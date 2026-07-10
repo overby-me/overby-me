@@ -15,7 +15,7 @@ pub fn ParentApp() -> Element {
     let session = use_session();
     let access_token = session.read().access_token.clone();
 
-    let orphans = use_resource(move || {
+    let orphans = crate::use_data_resource!(move || {
         let token = access_token.clone();
         async move {
             graphql::query_orphans(token.as_deref())

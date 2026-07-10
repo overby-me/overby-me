@@ -98,32 +98,30 @@ fn SpeakList(
     let access_token = session.read().access_token.clone();
     let list_for_query = list_id.clone();
     let rev = *refresh.read();
-    let state = use_resource(use_reactive!(
-        |(list_for_query, access_token, rev)| async move {
-            let _ = rev;
-            let n = graphql::query_node_by_id(access_token.as_deref(), &list_for_query)
-                .await
-                .ok()??;
-            {
-                let speakers = sorted_speakers(&n.children);
-                // The speaking time limit + last-start live on the list node's data.
-                let time = n
-                    .data
-                    .as_ref()
-                    .and_then(|d| d.0.get("time"))
-                    .and_then(|t| t.as_f64())
-                    .unwrap_or(0.0);
-                let updated_at = n
-                    .data
-                    .as_ref()
-                    .and_then(|d| d.0.get("updatedAt"))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                Some((n.mutable, time, updated_at, speakers))
-            }
+    let state = crate::use_data_resource!(|(list_for_query, access_token, rev)| async move {
+        let _ = rev;
+        let n = graphql::query_node_by_id(access_token.as_deref(), &list_for_query)
+            .await
+            .ok()??;
+        {
+            let speakers = sorted_speakers(&n.children);
+            // The speaking time limit + last-start live on the list node's data.
+            let time = n
+                .data
+                .as_ref()
+                .and_then(|d| d.0.get("time"))
+                .and_then(|t| t.as_f64())
+                .unwrap_or(0.0);
+            let updated_at = n
+                .data
+                .as_ref()
+                .and_then(|d| d.0.get("updatedAt"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some((n.mutable, time, updated_at, speakers))
         }
-    ));
+    });
 
     // Tick once a second so the countdown updates (cancelled on unmount).
     let mut tick = use_signal(|| 0u32);

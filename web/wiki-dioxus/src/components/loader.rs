@@ -62,11 +62,9 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     // token are unchanged, so without this the resolver would serve the stale
     // pre-edit node until a full reload.
     let segs = segments.clone();
-    let version = crate::session::DATA_VERSION();
-    let node_future = use_resource(use_reactive!(|(segs, access_token, version)| async move {
-        let _ = version;
+    let node_future = crate::use_data_resource!(|(segs, access_token)| async move {
         graphql::resolve_path(access_token.as_deref(), &segs).await
-    }));
+    });
 
     let result = node_future.read().clone();
     match result {

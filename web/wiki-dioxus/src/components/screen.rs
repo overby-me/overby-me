@@ -19,7 +19,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         .map(|c| c.0)
         .unwrap_or_else(|| node.id.0.clone());
 
-    let active = use_resource(use_reactive!(|(context_id, access_token)| async move {
+    let active = crate::use_data_resource!(|(context_id, access_token)| async move {
         let id = graphql::active_node_id(access_token.as_deref(), &context_id)
             .await
             .ok()
@@ -27,7 +27,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         graphql::query_node_by_id(access_token.as_deref(), &id)
             .await
             .ok()?
-    }));
+    });
     let active = active.read().clone().flatten();
 
     rsx! {

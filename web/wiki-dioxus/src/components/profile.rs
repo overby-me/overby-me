@@ -17,7 +17,7 @@ pub fn ProfileApp() -> Element {
     let user_id = user.as_ref().map(|u| u.id.clone());
 
     // The user's groups + events (same query the home list uses).
-    let memberships = use_resource(move || {
+    let memberships = crate::use_data_resource!(move || {
         let token = access_token.clone();
         let uid = user_id.clone();
         async move {

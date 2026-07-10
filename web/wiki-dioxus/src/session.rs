@@ -43,6 +43,36 @@ pub fn bump_data_version() {
     *DATA_VERSION.write() += 1;
 }
 
+/// A `use_resource` that also refetches whenever the global data version bumps
+/// (any mutation via [`bump_data_version`], or a pull-to-refresh), so one refresh
+/// updates the whole view. It mirrors the two `use_resource` idioms, folding the
+/// data version in for you either way, so call sites never repeat it:
+///
+/// - `use_data_resource!(|(a, b)| async move { … })` — explicit reactive
+///   dependencies, exactly like `use_reactive!`.
+/// - `use_data_resource!(move || { …; async move { … } })` — a plain closure that
+///   captures its own dependencies / reads signals inside.
+///
+/// Use it for every read-side data resource so a refresh works everywhere.
+#[macro_export]
+macro_rules! use_data_resource {
+    (|($($dep:ident),* $(,)?)| $body:expr) => {{
+        let __data_version = $crate::session::DATA_VERSION();
+        use_resource(use_reactive!(|($($dep,)* __data_version)| {
+            let _ = __data_version;
+            $body
+        }))
+    }};
+    (move || $body:expr) => {
+        use_resource(move || {
+            // Subscribe this resource to the data version so it refetches on a
+            // global refresh, alongside the closure's own dependencies.
+            let _ = $crate::session::DATA_VERSION();
+            $body
+        })
+    };
+}
+
 pub fn use_session() -> Signal<Session> {
     SESSION.signal()
 }

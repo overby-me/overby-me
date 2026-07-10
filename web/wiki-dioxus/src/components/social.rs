@@ -22,7 +22,7 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
 
     let mut query = use_signal(|| default_query.clone());
 
-    let posts = use_resource(move || {
+    let posts = crate::use_data_resource!(move || {
         let q = query.read().clone();
         async move { fetch_bluesky(&q).await }
     });

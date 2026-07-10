@@ -52,15 +52,14 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     // Depend on these reactively via use_reactive rather than a keyed remount,
     // which the web renderer does not perform reliably (see PathResolver).
     let rev = *refresh.read();
-    let children_res = use_resource(use_reactive!(|(node_id, access_token, user_id, rev)| {
-        async move {
+    let children_res =
+        crate::use_data_resource!(|(node_id, access_token, user_id, rev)| async move {
             let _ = rev;
             let uid = user_id?;
             graphql::query_children(access_token.as_deref(), &node_id, &uid)
                 .await
                 .ok()
-        }
-    }));
+        });
     // Use live children once loaded; fall back to the already-resolved set.
     let children = children_res.read().clone().flatten().unwrap_or(initial);
     let children = &children;

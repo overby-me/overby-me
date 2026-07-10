@@ -51,12 +51,14 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
 
     let nid = node_id.clone();
     let rev = refresh();
-    let comments = use_resource(use_reactive!(|(nid, token, rev)| async move {
+    // Refetches on a local post (`rev`) and on a global refresh (pull-to-refresh),
+    // so comments update alongside the rest of the view.
+    let comments = crate::use_data_resource!(|(nid, token, rev)| async move {
         let _ = rev;
         graphql::query_comments(token.as_deref(), &nid)
             .await
             .unwrap_or_default()
-    }));
+    });
     let list = comments.read().clone().unwrap_or_default();
 
     // Whether the current user may comment here: gate the composer on the node's
@@ -65,7 +67,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     // context's permission, so the post's verdict is passed down to every thread.
     let nid2 = node_id.clone();
     let tok2 = session.read().access_token.clone();
-    let can_comment_res = use_resource(use_reactive!(|(nid2, tok2)| async move {
+    let can_comment_res = crate::use_data_resource!(|(nid2, tok2)| async move {
         if tok2.is_none() {
             return false;
         }
@@ -73,7 +75,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
             .await
             .iter()
             .any(|m| m == "vote/comment")
-    }));
+    });
     let can_comment = (*can_comment_res.read()).unwrap_or(false);
 
     rsx! {
@@ -136,12 +138,12 @@ fn CommentThread(
 
     let cid = comment.id.0.clone();
     let rev = refresh();
-    let replies_res = use_resource(use_reactive!(|(cid, token, rev)| async move {
+    let replies_res = crate::use_data_resource!(|(cid, token, rev)| async move {
         let _ = rev;
         graphql::query_comments(token.as_deref(), &cid)
             .await
             .unwrap_or_default()
-    }));
+    });
     let replies = replies_res.read().clone().unwrap_or_default();
 
     let author = if comment.name.trim().is_empty() {

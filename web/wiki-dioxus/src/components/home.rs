@@ -91,7 +91,7 @@ fn InvitesUserList() -> Element {
         refresh,
     );
 
-    let invites = use_resource(move || {
+    let invites = crate::use_data_resource!(move || {
         let token = access_token.clone();
         let user_id = user_id.clone();
         let email = email.clone();

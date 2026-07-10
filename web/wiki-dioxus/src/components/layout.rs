@@ -44,13 +44,13 @@ pub fn Layout() -> Element {
             _ => vec![],
         };
         let token = SESSION.read().access_token.clone();
-        use_resource(use_reactive!(|(segments, token)| async move {
+        crate::use_data_resource!(|(segments, token)| async move {
             let crumbs = graphql::path_crumbs(token.as_deref(), &segments)
                 .await
                 .unwrap_or_default();
             *CONTEXT_DEPTH.write() = graphql::deepest_context_depth(&crumbs);
             *NAV_CRUMBS.write() = crumbs;
-        }));
+        });
     }
 
     // The stray trailing "?" the router emits for the optional `app` query is
@@ -641,7 +641,11 @@ fn MenuList(segments: Vec<String>) -> Element {
     // segment, so a nested event shows its own contents.
     let ctx_path = context_path(&segments);
 
-    // Re-resolve reactively when the context path changes.
+    // Re-resolve reactively when the context path changes. Deliberately a plain
+    // `use_resource` (not `use_data_resource!`): this only maps the path to the
+    // context node id, which is stable across data changes, and refetching it on
+    // every refresh would briefly blank and remount the whole drawer tree. The
+    // drawer's actual contents refresh via `DrawerLevel` instead.
     let cpath = ctx_path.clone();
     let context = use_resource(use_reactive!(|(cpath, access_token)| async move {
         graphql::resolve_path(access_token.as_deref(), &cpath)
@@ -691,16 +695,14 @@ fn DrawerLevel(
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let parent = parent_id.clone();
 
-    let children = use_resource(use_reactive!(
-        |(parent, access_token, user_id)| async move {
-            let Some(user_id) = user_id else {
-                return Vec::new();
-            };
-            graphql::query_children(access_token.as_deref(), &parent, &user_id)
-                .await
-                .unwrap_or_default()
-        }
-    ));
+    let children = crate::use_data_resource!(|(parent, access_token, user_id)| async move {
+        let Some(user_id) = user_id else {
+            return Vec::new();
+        };
+        graphql::query_children(access_token.as_deref(), &parent, &user_id)
+            .await
+            .unwrap_or_default()
+    });
 
     let items = children.read().clone();
     match items {
@@ -839,7 +841,7 @@ fn HomeList() -> Element {
         refresh,
     );
 
-    let contexts = use_resource(move || {
+    let contexts = crate::use_data_resource!(move || {
         let token = access_token.clone();
         let user_id = user_id.clone();
         let _ = refresh.read();

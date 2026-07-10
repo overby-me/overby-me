@@ -22,7 +22,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     let access_token = session.read().access_token.clone();
     let context_id = node.context_id.clone().map(|c| c.0).unwrap_or(node.id.0);
 
-    let active = use_resource(use_reactive!(|(context_id, access_token)| async move {
+    let active = crate::use_data_resource!(|(context_id, access_token)| async move {
         let id = graphql::active_node_id(access_token.as_deref(), &context_id)
             .await
             .ok()
@@ -30,7 +30,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
         graphql::query_node_by_id(access_token.as_deref(), &id)
             .await
             .ok()?
-    }));
+    });
 
     let no_vote = rsx! {
         div { class: "card",
@@ -256,39 +256,35 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     let av_poll = poll_id.clone();
     let av_token = session.read().access_token.clone();
     let av_user = user_id.clone();
-    let already_voted = use_resource(use_reactive!(
-        |(av_poll, av_token, av_user, rev)| async move {
-            let _ = rev;
-            let Some(uid) = av_user else { return false };
-            graphql::count_user_votes(av_token.as_deref(), &av_poll, &uid)
-                .await
-                .map(|n| n > 0)
-                .unwrap_or(false)
-        }
-    ));
+    let already_voted = crate::use_data_resource!(|(av_poll, av_token, av_user, rev)| async move {
+        let _ = rev;
+        let Some(uid) = av_user else { return false };
+        graphql::count_user_votes(av_token.as_deref(), &av_poll, &uid)
+            .await
+            .map(|n| n > 0)
+            .unwrap_or(false)
+    });
     let voted = already_voted.read().unwrap_or(false);
 
     // Tally of the votes visible to this user (all of them for the poll owner /
     // an admin; just their own otherwise). Counts per option index.
     let ty_poll = poll_id.clone();
     let ty_token = session.read().access_token.clone();
-    let tally = use_resource(use_reactive!(
-        |(ty_poll, ty_token, n_opts, rev)| async move {
-            let _ = rev;
-            let votes = graphql::query_poll_votes(ty_token.as_deref(), &ty_poll)
-                .await
-                .unwrap_or_default();
-            let mut counts = vec![0usize; n_opts];
-            for vote in &votes {
-                for &i in vote {
-                    if let Some(c) = counts.get_mut(i) {
-                        *c += 1;
-                    }
+    let tally = crate::use_data_resource!(|(ty_poll, ty_token, n_opts, rev)| async move {
+        let _ = rev;
+        let votes = graphql::query_poll_votes(ty_token.as_deref(), &ty_poll)
+            .await
+            .unwrap_or_default();
+        let mut counts = vec![0usize; n_opts];
+        for vote in &votes {
+            for &i in vote {
+                if let Some(c) = counts.get_mut(i) {
+                    *c += 1;
                 }
             }
-            (counts, votes.len())
         }
-    ));
+        (counts, votes.len())
+    });
     let (counts, total_votes) = tally.read().clone().unwrap_or((vec![], 0));
 
     let opts = options.clone();
