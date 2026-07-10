@@ -235,6 +235,15 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 }
             }
         }
+
+        // A group/event context also carries a discussion below its listing,
+        // mirroring React's ContentApp(hideMembers) stacked above the FolderApp.
+        if matches!(mime_id, "wiki/group" | "wiki/event") {
+            super::comments::CommentSection {
+                node_id: node.id.0.clone(),
+                context_id: node.context_id.clone().map(|c| c.0),
+            }
+        }
     }
 }
 
