@@ -52,6 +52,13 @@ pub fn HomeApp() -> Element {
                         }
                     }
                 }
+                // The user's groups/events — shown here only on mobile, where the
+                // drawer (which carries this list on desktop) is hidden.
+                if is_auth {
+                    div { class: "home-mobile-list mt-1",
+                        crate::components::layout::HomeList {}
+                    }
+                }
                 // Newest content across the user's contexts (#34).
                 if is_auth {
                     RecentContents {}

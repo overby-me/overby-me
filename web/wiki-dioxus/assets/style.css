@@ -1593,6 +1593,19 @@ h6, .title-small {
     }
 }
 
+/* The groups/events list rendered in the Home main pane — mobile only; on desktop
+   the always-visible drawer already carries it. Block-level (unlike .mobile-only,
+   which is inline-flex for buttons). */
+.home-mobile-list {
+    display: block;
+}
+
+@media (min-width: 1200px) {
+    .home-mobile-list {
+        display: none;
+    }
+}
+
 /* A drawer list-item shown only on mobile (keeps flex layout, unlike
    .mobile-only which is inline-flex). Desktop reaches Home via the app rail. */
 .drawer-mobile-home {

@@ -982,7 +982,7 @@ type ContextLists = (
 
 /// HomeList — shows the user's groups and events, loaded from GraphQL.
 #[component]
-fn HomeList() -> Element {
+pub fn HomeList() -> Element {
     let session = use_session();
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let access_token = session.read().access_token.clone();
