@@ -184,6 +184,121 @@ fn make_leaf(text: &str, m: &Marks) -> Value {
     Value::Object(o)
 }
 
+// ---------------------------------------------------------------------------
+// Auto-link detection (#97) — pure helpers, unit-tested on the host. The
+// leaf-splitting that consumes them lives in `mod dom` (wasm-only), but the
+// tricky part (what counts as a link) is here so it can be tested without a DOM.
+// ---------------------------------------------------------------------------
+
+/// If `token` (one whitespace-delimited word, already stripped of surrounding
+/// punctuation) is a URL or email, return its `href`.
+///
+/// Deliberately conservative: only an explicit `http(s)://` or `www.` prefix, or
+/// a clear `local@domain.tld` email, links. Bare domains are left alone so prose
+/// and code like `main.rs`, `e.g.` or `v1.2` do not turn into links.
+#[cfg(any(target_arch = "wasm32", test))]
+fn link_href(token: &str) -> Option<String> {
+    if let Some(rest) = token
+        .strip_prefix("https://")
+        .or_else(|| token.strip_prefix("http://"))
+    {
+        // Need a host (dot-bearing, non-empty) after the scheme.
+        return (rest.len() >= 3 && rest.contains('.') && !rest.starts_with('.'))
+            .then(|| token.to_string());
+    }
+    if let Some(rest) = token.strip_prefix("www.") {
+        return (rest.contains('.') && rest.len() >= 3).then(|| format!("https://{token}"));
+    }
+    is_email(token).then(|| format!("mailto:{token}"))
+}
+
+/// A conservative `local@domain.tld` check: exactly one `@`, an alnum-ish local
+/// part, and a domain whose last label is a 2+ letter alphabetic TLD.
+#[cfg(any(target_arch = "wasm32", test))]
+fn is_email(token: &str) -> bool {
+    let mut parts = token.split('@');
+    let (Some(local), Some(domain), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    if local.is_empty()
+        || !local
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._%+-".contains(c))
+    {
+        return false;
+    }
+    let Some(dot) = domain.rfind('.') else {
+        return false;
+    };
+    let (host, tld) = (&domain[..dot], &domain[dot + 1..]);
+    if host.is_empty()
+        || !host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+    {
+        return false;
+    }
+    tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic())
+}
+
+/// Split a word into `(leading_punct, link_text, href, trailing_punct)` when its
+/// core is a URL/email, else `None`. So `(https://x.io).` links only the URL and
+/// keeps the surrounding `(` and `).` as plain text.
+#[cfg(any(target_arch = "wasm32", test))]
+fn split_link_word(word: &str) -> Option<(String, String, String, String)> {
+    let open: &[char] = &['(', '[', '<', '"', '\'', '{'];
+    let close: &[char] = &['.', ',', ')', ']', '>', '!', '?', ';', ':', '"', '\'', '}'];
+    let after_open = word.trim_start_matches(open);
+    let pre = &word[..word.len() - after_open.len()];
+    let core = after_open.trim_end_matches(close);
+    let post = &after_open[core.len()..];
+    if core.is_empty() {
+        return None;
+    }
+    let href = link_href(core)?;
+    Some((pre.to_string(), core.to_string(), href, post.to_string()))
+}
+
+/// Split a bare text run into consecutive `(text, Some(href) | None)` segments,
+/// linking any URL/email words and preserving all surrounding whitespace and
+/// punctuation. Pure, so the splitting is unit-tested without a DOM.
+#[cfg(any(target_arch = "wasm32", test))]
+fn link_segments(text: &str) -> Vec<(String, Option<String>)> {
+    let mut segs: Vec<(String, Option<String>)> = Vec::new();
+    let mut plain = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(&c) = chars.peek() {
+        if c.is_whitespace() {
+            plain.push(c);
+            chars.next();
+            continue;
+        }
+        let mut word = String::new();
+        while let Some(&c2) = chars.peek() {
+            if c2.is_whitespace() {
+                break;
+            }
+            word.push(c2);
+            chars.next();
+        }
+        match split_link_word(&word) {
+            Some((pre, link_text, href, post)) => {
+                plain.push_str(&pre);
+                if !plain.is_empty() {
+                    segs.push((std::mem::take(&mut plain), None));
+                }
+                segs.push((link_text, Some(href)));
+                plain.push_str(&post);
+            }
+            None => plain.push_str(&word),
+        }
+    }
+    if !plain.is_empty() {
+        segs.push((plain, None));
+    }
+    segs
+}
+
 #[cfg(target_arch = "wasm32")]
 mod dom {
     use super::*;
@@ -255,6 +370,24 @@ mod dom {
         }
     }
 
+    /// Append the leaves for a bare (not-already-linked) text run, wrapping any
+    /// URL/email words in a `link` mark so typed or pasted links become
+    /// clickable on save (#97). Idempotent: text already inside an `<a>` (its
+    /// `link` mark set) is emitted unchanged, so re-editing never double-links.
+    fn push_autolinked(text: &str, marks: &Marks, out: &mut Vec<Value>) {
+        if marks.link.is_some() || !text.contains(|c: char| !c.is_whitespace()) {
+            out.push(make_leaf(text, marks));
+            return;
+        }
+        for (seg, href) in link_segments(text) {
+            let mut m = marks.clone();
+            if href.is_some() {
+                m.link = href;
+            }
+            out.push(make_leaf(&seg, &m));
+        }
+    }
+
     /// Walk one node (text or element), accumulating marks, appending leaves.
     /// The last `<br>` of a block is skipped (the browser's bogus trailing
     /// break) via `is_last`.
@@ -263,7 +396,7 @@ mod dom {
             Node::TEXT_NODE => {
                 if let Some(t) = node.text_content() {
                     if !t.is_empty() {
-                        out.push(make_leaf(&t, marks));
+                        push_autolinked(&t, marks, out);
                     }
                 }
             }
@@ -702,5 +835,67 @@ mod tests {
             {"type":"paragraph","children":[{"text":"a < b & c > d"}]},
         ]);
         assert_eq!(slate_to_html(&content), "<p>a &lt; b &amp; c &gt; d</p>");
+    }
+
+    #[test]
+    fn autolink_links_urls_and_emails_conservatively() {
+        // Explicit scheme, www., and emails link (with the right href prefix).
+        assert_eq!(
+            link_href("https://example.com/a?b=1"),
+            Some("https://example.com/a?b=1".to_string())
+        );
+        assert_eq!(link_href("http://a.bc"), Some("http://a.bc".to_string()));
+        assert_eq!(
+            link_href("www.example.com"),
+            Some("https://www.example.com".to_string())
+        );
+        assert_eq!(
+            link_href("niclas@overby.me"),
+            Some("mailto:niclas@overby.me".to_string())
+        );
+        // Prose, code and partial tokens must NOT become links.
+        for plain in [
+            "main.rs",
+            "example.com",
+            "e.g",
+            "etc.",
+            "v1.2",
+            "@handle",
+            "http://",
+            "a@b",
+            "www.x",
+        ] {
+            assert_eq!(link_href(plain), None, "should not link {plain}");
+        }
+    }
+
+    #[test]
+    fn autolink_word_keeps_surrounding_punctuation() {
+        let (pre, text, href, post) = split_link_word("(https://x.io/p).").unwrap();
+        assert_eq!(
+            (pre.as_str(), text.as_str(), href.as_str(), post.as_str()),
+            ("(", "https://x.io/p", "https://x.io/p", ").")
+        );
+        assert!(split_link_word("hello").is_none());
+        assert!(split_link_word("main.rs").is_none());
+    }
+
+    #[test]
+    fn autolink_segments_preserve_surrounding_text() {
+        // A URL mid-sentence splits into plain / link / plain, verbatim around it.
+        let segs = link_segments("see https://x.io now");
+        assert_eq!(
+            segs,
+            vec![
+                ("see ".to_string(), None),
+                ("https://x.io".to_string(), Some("https://x.io".to_string())),
+                (" now".to_string(), None),
+            ]
+        );
+        // No link: one plain segment, unchanged.
+        assert_eq!(
+            link_segments("just main.rs here"),
+            vec![("just main.rs here".to_string(), None)]
+        );
     }
 }

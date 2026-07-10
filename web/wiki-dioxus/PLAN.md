@@ -207,9 +207,13 @@ All the above build + render live (browser smoke test asserts each mounts).
 
 ### Editor
 
-- `#92` Line-break support (shift-enter).
-- `#94` Sticky formatting toolbar on long documents.
-- `#97` Auto-link URLs and emails.
+- `[x]` `#92` Line-break support (shift-enter) — handled natively by the
+  contenteditable surface (Shift+Enter inserts a `<br>`).
+- `[x]` `#94` Sticky formatting toolbar on long documents — `.editor-toolbar`
+  is `position: sticky; top: 0` (`assets/style.css`).
+- `[x]` `#97` Auto-link URLs and emails — on save, `dom_to_slate` wraps bare
+  `http(s)://` / `www.` / email words in a `link` mark (`richtext::link_segments`,
+  conservative so `main.rs`-style prose is left alone). Unit-tested.
 
 ### Voting / policy
 
