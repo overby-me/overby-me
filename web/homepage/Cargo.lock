@@ -1303,6 +1303,8 @@ dependencies = [
  "js-sys",
  "log",
  "manganis",
+ "serde",
+ "serde-wasm-bindgen",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",

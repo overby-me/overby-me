@@ -6,7 +6,15 @@ use web_sys::{HtmlImageElement, WebGlRenderingContext as GL, WebGlTexture};
 
 use manganis::asset;
 
-fn icon_url(icon: &str) -> String {
+/// Neutral placeholder (a gray disc, inline SVG data URL) shown when a remote
+/// icon fails to load — e.g. a favicon 404s or drops CORS on its error
+/// response. Keeps every node visible instead of leaving an invisible sprite.
+const FALLBACK_ICON: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%237c7c8a'/%3E%3C/svg%3E";
+
+/// Resolve a bundled icon filename (e.g. `"bluesky.avif"`) to its hashed,
+/// dx-bundled asset URL. Used by the personal graph and by curated atproto
+/// platforms that ship a local logo.
+pub fn icon_url(icon: &str) -> String {
     match icon {
         "me.avif" => asset!("/assets/icons/me.avif").to_string(),
         "commerce.avif" => asset!("/assets/icons/commerce.avif").to_string(),
@@ -14,15 +22,13 @@ fn icon_url(icon: &str) -> String {
         "connect.avif" => asset!("/assets/icons/connect.avif").to_string(),
         "immerse.avif" => asset!("/assets/icons/immerse.avif").to_string(),
         "give.avif" => asset!("/assets/icons/give.avif").to_string(),
-        "fediverse.avif" => asset!("/assets/icons/fediverse.avif").to_string(),
         "linkedin.avif" => asset!("/assets/icons/linkedin.avif").to_string(),
         "pinkleap.avif" => asset!("/assets/icons/pinkleap.avif").to_string(),
         "mail.avif" => asset!("/assets/icons/mail.avif").to_string(),
         "matrix.avif" => asset!("/assets/icons/matrix.avif").to_string(),
         "signal.avif" => asset!("/assets/icons/signal.avif").to_string(),
         "rocksky.avif" => asset!("/assets/icons/rocksky.avif").to_string(),
-        "atmosphere.avif" => asset!("/assets/icons/atmosphere.avif").to_string(),
-        "bridgy.avif" => asset!("/assets/icons/bridgy.avif").to_string(),
+        "popfeed.avif" => asset!("/assets/icons/popfeed.avif").to_string(),
         "github.avif" => asset!("/assets/icons/github.avif").to_string(),
         "codeberg.avif" => asset!("/assets/icons/codeberg.avif").to_string(),
         "tangled.avif" => asset!("/assets/icons/tangled.avif").to_string(),
@@ -35,7 +41,6 @@ fn icon_url(icon: &str) -> String {
         "wikipedia.avif" => asset!("/assets/icons/wikipedia.avif").to_string(),
         "happycow.avif" => asset!("/assets/icons/happycow.avif").to_string(),
         "lemmy.avif" => asset!("/assets/icons/lemmy.avif").to_string(),
-        "neodb.avif" => asset!("/assets/icons/neodb.avif").to_string(),
         other => {
             log::warn!("Unknown icon: {other}");
             String::new()
@@ -56,11 +61,14 @@ impl TextureManager {
         }
     }
 
-    pub fn load_icon(&self, icon: &str) {
+    /// Load an image URL into a texture keyed by that URL. Accepts both bundled
+    /// asset URLs and remote (CORS-enabled) avatar/favicon URLs; the crossOrigin
+    /// request below is what lets remote images be used without tainting WebGL.
+    pub fn load_icon(&self, url: &str) {
         let gl = self.gl.clone();
         let textures = Rc::clone(&self.textures);
-        let icon_name = icon.to_string();
-        let src = icon_url(icon);
+        let key = url.to_string();
+        let src = url.to_string();
 
         if src.is_empty() {
             return;
@@ -82,7 +90,7 @@ impl TextureManager {
                 GL::UNSIGNED_BYTE,
                 Some(&pixel),
             );
-            textures.borrow_mut().insert(icon_name.clone(), tex);
+            textures.borrow_mut().insert(key.clone(), tex);
         }
 
         let Ok(img) = HtmlImageElement::new() else {
@@ -93,7 +101,7 @@ impl TextureManager {
 
         let gl_clone = gl.clone();
         let textures_clone = Rc::clone(&textures);
-        let icon_clone = icon_name.clone();
+        let icon_clone = key.clone();
         let img_clone = img.clone();
 
         let onload = Closure::wrap(Box::new(move || {
@@ -126,6 +134,17 @@ impl TextureManager {
 
         img.set_onload(Some(onload.as_ref().unchecked_ref()));
         onload.forget(); // Leak the closure — it only fires once
+
+        // On load failure, swap in the placeholder (which then fires onload and
+        // populates the texture). The `data:` guard avoids a retry loop.
+        let img_err = img.clone();
+        let onerror = Closure::wrap(Box::new(move || {
+            if !img_err.src().starts_with("data:") {
+                img_err.set_src(FALLBACK_ICON);
+            }
+        }) as Box<dyn FnMut()>);
+        img.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+        onerror.forget();
 
         img.set_src(&src);
     }

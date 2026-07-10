@@ -5,7 +5,7 @@ use web_sys::{
 };
 
 use super::camera::Camera;
-use super::data::{LINKS, NODES};
+use super::data::GraphData;
 use super::simulation::Simulation;
 
 // Shader sources
@@ -186,6 +186,7 @@ impl Renderer {
         &self,
         camera: &Camera,
         simulation: &Simulation,
+        data: &GraphData,
         textures: &std::collections::HashMap<String, WebGlTexture>,
         particle_positions: &[(Vec3, Vec3)], // pairs of particle positions per link
     ) {
@@ -200,9 +201,9 @@ impl Renderer {
         // another by true depth instead of draw order. This is what keeps the
         // central node from hiding behind everything.
         gl.depth_mask(true);
-        for (i, node) in NODES.iter().enumerate() {
+        for (i, node) in data.nodes.iter().enumerate() {
             let size = node_size(node);
-            if let Some(tex) = textures.get(node.icon) {
+            if let Some(tex) = textures.get(&node.icon) {
                 self.draw_sprite(gl, &view, &proj, simulation.positions[i], size, tex);
             }
         }
@@ -213,16 +214,17 @@ impl Renderer {
         gl.depth_mask(false);
 
         // Links and their flow particles sit behind the nodes.
-        self.draw_links(gl, &view, &proj, &simulation.positions);
+        self.draw_links(gl, &view, &proj, data, &simulation.positions);
         self.draw_particles(gl, &view, &proj, particle_positions);
 
         // Colored halo spheres, drawn back-to-front (farthest first in view
         // space) so overlapping translucency composites correctly.
-        let mut halos: Vec<(usize, f32, &str)> = NODES
+        let mut halos: Vec<(usize, f32, &str)> = data
+            .nodes
             .iter()
             .enumerate()
             .filter_map(|(i, n)| {
-                let color = n.color?;
+                let color = n.color.as_deref()?;
                 let view_z = (view * simulation.positions[i].extend(1.0)).z;
                 Some((i, view_z, color))
             })
@@ -230,19 +232,19 @@ impl Renderer {
         halos.sort_by(|a, b| a.1.total_cmp(&b.1));
         for (i, _, color_str) in halos {
             let color = parse_hex_color(color_str);
-            let opacity = NODES[i].opacity.unwrap_or(0.4);
+            let opacity = data.nodes[i].opacity.unwrap_or(0.4);
             self.draw_sphere(gl, &view, &proj, simulation.positions[i], color, opacity);
         }
 
         gl.depth_mask(true);
     }
 
-    fn draw_links(&self, gl: &GL, view: &Mat4, proj: &Mat4, positions: &[Vec3]) {
+    fn draw_links(&self, gl: &GL, view: &Mat4, proj: &Mat4, data: &GraphData, positions: &[Vec3]) {
         // Build line vertex data
-        let mut line_data: Vec<f32> = Vec::with_capacity(LINKS.len() * 6);
-        for link in LINKS {
-            let si = NODES.iter().position(|n| n.id == link.source);
-            let ti = NODES.iter().position(|n| n.id == link.target);
+        let mut line_data: Vec<f32> = Vec::with_capacity(data.links.len() * 6);
+        for link in &data.links {
+            let si = data.node_index(&link.source);
+            let ti = data.node_index(&link.target);
             if let (Some(si), Some(ti)) = (si, ti) {
                 let s = positions[si];
                 let t = positions[ti];
@@ -551,7 +553,7 @@ fn create_sphere_mesh(
 }
 
 fn node_size(node: &super::data::GraphNode) -> f32 {
-    if node.id == "Niclas Overby" {
+    if node.center {
         40.0
     } else if node.color.is_some() {
         20.0

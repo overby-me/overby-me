@@ -1,369 +1,332 @@
+use crate::graph::texture::icon_url;
+
+#[derive(Clone, PartialEq)]
 pub struct GraphNode {
-    pub id: &'static str,
-    pub desc: &'static str,
-    pub icon: &'static str,
-    pub color: Option<&'static str>,
+    pub id: String,
+    pub desc: String,
+    /// Fully resolved image URL for the node icon (a bundled asset URL for the
+    /// personal graph, or a remote avatar/favicon URL for atproto graphs).
+    pub icon: String,
+    pub color: Option<String>,
     pub opacity: Option<f32>,
-    pub url: Option<&'static str>,
+    pub url: Option<String>,
+    /// The large hub node the layout centers on (drawn bigger, easier to grab).
+    pub center: bool,
 }
 
+#[derive(Clone, PartialEq)]
 pub struct GraphLink {
-    pub source: &'static str,
-    pub target: &'static str,
+    pub source: String,
+    pub target: String,
 }
 
-pub static NODES: &[GraphNode] = &[
-    GraphNode {
-        id: "Niclas Overby",
-        desc: "Niclas Overby Ⓝ",
-        icon: "me.avif",
-        color: None,
-        opacity: None,
-        url: None,
-    },
-    GraphNode {
-        id: "Commerce",
-        desc: "Commerce",
-        icon: "commerce.avif",
-        color: Some("#45b1e8"),
-        opacity: None,
-        url: None,
-    },
-    GraphNode {
-        id: "Improve",
-        desc: "Improve",
-        icon: "improve.avif",
-        color: Some("#7fff00"),
-        opacity: None,
-        url: None,
-    },
-    GraphNode {
-        id: "Connect",
-        desc: "Connect",
-        icon: "connect.avif",
-        color: Some("#e34234"),
-        opacity: None,
-        url: None,
-    },
-    GraphNode {
-        id: "Immerse",
-        desc: "Immerse",
-        icon: "immerse.avif",
-        color: Some("#ff7f50"),
-        opacity: None,
-        url: None,
-    },
-    GraphNode {
-        id: "Give",
-        desc: "Give",
-        icon: "give.avif",
-        color: Some("#6a5acd"),
-        opacity: None,
-        url: None,
-    },
-    GraphNode {
-        id: "LinkedIn",
-        desc: "LinkedIn\nProfile",
-        icon: "linkedin.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://www.linkedin.com/in/niclasoverby"),
-    },
-    GraphNode {
-        id: "PinkLeap",
-        desc: "PinkLeap\nProfile",
-        icon: "pinkleap.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://pinkleap.app/@overby.me"),
-    },
-    GraphNode {
-        id: "Mail",
-        desc: "Send Mail",
-        icon: "mail.avif",
-        color: None,
-        opacity: None,
-        url: Some("mailto:niclas@overby.me"),
-    },
-    GraphNode {
-        id: "Matrix",
-        desc: "Matrix\nProfile",
-        icon: "matrix.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://matrix.to/#/@niclas:overby.me"),
-    },
-    GraphNode {
-        id: "Signal",
-        desc: "Signal\nProfile",
-        icon: "signal.avif",
-        color: None,
-        opacity: None,
-        url: Some(
-            "https://signal.me/#eu/BKjgrHvQhqgDPpy9p2VfcfVj6yx0mJtVGOX8GQ_2htxhX7cDxhREVad8oWL1qAMj",
-        ),
-    },
-    GraphNode {
-        id: "Rocksky",
-        desc: "Rocksky\nProfile",
-        icon: "rocksky.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://rocksky.app/profile/overby.me"),
-    },
-    GraphNode {
-        id: "Atmosphere",
-        desc: "Atmosphere",
-        icon: "atmosphere.avif",
-        color: Some("#00ffff"),
-        opacity: Some(0.1),
-        url: Some("https://atproto.com/"),
-    },
-    GraphNode {
-        id: "GitHub",
-        desc: "GitHub\nProfile",
-        icon: "github.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://github.com/overby-me"),
-    },
-    GraphNode {
-        id: "Codeberg",
-        desc: "Codeberg\nProfile",
-        icon: "codeberg.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://codeberg.org/overby-me"),
-    },
-    GraphNode {
-        id: "Tangled",
-        desc: "Tangled\nProfile",
-        icon: "tangled.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://tangled.org/@overby.me"),
-    },
-    GraphNode {
-        id: "Mastodon",
-        desc: "Mastodon\nProfile",
-        icon: "mastodon.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://mastodon.social/@overby.me@bsky.brid.gy"),
-    },
-    GraphNode {
-        id: "Bluesky",
-        desc: "Bluesky\nProfile",
-        icon: "bluesky.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://bsky.app/profile/overby.me"),
-    },
-    GraphNode {
-        id: "Radikale Venstre",
-        desc: "Radikale Venstre\n(Political Effort)",
-        icon: "radikale.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://www.radikale.dk"),
-    },
-    GraphNode {
-        id: "Aivero",
-        desc: "Aivero\n(Ex-company)",
-        icon: "aivero.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://www.aivero.com"),
-    },
-    GraphNode {
-        id: "Factbird",
-        desc: "Factbird\n(Ex-company)",
-        icon: "factbird.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://www.factbird.com"),
-    },
-    GraphNode {
-        id: "Veo",
-        desc: "Veo\n(Commercial Effort)",
-        icon: "veo.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://www.veo.co"),
-    },
-    GraphNode {
-        id: "Wikipedia",
-        desc: "Wikipedia\nProfile",
-        icon: "wikipedia.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://en.wikipedia.org/wiki/User:Niclas_Overby"),
-    },
-    GraphNode {
-        id: "HappyCow",
-        desc: "HappyCow\nProfile",
-        icon: "happycow.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://www.happycow.net/members/profile/niclasoverby"),
-    },
-    GraphNode {
-        id: "Lemmy",
-        desc: "Lemmy\nProfile",
-        icon: "lemmy.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://lemmy.world/u/noverby"),
-    },
-    GraphNode {
-        id: "PopFeed",
-        desc: "PopFeed\nProfile",
-        icon: "popfeed.avif",
-        color: None,
-        opacity: None,
-        url: Some("https://popfeed.social/profile/did:plc:eukcx4amfqmhfrnkix7zwm34"),
-    },
-];
+/// A complete graph: the nodes and the links between them. Both the curated
+/// personal homepage and the auto-generated atproto graphs are just different
+/// `GraphData` values fed to the same simulation/renderer.
+#[derive(Clone, PartialEq, Default)]
+pub struct GraphData {
+    pub nodes: Vec<GraphNode>,
+    pub links: Vec<GraphLink>,
+}
 
-pub static LINKS: &[GraphLink] = &[
-    GraphLink {
-        source: "Niclas Overby",
-        target: "Commerce",
-    },
-    GraphLink {
-        source: "Niclas Overby",
-        target: "Improve",
-    },
-    GraphLink {
-        source: "Niclas Overby",
-        target: "Connect",
-    },
-    GraphLink {
-        source: "Niclas Overby",
-        target: "Immerse",
-    },
-    GraphLink {
-        source: "Niclas Overby",
-        target: "Give",
-    },
-    GraphLink {
-        source: "Connect",
-        target: "Mail",
-    },
-    GraphLink {
-        source: "Connect",
-        target: "Matrix",
-    },
-    GraphLink {
-        source: "Connect",
-        target: "LinkedIn",
-    },
-    GraphLink {
-        source: "Connect",
-        target: "Mastodon",
-    },
-    GraphLink {
-        source: "Connect",
-        target: "PinkLeap",
-    },
-    GraphLink {
-        source: "Connect",
-        target: "Bluesky",
-    },
-    GraphLink {
-        source: "Connect",
-        target: "Signal",
-    },
-    GraphLink {
-        source: "Commerce",
-        target: "LinkedIn",
-    },
-    GraphLink {
-        source: "Commerce",
-        target: "Aivero",
-    },
-    GraphLink {
-        source: "Commerce",
-        target: "Factbird",
-    },
-    GraphLink {
-        source: "Commerce",
-        target: "Veo",
-    },
-    GraphLink {
-        source: "Commerce",
-        target: "GitHub",
-    },
-    GraphLink {
-        source: "Immerse",
-        target: "PinkLeap",
-    },
-    GraphLink {
-        source: "Immerse",
-        target: "Rocksky",
-    },
-    GraphLink {
-        source: "Immerse",
-        target: "PopFeed",
-    },
-    GraphLink {
-        source: "Immerse",
-        target: "Wikipedia",
-    },
-    GraphLink {
-        source: "Immerse",
-        target: "HappyCow",
-    },
-    GraphLink {
-        source: "Immerse",
-        target: "Lemmy",
-    },
-    GraphLink {
-        source: "Give",
-        target: "Wikipedia",
-    },
-    GraphLink {
-        source: "Give",
-        target: "Codeberg",
-    },
-    GraphLink {
-        source: "Give",
-        target: "Tangled",
-    },
-    GraphLink {
-        source: "Give",
-        target: "Radikale Venstre",
-    },
-    GraphLink {
-        source: "Give",
-        target: "HappyCow",
-    },
-    GraphLink {
-        source: "Improve",
-        target: "Codeberg",
-    },
-    GraphLink {
-        source: "Improve",
-        target: "Tangled",
-    },
-    GraphLink {
-        source: "Improve",
-        target: "PopFeed",
-    },
-    GraphLink {
-        source: "Bluesky",
-        target: "Atmosphere",
-    },
-    GraphLink {
-        source: "Tangled",
-        target: "Atmosphere",
-    },
-    GraphLink {
-        source: "Rocksky",
-        target: "Atmosphere",
-    },
-    GraphLink {
-        source: "PopFeed",
-        target: "Atmosphere",
-    },
-];
+impl GraphData {
+    pub fn node_index(&self, id: &str) -> Option<usize> {
+        self.nodes.iter().position(|n| n.id == id)
+    }
+
+    /// The hand-curated graph shown on the homepage root (`/`).
+    pub fn personal() -> Self {
+        // Small builders keep the node/link tables readable.
+        fn node(
+            id: &str,
+            desc: &str,
+            icon: &str,
+            color: Option<&str>,
+            opacity: Option<f32>,
+            url: Option<&str>,
+            center: bool,
+        ) -> GraphNode {
+            GraphNode {
+                id: id.to_string(),
+                desc: desc.to_string(),
+                icon: icon_url(icon),
+                color: color.map(str::to_string),
+                opacity,
+                url: url.map(str::to_string),
+                center,
+            }
+        }
+        fn link(source: &str, target: &str) -> GraphLink {
+            GraphLink {
+                source: source.to_string(),
+                target: target.to_string(),
+            }
+        }
+
+        let nodes = vec![
+            node(
+                "Niclas Overby",
+                "Niclas Overby Ⓝ",
+                "me.avif",
+                None,
+                None,
+                None,
+                true,
+            ),
+            node(
+                "Commerce",
+                "Commerce",
+                "commerce.avif",
+                Some("#45b1e8"),
+                None,
+                None,
+                false,
+            ),
+            node(
+                "Improve",
+                "Improve",
+                "improve.avif",
+                Some("#7fff00"),
+                None,
+                None,
+                false,
+            ),
+            node(
+                "Connect",
+                "Connect",
+                "connect.avif",
+                Some("#e34234"),
+                None,
+                None,
+                false,
+            ),
+            node(
+                "Immerse",
+                "Immerse",
+                "immerse.avif",
+                Some("#ff7f50"),
+                None,
+                None,
+                false,
+            ),
+            node(
+                "Give",
+                "Give",
+                "give.avif",
+                Some("#6a5acd"),
+                None,
+                None,
+                false,
+            ),
+            node(
+                "LinkedIn",
+                "LinkedIn\nProfile",
+                "linkedin.avif",
+                None,
+                None,
+                Some("https://www.linkedin.com/in/niclasoverby"),
+                false,
+            ),
+            node(
+                "PinkLeap",
+                "PinkLeap\nProfile",
+                "pinkleap.avif",
+                None,
+                None,
+                Some("https://pinkleap.app/@overby.me"),
+                false,
+            ),
+            node(
+                "Mail",
+                "Send Mail",
+                "mail.avif",
+                None,
+                None,
+                Some("mailto:niclas@overby.me"),
+                false,
+            ),
+            node(
+                "Matrix",
+                "Matrix\nProfile",
+                "matrix.avif",
+                None,
+                None,
+                Some("https://matrix.to/#/@niclas:overby.me"),
+                false,
+            ),
+            node(
+                "Signal",
+                "Signal\nProfile",
+                "signal.avif",
+                None,
+                None,
+                Some(
+                    "https://signal.me/#eu/BKjgrHvQhqgDPpy9p2VfcfVj6yx0mJtVGOX8GQ_2htxhX7cDxhREVad8oWL1qAMj",
+                ),
+                false,
+            ),
+            node(
+                "Rocksky",
+                "Rocksky\nProfile",
+                "rocksky.avif",
+                None,
+                None,
+                Some("https://rocksky.app/profile/overby.me"),
+                false,
+            ),
+            node(
+                "GitHub",
+                "GitHub\nProfile",
+                "github.avif",
+                None,
+                None,
+                Some("https://github.com/overby-me"),
+                false,
+            ),
+            node(
+                "Codeberg",
+                "Codeberg\nProfile",
+                "codeberg.avif",
+                None,
+                None,
+                Some("https://codeberg.org/overby-me"),
+                false,
+            ),
+            node(
+                "Tangled",
+                "Tangled\nProfile",
+                "tangled.avif",
+                None,
+                None,
+                Some("https://tangled.org/@overby.me"),
+                false,
+            ),
+            node(
+                "Mastodon",
+                "Mastodon\nProfile",
+                "mastodon.avif",
+                None,
+                None,
+                Some("https://mastodon.social/@overby.me@bsky.brid.gy"),
+                false,
+            ),
+            node(
+                "Bluesky",
+                "Bluesky\nProfile",
+                "bluesky.avif",
+                None,
+                None,
+                Some("https://bsky.app/profile/overby.me"),
+                false,
+            ),
+            node(
+                "Radikale Venstre",
+                "Radikale Venstre\n(Political Effort)",
+                "radikale.avif",
+                None,
+                None,
+                Some("https://www.radikale.dk"),
+                false,
+            ),
+            node(
+                "Aivero",
+                "Aivero\n(Ex-company)",
+                "aivero.avif",
+                None,
+                None,
+                Some("https://www.aivero.com"),
+                false,
+            ),
+            node(
+                "Factbird",
+                "Factbird\n(Ex-company)",
+                "factbird.avif",
+                None,
+                None,
+                Some("https://www.factbird.com"),
+                false,
+            ),
+            node(
+                "Veo",
+                "Veo\n(Commercial Effort)",
+                "veo.avif",
+                None,
+                None,
+                Some("https://www.veo.co"),
+                false,
+            ),
+            node(
+                "Wikipedia",
+                "Wikipedia\nProfile",
+                "wikipedia.avif",
+                None,
+                None,
+                Some("https://en.wikipedia.org/wiki/User:Niclas_Overby"),
+                false,
+            ),
+            node(
+                "HappyCow",
+                "HappyCow\nProfile",
+                "happycow.avif",
+                None,
+                None,
+                Some("https://www.happycow.net/members/profile/niclasoverby"),
+                false,
+            ),
+            node(
+                "Lemmy",
+                "Lemmy\nProfile",
+                "lemmy.avif",
+                None,
+                None,
+                Some("https://lemmy.world/u/noverby"),
+                false,
+            ),
+            node(
+                "PopFeed",
+                "PopFeed\nProfile",
+                "popfeed.avif",
+                None,
+                None,
+                Some("https://popfeed.social/profile/did:plc:eukcx4amfqmhfrnkix7zwm34"),
+                false,
+            ),
+        ];
+
+        let links = vec![
+            link("Niclas Overby", "Commerce"),
+            link("Niclas Overby", "Improve"),
+            link("Niclas Overby", "Connect"),
+            link("Niclas Overby", "Immerse"),
+            link("Niclas Overby", "Give"),
+            link("Connect", "Mail"),
+            link("Connect", "Matrix"),
+            link("Connect", "LinkedIn"),
+            link("Connect", "Mastodon"),
+            link("Connect", "PinkLeap"),
+            link("Connect", "Bluesky"),
+            link("Connect", "Signal"),
+            link("Commerce", "LinkedIn"),
+            link("Commerce", "Aivero"),
+            link("Commerce", "Factbird"),
+            link("Commerce", "Veo"),
+            link("Commerce", "GitHub"),
+            link("Immerse", "PinkLeap"),
+            link("Immerse", "Rocksky"),
+            link("Immerse", "PopFeed"),
+            link("Immerse", "Wikipedia"),
+            link("Immerse", "HappyCow"),
+            link("Immerse", "Lemmy"),
+            link("Give", "Wikipedia"),
+            link("Give", "Codeberg"),
+            link("Give", "Tangled"),
+            link("Give", "Radikale Venstre"),
+            link("Give", "HappyCow"),
+            link("Improve", "Codeberg"),
+            link("Improve", "Tangled"),
+            link("Improve", "PopFeed"),
+        ];
+
+        GraphData { nodes, links }
+    }
+}

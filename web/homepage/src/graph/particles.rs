@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use super::data::{LINKS, NODES};
+use super::data::GraphData;
 use super::simulation::Simulation;
 
 pub struct ParticleSystem {
@@ -10,9 +10,9 @@ pub struct ParticleSystem {
 }
 
 impl ParticleSystem {
-    pub fn new() -> Self {
-        let mut t_values = Vec::with_capacity(LINKS.len());
-        for _ in LINKS {
+    pub fn new(data: &GraphData) -> Self {
+        let mut t_values = Vec::with_capacity(data.links.len());
+        for _ in &data.links {
             t_values.push([0.0, 0.5]); // Two particles per link, offset by 0.5
         }
         Self {
@@ -30,11 +30,11 @@ impl ParticleSystem {
     }
 
     /// Returns positions of particle pairs for each link
-    pub fn positions(&self, simulation: &Simulation) -> Vec<(Vec3, Vec3)> {
-        let mut result = Vec::with_capacity(LINKS.len());
-        for (i, link) in LINKS.iter().enumerate() {
-            let si = NODES.iter().position(|n| n.id == link.source);
-            let ti = NODES.iter().position(|n| n.id == link.target);
+    pub fn positions(&self, simulation: &Simulation, data: &GraphData) -> Vec<(Vec3, Vec3)> {
+        let mut result = Vec::with_capacity(data.links.len());
+        for (i, link) in data.links.iter().enumerate() {
+            let si = data.node_index(&link.source);
+            let ti = data.node_index(&link.target);
             if let (Some(si), Some(ti)) = (si, ti) {
                 let s = simulation.positions[si];
                 let t = simulation.positions[ti];

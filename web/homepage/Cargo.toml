@@ -9,6 +9,8 @@ glam = "0.29"
 js-sys = "0.3"
 log = "0.4"
 manganis = "0.7.9"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
 wasm-bindgen = "=0.2.121"
 wasm-bindgen-futures = "0.4"
 wasm-logger = "0.2"
@@ -23,6 +25,7 @@ web-sys = { version = "0.3", features = [
   "Location",
   "MouseEvent",
   "Performance",
+  "Response",
   "Url",
   "UrlSearchParams",
   "WebGlBuffer",

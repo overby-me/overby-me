@@ -16,7 +16,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::WebGlRenderingContext as GL;
 
 use camera::Camera;
-use data::NODES;
+use data::GraphData;
 use particles::ParticleSystem;
 use renderer::Renderer;
 use simulation::Simulation;
@@ -37,17 +37,23 @@ fn wheel_delta_y(evt: &WheelEvent) -> f32 {
 }
 
 #[component]
-pub fn Graph() -> Element {
+pub fn Graph(data: GraphData) -> Element {
     let mut tooltip_text = use_signal(|| Option::<String>::None);
     let mut tooltip_x = use_signal(|| 0.0f32);
     let mut tooltip_y = use_signal(|| 0.0f32);
     let mut cursor_pointer = use_signal(|| false);
+
+    // The graph topology, stored once per mount. Rc so the many event closures
+    // and the render loop share it cheaply. Callers `key` the component by
+    // handle so a new graph remounts and re-reads the prop here.
+    let data: Rc<GraphData> = use_hook(|| Rc::new(data));
 
     // Shared state for the render loop
     let mut state: Signal<Option<Rc<RefCell<GraphState>>>> = use_signal(|| None);
 
     // Initialize WebGL on canvas mount
     let onmounted = move |evt: MountedEvent| {
+        let data = data.clone();
         spawn(async move {
             let elem: web_sys::Element = evt.data().try_as_web_event().unwrap();
             let canvas: web_sys::HtmlCanvasElement = elem.dyn_into().unwrap();
@@ -79,14 +85,16 @@ pub fn Graph() -> Element {
             renderer.resize(display_width as u32, display_height as u32);
 
             let mut camera = Camera::new();
-            camera.set_aspect(display_width as f32 / display_height as f32);
+            let aspect = display_width as f32 / display_height as f32;
+            camera.set_aspect(aspect);
+            camera.distance = fit_camera_distance(&data, aspect);
 
-            let simulation = Simulation::new();
-            let particle_system = ParticleSystem::new();
+            let simulation = Simulation::new(&data);
+            let particle_system = ParticleSystem::new(&data);
 
             let tex_manager = TextureManager::new(gl);
-            for node in NODES {
-                tex_manager.load_icon(node.icon);
+            for node in &data.nodes {
+                tex_manager.load_icon(&node.icon);
             }
 
             let gs = Rc::new(RefCell::new(GraphState {
@@ -95,6 +103,7 @@ pub fn Graph() -> Element {
                 simulation,
                 particle_system,
                 textures: tex_manager.textures,
+                data,
                 canvas_width: display_width as f32,
                 canvas_height: display_height as f32,
                 dragging_node: None,
@@ -127,6 +136,7 @@ pub fn Graph() -> Element {
                 &view,
                 &proj,
                 &gs.simulation,
+                &gs.data,
             );
 
             if let Some(hit) = hit {
@@ -175,7 +185,7 @@ pub fn Graph() -> Element {
                     {
                         gs_mut.simulation.pin(idx, p);
                     }
-                    tooltip_text.set(Some(NODES[idx].desc.to_string()));
+                    tooltip_text.set(Some(gs_mut.data.nodes[idx].desc.clone()));
                     let (sx, sy) = interaction::project_to_screen(
                         gs_mut.simulation.positions[idx],
                         &view,
@@ -202,10 +212,11 @@ pub fn Graph() -> Element {
                     &view,
                     &proj,
                     &gs_mut.simulation,
+                    &gs_mut.data,
                 );
 
                 if let Some(hit) = hit {
-                    let node = &NODES[hit.node_index];
+                    let node = &gs_mut.data.nodes[hit.node_index];
                     let pos = gs_mut.simulation.positions[hit.node_index];
                     let (sx, sy) = interaction::project_to_screen(
                         pos,
@@ -235,7 +246,7 @@ pub fn Graph() -> Element {
                 gs.simulation.set_alpha_target(0.0);
                 // A grab that never moved is a click/tap: follow the node's link.
                 if !gs.drag_moved
-                    && let Some(url) = NODES[idx].url
+                    && let Some(url) = &gs.data.nodes[idx].url
                     && let Some(window) = web_sys::window()
                 {
                     let _ = window.location().set_href(url);
@@ -305,6 +316,7 @@ struct GraphState {
     simulation: Simulation,
     particle_system: ParticleSystem,
     textures: Rc<RefCell<std::collections::HashMap<String, web_sys::WebGlTexture>>>,
+    data: Rc<GraphData>,
     canvas_width: f32,
     canvas_height: f32,
     // Node-drag state: which node is grabbed, the screen-parallel plane it moves
@@ -315,6 +327,29 @@ struct GraphState {
     drag_moved: bool,
     press_x: f32,
     press_y: f32,
+}
+
+/// Pick a camera distance that frames the whole graph, whatever its size. A
+/// throwaway copy of the layout is settled to measure its radius, then the
+/// distance is `R / tan(fov/2)` with margin (and a portrait correction). This
+/// reproduces the hand-tuned ~240 for the personal graph and pulls in tighter
+/// for the more compact atproto star graphs.
+fn fit_camera_distance(data: &GraphData, aspect: f32) -> f32 {
+    let mut sim = Simulation::new(data);
+    let mut ticks = 0;
+    while sim.is_active() && ticks < 1000 {
+        sim.tick();
+        ticks += 1;
+    }
+    let max_r = sim
+        .positions
+        .iter()
+        .map(|p| p.length())
+        .fold(0.0_f32, f32::max);
+
+    let half_fov = Camera::new().fov * 0.5;
+    let fit = max_r / half_fov.tan() / aspect.min(1.0);
+    (fit * 1.6).clamp(120.0, 2000.0)
 }
 
 type AnimationClosure = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
@@ -329,11 +364,16 @@ fn start_animation_loop(state: Rc<RefCell<GraphState>>) {
             gs.simulation.tick();
             gs.particle_system.tick();
 
-            let particle_pos = gs.particle_system.positions(&gs.simulation);
+            let particle_pos = gs.particle_system.positions(&gs.simulation, &gs.data);
             let textures = gs.textures.borrow();
 
-            gs.renderer
-                .render(&gs.camera, &gs.simulation, &textures, &particle_pos);
+            gs.renderer.render(
+                &gs.camera,
+                &gs.simulation,
+                &gs.data,
+                &textures,
+                &particle_pos,
+            );
         }
 
         // Request next frame

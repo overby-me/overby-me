@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use super::data::{LINKS, NODES};
+use super::data::GraphData;
 
 // Faithful port of d3-force-3d as configured by react-force-graph-3d, whose
 // defaults the reference homepage (web/homepage) relies on. The simulation runs
@@ -47,8 +47,8 @@ pub struct Simulation {
 }
 
 impl Simulation {
-    pub fn new() -> Self {
-        let n = NODES.len();
+    pub fn new(data: &GraphData) -> Self {
+        let n = data.nodes.len();
 
         // d3's initializeNodes: 3D phyllotaxis spiral, no randomness.
         let initial_angle_roll = std::f32::consts::PI * (3.0 - 5.0_f32.sqrt());
@@ -68,10 +68,12 @@ impl Simulation {
 
         // Node degrees drive forceLink's strength and bias.
         let mut degree = vec![0u32; n];
-        let mut link_source = Vec::with_capacity(LINKS.len());
-        let mut link_target = Vec::with_capacity(LINKS.len());
-        for link in LINKS {
-            if let (Some(s), Some(t)) = (node_index(link.source), node_index(link.target)) {
+        let mut link_source = Vec::with_capacity(data.links.len());
+        let mut link_target = Vec::with_capacity(data.links.len());
+        for link in &data.links {
+            if let (Some(s), Some(t)) =
+                (data.node_index(&link.source), data.node_index(&link.target))
+            {
                 degree[s] += 1;
                 degree[t] += 1;
                 link_source.push(s);
@@ -237,10 +239,6 @@ impl Simulation {
     }
 }
 
-fn node_index(id: &str) -> Option<usize> {
-    NODES.iter().position(|n| n.id == id)
-}
-
 // d3's jiggle: a tiny nudge to break exact coincidences. xorshift32 keeps it
 // deterministic (Math.random is unavailable and reproducibility is desirable).
 fn jiggle(rng: &mut u32) -> f32 {
@@ -261,7 +259,7 @@ mod tests {
     // camera framing distance.
     #[test]
     fn layout_settles_without_collapsing() {
-        let mut sim = Simulation::new();
+        let mut sim = Simulation::new(&GraphData::personal());
         let mut ticks = 0;
         while sim.is_active() {
             sim.tick();

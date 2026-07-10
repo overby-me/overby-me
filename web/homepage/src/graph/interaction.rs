@@ -1,6 +1,6 @@
 use glam::{Mat4, Vec3, Vec4};
 
-use super::data::NODES;
+use super::data::GraphData;
 use super::simulation::Simulation;
 
 pub struct HitResult {
@@ -60,6 +60,7 @@ pub fn intersect_plane(
 }
 
 /// Unproject screen coordinates to a ray in world space, test against node spheres.
+#[allow(clippy::too_many_arguments)]
 pub fn pick_node(
     screen_x: f32,
     screen_y: f32,
@@ -68,15 +69,16 @@ pub fn pick_node(
     view: &Mat4,
     proj: &Mat4,
     simulation: &Simulation,
+    data: &GraphData,
 ) -> Option<HitResult> {
     let (ray_origin, ray_dir) =
         screen_ray(screen_x, screen_y, canvas_width, canvas_height, view, proj);
 
     let mut closest: Option<(usize, f32)> = None;
 
-    for (i, node) in NODES.iter().enumerate() {
+    for (i, node) in data.nodes.iter().enumerate() {
         let center = simulation.positions[i];
-        let radius = if node.id == "Niclas Overby" {
+        let radius = if node.center {
             20.0
         } else if node.color.is_some() {
             15.0

@@ -1,8 +1,10 @@
+mod atproto;
+mod atproto_web;
 mod graph;
 mod pages;
 
 use dioxus::prelude::*;
-use pages::{Index, Search, X, Yt};
+use pages::{AtProto, Index, Search, X, Yt};
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 // Self-hosted Space Grotesk (latin subset, variable 300–700). The @font-face is
@@ -20,6 +22,11 @@ enum Route {
     X { url: String },
     #[route("/yt?:url")]
     Yt { url: String },
+    // Any other single segment is treated as an atproto request: `/@handle`
+    // renders that account's platform graph. Kept last so the static routes
+    // above take precedence.
+    #[route("/:handle")]
+    AtProto { handle: String },
 }
 
 fn main() {

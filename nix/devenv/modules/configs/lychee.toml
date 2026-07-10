@@ -5,6 +5,9 @@ exclude = [
   '\$\{',
   "x-access-token",
   "%7B",
+  # Raw `{...}` template placeholders in source (e.g. `.../profile/{handle}`)
+  # are not real links; skip them like the `%7B`/`${` encoded forms above.
+  '\{',
   "localhost",
   '127\.0\.0\.1',
   'host\.docker\.internal',
