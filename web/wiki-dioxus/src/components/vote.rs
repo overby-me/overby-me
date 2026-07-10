@@ -23,7 +23,20 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     let access_token = session.read().access_token.clone();
     let context_id = node.context_id.clone().map(|c| c.0).unwrap_or(node.id.0);
 
-    let active = crate::use_data_resource!(|(context_id, access_token)| async move {
+    // Live-update when a poll opens/closes: subscribe to the context `active`
+    // relation so a freshly-opened ballot appears without a reload.
+    let refresh = use_signal(|| 0u32);
+    let sub_ctx = context_id.clone();
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _eq: \"active\" }} }}) {{ nodeId }} }}"
+        ),
+        refresh,
+    );
+    let rev = *refresh.read();
+
+    let active = crate::use_data_resource!(|(context_id, access_token, rev)| async move {
+        let _ = rev;
         let id = graphql::active_node_id(access_token.as_deref(), &context_id)
             .await
             .ok()
@@ -235,6 +248,15 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     let context_id = node.context_id.clone().map(|c| c.0);
     let open = node.mutable;
     let single = max_vote == 1 && min_vote == 1;
+    // hideResult (`data.hidden`): a hide-result poll reveals tallies only to the
+    // context owner; other viewers see the options without any counts.
+    let poll_hidden = node
+        .data
+        .as_ref()
+        .and_then(|d| d.0.get("hidden"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let show_results = !poll_hidden || node.is_context_owner.unwrap_or(false);
 
     let mut selected = use_signal(|| vec![false; options.len()]);
     let mut error = use_signal(String::new);
@@ -471,12 +493,16 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                                 div { class: "list-item-text",
                                     div { class: "list-item-primary", "{option}" }
                                     {
-                                        let count = counts.get(i).copied().unwrap_or(0);
-                                        let pct = (count * 100).checked_div(total_votes).unwrap_or(0);
-                                        let fraction = count as f64 / total_votes.max(1) as f64;
-                                        rsx! {
-                                            super::widgets::Bar { fraction }
-                                            div { class: "list-item-secondary", "{count} ({pct}%)" }
+                                        if show_results {
+                                            let count = counts.get(i).copied().unwrap_or(0);
+                                            let pct = (count * 100).checked_div(total_votes).unwrap_or(0);
+                                            let fraction = count as f64 / total_votes.max(1) as f64;
+                                            rsx! {
+                                                super::widgets::Bar { fraction }
+                                                div { class: "list-item-secondary", "{count} ({pct}%)" }
+                                            }
+                                        } else {
+                                            rsx! {}
                                         }
                                     }
                                 }
@@ -485,7 +511,11 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                     }
                     p { class: "body-medium mt-1",
                         if voted { "{t(\"vote.hasVoted\")} · " }
-                        "{t(\"vote.voteCount\")}: {total_votes}"
+                        if show_results {
+                            "{t(\"vote.voteCount\")}: {total_votes}"
+                        } else {
+                            "{t(\"poll.resultsHidden\")}"
+                        }
                     }
                 }
             }

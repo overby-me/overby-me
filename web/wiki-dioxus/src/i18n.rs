@@ -252,7 +252,8 @@ const EN_JSON: &str = r#"{
         "newPoll": "New poll",
         "voteRange": "Number of votes",
         "start": "Start",
-        "stopPoll": "Stop poll"
+        "stopPoll": "Stop poll",
+        "resultsHidden": "Results hidden"
     },
     "redirect": {
         "forwarding": "Forwarding you to:",
@@ -520,7 +521,8 @@ const DA_JSON: &str = r#"{
         "newPoll": "Ny afstemning",
         "voteRange": "Antal stemmer",
         "start": "Start",
-        "stopPoll": "Stop afstemning"
+        "stopPoll": "Stop afstemning",
+        "resultsHidden": "Resultat skjult"
     },
     "redirect": {
         "forwarding": "Sender dig videre til:",
