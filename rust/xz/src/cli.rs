@@ -458,15 +458,30 @@ mod tests {
     #[test]
     fn collects_multiple_files() {
         let o = parse_from("xz", &args(&["a", "b", "c"]));
-        assert_eq!(o.files, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            o.files,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
     }
 
     #[test]
     fn format_long_eq() {
-        assert_eq!(parse_from("xz", &args(&["--format=raw"])).format, Format::Raw);
-        assert_eq!(parse_from("xz", &args(&["--format=lzma"])).format, Format::Lzma);
-        assert_eq!(parse_from("xz", &args(&["--format=lzip"])).format, Format::Lzip);
-        assert_eq!(parse_from("xz", &args(&["--format=auto"])).format, Format::Auto);
+        assert_eq!(
+            parse_from("xz", &args(&["--format=raw"])).format,
+            Format::Raw
+        );
+        assert_eq!(
+            parse_from("xz", &args(&["--format=lzma"])).format,
+            Format::Lzma
+        );
+        assert_eq!(
+            parse_from("xz", &args(&["--format=lzip"])).format,
+            Format::Lzip
+        );
+        assert_eq!(
+            parse_from("xz", &args(&["--format=auto"])).format,
+            Format::Auto
+        );
     }
 
     #[test]
@@ -476,13 +491,18 @@ mod tests {
 
     #[test]
     fn format_short_dash_f_separate() {
-        assert_eq!(parse_from("xz", &args(&["-F", "lzma"])).format, Format::Lzma);
+        assert_eq!(
+            parse_from("xz", &args(&["-F", "lzma"])).format,
+            Format::Lzma
+        );
     }
 
     #[test]
     fn suffix_long_eq() {
         assert_eq!(
-            parse_from("xz", &args(&["--suffix=.foo"])).suffix.as_deref(),
+            parse_from("xz", &args(&["--suffix=.foo"]))
+                .suffix
+                .as_deref(),
             Some(".foo")
         );
     }

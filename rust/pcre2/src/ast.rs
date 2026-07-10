@@ -33,15 +33,9 @@ pub enum Node {
     /// Atomic group `(?>...)` — no backtracking once matched.
     AtomicGroup(Box<Node>),
     /// Lookahead `(?=...)` or `(?!...)`.
-    Lookahead {
-        node: Box<Node>,
-        positive: bool,
-    },
+    Lookahead { node: Box<Node>, positive: bool },
     /// Lookbehind `(?<=...)` or `(?<!...)`.
-    Lookbehind {
-        node: Box<Node>,
-        positive: bool,
-    },
+    Lookbehind { node: Box<Node>, positive: bool },
     /// Backreference `\1`, `\k<name>`.
     Backref(u32),
     /// Word boundary `\b` or `\B`.
@@ -111,25 +105,25 @@ pub enum ClassRange {
 /// Named character classes.
 #[derive(Debug, Clone, Copy)]
 pub enum NamedClass {
-    Digit,    // \d
-    NotDigit, // \D
-    Word,     // \w
-    NotWord,  // \W
-    Space,    // \s
-    NotSpace, // \S
-    HSpace,   // \h
+    Digit,     // \d
+    NotDigit,  // \D
+    Word,      // \w
+    NotWord,   // \W
+    Space,     // \s
+    NotSpace,  // \S
+    HSpace,    // \h
     NotHSpace, // \H
-    VSpace,   // \v
+    VSpace,    // \v
     NotVSpace, // \V
 }
 
 /// Regex options/flags.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Options {
-    pub caseless: bool,      // (?i)
-    pub multiline: bool,     // (?m)
-    pub dotall: bool,        // (?s)
-    pub extended: bool,      // (?x)
-    pub ungreedy: bool,      // (?U)
+    pub caseless: bool,       // (?i)
+    pub multiline: bool,      // (?m)
+    pub dotall: bool,         // (?s)
+    pub extended: bool,       // (?x)
+    pub ungreedy: bool,       // (?U)
     pub dollar_endonly: bool, // $ matches only at end of string (for -z mode)
 }

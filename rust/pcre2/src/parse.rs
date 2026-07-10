@@ -1,6 +1,6 @@
+use crate::Error;
 /// PCRE2 pattern parser — converts pattern strings to AST nodes.
 use crate::ast::*;
-use crate::Error;
 
 pub struct Parser<'a> {
     pattern: &'a [u8],
@@ -301,10 +301,7 @@ impl<'a> Parser<'a> {
             Some(b'Q') => self.parse_quoted_literal(),
             // Literal escape — any non-alphanumeric char is itself
             Some(b) if !b.is_ascii_alphanumeric() => Ok(Node::Literal(b)),
-            Some(b) => Err(self.error(&format!(
-                "unrecognized escape sequence \\{}",
-                b as char
-            ))),
+            Some(b) => Err(self.error(&format!("unrecognized escape sequence \\{}", b as char))),
         }
     }
 
@@ -318,14 +315,14 @@ impl<'a> Parser<'a> {
             self.expect(b'}')?;
             let hex = std::str::from_utf8(&self.pattern[start..self.pos - 1])
                 .map_err(|_| self.error("invalid hex escape"))?;
-            let val =
-                u32::from_str_radix(hex, 16).map_err(|_| self.error("invalid hex value"))?;
+            let val = u32::from_str_radix(hex, 16).map_err(|_| self.error("invalid hex value"))?;
             // For now, only handle single-byte values
             if val <= 0xFF {
                 Ok(Node::Literal(val as u8))
             } else {
                 // UTF-8 encode
-                let ch = char::from_u32(val).ok_or_else(|| self.error("invalid Unicode codepoint"))?;
+                let ch =
+                    char::from_u32(val).ok_or_else(|| self.error("invalid Unicode codepoint"))?;
                 let mut buf = [0u8; 4];
                 let s = ch.encode_utf8(&mut buf);
                 let bytes: Vec<Node> = s.bytes().map(Node::Literal).collect();
@@ -507,9 +504,8 @@ impl<'a> Parser<'a> {
                                 self.advance();
                             }
                             self.expect(b'}')?;
-                            let hex =
-                                std::str::from_utf8(&self.pattern[start..self.pos - 1])
-                                    .map_err(|_| self.error("invalid hex"))?;
+                            let hex = std::str::from_utf8(&self.pattern[start..self.pos - 1])
+                                .map_err(|_| self.error("invalid hex"))?;
                             let val = u32::from_str_radix(hex, 16)
                                 .map_err(|_| self.error("invalid hex value"))?;
                             Ok(ClassRange::Single(val as u8))
@@ -533,10 +529,9 @@ impl<'a> Parser<'a> {
                         }
                     }
                     Some(b) if !b.is_ascii_alphanumeric() => Ok(ClassRange::Single(b)),
-                    Some(b) => Err(self.error(&format!(
-                        "unrecognized escape in class: \\{}",
-                        b as char
-                    ))),
+                    Some(b) => {
+                        Err(self.error(&format!("unrecognized escape in class: \\{}", b as char)))
+                    }
                 }
             }
             Some(b'[') if self.pattern.get(self.pos + 1) == Some(&b':') => {
@@ -690,7 +685,14 @@ impl<'a> Parser<'a> {
                     self.expect(b')')?;
                     Ok(Node::Empty)
                 }
-                Some(b) if b == b'i' || b == b'm' || b == b's' || b == b'x' || b == b'U' || b == b'-' => {
+                Some(b)
+                    if b == b'i'
+                        || b == b'm'
+                        || b == b's'
+                        || b == b'x'
+                        || b == b'U'
+                        || b == b'-' =>
+                {
                     // Inline options (?imsx-imsx) or (?imsx:...)
                     let (set, clear) = self.parse_option_flags()?;
                     if self.peek() == Some(b':') {
@@ -735,23 +737,43 @@ impl<'a> Parser<'a> {
             match self.peek() {
                 Some(b'i') => {
                     self.advance();
-                    if clearing { clear.caseless = true } else { set.caseless = true }
+                    if clearing {
+                        clear.caseless = true
+                    } else {
+                        set.caseless = true
+                    }
                 }
                 Some(b'm') => {
                     self.advance();
-                    if clearing { clear.multiline = true } else { set.multiline = true }
+                    if clearing {
+                        clear.multiline = true
+                    } else {
+                        set.multiline = true
+                    }
                 }
                 Some(b's') => {
                     self.advance();
-                    if clearing { clear.dotall = true } else { set.dotall = true }
+                    if clearing {
+                        clear.dotall = true
+                    } else {
+                        set.dotall = true
+                    }
                 }
                 Some(b'x') => {
                     self.advance();
-                    if clearing { clear.extended = true } else { set.extended = true }
+                    if clearing {
+                        clear.extended = true
+                    } else {
+                        set.extended = true
+                    }
                 }
                 Some(b'U') => {
                     self.advance();
-                    if clearing { clear.ungreedy = true } else { set.ungreedy = true }
+                    if clearing {
+                        clear.ungreedy = true
+                    } else {
+                        set.ungreedy = true
+                    }
                 }
                 Some(b'-') => {
                     self.advance();
@@ -791,7 +813,11 @@ mod tests {
     #[test]
     fn quantifiers() {
         match parse("a+") {
-            Node::Quantifier { kind: QuantKind::OneOrMore, greedy: true, .. } => {}
+            Node::Quantifier {
+                kind: QuantKind::OneOrMore,
+                greedy: true,
+                ..
+            } => {}
             other => panic!("expected Quantifier, got {other:?}"),
         }
     }
@@ -844,7 +870,10 @@ mod tests {
     #[test]
     fn interval() {
         match parse("a{2,5}") {
-            Node::Quantifier { kind: QuantKind::Range(2, 5), .. } => {}
+            Node::Quantifier {
+                kind: QuantKind::Range(2, 5),
+                ..
+            } => {}
             other => panic!("expected Range(2,5), got {other:?}"),
         }
     }

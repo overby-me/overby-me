@@ -111,7 +111,8 @@ fn diff_main(args: &[String]) {
                 opts.format = DiffFormat::Context(n);
             }
             arg if arg.starts_with("--label=") => {
-                opts.labels.push(arg.strip_prefix("--label=").unwrap().to_string());
+                opts.labels
+                    .push(arg.strip_prefix("--label=").unwrap().to_string());
             }
             arg if arg.starts_with('-') && arg.len() > 1 => {
                 // Ignore unknown options silently for compatibility
@@ -263,11 +264,17 @@ fn diff_files(path1: &str, path2: &str, opts: &DiffOpts) -> i32 {
 
 fn diff_dirs(dir1: &str, dir2: &str, opts: &DiffOpts) -> i32 {
     let mut entries1: Vec<String> = fs::read_dir(dir1)
-        .unwrap_or_else(|_| { eprintln!("diff: {dir1}: No such file or directory"); process::exit(2); })
+        .unwrap_or_else(|_| {
+            eprintln!("diff: {dir1}: No such file or directory");
+            process::exit(2);
+        })
         .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
         .collect();
     let mut entries2: Vec<String> = fs::read_dir(dir2)
-        .unwrap_or_else(|_| { eprintln!("diff: {dir2}: No such file or directory"); process::exit(2); })
+        .unwrap_or_else(|_| {
+            eprintln!("diff: {dir2}: No such file or directory");
+            process::exit(2);
+        })
         .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
         .collect();
     entries1.sort();
@@ -296,18 +303,26 @@ fn diff_dirs(dir1: &str, dir2: &str, opts: &DiffOpts) -> i32 {
         } else if in1 && !in2 {
             if opts.new_file {
                 let r = diff_files(&p1, &p2, opts);
-                if r > result { result = r; }
+                if r > result {
+                    result = r;
+                }
             } else {
                 println!("Only in {dir1}: {name}");
-                if result < 1 { result = 1; }
+                if result < 1 {
+                    result = 1;
+                }
             }
         } else {
             if opts.new_file {
                 let r = diff_files(&p1, &p2, opts);
-                if r > result { result = r; }
+                if r > result {
+                    result = r;
+                }
             } else {
                 println!("Only in {dir2}: {name}");
-                if result < 1 { result = 1; }
+                if result < 1 {
+                    result = 1;
+                }
             }
         }
     }
@@ -320,9 +335,9 @@ fn diff_dirs(dir1: &str, dir2: &str, opts: &DiffOpts) -> i32 {
 
 #[derive(Debug, Clone)]
 enum Edit {
-    Equal(usize, usize),   // (line_idx_in_a, line_idx_in_b)
-    Delete(usize),          // line_idx_in_a
-    Insert(usize),          // line_idx_in_b
+    Equal(usize, usize), // (line_idx_in_a, line_idx_in_b)
+    Delete(usize),       // line_idx_in_a
+    Insert(usize),       // line_idx_in_b
 }
 
 fn compute_diff(a: &[String], b: &[String], opts: &DiffOpts) -> Vec<Edit> {
@@ -439,15 +454,24 @@ fn print_normal(edits: &[Edit], a: &[String], b: &[String], out: &mut impl Write
     let mut i = 0;
     while i < edits.len() {
         match &edits[i] {
-            Edit::Equal(_, _) => { i += 1; }
+            Edit::Equal(_, _) => {
+                i += 1;
+            }
             Edit::Delete(ai) => {
                 let start = *ai;
                 let mut end = start;
                 let mut j = i + 1;
                 while j < edits.len() {
                     if let Edit::Delete(aj) = &edits[j] {
-                        if *aj == end + 1 { end = *aj; j += 1; } else { break; }
-                    } else { break; }
+                        if *aj == end + 1 {
+                            end = *aj;
+                            j += 1;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
                 }
                 // Check for following inserts (change)
                 let mut ins_start = None;
@@ -455,26 +479,57 @@ fn print_normal(edits: &[Edit], a: &[String], b: &[String], out: &mut impl Write
                 let mut k = j;
                 while k < edits.len() {
                     if let Edit::Insert(bi) = &edits[k] {
-                        if ins_start.is_none() { ins_start = Some(*bi); }
+                        if ins_start.is_none() {
+                            ins_start = Some(*bi);
+                        }
                         ins_end = *bi;
                         k += 1;
-                    } else { break; }
+                    } else {
+                        break;
+                    }
                 }
                 if let Some(is) = ins_start {
                     // Change
-                    let _ = writeln!(out, "{}{}c{}{}",
-                        start + 1, if end > start { format!(",{}", end + 1) } else { String::new() },
-                        is + 1, if ins_end > is { format!(",{}", ins_end + 1) } else { String::new() });
-                    for idx in start..=end { let _ = writeln!(out, "< {}", a[idx]); }
+                    let _ = writeln!(
+                        out,
+                        "{}{}c{}{}",
+                        start + 1,
+                        if end > start {
+                            format!(",{}", end + 1)
+                        } else {
+                            String::new()
+                        },
+                        is + 1,
+                        if ins_end > is {
+                            format!(",{}", ins_end + 1)
+                        } else {
+                            String::new()
+                        }
+                    );
+                    for idx in start..=end {
+                        let _ = writeln!(out, "< {}", a[idx]);
+                    }
                     let _ = writeln!(out, "---");
-                    for idx in is..=ins_end { let _ = writeln!(out, "> {}", b[idx]); }
+                    for idx in is..=ins_end {
+                        let _ = writeln!(out, "> {}", b[idx]);
+                    }
                     i = k;
                 } else {
                     // Delete
-                    let _ = writeln!(out, "{}{}d{}",
-                        start + 1, if end > start { format!(",{}", end + 1) } else { String::new() },
-                        start); // approximate
-                    for idx in start..=end { let _ = writeln!(out, "< {}", a[idx]); }
+                    let _ = writeln!(
+                        out,
+                        "{}{}d{}",
+                        start + 1,
+                        if end > start {
+                            format!(",{}", end + 1)
+                        } else {
+                            String::new()
+                        },
+                        start
+                    ); // approximate
+                    for idx in start..=end {
+                        let _ = writeln!(out, "< {}", a[idx]);
+                    }
                     i = j;
                 }
             }
@@ -484,25 +539,54 @@ fn print_normal(edits: &[Edit], a: &[String], b: &[String], out: &mut impl Write
                 let mut j = i + 1;
                 while j < edits.len() {
                     if let Edit::Insert(bj) = &edits[j] {
-                        if *bj == end + 1 { end = *bj; j += 1; } else { break; }
-                    } else { break; }
+                        if *bj == end + 1 {
+                            end = *bj;
+                            j += 1;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
                 }
                 // Find the position in file a
-                let a_pos = edits[..i].iter().rev()
-                    .find_map(|e| match e { Edit::Equal(ai, _) | Edit::Delete(ai) => Some(*ai + 1), _ => None })
+                let a_pos = edits[..i]
+                    .iter()
+                    .rev()
+                    .find_map(|e| match e {
+                        Edit::Equal(ai, _) | Edit::Delete(ai) => Some(*ai + 1),
+                        _ => None,
+                    })
                     .unwrap_or(0);
-                let _ = writeln!(out, "{}a{}{}",
+                let _ = writeln!(
+                    out,
+                    "{}a{}{}",
                     a_pos,
-                    start + 1, if end > start { format!(",{}", end + 1) } else { String::new() });
-                for idx in start..=end { let _ = writeln!(out, "> {}", b[idx]); }
+                    start + 1,
+                    if end > start {
+                        format!(",{}", end + 1)
+                    } else {
+                        String::new()
+                    }
+                );
+                for idx in start..=end {
+                    let _ = writeln!(out, "> {}", b[idx]);
+                }
                 i = j;
             }
         }
     }
 }
 
-fn print_unified(edits: &[Edit], a: &[String], b: &[String], ctx: usize,
-                 label1: &str, label2: &str, out: &mut impl Write) {
+fn print_unified(
+    edits: &[Edit],
+    a: &[String],
+    b: &[String],
+    ctx: usize,
+    label1: &str,
+    label2: &str,
+    out: &mut impl Write,
+) {
     let _ = writeln!(out, "--- {}", label1);
     let _ = writeln!(out, "+++ {}", label2);
 
@@ -510,19 +594,39 @@ fn print_unified(edits: &[Edit], a: &[String], b: &[String], ctx: usize,
     let hunks = build_hunks(edits, ctx);
     for hunk in hunks {
         let (a_start, a_count, b_start, b_count) = hunk_range(&hunk, a.len(), b.len());
-        let _ = writeln!(out, "@@ -{},{} +{},{} @@", a_start + 1, a_count, b_start + 1, b_count);
+        let _ = writeln!(
+            out,
+            "@@ -{},{} +{},{} @@",
+            a_start + 1,
+            a_count,
+            b_start + 1,
+            b_count
+        );
         for edit in &hunk {
             match edit {
-                Edit::Equal(ai, _) => { let _ = writeln!(out, " {}", a[*ai]); }
-                Edit::Delete(ai) => { let _ = writeln!(out, "-{}", a[*ai]); }
-                Edit::Insert(bi) => { let _ = writeln!(out, "+{}", b[*bi]); }
+                Edit::Equal(ai, _) => {
+                    let _ = writeln!(out, " {}", a[*ai]);
+                }
+                Edit::Delete(ai) => {
+                    let _ = writeln!(out, "-{}", a[*ai]);
+                }
+                Edit::Insert(bi) => {
+                    let _ = writeln!(out, "+{}", b[*bi]);
+                }
             }
         }
     }
 }
 
-fn print_context(edits: &[Edit], a: &[String], b: &[String], ctx: usize,
-                 label1: &str, label2: &str, out: &mut impl Write) {
+fn print_context(
+    edits: &[Edit],
+    a: &[String],
+    b: &[String],
+    ctx: usize,
+    label1: &str,
+    label2: &str,
+    out: &mut impl Write,
+) {
     let _ = writeln!(out, "*** {}", label1);
     let _ = writeln!(out, "--- {}", label2);
 
@@ -533,17 +637,25 @@ fn print_context(edits: &[Edit], a: &[String], b: &[String], ctx: usize,
         let _ = writeln!(out, "*** {},{} ****", a_start + 1, a_start + a_count);
         for edit in &hunk {
             match edit {
-                Edit::Equal(ai, _) => { let _ = writeln!(out, "  {}", a[*ai]); }
-                Edit::Delete(ai) => { let _ = writeln!(out, "- {}", a[*ai]); }
+                Edit::Equal(ai, _) => {
+                    let _ = writeln!(out, "  {}", a[*ai]);
+                }
+                Edit::Delete(ai) => {
+                    let _ = writeln!(out, "- {}", a[*ai]);
+                }
                 Edit::Insert(_) => {}
             }
         }
         let _ = writeln!(out, "--- {},{} ----", b_start + 1, b_start + b_count);
         for edit in &hunk {
             match edit {
-                Edit::Equal(_, bi) => { let _ = writeln!(out, "  {}", b[*bi]); }
+                Edit::Equal(_, bi) => {
+                    let _ = writeln!(out, "  {}", b[*bi]);
+                }
                 Edit::Delete(_) => {}
-                Edit::Insert(bi) => { let _ = writeln!(out, "+ {}", b[*bi]); }
+                Edit::Insert(bi) => {
+                    let _ = writeln!(out, "+ {}", b[*bi]);
+                }
             }
         }
     }
@@ -556,10 +668,17 @@ fn print_ed(edits: &[Edit], b: &[String], out: &mut impl Write) {
         i -= 1;
         match &edits[i] {
             Edit::Equal(_, _) => {}
-            Edit::Delete(ai) => { let _ = writeln!(out, "{}d", ai + 1); }
+            Edit::Delete(ai) => {
+                let _ = writeln!(out, "{}d", ai + 1);
+            }
             Edit::Insert(bi) => {
-                let a_pos = edits[..=i].iter().rev()
-                    .find_map(|e| match e { Edit::Equal(ai, _) | Edit::Delete(ai) => Some(*ai + 1), _ => None })
+                let a_pos = edits[..=i]
+                    .iter()
+                    .rev()
+                    .find_map(|e| match e {
+                        Edit::Equal(ai, _) | Edit::Delete(ai) => Some(*ai + 1),
+                        _ => None,
+                    })
                     .unwrap_or(0);
                 let _ = writeln!(out, "{}a", a_pos);
                 let _ = writeln!(out, "{}", b[*bi]);
@@ -573,11 +692,17 @@ fn print_rcs(edits: &[Edit], a: &[String], b: &[String], out: &mut impl Write) {
     for edit in edits {
         match edit {
             Edit::Equal(_, _) => {}
-            Edit::Delete(ai) => { let _ = writeln!(out, "d{} 1", ai + 1); }
+            Edit::Delete(ai) => {
+                let _ = writeln!(out, "d{} 1", ai + 1);
+            }
             Edit::Insert(bi) => {
-                let a_pos = edits.iter()
+                let a_pos = edits
+                    .iter()
                     .take_while(|e| !std::ptr::eq(*e, edit))
-                    .filter_map(|e| match e { Edit::Equal(ai, _) | Edit::Delete(ai) => Some(*ai + 1), _ => None })
+                    .filter_map(|e| match e {
+                        Edit::Equal(ai, _) | Edit::Delete(ai) => Some(*ai + 1),
+                        _ => None,
+                    })
                     .last()
                     .unwrap_or(0);
                 let _ = writeln!(out, "a{} 1", a_pos);
@@ -594,7 +719,12 @@ fn print_side_by_side(edits: &[Edit], a: &[String], b: &[String], out: &mut impl
     for edit in edits {
         match edit {
             Edit::Equal(ai, _) => {
-                let _ = writeln!(out, "{:<col$}   {}", truncate(&a[*ai], col), truncate(&a[*ai], col));
+                let _ = writeln!(
+                    out,
+                    "{:<col$}   {}",
+                    truncate(&a[*ai], col),
+                    truncate(&a[*ai], col)
+                );
             }
             Edit::Delete(ai) => {
                 let _ = writeln!(out, "{:<col$} <", truncate(&a[*ai], col));
@@ -607,7 +737,11 @@ fn print_side_by_side(edits: &[Edit], a: &[String], b: &[String], out: &mut impl
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { s.to_string() } else { format!("{}...", &s[..max.saturating_sub(3)]) }
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max.saturating_sub(3)])
+    }
 }
 
 fn build_hunks(edits: &[Edit], ctx: usize) -> Vec<Vec<Edit>> {
@@ -694,8 +828,12 @@ fn hunk_range(hunk: &[Edit], _a_len: usize, _b_len: usize) -> (usize, usize, usi
         }
     }
 
-    if a_start == usize::MAX { a_start = 0; }
-    if b_start == usize::MAX { b_start = 0; }
+    if a_start == usize::MAX {
+        a_start = 0;
+    }
+    if b_start == usize::MAX {
+        b_start = 0;
+    }
 
     (a_start, a_end - a_start, b_start, b_end - b_start)
 }
@@ -728,11 +866,17 @@ fn cmp_main(args: &[String]) {
 
     let data1 = match fs::read(&files[0]) {
         Ok(d) => d,
-        Err(e) => { eprintln!("cmp: {}: {e}", files[0]); process::exit(2); }
+        Err(e) => {
+            eprintln!("cmp: {}: {e}", files[0]);
+            process::exit(2);
+        }
     };
     let data2 = match fs::read(&files[1]) {
         Ok(d) => d,
-        Err(e) => { eprintln!("cmp: {}: {e}", files[1]); process::exit(2); }
+        Err(e) => {
+            eprintln!("cmp: {}: {e}", files[1]);
+            process::exit(2);
+        }
     };
 
     let mut byte_pos = 0usize;
@@ -740,10 +884,15 @@ fn cmp_main(args: &[String]) {
 
     for (b1, b2) in data1.iter().zip(data2.iter()) {
         byte_pos += 1;
-        if *b1 == b'\n' { line += 1; }
+        if *b1 == b'\n' {
+            line += 1;
+        }
         if b1 != b2 {
             if !silent {
-                println!("{} {} differ: byte {byte_pos}, line {line}", files[0], files[1]);
+                println!(
+                    "{} {} differ: byte {byte_pos}, line {line}",
+                    files[0], files[1]
+                );
             }
             process::exit(1);
         }
@@ -751,7 +900,11 @@ fn cmp_main(args: &[String]) {
 
     if data1.len() != data2.len() {
         if !silent {
-            let shorter = if data1.len() < data2.len() { &files[0] } else { &files[1] };
+            let shorter = if data1.len() < data2.len() {
+                &files[0]
+            } else {
+                &files[1]
+            };
             eprintln!("cmp: EOF on {shorter}");
         }
         process::exit(1);

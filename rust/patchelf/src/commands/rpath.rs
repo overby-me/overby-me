@@ -188,12 +188,10 @@ pub fn remove_rpath(elf: &Elf, data: &mut [u8]) {
                     data[entry_off + 8..entry_off + 16].copy_from_slice(&0u64.to_be_bytes());
                 }
             } else if elf.little_endian {
-                data[entry_off..entry_off + 4]
-                    .copy_from_slice(&(DT_DEBUG as u32).to_le_bytes());
+                data[entry_off..entry_off + 4].copy_from_slice(&(DT_DEBUG as u32).to_le_bytes());
                 data[entry_off + 4..entry_off + 8].copy_from_slice(&0u32.to_le_bytes());
             } else {
-                data[entry_off..entry_off + 4]
-                    .copy_from_slice(&(DT_DEBUG as u32).to_be_bytes());
+                data[entry_off..entry_off + 4].copy_from_slice(&(DT_DEBUG as u32).to_be_bytes());
                 data[entry_off + 4..entry_off + 8].copy_from_slice(&0u32.to_be_bytes());
             }
         }

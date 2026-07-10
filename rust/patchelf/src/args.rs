@@ -70,8 +70,8 @@ pub fn parse_args() -> Options {
             "--force-rpath" => {
                 force_rpath = true;
             }
-            "--no-default-lib" | "--clear-execstack" | "--set-execstack"
-            | "--print-execstack" | "--debug" => {
+            "--no-default-lib" | "--clear-execstack" | "--set-execstack" | "--print-execstack"
+            | "--debug" => {
                 // Accepted-but-not-yet-implemented flags.
             }
             "--allowed-rpath-prefixes" => {

@@ -67,33 +67,33 @@
       run_script() {
         echo "Running upstream test: ${name}"
         ${
-          if name == "test_compress" || (pkgs.lib.hasPrefix "test_compress_generated_" name)
-          # The upstream `test_compress_generated_*` wrappers exec
-          # `test_compress.sh <filename>` with no xz-dir argument,
-          # which makes the script default to `../src/xz` and skip.
-          # We bypass them and call `test_compress.sh` directly with
-          # both arguments so the rust-xz binary is actually used.
-          then ''sh ./test_compress.sh "${compressFile}" "./fake"''
-          else ''sh "./${name}.sh" "./fake"''
-        }
+        if name == "test_compress" || (pkgs.lib.hasPrefix "test_compress_generated_" name)
+        # The upstream `test_compress_generated_*` wrappers exec
+        # `test_compress.sh <filename>` with no xz-dir argument,
+        # which makes the script default to `../src/xz` and skip.
+        # We bypass them and call `test_compress.sh` directly with
+        # both arguments so the rust-xz binary is actually used.
+        then ''sh ./test_compress.sh "${compressFile}" "./fake"''
+        else ''sh "./${name}.sh" "./fake"''
+      }
       }
 
       run_script || {
         rc=$?
         if [ $rc -eq 77 ]; then
           ${
-            if allowSkip
-            then ''
-              echo "test ${name}.sh skipped (exit 77, allowSkip=true)"
-              touch $out
-              exit 0
-            ''
-            else ''
-              echo "test ${name}.sh exited 77 (skipped) but allowSkip is false"
-              echo "this almost always means the test was misconfigured."
-              exit 1
-            ''
-          }
+        if allowSkip
+        then ''
+          echo "test ${name}.sh skipped (exit 77, allowSkip=true)"
+          touch $out
+          exit 0
+        ''
+        else ''
+          echo "test ${name}.sh exited 77 (skipped) but allowSkip is false"
+          echo "this almost always means the test was misconfigured."
+          exit 1
+        ''
+      }
         fi
         echo "test ${name}.sh failed (exit $rc)"
         exit $rc
@@ -134,85 +134,89 @@
 
   # Quick standalone round-trip sanity check: compress + decompress a
   # known buffer at every preset level using the rust-xz binary.
-  roundtrip = pkgs.runCommand "rust-xz-roundtrip" {
-    nativeBuildInputs = [pkgs.rust-xz-dev pkgs.coreutils pkgs.diffutils];
-  } ''
-    set -e
-    TMP=$(mktemp -d)
-    head -c 65536 /dev/urandom > "$TMP/payload"
-    for level in 0 1 2 3 4 5 6 7 8 9; do
-      ${pkgs.rust-xz-dev}/bin/xz -c -$level "$TMP/payload" > "$TMP/out.xz"
-      ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/out.xz" > "$TMP/decoded"
-      if ! cmp "$TMP/payload" "$TMP/decoded"; then
-        echo "roundtrip mismatch at level $level"
-        exit 1
-      fi
-    done
-    touch $out
-  '';
+  roundtrip =
+    pkgs.runCommand "rust-xz-roundtrip" {
+      nativeBuildInputs = [pkgs.rust-xz-dev pkgs.coreutils pkgs.diffutils];
+    } ''
+      set -e
+      TMP=$(mktemp -d)
+      head -c 65536 /dev/urandom > "$TMP/payload"
+      for level in 0 1 2 3 4 5 6 7 8 9; do
+        ${pkgs.rust-xz-dev}/bin/xz -c -$level "$TMP/payload" > "$TMP/out.xz"
+        ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/out.xz" > "$TMP/decoded"
+        if ! cmp "$TMP/payload" "$TMP/decoded"; then
+          echo "roundtrip mismatch at level $level"
+          exit 1
+        fi
+      done
+      touch $out
+    '';
 
   # End-to-end smoke check for `xz -l`/`--list`. Compresses a file,
   # then asserts the list output contains the expected stream count
   # and the CRC64 check name (xz's default).
-  list = pkgs.runCommand "rust-xz-list" {
-    nativeBuildInputs = [pkgs.rust-xz-dev pkgs.coreutils pkgs.gnugrep];
-  } ''
-    set -e
-    TMP=$(mktemp -d)
-    printf 'list mode integration check\n' > "$TMP/payload"
-    ${pkgs.rust-xz-dev}/bin/xz -k -c "$TMP/payload" > "$TMP/payload.xz"
-    OUT=$(${pkgs.rust-xz-dev}/bin/xz -l "$TMP/payload.xz")
-    echo "$OUT"
-    echo "$OUT" | grep -q "Strms"
-    echo "$OUT" | grep -q "CRC64"
-    echo "$OUT" | grep -q "payload.xz"
-    touch $out
-  '';
+  list =
+    pkgs.runCommand "rust-xz-list" {
+      nativeBuildInputs = [pkgs.rust-xz-dev pkgs.coreutils pkgs.gnugrep];
+    } ''
+      set -e
+      TMP=$(mktemp -d)
+      printf 'list mode integration check\n' > "$TMP/payload"
+      ${pkgs.rust-xz-dev}/bin/xz -k -c "$TMP/payload" > "$TMP/payload.xz"
+      OUT=$(${pkgs.rust-xz-dev}/bin/xz -l "$TMP/payload.xz")
+      echo "$OUT"
+      echo "$OUT" | grep -q "Strms"
+      echo "$OUT" | grep -q "CRC64"
+      echo "$OUT" | grep -q "payload.xz"
+      touch $out
+    '';
 
   # End-to-end smoke check for the BCJ filter chain (`--x86`,
   # `--arm64`, `--filters=`). Round-trips a payload through each
   # combination and asserts byte-equality.
-  filters = pkgs.runCommand "rust-xz-filters" {
-    nativeBuildInputs = [pkgs.rust-xz-dev pkgs.coreutils pkgs.diffutils];
-  } ''
-    set -e
-    TMP=$(mktemp -d)
-    head -c 16384 /dev/urandom > "$TMP/p"
+  filters =
+    pkgs.runCommand "rust-xz-filters" {
+      nativeBuildInputs = [pkgs.rust-xz-dev pkgs.coreutils pkgs.diffutils];
+    } ''
+      set -e
+      TMP=$(mktemp -d)
+      head -c 16384 /dev/urandom > "$TMP/p"
 
-    # --x86 + --lzma2= short-flag form.
-    ${pkgs.rust-xz-dev}/bin/xz --x86 --lzma2=preset=4 -c "$TMP/p" > "$TMP/p.xz"
-    ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
-    cmp "$TMP/p" "$TMP/p2"
+      # --x86 + --lzma2= short-flag form.
+      ${pkgs.rust-xz-dev}/bin/xz --x86 --lzma2=preset=4 -c "$TMP/p" > "$TMP/p.xz"
+      ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
+      cmp "$TMP/p" "$TMP/p2"
 
-    # --filters= form with a different BCJ + LZMA2 chain.
-    ${pkgs.rust-xz-dev}/bin/xz --filters="arm64 lzma2:preset=4" -c "$TMP/p" > "$TMP/p.xz"
-    ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
-    cmp "$TMP/p" "$TMP/p2"
+      # --filters= form with a different BCJ + LZMA2 chain.
+      ${pkgs.rust-xz-dev}/bin/xz --filters="arm64 lzma2:preset=4" -c "$TMP/p" > "$TMP/p.xz"
+      ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
+      cmp "$TMP/p" "$TMP/p2"
 
-    # --filters= using the `--` token separator (same as upstream).
-    ${pkgs.rust-xz-dev}/bin/xz --filters="riscv--lzma2:preset=4" -c "$TMP/p" > "$TMP/p.xz"
-    ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
-    cmp "$TMP/p" "$TMP/p2"
+      # --filters= using the `--` token separator (same as upstream).
+      ${pkgs.rust-xz-dev}/bin/xz --filters="riscv--lzma2:preset=4" -c "$TMP/p" > "$TMP/p.xz"
+      ${pkgs.rust-xz-dev}/bin/xz -dc "$TMP/p.xz" > "$TMP/p2"
+      cmp "$TMP/p" "$TMP/p2"
 
-    touch $out
-  '';
+      touch $out
+    '';
 
   # Decoder-stability fuzz check. Runs the `rust-xz-fuzz` binary
   # (built as part of `rust-xz-dev`) against the upstream
   # `tests/files/` corpus. Every file in the corpus is fed to the
   # decoder verbatim, then with prefix-truncated and one-byte-flipped
   # mutations; the test passes iff the decoder never panics.
-  fuzz = pkgs.runCommand "rust-xz-fuzz" {
-    nativeBuildInputs = [pkgs.rust-xz-dev pkgs.gnutar pkgs.coreutils];
-    xzSrc = pkgs.xz.src;
-  } ''
-    set -e
-    tar xf "$xzSrc"
-    CORPUS=$(echo "$PWD"/xz-*/tests/files)
-    echo "fuzz corpus: $CORPUS ($(ls "$CORPUS" | wc -l) files)"
-    ${pkgs.rust-xz-dev}/bin/rust-xz-fuzz "$CORPUS"
-    touch $out
-  '';
+  fuzz =
+    pkgs.runCommand "rust-xz-fuzz" {
+      nativeBuildInputs = [pkgs.rust-xz-dev pkgs.gnutar pkgs.coreutils];
+      xzSrc = pkgs.xz.src;
+    } ''
+      set -e
+      tar xf "$xzSrc"
+      CORPUS=$(echo "$PWD"/xz-*/tests/files)
+      echo "fuzz corpus: $CORPUS ($(ls "$CORPUS" | wc -l) files)"
+      ${pkgs.rust-xz-dev}/bin/rust-xz-fuzz "$CORPUS"
+      touch $out
+    '';
 
   # Run one of the upstream `tests/test_*.c` C unit tests. These
   # exercise liblzma library internals (VLI codec, block header
@@ -226,8 +230,16 @@
   cTest = name:
     pkgs.runCommand "rust-xz-${name}" {
       nativeBuildInputs = [
-        pkgs.gcc pkgs.gnumake pkgs.autoconf pkgs.automake pkgs.libtool
-        pkgs.gettext pkgs.pkg-config pkgs.m4 pkgs.po4a pkgs.gnutar
+        pkgs.gcc
+        pkgs.gnumake
+        pkgs.autoconf
+        pkgs.automake
+        pkgs.libtool
+        pkgs.gettext
+        pkgs.pkg-config
+        pkgs.m4
+        pkgs.po4a
+        pkgs.gnutar
       ];
       xzSrc = pkgs.xz.src;
     } ''

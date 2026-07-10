@@ -1,9 +1,9 @@
+use crate::Error;
 /// Backtracking NFA matcher for PCRE2 patterns.
 ///
 /// Uses continuation-passing style: every match operation takes a continuation
 /// representing the rest of the pattern to match after the current node.
 use crate::ast::*;
-use crate::Error;
 
 /// Detect patterns with nested unbounded quantifiers (`(a+)*`, `((a+)*)+`, etc.)
 /// that would cause catastrophic backtracking in a real backtracking engine.
@@ -16,17 +16,22 @@ fn has_nested_unbounded(node: &Node) -> bool {
     }
     fn unwrap<'a>(node: &'a Node) -> &'a Node {
         match node {
-            Node::Group { node, .. }
-            | Node::NonCapGroup(node)
-            | Node::AtomicGroup(node) => unwrap(node),
+            Node::Group { node, .. } | Node::NonCapGroup(node) | Node::AtomicGroup(node) => {
+                unwrap(node)
+            }
             Node::Concat(nodes) if nodes.len() == 1 => unwrap(&nodes[0]),
             _ => node,
         }
     }
     match node {
-        Node::Quantifier { kind, node: inner, .. } => {
+        Node::Quantifier {
+            kind, node: inner, ..
+        } => {
             if is_unbounded(*kind) {
-                if let Node::Quantifier { kind: inner_kind, .. } = unwrap(inner) {
+                if let Node::Quantifier {
+                    kind: inner_kind, ..
+                } = unwrap(inner)
+                {
                     if is_unbounded(*inner_kind) {
                         return true;
                     }
@@ -39,9 +44,7 @@ fn has_nested_unbounded(node: &Node) -> bool {
         | Node::AtomicGroup(node)
         | Node::Lookahead { node, .. }
         | Node::Lookbehind { node, .. } => has_nested_unbounded(node),
-        Node::Concat(nodes) | Node::Alternation(nodes) => {
-            nodes.iter().any(has_nested_unbounded)
-        }
+        Node::Concat(nodes) | Node::Alternation(nodes) => nodes.iter().any(has_nested_unbounded),
         Node::SetOptions { node: Some(n), .. } => has_nested_unbounded(n),
         _ => false,
     }
@@ -109,10 +112,7 @@ impl<'a> MatchState<'a> {
         // backtracking in a real PCRE2 engine when the match fails. Our
         // simpler matcher returns Ok(None) quickly, but we need to mimic
         // PCRE2's MatchLimit error so `grep -P` exits 2 on pathological input.
-        if matches!(result, Ok(None))
-            && self.subject.len() >= 20
-            && has_nested_unbounded(node)
-        {
+        if matches!(result, Ok(None)) && self.subject.len() >= 20 && has_nested_unbounded(node) {
             return Err(Error::MatchLimit);
         }
         result
@@ -380,7 +380,14 @@ impl<'a> MatchState<'a> {
         {
             // Build a continuation that matches the rest of this concat then outer
             return self.match_quant_in_concat(
-                inner, pos, *kind, *greedy, *possessive, nodes, index + 1, outer_cont,
+                inner,
+                pos,
+                *kind,
+                *greedy,
+                *possessive,
+                nodes,
+                index + 1,
+                outer_cont,
             );
         }
 
@@ -657,7 +664,14 @@ impl<'a> MatchState<'a> {
                     match self.try_match(node, pos)? {
                         Some(next) if next > pos => {
                             return self.quant_bt_standalone(
-                                node, next, min, max, count + 1, greedy, possessive, cont,
+                                node,
+                                next,
+                                min,
+                                max,
+                                count + 1,
+                                greedy,
+                                possessive,
+                                cont,
                             );
                         }
                         _ => self.restore(saved),
@@ -672,7 +686,14 @@ impl<'a> MatchState<'a> {
                     match self.try_match(node, pos)? {
                         Some(next) if next > pos => {
                             match self.quant_bt_standalone(
-                                node, next, min, max, count + 1, greedy, possessive, cont,
+                                node,
+                                next,
+                                min,
+                                max,
+                                count + 1,
+                                greedy,
+                                possessive,
+                                cont,
                             )? {
                                 Some(end) => return Ok(Some(end)),
                                 None => self.restore(saved),
@@ -693,7 +714,14 @@ impl<'a> MatchState<'a> {
                     match self.try_match(node, pos)? {
                         Some(next) if next > pos => {
                             match self.quant_bt_standalone(
-                                node, next, min, max, count + 1, greedy, possessive, cont,
+                                node,
+                                next,
+                                min,
+                                max,
+                                count + 1,
+                                greedy,
+                                possessive,
+                                cont,
                             )? {
                                 Some(end) => return Ok(Some(end)),
                                 None => self.restore(saved),
@@ -708,9 +736,9 @@ impl<'a> MatchState<'a> {
 
         let saved = self.save();
         match self.try_match(node, pos)? {
-            Some(next) if next > pos => self.quant_bt_standalone(
-                node, next, min, max, count + 1, greedy, possessive, cont,
-            ),
+            Some(next) if next > pos => {
+                self.quant_bt_standalone(node, next, min, max, count + 1, greedy, possessive, cont)
+            }
             _ => {
                 self.restore(saved);
                 Ok(None)
@@ -727,16 +755,36 @@ impl<'a> MatchState<'a> {
     }
 
     fn apply_options(&mut self, set: Options, clear: Options) {
-        if set.caseless { self.options.caseless = true; }
-        if set.multiline { self.options.multiline = true; }
-        if set.dotall { self.options.dotall = true; }
-        if set.extended { self.options.extended = true; }
-        if set.ungreedy { self.options.ungreedy = true; }
-        if clear.caseless { self.options.caseless = false; }
-        if clear.multiline { self.options.multiline = false; }
-        if clear.dotall { self.options.dotall = false; }
-        if clear.extended { self.options.extended = false; }
-        if clear.ungreedy { self.options.ungreedy = false; }
+        if set.caseless {
+            self.options.caseless = true;
+        }
+        if set.multiline {
+            self.options.multiline = true;
+        }
+        if set.dotall {
+            self.options.dotall = true;
+        }
+        if set.extended {
+            self.options.extended = true;
+        }
+        if set.ungreedy {
+            self.options.ungreedy = true;
+        }
+        if clear.caseless {
+            self.options.caseless = false;
+        }
+        if clear.multiline {
+            self.options.multiline = false;
+        }
+        if clear.dotall {
+            self.options.dotall = false;
+        }
+        if clear.extended {
+            self.options.extended = false;
+        }
+        if clear.ungreedy {
+            self.options.ungreedy = false;
+        }
     }
 
     pub fn get_captures(&self) -> &[Option<(usize, usize)>] {
@@ -752,7 +800,11 @@ fn class_matches(class: &CharClass, b: u8, caseless: bool) -> bool {
 fn range_matches(range: &ClassRange, b: u8, caseless: bool) -> bool {
     match range {
         ClassRange::Single(c) => {
-            if caseless { b.to_ascii_lowercase() == c.to_ascii_lowercase() } else { b == *c }
+            if caseless {
+                b.to_ascii_lowercase() == c.to_ascii_lowercase()
+            } else {
+                b == *c
+            }
         }
         ClassRange::Range(start, end) => {
             if caseless {
@@ -824,8 +876,13 @@ mod tests {
         let num_captures = parser.group_count();
         let subject_bytes = subject.as_bytes();
         for start in 0..=subject_bytes.len() {
-            let mut state =
-                MatchState::new(subject_bytes, num_captures, 100_000, 1000, Options::default());
+            let mut state = MatchState::new(
+                subject_bytes,
+                num_captures,
+                100_000,
+                1000,
+                Options::default(),
+            );
             if let Ok(Some(_)) = state.try_match(&ast, start) {
                 return true;
             }
@@ -934,6 +991,9 @@ mod tests {
         let subject = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
         let mut state = MatchState::new(subject, num_captures, 10_000, 1000, Options::default());
         let result = state.try_match(&ast, 0);
-        assert!(result.is_err(), "Expected match limit error, got {result:?}");
+        assert!(
+            result.is_err(),
+            "Expected match limit error, got {result:?}"
+        );
     }
 }

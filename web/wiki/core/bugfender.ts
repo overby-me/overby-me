@@ -43,8 +43,7 @@ export const initBugfender = async () => {
 		// Enhanced error context: log URL, session state and resolved stack for unhandled promise rejections
 		window.addEventListener("unhandledrejection", (event) => {
 			const reason = event.reason;
-			const message =
-				reason instanceof Error ? reason.message : String(reason);
+			const message = reason instanceof Error ? reason.message : String(reason);
 			const error = reason instanceof Error ? reason : undefined;
 			logErrorContext({
 				bugfender: Bugfender,

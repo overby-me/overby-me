@@ -41,7 +41,11 @@ pub fn process_file(path: &str, opts: &Options) -> io::Result<()> {
                 return Ok(());
             }
 
-            let output_path = match output_path_compress(input_path, opts.format, opts.suffix.as_deref()) {
+            let output_path = match output_path_compress(
+                input_path,
+                opts.format,
+                opts.suffix.as_deref(),
+            ) {
                 Some(p) => p,
                 None => {
                     return Err(io::Error::new(

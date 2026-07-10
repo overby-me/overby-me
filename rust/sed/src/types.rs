@@ -10,7 +10,10 @@ impl SedRegex {
     pub fn new(pattern: &str) -> Result<Self, String> {
         // GNU sed: `.` matches any char including newline in pattern space.
         // `^`/`$` still anchor only at start/end of the whole pattern space.
-        match regex::RegexBuilder::new(pattern).dot_matches_new_line(true).build() {
+        match regex::RegexBuilder::new(pattern)
+            .dot_matches_new_line(true)
+            .build()
+        {
             Ok(re) => Ok(SedRegex::Fast(re)),
             Err(_) => {
                 // Fall back to fancy-regex (supports backreferences).
@@ -114,12 +117,12 @@ impl<'t> SedCaptures<'t> {
 #[derive(Debug, Clone)]
 pub enum Address {
     Line(usize),
-    Last,                // $
+    Last, // $
     Regex(SedRegex),
-    LastRegex,           // // — reuse last regex
-    Step(usize, usize),  // first~step
-    Relative(usize),     // +N (only as second address in range)
-    Multiple(usize),     // ~N (only as second address in range)
+    LastRegex,          // // — reuse last regex
+    Step(usize, usize), // first~step
+    Relative(usize),    // +N (only as second address in range)
+    Multiple(usize),    // ~N (only as second address in range)
 }
 
 #[derive(Debug, Clone)]
@@ -151,9 +154,9 @@ pub enum Command {
     Delete,
     DeleteFirstLine, // D
     Print,
-    PrintFirstLine, // P
+    PrintFirstLine,              // P
     PrintEscaped(Option<usize>), // l [width]
-    PrintLineNum,   // =
+    PrintLineNum,                // =
     Quit(Option<i32>),
     QuitNoprint(Option<i32>), // Q
     Append(String),
@@ -216,11 +219,11 @@ pub struct Options {
     pub extended: bool,           // -E / -r
     pub scripts: Vec<ScriptEntry>,
     pub files: Vec<String>,
-    pub posix: bool,        // --posix
-    pub unbuffered: bool,   // -u
-    pub null_data: bool,    // -z
-    pub separate: bool,     // -s
-    pub sandbox: bool,          // --sandbox
-    pub follow_symlinks: bool,  // --follow-symlinks
-    pub line_length: usize,     // -l N (default line width for `l` command)
+    pub posix: bool,           // --posix
+    pub unbuffered: bool,      // -u
+    pub null_data: bool,       // -z
+    pub separate: bool,        // -s
+    pub sandbox: bool,         // --sandbox
+    pub follow_symlinks: bool, // --follow-symlinks
+    pub line_length: usize,    // -l N (default line width for `l` command)
 }

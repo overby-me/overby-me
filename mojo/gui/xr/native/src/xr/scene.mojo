@@ -337,7 +337,7 @@ struct XRScene(Movable):
         """Return the number of panels in the scene."""
         return len(self.panels)
 
-    fn get_panel(ref self, index: Int) -> ref [self.panels] XRPanel:
+    fn get_panel(ref self, index: Int) -> ref[self.panels] XRPanel:
         """Return a reference to the panel at the given index.
 
         Args:

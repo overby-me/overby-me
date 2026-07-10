@@ -43,8 +43,7 @@ pub fn set_interpreter(elf: &Elf, data: &mut Vec<u8>, new_interp: &str) {
         let new_off = (load_end + 7) & !7u64;
         let new_size = (new_bytes.len() + 1) as u64;
         if new_off + new_size <= next_load_off {
-            data[new_off as usize..new_off as usize + new_bytes.len()]
-                .copy_from_slice(new_bytes);
+            data[new_off as usize..new_off as usize + new_bytes.len()].copy_from_slice(new_bytes);
             data[new_off as usize + new_bytes.len()] = 0;
             let new_vaddr = load_vaddr + (new_off - load_off);
             let pf = bits.phdr_fields(interp_phdr_off);
@@ -71,7 +70,9 @@ pub fn set_interpreter(elf: &Elf, data: &mut Vec<u8>, new_interp: &str) {
     // reads PT_INTERP straight from the file via p_offset, no LOAD
     // coverage required.
     let pad = ((data.len() as u64 + 7) & !7u64) - data.len() as u64;
-    for _ in 0..pad { data.push(0); }
+    for _ in 0..pad {
+        data.push(0);
+    }
     let new_off = data.len() as u64;
     data.extend_from_slice(new_bytes);
     data.push(0);
@@ -102,15 +103,24 @@ fn find_load_slack(elf: &Elf, target_vaddr: u64) -> Option<(usize, u64, u64, u64
         }
     }
     let load_idx = load_idx?;
-    let load_phdr_off = elf.header.e_phoff as usize
-        + load_idx * elf.header.e_phentsize as usize;
+    let load_phdr_off = elf.header.e_phoff as usize + load_idx * elf.header.e_phentsize as usize;
     let mut next_load_off = u64::MAX;
     for ph in &elf.program_headers {
         if ph.p_type == PT_LOAD && ph.p_offset > load_off && ph.p_offset < next_load_off {
             next_load_off = ph.p_offset;
         }
     }
-    if next_load_off == u64::MAX { return None; }
-    if (load_off + load_filesz + 8) >= next_load_off { return None; }
-    Some((load_phdr_off, load_off, load_filesz, load_vaddr, next_load_off))
+    if next_load_off == u64::MAX {
+        return None;
+    }
+    if (load_off + load_filesz + 8) >= next_load_off {
+        return None;
+    }
+    Some((
+        load_phdr_off,
+        load_off,
+        load_filesz,
+        load_vaddr,
+        next_load_off,
+    ))
 }

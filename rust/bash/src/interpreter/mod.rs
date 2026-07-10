@@ -1248,9 +1248,7 @@ impl Shell {
                 self.last_status = 1;
                 // DISCARD: skip remaining commands on this line, but only
                 // for simple assignments (not arithmetic (( )), let, etc.)
-                if !self.arith_is_command && !self.arith_is_let
-                    && self.current_builtin.is_none()
-                {
+                if !self.arith_is_command && !self.arith_is_let && self.current_builtin.is_none() {
                     if let Some(lineno) = self.vars.get("LINENO").and_then(|s| s.parse().ok()) {
                         self.expansion_error_line = Some(lineno);
                     }

@@ -452,7 +452,7 @@ struct WasmValtypeVec:
 # a wasm_trap_t* where NULL means success.
 # ---------------------------------------------------------------------------
 
-comptime WasmtimeCallback = fn (
+comptime WasmtimeCallback = fn(
     UnsafePointer[NoneType, MutExternalOrigin],  # env
     UnsafePointer[NoneType, MutExternalOrigin],  # caller
     UnsafePointer[WasmtimeVal, MutExternalOrigin],  # args
@@ -462,6 +462,6 @@ comptime WasmtimeCallback = fn (
 ) -> UnsafePointer[NoneType, MutExternalOrigin]
 
 # Finalizer callback: void (*)(void*)
-comptime FinalizerCallback = fn (
+comptime FinalizerCallback = fn(
     UnsafePointer[NoneType, MutExternalOrigin]
 ) -> None

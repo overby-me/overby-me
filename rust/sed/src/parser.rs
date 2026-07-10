@@ -77,7 +77,10 @@ impl<'a> Parser<'a> {
     fn err(&self, msg: &str) -> String {
         match &self.source {
             ScriptSource::Expression(n) => {
-                format!("-e expression #{n}, char {}: {msg}", self.pos - self.cmd_start)
+                format!(
+                    "-e expression #{n}, char {}: {msg}",
+                    self.pos - self.cmd_start
+                )
             }
             ScriptSource::File(name) => {
                 // Count line number from cmd_start position
@@ -239,10 +242,7 @@ impl<'a> Parser<'a> {
                 return Err(self.err("comments don't accept any addresses"));
             }
             if self.peek() == Some(b'}') && self.block_depth > 0 {
-                return Err(self.err_at(
-                    self.pos + 1,
-                    "`}' doesn't want any addresses",
-                ));
+                return Err(self.err_at(self.pos + 1, "`}' doesn't want any addresses"));
             }
         }
 
@@ -252,9 +252,7 @@ impl<'a> Parser<'a> {
             if let Some(ch) = self.peek() {
                 let always_one_addr = b"qQ";
                 let posix_one_addr = b"aicl=rR";
-                if always_one_addr.contains(&ch)
-                    || (self.posix && posix_one_addr.contains(&ch))
-                {
+                if always_one_addr.contains(&ch) || (self.posix && posix_one_addr.contains(&ch)) {
                     self.advance();
                     return Err(self.err("command only uses one address"));
                 }
@@ -287,8 +285,12 @@ impl<'a> Parser<'a> {
         );
         if zero_arg {
             if let Some(ch) = self.peek() {
-                if ch != b'\n' && ch != b';' && ch != b'}' && ch != b'#'
-                    && ch != b' ' && ch != b'\t'
+                if ch != b'\n'
+                    && ch != b';'
+                    && ch != b'}'
+                    && ch != b'#'
+                    && ch != b' '
+                    && ch != b'\t'
                 {
                     return Err(self.err_at(
                         self.pos - self.cmd_start + 1,
@@ -319,17 +321,16 @@ impl<'a> Parser<'a> {
                     match second {
                         Some(addr2) => {
                             // Validate: 0,N (where N is a line number) is invalid
-                            if matches!(addr, Address::Line(0))
-                                && matches!(addr2, Address::Line(_))
+                            if matches!(addr, Address::Line(0)) && matches!(addr2, Address::Line(_))
                             {
                                 return Err(
-                                    self.err_at(self.pos + 1, "invalid usage of line address 0"),
+                                    self.err_at(self.pos + 1, "invalid usage of line address 0")
                                 );
                             }
                             // POSIX rejects address 0
                             if self.posix && matches!(addr, Address::Line(0)) {
                                 return Err(
-                                    self.err_at(self.pos + 1, "invalid usage of line address 0"),
+                                    self.err_at(self.pos + 1, "invalid usage of line address 0")
                                 );
                             }
                             Ok(AddressRange::Range(addr, addr2))
@@ -348,10 +349,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Some(b'+') => {
                 if self.posix {
-                    return Err(self.err_at(
-                        self.pos - self.cmd_start + 1,
-                        "unexpected `,'",
-                    ));
+                    return Err(self.err_at(self.pos - self.cmd_start + 1, "unexpected `,'"));
                 }
                 self.advance();
                 let n = self.parse_number()?;
@@ -359,10 +357,7 @@ impl<'a> Parser<'a> {
             }
             Some(b'~') => {
                 if self.posix {
-                    return Err(self.err_at(
-                        self.pos - self.cmd_start + 1,
-                        "unexpected `,'",
-                    ));
+                    return Err(self.err_at(self.pos - self.cmd_start + 1, "unexpected `,'"));
                 }
                 self.advance();
                 let n = self.parse_number()?;
@@ -404,7 +399,9 @@ impl<'a> Parser<'a> {
             }
             Some(b'\\') => {
                 self.advance();
-                let delim = self.advance().ok_or_else(|| self.err("expected delimiter after \\"))?;
+                let delim = self
+                    .advance()
+                    .ok_or_else(|| self.err("expected delimiter after \\"))?;
                 let pattern = self.parse_regex_delimited(delim)?;
                 let has_modifiers = matches!(self.peek(), Some(b'I') | Some(b'M'));
                 if pattern.is_empty() {
@@ -498,7 +495,10 @@ impl<'a> Parser<'a> {
                 }
             } else if ch == b'[' && in_bracket {
                 // Inside bracket: check for POSIX class like [:alpha:]
-                if self.peek() == Some(b':') || self.peek() == Some(b'.') || self.peek() == Some(b'=') {
+                if self.peek() == Some(b':')
+                    || self.peek() == Some(b'.')
+                    || self.peek() == Some(b'=')
+                {
                     let kind = self.advance().unwrap();
                     pattern.push('[');
                     pattern.push(kind as char);
@@ -554,9 +554,7 @@ impl<'a> Parser<'a> {
         let ch = self.advance().ok_or_else(|| self.err("expected command"))?;
 
         // POSIX mode: reject GNU extension commands
-        if self.posix
-            && matches!(ch, b'e' | b'F' | b'v' | b'Q' | b'T' | b'R' | b'W')
-        {
+        if self.posix && matches!(ch, b'e' | b'F' | b'v' | b'Q' | b'T' | b'R' | b'W') {
             return Err(self.err(&format!("unknown command: `{}'", ch as char)));
         }
 
@@ -679,9 +677,7 @@ impl<'a> Parser<'a> {
                 self.skip_whitespace();
                 let file = self.parse_filename();
                 if file.is_empty() {
-                    return Err(
-                        self.err("missing filename in r/R/w/W commands"),
-                    );
+                    return Err(self.err("missing filename in r/R/w/W commands"));
                 }
                 match ch {
                     b'r' => Ok(Command::ReadFile(file)),
@@ -695,10 +691,7 @@ impl<'a> Parser<'a> {
                 if self.sandbox {
                     return Err(self.err("e/r/w commands disabled in sandbox mode"));
                 }
-                if self.peek() == Some(b'\n')
-                    || self.peek() == Some(b';')
-                    || self.at_end()
-                {
+                if self.peek() == Some(b'\n') || self.peek() == Some(b';') || self.at_end() {
                     Ok(Command::Execute(None))
                 } else {
                     self.skip_whitespace();
@@ -728,8 +721,14 @@ impl<'a> Parser<'a> {
                     let our_major = 4u32;
                     let our_minor = 9u32;
                     let parts: Vec<&str> = ver.split('.').collect();
-                    let req_major = parts.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-                    let req_minor = parts.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                    let req_major = parts
+                        .first()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    let req_minor = parts
+                        .get(1)
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(0);
                     if (req_major, req_minor) > (our_major, our_minor) {
                         return Err(self.err("expected newer version of sed"));
                     }
@@ -760,7 +759,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_substitute(&mut self) -> Result<Command, String> {
-        let delim = self.advance().ok_or_else(|| self.err("unterminated `s' command"))?;
+        let delim = self
+            .advance()
+            .ok_or_else(|| self.err("unterminated `s' command"))?;
         if delim == b'\\' || delim == b'\n' {
             return Err(self.err("delimiter character is not a single-byte character"));
         }
@@ -792,7 +793,7 @@ impl<'a> Parser<'a> {
                 } else {
                     fix_posix_char_class(&re_pattern)
                 })
-                    .map_err(|e| self.err(&e))?,
+                .map_err(|e| self.err(&e))?,
             )
         };
 
@@ -808,9 +809,9 @@ impl<'a> Parser<'a> {
                     if let '1'..='9' = rchars[ri + 1] {
                         let n = (rchars[ri + 1] as u32 - '0' as u32) as usize;
                         if n > num_groups {
-                            return Err(self.err(&format!(
-                                "invalid reference \\{n} on `s' command's RHS"
-                            )));
+                            return Err(
+                                self.err(&format!("invalid reference \\{n} on `s' command's RHS"))
+                            );
                         }
                     }
                     ri += 2;
@@ -873,7 +874,9 @@ impl<'a> Parser<'a> {
                                                 // \c\d, \c\n, etc — recursive escaping
                                                 // Skip to end of replacement for correct position
                                                 while let Some(c) = self.advance() {
-                                                    if c == delim { break; }
+                                                    if c == delim {
+                                                        break;
+                                                    }
                                                 }
                                                 return Err(self.err(
                                                     "recursive escaping after \\c not allowed",
@@ -1041,9 +1044,7 @@ impl<'a> Parser<'a> {
                     self.skip_whitespace();
                     let file = self.parse_filename();
                     if file.is_empty() {
-                        return Err(
-                            self.err("missing filename in r/R/w/W commands"),
-                        );
+                        return Err(self.err("missing filename in r/R/w/W commands"));
                     }
                     flags.write_file = Some(file);
                     break;
@@ -1063,9 +1064,7 @@ impl<'a> Parser<'a> {
                     }
                     let n = self.parse_number()?;
                     if n == 0 {
-                        return Err(
-                            self.err("number option to `s' command may not be zero"),
-                        );
+                        return Err(self.err("number option to `s' command may not be zero"));
                     }
                     flags.nth = Some(n);
                 }
@@ -1080,7 +1079,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_transliterate(&mut self) -> Result<Command, String> {
-        let delim = self.advance().ok_or_else(|| self.err("unterminated `y' command"))?;
+        let delim = self
+            .advance()
+            .ok_or_else(|| self.err("unterminated `y' command"))?;
         let src = self.parse_translit_chars(delim)?;
         let dst = self.parse_translit_chars(delim)?;
         if src.len() != dst.len() {
@@ -1093,7 +1094,9 @@ impl<'a> Parser<'a> {
         let mut chars = Vec::new();
         let mut escaped = false;
         loop {
-            let ch = self.advance().ok_or_else(|| self.err("unterminated `y' command"))?;
+            let ch = self
+                .advance()
+                .ok_or_else(|| self.err("unterminated `y' command"))?;
             if escaped {
                 match ch {
                     b'n' | b'\n' => chars.push('\n'),

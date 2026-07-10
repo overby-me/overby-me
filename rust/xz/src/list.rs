@@ -237,7 +237,6 @@ pub fn list_files<W: Write>(paths: &[String], out: &mut W, verbose: bool) -> io:
 mod tests {
     use super::*;
 
-
     fn make_xz_bytes(payload: &[u8]) -> Vec<u8> {
         let mut compressed = Vec::new();
         crate::codec::compress_stream(
@@ -253,7 +252,10 @@ mod tests {
 
     fn write_temp(name: &str, bytes: &[u8]) -> String {
         let mut path = std::env::temp_dir();
-        path.push(format!("rust-xz-list-test-{name}-{}.xz", std::process::id()));
+        path.push(format!(
+            "rust-xz-list-test-{name}-{}.xz",
+            std::process::id()
+        ));
         let mut f = File::create(&path).unwrap();
         f.write_all(bytes).unwrap();
         path.to_string_lossy().into_owned()

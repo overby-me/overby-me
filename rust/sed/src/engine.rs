@@ -45,8 +45,8 @@ pub struct Engine {
     pub current_filename: Option<String>,
     pub is_last_file: bool,
     cumulative_lines: usize, // line offset from previous files
-    addr0_active: bool, // true when current command matched via address 0
-    in_range_middle: bool, // true when matched inside range but not at the closing line
+    addr0_active: bool,      // true when current command matched via address 0
+    in_range_middle: bool,   // true when matched inside range but not at the closing line
     pub line_wrap_width: usize,
     #[allow(dead_code)]
     sandbox: bool,
@@ -57,7 +57,14 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(commands: Vec<SedCommand>, quiet: bool, posix: bool, sandbox: bool, line_length: usize, null_data: bool) -> Self {
+    pub fn new(
+        commands: Vec<SedCommand>,
+        quiet: bool,
+        posix: bool,
+        sandbox: bool,
+        line_length: usize,
+        null_data: bool,
+    ) -> Self {
         let num_cmds = count_commands(&commands);
         Engine {
             commands,
@@ -113,12 +120,16 @@ impl Engine {
                 self.raw_lines = Vec::new();
             } else {
                 // Split raw bytes on newlines
-                let mut raw: Vec<Vec<u8>> = data.split(|&b| b == b'\n').map(|l| l.to_vec()).collect();
+                let mut raw: Vec<Vec<u8>> =
+                    data.split(|&b| b == b'\n').map(|l| l.to_vec()).collect();
                 if self.input_had_trailing_newline && raw.last().map_or(false, |s| s.is_empty()) {
                     raw.pop();
                 }
                 // Create lossy string versions for regex matching
-                self.input_lines = raw.iter().map(|r| String::from_utf8_lossy(r).into_owned()).collect();
+                self.input_lines = raw
+                    .iter()
+                    .map(|r| String::from_utf8_lossy(r).into_owned())
+                    .collect();
                 self.raw_lines = raw;
             }
         }
@@ -126,7 +137,11 @@ impl Engine {
     }
 
     /// Run in unbuffered mode — read one line at a time from reader
-    pub fn run_unbuffered<R: BufRead, W: Write>(&mut self, mut reader: R, writer: &mut W) -> io::Result<i32> {
+    pub fn run_unbuffered<R: BufRead, W: Write>(
+        &mut self,
+        mut reader: R,
+        writer: &mut W,
+    ) -> io::Result<i32> {
         // Read lines one at a time and process immediately
         loop {
             let mut line_buf = String::new();
@@ -165,9 +180,13 @@ impl Engine {
             }
 
             for text in self.prepend_queue.clone() {
-                if text.is_empty() { continue; }
+                if text.is_empty() {
+                    continue;
+                }
                 self.output.extend_from_slice(text.as_bytes());
-                if !text.ends_with('\n') { self.output.push(b'\n'); }
+                if !text.ends_with('\n') {
+                    self.output.push(b'\n');
+                }
             }
             self.prepend_queue.clear();
 
@@ -176,9 +195,13 @@ impl Engine {
             }
 
             for text in self.append_queue.clone() {
-                if text.is_empty() { continue; }
+                if text.is_empty() {
+                    continue;
+                }
                 self.output.extend_from_slice(text.as_bytes());
-                if !text.ends_with('\n') { self.output.push(b'\n'); }
+                if !text.ends_with('\n') {
+                    self.output.push(b'\n');
+                }
             }
 
             self.flush_output(writer)?;
@@ -398,20 +421,14 @@ impl Engine {
                     let (end_matches, past_end) = match b {
                         Address::Relative(n) => {
                             let end_line = self.range_start[range_idx] + n;
-                            (
-                                self.line_number == end_line,
-                                self.line_number > end_line,
-                            )
+                            (self.line_number == end_line, self.line_number > end_line)
                         }
                         Address::Multiple(n) if *n > 0 => (
                             self.line_number >= self.range_start[range_idx]
                                 && self.line_number.is_multiple_of(*n),
                             false,
                         ),
-                        Address::Line(n) => (
-                            self.line_number == *n,
-                            self.line_number > *n,
-                        ),
+                        Address::Line(n) => (self.line_number == *n, self.line_number > *n),
                         _ => (self.addr_matches_single(b), false),
                     };
                     if past_end {
@@ -430,8 +447,8 @@ impl Engine {
                     // (GNU sed behavior — end check begins on next line)
                     // Exception: 0,/regex/ does check on line 1
                     // Check end on start line if: addr 0, OR end is a line number already passed
-                    let check_end_on_start = is_addr_0_start
-                        || matches!(b, Address::Line(n) if *n <= self.line_number);
+                    let check_end_on_start =
+                        is_addr_0_start || matches!(b, Address::Line(n) if *n <= self.line_number);
                     let end_matches = if check_end_on_start {
                         match b {
                             Address::Relative(n) => self.line_number >= self.line_number + n,
@@ -480,9 +497,7 @@ impl Engine {
                 if let Some(ref re) = self.last_regex {
                     re.is_match(&self.pattern_space)
                 } else {
-                    eprintln!(
-                        "sed: -e expression #1, char 0: no previous regular expression"
-                    );
+                    eprintln!("sed: -e expression #1, char 0: no previous regular expression");
                     self.exit_code = 1;
                     self.quit = true;
                     false
@@ -494,8 +509,7 @@ impl Engine {
                 } else if *first == 0 {
                     self.line_number.is_multiple_of(*step)
                 } else {
-                    self.line_number >= *first
-                        && (self.line_number - *first).is_multiple_of(*step)
+                    self.line_number >= *first && (self.line_number - *first).is_multiple_of(*step)
                 }
             }
             // Relative and Multiple are only used as range end addresses
@@ -587,8 +601,7 @@ impl Engine {
                             .arg(&self.pattern_space)
                             .output()
                         {
-                            let mut text =
-                                String::from_utf8_lossy(&output.stdout).into_owned();
+                            let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
                             if text.ends_with('\n') {
                                 text.pop();
                             }
@@ -646,10 +659,13 @@ impl Engine {
                         raw.clone()
                     } else {
                         // Latin-1 encode for modified pattern space
-                        self.pattern_space.chars().map(|c| {
-                            let cp = c as u32;
-                            if cp <= 0xFF { cp as u8 } else { b'?' }
-                        }).collect()
+                        self.pattern_space
+                            .chars()
+                            .map(|c| {
+                                let cp = c as u32;
+                                if cp <= 0xFF { cp as u8 } else { b'?' }
+                            })
+                            .collect()
                     }
                 } else {
                     self.pattern_space.as_bytes().to_vec()
@@ -880,8 +896,7 @@ impl Engine {
                 Flow::Continue
             }
 
-            Command::Execute(cmd_text) => {
-                match cmd_text {
+            Command::Execute(cmd_text) => match cmd_text {
                 Some(cmd_str) => {
                     if let Ok(output) = std::process::Command::new("sh")
                         .arg("-c")
@@ -904,8 +919,7 @@ impl Engine {
                         .arg(&self.pattern_space)
                         .output()
                     {
-                        let mut text =
-                            String::from_utf8_lossy(&output.stdout).into_owned();
+                        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
                         if text.ends_with('\n') {
                             text.pop();
                         }
@@ -916,8 +930,7 @@ impl Engine {
                     }
                     Flow::Continue
                 }
-            }
-            }
+            },
 
             Command::Filename => {
                 let name = self.current_filename.as_deref().unwrap_or("-");
@@ -1083,12 +1096,7 @@ fn build_replacement(caps: &SedCaptures, replacement: &str) -> String {
                 '1'..='9' => {
                     let n = (chars[i + 1] as u32 - '0' as u32) as usize;
                     if let Some(m) = caps.get(n) {
-                        apply_case(
-                            m,
-                            &mut result,
-                            &mut case_mode,
-                            &mut next_char_mode,
-                        );
+                        apply_case(m, &mut result, &mut case_mode, &mut next_char_mode);
                     }
                     i += 2;
                 }

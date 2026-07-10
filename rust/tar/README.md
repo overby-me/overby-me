@@ -42,6 +42,7 @@ All GNU tar 1.35 surface area exercised by the upstream test suite,
 including:
 
 ### Core operations
+
 - `c` / `t` / `x` / `d` / `r` / `u` / `--delete` / `--test-label` for
   regular files, directories, symlinks, and hard links.
 - Hard-link detection via `(dev, inode)` map; second occurrence becomes
@@ -50,6 +51,7 @@ including:
   block; extract / append / update / `--test-label` fnmatch-verify.
 
 ### Path and directory handling
+
 - Positional `-C DIR` in create, append, and extract, plus inside `-T`
   files (each path carries its own chdir context).
 - `-T -` (stdin), nested `-T FILE` with recursion detection, `--null`
@@ -60,6 +62,7 @@ including:
   `--no-recur` abbreviations).
 
 ### Excludes and matching
+
 - `--exclude`, `--exclude-from`, `--exclude-caches[*]`, `--exclude-tag[*]`,
   `--exclude-backups`, `--exclude-vcs`.
 - Match modifiers: `--wildcards` / `--no-wildcards`, `--anchored` /
@@ -68,12 +71,14 @@ including:
   keeps `exclude05`'s 1M-line pattern file under the harness budget.
 
 ### Owner / group / time / mode
+
 - `--owner-map=FILE`, `--group-map=FILE`, `--owner=NAME[:UID]`,
   `--group=NAME[:GID]`, `--numeric-owner`.
 - `--mtime=@SECONDS|ISO`, `--clamp-mtime`, `--mode=EXPR`,
   `--preserve-permissions`, `--no-same-permissions`.
 
 ### Transforms and naming
+
 - Scoped `--transform` / `--xform`: `H` excludes hard-link targets, `S`
   excludes symlink targets; defaults match GNU 1.35.
 - Format-aware name-length enforcement: V7 rejects > 99 chars; strict
@@ -83,6 +88,7 @@ including:
   validation; long names trigger GNU `LongLink` blocks.
 
 ### Compression
+
 - Built-in `--gzip` / `--bzip2` / `--xz` plus `-I PROGRAM` /
   `--use-compress-program` external compressors. Non-zero child status
   surfaces GNU's `Error is not recoverable: exiting now`. Built-in
@@ -92,6 +98,7 @@ including:
   rather than `unexpected end of file`.
 
 ### Multi-volume
+
 - `-M` / `--multi-volume`, `-L N` / `--tape-length=N` (with `K/M/G`),
   multiple `-f FILE` slots, `-R` / `--block-number`, bundled short forms
   for `M` / `R` / `n` / `w`.
@@ -104,6 +111,7 @@ including:
   next. `-tMR` walks volumes directly with proper block counts.
 
 ### Sparse files
+
 - `--sparse` / `-S` actually emits sparse entries (oldgnu `S` typeflag
   with inline + chained `GnuExtSparseHeader` blocks).
 - `--sparse-version=0.0|0.1|1.0` selects PAX-encoded sparse maps via
@@ -115,6 +123,7 @@ including:
   boundaries.
 
 ### Listed-incremental (`-g` / `--listed-incremental`)
+
 - Snapshot file I/O (GNU format 2 header + time + per-dir records).
 - Per-dir dumpdir state in snapshot; child entries marked `Y`
   (changed/new), `N` (unchanged), `D` (directory).
@@ -138,11 +147,13 @@ including:
 - `--incremental` / `-G` standalone (no snapshot file) accepted.
 
 ### Concatenate / catenate
+
 - `-A` / `--catenate` / `--concatenate` raw-byte-copies source archive
   contents (up to EOF marker) onto the destination, then writes a new
   two-block terminator.
 
 ### Diff / extract
+
 - Diff: `Not linked to X`, `Symlink differs`, `Mod time differs`,
   `Contents differ` with GNU wording; directory mtime omitted so child
   changes don't taint the parent.
@@ -158,6 +169,7 @@ including:
   entry; default replaces it with a real directory.
 
 ### Checkpoint and signals
+
 - `--checkpoint=N` + `--checkpoint-action=echo=FMT` /
   `--checkpoint-action=wait=SIGNAL`: a `CheckpointStream` wraps the
   archive read/write, counts `blocking_factor × 512`-byte records, and
@@ -170,6 +182,7 @@ including:
   archive and the checkpoint counter.
 
 ### Misc options
+
 - `--ignore-failed-read`, `--keep-old-files` / `-k`,
   `--skip-old-files`, `--backup`, `--remove-files`, `--verify` / `-W`,
   `--to-stdout` / `-O`, `--one-top-level[=DIR]`,

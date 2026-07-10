@@ -746,9 +746,7 @@ impl Parser {
             if matches!(self.peek(), Token::Increment | Token::Decrement)
                 && matches!(
                     &left,
-                    Expr::Getline(..)
-                        | Expr::PostIncrement(_)
-                        | Expr::PostDecrement(_)
+                    Expr::Getline(..) | Expr::PostIncrement(_) | Expr::PostDecrement(_)
                 )
                 && Self::contains_getline(&left)
             {

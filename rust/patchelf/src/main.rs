@@ -143,15 +143,27 @@ fn parse_with_workarounds(data: &[u8]) -> Vec<u8> {
     let is_le = data[5] == 1;
     let read_u16 = |off: usize| -> u16 {
         let b: [u8; 2] = data[off..off + 2].try_into().unwrap();
-        if is_le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) }
+        if is_le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
     };
     let read_word = |off: usize| -> u64 {
         if is_64 {
             let b: [u8; 8] = data[off..off + 8].try_into().unwrap();
-            if is_le { u64::from_le_bytes(b) } else { u64::from_be_bytes(b) }
+            if is_le {
+                u64::from_le_bytes(b)
+            } else {
+                u64::from_be_bytes(b)
+            }
         } else {
             let b: [u8; 4] = data[off..off + 4].try_into().unwrap();
-            if is_le { u32::from_le_bytes(b) as u64 } else { u32::from_be_bytes(b) as u64 }
+            if is_le {
+                u32::from_le_bytes(b) as u64
+            } else {
+                u32::from_be_bytes(b) as u64
+            }
         }
     };
     let (e_phoff, e_phentsize_off, e_phnum_off) = if is_64 {
@@ -165,7 +177,9 @@ fn parse_with_workarounds(data: &[u8]) -> Vec<u8> {
     let mut dyn_filesz = 0usize;
     for i in 0..phnum {
         let ph = e_phoff + i * phentsize;
-        if ph + phentsize > data.len() { break; }
+        if ph + phentsize > data.len() {
+            break;
+        }
         let p_type = if is_le {
             u32::from_le_bytes(data[ph..ph + 4].try_into().unwrap())
         } else {
@@ -181,37 +195,39 @@ fn parse_with_workarounds(data: &[u8]) -> Vec<u8> {
             break;
         }
     }
-    let dyn_off = match dyn_off { Some(v) => v, None => return data.to_vec() };
+    let dyn_off = match dyn_off {
+        Some(v) => v,
+        None => return data.to_vec(),
+    };
     let entry_size = if is_64 { 16 } else { 8 };
 
     let mut buf = data.to_vec();
     let mut i = 0;
     while i + entry_size <= dyn_filesz {
         let entry_off = dyn_off + i;
-        if entry_off + entry_size > buf.len() { break; }
+        if entry_off + entry_size > buf.len() {
+            break;
+        }
         let tag = read_word(entry_off);
-        if tag == 0 { break; }
+        if tag == 0 {
+            break;
+        }
         if tag == DT_GNU_HASH {
             // Zero out d_tag (and d_val for safety so goblin treats it as DT_NULL? No —
             // DT_NULL terminates iteration. Use DT_DEBUG instead.).
             if is_64 {
                 if is_le {
-                    buf[entry_off..entry_off + 8]
-                        .copy_from_slice(&DT_DEBUG_TAG.to_le_bytes());
+                    buf[entry_off..entry_off + 8].copy_from_slice(&DT_DEBUG_TAG.to_le_bytes());
                 } else {
-                    buf[entry_off..entry_off + 8]
-                        .copy_from_slice(&DT_DEBUG_TAG.to_be_bytes());
+                    buf[entry_off..entry_off + 8].copy_from_slice(&DT_DEBUG_TAG.to_be_bytes());
                 }
             } else if is_le {
-                buf[entry_off..entry_off + 4]
-                    .copy_from_slice(&(DT_DEBUG_TAG as u32).to_le_bytes());
+                buf[entry_off..entry_off + 4].copy_from_slice(&(DT_DEBUG_TAG as u32).to_le_bytes());
             } else {
-                buf[entry_off..entry_off + 4]
-                    .copy_from_slice(&(DT_DEBUG_TAG as u32).to_be_bytes());
+                buf[entry_off..entry_off + 4].copy_from_slice(&(DT_DEBUG_TAG as u32).to_be_bytes());
             }
         }
         i += entry_size;
     }
     buf
 }
-

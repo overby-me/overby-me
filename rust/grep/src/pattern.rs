@@ -104,13 +104,9 @@ pub(crate) fn warn_char_class_misuse(pattern: &str) {
                     // Check if [: is properly inside a bracket expression
                     let inside_bracket = start > 0
                         && (chars[start - 1] == '['
-                            || (start > 1
-                                && chars[start - 1] == '^'
-                                && chars[start - 2] == '['));
+                            || (start > 1 && chars[start - 1] == '^' && chars[start - 2] == '['));
                     if !inside_bracket {
-                        eprintln!(
-                            "grep: character class syntax is [[:{name}:]], not [:{name}:]"
-                        );
+                        eprintln!("grep: character class syntax is [[:{name}:]], not [:{name}:]");
                         process::exit(2);
                     }
                 }
@@ -175,7 +171,8 @@ pub(crate) fn escape_invalid_ere_intervals(pattern: &str) -> String {
             }
             // Process bracket content
             while i < len && chars[i] != ']' {
-                if chars[i] == '[' && i + 1 < len
+                if chars[i] == '['
+                    && i + 1 < len
                     && (chars[i + 1] == ':' || chars[i + 1] == '.' || chars[i + 1] == '=')
                 {
                     let delim = chars[i + 1];
@@ -294,7 +291,9 @@ pub(crate) fn is_valid_interval(content: &str) -> bool {
     match parts.len() {
         1 => {
             // {n} — single number
-            parts[0].parse::<u32>().is_ok_and(|n| n <= 32767 && !parts[0].is_empty())
+            parts[0]
+                .parse::<u32>()
+                .is_ok_and(|n| n <= 32767 && !parts[0].is_empty())
         }
         2 => {
             // {n,} or {n,m}
@@ -358,7 +357,8 @@ pub(crate) fn convert_bre_to_ere(bre: &str) -> String {
                 i += 1;
             }
             while i < len && chars[i] != ']' {
-                if chars[i] == '[' && i + 1 < len
+                if chars[i] == '['
+                    && i + 1 < len
                     && (chars[i + 1] == ':' || chars[i + 1] == '.' || chars[i + 1] == '=')
                 {
                     let delim = chars[i + 1];
@@ -453,9 +453,8 @@ pub(crate) fn convert_bre_to_ere(bre: &str) -> String {
                             // In BRE, \{...\} is interval syntax.
                             // Check if content looks like a malformed interval (error)
                             // vs just not a valid interval (literal)
-                            let has_non_interval_chars = content
-                                .chars()
-                                .any(|c| !c.is_ascii_digit() && c != ',');
+                            let has_non_interval_chars =
+                                content.chars().any(|c| !c.is_ascii_digit() && c != ',');
                             if content.is_empty()
                                 || has_non_interval_chars
                                 || is_interval_too_large(&content)
@@ -473,7 +472,10 @@ pub(crate) fn convert_bre_to_ere(bre: &str) -> String {
                     } else {
                         // No closing \} — check if it looks like an interval attempt
                         let remaining: String = chars[interval_start..].iter().collect();
-                        if remaining.chars().next().is_some_and(|c| c.is_ascii_digit() || c == ',')
+                        if remaining
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_ascii_digit() || c == ',')
                         {
                             eprintln!("grep: Unmatched \\{{");
                             process::exit(2);

@@ -10,11 +10,10 @@ use crate::units::{
     IoWeight, KeyringMode, KillMode, MemoryLimit, MemoryPressureWatch, NotifyKind, OOMPolicy,
     OnFailureJobMode, ParsedMountSection, ParsedSliceSection, ParsedSwapSection, ProcSubset,
     ProtectControlGroupsEx, ProtectHome, ProtectProc, ProtectSystem, ResourceLimit, RestartMode,
-    RestrictNamespaces,
-    RuntimeDirectoryPreserve, ServiceRestart, ServiceType, StandardInput, StatusStarted,
-    StatusStopped, StdIoOption, TasksMax, Timeout, TimeoutFailureMode, Timestamping, UnitAction,
-    UnitCondition, UnitId, UnitIdKind, UnitOperationError, UnitOperationErrorReason, UnitStatus,
-    UtmpMode, acquire_locks,
+    RestrictNamespaces, RuntimeDirectoryPreserve, ServiceRestart, ServiceType, StandardInput,
+    StatusStarted, StatusStopped, StdIoOption, TasksMax, Timeout, TimeoutFailureMode, Timestamping,
+    UnitAction, UnitCondition, UnitId, UnitIdKind, UnitOperationError, UnitOperationErrorReason,
+    UnitStatus, UtmpMode, acquire_locks,
 };
 
 use std::path::PathBuf;

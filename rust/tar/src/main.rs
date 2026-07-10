@@ -1529,7 +1529,9 @@ fn parse_args() -> Args {
             "--test-label" => args.test_label = true,
             "-f" | "--file" => {
                 let fv = queue.pop_front();
-                if let Some(ref v) = fv { args.volume_files.push(v.clone()); }
+                if let Some(ref v) = fv {
+                    args.volume_files.push(v.clone());
+                }
                 args.file = fv;
             }
             "-C" | "--directory" => {
@@ -2017,13 +2019,12 @@ fn parse_args() -> Args {
                 } else if let Some(v) = other.strip_prefix("--hole-detection=") {
                     args.hole_detection_raw = v == "raw";
                 } else if other.strip_prefix("--occurrence=").is_some_and(|_| {
-                        args.occurrence = true;
-                        true
-                    })
-                    || other.strip_prefix("--xattrs-exclude=").is_some()
+                    args.occurrence = true;
+                    true
+                }) || other.strip_prefix("--xattrs-exclude=").is_some()
                     || other.strip_prefix("--xattrs-include=").is_some()
                     || other.strip_prefix("--acls").is_some()
-                                                            || other.strip_prefix("--new-volume-script=").is_some()
+                    || other.strip_prefix("--new-volume-script=").is_some()
                     || other.strip_prefix("--volno-file=").is_some()
                     || other.strip_prefix("--rsh-command=").is_some()
                     || other.strip_prefix("--backup=").is_some()
@@ -2108,10 +2109,13 @@ fn parse_args() -> Args {
                                 let rest: String = chars[i + 1..].iter().collect();
                                 if rest.is_empty() {
                                     let fv = queue.pop_front();
-                                    if let Some(ref v) = fv { args.volume_files.push(v.clone()); }
+                                    if let Some(ref v) = fv {
+                                        args.volume_files.push(v.clone());
+                                    }
                                     args.file = fv;
                                 } else {
-                                    args.volume_files.push(rest.clone()); args.file = Some(rest);
+                                    args.volume_files.push(rest.clone());
+                                    args.file = Some(rest);
                                 }
                                 i = chars.len(); // break
                                 continue;
@@ -2201,7 +2205,9 @@ fn parse_args() -> Args {
                                 } else {
                                     rest
                                 };
-                                let val_str = val_str.trim_end_matches(|c: char| "sScCwWbBkKMGTPEZYRQ".contains(c)).to_string();
+                                let val_str = val_str
+                                    .trim_end_matches(|c: char| "sScCwWbBkKMGTPEZYRQ".contains(c))
+                                    .to_string();
                                 if let Ok(n) = val_str.parse::<u64>() {
                                     args.tape_length = Some(n * 1024);
                                 }
@@ -2316,7 +2322,9 @@ fn find_sparse_extents(file: &File, realsize: u64) -> io::Result<Option<Vec<Spar
         #[cfg(not(any(target_os = "linux", target_os = "android")))]
         let f = unsafe { libc::lseek(fd, offset, whence) };
         if f == -1 {
-            Err(io::Error::last_os_error().raw_os_error().unwrap_or(libc::EINVAL))
+            Err(io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or(libc::EINVAL))
         } else {
             Ok(f)
         }
@@ -2366,17 +2374,17 @@ fn find_sparse_extents(file: &File, realsize: u64) -> io::Result<Option<Vec<Spar
 
     // GNU tar appends a zero-length sentinel extent at realsize to mark
     // the file's logical end (especially when the file ends with a hole).
-    extents.push(SparseExtent { offset: realsize, length: 0 });
+    extents.push(SparseExtent {
+        offset: realsize,
+        length: 0,
+    });
 
     // If there's exactly one data extent that spans the entire file
     // (no holes at all), treat as dense.
     // Reset file cursor for the caller, regardless of sparse/dense outcome.
     let _ = lseek(fd, 0, libc::SEEK_SET);
 
-    if extents.len() == 2
-        && extents[0].offset == 0
-        && extents[0].length == realsize
-    {
+    if extents.len() == 2 && extents[0].offset == 0 && extents[0].length == realsize {
         return Ok(None);
     }
 
@@ -2391,7 +2399,10 @@ fn find_sparse_extents(_file: &File, _realsize: u64) -> io::Result<Option<Vec<Sp
 /// Byte-level sparse scan: walks the file in 512-byte chunks, treating
 /// any all-zero chunk as a hole. Used for `--hole-detection=raw` mode
 /// where SEEK_HOLE's FS-block-aligned reporting would over-count.
-fn find_sparse_extents_raw(file: &mut File, realsize: u64) -> io::Result<Option<Vec<SparseExtent>>> {
+fn find_sparse_extents_raw(
+    file: &mut File,
+    realsize: u64,
+) -> io::Result<Option<Vec<SparseExtent>>> {
     use std::io::Seek;
     file.seek(SeekFrom::Start(0))?;
     let mut extents: Vec<SparseExtent> = Vec::new();
@@ -2409,12 +2420,17 @@ fn find_sparse_extents_raw(file: &mut File, realsize: u64) -> io::Result<Option<
         }
         if filled < want {
             // Treat short read past EOF as zeros.
-            for b in &mut buf[filled..want] { *b = 0; }
+            for b in &mut buf[filled..want] {
+                *b = 0;
+            }
         }
         let is_zero = buf[..want].iter().all(|&b| b == 0);
         if is_zero {
             if let Some(start) = cur_data_start {
-                extents.push(SparseExtent { offset: start, length: pos - start });
+                extents.push(SparseExtent {
+                    offset: start,
+                    length: pos - start,
+                });
                 cur_data_start = None;
             }
         } else if cur_data_start.is_none() {
@@ -2423,14 +2439,17 @@ fn find_sparse_extents_raw(file: &mut File, realsize: u64) -> io::Result<Option<
         pos += want as u64;
     }
     if let Some(start) = cur_data_start {
-        extents.push(SparseExtent { offset: start, length: realsize - start });
+        extents.push(SparseExtent {
+            offset: start,
+            length: realsize - start,
+        });
     }
-    extents.push(SparseExtent { offset: realsize, length: 0 });
+    extents.push(SparseExtent {
+        offset: realsize,
+        length: 0,
+    });
     file.seek(SeekFrom::Start(0))?;
-    if extents.len() == 2
-        && extents[0].offset == 0
-        && extents[0].length == realsize
-    {
+    if extents.len() == 2 && extents[0].offset == 0 && extents[0].length == realsize {
         return Ok(None);
     }
     Ok(Some(extents))
@@ -2494,9 +2513,7 @@ fn write_sparse_oldgnu<W: Write>(
     let on_tape = sparse_data_size(extents);
     header.set_entry_type(EntryType::new(b'S'));
     header.set_size(on_tape);
-    let gnu = header
-        .as_gnu_mut()
-        .expect("must be a GNU header");
+    let gnu = header.as_gnu_mut().expect("must be a GNU header");
     gnu.set_real_size(realsize);
     // Inline first 4 extents (the GnuHeader::sparse field).
     let inline_n = std::cmp::min(extents.len(), 4);
@@ -2606,10 +2623,19 @@ fn write_sparse_pax<W: Write>(
 
     // Build the PAX extended-header payload.
     let mut payload: Vec<u8> = Vec::new();
-    payload.extend_from_slice(&format_pax_record("GNU.sparse.major", &version.0.to_string()));
-    payload.extend_from_slice(&format_pax_record("GNU.sparse.minor", &version.1.to_string()));
+    payload.extend_from_slice(&format_pax_record(
+        "GNU.sparse.major",
+        &version.0.to_string(),
+    ));
+    payload.extend_from_slice(&format_pax_record(
+        "GNU.sparse.minor",
+        &version.1.to_string(),
+    ));
     payload.extend_from_slice(&format_pax_record("GNU.sparse.name", archive_name));
-    payload.extend_from_slice(&format_pax_record("GNU.sparse.realsize", &realsize.to_string()));
+    payload.extend_from_slice(&format_pax_record(
+        "GNU.sparse.realsize",
+        &realsize.to_string(),
+    ));
     // Number of *real* (non-sentinel) extents.
     let real_extents: Vec<&SparseExtent> = extents.iter().filter(|e| e.length > 0).collect();
     let num = real_extents.len();
@@ -2619,15 +2645,23 @@ fn write_sparse_pax<W: Write>(
         (0, 0) => {
             payload.extend_from_slice(&format_pax_record("GNU.sparse.numblocks", &num.to_string()));
             for e in &real_extents {
-                payload.extend_from_slice(&format_pax_record("GNU.sparse.offset", &e.offset.to_string()));
-                payload.extend_from_slice(&format_pax_record("GNU.sparse.numbytes", &e.length.to_string()));
+                payload.extend_from_slice(&format_pax_record(
+                    "GNU.sparse.offset",
+                    &e.offset.to_string(),
+                ));
+                payload.extend_from_slice(&format_pax_record(
+                    "GNU.sparse.numbytes",
+                    &e.length.to_string(),
+                ));
             }
         }
         (0, 1) => {
             payload.extend_from_slice(&format_pax_record("GNU.sparse.numblocks", &num.to_string()));
             let mut map = String::new();
             for (i, e) in real_extents.iter().enumerate() {
-                if i > 0 { map.push(','); }
+                if i > 0 {
+                    map.push(',');
+                }
                 map.push_str(&format!("{},{}", e.offset, e.length));
             }
             payload.extend_from_slice(&format_pax_record("GNU.sparse.map", &map));
@@ -2650,7 +2684,10 @@ fn write_sparse_pax<W: Write>(
     xh.set_mtime(0);
     xh.set_size(payload.len() as u64);
     // Set name to GNU's PaxHeader convention.
-    let pax_name = format!("PaxHeaders/{}", path_bytes.iter().rev().take_while(|&&b| b != b'/').count());
+    let pax_name = format!(
+        "PaxHeaders/{}",
+        path_bytes.iter().rev().take_while(|&&b| b != b'/').count()
+    );
     let _ = pax_name; // unused; just use a generic name
     {
         let old = xh.as_old_mut();
@@ -2707,7 +2744,9 @@ fn write_sparse_pax<W: Write>(
     // Write data extents.
     let mut written: u64 = 0;
     for ext in extents.iter() {
-        if ext.length == 0 { continue; }
+        if ext.length == 0 {
+            continue;
+        }
         file.seek(SeekFrom::Start(ext.offset))?;
         let mut remaining = ext.length;
         let mut buf = [0u8; 8192];
@@ -2802,7 +2841,6 @@ fn append_entry_raw<W: Write>(
     Ok(())
 }
 
-
 /// Parse a raw tar archive buffer into a list of entries.
 /// Returns (header_offset, header_block [u8;512], declared_data_size) for each entry.
 /// Extension headers (LongName 'L', LongLink 'K') are grouped with their
@@ -2853,7 +2891,9 @@ fn parse_tar_entries(data: &[u8]) -> Vec<(usize, usize, u64)> {
             let mut more = main_block[482] == 1;
             while more {
                 let off = pos + header_blocks * 512;
-                if off + 512 > data.len() { break; }
+                if off + 512 > data.len() {
+                    break;
+                }
                 let ext = &data[off..off + 512];
                 more = ext[504] == 1;
                 header_blocks += 1;
@@ -2896,11 +2936,7 @@ fn make_m_header(orig_header: &[u8], remaining: u64, offset: u64) -> [u8; 512] {
 
 /// Split a complete tar archive (as raw bytes) into multi-volume files.
 /// Each volume is at most `tape_length` bytes and padded to `record_size`.
-fn split_archive_into_volumes(
-    archive: &[u8],
-    tape_length: u64,
-    record_size: u64,
-) -> Vec<Vec<u8>> {
+fn split_archive_into_volumes(archive: &[u8], tape_length: u64, record_size: u64) -> Vec<Vec<u8>> {
     let entries = parse_tar_entries(archive);
     let tape_length = tape_length as usize;
     let record_size = record_size as usize;
@@ -2942,12 +2978,17 @@ fn split_archive_into_volumes(
         let real_header = {
             let mut p = 0usize;
             loop {
-                if p + 512 > header_portion_len { break entry_bytes[header_portion_len - 512..header_portion_len].to_vec(); }
+                if p + 512 > header_portion_len {
+                    break entry_bytes[header_portion_len - 512..header_portion_len].to_vec();
+                }
                 let blk = &entry_bytes[p..p + 512];
                 let tf = blk[156];
                 if tf == b'L' || tf == b'K' {
                     let sz_bytes = &blk[124..136];
-                    let sz_str = std::str::from_utf8(sz_bytes).unwrap_or("").trim_matches(' ').trim();
+                    let sz_str = std::str::from_utf8(sz_bytes)
+                        .unwrap_or("")
+                        .trim_matches(' ')
+                        .trim();
                     let sz: u64 = u64::from_str_radix(sz_str, 8).unwrap_or(0);
                     let payload_blocks = ((sz + 511) / 512) as usize;
                     p += 512 + payload_blocks * 512;
@@ -2963,8 +3004,13 @@ fn split_archive_into_volumes(
         // to straddle a volume boundary.
         let long_name: Option<String> = if header_portion_len > 512 && entry_bytes[156] == b'L' {
             let mut size_str = std::str::from_utf8(&entry_bytes[124..136])
-                .unwrap_or("").trim_matches('\0').trim().to_string();
-            if size_str.is_empty() { size_str = "0".to_string(); }
+                .unwrap_or("")
+                .trim_matches('\0')
+                .trim()
+                .to_string();
+            if size_str.is_empty() {
+                size_str = "0".to_string();
+            }
             let lsz = u64::from_str_radix(&size_str, 8).unwrap_or(0) as usize;
             let payload_start = 512;
             let end = std::cmp::min(payload_start + lsz, entry_bytes.len());
@@ -2980,7 +3026,14 @@ fn split_archive_into_volumes(
         if remaining_in_vol < header_portion_len {
             // Can't fit the headers on current volume — start new volume
             if !vol.is_empty() {
-                finalize_vol(&mut vol, &mut volumes, &prev_entry_header, 0, 0, record_size);
+                finalize_vol(
+                    &mut vol,
+                    &mut volumes,
+                    &prev_entry_header,
+                    0,
+                    0,
+                    record_size,
+                );
             }
         }
 
@@ -2991,7 +3044,9 @@ fn split_archive_into_volumes(
         let mut data_written: usize = 0;
         let mut warned_truncated = false;
         let mut emit_truncate_warning = |long_name: &Option<String>, warned: &mut bool| {
-            if *warned { return; }
+            if *warned {
+                return;
+            }
             if let Some(nm) = long_name
                 && nm.len() > 100
             {
@@ -3054,7 +3109,6 @@ fn split_archive_into_volumes(
 
     volumes
 }
-
 
 fn do_create_multivolume(args: &Args) -> io::Result<()> {
     // Resolve listed-incremental snapshot path before chdir
@@ -3618,10 +3672,9 @@ fn add_paths_to_builder_filter<W: Write>(
                 {
                     let mut filtered: Vec<PathBuf> = Vec::new();
                     for path in entries.drain(..) {
-                        if dedup_skip_prefixes
-                            .iter()
-                            .any(|(prefix, owner)| *owner != this_source_idx && path.starts_with(prefix))
-                        {
+                        if dedup_skip_prefixes.iter().any(|(prefix, owner)| {
+                            *owner != this_source_idx && path.starts_with(prefix)
+                        }) {
                             continue;
                         }
                         #[cfg(unix)]
@@ -3795,9 +3848,9 @@ fn add_paths_to_builder_filter<W: Write>(
                 // Incremental dedup (non-global-sort mode only).
                 if !global_sort
                     && args.incremental
-                    && dedup_skip_prefixes
-                        .iter()
-                        .any(|(prefix, owner)| *owner != this_source_idx && path.starts_with(prefix))
+                    && dedup_skip_prefixes.iter().any(|(prefix, owner)| {
+                        *owner != this_source_idx && path.starts_with(prefix)
+                    })
                 {
                     continue;
                 }
@@ -4140,8 +4193,12 @@ fn add_paths_to_builder_filter<W: Write>(
                                             let cur_dir_str = path.to_string_lossy();
                                             let cur_dir_trimmed = cur_dir_str.trim_end_matches('/');
                                             let prefix = format!("{cur_dir_trimmed}/");
-                                            if let Some(relative_prev) = prev_name_str.strip_prefix(&prefix) {
-                                                if !relative_prev.is_empty() && relative_prev != name {
+                                            if let Some(relative_prev) =
+                                                prev_name_str.strip_prefix(&prefix)
+                                            {
+                                                if !relative_prev.is_empty()
+                                                    && relative_prev != name
+                                                {
                                                     rename_from = Some(relative_prev.to_string());
                                                 }
                                             }
@@ -4439,7 +4496,13 @@ fn add_paths_to_builder_filter<W: Write>(
                         // Keeps the archive valid even though we flag the
                         // shrink afterwards.
                         let mut padded = PaddedReader::new(file, orig_size);
-                        append_entry_raw(&mut *builder, &mut header, archive_name, &mut padded, None)?;
+                        append_entry_raw(
+                            &mut *builder,
+                            &mut header,
+                            archive_name,
+                            &mut padded,
+                            None,
+                        )?;
                     }
                     // Detect a size-change-during-read and warn. GNU tar
                     // exits 1 (not 2) in this situation.
@@ -4489,13 +4552,9 @@ fn add_paths_to_builder_filter<W: Write>(
                             // archived. Set had_read_error so exit is 2
                             // (matches GNU behaviour for dirrem02).
                             if reported_missing_sources.insert(cur.clone()) {
-                                let reason = describe_open_error(
-                                    &io::Error::from(io::ErrorKind::NotFound),
-                                );
-                                eprintln!(
-                                    "tar: {}: Cannot open: {reason}",
-                                    cur.display()
-                                );
+                                let reason =
+                                    describe_open_error(&io::Error::from(io::ErrorKind::NotFound));
+                                eprintln!("tar: {}: Cannot open: {reason}", cur.display());
                                 had_read_error = true;
                             }
                             continue;
@@ -5038,7 +5097,7 @@ fn do_diff(args: &Args) -> io::Result<()> {
             }
         }
         let disk_meta = fs::metadata(&path)?;
-                let archived_mtime = entry.header().mtime().unwrap_or(0);
+        let archived_mtime = entry.header().mtime().unwrap_or(0);
         #[cfg(unix)]
         if !matches!(
             entry_kind,
@@ -5051,7 +5110,10 @@ fn do_diff(args: &Args) -> io::Result<()> {
                 differ = true;
             }
         }
-        if matches!(entry.header().entry_type(), EntryType::Regular | EntryType::GNUSparse) {
+        if matches!(
+            entry.header().entry_type(),
+            EntryType::Regular | EntryType::GNUSparse
+        ) {
             // Use entry.size() — for sparse entries the tar crate sets
             // this to the realsize after parsing the sparse header, so
             // it matches the materialized stream length we read below.
@@ -5073,11 +5135,15 @@ fn do_diff(args: &Args) -> io::Result<()> {
             let mut buf = vec![0u8; record_size];
             loop {
                 let n = disk_file.read(&mut buf)?;
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 disk.extend_from_slice(&buf[..n]);
                 emitted_records += 1;
-                if interval > 0 && !args.checkpoint_actions.is_empty()
-                    && emitted_records >= next_checkpoint_at {
+                if interval > 0
+                    && !args.checkpoint_actions.is_empty()
+                    && emitted_records >= next_checkpoint_at
+                {
                     fire_checkpoint_actions(&args.checkpoint_actions, emitted_records);
                     next_checkpoint_at += interval;
                 }
@@ -5300,7 +5366,6 @@ fn set_owner_group(header: &mut Header, args: &Args) {
 // Extract / List
 // ---------------------------------------------------------------------------
 
-
 /// Read a tar header's name field (first 100 bytes), NUL-terminated.
 fn read_header_name(header: &[u8; 512]) -> String {
     let name_bytes = &header[..100];
@@ -5349,7 +5414,10 @@ fn read_header_size(header: &[u8; 512]) -> u64 {
 /// 369..381). Tolerates trailing NUL/space.
 fn read_header_offset(header: &[u8; 512]) -> u64 {
     let bytes = &header[369..381];
-    let s = std::str::from_utf8(bytes).unwrap_or("").trim_matches('\0').trim();
+    let s = std::str::from_utf8(bytes)
+        .unwrap_or("")
+        .trim_matches('\0')
+        .trim();
     u64::from_str_radix(s, 8).unwrap_or(0)
 }
 
@@ -5530,8 +5598,8 @@ fn stitch_multivolume_archive(args: &Args) -> io::Result<Vec<u8>> {
                     }
                 }
             }
-            let is_straddle = next_m_off.is_some_and(|off| off < size)
-                || data_blocks > avail_blocks;
+            let is_straddle =
+                next_m_off.is_some_and(|off| off < size) || data_blocks > avail_blocks;
             if !is_straddle {
                 let span = 512 + data_blocks * 512;
                 out.extend_from_slice(&vol[off..off + span]);
@@ -5552,14 +5620,12 @@ fn stitch_multivolume_archive(args: &Args) -> io::Result<Vec<u8>> {
         v += 1;
     }
 
-    let need_eof = out.len() < 1024
-        || !out[out.len() - 1024..].iter().all(|&b| b == 0);
+    let need_eof = out.len() < 1024 || !out[out.len() - 1024..].iter().all(|&b| b == 0);
     if need_eof {
         out.extend_from_slice(&[0u8; 1024]);
     }
     Ok(out)
 }
-
 
 /// Multi-volume listing with block numbers. Reads all volume files
 /// sequentially, tracking block positions across volumes, skipping
@@ -5610,8 +5676,12 @@ fn do_multivolume_list(args: &Args) -> io::Result<()> {
                             name_bytes.extend_from_slice(&vol_data[doff..doff + 512]);
                         }
                     }
-                    let end = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
-                    pending_longname = Some(String::from_utf8_lossy(&name_bytes[..end]).into_owned());
+                    let end = name_bytes
+                        .iter()
+                        .position(|&b| b == 0)
+                        .unwrap_or(name_bytes.len());
+                    pending_longname =
+                        Some(String::from_utf8_lossy(&name_bytes[..end]).into_owned());
                     block_pos += 1 + actual_data as u64;
                     bi += 1 + actual_data;
                 }
@@ -5635,7 +5705,9 @@ fn do_multivolume_list(args: &Args) -> io::Result<()> {
                 }
                 b'V' => {
                     // Volume header
-                    let name = pending_longname.take().unwrap_or_else(|| read_header_path(&header));
+                    let name = pending_longname
+                        .take()
+                        .unwrap_or_else(|| read_header_path(&header));
                     let block_prefix = if args.block_number {
                         format!("block {block_pos}: ")
                     } else {
@@ -5647,7 +5719,9 @@ fn do_multivolume_list(args: &Args) -> io::Result<()> {
                 }
                 _ => {
                     // Regular entry (directory 'D', regular file, etc.)
-                    let name = pending_longname.take().unwrap_or_else(|| read_header_path(&header));
+                    let name = pending_longname
+                        .take()
+                        .unwrap_or_else(|| read_header_path(&header));
                     let block_prefix = if args.block_number {
                         format!("block {block_pos}: ")
                     } else {
@@ -5687,7 +5761,6 @@ fn do_multivolume_list(args: &Args) -> io::Result<()> {
     Ok(())
 }
 
-
 fn do_extract_or_list(args: &Args) -> io::Result<()> {
     // Multi-volume listing: when -M is active with multiple -f slots and
     // we're listing (not extracting), use the manual multi-volume parser.
@@ -5699,44 +5772,47 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
 
     // Multi-volume extract: stitch all -f volumes back into a single
     // archive in memory and feed that to the normal entry walker.
-    let mv_buffer: Option<Vec<u8>> = if args.multi_volume
-        && args.volume_files.len() > 1
-        && !args.list
-    {
-        Some(stitch_multivolume_archive(args)?)
-    } else {
-        None
-    };
+    let mv_buffer: Option<Vec<u8>> =
+        if args.multi_volume && args.volume_files.len() > 1 && !args.list {
+            Some(stitch_multivolume_archive(args)?)
+        } else {
+            None
+        };
 
-    let (reader, detected_compression): (Box<dyn Read>, Compression) = if let Some(buf) = mv_buffer {
+    let (reader, detected_compression): (Box<dyn Read>, Compression) = if let Some(buf) = mv_buffer
+    {
         (Box::new(io::Cursor::new(buf)), Compression::None)
-    } else { match args.file.as_deref() {
-        Some("-") | None => {
-            // stdin – need to buffer for magic detection
-            let mut buf = [0u8; 6];
-            let mut stdin = io::stdin().lock();
-            let n = stdin.read(&mut buf)?;
-            let magic_comp = detect_from_magic(&buf[..n]);
-            let chain: Box<dyn Read> = Box::new(io::Cursor::new(buf[..n].to_vec()).chain(stdin));
-            (chain, magic_comp)
+    } else {
+        match args.file.as_deref() {
+            Some("-") | None => {
+                // stdin – need to buffer for magic detection
+                let mut buf = [0u8; 6];
+                let mut stdin = io::stdin().lock();
+                let n = stdin.read(&mut buf)?;
+                let magic_comp = detect_from_magic(&buf[..n]);
+                let chain: Box<dyn Read> =
+                    Box::new(io::Cursor::new(buf[..n].to_vec()).chain(stdin));
+                (chain, magic_comp)
+            }
+            Some(path) => {
+                let file = File::open(path)?;
+                let mut buf = [0u8; 6];
+                let mut reader = BufReader::new(file);
+                let n = reader.read(&mut buf)?;
+                let magic_comp = detect_from_magic(&buf[..n]);
+                let ext_comp = detect_from_extension(path);
+                let chain: Box<dyn Read> =
+                    Box::new(io::Cursor::new(buf[..n].to_vec()).chain(reader));
+                // Prefer magic bytes, fall back to extension
+                let comp = if magic_comp != Compression::None {
+                    magic_comp
+                } else {
+                    ext_comp
+                };
+                (chain, comp)
+            }
         }
-        Some(path) => {
-            let file = File::open(path)?;
-            let mut buf = [0u8; 6];
-            let mut reader = BufReader::new(file);
-            let n = reader.read(&mut buf)?;
-            let magic_comp = detect_from_magic(&buf[..n]);
-            let ext_comp = detect_from_extension(path);
-            let chain: Box<dyn Read> = Box::new(io::Cursor::new(buf[..n].to_vec()).chain(reader));
-            // Prefer magic bytes, fall back to extension
-            let comp = if magic_comp != Compression::None {
-                magic_comp
-            } else {
-                ext_comp
-            };
-            (chain, comp)
-        }
-    }};
+    };
 
     let compression = explicit_compression.unwrap_or(detected_compression);
 
@@ -6328,7 +6404,6 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
             }
         }
     }
-
 
     if args.list && args.block_number {
         let data_blocks = (last_entry_size + 511) / 512;

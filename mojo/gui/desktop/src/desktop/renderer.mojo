@@ -226,7 +226,7 @@ struct MutationInterpreter(Movable):
     var _blitz: UnsafePointer[Blitz, MutAnyOrigin]
     var _stack: List[UInt32]
 
-    fn __init__(out self, ref [MutAnyOrigin]blitz: Blitz):
+    fn __init__(out self, ref[MutAnyOrigin] blitz: Blitz):
         """Create a mutation interpreter backed by the given Blitz instance.
 
         Args:

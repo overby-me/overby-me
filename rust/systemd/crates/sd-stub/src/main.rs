@@ -640,11 +640,7 @@ fn get_load_options(image: &LoadedImage) -> Option<String> {
     let s = String::from_utf16_lossy(&u16s);
     let s = s.trim_end_matches('\0').trim().to_string();
 
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
+    if s.is_empty() { None } else { Some(s) }
 }
 
 // ── Publish EFI Variables ─────────────────────────────────────────────────

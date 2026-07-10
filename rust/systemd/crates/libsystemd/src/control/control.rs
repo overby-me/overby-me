@@ -3691,9 +3691,7 @@ fn create_transient_unit(
                 "ProtectControlGroupsEx" => {
                     service_conf.exec_config.protect_control_groups_ex =
                         match value.to_lowercase().as_str() {
-                            "yes" | "true" | "1" => {
-                                crate::units::ProtectControlGroupsEx::Yes
-                            }
+                            "yes" | "true" | "1" => crate::units::ProtectControlGroupsEx::Yes,
                             "private" => crate::units::ProtectControlGroupsEx::Private,
                             "strict" => crate::units::ProtectControlGroupsEx::Strict,
                             _ => crate::units::ProtectControlGroupsEx::No,

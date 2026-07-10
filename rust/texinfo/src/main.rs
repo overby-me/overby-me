@@ -126,10 +126,22 @@ impl Converter {
             "node" => {
                 self.flush_text();
                 let parts: Vec<&str> = rest.splitn(4, ',').collect();
-                let name = parts.first().map(|s| s.trim().to_string()).unwrap_or_default();
-                let next = parts.get(1).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-                let prev = parts.get(2).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-                let up = parts.get(3).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                let name = parts
+                    .first()
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
+                let next = parts
+                    .get(1)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                let prev = parts
+                    .get(2)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                let up = parts
+                    .get(3)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
                 let is_top = name.eq_ignore_ascii_case("top");
                 self.current_node = Some(name.clone());
                 self.nodes.push(Node {
@@ -227,8 +239,8 @@ impl Converter {
             }
 
             // Formatting
-            "example" | "smallexample" | "lisp" | "smalllisp" | "display"
-            | "smalldisplay" | "format" | "smallformat" | "verbatim" => {
+            "example" | "smallexample" | "lisp" | "smalllisp" | "display" | "smalldisplay"
+            | "format" | "smallformat" | "verbatim" => {
                 self.append_text("\n");
                 let end_tag = cmd.as_str();
                 let mut j = idx + 1;
@@ -332,7 +344,9 @@ impl Converter {
                     }
                     let l = lines[j].trim();
                     if l.starts_with("@item") || l.starts_with("@tab") {
-                        self.append_text(&expand_inline(l.replace("@item", "").replace("@tab", "\t").trim()));
+                        self.append_text(&expand_inline(
+                            l.replace("@item", "").replace("@tab", "\t").trim(),
+                        ));
                         self.append_text("\n");
                     }
                     j += 1;
@@ -357,14 +371,14 @@ impl Converter {
             }
 
             // Ignore blocks
-            "ignore" | "ifhtml" | "ifxml" | "ifdocbook" | "iflatex" | "iftex"
-            | "ifplaintext" | "ifnotinfo" => {
+            "ignore" | "ifhtml" | "ifxml" | "ifdocbook" | "iflatex" | "iftex" | "ifplaintext"
+            | "ifnotinfo" => {
                 self.in_ignore += 1;
                 idx + 1
             }
             // Conditional blocks we process
-            "ifinfo" | "ifnottex" | "ifnothtml" | "ifnotxml" | "ifnotdocbook"
-            | "ifnotlatex" | "ifnotplaintext" => {
+            "ifinfo" | "ifnottex" | "ifnothtml" | "ifnotxml" | "ifnotdocbook" | "ifnotlatex"
+            | "ifnotplaintext" => {
                 // Process content (info format)
                 idx + 1
             }
@@ -384,11 +398,8 @@ impl Converter {
             }
 
             // Indices
-            "cindex" | "findex" | "vindex" | "pindex" | "tindex" | "kindex"
-            | "defindex" | "defcodeindex" | "synindex" | "syncodeindex"
-            | "printindex" => {
-                idx + 1
-            }
+            "cindex" | "findex" | "vindex" | "pindex" | "tindex" | "kindex" | "defindex"
+            | "defcodeindex" | "synindex" | "syncodeindex" | "printindex" => idx + 1,
 
             // Title page
             "titlepage" => {
@@ -403,7 +414,8 @@ impl Converter {
                     } else if l.starts_with("@author") {
                         self.author = l.strip_prefix("@author").unwrap_or("").trim().to_string();
                     } else if l.starts_with("@subtitle") {
-                        self.subtitle = l.strip_prefix("@subtitle").unwrap_or("").trim().to_string();
+                        self.subtitle =
+                            l.strip_prefix("@subtitle").unwrap_or("").trim().to_string();
                     }
                     j += 1;
                 }
@@ -411,25 +423,80 @@ impl Converter {
             }
 
             // Directives we can ignore
-            "dircategory" | "direntry" | "copying" | "insertcopying"
-            | "contents" | "shortcontents" | "summarycontents" | "detailmenu"
-            | "finalout" | "setfilename" | "documentencoding" | "documentlanguage"
-            | "setchapternewpage" | "headings" | "everyheading" | "everyfoooting"
-            | "oddheading" | "evenheading" | "oddfoooting" | "evenfoooting"
-            | "allowcodebreakable" | "exampleindent" | "firstparagraphindent"
-            | "frenchspacing" | "kbdinputstyle" | "validatemenus" | "macro"
-            | "defmac" | "defun" | "deffn" | "deftp" | "defvr" | "defvar"
-            | "defopt" | "defspec" | "deftypefn" | "deftypevar" | "deftypevr"
-            | "deftypefun" | "rmacro" | "alias" | "definfoenclose"
-            | "sp" | "page" | "vskip" | "need" | "group" | "noindent"
-            | "indent" | "exdent" | "headitem" | "columnfractions"
-            | "afourpaper" | "afivepaper" | "smallbook" | "pagesizes"
-            | "cropmarks" | "c" | "comment" | "anchor"
-            | "html" | "tex" | "docbook" | "xml" => {
+            "dircategory"
+            | "direntry"
+            | "copying"
+            | "insertcopying"
+            | "contents"
+            | "shortcontents"
+            | "summarycontents"
+            | "detailmenu"
+            | "finalout"
+            | "setfilename"
+            | "documentencoding"
+            | "documentlanguage"
+            | "setchapternewpage"
+            | "headings"
+            | "everyheading"
+            | "everyfoooting"
+            | "oddheading"
+            | "evenheading"
+            | "oddfoooting"
+            | "evenfoooting"
+            | "allowcodebreakable"
+            | "exampleindent"
+            | "firstparagraphindent"
+            | "frenchspacing"
+            | "kbdinputstyle"
+            | "validatemenus"
+            | "macro"
+            | "defmac"
+            | "defun"
+            | "deffn"
+            | "deftp"
+            | "defvr"
+            | "defvar"
+            | "defopt"
+            | "defspec"
+            | "deftypefn"
+            | "deftypevar"
+            | "deftypevr"
+            | "deftypefun"
+            | "rmacro"
+            | "alias"
+            | "definfoenclose"
+            | "sp"
+            | "page"
+            | "vskip"
+            | "need"
+            | "group"
+            | "noindent"
+            | "indent"
+            | "exdent"
+            | "headitem"
+            | "columnfractions"
+            | "afourpaper"
+            | "afivepaper"
+            | "smallbook"
+            | "pagesizes"
+            | "cropmarks"
+            | "c"
+            | "comment"
+            | "anchor"
+            | "html"
+            | "tex"
+            | "docbook"
+            | "xml" => {
                 // Skip @direntry..@end direntry blocks
-                if cmd == "direntry" || cmd == "copying" || cmd == "detailmenu"
-                    || cmd == "macro" || cmd == "rmacro" || cmd == "html"
-                    || cmd == "tex" || cmd == "docbook" || cmd == "xml"
+                if cmd == "direntry"
+                    || cmd == "copying"
+                    || cmd == "detailmenu"
+                    || cmd == "macro"
+                    || cmd == "rmacro"
+                    || cmd == "html"
+                    || cmd == "tex"
+                    || cmd == "docbook"
+                    || cmd == "xml"
                     || cmd == "group"
                 {
                     let end_tag = cmd.as_str();
@@ -496,10 +563,7 @@ impl Converter {
             // Node header
             output.push(31 as char); // ^_ separator
             output.push('\n');
-            output.push_str(&format!(
-                "File: {base},  Node: {}",
-                node.name
-            ));
+            output.push_str(&format!("File: {base},  Node: {}", node.name));
             if let Some(ref next) = node.next {
                 output.push_str(&format!(",  Next: {next}"));
             }
@@ -556,8 +620,16 @@ fn extract_command(line: &str) -> String {
 fn is_ignore_block(name: &str) -> bool {
     matches!(
         name,
-        "ignore" | "ifhtml" | "ifxml" | "ifdocbook" | "iflatex" | "iftex"
-            | "ifplaintext" | "ifnotinfo" | "ifset" | "ifclear"
+        "ignore"
+            | "ifhtml"
+            | "ifxml"
+            | "ifdocbook"
+            | "iflatex"
+            | "iftex"
+            | "ifplaintext"
+            | "ifnotinfo"
+            | "ifset"
+            | "ifclear"
     )
 }
 
@@ -620,8 +692,8 @@ fn expand_inline(text: &str) -> String {
                         }
                         let expanded = expand_inline(&content);
                         match cmd.as_str() {
-                            "code" | "samp" | "kbd" | "env" | "command" | "option"
-                            | "file" | "dfn" | "cite" | "abbr" | "acronym" => {
+                            "code" | "samp" | "kbd" | "env" | "command" | "option" | "file"
+                            | "dfn" | "cite" | "abbr" | "acronym" => {
                                 result.push('`');
                                 result.push_str(&expanded);
                                 result.push('\'');
@@ -711,9 +783,8 @@ fn expand_inline(text: &str) -> String {
                             "minus" => result.push('-'),
                             "comma" => result.push(','),
                             "tab" => result.push('\t'),
-                            "noindent" | "indent" | "sp" | "page"
-                            | "need" | "vskip" | "group" | "finalout"
-                            | "exdent" => {}
+                            "noindent" | "indent" | "sp" | "page" | "need" | "vskip" | "group"
+                            | "finalout" | "exdent" => {}
                             _ => {
                                 // Unknown — pass through
                                 result.push('@');

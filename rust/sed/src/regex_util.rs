@@ -113,10 +113,7 @@ pub fn bre_to_ere(bre: &str) -> String {
                     // In POSIX BRE, \ inside [] is literal
                     // But Rust regex uses \ for escapes inside [] too
                     let next = chars[i + 1];
-                    if "dDsSwWtnrfvp0".contains(next)
-                        || next == '\\'
-                        || next == ']'
-                    {
+                    if "dDsSwWtnrfvp0".contains(next) || next == '\\' || next == ']' {
                         // Known Rust regex escape — pass through as-is
                         result.push('\\');
                         result.push(next);

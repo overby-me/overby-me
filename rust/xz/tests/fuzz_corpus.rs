@@ -58,7 +58,11 @@ fn decode_no_panic(bytes: &[u8]) {
     let result = std::panic::catch_unwind(|| {
         let _ = decompress_stream(bytes, &mut sink());
     });
-    assert!(result.is_ok(), "decoder panicked on input ({} bytes)", bytes.len());
+    assert!(
+        result.is_ok(),
+        "decoder panicked on input ({} bytes)",
+        bytes.len()
+    );
 }
 
 #[test]
@@ -68,7 +72,10 @@ fn corpus_decodes_without_panicking() {
         return;
     };
     let inputs = collect_inputs(&dir);
-    assert!(!inputs.is_empty(), "fuzz corpus dir {dir:?} contained no inputs");
+    assert!(
+        !inputs.is_empty(),
+        "fuzz corpus dir {dir:?} contained no inputs"
+    );
 
     for (name, bytes) in &inputs {
         // 1) Original input.

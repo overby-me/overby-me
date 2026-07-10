@@ -52,13 +52,11 @@ pub fn remove_needed(elf: &Elf, data: &mut [u8], lib: &str) {
                                 .copy_from_slice(&0u64.to_be_bytes());
                         }
                     } else if is_le {
-                        data[entry_offset..entry_offset + 4]
-                            .copy_from_slice(&0u32.to_le_bytes());
+                        data[entry_offset..entry_offset + 4].copy_from_slice(&0u32.to_le_bytes());
                         data[entry_offset + 4..entry_offset + 8]
                             .copy_from_slice(&0u32.to_le_bytes());
                     } else {
-                        data[entry_offset..entry_offset + 4]
-                            .copy_from_slice(&0u32.to_be_bytes());
+                        data[entry_offset..entry_offset + 4].copy_from_slice(&0u32.to_be_bytes());
                         data[entry_offset + 4..entry_offset + 8]
                             .copy_from_slice(&0u32.to_be_bytes());
                     }

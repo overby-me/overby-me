@@ -229,13 +229,12 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         return "Mach-O binary".to_string();
     }
 
-
     // Linux S390 kernel
     if buf.len() >= 32
         && buf[8..32]
             == [
-                0x02, 0x00, 0x00, 0x18, 0x60, 0x00, 0x00, 0x50, 0x02, 0x00, 0x00, 0x68, 0x60,
-                0x00, 0x00, 0x50, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+                0x02, 0x00, 0x00, 0x18, 0x60, 0x00, 0x00, 0x50, 0x02, 0x00, 0x00, 0x68, 0x60, 0x00,
+                0x00, 0x50, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
             ]
     {
         if opts.mime_type {
@@ -251,9 +250,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
                     let subtype = &buf[i + 8..i + 16];
                     let name = match subtype {
                         [0xC1, 0x00, 0xEF, 0xE3, 0xF0, 0x68, 0x00, 0x00] => " Z10 64bit kernel",
-                        [0xC1, 0x00, 0xEF, 0xC3, 0x00, 0x00, 0x00, 0x00] => {
-                            " Z9-109 64bit kernel"
-                        }
+                        [0xC1, 0x00, 0xEF, 0xC3, 0x00, 0x00, 0x00, 0x00] => " Z9-109 64bit kernel",
                         [0xC0, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00] => " Z990 64bit kernel",
                         [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] => " Z900 64bit kernel",
                         _ => "",
@@ -271,8 +268,8 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         && buf[0..4] == [0x4c, 0x00, 0x00, 0x00]
         && buf[4..20]
             == [
-                0x01, 0x14, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x46,
+                0x01, 0x14, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x46,
             ]
     {
         if opts.mime_type {
@@ -297,11 +294,11 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
                 .position(|&b| b == b'\n')
                 .map(|n| data_start + n)
                 .unwrap_or(data_start);
-            let version =
-                std::str::from_utf8(&buf[data_start..version_end]).unwrap_or("?");
+            let version = std::str::from_utf8(&buf[data_start..version_end]).unwrap_or("?");
             // Round member-1 data size up to even for ar's 2-byte alignment.
-            let size_str =
-                std::str::from_utf8(&buf[8 + 48..8 + 58]).unwrap_or("0").trim();
+            let size_str = std::str::from_utf8(&buf[8 + 48..8 + 58])
+                .unwrap_or("0")
+                .trim();
             let size: usize = size_str.parse().unwrap_or(0);
             let member2_hdr = 68 + size + (size % 2);
             let payload = if buf.len() >= member2_hdr + 16 {
@@ -309,8 +306,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
                     .iter()
                     .position(|&b| b == b' ')
                     .unwrap_or(16);
-                std::str::from_utf8(&buf[member2_hdr..member2_hdr + name_end])
-                    .unwrap_or("?")
+                std::str::from_utf8(&buf[member2_hdr..member2_hdr + name_end]).unwrap_or("?")
             } else {
                 "?"
             };
@@ -370,9 +366,26 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
     // unrelated binary files with the same leading byte trip this check
     // otherwise (.pyc's 03 f3 0d 0a is a frequent offender).
     if buf.len() >= 32
-        && matches!(buf[0], 0x02 | 0x03 | 0x04 | 0x05 | 0x30 | 0x31 | 0x32 | 0x43 | 0x63 | 0x83 | 0x8b | 0xcb | 0xf5 | 0xfb)
-        && buf[2] >= 1 && buf[2] <= 12
-        && buf[3] >= 1 && buf[3] <= 31
+        && matches!(
+            buf[0],
+            0x02 | 0x03
+                | 0x04
+                | 0x05
+                | 0x30
+                | 0x31
+                | 0x32
+                | 0x43
+                | 0x63
+                | 0x83
+                | 0x8b
+                | 0xcb
+                | 0xf5
+                | 0xfb
+        )
+        && buf[2] >= 1
+        && buf[2] <= 12
+        && buf[3] >= 1
+        && buf[3] <= 31
     {
         let kind = match buf[0] {
             0x02 => "FoxBase",
@@ -445,8 +458,12 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         let key_parts = u16::from_be_bytes([buf[14], buf[15]]);
         let unique_key_parts = u16::from_be_bytes([buf[16], buf[17]]);
         let keys = buf[18];
-        let records = u64::from_be_bytes([buf[28], buf[29], buf[30], buf[31], buf[32], buf[33], buf[34], buf[35]]);
-        let deleted = u64::from_be_bytes([buf[36], buf[37], buf[38], buf[39], buf[40], buf[41], buf[42], buf[43]]);
+        let records = u64::from_be_bytes([
+            buf[28], buf[29], buf[30], buf[31], buf[32], buf[33], buf[34], buf[35],
+        ]);
+        let deleted = u64::from_be_bytes([
+            buf[36], buf[37], buf[38], buf[39], buf[40], buf[41], buf[42], buf[43],
+        ]);
         if opts.mime_type {
             return mime_with_encoding("application/octet-stream", opts);
         }
@@ -481,9 +498,8 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         } else {
             "1".to_string()
         };
-        let u32_be = |o: usize| -> u32 {
-            u32::from_be_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]])
-        };
+        let u32_be =
+            |o: usize| -> u32 { u32::from_be_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]) };
         let utcnt = u32_be(20);
         let stdcnt = u32_be(24);
         let leapcnt = u32_be(28);
@@ -505,11 +521,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
 
     // PostScript Type 1 binary font (.pfb). 6-byte binary header `80 01 LEN
     // LEN LEN LEN` then ASCII `%!PS-AdobeFont-N.N: <fontname> <version>`.
-    if buf.len() >= 32
-        && buf[0] == 0x80
-        && buf[1] == 0x01
-        && &buf[6..20] == b"%!PS-AdobeFont"
-    {
+    if buf.len() >= 32 && buf[0] == 0x80 && buf[1] == 0x01 && &buf[6..20] == b"%!PS-AdobeFont" {
         if opts.mime_type {
             return mime_with_encoding("application/vnd.ms-opentype", opts);
         }
@@ -530,20 +542,30 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
     // ICC / ColorSync color profile. "acsp" signature at offset 36.
     if buf.len() >= 132 && &buf[36..40] == b"acsp" {
         let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
-        let cmm =
-            std::str::from_utf8(&buf[4..8]).unwrap_or("????").trim_end();
+        let cmm = std::str::from_utf8(&buf[4..8]).unwrap_or("????").trim_end();
         let major = buf[8];
         let minor = (buf[9] >> 4) & 0x0f;
-        let class = std::str::from_utf8(&buf[12..16]).unwrap_or("????").trim_end();
-        let cs = std::str::from_utf8(&buf[16..20]).unwrap_or("????").trim_end();
-        let pcs = std::str::from_utf8(&buf[20..24]).unwrap_or("????").trim_end();
+        let class = std::str::from_utf8(&buf[12..16])
+            .unwrap_or("????")
+            .trim_end();
+        let cs = std::str::from_utf8(&buf[16..20])
+            .unwrap_or("????")
+            .trim_end();
+        let pcs = std::str::from_utf8(&buf[20..24])
+            .unwrap_or("????")
+            .trim_end();
         let platform = std::str::from_utf8(&buf[40..44]).unwrap_or("????");
-        let manufacturer =
-            std::str::from_utf8(&buf[48..52]).unwrap_or("????").trim_end();
-        let device_model =
-            std::str::from_utf8(&buf[52..56]).unwrap_or("").trim_end().trim_matches(char::from(0));
-        let creator =
-            std::str::from_utf8(&buf[80..84]).unwrap_or("").trim_end().trim_matches(char::from(0));
+        let manufacturer = std::str::from_utf8(&buf[48..52])
+            .unwrap_or("????")
+            .trim_end();
+        let device_model = std::str::from_utf8(&buf[52..56])
+            .unwrap_or("")
+            .trim_end()
+            .trim_matches(char::from(0));
+        let creator = std::str::from_utf8(&buf[80..84])
+            .unwrap_or("")
+            .trim_end()
+            .trim_matches(char::from(0));
         let platform_name = match platform {
             "APPL" => "ColorSync",
             "MSFT" => "Microsoft",
@@ -565,8 +587,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             }
             if &buf[t..t + 4] == b"desc" {
                 let dat_off =
-                    u32::from_be_bytes([buf[t + 4], buf[t + 5], buf[t + 6], buf[t + 7]])
-                        as usize;
+                    u32::from_be_bytes([buf[t + 4], buf[t + 5], buf[t + 6], buf[t + 7]]) as usize;
                 if dat_off + 16 < buf.len() {
                     // desc tag: [sig "desc"][rsvd 4][len BE u32][ASCII string]
                     let str_len = u32::from_be_bytes([
@@ -579,9 +600,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
                     let s_end = (s_start + str_len).min(buf.len());
                     let raw = &buf[s_start..s_end];
                     let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
-                    description = std::str::from_utf8(&raw[..end])
-                        .unwrap_or("")
-                        .to_string();
+                    description = std::str::from_utf8(&raw[..end]).unwrap_or("").to_string();
                 }
                 break;
             }
@@ -613,10 +632,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
     //   byte 3: symmetric cipher algorithm
     //   byte 4: S2K specifier (0/1/3)
     //   byte 5: hash algorithm (if S2K is salted / iterated)
-    if buf.len() >= 6
-        && buf[0] == 0x8c
-        && buf[2] == 0x04
-    {
+    if buf.len() >= 6 && buf[0] == 0x8c && buf[2] == 0x04 {
         let s2k = buf[4];
         let hash = buf[5];
         let hash_name = match hash {
@@ -635,17 +651,12 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             3 => "salted & iterated",
             _ => "unknown",
         };
-        return format!(
-            "PGP symmetric key encrypted data - {s2k_kind} - {hash_name} ."
-        );
+        return format!("PGP symmetric key encrypted data - {s2k_kind} - {hash_name} .");
     }
 
     // SELinux compiled policy. Magic 0xf97cff8c, then "SE Linux" string,
     // version (LE u32), and policy counters.
-    if buf.len() >= 32
-        && buf[0..4] == [0x8c, 0xff, 0x7c, 0xf9]
-        && &buf[8..16] == b"SE Linux"
-    {
+    if buf.len() >= 32 && buf[0..4] == [0x8c, 0xff, 0x7c, 0xf9] && &buf[8..16] == b"SE Linux" {
         let version = u32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
         let symbols = u32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
         let ocons = u32::from_le_bytes([buf[28], buf[29], buf[30], buf[31]]);
@@ -712,15 +723,21 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
     // identifier at offset 0x8028 (32 bytes, space-padded).
     if buf.len() >= 0x8028 + 32 && &buf[0x8001..0x8006] == b"CD001" {
         let vol_id = &buf[0x8028..0x8028 + 32];
-        let label_end = vol_id.iter().rposition(|&b| b != b' ').map(|p| p + 1).unwrap_or(0);
+        let label_end = vol_id
+            .iter()
+            .rposition(|&b| b != b' ')
+            .map(|p| p + 1)
+            .unwrap_or(0);
         let label = std::str::from_utf8(&vol_id[..label_end]).unwrap_or("");
         let has_mbr = buf.len() >= 512 && buf[510] == 0x55 && buf[511] == 0xaa;
-        let mbr_part = if has_mbr { " (DOS/MBR boot sector)" } else { "" };
+        let mbr_part = if has_mbr {
+            " (DOS/MBR boot sector)"
+        } else {
+            ""
+        };
         // Check for the "BOOT" extension (El Torito) by scanning a few
         // sectors for the "EL TORITO SPECIFICATION" signature.
-        let bootable = buf
-            .windows(23)
-            .any(|w| w == b"EL TORITO SPECIFICATION");
+        let bootable = buf.windows(23).any(|w| w == b"EL TORITO SPECIFICATION");
         let bootable_part = if bootable { " (bootable)" } else { "" };
         if opts.mime_type {
             return mime_with_encoding("application/x-iso9660-image", opts);
@@ -732,11 +749,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
     // sync pattern (0xFF 0xE* .. .. ..) and decoding the frame header.
     // Explicitly reject the UTF-16-LE BOM (ff fe ..) which also satisfies
     // the 11-bit sync mask.
-    if buf.len() >= 4
-        && buf[0] == 0xff
-        && (buf[1] & 0xe0) == 0xe0
-        && buf[1] != 0xfe
-    {
+    if buf.len() >= 4 && buf[0] == 0xff && (buf[1] & 0xe0) == 0xe0 && buf[1] != 0xfe {
         let version_id = (buf[1] >> 3) & 0x03;
         let layer = (buf[1] >> 1) & 0x03;
         let bitrate_idx = (buf[2] >> 4) & 0x0f;
@@ -766,22 +779,28 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             let bitrate = match (version_id, layer, bitrate_idx) {
                 (3, 3, 1) | (3, 3, 2) | (3, 3, 3) => 32 * bitrate_idx as u32,
                 (3, 2, _) => {
-                    let tab = [0u32, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384];
+                    let tab = [
+                        0u32, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384,
+                    ];
                     tab.get(bitrate_idx as usize).copied().unwrap_or(0)
                 }
                 (3, 1, _) => {
-                    let tab = [0u32, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+                    let tab = [
+                        0u32, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+                    ];
                     tab.get(bitrate_idx as usize).copied().unwrap_or(0)
                 }
                 // MPEG 2/2.5, Layer III
                 (_, 1, _) => {
-                    let tab = [0u32, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+                    let tab = [
+                        0u32, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160,
+                    ];
                     tab.get(bitrate_idx as usize).copied().unwrap_or(0)
                 }
                 _ => 0,
             };
             let sr_table: [[u32; 3]; 4] = [
-                [11025, 12000, 8000],  // MPEG 2.5
+                [11025, 12000, 8000], // MPEG 2.5
                 [0, 0, 0],
                 [22050, 24000, 16000], // MPEG 2
                 [44100, 48000, 32000], // MPEG 1
@@ -871,7 +890,10 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
                     }
                     continue;
                 }
-                let end = rest.iter().position(|&c| !c.is_ascii_digit()).unwrap_or(rest.len());
+                let end = rest
+                    .iter()
+                    .position(|&c| !c.is_ascii_digit())
+                    .unwrap_or(rest.len());
                 if end == 0 {
                     break;
                 }
@@ -882,19 +904,18 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
                 }
                 rest = &rest[end..];
             }
-            let (w, h) = (nums.first().copied().unwrap_or(0), nums.get(1).copied().unwrap_or(0));
+            let (w, h) = (
+                nums.first().copied().unwrap_or(0),
+                nums.get(1).copied().unwrap_or(0),
+            );
             // Upstream's magic emits different field orders depending on the
             // subtype — bitmap always leads with encoding, others lead with
             // the kind token.
             let encoding = if is_ascii { "ASCII text" } else { "rawbits" };
             if kind == "bitmap" {
-                return format!(
-                    "Netpbm image data, size = {w} x {h}, {encoding}, {kind}"
-                );
+                return format!("Netpbm image data, size = {w} x {h}, {encoding}, {kind}");
             }
-            return format!(
-                "Netpbm image data, size = {w} x {h}, {kind}, {encoding}"
-            );
+            return format!("Netpbm image data, size = {w} x {h}, {kind}, {encoding}");
         }
     }
 
@@ -945,9 +966,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
     // SummaryInformation stream correctly even when its sectors are
     // non-contiguous. If that fails, we fall back to scanning the raw
     // buffer for well-known FMTID patterns.
-    if buf.len() >= 16
-        && buf[0..8] == [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]
-    {
+    if buf.len() >= 16 && buf[0..8] == [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] {
         if opts.mime_type {
             return mime_with_encoding("application/x-ole-storage", opts);
         }
@@ -984,27 +1003,26 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             && fmtid_pos >= 28
         {
             let ps_start = fmtid_pos - 28;
-            let byte_order =
-                u16::from_le_bytes([buf[ps_start], buf[ps_start + 1]]);
+            let byte_order = u16::from_le_bytes([buf[ps_start], buf[ps_start + 1]]);
             if byte_order == 0xfffe {
                 // Only MSI files get the "MSI Installer" suffix from
                 // upstream; MSP/MST get their own reorderings but no label.
                 let is_msi = buf.windows(16).any(|w| {
                     w == [
-                        0x84, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0,
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+                        0x84, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x46,
                     ]
                 });
                 let is_mst = buf.windows(16).any(|w| {
                     w == [
-                        0x82, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0,
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+                        0x82, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x46,
                     ]
                 });
                 let is_msp = buf.windows(16).any(|w| {
                     w == [
-                        0x86, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0,
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+                        0x86, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x46,
                     ]
                 });
                 let installer = if is_msi {
@@ -1051,9 +1069,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
 
     // LVM2 physical volume (PV) on-disk label. "LABELONE" at offset 0x200,
     // "LVM2 001" at offset 0x218, UUID at 0x220 (32 bytes).
-    if buf.len() >= 0x248
-        && &buf[0x200..0x208] == b"LABELONE"
-        && &buf[0x218..0x220] == b"LVM2 001"
+    if buf.len() >= 0x248 && &buf[0x200..0x208] == b"LABELONE" && &buf[0x218..0x220] == b"LVM2 001"
     {
         let uuid = &buf[0x220..0x240];
         // LVM formats the UUID as 32 chars split into groups of 6-4-4-4-4-4-6.
@@ -1061,20 +1077,20 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         let uuid_parts: Vec<String> = groups
             .iter()
             .map(|r| {
-                std::str::from_utf8(&uuid[r.clone()]).unwrap_or("").to_string()
+                std::str::from_utf8(&uuid[r.clone()])
+                    .unwrap_or("")
+                    .to_string()
             })
             .collect();
         let uuid_str = uuid_parts.join("-");
         let size = u64::from_le_bytes([
-            buf[0x240], buf[0x241], buf[0x242], buf[0x243],
-            buf[0x244], buf[0x245], buf[0x246], buf[0x247],
+            buf[0x240], buf[0x241], buf[0x242], buf[0x243], buf[0x244], buf[0x245], buf[0x246],
+            buf[0x247],
         ]);
         if opts.mime_type {
             return mime_with_encoding("application/octet-stream", opts);
         }
-        return format!(
-            "LVM2 PV (Linux Logical Volume Manager), UUID: {uuid_str}, size: {size}"
-        );
+        return format!("LVM2 PV (Linux Logical Volume Manager), UUID: {uuid_str}, size: {size}");
     }
 
     // Linux swap file. Trailing 10-byte magic "SWAPSPACE2" lives at the end
@@ -1121,10 +1137,22 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             };
             let uuid_str = format!(
                 "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-                uuid[0], uuid[1], uuid[2], uuid[3],
-                uuid[4], uuid[5], uuid[6], uuid[7],
-                uuid[8], uuid[9], uuid[10], uuid[11],
-                uuid[12], uuid[13], uuid[14], uuid[15]
+                uuid[0],
+                uuid[1],
+                uuid[2],
+                uuid[3],
+                uuid[4],
+                uuid[5],
+                uuid[6],
+                uuid[7],
+                uuid[8],
+                uuid[9],
+                uuid[10],
+                uuid[11],
+                uuid[12],
+                uuid[13],
+                uuid[14],
+                uuid[15]
             );
             if opts.mime_type {
                 return mime_with_encoding("application/octet-stream", opts);
@@ -1147,8 +1175,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         while i + 9 <= buf.len() {
             let _lvl = buf[i];
             let tag = u32::from_le_bytes([buf[i + 1], buf[i + 2], buf[i + 3], buf[i + 4]]);
-            let len =
-                u32::from_le_bytes([buf[i + 5], buf[i + 6], buf[i + 7], buf[i + 8]]) as usize;
+            let len = u32::from_le_bytes([buf[i + 5], buf[i + 6], buf[i + 7], buf[i + 8]]) as usize;
             let data_start = i + 9;
             if data_start + len + 2 > buf.len() {
                 break;
@@ -1165,8 +1192,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
                 }
                 0x9007 => {
                     if data.len() >= 4 {
-                        oem_cp =
-                            Some(u32::from_le_bytes([data[0], data[1], data[2], data[3]]));
+                        oem_cp = Some(u32::from_le_bytes([data[0], data[1], data[2], data[3]]));
                         oem_cp_cs = cs;
                     }
                 }
@@ -1184,32 +1210,27 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         let class = msg_class
             .map(|c| format!(", MessageAttribute \"{c}\""))
             .unwrap_or_default();
-        return format!(
-            "Transport Neutral Encapsulation Format (TNEF){cp}{cs_part}{class}"
-        );
+        return format!("Transport Neutral Encapsulation Format (TNEF){cp}{cs_part}{class}");
     }
 
     // Windows PIF (Program Information File). Byte 0 is 0x00, bytes 2..=32
     // hold an ASCII title, and the program path starts at offset 36.
     // Upstream distinguishes "Windows NT-style" variants via the
     // "MICROSOFT PIFEX" signature later in the file.
-    if buf.len() >= 0x50
-        && buf[0] == 0x00
-        && path.to_ascii_lowercase().ends_with(".pif")
-    {
+    if buf.len() >= 0x50 && buf[0] == 0x00 && path.to_ascii_lowercase().ends_with(".pif") {
         let path_bytes = &buf[0x24..0x24 + 63.min(buf.len() - 0x24)];
-        let path_end = path_bytes.iter().position(|&b| b == 0).unwrap_or(path_bytes.len());
+        let path_end = path_bytes
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(path_bytes.len());
         if path_end > 0 {
-            let prog_path =
-                std::str::from_utf8(&path_bytes[..path_end]).unwrap_or("");
+            let prog_path = std::str::from_utf8(&path_bytes[..path_end]).unwrap_or("");
             let style = if buf.windows(15).any(|w| w == b"MICROSOFT PIFEX") {
                 "Windows NT-style"
             } else {
                 "regular"
             };
-            return format!(
-                "Windows Program Information File for {prog_path}, {style}"
-            );
+            return format!("Windows Program Information File for {prog_path}, {style}");
         }
     }
 
@@ -1265,7 +1286,10 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         let ver_off = 0x200 + kv_ptr;
         if ver_off < buf.len() {
             let ver_bytes = &buf[ver_off..];
-            let end = ver_bytes.iter().position(|&b| b == 0).unwrap_or(ver_bytes.len());
+            let end = ver_bytes
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(ver_bytes.len());
             let ver = std::str::from_utf8(&ver_bytes[..end]).unwrap_or("");
             return format!(
                 "Linux kernel x86 boot executable bzImage, version {ver}, RO-rootFS, swap_dev 0X4, Normal VGA"
@@ -1277,10 +1301,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
     // the PE header offset lives at byte 0x3c.
     if buf.len() >= 0x40 && &buf[0..2] == b"MZ" {
         let pe_off = u32::from_le_bytes([buf[0x3c], buf[0x3d], buf[0x3e], buf[0x3f]]) as usize;
-        if pe_off >= 4
-            && pe_off + 24 <= buf.len()
-            && &buf[pe_off..pe_off + 4] == b"PE\0\0"
-        {
+        if pe_off >= 4 && pe_off + 24 <= buf.len() && &buf[pe_off..pe_off + 4] == b"PE\0\0" {
             let coff = pe_off + 4;
             let machine = u16::from_le_bytes([buf[coff], buf[coff + 1]]);
             let nsections = u16::from_le_bytes([buf[coff + 2], buf[coff + 3]]);
@@ -1386,7 +1407,10 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
                 let header = &buf[e0_off..e0_off + e0_len];
                 // Pull just the first line (newline-terminated) of the
                 // metadata header. That's typically `Project-Id-Version: X`.
-                let line_end = header.iter().position(|&b| b == b'\n').unwrap_or(header.len());
+                let line_end = header
+                    .iter()
+                    .position(|&b| b == b'\n')
+                    .unwrap_or(header.len());
                 if let Ok(first_line) = std::str::from_utf8(&header[..line_end]) {
                     extra.push_str(", ");
                     extra.push_str(first_line);
@@ -1435,9 +1459,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             return mime_with_encoding("application/x-ms-dmp", opts);
         }
         let dt = format_unix_utc(timestamp as i64);
-        return format!(
-            "Mini DuMP crash report, {num_streams} streams, {dt}, {flags} type"
-        );
+        return format!("Mini DuMP crash report, {num_streams} streams, {dt}, {flags} type");
     }
 
     // Standard MIDI file. MThd header + 6-byte length + format/ntrks/division.
@@ -1448,7 +1470,9 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         let format = u16::from_be_bytes([buf[8], buf[9]]);
         let ntrks = u16::from_be_bytes([buf[10], buf[11]]);
         let division = u16::from_be_bytes([buf[12], buf[13]]);
-        return format!("Standard MIDI data (format {format}) using {ntrks} tracks at 1/{division}");
+        return format!(
+            "Standard MIDI data (format {format}) using {ntrks} tracks at 1/{division}"
+        );
     }
 
     // Python byte-compiled (.pyc). Magic is two version bytes + "\r\n".
@@ -1480,11 +1504,9 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             3420 | 3421 | 3422 | 3423 | 3424 | 3425 => Some("3.9"),
             3430 | 3431 | 3432 | 3433 | 3434 | 3435 | 3436 | 3437 | 3438 | 3439 => Some("3.10"),
             3450 | 3451 | 3452 | 3453 | 3454 | 3455 | 3456 | 3457 | 3458 | 3459 | 3460 | 3461
-            | 3462 | 3463 | 3464 | 3465 | 3466 | 3467 | 3468 | 3469 | 3470 | 3471 | 3472
-            | 3473 | 3474 | 3475 | 3476 | 3477 | 3478 | 3479 | 3480 | 3481 | 3482 | 3483
-            | 3484 | 3485 | 3486 | 3487 | 3488 | 3489 | 3490 | 3491 | 3492 | 3493 | 3494 => {
-                Some("3.11")
-            }
+            | 3462 | 3463 | 3464 | 3465 | 3466 | 3467 | 3468 | 3469 | 3470 | 3471 | 3472 | 3473
+            | 3474 | 3475 | 3476 | 3477 | 3478 | 3479 | 3480 | 3481 | 3482 | 3483 | 3484 | 3485
+            | 3486 | 3487 | 3488 | 3489 | 3490 | 3491 | 3492 | 3493 | 3494 => Some("3.11"),
             3500 | 3501 | 3502 | 3503 | 3504 | 3505 | 3506 | 3507 | 3508 | 3509 | 3510 | 3511 => {
                 Some("3.12")
             }
@@ -1582,16 +1604,13 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
     // VirtualBox VDI disk. 64-byte ASCII pre-header ("<<< ... >>>") then
     // signature 0xBEDA107F at offset 0x40, u16 major at 0x46, u16 minor at
     // 0x44, and block size at offset 0x170.
-    if buf.len() >= 0x174
-        && buf.starts_with(b"<<< ")
-        && buf[0x40..0x44] == [0x7f, 0x10, 0xda, 0xbe]
+    if buf.len() >= 0x174 && buf.starts_with(b"<<< ") && buf[0x40..0x44] == [0x7f, 0x10, 0xda, 0xbe]
     {
         let sig_end = buf[..0x40].iter().position(|&b| b == 0x0a).unwrap_or(0x40);
         if let Ok(sig) = std::str::from_utf8(&buf[..sig_end]) {
             let minor = u16::from_le_bytes([buf[0x44], buf[0x45]]);
             let major = u16::from_le_bytes([buf[0x46], buf[0x47]]);
-            let bytes =
-                u32::from_le_bytes([buf[0x170], buf[0x171], buf[0x172], buf[0x173]]);
+            let bytes = u32::from_le_bytes([buf[0x170], buf[0x171], buf[0x172], buf[0x173]]);
             if opts.mime_type {
                 return mime_with_encoding("application/octet-stream", opts);
             }
@@ -1625,7 +1644,8 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         // The first Ogg packet after the page header carries the codec
         // signature. Vorbis/Opus pack the stream parameters there.
         let first_pkt_off = 27 + buf[26] as usize;
-        if first_pkt_off + 30 <= buf.len() && &buf[first_pkt_off + 1..first_pkt_off + 7] == b"vorbis"
+        if first_pkt_off + 30 <= buf.len()
+            && &buf[first_pkt_off + 1..first_pkt_off + 7] == b"vorbis"
         {
             let channels = buf[first_pkt_off + 11];
             let rate = u32::from_le_bytes([
@@ -1763,9 +1783,11 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             let channels_str = match channels {
                 1 => "mono",
                 2 => "stereo",
-                n => return format!(
-                    "RIFF (little-endian) data, WAVE audio, {format_name}, {bits} bit, {n} channels {rate} Hz"
-                ),
+                n => {
+                    return format!(
+                        "RIFF (little-endian) data, WAVE audio, {format_name}, {bits} bit, {n} channels {rate} Hz"
+                    );
+                }
             };
             return format!(
                 "RIFF (little-endian) data, WAVE audio, {format_name}, {bits} bit, {channels_str} {rate} Hz"
@@ -1928,8 +1950,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             return mime_with_encoding("application/gzip", opts);
         }
         let flags = buf[3];
-        let mtime =
-            u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
+        let mtime = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
         let os = buf[9];
         let xfl = buf[8];
         let mut i = 10usize;
@@ -1999,12 +2020,22 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             }
             // FLG byte at base+3 (the last byte of the file).
             let flg = buf[buf.len() - 1];
-            if flg & 0x01 != 0 { p2.push("ASCII".to_string()); }
-            if flg & 0x02 != 0 { p2.push("has CRC".to_string()); }
-            if flg & 0x04 != 0 { p2.push("extra field".to_string()); }
+            if flg & 0x01 != 0 {
+                p2.push("ASCII".to_string());
+            }
+            if flg & 0x02 != 0 {
+                p2.push("has CRC".to_string());
+            }
+            if flg & 0x04 != 0 {
+                p2.push("extra field".to_string());
+            }
             // FNAME (0x08) would read a string beyond the file: always empty.
-            if flg & 0x10 != 0 { p2.push("has comment".to_string()); }
-            if flg & 0x20 != 0 { p2.push("encrypted".to_string()); }
+            if flg & 0x10 != 0 {
+                p2.push("has comment".to_string());
+            }
+            if flg & 0x20 != 0 {
+                p2.push("encrypted".to_string());
+            }
             // MTIME at base+4..base+8: beyond file -> 0 -> no last modified.
             // XFL at base+8: beyond file -> 0 -> no compression flag.
             // OS at base+9: beyond file -> 0 -> FAT filesystem.
@@ -2094,8 +2125,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             let mut i = 0usize;
             while i + 30 <= buf.len() {
                 if &buf[i..i + 4] == b"PK\x03\x04" {
-                    let name_len =
-                        u16::from_le_bytes([buf[i + 26], buf[i + 27]]) as usize;
+                    let name_len = u16::from_le_bytes([buf[i + 26], buf[i + 27]]) as usize;
                     if name_len >= prefix.len()
                         && i + 30 + prefix.len() <= buf.len()
                         && &buf[i + 30..i + 30 + prefix.len()] == prefix
@@ -2144,9 +2174,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         if scan_name_prefix(b"ppt/") {
             return "Microsoft PowerPoint 2007+".to_string();
         }
-        if scan_name_prefix(b"_rels/.rels")
-            && scan_name_prefix(b"[Content_Types].xml")
-        {
+        if scan_name_prefix(b"_rels/.rels") && scan_name_prefix(b"[Content_Types].xml") {
             return "Microsoft OOXML".to_string();
         }
         // version_needed at offset 4 (little-endian u16). Upstream prints it
@@ -2355,7 +2383,11 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
 
     // XML (and its specializations — SVG). Accept a leading UTF-8 BOM so
     // BOM-prefixed XML (common for WSF scripts) is classified correctly.
-    let xml_body_start = if buf.starts_with(b"\xef\xbb\xbf") { 3 } else { 0 };
+    let xml_body_start = if buf.starts_with(b"\xef\xbb\xbf") {
+        3
+    } else {
+        0
+    };
     if buf.len() >= xml_body_start + 5 && &buf[xml_body_start..xml_body_start + 5] == b"<?xml" {
         let text_preview = String::from_utf8_lossy(&buf[..buf.len().min(2048)]);
         if text_preview.contains("<svg") {
@@ -2385,7 +2417,11 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         }
         // Pull the version digit out of `{\rtfN` and check for the common
         // character set / code page markers upstream reports.
-        let version = buf.get(5).copied().filter(|b| b.is_ascii_digit()).unwrap_or(b'1');
+        let version = buf
+            .get(5)
+            .copied()
+            .filter(|b| b.is_ascii_digit())
+            .unwrap_or(b'1');
         let version_char = version as char;
         let sample = &buf[..buf.len().min(512)];
         let sample_str = String::from_utf8_lossy(sample);
@@ -2509,8 +2545,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
             let first_line = text.lines().next().unwrap_or("");
             // Type 1 ASCII font (PFA): `%!PS-AdobeFont-1.0` or `%!FontType1`,
             // plus a CreationDate comment in the first block.
-            if first_line.starts_with("%!PS-AdobeFont") || first_line.starts_with("%!FontType1")
-            {
+            if first_line.starts_with("%!PS-AdobeFont") || first_line.starts_with("%!FontType1") {
                 let cd_line = text
                     .lines()
                     .take(30)
@@ -2518,7 +2553,10 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
                     .unwrap_or("");
                 // Upstream drops one `%` from `%%CreationDate:` — we do the
                 // same so the summary matches byte-for-byte.
-                let cd = cd_line.trim_end_matches('\r').strip_prefix('%').unwrap_or("");
+                let cd = cd_line
+                    .trim_end_matches('\r')
+                    .strip_prefix('%')
+                    .unwrap_or("");
                 if !cd.is_empty() {
                     return format!("PostScript Type 1 font text ({cd})");
                 }
@@ -2589,9 +2627,7 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
 
         // Linux Software Map (.lsm): file starts with `Begin4\n`.
         if text.starts_with("Begin4\n") {
-            return format!(
-                "Linux Software Map entry text (new format), ASCII text{terms_text}"
-            );
+            return format!("Linux Software Map entry text (new format), ASCII text{terms_text}");
         }
 
         // ReStructuredText: starts with a long line of `=` characters,
@@ -2607,7 +2643,9 @@ fn identify_data(buf: &[u8], path: &str, opts: &FileOpts) -> String {
         // `:Base <help-file>`.
         if text.starts_with(":Base ") {
             let rest = &text[6..];
-            let name_end = rest.find(|c: char| c == '\n' || c == '>').unwrap_or(rest.len());
+            let name_end = rest
+                .find(|c: char| c == '\n' || c == '>')
+                .unwrap_or(rest.len());
             let name = rest[..name_end].trim();
             return format!(
                 "MS Windows help file Content, based \"{name}\", ASCII text{terms_text}"
@@ -2846,8 +2884,7 @@ fn identify_macho_fat(buf: &[u8], nfat: u32) -> String {
         parts.join("|")
     }
 
-    let be_u32 =
-        |o: usize| u32::from_be_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]);
+    let be_u32 = |o: usize| u32::from_be_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]);
 
     let mut arch_descs = Vec::new();
     for i in 0..nfat as usize {
@@ -3097,13 +3134,8 @@ fn find_netbsd_ident(buf: &[u8], le: bool) -> Option<String> {
             && &buf[i + 12..i + 19] == b"NetBSD\0"
         {
             // name is 7 bytes, padded to 8.
-            let v = u32::from_le_bytes_or_be(
-                le,
-                buf[i + 20],
-                buf[i + 21],
-                buf[i + 22],
-                buf[i + 23],
-            );
+            let v =
+                u32::from_le_bytes_or_be(le, buf[i + 20], buf[i + 21], buf[i + 22], buf[i + 23]);
             // Encoding: MMmmrrr00 (where MM=major, mm=minor, rrr=sub-release).
             // Actually it's packed as: major*100000000 + minor*1000000 + patch*100 + …
             // Simpler: decode as decimal: 799005900 → 7.99.59.
@@ -3128,7 +3160,13 @@ fn find_gnu_abi_tag(buf: &[u8], le: bool) -> Option<String> {
             && &buf[i + 12..i + 16] == b"GNU\0"
         {
             let get = |o: usize| -> u32 {
-                u32::from_le_bytes_or_be(le, buf[i + 16 + o], buf[i + 17 + o], buf[i + 18 + o], buf[i + 19 + o])
+                u32::from_le_bytes_or_be(
+                    le,
+                    buf[i + 16 + o],
+                    buf[i + 17 + o],
+                    buf[i + 18 + o],
+                    buf[i + 19 + o],
+                )
             };
             let os = get(0);
             let major = get(4);
@@ -3250,12 +3288,12 @@ fn find_nt_prpsinfo(buf: &[u8], le: bool, is_64: bool) -> Option<String> {
                 match (sz, le) {
                     (2, true) => u16::from_le_bytes([info[off], info[off + 1]]) as u32,
                     (2, false) => u16::from_be_bytes([info[off], info[off + 1]]) as u32,
-                    (4, true) => u32::from_le_bytes([
-                        info[off], info[off + 1], info[off + 2], info[off + 3],
-                    ]),
-                    (4, false) => u32::from_be_bytes([
-                        info[off], info[off + 1], info[off + 2], info[off + 3],
-                    ]),
+                    (4, true) => {
+                        u32::from_le_bytes([info[off], info[off + 1], info[off + 2], info[off + 3]])
+                    }
+                    (4, false) => {
+                        u32::from_be_bytes([info[off], info[off + 1], info[off + 2], info[off + 3]])
+                    }
                     _ => 0,
                 }
             };
@@ -3289,7 +3327,9 @@ fn find_nt_prpsinfo(buf: &[u8], le: bool, is_64: bool) -> Option<String> {
             // value would require walking pointers, so we probe for common
             // platform identifiers as null-terminated ASCII.
             if !is_64 {
-                for plat in ["power6", "power7", "power8", "power9", "ppc", "i686", "i386"] {
+                for plat in [
+                    "power6", "power7", "power8", "power9", "ppc", "i686", "i386",
+                ] {
                     let needle = format!("{plat}\0");
                     if buf.windows(needle.len()).any(|w| w == needle.as_bytes()) {
                         // Also check that the char before the match is
@@ -3304,16 +3344,20 @@ fn find_nt_prpsinfo(buf: &[u8], le: bool, is_64: bool) -> Option<String> {
                     let needle = format!("{plat}\0");
                     if buf.windows(needle.len()).any(|w| w == needle.as_bytes()) {
                         // execfn scan for common interpreters
-                        let execfn =
-                            [
-                                "/bin/sleep", "/bin/sh", "/bin/bash", "/usr/bin/python",
-                                "/bin/cat", "/bin/ls", "/usr/bin/env",
-                            ]
-                            .iter()
-                            .find(|p| {
-                                let n = format!("{p}\0");
-                                buf.windows(n.len()).any(|w| w == n.as_bytes())
-                            });
+                        let execfn = [
+                            "/bin/sleep",
+                            "/bin/sh",
+                            "/bin/bash",
+                            "/usr/bin/python",
+                            "/bin/cat",
+                            "/bin/ls",
+                            "/usr/bin/env",
+                        ]
+                        .iter()
+                        .find(|p| {
+                            let n = format!("{p}\0");
+                            buf.windows(n.len()).any(|w| w == n.as_bytes())
+                        });
                         if let Some(e) = execfn {
                             suffix.push_str(&format!(", execfn: '{e}'"));
                         }
@@ -3371,7 +3415,11 @@ fn is_text_data(buf: &[u8]) -> bool {
 /// than "data".
 fn is_iso8859_text(buf: &[u8]) -> bool {
     buf.iter().all(|&b| {
-        b == 0x09 || b == 0x0a || b == 0x0b || b == 0x0c || b == 0x0d
+        b == 0x09
+            || b == 0x0a
+            || b == 0x0b
+            || b == 0x0c
+            || b == 0x0d
             || (0x20..=0x7e).contains(&b)
             || (0xa0..=0xff).contains(&b)
     })
@@ -3459,12 +3507,10 @@ fn identify_jpeg(buf: &[u8]) -> String {
                     if d.len() >= 14 && &d[0..6] == b"Exif\0\0" {
                         let tiff_data = &d[6..];
                         if tiff_data.len() >= 8
-                            && (&tiff_data[0..4] == b"II*\0"
-                                || &tiff_data[0..4] == b"MM\0*")
+                            && (&tiff_data[0..4] == b"II*\0" || &tiff_data[0..4] == b"MM\0*")
                         {
                             let le = &tiff_data[0..2] == b"II";
-                            let endian =
-                                if le { "little-endian" } else { "big-endian" };
+                            let endian = if le { "little-endian" } else { "big-endian" };
                             let tiff_info = tiff_summary(tiff_data, le, true);
                             parts.push(format!(
                                 "Exif Standard: [TIFF image data, {endian}{tiff_info}]"
@@ -3533,7 +3579,11 @@ fn identify_png(buf: &[u8]) -> String {
         6 => "RGBA",
         _ => "unknown",
     };
-    let interlace_str = if interlace == 0 { "non-interlaced" } else { "interlaced" };
+    let interlace_str = if interlace == 0 {
+        "non-interlaced"
+    } else {
+        "interlaced"
+    };
     format!("PNG image data, {w} x {h}, {depth}-bit/color {color}, {interlace_str}")
 }
 
@@ -3797,9 +3847,18 @@ fn identify_cabinet(buf: &[u8]) -> String {
         let seconds = (time & 0x1F) * 2;
 
         let month_name = match month {
-            1 => "Jan", 2 => "Feb", 3 => "Mar", 4 => "Apr",
-            5 => "May", 6 => "Jun", 7 => "Jul", 8 => "Aug",
-            9 => "Sep", 10 => "Oct", 11 => "Nov", _ => "Dec",
+            1 => "Jan",
+            2 => "Feb",
+            3 => "Mar",
+            4 => "Apr",
+            5 => "May",
+            6 => "Jun",
+            7 => "Jul",
+            8 => "Aug",
+            9 => "Sep",
+            10 => "Oct",
+            11 => "Nov",
+            _ => "Dec",
         };
 
         // GNU file always uses "Sun" as weekday for CAB dates (tm_wday=0 in file_fmtdatetime)
@@ -3810,7 +3869,10 @@ fn identify_cabinet(buf: &[u8]) -> String {
 
         // First file gets the coffFiles offset prefix
         if i == 0 {
-            out.push_str(&format!(", at 0x{:x} last modified {}", coff_files, date_str));
+            out.push_str(&format!(
+                ", at 0x{:x} last modified {}",
+                coff_files, date_str
+            ));
         } else {
             out.push_str(&format!(" last modified {}", date_str));
         }
@@ -3818,13 +3880,27 @@ fn identify_cabinet(buf: &[u8]) -> String {
         // File attributes: both files show all flags in the same order
         if attribs > 0 {
             let mut attrs = String::new();
-            if attribs & 0x0001 != 0 { attrs.push_str("+R"); }
-            if attribs & 0x0002 != 0 { attrs.push_str("+H"); }
-            if attribs & 0x0004 != 0 { attrs.push_str("+S"); }
-            if attribs & 0x0020 != 0 { attrs.push_str("+A"); }
-            if attribs & 0x0040 != 0 { attrs.push_str("+X"); }
-            if attribs & 0x0080 != 0 { attrs.push_str("+Utf"); }
-            if attribs & 0x0100 != 0 { attrs.push_str("+?"); }
+            if attribs & 0x0001 != 0 {
+                attrs.push_str("+R");
+            }
+            if attribs & 0x0002 != 0 {
+                attrs.push_str("+H");
+            }
+            if attribs & 0x0004 != 0 {
+                attrs.push_str("+S");
+            }
+            if attribs & 0x0020 != 0 {
+                attrs.push_str("+A");
+            }
+            if attribs & 0x0040 != 0 {
+                attrs.push_str("+X");
+            }
+            if attribs & 0x0080 != 0 {
+                attrs.push_str("+Utf");
+            }
+            if attribs & 0x0100 != 0 {
+                attrs.push_str("+?");
+            }
             out.push_str(&format!(" {} \"{}\"", attrs, name));
         } else {
             out.push_str(&format!(" \"{}\"", name));
@@ -4034,16 +4110,16 @@ fn ole_structural_summary(buf: &[u8]) -> Option<String> {
     let n_ent = dir.len() / 128;
 
     let clsid_msi: [u8; 16] = [
-        0x84, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x46,
+        0x84, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
     ];
     let clsid_mst: [u8; 16] = [
-        0x82, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x46,
+        0x82, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
     ];
     let clsid_msp: [u8; 16] = [
-        0x86, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x46,
+        0x86, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
     ];
 
     // Root entry (entry 0) — holds the mini-stream container.
@@ -4081,11 +4157,7 @@ fn ole_structural_summary(buf: &[u8]) -> Option<String> {
             let sz = u32::from_le_bytes([e[120], e[121], e[122], e[123]]) as usize;
             if ole_dir_name_eq(&e[0..64], nsz, b"\x05SummaryInformation") {
                 si_entries.push((sec, sz));
-            } else if ole_dir_name_eq(
-                &e[0..64],
-                nsz,
-                b"\x05DocumentSummaryInformation",
-            ) {
+            } else if ole_dir_name_eq(&e[0..64], nsz, b"\x05DocumentSummaryInformation") {
                 dsi_entries.push((sec, sz));
             }
         }
@@ -4153,12 +4225,12 @@ fn ole_structural_summary(buf: &[u8]) -> Option<String> {
 
     // ── Locate the right FMTID section inside the property set ───
     let fmtid_si: [u8; 16] = [
-        0xe0, 0x85, 0x9f, 0xf2, 0xf9, 0x4f, 0x68, 0x10, 0xab, 0x91, 0x08, 0x00, 0x2b, 0x27,
-        0xb3, 0xd9,
+        0xe0, 0x85, 0x9f, 0xf2, 0xf9, 0x4f, 0x68, 0x10, 0xab, 0x91, 0x08, 0x00, 0x2b, 0x27, 0xb3,
+        0xd9,
     ];
     let fmtid_dsi: [u8; 16] = [
-        0x02, 0xd5, 0xcd, 0xd5, 0x9c, 0x2e, 0x1b, 0x10, 0x93, 0x97, 0x08, 0x00, 0x2b, 0x2c,
-        0xf9, 0xae,
+        0x02, 0xd5, 0xcd, 0xd5, 0x9c, 0x2e, 0x1b, 0x10, 0x93, 0x97, 0x08, 0x00, 0x2b, 0x2c, 0xf9,
+        0xae,
     ];
 
     let nsec = u32::from_le_bytes(stream[24..28].try_into().ok()?) as usize;
@@ -4191,7 +4263,6 @@ fn ole_structural_summary(buf: &[u8]) -> Option<String> {
 
     Some(format_ole_summary(&stream, 0, fmtid_pos, installer))
 }
-
 
 /// Parse the first section of an OLE SummaryInformation property set and
 /// emit the classic upstream `file` summary line. `ps_start` points at the
@@ -4242,11 +4313,12 @@ fn format_ole_summary(
         if entry + 8 > buf.len() {
             break;
         }
-        let pid = u32::from_le_bytes([
-            buf[entry], buf[entry + 1], buf[entry + 2], buf[entry + 3],
-        ]);
+        let pid = u32::from_le_bytes([buf[entry], buf[entry + 1], buf[entry + 2], buf[entry + 3]]);
         let off = u32::from_le_bytes([
-            buf[entry + 4], buf[entry + 5], buf[entry + 6], buf[entry + 7],
+            buf[entry + 4],
+            buf[entry + 5],
+            buf[entry + 6],
+            buf[entry + 7],
         ]) as usize;
         props.push((pid, off));
     }
@@ -4265,7 +4337,10 @@ fn format_ole_summary(
             return None;
         }
         let len = u32::from_le_bytes([
-            buf[val_off + 4], buf[val_off + 5], buf[val_off + 6], buf[val_off + 7],
+            buf[val_off + 4],
+            buf[val_off + 5],
+            buf[val_off + 6],
+            buf[val_off + 7],
         ]) as usize;
         if len == 0 || val_off + 8 + len > buf.len() {
             return None;
@@ -4292,7 +4367,10 @@ fn format_ole_summary(
             return None;
         }
         Some(i32::from_le_bytes([
-            buf[val_off + 4], buf[val_off + 5], buf[val_off + 6], buf[val_off + 7],
+            buf[val_off + 4],
+            buf[val_off + 5],
+            buf[val_off + 6],
+            buf[val_off + 7],
         ]))
     };
     let read_filetime = |val_off: usize| -> Option<u64> {
@@ -4300,8 +4378,14 @@ fn format_ole_summary(
             return None;
         }
         Some(u64::from_le_bytes([
-            buf[val_off + 4], buf[val_off + 5], buf[val_off + 6], buf[val_off + 7],
-            buf[val_off + 8], buf[val_off + 9], buf[val_off + 10], buf[val_off + 11],
+            buf[val_off + 4],
+            buf[val_off + 5],
+            buf[val_off + 6],
+            buf[val_off + 7],
+            buf[val_off + 8],
+            buf[val_off + 9],
+            buf[val_off + 10],
+            buf[val_off + 11],
         ]))
     };
     // Code page (PID 1). Upstream prints unsigned 16-bit even if stored
@@ -4509,13 +4593,10 @@ fn format_unix_utc(ts: i64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     let months = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     let month = months[(m - 1) as usize];
-    format!(
-        "{weekday} {month} {d:>2} {hour:02}:{minute:02}:{second:02} {y}"
-    )
+    format!("{weekday} {month} {d:>2} {hour:02}:{minute:02}:{second:02} {y}")
 }
 
 /// Parse the first IFD of a TIFF file and build the comma-separated suffix
@@ -4526,14 +4607,22 @@ fn tiff_summary(buf: &[u8], le: bool, is_exif: bool) -> String {
             return None;
         }
         let bytes = [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]];
-        Some(if le { u32::from_le_bytes(bytes) } else { u32::from_be_bytes(bytes) })
+        Some(if le {
+            u32::from_le_bytes(bytes)
+        } else {
+            u32::from_be_bytes(bytes)
+        })
     };
     let u16_at = |i: usize| -> Option<u16> {
         if i + 2 > buf.len() {
             return None;
         }
         let bytes = [buf[i], buf[i + 1]];
-        Some(if le { u16::from_le_bytes(bytes) } else { u16::from_be_bytes(bytes) })
+        Some(if le {
+            u16::from_le_bytes(bytes)
+        } else {
+            u16::from_be_bytes(bytes)
+        })
     };
     // Read an ASCII (type 2) string value from an IFD entry whose first byte
     // is at position `eoff` in `buf`.
@@ -4695,44 +4784,44 @@ fn tiff_summary(buf: &[u8], le: bool, is_exif: bool) -> String {
         parts.push(format!("PhotometricInterpretation={name}"));
     }
     if is_exif {
-    if let Some(ref d) = description {
-        parts.push(format!("description={d}"));
-    }
-    if let Some(ref m) = manufacturer {
-        parts.push(format!("manufacturer={m}"));
-    }
-    if let Some(ref m) = model_str {
-        parts.push(format!("model={m}"));
-    }
-    if let Some(o) = orientation {
-        let name = match o {
-            1 => "upper-left",
-            2 => "upper-right",
-            3 => "lower-right",
-            4 => "lower-left",
-            5 => "left-top",
-            6 => "right-top",
-            7 => "right-bottom",
-            8 => "left-bottom",
-            _ => "unknown",
-        };
-        parts.push(format!("orientation={name}"));
-    }
-    if let Some(x) = xresolution {
-        parts.push(format!("xresolution={x}"));
-    }
-    if let Some(y) = yresolution {
-        parts.push(format!("yresolution={y}"));
-    }
-    if let Some(r) = resolutionunit {
-        parts.push(format!("resolutionunit={r}"));
-    }
-    if let Some(ref s) = software {
-        parts.push(format!("software={s}"));
-    }
-    if let Some(ref d) = datetime {
-        parts.push(format!("datetime={d}"));
-    }
+        if let Some(ref d) = description {
+            parts.push(format!("description={d}"));
+        }
+        if let Some(ref m) = manufacturer {
+            parts.push(format!("manufacturer={m}"));
+        }
+        if let Some(ref m) = model_str {
+            parts.push(format!("model={m}"));
+        }
+        if let Some(o) = orientation {
+            let name = match o {
+                1 => "upper-left",
+                2 => "upper-right",
+                3 => "lower-right",
+                4 => "lower-left",
+                5 => "left-top",
+                6 => "right-top",
+                7 => "right-bottom",
+                8 => "left-bottom",
+                _ => "unknown",
+            };
+            parts.push(format!("orientation={name}"));
+        }
+        if let Some(x) = xresolution {
+            parts.push(format!("xresolution={x}"));
+        }
+        if let Some(y) = yresolution {
+            parts.push(format!("yresolution={y}"));
+        }
+        if let Some(r) = resolutionunit {
+            parts.push(format!("resolutionunit={r}"));
+        }
+        if let Some(ref s) = software {
+            parts.push(format!("software={s}"));
+        }
+        if let Some(ref d) = datetime {
+            parts.push(format!("datetime={d}"));
+        }
     }
     if let Some(w) = width {
         parts.push(format!("width={w}"));
@@ -4785,8 +4874,15 @@ fn looks_like_mail(text: &str) -> bool {
     // Upstream only labels a file as RFC 822 mail when it *starts* with a
     // mail header — mail-like strings later in the body do not count.
     let markers = [
-        "From:", "To:", "Subject:", "Date:", "Message-ID:",
-        "Received:", "Return-Path:", "From ", "Delivered-To:",
+        "From:",
+        "To:",
+        "Subject:",
+        "Date:",
+        "Message-ID:",
+        "Received:",
+        "Return-Path:",
+        "From ",
+        "Delivered-To:",
     ];
     if !markers.iter().any(|m| text.starts_with(m)) {
         return false;
@@ -4796,10 +4892,7 @@ fn looks_like_mail(text: &str) -> bool {
     let hdr_block: &str = text.split("\n\n").next().unwrap_or("");
     markers
         .iter()
-        .filter(|m| {
-            hdr_block.starts_with(*m)
-                || hdr_block.contains(&format!("\n{m}"))
-        })
+        .filter(|m| hdr_block.starts_with(*m) || hdr_block.contains(&format!("\n{m}")))
         .count()
         >= 2
 }
@@ -4858,7 +4951,13 @@ fn identify_utf16(buf: &[u8], opts: &FileOpts, le: bool) -> String {
     }
     let ascii: String = chars
         .iter()
-        .filter_map(|&c| if c < 0x80 { Some(c as u8 as char) } else { None })
+        .filter_map(|&c| {
+            if c < 0x80 {
+                Some(c as u8 as char)
+            } else {
+                None
+            }
+        })
         .collect();
     let endian = if le { "little-endian" } else { "big-endian" };
     if ascii.starts_with("<?xml") {
@@ -4899,9 +4998,7 @@ fn identify_pdf(buf: &[u8]) -> String {
         .position(|&b| b == b'\n' || b == b'\r')
         .unwrap_or(buf.len().min(16));
     // buf[5..end] contains the version (e.g. "1.4")
-    let version = std::str::from_utf8(&buf[5..end])
-        .unwrap_or("")
-        .trim();
+    let version = std::str::from_utf8(&buf[5..end]).unwrap_or("").trim();
     if version.is_empty() {
         "PDF document".to_string()
     } else {
@@ -4912,7 +5009,14 @@ fn identify_pdf(buf: &[u8]) -> String {
 fn identify_ext_fs(buf: &[u8]) -> String {
     let sb = 1024usize; // superblock offset
     let le_u16 = |o: usize| u16::from_le_bytes([buf[sb + o], buf[sb + o + 1]]);
-    let le_u32 = |o: usize| u32::from_le_bytes([buf[sb + o], buf[sb + o + 1], buf[sb + o + 2], buf[sb + o + 3]]);
+    let le_u32 = |o: usize| {
+        u32::from_le_bytes([
+            buf[sb + o],
+            buf[sb + o + 1],
+            buf[sb + o + 2],
+            buf[sb + o + 3],
+        ])
+    };
 
     let rev_level = le_u32(76);
     let minor_rev = le_u16(62);
@@ -4934,14 +5038,26 @@ fn identify_ext_fs(buf: &[u8]) -> String {
     // Format UUID as 8-4-4-4-12
     let uuid = format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        uuid_bytes[0], uuid_bytes[1], uuid_bytes[2], uuid_bytes[3],
-        uuid_bytes[4], uuid_bytes[5],
-        uuid_bytes[6], uuid_bytes[7],
-        uuid_bytes[8], uuid_bytes[9],
-        uuid_bytes[10], uuid_bytes[11], uuid_bytes[12], uuid_bytes[13], uuid_bytes[14], uuid_bytes[15]
+        uuid_bytes[0],
+        uuid_bytes[1],
+        uuid_bytes[2],
+        uuid_bytes[3],
+        uuid_bytes[4],
+        uuid_bytes[5],
+        uuid_bytes[6],
+        uuid_bytes[7],
+        uuid_bytes[8],
+        uuid_bytes[9],
+        uuid_bytes[10],
+        uuid_bytes[11],
+        uuid_bytes[12],
+        uuid_bytes[13],
+        uuid_bytes[14],
+        uuid_bytes[15]
     );
 
-    let mut out = format!("Linux rev {rev_level}.{minor_rev} {fs_type} filesystem data, UUID={uuid}");
+    let mut out =
+        format!("Linux rev {rev_level}.{minor_rev} {fs_type} filesystem data, UUID={uuid}");
 
     // Volume name (16 bytes at offset 136)
     let vol_name_bytes = &buf[sb + 120..sb + 136];
@@ -5003,15 +5119,23 @@ fn identify_mbr(buf: &[u8]) -> String {
         let end_chs_sec = buf[base + 6] & 0x3f;
         let end_chs_cyl = ((buf[base + 6] as u16 & 0xc0) << 2) | buf[base + 7] as u16;
 
-        let start_lba = u32::from_le_bytes([buf[base + 8], buf[base + 9], buf[base + 10], buf[base + 11]]);
-        let num_sectors = u32::from_le_bytes([buf[base + 12], buf[base + 13], buf[base + 14], buf[base + 15]]);
+        let start_lba =
+            u32::from_le_bytes([buf[base + 8], buf[base + 9], buf[base + 10], buf[base + 11]]);
+        let num_sectors = u32::from_le_bytes([
+            buf[base + 12],
+            buf[base + 13],
+            buf[base + 14],
+            buf[base + 15],
+        ]);
 
         let sep = if first_part { "; " } else { "; " };
         first_part = false;
 
         out.push_str(&format!(
             "{}partition {} : ID=0x{:x}",
-            sep, i + 1, part_type
+            sep,
+            i + 1,
+            part_type
         ));
 
         if status == 0x80 {
@@ -5020,9 +5144,14 @@ fn identify_mbr(buf: &[u8]) -> String {
 
         out.push_str(&format!(
             ", start-CHS (0x{:x},{},{}), end-CHS (0x{:x},{},{}), startsector {}, {} sectors",
-            start_chs_cyl, start_chs_head, start_chs_sec,
-            end_chs_cyl, end_chs_head, end_chs_sec,
-            start_lba, num_sectors
+            start_chs_cyl,
+            start_chs_head,
+            start_chs_sec,
+            end_chs_cyl,
+            end_chs_head,
+            end_chs_sec,
+            start_lba,
+            num_sectors
         ));
 
         // Extended partition types
@@ -5064,7 +5193,10 @@ fn identify_ntfs_boot(buf: &[u8]) -> String {
 
     // Boot indicator and FAT descriptor
     let boot_indicator = buf[36];
-    out.push_str(&format!(", dos < 4.0 BootSector (0x{:02x})", boot_indicator));
+    out.push_str(&format!(
+        ", dos < 4.0 BootSector (0x{:02x})",
+        boot_indicator
+    ));
 
     // FAT descriptor based on media_descriptor
     if media_descriptor == 0xf8 {
@@ -5072,21 +5204,35 @@ fn identify_ntfs_boot(buf: &[u8]) -> String {
     }
 
     // NTFS specific fields
-    let total_sectors = u64::from_le_bytes([buf[40], buf[41], buf[42], buf[43], buf[44], buf[45], buf[46], buf[47]]);
-    let mft_start_cluster = u64::from_le_bytes([buf[48], buf[49], buf[50], buf[51], buf[52], buf[53], buf[54], buf[55]]);
-    let mft_mirror_cluster = u64::from_le_bytes([buf[56], buf[57], buf[58], buf[59], buf[60], buf[61], buf[62], buf[63]]);
+    let total_sectors = u64::from_le_bytes([
+        buf[40], buf[41], buf[42], buf[43], buf[44], buf[45], buf[46], buf[47],
+    ]);
+    let mft_start_cluster = u64::from_le_bytes([
+        buf[48], buf[49], buf[50], buf[51], buf[52], buf[53], buf[54], buf[55],
+    ]);
+    let mft_mirror_cluster = u64::from_le_bytes([
+        buf[56], buf[57], buf[58], buf[59], buf[60], buf[61], buf[62], buf[63],
+    ]);
     let record_segment_raw = buf[64];
     let clusters_per_index = buf[68];
-    let serial = u64::from_le_bytes([buf[72], buf[73], buf[74], buf[75], buf[76], buf[77], buf[78], buf[79]]);
+    let serial = u64::from_le_bytes([
+        buf[72], buf[73], buf[74], buf[75], buf[76], buf[77], buf[78], buf[79],
+    ]);
 
     out.push_str(&format!("; NTFS, sectors/track {}", sectors_per_track));
     out.push_str(&format!(", sectors {}", total_sectors));
     out.push_str(&format!(", $MFT start cluster {}", mft_start_cluster));
-    out.push_str(&format!(", $MFTMirror start cluster {}", mft_mirror_cluster));
+    out.push_str(&format!(
+        ", $MFTMirror start cluster {}",
+        mft_mirror_cluster
+    ));
 
     // Record segment size: if > 127, it's 2^(-1*value) bytes; otherwise clusters
     if record_segment_raw > 127 {
-        out.push_str(&format!(", bytes/RecordSegment 2^(-1*{})", record_segment_raw));
+        out.push_str(&format!(
+            ", bytes/RecordSegment 2^(-1*{})",
+            record_segment_raw
+        ));
     } else {
         out.push_str(&format!(", clusters/RecordSegment {}", record_segment_raw));
     }
@@ -5104,7 +5250,6 @@ fn identify_ntfs_boot(buf: &[u8]) -> String {
 
     out
 }
-
 
 fn identify_dump_be(buf: &[u8]) -> String {
     let be_u32 = |o: usize| u32::from_be_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]);
@@ -5266,20 +5411,13 @@ fn identify_lnk(buf: &[u8]) -> String {
     if flags & 0x1000000 == 0 {
         let sig: [u8; 8] = [0x60, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0xA0];
         let search_start = 76;
-        if let Some(pos) = buf[search_start..]
-            .windows(8)
-            .position(|w| w == sig)
-        {
+        if let Some(pos) = buf[search_start..].windows(8).position(|w| w == sig) {
             let block_start = search_start + pos;
             let machine_off = block_start + 16;
             if machine_off + 16 <= buf.len() {
                 let machine_bytes = &buf[machine_off..machine_off + 16];
-                let end = machine_bytes
-                    .iter()
-                    .position(|&b| b == 0)
-                    .unwrap_or(16);
-                let machine_id =
-                    std::str::from_utf8(&machine_bytes[..end]).unwrap_or("");
+                let end = machine_bytes.iter().position(|&b| b == 0).unwrap_or(16);
+                let machine_id = std::str::from_utf8(&machine_bytes[..end]).unwrap_or("");
                 if !machine_id.is_empty() {
                     parts.push(format!("MachineID {machine_id}"));
                 }
@@ -5294,7 +5432,8 @@ fn identify_lnk(buf: &[u8]) -> String {
         let mut found_etm = false;
         for i in search_start..buf.len().saturating_sub(8) {
             // Look for the 4-byte signature 0xA0000009 LE = [0x09, 0x00, 0x00, 0xA0]
-            if buf[i + 4] == 0x09 && buf[i + 5] == 0x00 && buf[i + 6] == 0x00 && buf[i + 7] == 0xA0 {
+            if buf[i + 4] == 0x09 && buf[i + 5] == 0x00 && buf[i + 6] == 0x00 && buf[i + 7] == 0xA0
+            {
                 let block_size = u32::from_le_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]);
                 if block_size >= 12 {
                     found_etm = true;
@@ -5365,8 +5504,7 @@ fn identify_lnk(buf: &[u8]) -> String {
     let mut offset = 76usize;
 
     if flags & 0x001 != 0 && offset + 2 <= buf.len() {
-        let id_list_size =
-            u16::from_le_bytes([buf[offset], buf[offset + 1]]) as usize;
+        let id_list_size = u16::from_le_bytes([buf[offset], buf[offset + 1]]) as usize;
         parts.push(format!("IDListSize 0x{id_list_size:04x}"));
 
         // Parse individual items in the IDList
@@ -5374,8 +5512,7 @@ fn identify_lnk(buf: &[u8]) -> String {
         let list_end = (list_start + id_list_size).min(buf.len());
         let mut item_off = list_start;
         while item_off + 2 <= list_end {
-            let item_size =
-                u16::from_le_bytes([buf[item_off], buf[item_off + 1]]) as usize;
+            let item_size = u16::from_le_bytes([buf[item_off], buf[item_off + 1]]) as usize;
             if item_size == 0 {
                 break;
             }
@@ -5424,9 +5561,12 @@ fn identify_lnk(buf: &[u8]) -> String {
     // LinkInfo
     if flags & 0x002 != 0 && offset + 4 <= buf.len() {
         let link_info_start = offset;
-        let link_info_size =
-            u32::from_le_bytes([buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3]])
-                as usize;
+        let link_info_size = u32::from_le_bytes([
+            buf[offset],
+            buf[offset + 1],
+            buf[offset + 2],
+            buf[offset + 3],
+        ]) as usize;
         if link_info_size >= 20 && link_info_start + link_info_size <= buf.len() {
             let local_base_path_off = u32::from_le_bytes([
                 buf[link_info_start + 16],
@@ -5441,8 +5581,7 @@ fn identify_lnk(buf: &[u8]) -> String {
                     .position(|&b| b == 0)
                     .map(|p| s_start + p)
                     .unwrap_or(buf.len());
-                let local_path =
-                    std::str::from_utf8(&buf[s_start..s_end]).unwrap_or("");
+                let local_path = std::str::from_utf8(&buf[s_start..s_end]).unwrap_or("");
                 if !local_path.is_empty() {
                     parts.push(format!("LocalBasePath \"{local_path}\""));
                 }

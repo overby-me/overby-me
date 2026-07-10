@@ -81,25 +81,45 @@ impl ElfBits {
 
     pub fn read_u64(&self, data: &[u8], off: usize) -> u64 {
         let b: [u8; 8] = data[off..off + 8].try_into().unwrap();
-        if self.is_le { u64::from_le_bytes(b) } else { u64::from_be_bytes(b) }
+        if self.is_le {
+            u64::from_le_bytes(b)
+        } else {
+            u64::from_be_bytes(b)
+        }
     }
     pub fn write_u64(&self, data: &mut [u8], off: usize, v: u64) {
-        let b = if self.is_le { v.to_le_bytes() } else { v.to_be_bytes() };
+        let b = if self.is_le {
+            v.to_le_bytes()
+        } else {
+            v.to_be_bytes()
+        };
         data[off..off + 8].copy_from_slice(&b);
     }
     pub fn read_u32(&self, data: &[u8], off: usize) -> u32 {
         let b: [u8; 4] = data[off..off + 4].try_into().unwrap();
-        if self.is_le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }
+        if self.is_le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
     }
     pub fn write_u32(&self, data: &mut [u8], off: usize, v: u32) {
-        let b = if self.is_le { v.to_le_bytes() } else { v.to_be_bytes() };
+        let b = if self.is_le {
+            v.to_le_bytes()
+        } else {
+            v.to_be_bytes()
+        };
         data[off..off + 4].copy_from_slice(&b);
     }
 
     /// Field offsets within an Elf_Dyn entry.
     /// Returns (d_tag_off, d_val_off, word_size).
     pub fn dyn_fields(&self, base: usize) -> (usize, usize, usize) {
-        if self.is_64 { (base, base + 8, 8) } else { (base, base + 4, 4) }
+        if self.is_64 {
+            (base, base + 8, 8)
+        } else {
+            (base, base + 4, 4)
+        }
     }
 
     /// Field offsets within an Elf_Phdr entry.
@@ -196,8 +216,14 @@ pub fn append_to_dynstr(elf: &Elf, data: &mut Vec<u8>, extra: &[u8]) -> (u64, u3
     let mut old_strsz = 0u64;
     for (i, e) in dynamic.dyns.iter().enumerate() {
         match e.d_tag {
-            DT_STRTAB => { dt_strtab_idx = Some(i); old_strtab_vaddr = e.d_val; }
-            DT_STRSZ => { dt_strsz_idx = Some(i); old_strsz = e.d_val; }
+            DT_STRTAB => {
+                dt_strtab_idx = Some(i);
+                old_strtab_vaddr = e.d_val;
+            }
+            DT_STRSZ => {
+                dt_strsz_idx = Some(i);
+                old_strsz = e.d_val;
+            }
             _ => {}
         }
     }
@@ -275,7 +301,12 @@ pub fn append_to_dynstr(elf: &Elf, data: &mut Vec<u8>, extra: &[u8]) -> (u64, u3
             bits.write_word(data, load_pf.p_memsz, new_load_filesz);
         }
         update_dynstr_section_header(
-            data, &elf.header, &bits, old_strtab_off, new_dynstr_off, new_dynstr_size,
+            data,
+            &elf.header,
+            &bits,
+            old_strtab_off,
+            new_dynstr_off,
+            new_dynstr_size,
         );
         return (new_dynstr_vaddr, old_strsz as u32);
     }
@@ -286,9 +317,8 @@ pub fn append_to_dynstr(elf: &Elf, data: &mut Vec<u8>, extra: &[u8]) -> (u64, u3
     let mut spare_phdr_off = None;
     for (i, ph) in elf.program_headers.iter().enumerate() {
         if ph.p_type == PT_GNU_STACK || ph.p_type == PT_NULL {
-            spare_phdr_off = Some(
-                elf.header.e_phoff as usize + i * elf.header.e_phentsize as usize,
-            );
+            spare_phdr_off =
+                Some(elf.header.e_phoff as usize + i * elf.header.e_phentsize as usize);
             break;
         }
     }
@@ -312,14 +342,20 @@ pub fn append_to_dynstr(elf: &Elf, data: &mut Vec<u8>, extra: &[u8]) -> (u64, u3
 
     let cur_len = data.len() as u64;
     let new_off = (cur_len + page - 1) & !(page - 1);
-    while (data.len() as u64) < new_off { data.push(0); }
+    while (data.len() as u64) < new_off {
+        data.push(0);
+    }
     let pad_to_align = (page - (data.len() as u64 % page)) % page;
-    for _ in 0..pad_to_align { data.push(0); }
+    for _ in 0..pad_to_align {
+        data.push(0);
+    }
     let new_dynstr_off = data.len() as u64;
     data.extend_from_slice(&strtab_bytes);
     data.extend_from_slice(extra);
     let memsz_aligned = (new_dynstr_size + page - 1) & !(page - 1);
-    while ((data.len() as u64) - new_dynstr_off) < memsz_aligned { data.push(0); }
+    while ((data.len() as u64) - new_dynstr_off) < memsz_aligned {
+        data.push(0);
+    }
 
     let gs = bits.phdr_fields(gnu_stack_phdr_off);
     bits.write_u32(data, gs.p_type, PT_LOAD);
@@ -334,7 +370,12 @@ pub fn append_to_dynstr(elf: &Elf, data: &mut Vec<u8>, extra: &[u8]) -> (u64, u3
     bits.write_word(data, strtab_dyn.1, top_vaddr);
     bits.write_word(data, strsz_dyn.1, new_dynstr_size);
     update_dynstr_section_header(
-        data, &elf.header, &bits, old_strtab_off, new_dynstr_off, new_dynstr_size,
+        data,
+        &elf.header,
+        &bits,
+        old_strtab_off,
+        new_dynstr_off,
+        new_dynstr_size,
     );
 
     (top_vaddr, old_strsz as u32)

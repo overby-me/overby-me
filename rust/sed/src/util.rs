@@ -40,4 +40,3 @@ pub fn escape_string_tokens(data: &[u8]) -> Vec<String> {
     }
     result
 }
-

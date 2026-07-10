@@ -1026,10 +1026,7 @@ impl<'a> TableGenerator<'a> {
 
                 if rule.rhs.is_empty() {
                     // Epsilon production
-                    let set = self
-                        .first_sets
-                        .entry(rule.lhs)
-                        .or_default();
+                    let set = self.first_sets.entry(rule.lhs).or_default();
                     if set.insert(EPSILON) {
                         changed = true;
                     }
@@ -1047,10 +1044,7 @@ impl<'a> TableGenerator<'a> {
                         .cloned()
                         .collect();
 
-                    let set = self
-                        .first_sets
-                        .entry(rule.lhs)
-                        .or_default();
+                    let set = self.first_sets.entry(rule.lhs).or_default();
                     for t in non_eps {
                         if set.insert(t) {
                             changed = true;
@@ -1064,10 +1058,7 @@ impl<'a> TableGenerator<'a> {
                 }
 
                 if all_nullable {
-                    let set = self
-                        .first_sets
-                        .entry(rule.lhs)
-                        .or_default();
+                    let set = self.first_sets.entry(rule.lhs).or_default();
                     if set.insert(EPSILON) {
                         changed = true;
                     }

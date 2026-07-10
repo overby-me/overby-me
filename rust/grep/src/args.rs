@@ -37,14 +37,14 @@ pub(crate) struct Options {
     pub(crate) context: usize,          // -C
     pub(crate) context_requested: bool, // true if -A, -B, or -C was explicitly used
     // File/directory
-    pub(crate) recursive: bool, // -r/-R
+    pub(crate) recursive: bool,             // -r/-R
     pub(crate) dereference_recursive: bool, // -R only (follow symlinks during recursion)
     pub(crate) include_glob: Vec<String>,
     pub(crate) exclude_glob: Vec<String>,
     pub(crate) include_is_strict: bool, // true if --include should be a strict whitelist
     pub(crate) exclude_dir_glob: Vec<String>,
-    pub(crate) skip_devices: bool,      // -D skip
-    pub(crate) skip_directories: bool,  // -d skip / --directories=skip
+    pub(crate) skip_devices: bool,     // -D skip
+    pub(crate) skip_directories: bool, // -d skip / --directories=skip
     // Misc
     pub(crate) label: String, // --label
     pub(crate) color: ColorMode,
@@ -322,7 +322,11 @@ pub(crate) fn parse_args() -> Options {
                         let rest: String = chars[j + 1..].iter().collect();
                         let action = if rest.is_empty() {
                             i += 1;
-                            if i < args.len() { args[i].as_str() } else { "read" }
+                            if i < args.len() {
+                                args[i].as_str()
+                            } else {
+                                "read"
+                            }
                         } else {
                             &rest
                         };
@@ -339,7 +343,11 @@ pub(crate) fn parse_args() -> Options {
                         let rest: String = chars[j + 1..].iter().collect();
                         let action = if rest.is_empty() {
                             i += 1;
-                            if i < args.len() { args[i].as_str() } else { "read" }
+                            if i < args.len() {
+                                args[i].as_str()
+                            } else {
+                                "read"
+                            }
                         } else {
                             &rest
                         };
@@ -520,9 +528,7 @@ pub(crate) fn parse_args() -> Options {
         );
         // GREP_COLOR sets mt= if not already set by GREP_COLORS
         if env::var("GREP_COLORS").is_err()
-            || !env::var("GREP_COLORS")
-                .unwrap_or_default()
-                .contains("mt=")
+            || !env::var("GREP_COLORS").unwrap_or_default().contains("mt=")
         {
             opts.match_color = color;
         }

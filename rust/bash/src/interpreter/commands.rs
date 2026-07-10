@@ -1493,9 +1493,8 @@ impl Shell {
         // read/printf -v to decide bracket matching (rfind vs first-]).
         // This mimics bash's W_ARRAYREF flag set during word expansion.
         let has_unquoted_arrayref = words_to_expand.iter().any(|(_, word)| {
-            word.iter().any(|part| {
-                matches!(part, crate::ast::WordPart::Literal(s) if s.contains('['))
-            })
+            word.iter()
+                .any(|part| matches!(part, crate::ast::WordPart::Literal(s) if s.contains('[')))
         });
         crate::expand::set_unquoted_arrayref(has_unquoted_arrayref);
         // Expand words, applying assignment-context tilde expansion where appropriate
@@ -4359,16 +4358,14 @@ impl Shell {
                                         // Emit depth-exceeded warning and assign to both
                                         // current array AND saved scope
                                         self.resolve_nameref_warn_depth_only(&assign.name);
-                                        let final_value =
-                                            if self.integer_vars.contains(&resolved) {
-                                                self.eval_arith_expr(&value).to_string()
-                                            } else {
-                                                value
-                                            };
+                                        let final_value = if self.integer_vars.contains(&resolved) {
+                                            self.eval_arith_expr(&value).to_string()
+                                        } else {
+                                            value
+                                        };
                                         // Assign to current array
                                         self.declared_unset.remove(&resolved);
-                                        let arr =
-                                            self.arrays.entry(resolved.clone()).or_default();
+                                        let arr = self.arrays.entry(resolved.clone()).or_default();
                                         if arr.is_empty() {
                                             arr.push(Some(final_value.clone()));
                                         } else {
@@ -4385,8 +4382,7 @@ impl Shell {
                                                         arr[0] = Some(final_value);
                                                     }
                                                 } else {
-                                                    saved.array =
-                                                        Some(vec![Some(final_value)]);
+                                                    saved.array = Some(vec![Some(final_value)]);
                                                 }
                                                 break;
                                             }

@@ -460,7 +460,7 @@ The benchmark app (`examples/bench/bench.mojo`) used `external_call["performance
 
 **Fix:** Made `performance_now()` cross-platform with `@parameter if is_wasm_target()`: WASM path uses `external_call` (unchanged), native path uses `time.perf_counter_ns() / 1_000_000.0`.
 
-**Issue 3: Headless XR frame loop never exits**
+## Issue 3: Headless XR frame loop never exits
 
 The XR launcher's break condition checked `predicted_time == 0` as a "headless sentinel", but the headless `mxr_wait_frame()` returns real `SystemTime` timestamps (not 0). The frame loop ran indefinitely.
 

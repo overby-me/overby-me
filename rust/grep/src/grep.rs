@@ -280,11 +280,23 @@ pub(crate) fn grep_reader<R: BufRead>(
                         checked_write!(out, "\t");
                     }
                     if use_color {
-                        checked_writeln!(out, "{}", colorize_line(&line, matcher, &opts.match_color));
+                        checked_writeln!(
+                            out,
+                            "{}",
+                            colorize_line(&line, matcher, &opts.match_color)
+                        );
                     } else {
                         // Write raw bytes to preserve non-UTF-8 content
-                        if !write_error && out.write_all(&line_buf).is_err() { write_error = true; }
-                        if !write_error && out.write_all(if opts.null_data { b"\0" } else { b"\n" }).is_err() { write_error = true; }
+                        if !write_error && out.write_all(&line_buf).is_err() {
+                            write_error = true;
+                        }
+                        if !write_error
+                            && out
+                                .write_all(if opts.null_data { b"\0" } else { b"\n" })
+                                .is_err()
+                        {
+                            write_error = true;
+                        }
                     }
                 }
             }

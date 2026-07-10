@@ -115,7 +115,8 @@ pub(crate) fn collect_files(opts: &Options, default_dir: bool) -> (Vec<PathBuf>,
                     Ok(e) => e,
                     Err(e) => {
                         if !opts.no_messages {
-                            let path_display = e.path()
+                            let path_display = e
+                                .path()
                                 .map(|p| p.display().to_string())
                                 .unwrap_or_else(|| "(unknown)".to_string());
                             if e.loop_ancestor().is_some() {
@@ -137,9 +138,10 @@ pub(crate) fn collect_files(opts: &Options, default_dir: bool) -> (Vec<PathBuf>,
 
                     // Apply include/exclude filters (match against both name and path)
                     let entry_path_str = entry.path().to_string_lossy();
-                    let matches_exclude = opts.exclude_glob.iter().any(|g| {
-                        matches_glob(&name, g) || matches_glob(&entry_path_str, g)
-                    });
+                    let matches_exclude = opts
+                        .exclude_glob
+                        .iter()
+                        .any(|g| matches_glob(&name, g) || matches_glob(&entry_path_str, g));
 
                     if matches_exclude {
                         continue;
@@ -147,9 +149,10 @@ pub(crate) fn collect_files(opts: &Options, default_dir: bool) -> (Vec<PathBuf>,
 
                     if !opts.include_glob.is_empty() && opts.include_is_strict {
                         // Strict whitelist: only files matching include are considered
-                        let matches_include = opts.include_glob.iter().any(|g| {
-                            matches_glob(&name, g) || matches_glob(&entry_path_str, g)
-                        });
+                        let matches_include = opts
+                            .include_glob
+                            .iter()
+                            .any(|g| matches_glob(&name, g) || matches_glob(&entry_path_str, g));
                         if !matches_include {
                             continue;
                         }
@@ -166,22 +169,29 @@ pub(crate) fn collect_files(opts: &Options, default_dir: bool) -> (Vec<PathBuf>,
                 }
             }
         } else {
-            let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_default();
             let path_str = path.to_string_lossy();
 
             // Apply --include filter for non-recursive files
             if !opts.include_glob.is_empty() && opts.include_is_strict {
-                if !opts.include_glob.iter().any(|g| {
-                    matches_glob(&name, g) || matches_glob(&path_str, g)
-                }) {
+                if !opts
+                    .include_glob
+                    .iter()
+                    .any(|g| matches_glob(&name, g) || matches_glob(&path_str, g))
+                {
                     continue;
                 }
             }
 
             // Apply --exclude to non-recursive file arguments too
-            if opts.exclude_glob.iter().any(|g| {
-                matches_glob(&name, g) || matches_glob(&path_str, g)
-            }) {
+            if opts
+                .exclude_glob
+                .iter()
+                .any(|g| matches_glob(&name, g) || matches_glob(&path_str, g))
+            {
                 continue;
             }
 

@@ -8,9 +8,7 @@
 use std::io::{self, BufReader, BufWriter, Read, Write};
 
 use liblzma::read::{XzDecoder, XzEncoder};
-use liblzma::stream::{
-    CONCATENATED, Filters, LzmaOptions, Stream, TELL_UNSUPPORTED_CHECK,
-};
+use liblzma::stream::{CONCATENATED, Filters, LzmaOptions, Stream, TELL_UNSUPPORTED_CHECK};
 
 use crate::options::{BcjArch, FilterChain, FilterKind, Format};
 
@@ -144,8 +142,7 @@ const XZ_MAGIC: &[u8; 6] = b"\xfd7zXZ\x00";
 /// compressed stream (xz, lzip; lzma-alone has no reliable magic
 /// so we don't try to detect it here).
 pub fn looks_compressed(buf: &[u8]) -> bool {
-    (buf.len() >= 6 && &buf[..6] == XZ_MAGIC)
-        || (buf.len() >= 4 && &buf[..4] == LZIP_MAGIC)
+    (buf.len() >= 6 && &buf[..6] == XZ_MAGIC) || (buf.len() >= 4 && &buf[..4] == LZIP_MAGIC)
 }
 
 /// Decompress in `-dfc` mode: like `decompress_stream_opts`, but if

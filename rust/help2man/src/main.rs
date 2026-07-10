@@ -173,11 +173,7 @@ fn main() {
 
     // Parse program name and version from --version output
     let first_line = version_output.lines().next().unwrap_or(&exe);
-    let prog_name = exe
-        .rsplit('/')
-        .next()
-        .unwrap_or(&exe)
-        .to_string();
+    let prog_name = exe.rsplit('/').next().unwrap_or(&exe).to_string();
     let version_str = first_line;
 
     let description = name.unwrap_or_else(|| {
@@ -211,11 +207,7 @@ fn main() {
 
     // NAME section
     man.push_str(".SH NAME\n");
-    man.push_str(&format!(
-        "{} \\- {}\n",
-        prog_name,
-        description.trim()
-    ));
+    man.push_str(&format!("{} \\- {}\n", prog_name, description.trim()));
 
     // Parse --help into sections
     let sections = parse_help(&help_output, &prog_name);

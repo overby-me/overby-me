@@ -99,7 +99,10 @@ fn main() -> ExitCode {
         eprintln!("FAIL: at least one input panicked the decoder");
         ExitCode::from(1)
     } else {
-        eprintln!("OK: {} inputs survived all mutations without panicking", inputs.len());
+        eprintln!(
+            "OK: {} inputs survived all mutations without panicking",
+            inputs.len()
+        );
         ExitCode::SUCCESS
     }
 }

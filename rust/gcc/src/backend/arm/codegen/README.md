@@ -679,7 +679,7 @@ The optimizer runs in three phases:
 
 ### Optimization Catalog
 
-**1. Adjacent Store/Load Elimination**
+## 1. Adjacent Store/Load Elimination
 
 When a `str xN, [sp, #off]` is immediately followed by `ldr xN, [sp, #off]` (same
 register, same offset), the load is redundant and eliminated. If the registers differ
@@ -688,23 +688,23 @@ register, same offset), the load is redundant and eliminated. If the registers d
 Also handles `str wN, [sp, #off]` followed by `ldrsw xN, [sp, #off]` (sign-extending
 load after 32-bit store).
 
-**2. Redundant Branch Elimination**
+## 2. Redundant Branch Elimination
 
 An unconditional `b .label` where `.label:` is the immediately next non-empty line
 is a no-op (natural fall-through) and is eliminated.
 
-**3. Self-Move Elimination**
+## 3. Self-Move Elimination
 
 `mov xN, xN` (64-bit) is a no-op and removed. Importantly, `mov wN, wN` (32-bit) is
 **not** eliminated because it zeros the upper 32 bits of the 64-bit register, which
 is a meaningful operation.
 
-**4. Move Chain Optimization**
+## 4. Move Chain Optimization
 
 The sequence `mov A, B; mov C, A` is transformed to `mov C, B`, which enables the
 first `mov` to become dead if `A` has no other uses.
 
-**5. Branch-Over-Branch Fusion**
+## 5. Branch-Over-Branch Fusion
 
 The pattern:
 
@@ -720,7 +720,7 @@ is fused into a single inverted conditional branch:
     b.!cc .target
 ```
 
-**6. Move-Immediate Chain**
+## 6. Move-Immediate Chain
 
 The sequence `mov xN, #imm; mov xM, xN` where `xN` is a scratch register is collapsed
 to `mov xM, #imm` when safe.

@@ -67,7 +67,7 @@ use uefi::proto::loaded_image::LoadedImage;
 use uefi::proto::media::file::{Directory, File, FileAttribute, FileInfo, FileMode, FileType};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::runtime::{VariableAttributes, VariableVendor};
-use uefi::{cstr16, CStr16};
+use uefi::{CStr16, cstr16};
 
 // ── Constants ─────────────────────────────────────────────────────────────
 

@@ -47,7 +47,9 @@ impl GawkRng {
         let mut x = if x == 0 { 123_459_876 } else { x };
         let hi = x / 127_773;
         let lo = x % 127_773;
-        x = 16807_i32.wrapping_mul(lo).wrapping_sub(2836_i32.wrapping_mul(hi));
+        x = 16807_i32
+            .wrapping_mul(lo)
+            .wrapping_sub(2836_i32.wrapping_mul(hi));
         if x < 0 {
             x = x.wrapping_add(0x7fff_ffff);
         }
@@ -2223,12 +2225,11 @@ impl Interpreter {
             }
             Expr::Match(left, right) => {
                 let s = self.eval_expr(left).to_string_val();
-                let (pattern, is_literal) =
-                    if let Some(r) = self.extract_regex_pattern(right) {
-                        (r, true)
-                    } else {
-                        (self.eval_expr(right).to_string_val(), false)
-                    };
+                let (pattern, is_literal) = if let Some(r) = self.extract_regex_pattern(right) {
+                    (r, true)
+                } else {
+                    (self.eval_expr(right).to_string_val(), false)
+                };
                 if !is_literal && Self::has_trailing_backslash(&pattern) {
                     self.runtime_regex_error("Trailing backslash", &pattern);
                 }
@@ -2239,12 +2240,11 @@ impl Interpreter {
             }
             Expr::NotMatch(left, right) => {
                 let s = self.eval_expr(left).to_string_val();
-                let (pattern, is_literal) =
-                    if let Some(r) = self.extract_regex_pattern(right) {
-                        (r, true)
-                    } else {
-                        (self.eval_expr(right).to_string_val(), false)
-                    };
+                let (pattern, is_literal) = if let Some(r) = self.extract_regex_pattern(right) {
+                    (r, true)
+                } else {
+                    (self.eval_expr(right).to_string_val(), false)
+                };
                 if !is_literal && Self::has_trailing_backslash(&pattern) {
                     self.runtime_regex_error("Trailing backslash", &pattern);
                 }

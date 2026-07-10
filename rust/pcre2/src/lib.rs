@@ -269,7 +269,14 @@ mod tests {
 
     #[test]
     fn case_insensitive() {
-        let re = Regex::with_options("hello", CompileOptions { caseless: true, ..Default::default() }).unwrap();
+        let re = Regex::with_options(
+            "hello",
+            CompileOptions {
+                caseless: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(re.is_match(b"HELLO").unwrap());
     }
 
@@ -290,7 +297,10 @@ mod tests {
             .map(|m| m.unwrap())
             .map(|m| m.as_bytes().to_vec())
             .collect();
-        assert_eq!(matches, vec![b"1".to_vec(), b"23".to_vec(), b"456".to_vec()]);
+        assert_eq!(
+            matches,
+            vec![b"1".to_vec(), b"23".to_vec(), b"456".to_vec()]
+        );
     }
 
     #[test]
@@ -324,7 +334,14 @@ mod tests {
 
     #[test]
     fn multiline() {
-        let re = Regex::with_options("^test$", CompileOptions { multiline: true, ..Default::default() }).unwrap();
+        let re = Regex::with_options(
+            "^test$",
+            CompileOptions {
+                multiline: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(re.is_match(b"line1\ntest\nline3").unwrap());
     }
 
@@ -333,7 +350,14 @@ mod tests {
         let re_no = Regex::new("a.b").unwrap();
         assert!(!re_no.is_match(b"a\nb").unwrap());
 
-        let re_yes = Regex::with_options("a.b", CompileOptions { dotall: true, ..Default::default() }).unwrap();
+        let re_yes = Regex::with_options(
+            "a.b",
+            CompileOptions {
+                dotall: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(re_yes.is_match(b"a\nb").unwrap());
     }
 }

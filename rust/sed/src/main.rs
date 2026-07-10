@@ -28,7 +28,10 @@ fn fmt_io_err(e: &io::Error) -> String {
 
 fn print_usage(out: &mut dyn io::Write, full: bool) {
     let _ = writeln!(out, "Usage: sed [OPTION]... {{script}} [input-file]...");
-    let _ = writeln!(out, "  -n, --quiet, --silent    suppress automatic printing");
+    let _ = writeln!(
+        out,
+        "  -n, --quiet, --silent    suppress automatic printing"
+    );
     let _ = writeln!(out, "  -e script                add commands");
     let _ = writeln!(out, "  -f file                  add commands from file");
     let _ = writeln!(out, "  -i[SUFFIX]               edit files in place");
@@ -424,8 +427,16 @@ fn main() {
         }
     } else {
         // GNU mode: join all expressions with newlines (allows a/c/i continuation)
-        let combined: String = opts.scripts.iter().map(|s| s.content.clone()).collect::<Vec<_>>().join("\n");
-        let source = opts.scripts.first().map(|s| s.source.clone())
+        let combined: String = opts
+            .scripts
+            .iter()
+            .map(|s| s.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let source = opts
+            .scripts
+            .first()
+            .map(|s| s.source.clone())
             .unwrap_or(ScriptSource::Expression(1));
         let mut parser = Parser::new(&combined, opts.extended, source);
         parser.sandbox = opts.sandbox;
@@ -485,8 +496,7 @@ fn main() {
                 Ok(bytes) => bytes,
                 Err(e) => {
                     if opts.follow_symlinks
-                        && (!std::path::Path::new(file).exists()
-                            || e.raw_os_error() == Some(40))
+                        && (!std::path::Path::new(file).exists() || e.raw_os_error() == Some(40))
                     {
                         let msg = fmt_io_err(&e);
                         if msg.is_empty() {
@@ -527,15 +537,25 @@ fn main() {
                         let _ = std::fs::remove_file(&tmp_path);
                     }
                     Err(e) => {
-                        eprintln!("sed: couldn't open temporary file {}: {}",
-                            tmp_path.display(), fmt_io_err(&e));
+                        eprintln!(
+                            "sed: couldn't open temporary file {}: {}",
+                            tmp_path.display(),
+                            fmt_io_err(&e)
+                        );
                         process::exit(4);
                     }
                 }
             }
 
             // Each file gets a fresh engine in in-place mode
-            let mut engine = Engine::new(commands.clone(), quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
+            let mut engine = Engine::new(
+                commands.clone(),
+                quiet,
+                posix,
+                opts.sandbox,
+                opts.line_length,
+                opts.null_data,
+            );
             engine.current_filename = Some(if opts.follow_symlinks {
                 resolve_symlinks(file)
             } else {
@@ -564,7 +584,14 @@ fn main() {
         }
     } else if opts.files.is_empty() || (opts.files.len() == 1 && opts.files[0] == "-") {
         let stdin = io::stdin();
-        let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
+        let mut engine = Engine::new(
+            commands,
+            quiet,
+            posix,
+            opts.sandbox,
+            opts.line_length,
+            opts.null_data,
+        );
         let code = if opts.unbuffered {
             // Read byte-by-byte from raw fd 0 to avoid read-ahead buffering.
             // This ensures that after sed exits (e.g., via `q`), unconsumed
@@ -577,13 +604,21 @@ fn main() {
         } else {
             let reader = stdin.lock();
             engine.run(reader, &mut out)
-        }.unwrap_or_else(|e| {
+        }
+        .unwrap_or_else(|e| {
             eprintln!("sed: {e}");
             1
         });
         process::exit(code);
     } else {
-        let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
+        let mut engine = Engine::new(
+            commands,
+            quiet,
+            posix,
+            opts.sandbox,
+            opts.line_length,
+            opts.null_data,
+        );
         let mut exit_code = 0i32;
         // Determine the last file with actual content for $ detection
         let last_content_idx = {
@@ -615,8 +650,7 @@ fn main() {
                         if opts.follow_symlinks {
                             let msg = fmt_io_err(&e);
                             // Non-existent file or symlink loop
-                            if !std::path::Path::new(file).exists()
-                                || e.raw_os_error() == Some(40)
+                            if !std::path::Path::new(file).exists() || e.raw_os_error() == Some(40)
                             {
                                 // 40 = ELOOP on Linux
                                 if msg.is_empty() {

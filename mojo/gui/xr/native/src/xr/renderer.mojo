@@ -231,7 +231,7 @@ struct XRMutationInterpreter(Movable):
     var _panel_id: UInt32
     var _stack: List[UInt32]
 
-    fn __init__(out self, ref [MutAnyOrigin]xr: XRBlitz, panel_id: UInt32):
+    fn __init__(out self, ref[MutAnyOrigin] xr: XRBlitz, panel_id: UInt32):
         """Create a mutation interpreter for a specific XR panel.
 
         Args:
