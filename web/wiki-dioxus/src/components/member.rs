@@ -38,6 +38,10 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let mut edit_name = use_signal(String::new);
     let mut edit_email = use_signal(String::new);
     let mut remove_target = use_signal(|| Option::<(String, String)>::None);
+    // Invite-by-name autocomplete: matching users, and a monotonic request id so
+    // out-of-order search responses don't clobber a newer one.
+    let mut user_matches = use_signal(Vec::<graphql::Author>::new);
+    let mut search_seq = use_signal(|| 0u32);
 
     let save_edit = move |_| {
         let Some(id) = edit_id.read().clone() else {
@@ -112,7 +116,67 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                             r#type: "text",
                             placeholder: "{t(\"invite.nameOrEmail\")}",
                             value: "{invite_input}",
-                            oninput: move |evt| invite_input.set(evt.value()),
+                            oninput: move |evt| {
+                                let q = evt.value();
+                                invite_input.set(q.clone());
+                                // Autocomplete known users by name; an email (with
+                                // '@') falls through to the email-invite button.
+                                if q.trim().is_empty() || q.contains('@') {
+                                    user_matches.set(vec![]);
+                                    return;
+                                }
+                                let token = session.read().access_token.clone();
+                                let seq = *search_seq.read() + 1;
+                                search_seq.set(seq);
+                                spawn(async move {
+                                    let results = graphql::search_users(token.as_deref(), &q).await;
+                                    if *search_seq.read() == seq {
+                                        user_matches.set(results);
+                                    }
+                                });
+                            },
+                        }
+                    }
+                    // Matching users — click to invite by node id (binds the user).
+                    if !user_matches.read().is_empty() {
+                        div { class: "list",
+                            for u in user_matches.read().iter() {
+                                {
+                                    let uname = u.name.clone();
+                                    let nid = u.node_id.clone();
+                                    let parent = node_id.clone();
+                                    rsx! {
+                                        button {
+                                            key: "{u.node_id.clone().unwrap_or_default()}",
+                                            class: "folder-item",
+                                            style: "width: 100%; text-align: left; background: none; border: none; cursor: pointer;",
+                                            onclick: move |_| {
+                                                let Some(nid) = nid.clone() else {
+                                                    return;
+                                                };
+                                                let token = session.read().access_token.clone();
+                                                let parent = parent.clone();
+                                                let uname = uname.clone();
+                                                invite_input.set(String::new());
+                                                user_matches.set(vec![]);
+                                                spawn(async move {
+                                                    match graphql::invite_member_by_node(token.as_deref(), &parent, &nid, &uname).await {
+                                                        Ok(true) => {
+                                                            show_snackbar(&t("invite.invite"));
+                                                            crate::session::bump_data_version();
+                                                        }
+                                                        _ => show_snackbar(&t("error.somethingWentWrong")),
+                                                    }
+                                                });
+                                            },
+                                            div { class: "avatar small", span { class: "material-icons", "person" } }
+                                            div { class: "list-item-text",
+                                                div { class: "list-item-primary", "{u.name}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     button {

@@ -1739,6 +1739,55 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
     out
 }
 
+/// Search users by display name for the member-invite autocomplete. Unlike
+/// [`search_authors`] this excludes groups — an invite binds a real user.
+pub async fn search_users(access_token: Option<&str>, query: &str) -> Vec<Author> {
+    if query.trim().is_empty() {
+        return vec![];
+    }
+    use cynic::QueryBuilder;
+    let op = UsersSearchQuery::build(UsersSearchVariables {
+        where_clause: UsersBoolExp {
+            display_name: Some(StringComparisonExp {
+                ilike: Some(format!("%{query}%")),
+                ..Default::default()
+            }),
+        },
+    });
+    let mut out = Vec::new();
+    if let Ok(r) = execute(access_token, op).await {
+        for u in r.users.into_iter().take(10) {
+            out.push(Author {
+                name: u.display_name,
+                node_id: Some(u.id.0),
+            });
+        }
+    }
+    out
+}
+
+/// Invite a known user by node id (binds `nodeId` + `name`), as opposed to the
+/// email-only [`invite_member`]. Mirrors selecting a `users` match in React
+/// InvitesTextField.
+pub async fn invite_member_by_node(
+    access_token: Option<&str>,
+    parent_id: &str,
+    node_id: &str,
+    name: &str,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let operation = InsertMemberMutation::build(InsertMemberVariables {
+        object: MembersInsertInput {
+            node_id: Some(Uuid(node_id.to_string())),
+            name: Some(name.to_string()),
+            parent_id: Some(Uuid(parent_id.to_string())),
+            ..Default::default()
+        },
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.insert_member.is_some())
+}
+
 #[derive(cynic::QueryVariables, Debug)]
 pub struct DeleteMembersVariables {
     pub where_clause: MembersBoolExp,
