@@ -154,7 +154,6 @@
 
   outputs = inputs:
     inputs.flakelight ./. {
-      nixDir = ./.;
       inherit inputs;
       systems = [
         "x86_64-linux"
@@ -167,21 +166,21 @@
       flakelight.builtinFormatters = false;
 
       imports = [
-        ./flake/modules/colmena.nix
-        ./flake/modules/darwin.nix
-        ./flake/modules/systemConfigs.nix
-        ./flake/modules/desktops.nix
-        ./flake/modules/devShellNames.nix
-        ./flake/modules/devenvConfigurations.nix
-        ./flake/modules/devenvModules.nix
-        ./flake/modules/filterUnsupported.nix
-        ./flake/modules/hardware.nix
-        ./flake/modules/homeConfigurations.nix
-        ./flake/modules/lib.nix
-        ./flake/modules/perSystemLib.nix
-        ./flake/modules/secrets.nix
-        ./flake/modules/users.nix
-        ./flake/modules/zedExtensions.nix
+        ./nix/flake/modules/colmena.nix
+        ./nix/flake/modules/darwin.nix
+        ./nix/flake/modules/systemConfigs.nix
+        ./nix/flake/modules/desktops.nix
+        ./nix/flake/modules/devShellNames.nix
+        ./nix/flake/modules/devenvConfigurations.nix
+        ./nix/flake/modules/devenvModules.nix
+        ./nix/flake/modules/filterUnsupported.nix
+        ./nix/flake/modules/hardware.nix
+        ./nix/flake/modules/homeConfigurations.nix
+        ./nix/flake/modules/lib.nix
+        ./nix/flake/modules/perSystemLib.nix
+        ./nix/flake/modules/secrets.nix
+        ./nix/flake/modules/users.nix
+        ./nix/flake/modules/zedExtensions.nix
 
         ./ironclaw/bluesky
         ./ironclaw/calendar
