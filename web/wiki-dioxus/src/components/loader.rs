@@ -401,6 +401,9 @@ mod tests {
             index,
             created_at: Some(Timestamptz(created.to_string())),
             owner_id: None,
+            is_owner: None,
+            is_context_owner: None,
+            owner: None,
             data: None,
             mime: Some(MimeFields {
                 id: "wiki/folder".to_string(),

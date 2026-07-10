@@ -589,6 +589,9 @@ mod tests {
             index,
             created_at: Some(Timestamptz(created.to_string())),
             owner_id: None,
+            is_owner: None,
+            is_context_owner: None,
+            owner: None,
             data: Some(Jsonb(serde_json::Value::String(kind.to_string()))),
             mime: None,
         }

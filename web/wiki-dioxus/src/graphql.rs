@@ -118,6 +118,9 @@ pub struct NodeFields {
     // a format-specific icon in the drawer tree.
     pub data: Option<Jsonb>,
     pub mime: Option<MimeFields>,
+    pub is_owner: Option<bool>,
+    pub is_context_owner: Option<bool>,
+    pub created_at: Option<Timestamptz>,
 }
 
 // --- Node with children ---
@@ -155,6 +158,15 @@ pub struct NodeWithChildren {
     pub parent: Option<Box<ParentNodeFields>>,
     pub children: Vec<ChildNodeFields>,
     pub members: Vec<MemberFields>,
+    // Backend-computed permission flags: `is_owner` = the session user owns this
+    // node; `is_context_owner` = they own its context. Drive owner-only UI gating.
+    pub is_owner: Option<bool>,
+    pub is_context_owner: Option<bool>,
+    // Whether children may be added (the folder "lock"; owner-toggleable).
+    pub attachable: bool,
+    pub created_at: Option<Timestamptz>,
+    // The creating user (fallback author label when no explicit author chip).
+    pub owner: Option<UserRef>,
 }
 
 /// A membership row on a node — used as the author chips on documents and the
@@ -164,7 +176,9 @@ pub struct NodeWithChildren {
 pub struct MemberFields {
     pub id: Uuid,
     pub name: Option<String>,
+    pub email: Option<String>,
     pub accepted: bool,
+    pub active: bool,
     pub owner: bool,
     pub hidden: bool,
     pub node_id: Option<Uuid>,
@@ -218,6 +232,10 @@ pub struct ChildNodeFields {
     pub owner_id: Option<Uuid>,
     pub data: Option<Jsonb>,
     pub mime: Option<MimeFields>,
+    pub is_owner: Option<bool>,
+    pub is_context_owner: Option<bool>,
+    // Creating user (fallback label for questions/candidates/comments/amendments).
+    pub owner: Option<UserRef>,
 }
 
 // --- Mime type ---
@@ -609,9 +627,19 @@ pub struct MembersSetInput {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub accepted: Option<bool>,
     #[cynic(skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub hidden: Option<bool>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub node_id: Option<Uuid>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
 }
 
 #[derive(cynic::QueryVariables, Debug)]
@@ -857,6 +885,16 @@ pub struct NodesSetInput {
     pub mutable: Option<bool>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub index: Option<i32>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub attachable: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub context_id: Option<Uuid>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<Uuid>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<Timestamptz>,
 }
 
 #[derive(cynic::QueryVariables, Debug)]
