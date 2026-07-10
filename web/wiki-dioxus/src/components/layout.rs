@@ -440,6 +440,18 @@ fn AppRail() -> Element {
             },
             current_app.as_deref() == Some("vote"),
         ));
+        // Members (roster + invitations). React only surfaces this to owners, but
+        // MemberApp gates the admin controls itself, so the rail entry is safe for
+        // any authenticated user (matching how speak/vote are shown here).
+        apps.push((
+            "app/member",
+            t("common.members"),
+            Route::PathPage {
+                segments: ctx_path.clone(),
+                app: Some("member".to_string()),
+            },
+            current_app.as_deref() == Some("member"),
+        ));
         // The other apps (screen, admin, program, graph, social, map, profile,
         // perm, parent) are still reachable via their `?app=` URL but hidden
         // from the rail until they are ready to show.

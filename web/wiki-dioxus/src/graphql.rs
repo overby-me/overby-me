@@ -991,6 +991,31 @@ pub async fn decline_invitation(
     Ok(result.delete_member.is_some())
 }
 
+/// Update a member row by primary key (owner/active/name/email/hidden). The
+/// owner-only member admin uses this to promote/demote, (de)activate, or rename
+/// a member, mirroring React's editable MembersDataGrid.
+pub async fn update_member(
+    access_token: Option<&str>,
+    member_id: &str,
+    set: MembersSetInput,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let operation = UpdateMemberMutation::build(UpdateMemberVariables {
+        pk: MembersPkColumnsInput {
+            id: Uuid(member_id.to_string()),
+        },
+        set,
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.update_member.is_some())
+}
+
+/// Remove a member from a context (owner action) — the same mutation as
+/// declining an invitation, named for the admin use.
+pub async fn remove_member(access_token: Option<&str>, member_id: &str) -> Result<bool, String> {
+    decline_invitation(access_token, member_id).await
+}
+
 // --- Update mutation ---
 
 #[derive(cynic::QueryVariables, Debug)]

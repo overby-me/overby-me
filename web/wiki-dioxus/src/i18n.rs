@@ -297,7 +297,14 @@ const EN_JSON: &str = r#"{
         "owner": "Owner",
         "active": "Active",
         "actions": "Actions",
-        "author": "Author"
+        "author": "Author",
+        "promote": "Make owner",
+        "demote": "Remove owner",
+        "activate": "Mark active",
+        "deactivate": "Mark inactive",
+        "remove": "Remove member",
+        "edit": "Edit member",
+        "confirmRemove": "Remove this member?"
     },
     "mime": {
         "group": "Group",
@@ -558,7 +565,14 @@ const DA_JSON: &str = r#"{
         "owner": "Ejer",
         "active": "Aktiv",
         "actions": "Handlinger",
-        "author": "Forfatter"
+        "author": "Forfatter",
+        "promote": "Gør til ejer",
+        "demote": "Fjern ejer",
+        "activate": "Markér aktiv",
+        "deactivate": "Markér inaktiv",
+        "remove": "Fjern medlem",
+        "edit": "Rediger medlem",
+        "confirmRemove": "Fjern dette medlem?"
     },
     "mime": {
         "group": "Gruppe",
