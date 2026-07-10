@@ -155,9 +155,7 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
 
         resolved = {
           enable = true;
-          extraConfig = ''
-            MulticastDNS=resolve
-          '';
+          settings.Resolve.MulticastDNS = "resolve";
         };
 
         # SSH

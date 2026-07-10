@@ -23,9 +23,20 @@
       url = "github:accelbread/flakelight";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    nixos-hardware.url = "github:NixOS/nixos-hardware/master";
+    nixos-hardware = {
+      url = "github:NixOS/nixos-hardware/master";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nixos-raspberrypi = {
+      # Following nixpkgs means eva-00 is built against this flake's nixpkgs
+      # rather than the revision nixos-raspberrypi pins. Its binary cache
+      # (nixos-raspberrypi.cachix.org) is keyed to that pinned revision, so
+      # cached rpi artifacts miss and get rebuilt locally.
       url = "github:nvmd/nixos-raspberrypi/main";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-compat.follows = "flake-compat";
+      };
     };
     nix-darwin = {
       url = "github:nix-darwin/nix-darwin/nix-darwin-26.05";
@@ -42,7 +53,13 @@
       # aren't part of that subset (e.g. nginx referencing `security.dhparams`),
       # breaking evaluation. Follow nixpkgs-unstable to match its expectations.
       url = "github:numtide/system-manager";
-      inputs.nixpkgs.follows = "nixpkgs-unstable";
+      inputs = {
+        nixpkgs.follows = "nixpkgs-unstable";
+        flake-compat.follows = "flake-compat";
+        userborn.inputs.flake-parts.follows = "flake-parts";
+        userborn.inputs.systems.follows = "systems";
+        userborn.inputs.pre-commit-hooks-nix.inputs.gitignore.follows = "gitignore";
+      };
     };
     agenix = {
       url = "github:ryantm/agenix";
@@ -78,6 +95,7 @@
         git-hooks.follows = "git-hooks";
         flake-compat.follows = "flake-compat";
         flake-parts.follows = "flake-parts";
+        rust-overlay.follows = "rust-overlay";
       };
     };
 
@@ -103,6 +121,11 @@
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-compat.follows = "flake-compat";
+      inputs.gitignore.follows = "gitignore";
+    };
+    gitignore = {
+      url = "github:hercules-ci/gitignore.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils = {
       url = "github:numtide/flake-utils";
