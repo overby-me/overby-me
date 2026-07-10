@@ -84,9 +84,9 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 - `[x]` **Questions** (React `vote/QuestionList.tsx`, `AddQuestionButton.tsx`) —
   done: numbered `vote/question` list with add (`data.text`) and owner/author
   delete. (Question reorder/sort not wired.)
-- `[ ]` **Amendments** (React `vote/AddChangeButton.tsx`) — "new amendment" button
-  (gated on `inserts` ∋ `vote/change`) → editor redirect, name-prefill under a
-  position. **major**
+- `[x]` **Amendments** (React `vote/AddChangeButton.tsx`) — done: a "New amendment"
+  button + name dialog on PolicyApp inserts a `vote/change` and redirects to its
+  editor.
 - `[x]` **Live-update on poll open** — done: VoteApp subscribes to the context
   `active` relation so a newly-opened poll appears without reload.
 - `[~]` **Poll-list affordances** (React `poll/PollList.tsx`) — poll rows lack the
@@ -119,9 +119,9 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 - `[x]` **Cover image lost on save** — done: the editor preserves the node's other
   `data` keys (e.g. `image`) and overwrites only `content`. (A cover-image
   uploader/preview in the editor is still not offered.)
-- `[ ]` **Group/event double-card** — React stacks `ContentApp(hideMembers)` above
-  `FolderApp` for `wiki/group`/`wiki/event` (metadata + comments card, then the
-  folder listing); the port renders only the folder. **medium**
+- `[x]` **Group/event double-card** — done: a CommentSection now renders below the
+  folder listing for `wiki/group`/`wiki/event` (the description already shows in
+  the folder card). The metadata/members card is not separately duplicated.
 - `[x]` **Delete removes member rows first** (React `DeleteButton.tsx:16-19`) —
   done: content delete now removes the node's member rows first
   (`delete_node_members`) so no orphans are left.
@@ -148,15 +148,15 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 - `[x]` **Member administration** (React `member/MembersDataGrid.tsx`) — done:
   per-row promote/demote owner, mark active/inactive, hide/show, edit name+email,
   and remove (confirm), via `update_member`/`remove_member`.
-- `[ ]` **Invite existing users by name** (React `invite/InvitesTextField.tsx`) —
-  only single-email invites; add a `users` `displayName _ilike` autocomplete with
-  multi-select, binding `nodeId` for known users (`invite_member` currently sends
-  no `nodeId`/`name`). **major**
+- `[x]` **Invite existing users by name** — done: a users `displayName _ilike`
+  autocomplete (race-guarded) in MemberApp; clicking a match invites by `nodeId`
+  (binds nodeId + name) via `invite_member_by_node`. (Single-select, not multi.)
 - `[x]` **Members entry point** — done: a Members entry in the app rail + mobile
   app bar (the component gates admin actions itself).
-- `[ ]` **Accept-invite unique-constraint fallback** — if a member row already
-  exists, React deletes the placeholder email-invite row and updates the existing
-  membership; the port has no fallback and can hit the unique constraint. **major**
+- `[x]` **Accept-invite unique-constraint fallback** — done: on accept failure,
+  accept the existing `(parent, node)` membership (`accept_existing_member`) then
+  drop the duplicate invite — ordered so a transient failure never loses the
+  invite (safer than React).
 
 ## 6. Folder management
 
@@ -164,15 +164,14 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   `session.selected`) — select items, recursively deep-duplicate node + children +
   members, with a `checkIfSuperParent` circular-parent guard. Entirely absent.
   **major**
-- `[ ]` **Folder lock** (`attachable`) — read the lock state and let a context
-  owner toggle whether children can be added (needs the `attachable` field, §1).
-  **major**
+- `[x]` **Folder lock** (`attachable`) — done: a context owner toggles whether
+  children can be added via a header lock button (update_node on `attachable`).
 
 ## 7. Real-time
 
-- `[ ]` **Projector live-update** — `ScreenApp` doesn't subscribe to the `active`
-  relation, so the projected content pane doesn't change when the active node is
-  switched remotely (React `ScreenApp` uses `useSubsGet`). **major**
+- `[x]` **Projector live-update** — done: `ScreenApp` subscribes to the context
+  `active` relation, so the projected pane changes when the active node is
+  switched remotely.
 - (Voter poll-open subscription is in §3.)
 
 ## 8. Mobile & responsive
@@ -180,18 +179,18 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 - `[x]` **Mobile app navigation** (React `layout/MobileMenu.tsx`) — done: a
   floating mobile app bar (bottom-left) exposes the same context apps as the
   desktop rail, so Speak/Vote/Members are reachable on a phone.
-- `[ ]` **Home list on mobile** — authed mobile users see only the welcome card in
-  the main pane; React also renders `HomeList` (groups/events) there. **medium**
-- `[ ]` **Pending-invite badge** on the Home rail/nav item (data already exists via
-  `query_invitations`). **medium**
+- `[x]` **Home list on mobile** — done: HomeList (groups/events) renders in the
+  Home main pane on mobile (`.home-mobile-list`), where the drawer is hidden.
+- `[x]` **Pending-invite badge** — done: a count badge on the Home nav item (rail
+  + mobile bar), fed by a `PENDING_INVITES` global resolved in Layout.
 
 ## 9. Search, auth & routing
 
 - `[x]` **`?type=passwordReset` deep-link** — done: the token is captured in
   `main()` before the router drops the query, exchanged for a session, and the
   set-password form is shown.
-- `[~]` **`?app=screen` chrome** — the projector view still shows the drawer/rail/
-  bar; it should render full-screen. **major**
+- `[x]` **`?app=screen` chrome** — done: Layout renders the projector view
+  full-screen (`.screen-full`), with no drawer/rail/bar.
 - `[~]` **Clear GraphQL cache on login/logout** — the port relies on token-change
   refetch; React explicitly clears the cache to avoid cross-session stale data.
 - `[ ]` **Resend verification email** on an unverified sign-in (React
