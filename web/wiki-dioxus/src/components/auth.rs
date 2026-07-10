@@ -25,6 +25,9 @@ fn AuthForm(mode: AuthMode) -> Element {
     let mut error_email = use_signal(String::new);
     let mut error_password = use_signal(String::new);
     let mut error_password_repeat = use_signal(String::new);
+    // Set when a sign-in fails because the account is unverified, so the login
+    // screen can offer to re-send the verification email.
+    let mut unverified = use_signal(|| false);
 
     let title = match mode {
         AuthMode::Login => t("auth.login"),
@@ -84,6 +87,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                         Err(err) => {
                             if err.error.as_deref() == Some("unverified-user") {
                                 error_email.set(t("auth.emailNotVerified"));
+                                unverified.set(true);
                             } else {
                                 error_email.set(t("auth.wrongCredentials"));
                                 error_password.set(t("auth.wrongCredentials"));
@@ -226,6 +230,27 @@ fn AuthForm(mode: AuthMode) -> Element {
                         }
                         if !error_email.read().is_empty() {
                             div { class: "helper-text", "{error_email}" }
+                        }
+                    }
+                    // Offer to re-send the verification email when a sign-in was
+                    // rejected because the account is not verified yet.
+                    if mode == AuthMode::Login && *unverified.read() {
+                        button {
+                            r#type: "button",
+                            class: "btn btn-text mt-1",
+                            onclick: move |_| {
+                                let em = email.read().trim().to_lowercase();
+                                if em.is_empty() {
+                                    return;
+                                }
+                                spawn(async move {
+                                    match nhost::send_verification_email(&em).await {
+                                        Ok(()) => crate::snackbar::show_snackbar(&t("auth.verificationResent")),
+                                        Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                    }
+                                });
+                            },
+                            "{t(\"auth.resendVerification\")}"
                         }
                     }
                 }

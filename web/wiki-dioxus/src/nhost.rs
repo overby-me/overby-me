@@ -197,6 +197,37 @@ pub async fn reset_password(email: &str) -> Result<(), NhostError> {
     Ok(())
 }
 
+/// Re-send the sign-up verification email for an unverified account. Used from
+/// the login screen when a sign-in fails with `unverified-user`.
+pub async fn send_verification_email(email: &str) -> Result<(), NhostError> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/user/email/send-verification-email", auth_url()))
+        .json(&ResetPasswordRequest {
+            email: email.to_lowercase(),
+        })
+        .send()
+        .await
+        .map_err(|e| NhostError {
+            status: None,
+            error: Some("network_error".to_string()),
+            message: Some(e.to_string()),
+        })?;
+
+    if !resp.status().is_success() {
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        return Err(
+            serde_json::from_value::<NhostError>(body).unwrap_or(NhostError {
+                status: None,
+                error: Some("unknown".to_string()),
+                message: Some("Failed to send verification email".to_string()),
+            }),
+        );
+    }
+
+    Ok(())
+}
+
 pub async fn change_password(access_token: &str, new_password: &str) -> Result<(), NhostError> {
     let client = reqwest::Client::new();
     let resp = client
