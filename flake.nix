@@ -163,7 +163,6 @@
       nixpkgs.config = {
         allowUnfree = true;
       };
-      flakelight.builtinFormatters = false;
 
       imports = [
         ./nix/flake/modules/colmena.nix
