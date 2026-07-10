@@ -194,7 +194,9 @@ const EN_JSON: &str = r#"{
         "manageFolder": "Manage folder",
         "proposedBy": "Proposed by",
         "export": "Export",
-        "copy": "Copy"
+        "copy": "Copy",
+        "lock": "Lock (block adding content)",
+        "unlock": "Unlock (allow adding content)"
     },
     "node": {
         "documentUnavailable": "The document is not available",
@@ -464,7 +466,9 @@ const DA_JSON: &str = r#"{
         "manageFolder": "Administrer mappe",
         "proposedBy": "Foresl\u00e5et af",
         "export": "Eksporter",
-        "copy": "Kopier"
+        "copy": "Kopier",
+        "lock": "L\u00e5s (bloker tilf\u00f8jelse)",
+        "unlock": "L\u00e5s op (tillad tilf\u00f8jelse)"
     },
     "node": {
         "documentUnavailable": "Dokumentet er ikke tilg\u00e6ngeligt",

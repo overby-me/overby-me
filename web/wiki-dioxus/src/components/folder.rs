@@ -149,6 +149,35 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                         {icon_el("app/sort")}
                     }
                 }
+                // Lock / unlock adding children (the `attachable` flag). Owner-only.
+                if is_context_owner {
+                    button {
+                        class: "btn-icon",
+                        title: if attachable { "{t(\"folder.lock\")}" } else { "{t(\"folder.unlock\")}" },
+                        onclick: {
+                            let id = node.id.0.clone();
+                            move |_| {
+                                let token = session.read().access_token.clone();
+                                let id = id.clone();
+                                spawn(async move {
+                                    let _ = graphql::update_node(
+                                        token.as_deref(),
+                                        &id,
+                                        graphql::NodesSetInput {
+                                            attachable: Some(!attachable),
+                                            ..Default::default()
+                                        },
+                                    )
+                                    .await;
+                                    crate::session::bump_data_version();
+                                });
+                            }
+                        },
+                        span { class: "material-icons",
+                            if attachable { "lock_open" } else { "lock" }
+                        }
+                    }
+                }
             }
             // The node's own description: groups, events and folders can carry
             // rich text shown above their children (#missing content text).
