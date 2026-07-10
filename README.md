@@ -2,20 +2,20 @@
 
 # [@overby.me](https://tangled.org/overby.me/overby.me)
 
-<a href="mailto:niclas@overby.me"><img src="./web/homepage/public/icons/mail.avif" width="32" height="32" alt="Mail"></a>
-<a href="https://matrix.to/#/@niclas:overby.me"><img src="./web/homepage/public/icons/matrix.avif" width="32" height="32" alt="Matrix"></a>
-<a href="https://signal.me/#eu/BKjgrHvQhqgDPpy9p2VfcfVj6yx0mJtVGOX8GQ_2htxhX7cDxhREVad8oWL1qAMj"><img src="./web/homepage/public/icons/signal.avif" width="32" height="32" alt="Signal"></a>
-<a href="https://www.linkedin.com/in/niclasoverby"><img src="./web/homepage/public/icons/linkedin.avif" width="32" height="32" alt="LinkedIn"></a>
-<a href="https://github.com/overby-me"><img src="./web/homepage/public/icons/github.avif" width="32" height="32" alt="GitHub"></a>
-<a href="https://tangled.org/@overby.me"><img src="./web/homepage/public/icons/tangled.avif" width="32" height="32" alt="Tangled"></a>
-<a href="https://mas.to/@niclasoverby"><img src="./web/homepage/public/icons/mastodon.avif" width="32" height="32" alt="Mastodon"></a>
-<a href="https://bsky.app/profile/overby.me"><img src="./web/homepage/public/icons/bluesky.avif" width="32" height="32" alt="Bluesky"></a>
-<a href="https://pixelfed.social/niclasoverby"><img src="./web/homepage/public/icons/pixelfed.avif" width="32" height="32" alt="PixelFed"></a>
-<a href="https://rocksky.app/profile/overby.me"><img src="./web/homepage/public/icons/rocksky.avif" width="32" height="32" alt="Rocksky"></a>
-<a href="https://en.wikipedia.org/wiki/User:Niclas_Overby"><img src="./web/homepage/public/icons/wikipedia.avif" width="32" height="32" alt="Wikipedia"></a>
-<a href="https://www.happycow.net/members/profile/niclasoverby"><img src="./web/homepage/public/icons/happycow.avif" width="32" height="32" alt="HappyCow"></a>
-<a href="https://lemmy.world/u/noverby"><img src="./web/homepage/public/icons/lemmy.avif" width="32" height="32" alt="Lemmy"></a>
-<a href="https://neodb.social/users/niclasoverby"><img src="./web/homepage/public/icons/neodb.avif" width="32" height="32" alt="NeoDB"></a>
+<a href="mailto:niclas@overby.me"><img src="./web/homepage/assets/icons/mail.avif" width="32" height="32" alt="Mail"></a>
+<a href="https://matrix.to/#/@niclas:overby.me"><img src="./web/homepage/assets/icons/matrix.avif" width="32" height="32" alt="Matrix"></a>
+<a href="https://signal.me/#eu/BKjgrHvQhqgDPpy9p2VfcfVj6yx0mJtVGOX8GQ_2htxhX7cDxhREVad8oWL1qAMj"><img src="./web/homepage/assets/icons/signal.avif" width="32" height="32" alt="Signal"></a>
+<a href="https://www.linkedin.com/in/niclasoverby"><img src="./web/homepage/assets/icons/linkedin.avif" width="32" height="32" alt="LinkedIn"></a>
+<a href="https://github.com/overby-me"><img src="./web/homepage/assets/icons/github.avif" width="32" height="32" alt="GitHub"></a>
+<a href="https://tangled.org/@overby.me"><img src="./web/homepage/assets/icons/tangled.avif" width="32" height="32" alt="Tangled"></a>
+<a href="https://mas.to/@niclasoverby"><img src="./web/homepage/assets/icons/mastodon.avif" width="32" height="32" alt="Mastodon"></a>
+<a href="https://bsky.app/profile/overby.me"><img src="./web/homepage/assets/icons/bluesky.avif" width="32" height="32" alt="Bluesky"></a>
+<a href="https://pinkleap.app/@overby.me"><img src="./web/homepage/assets/icons/pinkleap.avif" width="32" height="32" alt="PinkLeap"></a>
+<a href="https://rocksky.app/profile/overby.me"><img src="./web/homepage/assets/icons/rocksky.avif" width="32" height="32" alt="Rocksky"></a>
+<a href="https://en.wikipedia.org/wiki/User:Niclas_Overby"><img src="./web/homepage/assets/icons/wikipedia.avif" width="32" height="32" alt="Wikipedia"></a>
+<a href="https://www.happycow.net/members/profile/niclasoverby"><img src="./web/homepage/assets/icons/happycow.avif" width="32" height="32" alt="HappyCow"></a>
+<a href="https://lemmy.world/u/noverby"><img src="./web/homepage/assets/icons/lemmy.avif" width="32" height="32" alt="Lemmy"></a>
+<a href="https://neodb.social/users/niclasoverby"><img src="./web/homepage/assets/icons/neodb.avif" width="32" height="32" alt="NeoDB"></a>
 
 <!-- BEGIN mktoc {"min_depth": 2, "max_depth": 3} -->
 
@@ -723,7 +723,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Media Sharing | [Pixelfed 🇪🇺](https://pixelfed.social/niclasoverby) | [Flashes 🔒🇪🇺🌀](https://github.com/birdsongapps/Flashes) | [AT Protocol 🌀](https://atproto.com) | [Meta Instagram (Flufi) 🔒🇺🇸](https://flufi.me) |
+| ✅ | Media Sharing | [PinkLeap 🌀](https://pinkleap.app/@overby.me) | [Flashes 🔒🇪🇺🌀](https://github.com/birdsongapps/Flashes) | [AT Protocol 🌀](https://atproto.com) | [Pixelfed 🇪🇺](https://pixelfed.social/niclasoverby), [Meta Instagram (Flufi) 🔒🇺🇸](https://flufi.me) |
 | 🚧 | Long-form Video | [Alphabet YouTube 🔒🇺🇸](https://youtube.com) | [Skytube 🔒🇺🇸🌀](https://skytube.video), [PeerTube 🌐🇪🇺](https://joinpeertube.org) | [AT Protocol 🌀](https://atproto.com) | |
 | 🚧 | Short-form Video | | [SkyLight 🔒🇺🇸🌀](https://skylight.social), [Spark 🔒🇺🇸🌀](https://sprk.so) | [AT Protocol 🌀](https://atproto.com) | |
 | 🚧 | Live Streaming | [Stream.place 🌀](https://stream.place/) | | [AT Protocol 🌀](https://atproto.com) | [Twitch 🔒🇺🇸](https://twitch.tv) |
