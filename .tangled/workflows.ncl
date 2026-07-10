@@ -46,36 +46,31 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
         "%%,
       },
       {
-        name = "Nix flake check",
-        # Not `nix flake check`: it instantiates all ~3265 checks in a single
-        # evaluator, which keeps the whole value graph reachable and peaks past
-        # 30 GiB before any build starts. `--max-jobs` caps build concurrency,
-        # not evaluation, so it does not help. `.#flake-check` evaluates in
-        # memory-capped nix-eval-jobs workers, skips derivations cachix already
-        # has, and realises the rest one build job at a time.
+        name = "Nix flake check (formatting)",
+        # Scoped to the formatting check. The full check set (~3266 checks) does
+        # not fit this CI's microVM: it has ~2 GiB RAM and a 5-minute step
+        # timeout, and 686 checks are NixOS VM tests that boot a nested QEMU
+        # guest, which cannot even complete a first build in 2 GiB. Local
+        # `just check` runs the full `.#flake-check` on a real machine.
         #
-        # NIX_CONFIG is exported by this shell rather than injected by the
-        # engine, so every nix process the script spawns inherits the features.
+        # `checks.<system>.formatting` is the one check that fits: nix forces
+        # only that attribute (not the whole 3266-check graph), and the formatter
+        # tools it builds are substituted from cache.nixos.org. It catches
+        # unformatted code and, by evaluating far enough to produce the check,
+        # gross flake-evaluation breakage. Tangled's own cache stores the result,
+        # so repeat runs on an unchanged tree are fast; no explicit push needed.
         #
-        # The check outputs are pushed here rather than in "Push to Cachix":
-        # that step only runs on success and only uploads `nix flake archive`
-        # paths (the flake source and its inputs), never build results. Without
-        # this every run rebuilds all checks from scratch. Pushing regardless of
-        # the exit status means a partial run still makes the next one cheaper.
+        # NIX_CONFIG is exported here so the inner nix build inherits the
+        # experimental features this flake's build system relies on.
         command = m%%"
           echo "=== runs as: $(id -un); /etc/nix/nix.conf: ==="
           cat /etc/nix/nix.conf 2>/dev/null || echo "(no /etc/nix/nix.conf)"
           ulimit -n 65536
           printf '{"PWD":"%s"}' "$PWD" > .env
-          export PATH="$(readlink -f result)/bin:$PATH"
           export NIX_CONFIG="experimental-features = %%{nixFeatures}"
-          export OUT_PATHS_FILE="$PWD/check-outputs.txt"
-          rc=0
-          nix run --extra-experimental-features "%%{nixFeatures}" .#flake-check -- --override-input env path:$(realpath $PWD/.env) || rc=$?
-          if [ -s "$OUT_PATHS_FILE" ]; then
-            cachix push overby-me < "$OUT_PATHS_FILE" || echo "cachix push failed; continuing"
-          fi
-          exit $rc
+          nix build --extra-experimental-features "%%{nixFeatures}" --max-jobs 1 --cores 2 \
+            --no-link --print-build-logs .#checks.x86_64-linux.formatting \
+            --override-input env path:$(realpath $PWD/.env)
         "%%,
       },
       {

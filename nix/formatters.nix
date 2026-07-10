@@ -10,7 +10,7 @@
 # gitignored, so they are absent from the source `nix flake check` copies into
 # the sandbox. Point at the store copies instead.
 pkgs: let
-  inherit (pkgs) lib alejandra biome coreutils gnused mojo rumdl rustfmt tombi;
+  inherit (pkgs) alejandra biome coreutils gnused rumdl rustfmt tombi;
   inherit (pkgs.pkgsUnstable) nickel;
 
   # devenv has no YAML formatter, and the builtin prettier must not become one:
@@ -20,14 +20,6 @@ pkgs: let
   # red. Override the builtin with a no-op rather than disabling
   # flakelight.builtinFormatters wholesale.
   noop = "${coreutils}/bin/true";
-
-  # mojo is not built for aarch64-linux, and interpolating an unavailable
-  # derivation throws during `formatter.<system>` evaluation. Mirror the
-  # meta.available guard used by flake/modules/filterUnsupported.nix.
-  isSupported = drv: let
-    result = builtins.tryEval (drv.meta.available or false);
-  in
-    result.success && result.value;
 
   # `cargo fmt` reads the edition from the crate's Cargo.toml; a bare `rustfmt`
   # would silently fall back to 2015 and mangle newer code. Walk up to the
@@ -63,27 +55,29 @@ pkgs: let
     "${biome}/bin/biome format --write"
     + " --config-path=${./devenv/modules/configs/biome-nix.jsonc}";
   rumdlFormat = "${rumdl}/bin/rumdl fmt --config ${./devenv/modules/configs/rumdl.toml}";
-in
-  {
-    "*.nix" = "${alejandra}/bin/alejandra --quiet";
-    "*.md" = rumdlFormat;
-    "*.toml" = "${tombi}/bin/tombi format --offline";
-    "*.ncl" = "${nickel}/bin/nickel format";
-    "*.rs" = "${rustfmtEdition}";
+in {
+  "*.nix" = "${alejandra}/bin/alejandra --quiet";
+  "*.md" = rumdlFormat;
+  "*.toml" = "${tombi}/bin/tombi format --offline";
+  "*.ncl" = "${nickel}/bin/nickel format";
+  "*.rs" = "${rustfmtEdition}";
 
-    # Matches the devenv biome hook's types_or (javascript, jsx, ts, tsx,
-    # json). CSS is deliberately absent: biome can format it, and the repo's
-    # biome config lists it under files.includes, but the hook never passes it,
-    # so `nix fmt` would restyle CSS that devenv leaves alone.
-    "*.js" = biomeFormat;
-    "*.jsx" = biomeFormat;
-    "*.ts" = biomeFormat;
-    "*.tsx" = biomeFormat;
-    "*.json" = biomeFormat;
+  # Matches the devenv biome hook's types_or (javascript, jsx, ts, tsx,
+  # json). CSS is deliberately absent: biome can format it, and the repo's
+  # biome config lists it under files.includes, but the hook never passes it,
+  # so `nix fmt` would restyle CSS that devenv leaves alone.
+  "*.js" = biomeFormat;
+  "*.jsx" = biomeFormat;
+  "*.ts" = biomeFormat;
+  "*.tsx" = biomeFormat;
+  "*.json" = biomeFormat;
 
-    "*.yaml" = noop;
-    "*.yml" = noop;
-  }
-  // lib.optionalAttrs (isSupported mojo) {
-    "*.mojo" = "${mojo}/bin/mojo format";
-  }
+  "*.yaml" = noop;
+  "*.yml" = noop;
+
+  # *.mojo is deliberately absent. `mojo format` needs the ~900 MiB Modular
+  # toolchain, which is not on cache.nixos.org, so pulling it into every
+  # `nix fmt` and into checks.formatting is far too heavy — it alone makes
+  # the formatting check unbuildable in CI's small microVM. Mojo files are
+  # still formatted by the dedicated mojo-format devenv git-hook on commit.
+}
