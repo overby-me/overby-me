@@ -26,22 +26,30 @@ entire app = change the two seeds and re-run the generator. Green drives the
 chrome (bar, buttons, avatars, app-rail, chips); magenta pops on the FAB, the
 user avatar and badges/comment avatars.
 
-**Remaining M3 conformance (per component, validate as you go):**
-- **Shape** — M3 corner-radius scale (extra-small 4 / small 8 / medium 12 /
-  large 16 / full). FAB is a rounded rectangle (done); audit cards, buttons,
-  chips, dialogs, text fields.
-- **Elevation & surfaces** — use the tonal `surface-container-*` levels for
-  elevation instead of ad-hoc shadows; M3 app bars are `surface`-coloured on
-  scroll (today the bar is a solid primary — a deliberate brand choice to
-  revisit).
-- **Typography** — adopt the M3 type scale (display/headline/title/body/label)
-  with consistent sizes/weights/line-heights.
-- **State layers** — hover/focus/pressed/dragged overlays at M3 opacities
-  (8/10/10/16%) on interactive elements.
-- **Components** — buttons (filled/tonal/outlined/text/elevated), FAB, chips,
-  cards, lists, navigation (rail/bar/drawer), dialogs, snackbars, switches,
-  selects, tooltips — each matched to its M3 spec (many are dioxus-primitives).
-- **Motion** — M3 easing/duration tokens for transitions.
+**M3 conformance status.** Non-colour system tokens live in
+`assets/m3-tokens.css` (type scale, corner/shape scale, elevation levels,
+state-layer opacities, motion easing/duration). Validated with `--shots` +
+the contrast audit, viewed across home / vote / context / editor ×
+light/dark × desktop/mobile:
+- `[x]` **Shape** — corner scale applied: buttons pill, cards/tiles medium,
+  chips small, dialogs extra-large, snackbar extra-small, FAB large, bar large.
+- `[x]` **Elevation & surfaces** — tonal shadow tokens on cards (elevated,
+  surface-container-low), dialogs (level 3), snackbar, the floating bar (level 2,
+  now opaque); the surface-container tonal levels are wired.
+- `[x]` **Typography** — full M3 type scale; body → body-large, headings →
+  headline/title roles, buttons/labels → label-large.
+- `[x]` **State layers** — hover/pressed overlays (`color-mix` at 8/10%) on
+  buttons, icon buttons, chips, list/folder items and the nav-rail pill.
+- `[x]` **Focus** — `:focus-visible` rings on every interactive surface; the
+  primitives' focus ring re-pointed from blue to the M3 primary.
+- `[x]` **Components** — buttons (filled/outlined/text), FAB, cards, dialogs,
+  chips, snackbar, the nav-rail active indicator (container pill), text fields,
+  and the dioxus-primitives (switch/checkbox/radio) themed to the green accent.
+- `[x]` **Motion** — M3 easing/duration tokens on component transitions.
+- `[~]` **Remaining** — richer motion on route/page transitions (shared-axis);
+  screenshot coverage for the poll-ballot / comments / member / speak screens
+  (validated by component reuse, not yet viewed); the floating **bar** is a
+  solid primary (M3's default is a surface app bar — kept as a brand choice).
 
 ## Design direction: dioxus-components / dioxus-primitives
 
