@@ -442,6 +442,7 @@ const DA_JSON: &str = r#"{
         "submit": "Indsend",
         "authors": "Forfattere",
         "addAuthor": "Tilf\u00f8j forfatter",
+        "addAtLeastOneAuthor": "Tilf\u00f8j mindst 1 forfatter",
         "imageAlt": "Indholdsbillede",
         "tableOfContents": "Indholdsfortegnelse"
     },

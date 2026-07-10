@@ -45,6 +45,121 @@ fn refresh_toolbar(
     block.set(current_block());
 }
 
+/// Whether a node type carries authors (members). Contexts and a few vote types
+/// do not, matching the React editor.
+fn node_takes_authors(mime_id: Option<&str>) -> bool {
+    !matches!(
+        mime_id,
+        Some("wiki/group" | "wiki/event" | "vote/position" | "vote/candidate" | "wiki/folder")
+    )
+}
+
+/// Append an author (deduped) and clear the input + suggestions.
+fn add_author(
+    mut authors: Signal<Vec<graphql::Author>>,
+    mut input: Signal<String>,
+    mut suggestions: Signal<Vec<graphql::Author>>,
+    author: graphql::Author,
+) {
+    let exists = authors
+        .read()
+        .iter()
+        .any(|a| a.name == author.name && a.node_id == author.node_id);
+    if !exists && !author.name.trim().is_empty() {
+        authors.write().push(author);
+    }
+    input.set(String::new());
+    suggestions.set(vec![]);
+}
+
+/// Author autocomplete: type a name to search groups and users (or add a
+/// free-text author with Enter), shown as removable chips. Mirrors the React
+/// `AuthorTextField`; the list is persisted as the node's members on save.
+#[component]
+fn AuthorField(authors: Signal<Vec<graphql::Author>>) -> Element {
+    let session = use_session();
+    let mut authors = authors;
+    let mut input = use_signal(String::new);
+    let mut suggestions = use_signal(Vec::<graphql::Author>::new);
+    // Monotonic id so out-of-order search responses don't clobber newer ones.
+    let mut seq = use_signal(|| 0u32);
+
+    rsx! {
+        div { class: "author-field mb-2",
+            label { "{t(\"content.authors\")}" }
+            div { class: "chip-row",
+                for (i , a) in authors.read().iter().enumerate() {
+                    div { class: "chip", key: "{i}",
+                        span { class: "material-icons",
+                            if a.node_id.is_some() { "groups" } else { "face" }
+                        }
+                        span { "{a.name}" }
+                        button {
+                            class: "chip-remove",
+                            r#type: "button",
+                            onclick: move |_| {
+                                authors.write().remove(i);
+                            },
+                            span { class: "material-icons", "close" }
+                        }
+                    }
+                }
+            }
+            div { class: "author-input-wrap",
+                input {
+                    r#type: "text",
+                    placeholder: "{t(\"content.addAuthor\")}",
+                    value: "{input}",
+                    oninput: move |evt| {
+                        let val = evt.value();
+                        input.set(val.clone());
+                        let my = *seq.read() + 1;
+                        seq.set(my);
+                        if val.trim().is_empty() {
+                            suggestions.set(vec![]);
+                            return;
+                        }
+                        let token = session.read().access_token.clone();
+                        spawn(async move {
+                            let res = graphql::search_authors(token.as_deref(), &val).await;
+                            if *seq.read() == my {
+                                suggestions.set(res);
+                            }
+                        });
+                    },
+                    onkeydown: move |evt| {
+                        if evt.key().to_string() == "Enter" {
+                            evt.prevent_default();
+                            let name = input.read().trim().to_string();
+                            add_author(authors, input, suggestions, graphql::Author { name, node_id: None });
+                        }
+                    },
+                }
+                if !suggestions.read().is_empty() {
+                    div { class: "author-suggestions",
+                        for s in suggestions.read().iter() {
+                            {
+                                let chosen = s.clone();
+                                let icon = if s.node_id.is_some() { "groups" } else { "face" };
+                                rsx! {
+                                    button {
+                                        class: "author-suggestion",
+                                        r#type: "button",
+                                        key: "{s.node_id:?}{s.name}",
+                                        onclick: move |_| add_author(authors, input, suggestions, chosen.clone()),
+                                        span { class: "material-icons", "{icon}" }
+                                        span { "{s.name}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// EditorApp: a WYSIWYG rich text editor over a `contenteditable` surface,
 /// reading and writing the same Slate JSON model as the reference wiki.
 #[component]
@@ -63,6 +178,21 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
 
     let mut title = use_signal(|| node.name.clone());
     let mut saving = use_signal(|| false);
+
+    // Authors (members): content nodes carry a list of authors that the editor
+    // maintains; contexts and a few vote types do not.
+    let takes_authors = node_takes_authors(node.mime_id.as_deref());
+    let authors = use_signal(|| {
+        node.members
+            .iter()
+            .filter(|m| !m.hidden)
+            .map(|m| graphql::Author {
+                name: m.label(),
+                node_id: m.node_id.as_ref().map(|u| u.0.clone()),
+            })
+            .filter(|a| !a.name.is_empty())
+            .collect::<Vec<_>>()
+    });
 
     // The initial editor HTML, rendered once from the stored Slate content.
     let initial_html = use_hook(|| {
@@ -95,6 +225,25 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
             let title_val = title.read().clone();
             spawn(async move {
                 saving.set(true);
+
+                // Content nodes require at least one author; replace the node's
+                // members with the edited list.
+                if takes_authors {
+                    let author_list = authors.read().clone();
+                    if author_list.is_empty() {
+                        show_snackbar(&t("content.addAtLeastOneAuthor"));
+                        saving.set(false);
+                        return;
+                    }
+                    if let Err(e) =
+                        graphql::set_node_authors(token.as_deref(), &node_id, &author_list).await
+                    {
+                        log::error!("Saving authors failed: {e}");
+                        show_snackbar(&t("error.somethingWentWrong"));
+                        saving.set(false);
+                        return;
+                    }
+                }
 
                 // Serialize the live editor DOM back to Slate JSON.
                 let content_json = richtext::serialize_editor(EDITOR_ID).unwrap_or_else(
@@ -157,6 +306,11 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         value: "{title}",
                         oninput: move |evt| title.set(evt.value()),
                     }
+                }
+
+                // Authors (members), content nodes only.
+                if takes_authors {
+                    AuthorField { authors }
                 }
 
                 // Sticky toolbar (#94): action buttons + formatting controls

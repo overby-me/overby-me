@@ -139,6 +139,7 @@ pub struct MemberFields {
     pub accepted: bool,
     pub owner: bool,
     pub hidden: bool,
+    pub node_id: Option<Uuid>,
     pub user: Option<UserRef>,
     pub node: Option<MemberNodeRef>,
 }
@@ -333,6 +334,8 @@ pub struct MembersBoolExp {
     pub email: Option<StringComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub node_id: Option<UuidComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<UuidComparisonExp>,
     // Boxed to break the NodesBoolExp <-> MembersBoolExp type cycle.
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub parent: Option<Box<NodesBoolExp>>,
@@ -1343,6 +1346,148 @@ pub async fn search_nodes(
     let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
     Ok(result.nodes)
+}
+
+// --- Authors: search + replace a node's members ---
+
+/// An author option: a group/user (carrying its node id) or a free-text name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Author {
+    pub name: String,
+    pub node_id: Option<String>,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "users_bool_exp"
+)]
+pub struct UsersBoolExp {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<StringComparisonExp>,
+}
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct UsersSearchVariables {
+    pub where_clause: UsersBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "UsersSearchVariables"
+)]
+pub struct UsersSearchQuery {
+    #[arguments(where: $where_clause, limit: 10)]
+    pub users: Vec<UserSearchFields>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "users")]
+pub struct UserSearchFields {
+    pub id: Uuid,
+    pub display_name: String,
+}
+
+/// Search groups and users by name for the author autocomplete (each carries the
+/// node id used as the member's `node_id`).
+pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Author> {
+    if query.trim().is_empty() {
+        return vec![];
+    }
+    let mut out: Vec<Author> = Vec::new();
+    // Groups can author content.
+    if let Ok(nodes) = search_nodes(access_token, query).await {
+        for n in nodes
+            .into_iter()
+            .filter(|n| n.mime_id.as_deref() == Some("wiki/group"))
+            .take(10)
+        {
+            out.push(Author {
+                name: n.name,
+                node_id: Some(n.id.0),
+            });
+        }
+    }
+    // Users.
+    use cynic::QueryBuilder;
+    let op = UsersSearchQuery::build(UsersSearchVariables {
+        where_clause: UsersBoolExp {
+            display_name: Some(StringComparisonExp {
+                ilike: Some(format!("%{query}%")),
+                ..Default::default()
+            }),
+        },
+    });
+    if let Ok(r) = execute(access_token, op).await {
+        for u in r.users.into_iter().take(10) {
+            out.push(Author {
+                name: u.display_name,
+                node_id: Some(u.id.0),
+            });
+        }
+    }
+    out
+}
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct DeleteMembersVariables {
+    pub where_clause: MembersBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "mutation_root",
+    variables = "DeleteMembersVariables"
+)]
+pub struct DeleteMembersMutation {
+    #[arguments(where: $where_clause)]
+    pub delete_members: Option<MembersAffected>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_mutation_response"
+)]
+pub struct MembersAffected {
+    #[cynic(rename = "affected_rows")]
+    pub affected_rows: i32,
+}
+
+/// Replace a node's authors: delete the current members and insert `authors`. A
+/// group/user author carries its `node_id`; a free-text author is stored by name
+/// only. Mirrors the React editor's save.
+pub async fn set_node_authors(
+    access_token: Option<&str>,
+    node_id: &str,
+    authors: &[Author],
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let del = DeleteMembersMutation::build(DeleteMembersVariables {
+        where_clause: MembersBoolExp {
+            parent_id: Some(UuidComparisonExp {
+                eq: Some(Uuid(node_id.to_string())),
+                is_null: None,
+            }),
+            ..Default::default()
+        },
+    });
+    execute(access_token, del).await?;
+    for author in authors {
+        let op = InsertMemberMutation::build(InsertMemberVariables {
+            object: MembersInsertInput {
+                name: Some(author.name.clone()),
+                node_id: author.node_id.clone().map(Uuid),
+                parent_id: Some(Uuid(node_id.to_string())),
+                ..Default::default()
+            },
+        });
+        execute(access_token, op).await?;
+    }
+    Ok(true)
 }
 
 /// Build the `where` filter for the user's context nodes (groups or events) of

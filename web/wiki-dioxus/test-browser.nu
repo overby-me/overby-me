@@ -606,6 +606,37 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "rich editor did not mount, skipping editor checks"
     }
 
+    # ── Author field: hidden for contexts, shown for content nodes ───────────
+    # Contexts (group/event) do not carry authors; documents/policies do.
+    wd-navigate $session_id $"(base-url)($ctx_path)?app=editor"
+    if (wd-wait-for-element $session_id "#rich-editor" 15) {
+        let ctx_af = (wd-execute $session_id 'return document.querySelector(".author-field")?"y":"n"')
+        if $ctx_af == "n" {
+            log-ok "context editor has no author field"; $p = $p + 1
+        } else {
+            log-fail "context editor unexpectedly shows an author field"; $fl = $fl + 1
+        }
+    }
+    # Open a child node's editor; a content node shows the author autocomplete.
+    wd-navigate $session_id $"(base-url)($ctx_path)"
+    sleep 1sec
+    let clicked = (wd-execute $session_id 'var e=document.querySelector("#main .folder-item"); if(e){e.click(); return "y"} return "n"')
+    if $clicked == "y" {
+        sleep 2sec
+        let child_path = (wd-execute $session_id 'return location.pathname')
+        wd-navigate $session_id $"(base-url)($child_path)?app=editor"
+        if (wd-wait-for-element $session_id "#rich-editor" 15) {
+            let af = (wd-execute $session_id 'return document.querySelector(".author-field .author-input-wrap input")?"y":"n"')
+            if $af == "y" {
+                log-ok "content editor shows the author field"; $p = $p + 1
+            } else {
+                log-warn "child node does not carry authors, skipping author-field presence check"
+            }
+        }
+    } else {
+        log-warn "no child node to open, skipping author-field presence check"
+    }
+
     { passed: $p, failed: $fl }
 }
 
