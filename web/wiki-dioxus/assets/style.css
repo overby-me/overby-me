@@ -275,6 +275,35 @@ a:hover {
     display: none;
 }
 
+/* Mobile app bar — a floating horizontal row of the context apps, bottom-left
+   (the FAB owns bottom-right), above the bottom bar. Only on phones; hidden once
+   the desktop rail appears at 1200px. */
+.mobile-app-bar {
+    display: flex;
+    position: fixed;
+    left: 8px;
+    bottom: 84px;
+    gap: 2px;
+    padding: 4px;
+    background: var(--md-surface-container);
+    border-radius: 20px;
+    box-shadow: var(--md-sys-elevation-2);
+    z-index: 120;
+    max-width: calc(100vw - 96px);
+    overflow-x: auto;
+}
+
+.mobile-app-bar .btn-icon.active {
+    background: var(--md-primary);
+    color: var(--md-on-primary);
+}
+
+@media (min-width: 1200px) {
+    .mobile-app-bar {
+        display: none;
+    }
+}
+
 /* App sidebar (icon rail on large screens) */
 .app-rail {
     display: none;

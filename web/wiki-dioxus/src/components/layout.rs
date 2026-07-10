@@ -90,6 +90,10 @@ pub fn Layout() -> Element {
                 AppRail {}
             }
 
+            // Mobile app bar (phones only — the rail is hidden there, so this is
+            // how Speak/Vote/Members stay reachable).
+            MobileAppBar {}
+
             // Bottom/top bar
             div { class: "bottom-bar",
                 div { class: "bar",
@@ -385,28 +389,24 @@ fn BreadcrumbCrumb(
 }
 
 /// App rail — vertical icon navigation for large screens
-#[component]
-fn AppRail() -> Element {
-    let session = use_session();
-    let is_auth = session.read().is_authenticated();
-    let route = use_route::<Route>();
-    let segments: Vec<String> = match &route {
+/// The context apps for the current route (home, folder, and for authed users
+/// speak/vote/member), each as `(mime, label, route, is-active)`. Shared by the
+/// desktop rail and the mobile app bar, mirroring React's `useApps`. Empty off a
+/// context (`segments` empty), which hides both nav surfaces.
+fn context_apps(route: &Route, is_auth: bool) -> Vec<(&'static str, String, Route, bool)> {
+    let segments: Vec<String> = match route {
         Route::PathPage { segments, .. } => segments.clone(),
         _ => vec![],
     };
-
-    let current_app = match &route {
+    if segments.is_empty() {
+        return vec![];
+    }
+    let current_app = match route {
         Route::PathPage { app, .. } => app.clone(),
         _ => None,
     };
-
-    if segments.is_empty() {
-        return rsx! {};
-    }
-
-    // The apps operate on the current context (the nearest group/event), mirroring
-    // the React `useApps`. The app is part of the route's query, so these navigate
-    // client-side and the resolver swaps the view without a reload.
+    // The app is part of the route's query, so these navigate client-side and the
+    // resolver swaps the view without a reload.
     let ctx_path = context_path(&segments);
 
     let mut apps: Vec<(&str, String, Route, bool)> = vec![
@@ -422,40 +422,40 @@ fn AppRail() -> Element {
         ),
     ];
     if is_auth {
-        apps.push((
-            "app/speak",
-            t("mime.speak"),
-            Route::PathPage {
-                segments: ctx_path.clone(),
-                app: Some("speak".to_string()),
-            },
-            current_app.as_deref() == Some("speak"),
-        ));
-        apps.push((
-            "app/vote",
-            t("mime.vote"),
-            Route::PathPage {
-                segments: ctx_path.clone(),
-                app: Some("vote".to_string()),
-            },
-            current_app.as_deref() == Some("vote"),
-        ));
-        // Members (roster + invitations). React only surfaces this to owners, but
-        // MemberApp gates the admin controls itself, so the rail entry is safe for
-        // any authenticated user (matching how speak/vote are shown here).
-        apps.push((
-            "app/member",
-            t("common.members"),
-            Route::PathPage {
-                segments: ctx_path.clone(),
-                app: Some("member".to_string()),
-            },
-            current_app.as_deref() == Some("member"),
-        ));
+        for (app, label) in [
+            ("speak", t("mime.speak")),
+            ("vote", t("mime.vote")),
+            // Members: React only surfaces this to owners, but MemberApp gates
+            // its admin controls itself, so the entry is safe for any authed user.
+            ("member", t("common.members")),
+        ] {
+            apps.push((
+                match app {
+                    "speak" => "app/speak",
+                    "vote" => "app/vote",
+                    _ => "app/member",
+                },
+                label,
+                Route::PathPage {
+                    segments: ctx_path.clone(),
+                    app: Some(app.to_string()),
+                },
+                current_app.as_deref() == Some(app),
+            ));
+        }
         // The other apps (screen, admin, program, graph, social, map, profile,
         // perm, parent) are still reachable via their `?app=` URL but hidden
-        // from the rail until they are ready to show.
+        // from these nav surfaces until they are ready to show.
     }
+    apps
+}
+
+#[component]
+fn AppRail() -> Element {
+    let session = use_session();
+    let is_auth = session.read().is_authenticated();
+    let route = use_route::<Route>();
+    let apps = context_apps(&route, is_auth);
 
     rsx! {
         for (mime_id , label , to , active) in apps.into_iter() {
@@ -466,6 +466,35 @@ fn AppRail() -> Element {
                 title: "{label}",
                 span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
                 span { class: "app-rail-label", "{label}" }
+            }
+        }
+    }
+}
+
+/// Mobile app bar — the same context apps as the desktop rail, as a floating
+/// horizontal row (bottom-left, above the bottom bar). Without it the apps
+/// (Speak/Vote/Members) are unreachable on a phone, where the rail is hidden.
+/// Shown only under the rail's 1200px breakpoint (see `.mobile-app-bar` CSS).
+#[component]
+fn MobileAppBar() -> Element {
+    let session = use_session();
+    let is_auth = session.read().is_authenticated();
+    let route = use_route::<Route>();
+    let apps = context_apps(&route, is_auth);
+    if apps.is_empty() {
+        return rsx! {};
+    }
+
+    rsx! {
+        div { class: "mobile-app-bar",
+            for (mime_id , label , to , active) in apps.into_iter() {
+                Link {
+                    to,
+                    class: if active { "btn-icon active" } else { "btn-icon" },
+                    title: "{label}",
+                    aria_label: "{label}",
+                    span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
+                }
             }
         }
     }
