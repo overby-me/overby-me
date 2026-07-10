@@ -56,9 +56,14 @@
       inputs = {
         nixpkgs.follows = "nixpkgs-unstable";
         flake-compat.follows = "flake-compat";
-        userborn.inputs.flake-parts.follows = "flake-parts";
-        userborn.inputs.systems.follows = "systems";
-        userborn.inputs.pre-commit-hooks-nix.inputs.gitignore.follows = "gitignore";
+        # Do NOT reach into system-manager's `userborn` input to dedupe its
+        # dev-time transitive inputs. Overriding `userborn.inputs.*` makes the
+        # root flake resolve `userborn` itself, and a sandboxed re-lock that
+        # can't read system-manager's flake to learn userborn's URL falls back
+        # to a bare `flake:userborn` registry lookup, which fails on builders
+        # without registry access (e.g. statichost.eu). Let system-manager
+        # carry its own userborn subtree; the extra duplicate dev inputs it
+        # pulls in are never built.
       };
     };
     agenix = {
