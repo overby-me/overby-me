@@ -211,6 +211,20 @@ def test-shell [session_id: string, timeout: int, passed: int, failed: int]: not
     let r = (assert-exists $session_id "log in link present" '#main a[href="/user/login"]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (assert-exists $session_id "register link present" '#main a[href="/user/register"]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
 
+    # Pull-to-refresh: the indicator mounts, and an over-scroll up at the top
+    # triggers the refreshing animation (synthetic wheel event; scrollY is 0).
+    let r = (assert-exists $session_id "pull-to-refresh indicator mounts" ".ptr-indicator" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    wd-execute $session_id "window.scrollTo(0,0); var e=new WheelEvent('wheel',{deltaY:-300,bubbles:true,cancelable:true}); window.dispatchEvent(e); return 1" | ignore
+    mut ptr_seen = false
+    mut ptr_tries = 0
+    while (not $ptr_seen) and $ptr_tries < 6 {
+        sleep 120ms
+        let rc = (wd-execute $session_id "return document.querySelector('.ptr-indicator.refreshing')?'y':'n'")
+        if $rc == "y" { $ptr_seen = true }
+        $ptr_tries = $ptr_tries + 1
+    }
+    if $ptr_seen { log-ok "pull-to-refresh triggers the refreshing animation"; $p = $p + 1 } else { log-fail "over-scroll up did not trigger the refresh animation"; $fl = $fl + 1 }
+
     # Client-side routing into the login page.
     let login = (try { wd-find $session_id '#main a[href="/user/login"]' } catch { "" })
     if ($login | is-not-empty) and $login != "null" {

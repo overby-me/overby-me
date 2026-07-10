@@ -53,34 +53,9 @@ pub fn Layout() -> Element {
         }));
     }
 
-    // Dioxus renders a lone "?" for the optional `app` query even when it is None
-    // (e.g. "/group?"). Strip it from the address bar after each navigation so
-    // URLs read cleanly. Run once synchronously and once deferred, because the
-    // router can finish writing the URL just after this effect fires (which left
-    // a stray "?" on some navigations). Cosmetic only; the router state is kept.
-    {
-        let route_dep = route.clone();
-        use_effect(use_reactive!(|(route_dep,)| {
-            let _ = route_dep;
-            fn strip_bare_query() {
-                let Some(w) = web_sys::window() else { return };
-                if w.location().search().map(|s| s == "?").unwrap_or(false) {
-                    if let (Ok(path), Ok(history)) = (w.location().pathname(), w.history()) {
-                        let _ = history.replace_state_with_url(
-                            &wasm_bindgen::JsValue::NULL,
-                            "",
-                            Some(&path),
-                        );
-                    }
-                }
-            }
-            strip_bare_query();
-            wasm_bindgen_futures::spawn_local(async {
-                gloo_timers::future::TimeoutFuture::new(0).await;
-                strip_bare_query();
-            });
-        }));
-    }
+    // The stray trailing "?" the router emits for the optional `app` query is
+    // cleaned globally at the source by `install_history_query_shim` (main.rs),
+    // which wraps history.pushState/replaceState. No per-navigation strip here.
 
     let is_auth_page = matches!(
         route,
@@ -99,6 +74,8 @@ pub fn Layout() -> Element {
 
     rsx! {
         div { class: "app-shell",
+            // Pull-to-refresh spinner (fixed overlay; listens on the window).
+            super::pull_refresh::PullToRefresh {}
             // Main content area
             div { class: "main-content",
                 Outlet::<Route> {}

@@ -41,7 +41,48 @@ fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     log::info!("RadikalWiki starting...");
 
+    // Clean the stray trailing "?" the router emits for the optional `app` query
+    // before the first navigation writes it to the address bar.
+    install_history_query_shim();
+
     dioxus::launch(App);
+}
+
+/// Strip the stray trailing "?" the Dioxus router writes for the optional `app`
+/// query (a route with no `app=` serializes to e.g. "/group?"). Wrap
+/// `history.pushState` / `history.replaceState` so any URL ending in a bare "?"
+/// is cleaned at the source, before it reaches the address bar. This is
+/// race-free, unlike stripping after the fact in an effect: the router rewrites
+/// the URL on its own schedule and would re-add the "?" after such a strip.
+fn install_history_query_shim() {
+    use wasm_bindgen::JsValue;
+    let Some(win) = web_sys::window() else { return };
+    let Ok(history) = js_sys::Reflect::get(&win, &JsValue::from_str("history")) else {
+        return;
+    };
+    for method in ["pushState", "replaceState"] {
+        let key = JsValue::from_str(method);
+        let Ok(orig) = js_sys::Reflect::get(&history, &key) else {
+            continue;
+        };
+        let Ok(orig_fn) = orig.dyn_into::<js_sys::Function>() else {
+            continue;
+        };
+        let this = history.clone();
+        let wrapper = Closure::wrap(
+            Box::new(move |state: JsValue, title: JsValue, url: JsValue| {
+                let url = match url.as_string() {
+                    Some(s) if s.ends_with('?') => JsValue::from_str(s.strip_suffix('?').unwrap()),
+                    _ => url,
+                };
+                let args = js_sys::Array::of3(&state, &title, &url);
+                let _ = js_sys::Reflect::apply(&orig_fn, &this, &args);
+            }) as Box<dyn FnMut(JsValue, JsValue, JsValue)>,
+        );
+        let _ = js_sys::Reflect::set(&history, &key, wrapper.as_ref().unchecked_ref());
+        // Leak the closure so the wrapped method lives for the app's lifetime.
+        wrapper.forget();
+    }
 }
 
 #[component]

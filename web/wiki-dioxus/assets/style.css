@@ -71,6 +71,9 @@ body {
     background-color: var(--md-background);
     color: var(--md-on-background);
     line-height: 1.5;
+    /* Take over the top over-scroll so the custom pull-to-refresh runs instead
+       of the browser's native one. */
+    overscroll-behavior-y: contain;
 }
 
 a {
@@ -1673,4 +1676,56 @@ a.list-item:hover {
 .comment-reply-count {
     font-size: 13px;
     color: var(--md-on-surface-variant);
+}
+
+/* Pull-to-refresh indicator */
+.ptr-indicator {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    z-index: 1200;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    margin-top: 6px;
+    border-radius: 50%;
+    background: var(--md-surface-container-high, var(--md-surface));
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+    color: var(--md-primary);
+    /* Default transform is set inline (follows the finger); opacity always eases. */
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+}
+
+/* When settling / parking (not actively dragging) also ease the transform so the
+   indicator glides back or into place instead of jumping. */
+.ptr-indicator.settling {
+    transition: transform 0.25s ease, opacity 0.15s ease;
+}
+
+.ptr-indicator.hidden {
+    opacity: 0 !important;
+}
+
+.ptr-indicator .material-icons {
+    font-size: 22px;
+    transition: transform 0.15s ease;
+}
+
+/* Armed (pulled past the threshold): flip the arrow to say "release to refresh". */
+.ptr-indicator.armed .material-icons {
+    transform: rotate(180deg);
+}
+
+.ptr-indicator.refreshing .ptr-spinner {
+    display: grid;
+    place-items: center;
+    animation: ptr-spin 0.8s linear infinite;
+}
+
+@keyframes ptr-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }

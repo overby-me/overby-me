@@ -6,6 +6,49 @@ use crate::session::use_session;
 
 use super::loader::icon_el;
 
+/// Office document mimes (legacy + OpenXML) previewable via the MS Office viewer:
+/// Word, Excel and PowerPoint.
+fn is_office_mime(mime: &str) -> bool {
+    matches!(
+        mime,
+        "application/msword"
+            | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            | "application/vnd.ms-excel"
+            | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            | "application/vnd.ms-powerpoint"
+            | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_office_mime;
+
+    #[test]
+    fn office_mimes_are_previewable() {
+        for m in [
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ] {
+            assert!(
+                is_office_mime(m),
+                "{m} should preview via the office viewer"
+            );
+        }
+    }
+
+    #[test]
+    fn non_office_mimes_are_not() {
+        for m in ["application/pdf", "image/png", "text/plain", ""] {
+            assert!(!is_office_mime(m));
+        }
+    }
+}
+
 #[component]
 pub fn FileApp(node: NodeWithChildren) -> Element {
     let name = node.name.as_str();
@@ -48,6 +91,19 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                     audio { controls: true, src: "{file_url}" }
                 } else if file_mime == "application/pdf" {
                     iframe { src: "{file_url}", title: "{name}" }
+                } else if is_office_mime(file_mime) {
+                    // Preview Word/Excel/PowerPoint via Microsoft's hosted viewer,
+                    // which fetches the file URL server-side (mirrors the old wiki).
+                    // The whole tokenised URL is percent-encoded into `src`.
+                    {
+                        let encoded = String::from(&js_sys::encode_uri_component(&file_url));
+                        rsx! {
+                            iframe {
+                                src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
+                                title: "{name}",
+                            }
+                        }
+                    }
                 } else {
                     a {
                         href: "{file_url}",
