@@ -1,6 +1,10 @@
 use dioxus::prelude::*;
 
 use crate::components::richtext;
+use crate::components::ui::alert_dialog::{
+    AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
+    AlertDialogTitle,
+};
 use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::t;
 use crate::route::Route;
@@ -178,6 +182,9 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
 
     let mut title = use_signal(|| node.name.clone());
     let mut saving = use_signal(|| false);
+    // Submit (publish) is irreversible — makes the node immutable — so it goes
+    // through a confirm dialog carrying the submit warning.
+    let mut confirm_submit = use_signal(|| false);
 
     // Authors (members): content nodes carry a list of authors that the editor
     // maintains; contexts and a few vote types do not.
@@ -342,12 +349,28 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                             button {
                                 class: "btn btn-secondary",
                                 disabled: *saving.read(),
-                                onclick: {
-                                    let save = handle_save.clone();
-                                    move |_| save(false)
-                                },
+                                onclick: move |_| confirm_submit.set(true),
                                 span { class: "material-icons", "publish" }
                                 " {t(\"content.submit\")}"
+                            }
+                            AlertDialog {
+                                open: Some(confirm_submit()),
+                                on_open_change: move |v| confirm_submit.set(v),
+                                AlertDialogTitle { "{t(\"content.submit\")}" }
+                                AlertDialogDescription { "{t(\"content.submitWarning\")}" }
+                                AlertDialogActions {
+                                    AlertDialogCancel { "{t(\"common.cancel\")}" }
+                                    AlertDialogAction {
+                                        on_click: {
+                                            let save = handle_save.clone();
+                                            move |_| {
+                                                confirm_submit.set(false);
+                                                save(false);
+                                            }
+                                        },
+                                        "{t(\"content.submit\")}"
+                                    }
+                                }
                             }
                         }
                         if *saving.read() {
