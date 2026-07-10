@@ -5,6 +5,8 @@ mod export;
 mod graphql;
 #[allow(dead_code)]
 mod i18n;
+#[cfg(feature = "remote-logging")]
+mod logging;
 #[allow(dead_code)]
 mod nhost;
 mod route;
@@ -31,6 +33,11 @@ fn main() {
     // of a bare `unreachable executed` wasm trap — the single highest-value
     // change for debugging authenticated-load traps in Servo.
     console_error_panic_hook::set_once();
+    // With `remote-logging`, ship warn/error (plus breadcrumbs + panics) to
+    // Logtail and mirror to the console; otherwise just log to the console.
+    #[cfg(feature = "remote-logging")]
+    logging::init();
+    #[cfg(not(feature = "remote-logging"))]
     wasm_logger::init(wasm_logger::Config::default());
     log::info!("RadikalWiki starting...");
 

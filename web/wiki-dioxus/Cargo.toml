@@ -28,6 +28,7 @@ web-sys = { version = "=0.3.98", features = [
   "Document",
   "Element",
   "ErrorEvent",
+  "Event",
   "EventTarget",
   "History",
   "HtmlAnchorElement",
@@ -48,8 +49,13 @@ web-sys = { version = "=0.3.98", features = [
   "Storage",
   "WebSocket",
   "Window",
+  "XmlHttpRequest",
+  "console",
 ] }
 
 [features]
 default = ["web"]
+# Ship warn/error logs (with interaction breadcrumbs, user/session enrichment and
+# panics) to Better Stack / Logtail. Reads BETTERSTACK_SOURCE_TOKEN at build time.
+remote-logging = []
 web = ["dioxus/router", "dioxus/web"]
