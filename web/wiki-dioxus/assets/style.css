@@ -256,7 +256,7 @@ a:hover {
         bottom: 0;
         padding-top: 64px;
         gap: 8px;
-        background: var(--md-surface-variant);
+        background: var(--md-surface-container);
     }
 }
 
@@ -338,13 +338,60 @@ a:hover {
 /* App-rail item label. The icon inherits the button's colour (on-surface when
    idle, on-secondary on the active green box); the label follows the same
    on-colour pattern so it never ends up muted-on-green. */
+/* M3 navigation-rail item: a column of [pill indicator holding the icon] over
+   the label. The active pill uses the secondary-container tone (not a full
+   button fill), matching the M3 NavigationRail active indicator. */
+.app-rail .btn-icon {
+    width: auto;
+    height: auto;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.app-rail .app-rail-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 32px;
+    border-radius: var(--md-sys-shape-corner-full);
+    color: var(--md-on-surface-variant);
+    transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+
+.app-rail .btn-icon:hover .app-rail-icon {
+    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+
+/* Active indicator: a secondary-container pill behind the icon; the button
+   itself stays transparent (override the generic .btn-icon.active fill). */
+.app-rail .btn-icon.active {
+    background: transparent;
+    color: inherit;
+}
+
+.app-rail .btn-icon.active .app-rail-icon {
+    /* primary-container (not secondary-container): this scheme's secondary is
+       very low-chroma, so a secondary pill is invisible on the neutral rail;
+       the brighter primary-container reads clearly by hue while staying a
+       tonal container indicator. */
+    background: var(--md-primary-container);
+    color: var(--md-on-primary-container);
+}
+
 .app-rail-label {
-    font-size: 10px;
+    font-size: var(--md-sys-typescale-label-medium-size);
+    line-height: var(--md-sys-typescale-label-medium-line);
+    font-weight: 500;
+    letter-spacing: var(--md-sys-typescale-label-medium-tracking);
     color: var(--md-on-surface-variant);
 }
 
-.btn-icon.active .app-rail-label {
-    color: var(--md-on-primary);
+.app-rail .btn-icon.active .app-rail-label {
+    color: var(--md-on-surface);
 }
 
 /* "Not submitted" badge overlaid on a node avatar (mutable draft nodes). */

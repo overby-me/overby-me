@@ -486,6 +486,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
 
     let r = (assert-exists $session_id "context view renders a card" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (check-contrast $session_id "context view (drawer + app rail + bar)" $p $fl); $p = $r.passed; $fl = $r.failed
+    capture-shots $session_id "context"
 
     # Pull-to-refresh must actually REFETCH data, not just animate. Hook fetch to
     # count GraphQL calls, over-scroll up, and expect fresh calls to fire (the
@@ -634,13 +635,21 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             capture-shots $session_id "vote-app"
             # The highlighted app must have readable contrast (icon vs its box):
             # regression for the green-on-green active state.
-            let arc = (wd-execute $session_id 'function L(c){var a=c.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]} function P(s){var m=s.match(/[0-9.]+/g);return [+m[0],+m[1],+m[2]]} function R(x,y){var p=L(P(x)),q=L(P(y)),h=Math.max(p,q),l=Math.min(p,q);return (h+0.05)/(l+0.05)} var el=document.querySelector(".app-rail .btn-icon.active"); if(!el) return "noactive"; var ic=el.querySelector(".material-icons"); var cs=getComputedStyle(el); var icc=ic?getComputedStyle(ic).color:cs.color; return R(cs.backgroundColor, icc).toFixed(2)')
+            # M3 nav-rail active indicator: a container-tone pill behind the icon.
+            # Two guards: the icon must be readable ON the pill (luminance ratio,
+            # the green-on-green regression), and the pill must be distinguishable
+            # FROM the rail (colour DISTANCE, since a tonal pill differs from the
+            # neutral rail by hue/chroma, not luminance).
+            let arc = (wd-execute $session_id 'function L(c){var a=c.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]} function P(s){var m=s.match(/[0-9.]+/g);return [+m[0],+m[1],+m[2]]} function R(x,y){var p=L(P(x)),q=L(P(y)),h=Math.max(p,q),l=Math.min(p,q);return (h+0.05)/(l+0.05)} function D(x,y){var a=P(x),b=P(y);return Math.round(Math.sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2])))} var el=document.querySelector(".app-rail .btn-icon.active"); if(!el) return "noactive"; var pill=el.querySelector(".app-rail-icon")||el; var ic=el.querySelector(".material-icons"); var pb=getComputedStyle(pill).backgroundColor; var icc=ic?getComputedStyle(ic).color:getComputedStyle(el).color; var rail=document.querySelector(".app-rail"); var rb=rail?getComputedStyle(rail).backgroundColor:"rgb(255,255,255)"; return JSON.stringify({readable:+R(pb,icc).toFixed(2), distinct:D(pb,rb)})')
             if $arc == "noactive" {
                 log-warn "no active app-rail item to contrast-check"
-            } else if ((try { $arc | into float } catch { 0.0 }) >= 3.0) {
-                log-ok $"active app highlight readable contrast ($arc):1"; $p = $p + 1
             } else {
-                log-fail $"active app highlight is low-contrast: ($arc):1"; $fl = $fl + 1
+                let m = ($arc | from json)
+                if ($m.readable >= 3.0) and ($m.distinct >= 40) {
+                    log-ok $"active app indicator: icon ($m.readable):1 on the pill, colour-distance ($m.distinct) from rail"; $p = $p + 1
+                } else {
+                    log-fail $"active app indicator weak: readable ($m.readable):1, distinct ($m.distinct)"; $fl = $fl + 1
+                }
             }
             # The open app is badged onto the current node's breadcrumb avatar.
             sleep 1sec
@@ -843,6 +852,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         let ce = (wd-execute $session_id 'return document.getElementById("rich-editor")?.getAttribute("contenteditable")')
         if $ce == "true" {
             log-ok "rich editor mounts (contenteditable)"; $p = $p + 1
+            capture-shots $session_id "editor"
         } else {
             log-fail $"rich editor not contenteditable: ($ce)"; $fl = $fl + 1
         }
