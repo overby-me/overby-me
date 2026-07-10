@@ -235,7 +235,14 @@ All the above build + render live (browser smoke test asserts each mounts).
   the add-content form only inserts on the explicit Add action (no pre-created
   draft node like the React flow had).
 - `#69` Node revision/history table.
-- `#108` Remove hardcoded mime lists (drive icons/apps from the mime data).
+- `[blocked]` `#108` Remove hardcoded mime lists (drive icons/apps from the mime
+  data) — not feasible frontend-only. The `mimes` table's `icon` is only a
+  letter/number/questionmark avatar-*mode* hint (verified live: every mime is
+  `questionmark` except vote policy=`letter`, candidate/change=`number`), not a
+  Material icon; and `MimeLoader` maps mime → a Rust component (compile-time
+  code, not data). The one datum that IS present, `hidden`, is already used
+  (`loader.rs` filters on `mime.hidden`). Needs the backend to carry real
+  icon/app data first.
 - `[x]` `#111` Limit node name length — `maxlength` on the name inputs.
 - `[x]` `#114` Zoom/maximise images — click-to-zoom lightbox (`ZoomableImage`) in
   the file, content-block and inline-content image views.
@@ -245,7 +252,10 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `[x]` `#119` MS Office viewer dark mode — invert + hue-rotate filter on the
   viewer iframe under `[data-theme="dark"]`.
 - `[x]` `#125` Folder grid view mode — list/grid toggle in the folder header.
-- `#128` Audio / MIDI file support.
+- `[~]` `#128` Audio / MIDI file support — audio (and video) already preview via
+  native `<audio controls>` / `<video controls>` in the file viewer (`file.rs`).
+  MIDI is the only gap: browsers have no native MIDI synth, so it needs an
+  external JS synthesizer + soundfont (a CDN dependency) to actually play.
 - `[x]` `#143` Show the child count in every content overview — count badge in
   the folder header.
 
