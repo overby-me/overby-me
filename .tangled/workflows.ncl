@@ -17,17 +17,6 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
     engine = "microvm",
     image = "nixos",
     dependencies = ["git"],
-    # Trusted binary caches. The microVM image ships no substituters, and its CI
-    # user is untrusted, so a client-set `substituters` is ignored. Declaring
-    # them here makes the spindle configure them system-side (trusted): nixpkgs
-    # substitutes from cache.nixos.org instead of a from-source bootstrap, and
-    # this repo's own outputs substitute from overby-me instead of rebuilding.
-    caches = {
-      "https://cache.nixos.org" = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=",
-      "https://overby-me.cachix.org" = "overby-me.cachix.org-1:dU7qOj5u97QZz98nqnh+Nwait6c+2d2Eq0KTOAXTyp4=",
-      "https://nix-community.cachix.org" = "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=",
-      "https://zed.cachix.org" = "zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU=",
-    },
     steps = [
       {
         name = "Build Cachix",
@@ -39,40 +28,43 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
       },
       {
         name = "Setup Cachix",
-        # Substituters are declared by the workflow-level `caches` field above
-        # (system-trusted), so nothing is configured here. cachix is still set up
-        # for the "Push to Cachix" step's upload of the flake inputs.
+        # The microVM image ships no public substituters, so add cache.nixos.org
+        # for the check step; without it nixpkgs' bootstrap rebuilds from source
+        # and dies on the rotted minimal-bootstrap/tinycc snapshot. The
+        # workflow-level `caches` field would be the documented way to do this,
+        # but this knot's spindle does not honour it (the caches stay untrusted
+        # and it broke substitution in the Build Cachix step), so append to the
+        # nix.conf cachix writes instead. overby-me cannot be made readable this
+        # way (client substituters are ignored for the untrusted CI user), which
+        # is why CI cannot substitute this repo's own packages.
         command = m%%"
           export PATH="$(readlink -f result)/bin:$PATH"
           mkdir -p $HOME/.config/nix
           cachix use overby-me
+          echo "extra-substituters = https://cache.nixos.org" >> $HOME/.config/nix/nix.conf
+          echo "extra-trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" >> $HOME/.config/nix/nix.conf
         "%%,
       },
       {
-        name = "Nix flake check (formatting + packages)",
-        # Scoped to formatting and the packages. The full check set does not fit
-        # this CI's microVM (~2 GiB RAM, ~5-minute step timeout): evaluating all
-        # 3266 checks thrashes a memory-capped worker and the 686 nested-QEMU VM
-        # tests cannot build here. Formatting and packages do fit — packages
-        # evaluate within the RAM budget, and with the caches above they
-        # substitute from cache.nixos.org and overby-me rather than building.
-        #
-        # nix-fast-build (nix-eval-jobs + one build job at a time) evaluates in a
-        # single memory-capped worker and --skip-cached skips anything a cache
-        # already has, so only genuinely new packages build. Local `just check`
-        # runs the full `.#flake-check` on a real machine.
+        name = "Nix flake check (formatting)",
+        # Scoped to the formatting check. The full check set does not fit this
+        # CI's microVM (~2 GiB RAM, ~5-minute step timeout): evaluating all 3266
+        # checks thrashes a memory-capped worker, and the 686 nested-QEMU VM
+        # tests cannot build here. Packages do not fit either: they live only in
+        # overby-me, which cannot be made a trusted substituter for the untrusted
+        # CI user, so they would rebuild from source. checks.formatting is the
+        # one check that fits — nix forces only that attribute and its formatter
+        # tools substitute from cache.nixos.org. Local `just check` runs the full
+        # `.#flake-check` on a real machine.
         command = m%%"
           echo "=== runs as: $(id -un); /etc/nix/nix.conf: ==="
           cat /etc/nix/nix.conf 2>/dev/null || echo "(no /etc/nix/nix.conf)"
           ulimit -n 65536
           printf '{"PWD":"%s"}' "$PWD" > .env
           export NIX_CONFIG="experimental-features = %%{nixFeatures}"
-          for fragment in "checks.x86_64-linux.formatting" "packages.x86_64-linux"; do
-            nix run --extra-experimental-features "%%{nixFeatures}" nixpkgs#nix-fast-build -- \
-              --flake ".#$fragment" --skip-cached --no-nom \
-              --eval-workers 1 --eval-max-memory-size 1024 -j 1 \
-              --override-input env "path:$(realpath $PWD/.env)"
-          done
+          nix build --extra-experimental-features "%%{nixFeatures}" --max-jobs 1 --cores 2 \
+            --no-link --print-build-logs .#checks.x86_64-linux.formatting \
+            --override-input env path:$(realpath $PWD/.env)
         "%%,
       },
       {

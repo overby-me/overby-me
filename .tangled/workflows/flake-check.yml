@@ -1,8 +1,3 @@
-caches:
-  https://cache.nixos.org: cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
-  https://nix-community.cachix.org: nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
-  https://overby-me.cachix.org: overby-me.cachix.org-1:dU7qOj5u97QZz98nqnh+Nwait6c+2d2Eq0KTOAXTyp4=
-  https://zed.cachix.org: zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU=
 clone:
   depth: 1
   skip: false
@@ -21,6 +16,8 @@ steps:
       export PATH="$(readlink -f result)/bin:$PATH"
       mkdir -p $HOME/.config/nix
       cachix use overby-me
+      echo "extra-substituters = https://cache.nixos.org" >> $HOME/.config/nix/nix.conf
+      echo "extra-trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" >> $HOME/.config/nix/nix.conf
     name: Setup Cachix
   - command: |-
       echo "=== runs as: $(id -un); /etc/nix/nix.conf: ==="
@@ -28,13 +25,10 @@ steps:
       ulimit -n 65536
       printf '{"PWD":"%s"}' "$PWD" > .env
       export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix"
-      for fragment in "checks.x86_64-linux.formatting" "packages.x86_64-linux"; do
-        nix run --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" nixpkgs#nix-fast-build -- \
-          --flake ".#$fragment" --skip-cached --no-nom \
-          --eval-workers 1 --eval-max-memory-size 1024 -j 1 \
-          --override-input env "path:$(realpath $PWD/.env)"
-      done
-    name: Nix flake check (formatting + packages)
+      nix build --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" --max-jobs 1 --cores 2 \
+        --no-link --print-build-logs .#checks.x86_64-linux.formatting \
+        --override-input env path:$(realpath $PWD/.env)
+    name: Nix flake check (formatting)
   - command: |-
       export PATH="$(readlink -f result)/bin:$PATH"
       nix flake archive --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" --json --override-input env path:$(realpath $PWD/.env) | nix run --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" nixpkgs#jq -- -r '.path,(.inputs|to_entries[].value.path)' | cachix push overby-me
