@@ -173,7 +173,17 @@ pub fn Layout() -> Element {
     }
 
     rsx! {
-        div { class: "app-shell",
+        div {
+            class: "app-shell",
+            // Ctrl/Cmd+K opens search (a common shortcut). Catches keydowns that
+            // bubble up from any focused element in the app.
+            onkeydown: move |evt| {
+                let m = evt.modifiers();
+                if (m.ctrl() || m.meta()) && evt.key() == Key::Character("k".to_string()) {
+                    search_mode.set(true);
+                    evt.prevent_default();
+                }
+            },
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
             // Main content area
@@ -273,6 +283,8 @@ fn SearchBar(
     // (typing fires a query per keystroke; the last issued must win, not the
     // last to return).
     let mut seq = use_signal(|| 0u32);
+    // Keyboard-highlighted result (arrow keys move it, Enter opens it).
+    let mut selected = use_signal(|| 0usize);
 
     rsx! {
         div { style: "flex: 1; position: relative;",
@@ -284,6 +296,7 @@ fn SearchBar(
                 oninput: move |evt| {
                     let value = evt.value();
                     input.set(value.clone());
+                    selected.set(0);
                     let my = *seq.read() + 1;
                     seq.set(my);
                     if value.trim().is_empty() {
@@ -302,17 +315,42 @@ fn SearchBar(
                     });
                 },
                 onkeydown: move |evt| {
-                    if evt.key() == Key::Escape {
-                        on_close.call(());
+                    let len = results.read().len();
+                    match evt.key() {
+                        Key::Escape => on_close.call(()),
+                        Key::ArrowDown if len > 0 => {
+                            let s = (*selected.read() + 1).min(len - 1);
+                            selected.set(s);
+                            evt.prevent_default();
+                        }
+                        Key::ArrowUp if len > 0 => {
+                            let s = selected.read().saturating_sub(1);
+                            selected.set(s);
+                            evt.prevent_default();
+                        }
+                        Key::Enter => {
+                            let idx = *selected.read();
+                            if let Some(node) = results.read().get(idx) {
+                                let node_id = node.id.0.clone();
+                                let key = node.key.clone();
+                                let token = session.read().access_token.clone();
+                                spawn(async move {
+                                    let segments = resolve_result_path(node_id, key, token).await;
+                                    nav.push(Route::PathPage { segments, app: None });
+                                    on_close.call(());
+                                });
+                            }
+                        }
+                        _ => {}
                     }
                 },
             }
             // Search results dropdown
             if !results.read().is_empty() {
                 div { class: "search-results",
-                    for node in results.read().iter() {
+                    for (idx , node) in results.read().iter().enumerate() {
                         div {
-                            class: "list-item",
+                            class: if idx == *selected.read() { "list-item selected" } else { "list-item" },
                             key: "{node.id.0}",
                             onclick: {
                                 // A search hit can live anywhere in the tree, so
@@ -327,19 +365,10 @@ fn SearchBar(
                                     let node_id = node_id.clone();
                                     let key = key.clone();
                                     let token = session.read().access_token.clone();
-                                    // Resolve first, THEN navigate and close: closing
-                                    // unmounts the SearchBar, which would cancel this
-                                    // task before the async path lookup finished.
+                                    // Resolve first, THEN navigate + close: closing
+                                    // unmounts the SearchBar, cancelling the task.
                                     spawn(async move {
-                                        let mut segments = graphql::path_from_id(
-                                                token.as_deref(),
-                                                &node_id,
-                                            )
-                                            .await
-                                            .unwrap_or_default();
-                                        if segments.is_empty() {
-                                            segments = vec![key];
-                                        }
+                                        let segments = resolve_result_path(node_id, key, token).await;
                                         nav.push(Route::PathPage { segments, app: None });
                                         on_close.call(());
                                     });
@@ -362,6 +391,20 @@ fn SearchBar(
             span { class: "material-icons", "close" }
         }
     }
+}
+
+/// Resolve a search hit's full ancestor path (root excluded), falling back to the
+/// bare key. A hit can live anywhere in the tree, so we resolve its ancestors
+/// rather than treating the key as a top-level segment. Shared by a result click
+/// and the Enter key.
+async fn resolve_result_path(node_id: String, key: String, token: Option<String>) -> Vec<String> {
+    let mut segments = graphql::path_from_id(token.as_deref(), &node_id)
+        .await
+        .unwrap_or_default();
+    if segments.is_empty() {
+        segments = vec![key];
+    }
+    segments
 }
 
 /// Breadcrumb navigation based on the current route. Mirrors the old wiki: a row

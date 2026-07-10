@@ -1695,6 +1695,11 @@ a.list-item:hover {
     border-radius: 0;
 }
 
+/* Keyboard-highlighted search result (arrow-key navigation). */
+.search-results .list-item.selected {
+    background: var(--md-surface-variant);
+}
+
 /* The bar is green (secondary), so its icons use the on-secondary colour for
    contrast (black-on-green was too faint). */
 .bar .btn-icon {
