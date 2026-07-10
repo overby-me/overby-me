@@ -452,28 +452,9 @@ fn AppRail() -> Element {
             },
             current_app.as_deref() == Some("vote"),
         ));
-        // Meeting / admin views.
-        for (icon, key, app) in [
-            ("app/screen", "mime.screen", "screen"),
-            ("vote/poll", "mime.admin", "admin"),
-            ("app/program", "mime.program", "program"),
-            ("app/graph", "mime.graph", "graph"),
-            ("app/social", "mime.social", "social"),
-            ("app/map", "mime.map", "map"),
-            ("app/profile", "mime.profile", "profile"),
-            ("wiki/user", "mime.permissions", "perm"),
-            ("app/parent", "mime.parent", "parent"),
-        ] {
-            apps.push((
-                icon,
-                t(key),
-                Route::PathPage {
-                    segments: ctx_path.clone(),
-                    app: Some(app.to_string()),
-                },
-                current_app.as_deref() == Some(app),
-            ));
-        }
+        // The other apps (screen, admin, program, graph, social, map, profile,
+        // perm, parent) are still reachable via their `?app=` URL but hidden
+        // from the rail until they are ready to show.
     }
 
     rsx! {
@@ -788,6 +769,13 @@ fn DrawerNodeItem(
 
     // Auto-expand ancestors of the current node; let the user toggle the rest.
     let mut expanded = use_signal(|| on_path && !selected);
+    // Re-expand when a later navigation brings this node onto the active path
+    // (the initial value above only applies on first mount).
+    use_effect(use_reactive!(|(on_path, selected)| {
+        if on_path && !selected {
+            expanded.set(true);
+        }
+    }));
 
     let node_id = node.id.0.clone();
     let indent = format!("padding-left: {}px;", 12 + depth * 14);

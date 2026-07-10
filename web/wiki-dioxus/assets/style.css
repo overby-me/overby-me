@@ -574,6 +574,13 @@ select:focus {
 
 .list-item.selected {
     background-color: var(--md-primary-container);
+    /* Left accent bar marking the current node in the tree. */
+    box-shadow: inset 3px 0 0 var(--md-primary);
+}
+
+.list-item.selected .list-item-primary {
+    color: var(--md-on-primary-container);
+    font-weight: 600;
 }
 
 .list-item-text {

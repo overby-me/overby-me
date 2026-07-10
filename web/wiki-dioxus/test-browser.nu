@@ -329,6 +329,14 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         let main_after = (wd-execute $session_id 'return (document.getElementById("main")||{innerText:""}).innerText')
         if $deeper and ($main_after != $main_before) {
             log-ok "navigating to a child node updates the view"; $p = $p + 1
+            # The drawer tree highlights the current node in the path.
+            sleep 1500ms
+            let sel = (wd-execute $session_id 'return document.querySelector(".drawer .list-item.selected, .drawer-inner .list-item.selected")?"y":"n"')
+            if $sel == "y" {
+                log-ok "drawer highlights the current node"; $p = $p + 1
+            } else {
+                log-fail "drawer does not highlight the current node"; $fl = $fl + 1
+            }
         } else {
             log-fail "child navigation did not update the view (stale PathPage)"; $fl = $fl + 1
         }
@@ -397,6 +405,15 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
                 log-ok "open app shows a breadcrumb badge"; $p = $p + 1
             } else {
                 log-fail "no app badge on the breadcrumb avatar"; $fl = $fl + 1
+            }
+            # Only the ready apps (folder/speak/vote) are in the rail; the rest
+            # (graph/social/...) are hidden until ready.
+            let rail = (wd-execute $session_id 'return JSON.stringify({vote:document.querySelector(".app-rail a[href*=\"app=vote\"]")?1:0, speak:document.querySelector(".app-rail a[href*=\"app=speak\"]")?1:0, graph:document.querySelector(".app-rail a[href*=\"app=graph\"]")?1:0, social:document.querySelector(".app-rail a[href*=\"app=social\"]")?1:0})')
+            let ok = (try { let j = ($rail | from json); ($j.vote == 1) and ($j.speak == 1) and ($j.graph == 0) and ($j.social == 0) } catch { false })
+            if $ok {
+                log-ok "app rail shows only the ready apps"; $p = $p + 1
+            } else {
+                log-fail $"app rail set unexpected: ($rail)"; $fl = $fl + 1
             }
         } else {
             log-warn "no vote rail item — skipping app-switch check"
