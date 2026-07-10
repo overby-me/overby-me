@@ -38,72 +38,61 @@ Radikale brand via `scripts/gen-theme.ts` → `assets/m3-theme.css`, plus
 The cynic query fragments and `*_set_input` structs omit many fields the schema
 has and React uses. Add them (grep `graphql/schema.graphql` for each):
 
-- `[ ]` **`isOwner` / `isContextOwner`** computed fields on node fragments
-  (`schema.graphql:6620,6625`). The port fakes `isOwner` with `owner_id ==
-  user.id` and can't express `isContextOwner` at all — the root cause of the
-  missing owner-gating in §2. **major**
-- `[ ]` **`owner` relation object** (UserRef) on node fragments — needed to show
-  a creator's display name as a fallback label on questions/amendments/candidates
-  and in threaded comments. **medium**
-- `[ ]` **`attachable`** on `NodeFields`/`NodesSetInput` — the folder "lock"
-  flag (read + toggle). See §6. **major**
-- `[ ]` **`createdAt` / `updatedAt`** on `NodesSetInput`/`NodesInsertInput`
-  (write) and `createdAt` on `NodeWithChildren` (read) — blocks timestamp editing
-  and the content-header "created N ago" subtitle. **major**
-- `[ ]` **`contextId` / `ownerId` / `parentId`** on `NodesSetInput` — the
-  insert-then-self-reference update used when creating context nodes. **major**
-- `[ ]` **`MembersSetInput`**: add `active`, `email`, `name`, `owner`,
-  `parentId`; **`MemberFields`**: add `active`, `email`; **`UserRef`**: add
-  `email` — enables member admin (§4). **major**
+- `[x]` **`isOwner` / `isContextOwner`** computed fields — done on the node
+  fragments; drive the §2 owner-gating.
+- `[x]` **`owner` relation object** (UserRef) — done on node fragments; used as a
+  fallback author label on questions/candidates and in comments.
+- `[x]` **`attachable`** on `NodeFields` (read) — done; gates the add-FAB. (Owner
+  toggle of the lock, §6, is not yet wired.)
+- `[x]` **`createdAt`** on `NodeWithChildren` (read) — done; drives the
+  content/file "created N ago" subtitle. (Timestamp *editing* is not carried.)
+- `[x]` **`contextId` / `ownerId` / `parentId`** on `NodesSetInput` — done.
+- `[x]` **`MembersSetInput`**: `active`/`email`/`name`/`owner`/`parentId`;
+  **`MemberFields`**: `active`/`email` — done; power the member admin (§5).
 - `[ ]` **Aggregate queries** (`children_aggregate`, `membersAggregate`) — React
   uses counts for the drawer expander/skeleton, the poll-list vote-count badge,
   and invite counts. **medium**
 - `[ ]` **Member ordering by `user.displayName`** (`members_order_by.user`).
   **minor**
 
-## 2. Permissions & owner-gating (frontend gates are missing)
+## 2. Permissions & owner-gating (frontend gates are missing) — DONE
 
-The backend row permissions block unauthorized writes, but the UI shows owner-
-only controls to everyone (confusing, and buttons that then fail). React hides
-whole panels behind `isContextOwner` / `owner` / `mutable`.
+The backend row permissions block unauthorized writes, but the UI showed owner-
+only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
+`mutable`, matching React.
 
-- `[ ]` **Folder admin controls** (export, sort, add-FAB) are shown to any authed
-  user; React `FolderDial.tsx:48` returns `null` unless `isContextOwner`. **major**
-- `[ ]` **Content edit / delete** buttons show without owner/`mutable` checks
-  (React `ContentToolbar`/`DeleteButton` gate on owner + mutable). **major**
-- `[ ]` **Add-content FAB** is gated only on `is_auth`, not `isContextOwner` /
-  `attachable`. **major**
-- (Depends on the `isOwner`/`isContextOwner`/`attachable` fields in §1.)
+- `[x]` **Folder admin controls** (sort, add-FAB) — done: sort gated on
+  `is_context_owner`, the add-FAB on `is_auth && attachable`.
+- `[x]` **Content edit / delete** — done: edit gated on owner + `mutable`, delete
+  on owner (`is_owner || is_context_owner`).
+- `[x]` **Add-content FAB** — done: gated on `is_auth && attachable`.
 
 ## 3. Voting & polls (can vote; cannot manage)
 
-- `[ ]` **Create / open a poll** (React `poll/PollDialog.tsx`) — no way to start
-  one (`FolderAdd` offers only document/folder). Needs min/max range, hide-result
-  toggle, options (For/Imod/Blank or candidates+Blank), close prior active poll,
-  insert `vote/poll`, **set the context `active` relation** (no such mutation
-  yet). **major**
-- `[ ]` **Stop / close a poll** (React `poll/PollAdmin.tsx`) — owner "Stop" sets
-  `mutable:false` and snapshots eligible-voter count into `data.voters`. Also fix
-  `vote.rs` misusing `poll.managePoll` as the voter subtitle. **major**
-- `[ ]` **Position screen** (React `vote/PositionApp.tsx`) — `vote/position` falls
-  to the generic node view; should compose content + candidates + questions +
-  polls. **major**
-- `[ ]` **Candidate gallery + view** (React `vote/CandidateList.tsx`,
-  `CandidateApp.tsx`) — image gallery of `vote/candidate` (photo from `data.image`,
-  per-user visibility); candidate opens as content with members hidden. **major**
-- `[ ]` **Questions** (React `vote/QuestionList.tsx`, `AddQuestionButton.tsx`) —
-  numbered `vote/question` list, add (gated on `inserts`), owner delete/sort.
-  (Overlaps issue #138.) **major**
+- `[x]` **Create / open a poll** (React `poll/PollDialog.tsx`) — done: owner
+  StartPollButton (range, hide-result, For/Imod/Blank or candidates+Blank),
+  closes the prior active poll, inserts `vote/poll`, sets the context `active`
+  relation (`set_active_relation`), navigates to the ballot.
+- `[x]` **Stop / close a poll** (React `poll/PollAdmin.tsx`) — done: owner "Stop"
+  sets `mutable:false`. (Snapshotting eligible-voter count into `data.voters` is
+  not carried; the tally reads live votes.)
+- `[x]` **Position screen** (React `vote/PositionApp.tsx`) — done: PositionApp
+  composes content + StartPollButton + candidate gallery + questions + polls.
+- `[x]` **Candidate gallery + view** — done (display): a `vote/candidate` photo
+  gallery (from `data.image`) linking to each candidate, which opens as content.
+  (Creating a candidate with a photo upload is not yet offered.)
+- `[x]` **Questions** (React `vote/QuestionList.tsx`, `AddQuestionButton.tsx`) —
+  done: numbered `vote/question` list with add (`data.text`) and owner/author
+  delete. (Question reorder/sort not wired.)
 - `[ ]` **Amendments** (React `vote/AddChangeButton.tsx`) — "new amendment" button
   (gated on `inserts` ∋ `vote/change`) → editor redirect, name-prefill under a
   position. **major**
-- `[ ]` **Live-update on poll open** — the voter's `?app=vote` view doesn't
-  subscribe to the context `active` relation, so a newly-opened poll doesn't
-  appear without reload (the `use_live` pattern exists elsewhere). **major**
+- `[x]` **Live-update on poll open** — done: VoteApp subscribes to the context
+  `active` relation so a newly-opened poll appears without reload.
 - `[~]` **Poll-list affordances** (React `poll/PollList.tsx`) — poll rows lack the
   vote-count badge, created-at, and owner delete.
-- `[~]` **`hideResult`** (`data.hidden`) not read: a closed hide-result poll
-  should hide options/tallies from non-owners.
+- `[x]` **`hideResult`** (`data.hidden`) — done: a hide-result poll shows tallies
+  only to the context owner; others see options + a "results hidden" note.
 - `[~]` **Voting-rights status** (React `vote/VoteApp.tsx`) — no `canVote` check
   or "you (do not) have voting rights / have (not) voted" card.
 - `[~]` Owner **Sort** entry buttons in vote/comment/question lists; block
@@ -111,32 +100,33 @@ whole panels behind `isContextOwner` / `owner` / `mutable`.
 
 ## 4. Content, editor & files
 
-- `[ ]` **File upload** (React `util/FileUploader.tsx` via `nhost.storage.upload`)
-  — `nhost.rs` has no upload path, so `wiki/file` nodes and document cover images
-  can't be created. Needs multipart upload + presigned-URL helper. **major**
-- `[~]` **Add-content dialog** (React `content/AddContentDialog.tsx`) — `FolderAdd`
-  hardcodes document/folder and ignores the node's `inserts` field; add the
-  file-upload option, free-text body for `vote/question`/`vote/comment`, and a
-  duplicate-name check.
+- `[x]` **File upload** (React `util/FileUploader.tsx`) — done: `nhost::upload_file`
+  (multipart POST to storage) + a File option in the add-content modal that
+  uploads and inserts a `wiki/file` node with `{ fileId, type }`.
+- `[x]` **Add-content dialog** — done (file option): `FolderAdd` now offers
+  document/folder/**file** (with upload). (Free-text body for question/comment is
+  handled in PositionApp/comments; a duplicate-name check is still absent, and it
+  still does not read the node's `inserts` list.)
 - `[ ]` **Context creation + permission seeding** (`contextPerm`) — a new group/
   event/context is created with a plain `insert_node` and gets no permission rows.
-  **major**
+  (Note: the port has no context-creation flow yet, so this is latent.) **major**
 - `[ ]` **File-node toolbar + sub-content** (React `file/FileApp.tsx` +
-  `ContentToolbar`) — a file page shows only the viewer: no delete / download-raw /
-  edit / members / publish, no member chips, no comments/changes/questions. **major**
-- `[ ]` **Raw-file download** (React `content/DownloadButton.tsx`) via a presigned
-  URL, for every previewable type (`.odt` export already exists for documents).
-- `[ ]` **Cover image lost on save** — the editor never reads/writes `data.image`,
-  so editing a document with a cover image **drops it** (ContentApp still renders
-  one if present). Add the image field to save + an uploader/preview. **medium**
+  `ContentToolbar`) — a file page shows the viewer + download + created-at, but
+  still no delete / edit / members / publish, no member chips, no comments/
+  changes/questions. **major**
+- `[x]` **Raw-file download** (React `content/DownloadButton.tsx`) — done: a header
+  Download button on FileApp for every previewable type.
+- `[x]` **Cover image lost on save** — done: the editor preserves the node's other
+  `data` keys (e.g. `image`) and overwrites only `content`. (A cover-image
+  uploader/preview in the editor is still not offered.)
 - `[ ]` **Group/event double-card** — React stacks `ContentApp(hideMembers)` above
   `FolderApp` for `wiki/group`/`wiki/event` (metadata + comments card, then the
   folder listing); the port renders only the folder. **medium**
-- `[ ]` **Delete removes member rows first** (React `DeleteButton.tsx:16-19`) — the
-  port deletes the node but not its `members`, leaving orphan rows. **medium**
-- `[ ]` **Code mark is broken** — the port wraps the selection in `<code>` via
-  `insertHTML` on every click (nests `<code>`), instead of toggling the mark off.
-  **medium**
+- `[x]` **Delete removes member rows first** (React `DeleteButton.tsx:16-19`) —
+  done: content delete now removes the node's member rows first
+  (`delete_node_members`) so no orphans are left.
+- `[x]` **Code mark is broken** — done: the code button now toggles — when the
+  caret is inside a `<code>` span it unwraps to plain text instead of nesting.
 - `[~]` **Submit/publish confirmation** (React `PublishButton.tsx`) — submit fires
   with no confirm dialog / `submitWarning` for an irreversible action (i18n keys
   exist, unused); also no publish button on the read view.
@@ -144,8 +134,9 @@ whole panels behind `isContextOwner` / `owner` / `mutable`.
   `Slate.tsx` `withHtml`/`deserialize`); paste is left to the browser. **medium**
 - `[~]` **PDF viewer** — direct-URL iframe at a fixed `80vh`; React wraps in the
   Google-Docs viewer with dynamic height. **medium**
-- `[ ]` **`createdAt` subtitle** ("created N ago" + tooltip) on content/file
-  headers. Editor `DatePicker` for `createdAt` (context-owner) is niche. **minor**
+- `[x]` **`createdAt` subtitle** — done: a compact relative time (full date in the
+  tooltip) on content/file headers. Editor `DatePicker` for `createdAt` is niche
+  and not carried. **minor**
 - `[ ]` Editor: strip the empty leading paragraph on save; add an editor error
   fallback; audio/video `autoPlay` + video width. **minor**
 - `[~]` **Bulk member import** / **xlsx SheetReader** (React `invite/InvitesFab.tsx`)
@@ -154,16 +145,15 @@ whole panels behind `isContextOwner` / `owner` / `mutable`.
 
 ## 5. Members & invites
 
-- `[ ]` **Member administration** (React `member/MembersDataGrid.tsx`) — owners can
-  only hide/unhide; add promote/demote **owner**, toggle **active**, edit name/
-  email, and **remove a member** (`delete_member` exists, no button). Enabled by
-  the `MembersSetInput` fields in §1. **major**
+- `[x]` **Member administration** (React `member/MembersDataGrid.tsx`) — done:
+  per-row promote/demote owner, mark active/inactive, hide/show, edit name+email,
+  and remove (confirm), via `update_member`/`remove_member`.
 - `[ ]` **Invite existing users by name** (React `invite/InvitesTextField.tsx`) —
   only single-email invites; add a `users` `displayName _ilike` autocomplete with
   multi-select, binding `nodeId` for known users (`invite_member` currently sends
   no `nodeId`/`name`). **major**
-- `[ ]` **Members entry point** — no owner "Members" button on a group/event view;
-  `?app=member` is reachable only by typing the URL. **major**
+- `[x]` **Members entry point** — done: a Members entry in the app rail + mobile
+  app bar (the component gates admin actions itself).
 - `[ ]` **Accept-invite unique-constraint fallback** — if a member row already
   exists, React deletes the placeholder email-invite row and updates the existing
   membership; the port has no fallback and can hit the unique constraint. **major**
@@ -187,10 +177,9 @@ whole panels behind `isContextOwner` / `owner` / `mutable`.
 
 ## 8. Mobile & responsive
 
-- `[ ]` **Mobile app navigation** (React `layout/MobileMenu.tsx`) — the app rail is
-  desktop-only, so on a phone **Speak/Vote/other apps are unreachable** (drawer
-  only offers context + Home). Events are attended on phones. (Distinct from the
-  skipped *styling* redesign #158 — this is reachability.) **major**
+- `[x]` **Mobile app navigation** (React `layout/MobileMenu.tsx`) — done: a
+  floating mobile app bar (bottom-left) exposes the same context apps as the
+  desktop rail, so Speak/Vote/Members are reachable on a phone.
 - `[ ]` **Home list on mobile** — authed mobile users see only the welcome card in
   the main pane; React also renders `HomeList` (groups/events) there. **medium**
 - `[ ]` **Pending-invite badge** on the Home rail/nav item (data already exists via
@@ -198,9 +187,9 @@ whole panels behind `isContextOwner` / `owner` / `mutable`.
 
 ## 9. Search, auth & routing
 
-- `[ ]` **`?type=passwordReset` deep-link** — password-reset emails link to
-  `/?type=passwordReset`; the port renders home instead of the set-password form.
-  **major**
+- `[x]` **`?type=passwordReset` deep-link** — done: the token is captured in
+  `main()` before the router drops the query, exchanged for a session, and the
+  set-password form is shown.
 - `[~]` **`?app=screen` chrome** — the projector view still shows the drawer/rail/
   bar; it should render full-screen. **major**
 - `[~]` **Clear GraphQL cache on login/logout** — the port relies on token-change
