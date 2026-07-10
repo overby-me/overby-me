@@ -10,7 +10,7 @@
 # gitignored, so they are absent from the source `nix flake check` copies into
 # the sandbox. Point at the store copies instead.
 pkgs: let
-  inherit (pkgs) alejandra biome coreutils gnused rumdl rustfmt tombi;
+  inherit (pkgs) alejandra biome coreutils gnused rustfmt tombi;
   inherit (pkgs.pkgsUnstable) nickel;
 
   # devenv has no YAML formatter, and the builtin prettier must not become one:
@@ -54,10 +54,14 @@ pkgs: let
   biomeFormat =
     "${biome}/bin/biome format --write"
     + " --config-path=${./devenv/modules/configs/biome-nix.jsonc}";
-  rumdlFormat = "${rumdl}/bin/rumdl fmt --config ${./devenv/modules/configs/rumdl.toml}";
 in {
   "*.nix" = "${alejandra}/bin/alejandra --quiet";
-  "*.md" = rumdlFormat;
+  # *.md is a no-op, not rumdl. rumdl has no cache.nixos.org build, so it
+  # compiles from source, which overflows CI's tiny microVM disk and fails
+  # checks.formatting. The no-op also stops the builtin prettier from taking
+  # over *.md. Markdown is still formatted by the rumdl devenv git-hook on
+  # commit.
+  "*.md" = noop;
   "*.toml" = "${tombi}/bin/tombi format --offline";
   "*.ncl" = "${nickel}/bin/nickel format";
   "*.rs" = "${rustfmtEdition}";
