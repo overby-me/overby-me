@@ -223,13 +223,34 @@ fn InviteItem(invite: InvitationFields, refresh: Signal<u32>) -> Element {
 
     let accept = {
         let member_id = member_id.clone();
+        let parent_id = invite.parent.as_ref().map(|p| p.id.0.clone());
         move |_| {
             let token = session.read().access_token.clone();
             let uid = session.read().user.as_ref().map(|u| u.id.clone());
             let member_id = member_id.clone();
+            let parent_id = parent_id.clone();
             spawn(async move {
                 if let Some(uid) = uid {
-                    let _ = graphql::accept_invitation(token.as_deref(), &member_id, &uid).await;
+                    // Accept by binding the invite to the user. If that fails —
+                    // typically the (parentId, nodeId) unique constraint because
+                    // the user already has a membership for this context — accept
+                    // that existing row instead, then drop the duplicate invite.
+                    // Ordering it this way never destroys the invite on a
+                    // transient failure (safer than React's delete-then-accept).
+                    let accepted = graphql::accept_invitation(token.as_deref(), &member_id, &uid)
+                        .await
+                        .unwrap_or(false);
+                    if !accepted {
+                        if let Some(pid) = parent_id {
+                            if graphql::accept_existing_member(token.as_deref(), &pid, &uid)
+                                .await
+                                .unwrap_or(false)
+                            {
+                                let _ =
+                                    graphql::decline_invitation(token.as_deref(), &member_id).await;
+                            }
+                        }
+                    }
                     refresh += 1;
                 }
             });

@@ -1765,6 +1765,56 @@ pub struct MembersAffected {
     pub affected_rows: i32,
 }
 
+#[derive(cynic::QueryVariables, Debug)]
+pub struct UpdateMembersWhereVariables {
+    pub where_clause: MembersBoolExp,
+    pub set: MembersSetInput,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "mutation_root",
+    variables = "UpdateMembersWhereVariables"
+)]
+pub struct UpdateMembersMutation {
+    #[arguments(where: $where_clause, _set: $set)]
+    pub update_members: Option<MembersAffected>,
+}
+
+/// Accept a pre-existing membership by `(parent, node)` instead of an email
+/// invite row. The fallback when accepting an email invite would violate the
+/// `(parentId, nodeId)` unique constraint because the user is already a member
+/// of that context (React InvitesUserList's accept-then-fallback).
+pub async fn accept_existing_member(
+    access_token: Option<&str>,
+    parent_id: &str,
+    node_id: &str,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let op = UpdateMembersMutation::build(UpdateMembersWhereVariables {
+        where_clause: MembersBoolExp {
+            parent_id: Some(UuidComparisonExp {
+                eq: Some(Uuid(parent_id.to_string())),
+                is_null: None,
+            }),
+            node_id: Some(UuidComparisonExp {
+                eq: Some(Uuid(node_id.to_string())),
+                is_null: None,
+            }),
+            ..Default::default()
+        },
+        set: MembersSetInput {
+            accepted: Some(true),
+            ..Default::default()
+        },
+    });
+    let r = execute(access_token, op).await?;
+    Ok(r.update_members
+        .map(|m| m.affected_rows > 0)
+        .unwrap_or(false))
+}
+
 /// Delete every member row belonging to a node (`members` where
 /// `parent_id = node_id`). React's DeleteButton removes members before the node
 /// itself so no orphan member rows are left behind.
