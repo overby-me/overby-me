@@ -28,6 +28,10 @@ const STYLE_CSS: Asset = asset!("/assets/style.css");
 // The dioxus-components (shadcn-style) theme tokens, loaded before our own CSS
 // so app styles can build on / override them as screens migrate to primitives.
 const DX_THEME_CSS: Asset = asset!("/assets/dx-components-theme.css");
+// The Material Design 3 colour scheme (generated from the Radikale brand seeds
+// by scripts/gen-theme.ts). Defines the canonical --md-sys-color-* roles that
+// style.css's --md-* tokens alias, so the whole app re-skins from one file.
+const M3_THEME_CSS: Asset = asset!("/assets/m3-theme.css");
 
 fn main() {
     // Print real panic messages (with a JS stack trace) to the console instead
@@ -138,6 +142,7 @@ fn App() -> Element {
 
     rsx! {
         document::Stylesheet { href: DX_THEME_CSS }
+        document::Stylesheet { href: M3_THEME_CSS }
         document::Stylesheet { href: STYLE_CSS }
         Router::<Route> {}
         snackbar::Snackbar {}

@@ -27,7 +27,7 @@ pub fn setup() {
         let manifest = format!(
             "{{\"name\":\"RadikalWiki\",\"short_name\":\"RadikalWiki\",\
              \"start_url\":\"/\",\"scope\":\"/\",\"display\":\"standalone\",\
-             \"background_color\":\"#ffffff\",\"theme_color\":\"#006B32\",\
+             \"background_color\":\"#ffffff\",\"theme_color\":\"#006d39\",\
              \"icons\":[{{\"src\":\"{icon}\",\"sizes\":\"any\",\
              \"type\":\"image/svg+xml\",\"purpose\":\"any maskable\"}}]}}"
         );
@@ -42,7 +42,7 @@ pub fn setup() {
         }
         append_link(&document, &head, "icon", &icon);
         append_link(&document, &head, "apple-touch-icon", &icon);
-        append_meta(&document, &head, "theme-color", "#006B32");
+        append_meta(&document, &head, "theme-color", "#006d39");
         append_meta(&document, &head, "apple-mobile-web-app-capable", "yes");
         append_meta(&document, &head, "mobile-web-app-capable", "yes");
     }

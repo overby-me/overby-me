@@ -8,6 +8,41 @@ The initial port (scaffolding through all screens) is done; this plan is about
 **verifying each area against the real backend and fixing what's broken**, and
 (see below) **moving the UI onto the dioxus-components style and component set**.
 
+## North star: Material Design 3, 100%
+
+The active goal is to make the whole UI follow **Material Design 3** — both its
+**style** (colour, typography, shape, elevation, state layers, motion) and its
+**principles** — validated component-by-component and page-by-page with the
+screenshot + contrast tooling (`test-browser.nu --shots`, `test-contrast-audit.js`).
+Reference: <https://m3.material.io/>.
+
+**Colour (done — replaceable).** The palette is a genuine M3 scheme generated
+from the Radikale Venstre brand seeds by `scripts/gen-theme.ts`
+(Google `material-color-utilities`) into `assets/m3-theme.css` as canonical
+`--md-sys-color-*` roles (light + dark). **Green `#02944F` leads as the primary,
+magenta `#D2307E` is the tertiary accent** ("de to farver bør altid optræde
+sammen"). The app's `--md-*` tokens alias the sys roles, so re-skinning the
+entire app = change the two seeds and re-run the generator. Green drives the
+chrome (bar, buttons, avatars, app-rail, chips); magenta pops on the FAB, the
+user avatar and badges/comment avatars.
+
+**Remaining M3 conformance (per component, validate as you go):**
+- **Shape** — M3 corner-radius scale (extra-small 4 / small 8 / medium 12 /
+  large 16 / full). FAB is a rounded rectangle (done); audit cards, buttons,
+  chips, dialogs, text fields.
+- **Elevation & surfaces** — use the tonal `surface-container-*` levels for
+  elevation instead of ad-hoc shadows; M3 app bars are `surface`-coloured on
+  scroll (today the bar is a solid primary — a deliberate brand choice to
+  revisit).
+- **Typography** — adopt the M3 type scale (display/headline/title/body/label)
+  with consistent sizes/weights/line-heights.
+- **State layers** — hover/focus/pressed/dragged overlays at M3 opacities
+  (8/10/10/16%) on interactive elements.
+- **Components** — buttons (filled/tonal/outlined/text/elevated), FAB, chips,
+  cards, lists, navigation (rail/bar/drawer), dialogs, snackbars, switches,
+  selects, tooltips — each matched to its M3 spec (many are dioxus-primitives).
+- **Motion** — M3 easing/duration tokens for transitions.
+
 ## Design direction: dioxus-components / dioxus-primitives
 
 Adopt the [dioxus-components](https://github.com/DioxusLabs/dioxus-components)

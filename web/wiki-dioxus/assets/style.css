@@ -1,8 +1,13 @@
-/* RadikalWiki theme — surfaces/text/borders track the dioxus-components
- * (shadcn) tokens from dx-components-theme.css (which auto-switch on
- * [data-theme]), while the RadikalWiki brand pink/green stay as the accents.
- * Because surface = --primary-color and text = --secondary-color are opposites,
- * contrast is guaranteed in both light and dark. */
+/* RadikalWiki theme — Material Design 3.
+ *
+ * Colour is a generated M3 scheme (assets/m3-theme.css) seeded from the
+ * Radikale Venstre brand: grøn #02944F leads as the M3 primary, magenta
+ * #D2307E is the tertiary accent ("de to farver bør altid optræde sammen").
+ * The `--md-*` tokens below are thin aliases over the canonical
+ * `--md-sys-color-*` roles, so the whole app re-skins by regenerating that one
+ * file (scripts/gen-theme.ts) from new seeds. Every element pairs an on-colour
+ * with its background (see the COLOR SYSTEM block), so contrast holds in both
+ * light and dark. */
 
 /* Atkinson Hyperlegible — a high-legibility face designed for low-vision
  * readers (#37). Loaded from Google Fonts; if the fetch is blocked the
@@ -16,56 +21,49 @@
 @import url('https://fonts.googleapis.com/icon?family=Material+Icons');
 
 :root {
-    /* Brand accents (RadikalWiki). */
-    --md-primary: #B80F55;
-    --md-on-primary: #FFFFFF;
-    --md-primary-container: #FFD9DF;
-    --md-on-primary-container: #3F0018;
-    --md-secondary: #006B32;
-    --md-on-secondary: #FFFFFF;
-    /* A light tint + dark on-color (like primary-container): the old values were
-       green-on-green and unreadable. */
-    --md-secondary-container: #A0F5C0;
-    --md-on-secondary-container: #00210F;
-    --md-tertiary: #006B32;
-    --md-on-tertiary: #FFFFFF;
-    --md-surface-tint: #B80F55;
+    /* App semantic tokens — thin aliases over the generated M3 system colours
+       (assets/m3-theme.css). Light/dark is handled there, so these are defined
+       once. Regenerate that file to re-skin; nothing here changes. */
+    --md-primary: var(--md-sys-color-primary);
+    --md-on-primary: var(--md-sys-color-on-primary);
+    --md-primary-container: var(--md-sys-color-primary-container);
+    --md-on-primary-container: var(--md-sys-color-on-primary-container);
+    --md-secondary: var(--md-sys-color-secondary);
+    --md-on-secondary: var(--md-sys-color-on-secondary);
+    --md-secondary-container: var(--md-sys-color-secondary-container);
+    --md-on-secondary-container: var(--md-sys-color-on-secondary-container);
+    /* Tertiary = the Radikale magenta accent. */
+    --md-tertiary: var(--md-sys-color-tertiary);
+    --md-on-tertiary: var(--md-sys-color-on-tertiary);
+    --md-tertiary-container: var(--md-sys-color-tertiary-container);
+    --md-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
+    --md-surface-tint: var(--md-sys-color-surface-tint);
 
-    /* Neutral surfaces / text / borders / status — from the shadcn tokens. */
-    --md-background: var(--primary-color-2, #fff);
-    --md-on-background: var(--secondary-color, #000);
-    --md-surface: var(--primary-color-1, #fbfbfb);
-    --md-on-surface: var(--secondary-color, #000);
-    --md-surface-variant: var(--primary-color-5, #f5f5f5);
-    /* Muted/secondary text. Darker than the shadcn default (#848484 was ~3.6:1
-       on white, below AA) so hints, timestamps and counts stay readable. */
-    --md-on-surface-variant: #616161;
-    --md-outline: var(--primary-color-6, #e5e5e5);
+    --md-background: var(--md-sys-color-background);
+    --md-on-background: var(--md-sys-color-on-background);
+    --md-surface: var(--md-sys-color-surface);
+    --md-on-surface: var(--md-sys-color-on-surface);
+    --md-surface-variant: var(--md-sys-color-surface-variant);
+    --md-on-surface-variant: var(--md-sys-color-on-surface-variant);
+    /* M3 tonal surface-container elevation levels. */
+    --md-surface-container-lowest: var(--md-sys-color-surface-container-lowest);
+    --md-surface-container-low: var(--md-sys-color-surface-container-low);
+    --md-surface-container: var(--md-sys-color-surface-container);
+    --md-surface-container-high: var(--md-sys-color-surface-container-high);
+    --md-surface-container-highest: var(--md-sys-color-surface-container-highest);
+    /* App borders are decorative, so alias the subtle M3 outline-variant;
+       --md-outline-strong is the emphasis boundary (text fields, dividers). */
+    --md-outline: var(--md-sys-color-outline-variant);
+    --md-outline-strong: var(--md-sys-color-outline);
+    --md-outline-variant: var(--md-sys-color-outline-variant);
     --md-shadow: rgba(0, 0, 0, 0.12);
-    --md-error: var(--secondary-error-color, #ef4444);
-    --md-on-error: var(--primary-color, #fff);
-    --md-error-container: var(--primary-error-color, #dc2626);
-    --md-inverse-surface: var(--secondary-color, #000);
-    --md-inverse-on-surface: var(--primary-color, #fff);
-}
-
-/* Only the brand accents flip for dark; the neutrals ride the shadcn tokens. */
-[data-theme="dark"] {
-    --md-primary: #FFB1C2;
-    --md-on-primary: #66002B;
-    --md-primary-container: #8F003F;
-    --md-on-primary-container: #FFD9DF;
-    --md-secondary: #5ADF82;
-    --md-on-secondary: #003917;
-    /* Dark tint + light on-color (mirrors light mode): the old values were
-       green-on-green and unreadable. */
-    --md-secondary-container: #005230;
-    --md-on-secondary-container: #A0F5C0;
-    /* Muted text on the dark surface (light gray, high contrast). */
-    --md-on-surface-variant: #A1A1A1;
-    --md-tertiary: #5ADF82;
-    --md-on-tertiary: #003917;
-    --md-surface-tint: #FFB1C2;
+    --md-error: var(--md-sys-color-error);
+    --md-on-error: var(--md-sys-color-on-error);
+    --md-error-container: var(--md-sys-color-error-container);
+    --md-on-error-container: var(--md-sys-color-on-error-container);
+    --md-inverse-surface: var(--md-sys-color-inverse-surface);
+    --md-inverse-on-surface: var(--md-sys-color-inverse-on-surface);
+    --md-inverse-primary: var(--md-sys-color-inverse-primary);
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -74,21 +72,25 @@
    Material "on-color" pairing: every background token has a matching foreground
    ("on-") token. Put content ONLY in its paired colour:
 
+   The Radikale palette: green LEADS (--md-primary), magenta is the accent
+   (--md-tertiary); "de to farver bør altid optræde sammen".
+
      background                 foreground (text / icons)
      --md-surface               --md-on-surface           body text
        (muted, on surface only) --md-on-surface-variant   hints, timestamps, labels
-     --md-primary               --md-on-primary           base avatars, primary btns
-     --md-secondary             --md-on-secondary         the bar, secondary avatars,
-                                                           active app-rail item, chips
+     --md-primary (green)       --md-on-primary           the bar, primary btns, all
+                                                           avatars, active app-rail, chips
      --md-primary-container     --md-on-primary-container    selected drawer row
-     --md-secondary-container   --md-on-secondary-container  badges, comment avatars
+     --md-tertiary (magenta)    --md-on-tertiary          accent chips / highlights
+     --md-tertiary-container    --md-on-tertiary-container   badges, comment avatars,
+                                                             the user avatar (the pop)
 
    Rules:
    1. Never set a foreground colour that assumes a different background than
       where the element renders. `--md-on-surface-variant` is muted text on a
-      SURFACE only; it is invisible on a coloured (primary/secondary) background.
+      SURFACE only; it is invisible on a coloured (primary/tertiary) background.
    2. A highlight / selected / active state flips BOTH background and foreground
-      together to a paired set (app-rail active = secondary + on-secondary;
+      together to a paired set (app-rail active = primary + on-primary;
       drawer selected = primary-container + on-primary-container). If a child's
       colour would otherwise be inherited wrong, override it in the state's rule
       (see `.btn-icon.active .app-rail-label`).
@@ -149,7 +151,7 @@ a:hover {
 .bar {
     position: relative;
     border-radius: 20px;
-    background-color: var(--md-secondary);
+    background-color: var(--md-primary);
     opacity: 0.9;
     width: 100%;
     display: flex;
@@ -291,8 +293,8 @@ a:hover {
 }
 
 .avatar.secondary {
-    background-color: var(--md-secondary);
-    color: var(--md-on-secondary);
+    background-color: var(--md-primary);
+    color: var(--md-on-primary);
 }
 
 .avatar.small {
@@ -338,7 +340,7 @@ a:hover {
 }
 
 .btn-icon.active .app-rail-label {
-    color: var(--md-on-secondary);
+    color: var(--md-on-primary);
 }
 
 /* "Not submitted" badge overlaid on a node avatar (mutable draft nodes). */
@@ -409,9 +411,12 @@ a:hover {
     width: 56px;
     height: 56px;
     border: none;
-    border-radius: 50%;
-    background: var(--md-primary);
-    color: var(--md-on-primary);
+    /* M3 FAB shape: large rounded rectangle, not a full circle. */
+    border-radius: 16px;
+    /* Magenta accent (tertiary) — the brand's second colour, paired with the
+       green chrome (a FAB is the M3-idiomatic place for the accent). */
+    background: var(--md-tertiary);
+    color: var(--md-on-tertiary);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     cursor: pointer;
     display: inline-flex;
@@ -491,8 +496,8 @@ a:hover {
 }
 
 .btn-secondary {
-    background-color: var(--md-secondary);
-    color: var(--md-on-secondary);
+    background-color: var(--md-primary);
+    color: var(--md-on-primary);
 }
 
 .btn-outlined {
@@ -687,18 +692,18 @@ select:focus {
     gap: 5px;
     height: 24px;
     padding: 0 10px 0 7px;
-    border: 1px solid var(--md-secondary);
+    border: 1px solid var(--md-primary);
     border-radius: 16px;
     font-size: 13px;
     line-height: 1;
-    color: var(--md-secondary);
+    color: var(--md-primary);
     background: transparent;
     max-width: 100%;
 }
 
 .chip .material-icons {
     font-size: 18px;
-    color: var(--md-secondary);
+    color: var(--md-primary);
 }
 
 .chip-label {
@@ -725,7 +730,7 @@ select:focus {
     justify-content: center;
     border: none;
     background: transparent;
-    color: var(--md-secondary);
+    color: var(--md-primary);
     cursor: pointer;
     padding: 0;
     margin-left: 2px;
@@ -1003,8 +1008,8 @@ h6, .title-small {
     width: 17px;
     height: 17px;
     border-radius: 50%;
-    background: var(--md-secondary-container);
-    color: var(--md-on-secondary-container);
+    background: var(--md-tertiary-container);
+    color: var(--md-on-tertiary-container);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1119,7 +1124,7 @@ h6, .title-small {
 }
 
 .speak-next {
-    border-left: 4px solid var(--md-secondary);
+    border-left: 4px solid var(--md-primary);
     background: var(--md-surface-variant);
     border-radius: 8px;
 }
@@ -1424,7 +1429,7 @@ a.list-item:hover {
 /* The bar is green (secondary), so its icons use the on-secondary colour for
    contrast (black-on-green was too faint). */
 .bar .btn-icon {
-    color: var(--md-on-secondary);
+    color: var(--md-on-primary);
 }
 
 /* User menu */
@@ -1432,11 +1437,13 @@ a.list-item:hover {
     position: relative;
 }
 
-/* The user avatar sits on the green bar; invert it (light circle, green initial)
-   so the green-on-green avatar is clearly visible. */
+/* The user avatar sits on the green bar; make it the light-magenta accent
+   (tertiary-container) so the brand's two colours pair on every screen. Light
+   on green gives clear luminance contrast (a bold magenta would match the
+   green's luminance and vibrate against it). */
 .user-menu .avatar.secondary {
-    background: var(--md-on-secondary);
-    color: var(--md-secondary);
+    background: var(--md-tertiary-container);
+    color: var(--md-on-tertiary-container);
 }
 
 /* Full-viewport click-catcher behind an open popup menu, so a click anywhere
@@ -1566,8 +1573,8 @@ a.list-item:hover {
 .btn-icon.active {
     /* Saturated green + white icon: a strong highlight that stands out on the
        light-gray app rail (the container tint would be too subtle there). */
-    background: var(--md-secondary);
-    color: var(--md-on-secondary);
+    background: var(--md-primary);
+    color: var(--md-on-primary);
 }
 
 .btn-icon .material-icons {
@@ -1723,8 +1730,8 @@ a.list-item:hover {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--md-secondary-container);
-    color: var(--md-on-secondary-container);
+    background: var(--md-tertiary-container);
+    color: var(--md-on-tertiary-container);
     font-size: 13px;
     font-weight: 600;
     text-transform: uppercase;
