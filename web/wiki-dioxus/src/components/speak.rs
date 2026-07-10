@@ -144,6 +144,25 @@ fn SpeakList(
     let max_index = speakers.iter().map(|s| s.index).max().unwrap_or(0);
     let count = speakers.len();
 
+    // Native notification when it becomes the user's turn to speak (#139). Keyed
+    // on the current speaker so it fires once per turn-change; permission is
+    // requested on Join, so only opted-in participants are ever notified.
+    {
+        let current_id = speakers.first().map(|s| s.id.0.clone()).unwrap_or_default();
+        let my_turn = current_user_id.is_some()
+            && speakers
+                .first()
+                .and_then(|s| s.owner_id.as_ref())
+                .map(|o| o.0.clone())
+                == current_user_id;
+        use_effect(use_reactive!(|(current_id, my_turn)| {
+            let _ = &current_id;
+            if my_turn {
+                crate::pwa::notify(&t("speak.yourTurn"), &t("speak.yourTurnBody"));
+            }
+        }));
+    }
+
     rsx! {
         div { class: "card",
             div { class: "card-header",
@@ -409,6 +428,10 @@ fn SpeakList(
                                             button {
                                                 class: "btn btn-outlined",
                                                 onclick: move |_| {
+                                                    // Joining is a user gesture: ask for
+                                                    // notification permission so we can ping
+                                                    // this speaker when it is their turn (#139).
+                                                    crate::pwa::request_notification_permission();
                                                     let name = display_name.clone();
                                                     let key = format!(
                                                         "{}-{}",

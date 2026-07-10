@@ -272,6 +272,8 @@ const EN_JSON: &str = r#"{
         "stop": "Stop",
         "speakingTime": "Speaking time (s)",
         "speakingNow": "Speaking now",
+        "yourTurn": "Your turn to speak",
+        "yourTurnBody": "You are the current speaker.",
         "next": "Next",
         "moveUp": "Move to top",
         "moveDown": "Move to bottom"
@@ -526,6 +528,8 @@ const DA_JSON: &str = r#"{
         "stop": "Stop",
         "speakingTime": "Taletid (s)",
         "speakingNow": "Taler nu",
+        "yourTurn": "Din tur til at tale",
+        "yourTurnBody": "Du er den nuværende taler.",
         "next": "Næste",
         "moveUp": "Flyt øverst",
         "moveDown": "Flyt nederst"

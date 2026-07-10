@@ -254,8 +254,14 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `[x]` `#122` Refresh data on window focus — `use_live` re-fetches when the
   window regains focus (via `use_focus_refresh`), recovering a dropped socket.
 - `#158` New bottom-bar design (list menu · app select · tools).
-- `#33` PWA / offline mode.
-- `#139` Native notifications (poll open, your turn to speak).
+- `[~]` `#33` PWA / offline mode — installable: web manifest + icon + theme-color
+  (`assets/manifest.json`, `assets/icon.svg`, wired in `main.rs`). A service
+  worker (`assets/sw.js`) is registered for offline, but full offline needs it
+  served from the site ROOT (`/sw.js` or `Service-Worker-Allowed: /`); at
+  `/assets/sw.js` its scope is limited — a deploy concern (`src/pwa.rs`).
+- `[~]` `#139` Native notifications — "your turn to speak" fires when a speaker
+  reaches the top of the queue (permission requested on Join). Poll-open
+  notifications still to do (needs new-poll detection).
 - `#145` Error/stacktrace reporting API.
 
 ### Ignored (legacy React/TS only)

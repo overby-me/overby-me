@@ -9,6 +9,7 @@ mod i18n;
 mod logging;
 #[allow(dead_code)]
 mod nhost;
+mod pwa;
 mod route;
 #[allow(dead_code)]
 mod session;
@@ -44,6 +45,10 @@ fn main() {
     // Clean the stray trailing "?" the router emits for the optional `app` query
     // before the first navigation writes it to the address bar.
     install_history_query_shim();
+
+    // PWA: install the manifest / icon / theme-color head tags and register the
+    // service worker (offline where the SW controls the root).
+    pwa::setup();
 
     dioxus::launch(App);
 }

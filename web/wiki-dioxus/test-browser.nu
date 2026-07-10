@@ -302,6 +302,17 @@ def test-shell [session_id: string, timeout: int, passed: int, failed: int]: not
     let r = (check-contrast-selftest $session_id $p $fl); $p = $r.passed; $fl = $r.failed
     let r = (check-contrast $session_id "logged-out shell" $p $fl); $p = $r.passed; $fl = $r.failed
 
+    # PWA (#33): the app is installable — a manifest link + brand theme-color are
+    # injected into the head (by pwa::setup), the manifest (a runtime blob)
+    # declares name/start_url/icons, and the icon it points to actually serves.
+    let mhref = (wd-execute $session_id 'var l=document.querySelector("link[rel=manifest]"); return l?(l.getAttribute("href")):"none"')
+    if ($mhref != "none") and ($mhref | str starts-with "blob:") { log-ok "PWA manifest linked (blob)"; $p = $p + 1 } else { log-fail $"no PWA manifest link: ($mhref)"; $fl = $fl + 1 }
+    let tcolor = (wd-execute $session_id 'var m=document.querySelector("meta[name=theme-color]"); return m?(m.getAttribute("content")):"none"')
+    if $tcolor != "none" { log-ok $"PWA theme-color: ($tcolor)"; $p = $p + 1 } else { log-fail "no theme-color meta"; $fl = $fl + 1 }
+    # Fetch the manifest blob + its icon synchronously; validate the essentials.
+    let mstatus = (wd-execute $session_id 'try{var l=document.querySelector("link[rel=manifest]"); var x=new XMLHttpRequest(); x.open("GET",l.href,false); x.send(); var m=JSON.parse(x.responseText); if(!(m.name&&m.start_url&&m.icons&&m.icons.length))return "invalid"; var y=new XMLHttpRequest(); y.open("GET",m.icons[0].src,false); y.send(); return (y.status===200&&y.responseText.indexOf("<svg")>=0)?"ok":("icon:"+y.status)}catch(e){return "err:"+e}')
+    if $mstatus == "ok" { log-ok "PWA manifest + icon valid and served"; $p = $p + 1 } else { log-fail $"PWA manifest/icon check: ($mstatus)"; $fl = $fl + 1 }
+
     # Pull-to-refresh: the indicator mounts, and an over-scroll up at the top
     # triggers the refreshing animation (synthetic wheel event; scrollY is 0).
     let r = (assert-exists $session_id "pull-to-refresh indicator mounts" ".ptr-indicator" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
