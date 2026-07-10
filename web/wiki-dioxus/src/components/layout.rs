@@ -621,7 +621,7 @@ fn DrawerContent() -> Element {
     let ctx_abbr = abbrev_context_name(&ctx_name);
 
     rsx! {
-        div { style: "padding: 16px;",
+        div { style: "padding: 0 16px 16px;",
             div { class: "list",
                 if segments.is_empty() {
                     // At the home route: Home, styled as a bar like the top panel.

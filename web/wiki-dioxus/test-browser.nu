@@ -577,6 +577,17 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             log-fail $"drawer context bar off: text='($m.contextText)', mobileHome=($m.mobileHome)"; $fl = $fl + 1
         }
     }
+    # The drawer context bar should look like the top panel: same height, and
+    # aligned to the same top (no gap above it).
+    let bars = (wd-execute $session_id 'var t=document.querySelector(".bottom-bar .bar"); var d=document.querySelector(".drawer-context-bar"); if(!t||!d) return "missing"; var tr=t.getBoundingClientRect(), dr=d.getBoundingClientRect(); return JSON.stringify({th:Math.round(tr.height), dh:Math.round(dr.height), tt:Math.round(tr.top), dt:Math.round(dr.top)})')
+    if $bars == "missing" {
+        log-warn "could not measure both bars"
+    } else {
+        let b = ($bars | from json)
+        let dh = (($b.th - $b.dh) | math abs)
+        let dt = (($b.tt - $b.dt) | math abs)
+        if ($dh <= 4) and ($dt <= 6) { log-ok $"drawer bar matches the top panel: h ($b.dh) vs ($b.th), top ($b.dt) vs ($b.tt)"; $p = $p + 1 } else { log-fail $"drawer bar differs from top panel: h ($b.dh) vs ($b.th), top ($b.dt) vs ($b.tt)"; $fl = $fl + 1 }
+    }
 
     # ── Navigate to a child node (regression: PathPage must re-resolve on a
     # client-side route change between two path pages, not show stale content).
