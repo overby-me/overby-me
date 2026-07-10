@@ -561,6 +561,160 @@ pub async fn active_node_id(
         .find_map(|r| r.node_id.map(|n| n.0)))
 }
 
+// --- Set the context's `active` relation (upsert, keyed on parentId+name) ---
+
+#[derive(cynic::Enum, Clone, Copy, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "relations_constraint",
+    rename_all = "snake_case"
+)]
+pub enum RelationsConstraint {
+    RelationsParentIdNameKey,
+    RelationsPkey,
+}
+
+#[derive(cynic::Enum, Clone, Copy, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "relations_update_column",
+    rename_all = "camelCase"
+)]
+pub enum RelationsUpdateColumn {
+    Id,
+    Name,
+    NodeId,
+    ParentId,
+}
+
+#[derive(cynic::InputObject, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "relations_on_conflict"
+)]
+pub struct RelationsOnConflict {
+    pub constraint: RelationsConstraint,
+    // Hasura's on_conflict meta-field stays snake_case (unlike the camelCase
+    // column fields), so keep cynic from rewriting it to `updateColumns`.
+    #[cynic(rename = "update_columns")]
+    pub update_columns: Vec<RelationsUpdateColumn>,
+}
+
+#[derive(cynic::InputObject, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "relations_insert_input"
+)]
+pub struct RelationsInsertInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<Uuid>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
+}
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct InsertRelationVariables {
+    pub object: RelationsInsertInput,
+    pub on_conflict: RelationsOnConflict,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "mutation_root",
+    variables = "InsertRelationVariables"
+)]
+pub struct InsertRelationMutation {
+    #[arguments(object: $object, on_conflict: $on_conflict)]
+    pub insert_relation: Option<RelationRef>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "relations")]
+pub struct RelationRef {
+    pub id: Uuid,
+}
+
+/// Upsert the context's `active` relation to point at `node_id` (keyed on
+/// parentId+name so it replaces any prior active). Mirrors `contextSet("active")`.
+pub async fn set_active_relation(
+    access_token: Option<&str>,
+    context_id: &str,
+    node_id: Option<&str>,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let object = RelationsInsertInput {
+        name: Some("active".to_string()),
+        node_id: node_id.map(|n| Uuid(n.to_string())),
+        parent_id: Some(Uuid(context_id.to_string())),
+    };
+    let on_conflict = RelationsOnConflict {
+        constraint: RelationsConstraint::RelationsParentIdNameKey,
+        update_columns: vec![RelationsUpdateColumn::NodeId],
+    };
+    let operation = InsertRelationMutation::build(InsertRelationVariables {
+        object,
+        on_conflict,
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.insert_relation.is_some())
+}
+
+/// Open a poll on `parent_id` (a policy/change/position): close any prior active
+/// poll, insert a `vote/poll` node with the ballot config, and set the context's
+/// `active` relation to it. Mirrors React's PollDialog.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_poll(
+    access_token: Option<&str>,
+    parent_id: &str,
+    context_id: &str,
+    name: &str,
+    key: &str,
+    options: &[String],
+    min_vote: usize,
+    max_vote: usize,
+    hidden: bool,
+) -> Result<InsertedNode, String> {
+    // Close the context's current active poll, if any (only one is open at once).
+    if let Ok(Some(prior)) = active_node_id(access_token, context_id).await {
+        let _ = update_node(
+            access_token,
+            &prior,
+            NodesSetInput {
+                mutable: Some(false),
+                ..Default::default()
+            },
+        )
+        .await;
+    }
+    let data = serde_json::json!({
+        "options": options,
+        "minVote": min_vote,
+        "maxVote": max_vote,
+        "hidden": hidden,
+        "nodeId": parent_id,
+    });
+    let inserted = insert_node(
+        access_token,
+        NodesInsertInput {
+            name: Some(name.to_string()),
+            key: Some(key.to_string()),
+            mime_id: Some("vote/poll".to_string()),
+            parent_id: Some(Uuid(parent_id.to_string())),
+            context_id: Some(Uuid(context_id.to_string())),
+            data: Some(Jsonb(data)),
+            mutable: Some(true),
+            index: None,
+        },
+    )
+    .await?
+    .ok_or_else(|| "poll insert returned no node".to_string())?;
+    set_active_relation(access_token, context_id, Some(&inserted.id.0)).await?;
+    Ok(inserted)
+}
+
 // --- Invitations (pending memberships on groups / events) ---
 
 #[derive(cynic::QueryVariables, Debug)]

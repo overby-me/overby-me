@@ -10,6 +10,7 @@ use super::content::ContentApp;
 use super::loader::{icon_el, mime_icon, visible_sorted};
 use super::ui::checkbox::Checkbox;
 use super::ui::radio_group::{RadioGroup, RadioItem};
+use super::ui::switch::Switch;
 use dioxus_primitives::checkbox::CheckboxState;
 
 /// VoteApp — the context-level vote screen (`?app=vote`). Resolves the context's
@@ -93,6 +94,9 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     rsx! {
         // Main content
         ContentApp { node: node.clone() }
+
+        // Owner-only: open a poll on this policy/change.
+        StartPollButton { node: node.clone(), path: path.clone() }
 
         // Amendments
         if !amendments.is_empty() {
@@ -348,6 +352,35 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                         if !open { "{t(\"vote.noVoteNow\")}" } else if voted { "{t(\"vote.hasVoted\")}" } else { "{t(\"poll.managePoll\")}" }
                     }
                 }
+                div { class: "flex-grow" }
+                // Owner-only: close the poll (mutable:false) so results show.
+                if open && node.is_context_owner.unwrap_or(false) {
+                    button {
+                        class: "btn-icon",
+                        aria_label: "{t(\"poll.stopPoll\")}",
+                        title: "{t(\"poll.stopPoll\")}",
+                        onclick: {
+                            let poll_id = poll_id.clone();
+                            move |_| {
+                                let token = session.read().access_token.clone();
+                                let poll_id = poll_id.clone();
+                                spawn(async move {
+                                    let _ = graphql::update_node(
+                                        token.as_deref(),
+                                        &poll_id,
+                                        graphql::NodesSetInput {
+                                            mutable: Some(false),
+                                            ..Default::default()
+                                        },
+                                    )
+                                    .await;
+                                    crate::session::bump_data_version();
+                                });
+                            }
+                        },
+                        span { class: "material-icons", "stop" }
+                    }
+                }
             }
 
             div { class: "card-content",
@@ -505,6 +538,174 @@ fn ballot_order(n: usize, mut rand: impl FnMut() -> f64) -> Vec<usize> {
     }
     order.push(n - 1);
     order
+}
+
+/// Owner-only control to open a poll on a policy / change / position: a "start"
+/// button and a small dialog (hide-result toggle, plus a vote-range for a
+/// position with more than two candidates). Mirrors React's PollDialog — it
+/// closes any prior active poll, inserts a `vote/poll`, sets the context
+/// `active` relation, and navigates to the new ballot.
+#[component]
+fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Element {
+    let mime = node.mime_id.clone().unwrap_or_default();
+    let is_position = mime == "vote/position";
+    let options: Vec<String> = if is_position {
+        let mut o: Vec<String> = node
+            .children
+            .iter()
+            .filter(|c| c.mime_id.as_deref() == Some("vote/candidate"))
+            .map(|c| c.name.clone())
+            .collect();
+        o.push("Blank".to_string());
+        o
+    } else {
+        vec!["For".to_string(), "Imod".to_string(), "Blank".to_string()]
+    };
+    let opt_count = options.len();
+    let max_range = opt_count.saturating_sub(1).max(1);
+
+    let session = use_session();
+    let nav = use_navigator();
+    let mut open = use_signal(|| false);
+    let mut hidden = use_signal(|| is_position);
+    let mut min_vote = use_signal(|| 1usize);
+    let mut max_vote = use_signal(|| 1usize);
+
+    // Non-owners get nothing (hooks above run unconditionally).
+    if !node.is_context_owner.unwrap_or(false) {
+        return rsx! {};
+    }
+
+    let node_id = node.id.0.clone();
+    let context_id = node.context_id.clone().map(|c| c.0);
+    let name = node.name.clone();
+    let range_label = t("poll.voteRange");
+
+    rsx! {
+        div { class: "card mt-1",
+            div { class: "card-header",
+                div { class: "avatar", {icon_el("vote/poll")} }
+                h3 { class: "title-medium", "{t(\"poll.newPoll\")}" }
+                div { class: "flex-grow" }
+                button {
+                    class: "btn-icon",
+                    aria_label: "{t(\"poll.newPoll\")}",
+                    title: "{t(\"poll.newPoll\")}",
+                    onclick: move |_| open.set(true),
+                    span { class: "material-icons", "play_arrow" }
+                }
+            }
+        }
+        if open() {
+            div { class: "modal-backdrop", onclick: move |_| open.set(false),
+                div {
+                    class: "modal-card",
+                    onclick: move |e| e.stop_propagation(),
+                    h3 { class: "title-large", style: "margin-bottom: 12px;", "{t(\"poll.newPoll\")}" }
+                    if is_position && opt_count > 2 {
+                        div { class: "body-medium", style: "margin-bottom: 4px;",
+                            "{range_label}: {min_vote} to {max_vote}"
+                        }
+                        input {
+                            r#type: "range",
+                            min: "1",
+                            max: "{max_range}",
+                            value: "{min_vote}",
+                            style: "width: 100%;",
+                            oninput: move |e| {
+                                let v: usize = e.value().parse().unwrap_or(1);
+                                min_vote.set(v);
+                                if max_vote() < v {
+                                    max_vote.set(v);
+                                }
+                            },
+                        }
+                        input {
+                            r#type: "range",
+                            min: "1",
+                            max: "{max_range}",
+                            value: "{max_vote}",
+                            style: "width: 100%; margin-bottom: 8px;",
+                            oninput: move |e| {
+                                let v: usize = e.value().parse().unwrap_or(1);
+                                max_vote.set(v.max(min_vote()));
+                            },
+                        }
+                    }
+                    div { class: "list-item switch-row",
+                        span { class: "switch-row-label", "{t(\"poll.hideResult\")}" }
+                        Switch {
+                            checked: Some(hidden()),
+                            on_checked_change: move |v: bool| hidden.set(v),
+                        }
+                    }
+                    div {
+                        class: "stack stack-h",
+                        style: "justify-content: flex-end; gap: 8px; margin-top: 12px;",
+                        button {
+                            class: "btn btn-text",
+                            onclick: move |_| open.set(false),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            onclick: {
+                                let node_id = node_id.clone();
+                                let context_id = context_id.clone();
+                                let name = name.clone();
+                                let options = options.clone();
+                                let path = path.clone();
+                                move |_| {
+                                    let token = session.read().access_token.clone();
+                                    let Some(context_id) = context_id.clone() else {
+                                        return;
+                                    };
+                                    let parent_id = node_id.clone();
+                                    let name = name.clone();
+                                    let options = options.clone();
+                                    let hidden = hidden();
+                                    let mn = min_vote();
+                                    let mx = max_vote().max(mn);
+                                    let mut poll_path = path.clone();
+                                    spawn(async move {
+                                        let key = format!("poll{}", js_sys::Date::now() as u64);
+                                        match graphql::create_poll(
+                                            token.as_deref(),
+                                            &parent_id,
+                                            &context_id,
+                                            &name,
+                                            &key,
+                                            &options,
+                                            mn,
+                                            mx,
+                                            hidden,
+                                        )
+                                        .await
+                                        {
+                                            Ok(inserted) => {
+                                                crate::session::bump_data_version();
+                                                open.set(false);
+                                                poll_path.push(inserted.key);
+                                                nav.push(Route::PathPage {
+                                                    segments: poll_path,
+                                                    app: None,
+                                                });
+                                            }
+                                            Err(e) => {
+                                                open.set(false);
+                                                show_snackbar(&e);
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            "{t(\"poll.start\")}"
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -281,7 +281,11 @@ const EN_JSON: &str = r#"{
     },
     "poll": {
         "managePoll": "Manage Poll",
-        "hideResult": "Hide result"
+        "hideResult": "Hide result",
+        "newPoll": "New poll",
+        "voteRange": "Number of votes",
+        "start": "Start",
+        "stopPoll": "Stop poll"
     },
     "redirect": {
         "forwarding": "Forwarding you to:",
@@ -538,7 +542,11 @@ const DA_JSON: &str = r#"{
     },
     "poll": {
         "managePoll": "Administrer Afstemning",
-        "hideResult": "Skjul resultatet"
+        "hideResult": "Skjul resultatet",
+        "newPoll": "Ny afstemning",
+        "voteRange": "Antal stemmer",
+        "start": "Start",
+        "stopPoll": "Stop afstemning"
     },
     "redirect": {
         "forwarding": "Sender dig videre til:",
