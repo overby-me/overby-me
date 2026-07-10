@@ -296,7 +296,7 @@ fn FolderItem(
             to: Route::PathPage { segments: full_path, app: None },
             class: if grid { "folder-tile" } else { "folder-item" },
             super::loader::NodeAvatar {
-                mime: mime_id.to_string(),
+                mime: super::loader::node_icon_mime_id(mime_id, node.data.as_ref().map(|d| &d.0)),
                 name: name.to_string(),
                 ordinal,
                 mutable: is_mutable,

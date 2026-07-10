@@ -242,7 +242,7 @@ fn SearchBar(
                                 }
                             },
                             div { class: "avatar small",
-                                {super::loader::icon_el(node.mime_id.as_deref().unwrap_or(""))}
+                                {super::loader::node_icon_el(node.mime_id.as_deref().unwrap_or(""), node.data.as_ref().map(|d| &d.0))}
                             }
                             div { class: "list-item-text",
                                 div { class: "list-item-primary", "{node.name}" }

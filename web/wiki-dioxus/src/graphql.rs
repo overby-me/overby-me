@@ -114,6 +114,9 @@ pub struct NodeFields {
     // Computed ordinal among same-type siblings (1-based) — drives the A/B/C and
     // 1/2/3 avatar labels for policies / change proposals.
     pub get_index: Option<i32>,
+    // The node's data blob; for files it carries the content `type`, used to pick
+    // a format-specific icon in the drawer tree.
+    pub data: Option<Jsonb>,
     pub mime: Option<MimeFields>,
 }
 

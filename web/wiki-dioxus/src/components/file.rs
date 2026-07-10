@@ -4,7 +4,7 @@ use crate::graphql::NodeWithChildren;
 use crate::nhost::storage_url;
 use crate::session::use_session;
 
-use super::loader::icon_el;
+use super::loader::node_icon_el;
 
 /// Office document mimes (legacy + OpenXML) previewable via the MS Office viewer:
 /// Word, Excel and PowerPoint.
@@ -77,7 +77,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", {icon_el("wiki/file")} }
+                div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
                 h3 { class: "title-medium", "{name}" }
             }
             div { class: "file-viewer",

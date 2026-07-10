@@ -195,6 +195,31 @@ pub fn icon_el(mime_id: &str) -> Element {
     }
 }
 
+/// The mime id that should drive a NODE's icon: for a `wiki/file` it is the
+/// file's own content type (`data.type`) so uploads show format-specific icons
+/// (pdf, Word, Excel, PowerPoint, image, audio, video), mirroring the old wiki's
+/// `type ?? mimeId`. Any other node returns its own mime. The result feeds
+/// [`icon_el`] / [`node_avatar`], whose prefix matching maps the office/media
+/// content types to the right ligature.
+pub fn node_icon_mime_id(mime_id: &str, data: Option<&serde_json::Value>) -> String {
+    if mime_id == "wiki/file" {
+        if let Some(t) = data
+            .and_then(|d| d.get("type"))
+            .and_then(|t| t.as_str())
+            .filter(|t| !t.is_empty())
+        {
+            return t.to_string();
+        }
+    }
+    mime_id.to_string()
+}
+
+/// Like [`icon_el`] but node-aware: files get a format-specific icon from their
+/// content type. Pass the node's `mime_id` and its `data` json.
+pub fn node_icon_el(mime_id: &str, data: Option<&serde_json::Value>) -> Element {
+    icon_el(&node_icon_mime_id(mime_id, data))
+}
+
 /// The spreadsheet-style letter for an index (0→A, 1→B, …, 25→Z, 26→AA, …),
 /// ported from the React `getLetter`. Used to label policy proposals.
 pub fn index_letter(index: usize) -> String {
@@ -414,6 +439,46 @@ mod tests {
         let names: Vec<&str> = out.iter().map(|c| c.name.as_str()).collect();
         // hidden dropped; index 0 before index 1; within index 0 older first.
         assert_eq!(names, vec!["a-older", "a", "b"]);
+    }
+
+    #[test]
+    fn files_get_format_specific_icons_from_their_type() {
+        let cases = [
+            ("application/pdf", "picture_as_pdf"),
+            (
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "description",
+            ),
+            (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "table_chart",
+            ),
+            (
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "slideshow",
+            ),
+            ("image/png", "image"),
+            ("audio/ogg", "music_note"),
+            ("video/mp4", "movie"),
+        ];
+        for (ty, icon) in cases {
+            let data = serde_json::json!({ "type": ty });
+            let eff = node_icon_mime_id("wiki/file", Some(&data));
+            assert_eq!(eff, ty);
+            assert_eq!(mime_icon(&eff), icon, "wrong icon for {ty}");
+        }
+    }
+
+    #[test]
+    fn files_without_a_type_and_non_files_fall_back() {
+        // No data, or an empty type, keeps the generic file icon.
+        assert_eq!(node_icon_mime_id("wiki/file", None), "wiki/file");
+        assert_eq!(mime_icon("wiki/file"), "upload_file");
+        let empty = serde_json::json!({ "type": "" });
+        assert_eq!(node_icon_mime_id("wiki/file", Some(&empty)), "wiki/file");
+        // Non-file nodes ignore any `type` and keep their own mime.
+        let data = serde_json::json!({ "type": "application/pdf" });
+        assert_eq!(node_icon_mime_id("vote/policy", Some(&data)), "vote/policy");
     }
 }
 

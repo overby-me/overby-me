@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use crate::graphql::NodeWithChildren;
 use crate::i18n::t;
 
-use super::loader::{icon_el, mime_icon, visible_sorted};
+use super::loader::{mime_icon, node_icon_el, visible_sorted};
 
 /// Generic node viewer — shows node info and its children
 #[component]
@@ -31,7 +31,7 @@ pub fn NodeApp(node: NodeWithChildren, title: String) -> Element {
                     for child in children.iter() {
                         div { class: "list-item", key: "{child.id.0}",
                             div { class: "avatar small",
-                                {icon_el(child.mime_id.as_deref().unwrap_or(""))}
+                                {node_icon_el(child.mime_id.as_deref().unwrap_or(""), child.data.as_ref().map(|d| &d.0))}
                             }
                             div { class: "list-item-text",
                                 div { class: "list-item-primary",
