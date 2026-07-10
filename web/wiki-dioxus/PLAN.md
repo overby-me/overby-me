@@ -110,10 +110,10 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 - `[ ]` **Context creation + permission seeding** (`contextPerm`) — a new group/
   event/context is created with a plain `insert_node` and gets no permission rows.
   (Note: the port has no context-creation flow yet, so this is latent.) **major**
-- `[ ]` **File-node toolbar + sub-content** (React `file/FileApp.tsx` +
-  `ContentToolbar`) — a file page shows the viewer + download + created-at, but
-  still no delete / edit / members / publish, no member chips, no comments/
-  changes/questions. **major**
+- `[x]` **File-node toolbar + sub-content** — done: a file page now has an owner
+  delete (confirm, members-first) and a comment section under the viewer. (Edit /
+  members-chips / publish on a file are not carried; the viewer already had
+  download + created-at.)
 - `[x]` **Raw-file download** (React `content/DownloadButton.tsx`) — done: a header
   Download button on FileApp for every previewable type.
 - `[x]` **Cover image lost on save** — done: the editor preserves the node's other
@@ -127,9 +127,9 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   (`delete_node_members`) so no orphans are left.
 - `[x]` **Code mark is broken** — done: the code button now toggles — when the
   caret is inside a `<code>` span it unwraps to plain text instead of nesting.
-- `[~]` **Submit/publish confirmation** (React `PublishButton.tsx`) — submit fires
-  with no confirm dialog / `submitWarning` for an irreversible action (i18n keys
-  exist, unused); also no publish button on the read view.
+- `[x]` **Submit/publish confirmation** — done: the editor's Submit now routes
+  through a confirm dialog carrying the submitWarning before making the node
+  immutable. (A publish button on the read view is still not added.)
 - `[~]` **Editor paste fidelity** — no custom HTML-paste deserializer (React
   `Slate.tsx` `withHtml`/`deserialize`); paste is left to the browser. **medium**
 - `[~]` **PDF viewer** — direct-URL iframe at a fixed `80vh`; React wraps in the
@@ -160,10 +160,11 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 
 ## 6. Folder management
 
-- `[ ]` **Copy / paste** (React `folder/FolderDial.tsx` + `FolderList` checkboxes +
-  `session.selected`) — select items, recursively deep-duplicate node + children +
-  members, with a `checkIfSuperParent` circular-parent guard. Entirely absent.
-  **major**
+- `[x]` **Copy / paste** — done: a per-item copy toggle feeds a clipboard
+  (GlobalSignal); a Paste button on any folder recursively deep-duplicates each
+  selected node + its members + subtree (`deep_copy_node`), guarded against
+  pasting into itself/a descendant (`is_descendant_of`). (Single-list select, not
+  a full multi-folder session model.)
 - `[x]` **Folder lock** (`attachable`) — done: a context owner toggles whether
   children can be added via a header lock button (update_node on `attachable`).
 
@@ -193,16 +194,16 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   full-screen (`.screen-full`), with no drawer/rail/bar.
 - `[~]` **Clear GraphQL cache on login/logout** — the port relies on token-change
   refetch; React explicitly clears the cache to avoid cross-session stale data.
-- `[ ]` **Resend verification email** on an unverified sign-in (React
-  `auth/AuthForm.tsx`; `nhost.rs` has no `send_verification_email`). **medium**
+- `[x]` **Resend verification email** — done: an unverified sign-in offers a
+  resend button on the login screen (`nhost::send_verification_email`).
 - `[~]` **Public user profile** (React `layout/UserApp.tsx`) — `wiki/user` isn't
   routed (falls to `NodeApp`); `ProfileApp` is self-only and omits the authored-
   content list. Route `wiki/user` → profile; show any user's memberships/events/
   authored content.
-- `[~]` **Search** (React `layout/SearchField.tsx`) — add context-scoping (filter
-  by `contextId`), the `mime.hidden=false OR mime.context=true` + `parent not
-  null` filters (currently shows hidden/orphan nodes), a **Ctrl-K** shortcut,
-  arrow-key + Enter result nav, and the parent-name secondary line.
+- `[~]` **Search** — Ctrl-K shortcut + arrow-key/Enter result nav are done.
+  Remaining: context-scoping (filter by `contextId`), the `mime.hidden=false OR
+  mime.context=true` + `parent not null` filters (still shows hidden/orphan
+  nodes), and the parent-name secondary line.
 - `[ ]` Auth minor: unverified page should auto-redirect once verified; handle the
   already-logged-in sign-in error (status 100); post-login return-to-origin
   (`navigate(-1)` vs always Home). **minor**
@@ -218,8 +219,9 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   positioning (single centered message only). **medium**
 - `[ ]` **ZoomableImage** — no loading/error state or fade-in (only click-to-zoom).
   **medium**
-- `[~]` **SortApp** — doesn't filter hidden mimes (`visible_sorted`) or force a
-  fresh fetch.
+- `[x]` **SortApp** — done: seeded from `visible_sorted`, so hidden mimes no
+  longer appear in the sort list. (A forced fresh fetch is not added; it reads the
+  passed-in node.)
 - `[ ]` Polish: sync the `meta[name=theme-color]` to the active light/dark scheme
   (currently a static value); set `document.title` to the active node name;
   breadcrumb re-click should scroll content to top; drawer rounded right corners +
@@ -254,6 +256,9 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 
 - **Release build won't load in Servo** (`Module fetching failed`); debug build
   runs there. Loads in Chrome/Firefox. Uninvestigated, low priority.
+- **Folder-letter avatar contrast** — a folder whose name hashes to an avatar
+  colour close to its text can fail the 1:1 contrast audit (seen on a scratch
+  folder). The letter colour derivation should guarantee a contrast floor.
 
 ## Intentionally excluded (React features that don't make sense to port)
 
