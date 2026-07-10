@@ -232,7 +232,7 @@ fn CommentComposer(
             posting.set(true);
             // A unique per-parent key for the comment node.
             let key = format!("c{}", (js_sys::Math::random() * 1e12) as u64);
-            let ok = graphql::insert_comment(
+            let result = graphql::insert_comment(
                 token.as_deref(),
                 &parent_id,
                 context_id.as_deref(),
@@ -240,14 +240,21 @@ fn CommentComposer(
                 &author,
                 &body,
             )
-            .await
-            .unwrap_or(false);
+            .await;
             posting.set(false);
-            if ok {
-                text.set(String::new());
-                let v = refresh();
-                refresh.set(v + 1);
-                on_posted.call(());
+            match result {
+                // Any non-error is a success: Hasura may return no row when the
+                // fresh comment is not yet selectable, but it WAS inserted.
+                Ok(_) => {
+                    text.set(String::new());
+                    let v = refresh();
+                    refresh.set(v + 1);
+                    on_posted.call(());
+                }
+                Err(e) => {
+                    log::error!("comment post failed: {e}");
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                }
             }
         });
     };
