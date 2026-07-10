@@ -72,6 +72,19 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     let is_grid = *grid.read();
     let count = children.len();
 
+    // Surface child events in their own section (#132): a group / folder that
+    // contains events lists them separately, above its other content.
+    let event_children: Vec<ChildNodeFields> = children
+        .iter()
+        .filter(|c| c.mime_id.as_deref() == Some("wiki/event"))
+        .cloned()
+        .collect();
+    let other_children: Vec<ChildNodeFields> = children
+        .iter()
+        .filter(|c| c.mime_id.as_deref() != Some("wiki/event"))
+        .cloned()
+        .collect();
+
     rsx! {
         div { class: "card",
             div { class: "card-header",
@@ -148,9 +161,27 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                         "{t(\"common.noContent\")}"
                     }
                 }
-            } else {
+            }
+            // Events section (#132) — always a list, even in grid mode.
+            if !event_children.is_empty() {
+                h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px 0;",
+                    "{t(\"layout.events\")}"
+                }
+                div { class: "list",
+                    for child in event_children.iter() {
+                        FolderItem {
+                            key: "{child.id.0}",
+                            node: child.clone(),
+                            parent_path: parent_path.clone(),
+                            grid: false,
+                            ordinal: None,
+                        }
+                    }
+                }
+            }
+            if !other_children.is_empty() {
                 div { class: if is_grid { "folder-grid" } else { "list" },
-                    for (child , ordinal) in children.iter().zip(super::loader::sibling_ordinals(children)) {
+                    for (child , ordinal) in other_children.iter().zip(super::loader::sibling_ordinals(&other_children)) {
                         FolderItem {
                             key: "{child.id.0}",
                             node: child.clone(),

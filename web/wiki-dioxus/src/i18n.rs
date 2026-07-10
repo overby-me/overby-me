@@ -215,7 +215,8 @@ const EN_JSON: &str = r#"{
         "notSubmitted": "Not submitted",
         "dark": "Dark",
         "light": "Light",
-        "userMenu": "User menu"
+        "userMenu": "User menu",
+        "newest": "Newest"
     },
     "error": {
         "somethingWentWrong": "Something went wrong!",
@@ -468,7 +469,8 @@ const DA_JSON: &str = r#"{
         "exitSearch": "Forlad s\u00f8gefeltet",
         "dark": "M\u00f8rk",
         "light": "Lys",
-        "userMenu": "Brugermenu"
+        "userMenu": "Brugermenu",
+        "newest": "Nyeste"
     },
     "error": {
         "somethingWentWrong": "Noget gik galt!",

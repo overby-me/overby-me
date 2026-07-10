@@ -52,6 +52,10 @@ pub fn HomeApp() -> Element {
                         }
                     }
                 }
+                // Newest content across the user's contexts (#34).
+                if is_auth {
+                    RecentContents {}
+                }
             }
 
             // Sidebar column (invitations, etc.)
@@ -59,6 +63,70 @@ pub fn HomeApp() -> Element {
                 div {
                     InvitesUserList {}
                 }
+            }
+        }
+    }
+}
+
+/// "Newest" — the most recently created content the user can see, each linking
+/// to its full path (resolved lazily on click, like search). #34.
+#[component]
+fn RecentContents() -> Element {
+    let session = use_session();
+    let token = session.read().access_token.clone();
+
+    let recent = crate::use_data_resource!(|(token)| async move {
+        graphql::query_recent_nodes(token.as_deref(), 8).await
+    });
+    let items = recent.read().clone().unwrap_or_default();
+    if items.is_empty() {
+        return rsx! {};
+    }
+
+    rsx! {
+        div { class: "card mt-2",
+            div { class: "card-header",
+                div { class: "avatar", span { class: "material-icons", "schedule" } }
+                h3 { class: "title-medium", "{t(\"layout.newest\")}" }
+            }
+            div { class: "list",
+                for node in items.iter() {
+                    RecentItem { key: "{node.id.0}", node: node.clone() }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn RecentItem(node: graphql::ChildNodeFields) -> Element {
+    let session = use_session();
+    let nav = use_navigator();
+    let node_id = node.id.0.clone();
+    let key = node.key.clone();
+    rsx! {
+        div {
+            class: "list-item",
+            onclick: move |_| {
+                let node_id = node_id.clone();
+                let key = key.clone();
+                let token = session.read().access_token.clone();
+                // Resolve the node's full ancestor path, then navigate.
+                spawn(async move {
+                    let mut segments = graphql::path_from_id(token.as_deref(), &node_id)
+                        .await
+                        .unwrap_or_default();
+                    if segments.is_empty() {
+                        segments = vec![key];
+                    }
+                    nav.push(Route::PathPage { segments, app: None });
+                });
+            },
+            div { class: "avatar small",
+                {super::loader::node_icon_el(node.mime_id.as_deref().unwrap_or(""), node.data.as_ref().map(|d| &d.0))}
+            }
+            div { class: "list-item-text",
+                div { class: "list-item-primary", "{node.name}" }
             }
         }
     }

@@ -304,6 +304,26 @@ pub struct ChildrenQuery {
     pub nodes: Vec<ChildNodeFields>,
 }
 
+// --- Query: recent nodes across the user's contexts (home "Newest") ---
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct RecentNodesVariables {
+    pub where_clause: NodesBoolExp,
+    pub order_by: Option<Vec<NodesOrderBy>>,
+    pub limit: Option<i32>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "RecentNodesVariables"
+)]
+pub struct RecentNodesQuery {
+    #[arguments(where: $where_clause, order_by: $order_by, limit: $limit)]
+    pub nodes: Vec<ChildNodeFields>,
+}
+
 // --- Input types ---
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -379,6 +399,8 @@ pub struct StringComparisonExp {
     pub eq: Option<String>,
     #[cynic(rename = "_ilike", skip_serializing_if = "Option::is_none")]
     pub ilike: Option<String>,
+    #[cynic(rename = "_in", skip_serializing_if = "Option::is_none")]
+    pub in_: Option<Vec<String>>,
     #[cynic(rename = "_is_null", skip_serializing_if = "Option::is_none")]
     pub is_null: Option<bool>,
 }
@@ -1374,6 +1396,39 @@ pub async fn search_nodes(
     let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
     Ok(result.nodes)
+}
+
+/// The most recently created content nodes the user can see (home "Newest",
+/// #34). Hasura's row permissions already scope this to the caller's visible
+/// nodes, so no per-context filter is needed.
+pub async fn query_recent_nodes(access_token: Option<&str>, limit: i32) -> Vec<ChildNodeFields> {
+    let where_clause = NodesBoolExp {
+        mime_id: Some(StringComparisonExp {
+            in_: Some(vec![
+                "wiki/document".to_string(),
+                "vote/policy".to_string(),
+                "vote/change".to_string(),
+                "vote/position".to_string(),
+                "vote/candidate".to_string(),
+                "wiki/file".to_string(),
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let order_by = vec![NodesOrderBy {
+        created_at: Some(OrderBy::Desc),
+        index: None,
+    }];
+    let op = RecentNodesQuery::build(RecentNodesVariables {
+        where_clause,
+        order_by: Some(order_by),
+        limit: Some(limit),
+    });
+    match execute(access_token, op).await {
+        Ok(d) => d.nodes,
+        Err(_) => Vec::new(),
+    }
 }
 
 // --- Authors: search + replace a node's members ---

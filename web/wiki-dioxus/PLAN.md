@@ -211,8 +211,10 @@ All the above build + render live (browser smoke test asserts each mounts).
 ### Content / nodes
 
 - `#25` Content metadata attributes (e.g. a "keep longer" flag for programs).
-- `#32` Comment system.
-- `#34` "Newest contents" page (recent items, maybe on home).
+- `[x]` `#32` Comment system — nested Bluesky-style threads (`components/comments.rs`),
+  shown under documents / policies; backend permissions in the Hasura perms table.
+- `[x]` `#34` "Newest contents" — a recent-content card on the home page
+  (`RecentContents`), each item resolving to its full path on click.
 - `[x]` `#44` Don't create the node until the first save — satisfied by design:
   the add-content form only inserts on the explicit Add action (no pre-created
   draft node like the React flow had).
@@ -224,7 +226,8 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `#115` Live collaborative editing.
 - `[x]` `#117` Table of contents — heading blocks become anchored links in a TOC
   above documents with two or more headings; unit-tested.
-- `#119` MS Office viewer dark mode.
+- `[x]` `#119` MS Office viewer dark mode — invert + hue-rotate filter on the
+  viewer iframe under `[data-theme="dark"]`.
 - `[x]` `#125` Folder grid view mode — list/grid toggle in the folder header.
 - `#128` Audio / MIDI file support.
 - `[x]` `#143` Show the child count in every content overview — count badge in
@@ -235,7 +238,8 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `#41` Export event participants.
 - `[x]` `#51` Allow users to be hidden in groups — owner can hide/unhide a
   member (`set_member_hidden`); hidden members are dropped for non-owners.
-- `#132` Event viewer inside groups.
+- `[x]` `#132` Event viewer inside groups — a folder/group's child events are
+  listed in their own "Events" section above the rest of its content.
 - `[x]` `#133` Integrate the invite list into the home list — the home screen
   already shows pending group/event invites inline with accept / decline.
 - `#134` "Open" contexts anyone can join.
@@ -243,8 +247,9 @@ All the above build + render live (browser smoke test asserts each mounts).
 
 ### Design / UX / platform
 
-- `#37` Atkinson Hyperlegible font for accessibility.
-- `#73` Pull-to-refresh (feature, not the React lib).
+- `[x]` `#37` Atkinson Hyperlegible font for accessibility — the app font family.
+- `[x]` `#73` Pull-to-refresh — drag down (touch) or over-scroll up (wheel) at the
+  top reloads the current view with a spinner (`components/pull_refresh.rs`).
 - `#118` Move the toolbar to the right-hand bar.
 - `[x]` `#122` Refresh data on window focus — `use_live` re-fetches when the
   window regains focus (via `use_focus_refresh`), recovering a dropped socket.

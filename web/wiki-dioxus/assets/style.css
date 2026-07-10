@@ -1304,6 +1304,14 @@ h6, .title-small {
     border-radius: 8px;
 }
 
+/* #119: dark mode for the embedded (white) Office / PDF viewers. The iframe is
+   cross-origin so we can only filter the whole element: invert + hue-rotate
+   keeps colours roughly intact while turning the white page dark. */
+[data-theme="dark"] .file-viewer iframe {
+    filter: invert(0.92) hue-rotate(180deg);
+    background: var(--md-surface);
+}
+
 /* Home page */
 .home-welcome {
     text-align: center;
