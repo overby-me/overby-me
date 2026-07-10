@@ -14,6 +14,9 @@ use crate::theme::{apply_theme, use_theme, ThemeMode, THEME};
 /// read these so they agree on the context without each re-querying the path.
 static NAV_CRUMBS: GlobalSignal<Vec<graphql::Crumb>> = Signal::global(Vec::new);
 static CONTEXT_DEPTH: GlobalSignal<usize> = Signal::global(|| 0);
+/// The signed-in user's pending-invitation count, for the Home nav badge. Set by
+/// [`Layout`] (once per session, refreshed on mutations via the data version).
+static PENDING_INVITES: GlobalSignal<usize> = Signal::global(|| 0);
 
 /// The current context's key-path: the leading `CONTEXT_DEPTH` segments (or the
 /// first segment as a fallback until the context resolves).
@@ -118,6 +121,24 @@ pub fn Layout() -> Element {
                 .unwrap_or_default();
             *CONTEXT_DEPTH.write() = graphql::deepest_context_depth(&crumbs);
             *NAV_CRUMBS.write() = crumbs;
+        });
+    }
+
+    // Pending-invitation count for the Home nav badge. Session-stable deps, so
+    // this runs once per session and refreshes on mutations (data version).
+    {
+        let uid = SESSION.read().user.as_ref().map(|u| u.id.clone());
+        let email = SESSION.read().user.as_ref().map(|u| u.email.clone());
+        let token = SESSION.read().access_token.clone();
+        crate::use_data_resource!(|(uid, email, token)| async move {
+            if let (Some(uid), Some(email)) = (uid, email) {
+                let list = graphql::query_invitations(token.as_deref(), &uid, &email)
+                    .await
+                    .unwrap_or_default();
+                *PENDING_INVITES.write() = list.len();
+            } else {
+                *PENDING_INVITES.write() = 0;
+            }
         });
     }
 
@@ -539,14 +560,19 @@ fn AppRail() -> Element {
     let route = use_route::<Route>();
     let apps = context_apps(&route, is_auth);
 
+    let pending = PENDING_INVITES();
+
     rsx! {
         for (mime_id , label , to , active) in apps.into_iter() {
             Link {
                 to,
                 class: if active { "btn-icon active" } else { "btn-icon" },
-                style: "flex-direction: column; gap: 2px; width: 56px; height: 56px;",
+                style: "flex-direction: column; gap: 2px; width: 56px; height: 56px; position: relative;",
                 title: "{label}",
                 span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
+                if mime_id == "app/home" && pending > 0 {
+                    span { class: "nav-badge", "{pending}" }
+                }
                 span { class: "app-rail-label", "{label}" }
             }
         }
@@ -567,15 +593,21 @@ fn MobileAppBar() -> Element {
         return rsx! {};
     }
 
+    let pending = PENDING_INVITES();
+
     rsx! {
         div { class: "mobile-app-bar",
             for (mime_id , label , to , active) in apps.into_iter() {
                 Link {
                     to,
                     class: if active { "btn-icon active" } else { "btn-icon" },
+                    style: "position: relative;",
                     title: "{label}",
                     aria_label: "{label}",
                     span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
+                    if mime_id == "app/home" && pending > 0 {
+                        span { class: "nav-badge", "{pending}" }
+                    }
                 }
             }
         }
