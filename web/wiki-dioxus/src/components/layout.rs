@@ -613,12 +613,15 @@ fn DrawerContent() -> Element {
     // nearest group/event, linking to its root) once inside one — mirroring the
     // old wiki's drawer, whose title switched Home → the selected context.
     let ctx_path = context_path(&segments);
-    let ctx_name = NAV_CRUMBS()
-        .get(ctx_path.len().saturating_sub(1))
+    let crumbs = NAV_CRUMBS();
+    let ctx_crumb = crumbs.get(ctx_path.len().saturating_sub(1));
+    let ctx_name = ctx_crumb
         .map(|c| c.name.clone())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| ctx_path.last().cloned().unwrap_or_default());
-    let ctx_abbr = abbrev_context_name(&ctx_name);
+    let ctx_mime = ctx_crumb
+        .and_then(|c| c.mime_id.clone())
+        .unwrap_or_default();
 
     rsx! {
         div { style: "padding: 0 16px 16px;",
@@ -638,7 +641,7 @@ fn DrawerContent() -> Element {
                     Link {
                         to: Route::PathPage { segments: ctx_path.clone(), app: None },
                         class: "bar drawer-context-bar",
-                        div { class: "avatar small", "{ctx_abbr}" }
+                        div { class: "avatar small", {super::loader::icon_el(&ctx_mime)} }
                         span { class: "drawer-context-name", "{ctx_name}" }
                     }
                     // On mobile there is no app rail, so keep Home reachable here
