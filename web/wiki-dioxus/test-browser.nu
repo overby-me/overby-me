@@ -8,9 +8,15 @@
 # (--firefox). Prefer --firefox: Servo masks client-side routing / rendering bugs
 # that real browsers hit (it hid the whole navigation-stale-view bug).
 #
+# Beyond DOM assertions it runs a whole-page WCAG contrast audit on each key
+# screen (test-contrast-audit.js — fails on any green-on-green / faint text; a
+# self-test proves the detector works), so contrast regressions can't merge.
+#
 # Usage:
 #   nu test-browser.nu                     # Unauthenticated smoke tests (Servo)
 #   nu test-browser.nu --firefox           # Drive real Firefox (geckodriver)
+#   nu test-browser.nu --firefox --shots   # Also save light/dark x desktop/mobile
+#                                          #   PNGs of key screens to ./screenshots
 #   nu test-browser.nu --timeout 30        # Per-wait timeout (seconds)
 #   nu test-browser.nu --verbose           # Print WebDriver-server stderr at end
 #   nu test-browser.nu --keep              # Keep dx serve + browser running after
@@ -95,6 +101,89 @@ def wd-execute [session_id: string, script: string] {
     let resp = (wd-post $"/session/($session_id)/execute/sync" ({ script: $script, args: [] } | to json))
     if $resp == null { return null }
     $resp | get -o value
+}
+
+# Resize the browser window (for responsive / breakpoint screenshots).
+def wd-window-rect [session_id: string, w: int, h: int] {
+    wd-post $"/session/($session_id)/window/rect" ({ width: $w, height: $h, x: 0, y: 0 } | to json) | ignore
+}
+
+# Save a PNG screenshot of the current page.
+def wd-screenshot [session_id: string, out: string] {
+    let resp = (wd-get $"/session/($session_id)/screenshot")
+    if $resp == null { return }
+    let b64 = ($resp | get -o value | default "")
+    if ($b64 | is-empty) { return }
+    $b64 | decode base64 | save -f $out
+}
+
+# Self-test: prove the audit actually DETECTS a violation (a passing audit is
+# only meaningful if the detector works). Inject a known green-on-green element,
+# confirm the audit flags it, then remove it.
+def check-contrast-selftest [session_id: string, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
+    let audit_js = (try { open --raw ($env.FILE_PWD | path join "test-contrast-audit.js") } catch { "" })
+    if ($audit_js | is-empty) { return { passed: $passed, failed: $failed } }
+    wd-execute $session_id "var d=document.createElement('div'); d.id='__ctest'; d.className='__ctest'; d.style.cssText='color:#006b32;background-color:#008740;font-size:14px;padding:4px'; d.textContent='green on green'; document.body.appendChild(d); return 1" | ignore
+    let raw = (wd-execute $session_id $audit_js)
+    let caught = (try { ($raw | from json | any {|b| (($b.s | str contains "__ctest") or ($b.t | str contains "green on green")) }) } catch { false })
+    wd-execute $session_id "var e=document.getElementById('__ctest'); if(e)e.remove(); return 1" | ignore
+    if $caught {
+        log-ok "contrast audit self-test: detects a green-on-green violation"
+        { passed: ($passed + 1), failed: $failed }
+    } else {
+        log-fail "contrast audit self-test FAILED: did not detect an injected violation"
+        { passed: $passed, failed: ($failed + 1) }
+    }
+}
+
+# Run the whole-page contrast audit (test-contrast-audit.js) and fail on any
+# element below WCAG AA. This is the systematic gate for green-on-green / faint
+# text: it walks every visible text element, resolves its effective (composited)
+# background, and checks the real contrast ratio.
+def check-contrast [session_id: string, label: string, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
+    let audit_js = (try { open --raw ($env.FILE_PWD | path join "test-contrast-audit.js") } catch { "" })
+    if ($audit_js | is-empty) { log-warn "contrast audit script missing — skipping"; return { passed: $passed, failed: $failed } }
+    let raw = (wd-execute $session_id $audit_js)
+    if $raw == null { log-warn $"contrast audit errored on ($label)"; return { passed: $passed, failed: $failed } }
+    let bad = (try { $raw | from json } catch { null })
+    if $bad == null { log-warn $"contrast audit returned non-JSON on ($label)"; return { passed: $passed, failed: $failed } }
+    if ($bad | length) == 0 {
+        log-ok $"contrast OK: ($label)"
+        { passed: ($passed + 1), failed: $failed }
+    } else {
+        log-fail $"($bad | length) low-contrast elements on ($label)"
+        for b in ($bad | take 8) { log-fail $"    ($b.r):1 < ($b.m)  ($b.s)  ($b.t)" }
+        { passed: $passed, failed: ($failed + 1) }
+    }
+}
+
+# Capture the current view in light + dark theme at desktop + mobile widths, if
+# screenshots are enabled (--shots sets WIKI_SHOTS). `name` prefixes the files.
+# The theme rides `data-theme` on <html> (set once by the app at mount), so we
+# flip it directly — no reload, and it can't be undone by re-renders.
+def capture-shots [session_id: string, name: string] {
+    if (($env | get -o WIKI_SHOTS | default "") != "1") { return }
+    let dir = ($env | get -o WIKI_SHOTS_DIR | default "screenshots")
+    mkdir $dir
+    for wh in [{ w: 1280, h: 900, tag: "desktop" }, { w: 390, h: 844, tag: "mobile" }] {
+        wd-window-rect $session_id $wh.w $wh.h
+        sleep 300ms
+        for theme in ["light", "dark"] {
+            wd-execute $session_id ("document.documentElement.setAttribute('data-theme','" + $theme + "'); return 1") | ignore
+            wd-execute $session_id "void document.body.offsetHeight; return 1" | ignore
+            sleep 500ms
+            let out = ($dir | path join $"($name)-($wh.tag)-($theme).png")
+            # Screenshot twice: after a CSS-var (theme) change headless Firefox can
+            # return a pre-repaint frame the first time; the second grabs the paint.
+            wd-screenshot $session_id $out
+            sleep 250ms
+            wd-screenshot $session_id $out
+        }
+    }
+    # Restore the app's default (light) at desktop for subsequent tests.
+    wd-execute $session_id "document.documentElement.setAttribute('data-theme','light'); return 1" | ignore
+    wd-window-rect $session_id 1280 900
+    sleep 200ms
 }
 
 # Poll until a CSS selector matches (or timeout in seconds). Returns bool.
@@ -210,6 +299,8 @@ def test-shell [session_id: string, timeout: int, passed: int, failed: int]: not
     let r = (assert-contains $session_id "welcome card shown" "#main .headline-small" "RadikalWiki" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (assert-exists $session_id "log in link present" '#main a[href="/user/login"]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (assert-exists $session_id "register link present" '#main a[href="/user/register"]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    let r = (check-contrast-selftest $session_id $p $fl); $p = $r.passed; $fl = $r.failed
+    let r = (check-contrast $session_id "logged-out shell" $p $fl); $p = $r.passed; $fl = $r.failed
 
     # Pull-to-refresh: the indicator mounts, and an over-scroll up at the top
     # triggers the refreshing animation (synthetic wheel event; scrollY is 0).
@@ -276,6 +367,8 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
 
     # The greeting should replace the logged-out copy.
     let r = (assert-contains $session_id "greeting shows the user" "#main .body-large" "Hello" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    let r = (check-contrast $session_id "home (authenticated)" $p $fl); $p = $r.passed; $fl = $r.failed
+    capture-shots $session_id "home"
 
     # User menu: clicking the avatar opens a dropdown that stays fully within the
     # viewport, and the trigger has no stray border (regression: the primitive
@@ -366,6 +459,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     let sel_ctx = (wd-execute $session_id 'return "/"+location.pathname.split("/")[1]')
 
     let r = (assert-exists $session_id "context view renders a card" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    let r = (check-contrast $session_id "context view (drawer + app rail + bar)" $p $fl); $p = $r.passed; $fl = $r.failed
 
     # Pull-to-refresh must actually REFETCH data, not just animate. Hook fetch to
     # count GraphQL calls, over-scroll up, and expect fresh calls to fire (the
@@ -510,6 +604,8 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
                 log-fail $"app rail did not set ?app=vote; got: ($search)"; $fl = $fl + 1
             }
             let r = (assert-exists $session_id "vote app renders" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+            let r = (check-contrast $session_id "vote app (active app-rail highlight)" $p $fl); $p = $r.passed; $fl = $r.failed
+            capture-shots $session_id "vote-app"
             # The highlighted app must have readable contrast (icon vs its box):
             # regression for the green-on-green active state.
             let arc = (wd-execute $session_id 'function L(c){var a=c.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]} function P(s){var m=s.match(/[0-9.]+/g);return [+m[0],+m[1],+m[2]]} function R(x,y){var p=L(P(x)),q=L(P(y)),h=Math.max(p,q),l=Math.min(p,q);return (h+0.05)/(l+0.05)} var el=document.querySelector(".app-rail .btn-icon.active"); if(!el) return "noactive"; var ic=el.querySelector(".material-icons"); var cs=getComputedStyle(el); var icc=ic?getComputedStyle(ic).color:cs.color; return R(cs.backgroundColor, icc).toFixed(2)')
@@ -809,8 +905,14 @@ def main [
     --keep
     --firefox   # Drive real Firefox (via geckodriver) instead of Servo. Firefox
                 # catches client-side routing / rendering bugs Servo masks.
+    --shots     # Capture PNG screenshots (light/dark x desktop/mobile) of key
+                # screens to ./screenshots for visual review.
 ] {
     let proj = $env.FILE_PWD
+    if $shots {
+        $env.WIKI_SHOTS = "1"
+        $env.WIKI_SHOTS_DIR = ($proj | path join "screenshots")
+    }
     mut servo_pid = 0
     mut server_pid = 0
     mut session_id = ""
