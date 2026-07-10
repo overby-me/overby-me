@@ -112,7 +112,10 @@ body {
     font-family: 'Atkinson Hyperlegible', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background-color: var(--md-background);
     color: var(--md-on-background);
-    line-height: 1.5;
+    /* M3 body-large is the default reading role. */
+    font-size: var(--md-sys-typescale-body-large-size);
+    line-height: var(--md-sys-typescale-body-large-line);
+    letter-spacing: var(--md-sys-typescale-body-large-tracking);
     /* Take over the top over-scroll so the custom pull-to-refresh runs instead
        of the browser's native one. */
     overscroll-behavior-y: contain;
@@ -257,13 +260,14 @@ a:hover {
     }
 }
 
-/* Cards */
+/* Cards — M3 elevated card: surface-container-low tone, corner-medium, a
+   level-1 tonal shadow, no outline. */
 .card {
-    background: var(--md-surface);
-    border-radius: 12px;
-    border: 1px solid var(--md-outline);
+    background: var(--md-surface-container-low);
+    border-radius: var(--md-sys-shape-corner-medium);
+    box-shadow: var(--md-sys-elevation-1);
     overflow: hidden;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
 }
 
 .card-header {
@@ -271,7 +275,7 @@ a:hover {
     align-items: center;
     padding: 16px;
     gap: 12px;
-    border-bottom: 1px solid var(--md-surface-variant);
+    border-bottom: 1px solid var(--md-outline-variant);
 }
 
 .card-content {
@@ -447,51 +451,65 @@ a:hover {
     position: fixed;
     inset: 0;
     z-index: 300;
-    background: rgba(0, 0, 0, 0.5);
+    /* M3 scrim. */
+    background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 16px;
 }
 
+/* M3 dialog: surface-container-high tone, extra-large corners, level-3 shadow. */
 .modal-card {
-    background: var(--md-surface);
-    border: 1px solid var(--md-outline);
-    border-radius: 12px;
-    padding: 20px;
+    background: var(--md-surface-container-high);
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    padding: 24px;
     width: 100%;
     max-width: 420px;
-    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--md-sys-elevation-3);
 }
 
-/* Buttons */
+/* Buttons — M3 common button: 40px tall, full (pill) shape, label-large text. */
 .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
+    min-height: 40px;
     padding: 10px 24px;
-    border-radius: 20px;
+    border-radius: var(--md-sys-shape-corner-full);
     border: none;
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--md-sys-typescale-label-large-size);
+    line-height: var(--md-sys-typescale-label-large-line);
     font-weight: 500;
-    letter-spacing: 0.1px;
-    transition: background-color 0.2s, box-shadow 0.2s;
+    letter-spacing: var(--md-sys-typescale-label-large-tracking);
+    transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+        box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
     text-decoration: none;
 }
 
+/* Filled button (M3): primary fill; hover adds a level-1 shadow + an 8%
+   on-colour state layer (color-mix), pressed goes to 10%. */
 .btn-primary {
     background-color: var(--md-primary);
     color: var(--md-on-primary);
 }
 
 .btn-primary:hover {
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    background-color: color-mix(in srgb, var(--md-on-primary) 8%, var(--md-primary));
+    box-shadow: var(--md-sys-elevation-1);
+}
+
+.btn-primary:active {
+    background-color: color-mix(in srgb, var(--md-on-primary) 10%, var(--md-primary));
+    box-shadow: var(--md-sys-elevation-0);
 }
 
 .btn-primary:disabled {
-    opacity: 0.6;
+    background-color: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+    color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+    box-shadow: none;
     cursor: not-allowed;
 }
 
@@ -500,23 +518,43 @@ a:hover {
     color: var(--md-on-primary);
 }
 
+/* Outlined button (M3): 1px outline, primary label, state layer on hover. */
 .btn-outlined {
     background: transparent;
-    border: 1px solid var(--md-outline);
+    border: 1px solid var(--md-outline-strong);
     color: var(--md-primary);
 }
 
+.btn-outlined:hover {
+    background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
+}
+
+.btn-outlined:active {
+    background-color: color-mix(in srgb, var(--md-primary) 10%, transparent);
+}
+
+/* Text button (M3). */
 .btn-text {
     background: transparent;
     color: var(--md-primary);
     padding: 10px 12px;
 }
 
+.btn-text:hover {
+    background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
+}
+
+.btn-text:active {
+    background-color: color-mix(in srgb, var(--md-primary) 10%, transparent);
+}
+
+/* Icon button (M3): 40px target, circular state layer of the on-surface
+   colour (8% hover / 10% pressed). */
 .btn-icon {
     width: 40px;
     height: 40px;
     padding: 0;
-    border-radius: 50%;
+    border-radius: var(--md-sys-shape-corner-full);
     border: none;
     background: transparent;
     cursor: pointer;
@@ -524,10 +562,15 @@ a:hover {
     align-items: center;
     justify-content: center;
     color: var(--md-on-surface);
+    transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
 }
 
 .btn-icon:hover {
-    background-color: var(--md-surface-variant);
+    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+
+.btn-icon:active {
+    background-color: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
 }
 
 .btn-full {
@@ -629,7 +672,7 @@ select:focus {
 }
 
 .list-item:hover {
-    background-color: var(--md-surface-variant);
+    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
 /* Dark-mode toggle row in the user menu: the label fills the row so the
@@ -689,16 +732,22 @@ select:focus {
 .chip {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    height: 24px;
-    padding: 0 10px 0 7px;
-    border: 1px solid var(--md-primary);
-    border-radius: 16px;
-    font-size: 13px;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px 0 8px;
+    border: 1px solid var(--md-outline-strong);
+    border-radius: var(--md-sys-shape-corner-small);
+    font-size: var(--md-sys-typescale-label-large-size);
     line-height: 1;
+    letter-spacing: var(--md-sys-typescale-label-large-tracking);
     color: var(--md-primary);
     background: transparent;
     max-width: 100%;
+    transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+
+.chip:hover {
+    background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
 }
 
 .chip .material-icons {
@@ -911,7 +960,7 @@ h6, .title-small {
     align-items: center;
 }
 
-/* Snackbar */
+/* Snackbar — M3: inverse-surface, extra-small corners, level-3 shadow. */
 .snackbar {
     position: fixed;
     bottom: 80px;
@@ -919,11 +968,13 @@ h6, .title-small {
     transform: translateX(-50%);
     background: var(--md-inverse-surface);
     color: var(--md-inverse-on-surface);
-    padding: 14px 24px;
-    border-radius: 8px;
+    padding: 14px 16px;
+    border-radius: var(--md-sys-shape-corner-extra-small);
     z-index: 300;
-    box-shadow: 0 3px 5px rgba(0, 0, 0, 0.2);
-    animation: snackbar-in 0.3s ease;
+    box-shadow: var(--md-sys-elevation-3);
+    font-size: var(--md-sys-typescale-body-medium-size);
+    line-height: var(--md-sys-typescale-body-medium-line);
+    animation: snackbar-in var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-emphasized-decelerate);
 }
 
 @keyframes snackbar-in {
@@ -1218,7 +1269,7 @@ h6, .title-small {
 }
 
 .folder-item:hover {
-    background-color: var(--md-surface-variant);
+    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
 /* Child count badge in a folder header (#143). */
@@ -1247,14 +1298,14 @@ h6, .title-small {
     text-align: center;
     gap: 8px;
     padding: 16px 10px;
-    border: 1px solid var(--md-outline);
-    border-radius: 12px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
     cursor: pointer;
-    transition: background-color 0.15s;
+    transition: background-color var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
 }
 
 .folder-tile:hover {
-    background-color: var(--md-surface-variant);
+    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
 .folder-tile .list-item-text {
@@ -1430,6 +1481,16 @@ a.list-item:hover {
    contrast (black-on-green was too faint). */
 .bar .btn-icon {
     color: var(--md-on-primary);
+}
+
+/* On the coloured bar the icon state layer is the on-primary (white), not the
+   default on-surface. */
+.bar .btn-icon:hover {
+    background-color: color-mix(in srgb, var(--md-on-primary) 8%, transparent);
+}
+
+.bar .btn-icon:active {
+    background-color: color-mix(in srgb, var(--md-on-primary) 10%, transparent);
 }
 
 /* User menu */

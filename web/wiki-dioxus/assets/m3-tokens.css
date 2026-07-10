@@ -1,0 +1,109 @@
+/* Material Design 3 system tokens (non-colour) — hand-authored from the M3
+ * spec (https://m3.material.io/): the type scale, shape (corner) scale,
+ * elevation levels, state-layer opacities and motion easing/duration.
+ * Colour tokens live in the generated m3-theme.css. Components consume these
+ * so the whole UI stays on-spec and consistent.
+ */
+:root {
+    /* ── Shape: corner-radius scale ─────────────────────────────────────── */
+    --md-sys-shape-corner-none: 0;
+    --md-sys-shape-corner-extra-small: 4px;
+    --md-sys-shape-corner-small: 8px;
+    --md-sys-shape-corner-medium: 12px;
+    --md-sys-shape-corner-large: 16px;
+    --md-sys-shape-corner-extra-large: 28px;
+    --md-sys-shape-corner-full: 9999px;
+
+    /* ── Elevation: tonal shadows (M3 levels 0–5) ───────────────────────── */
+    --md-sys-elevation-0: none;
+    --md-sys-elevation-1: 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
+    --md-sys-elevation-2: 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
+    --md-sys-elevation-3: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 4px 8px 3px rgba(0, 0, 0, 0.15);
+    --md-sys-elevation-4: 0 2px 3px 0 rgba(0, 0, 0, 0.3), 0 6px 10px 4px rgba(0, 0, 0, 0.15);
+    --md-sys-elevation-5: 0 4px 4px 0 rgba(0, 0, 0, 0.3), 0 8px 12px 6px rgba(0, 0, 0, 0.15);
+
+    /* ── State-layer opacities (overlay of the on-colour) ───────────────── */
+    --md-sys-state-hover-opacity: 0.08;
+    --md-sys-state-focus-opacity: 0.10;
+    --md-sys-state-pressed-opacity: 0.10;
+    --md-sys-state-dragged-opacity: 0.16;
+
+    /* ── Motion: easing + duration ──────────────────────────────────────── */
+    --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+    --md-sys-motion-easing-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+    --md-sys-motion-easing-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+    --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+    --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+    --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+    --md-sys-motion-duration-short1: 50ms;
+    --md-sys-motion-duration-short2: 100ms;
+    --md-sys-motion-duration-short3: 150ms;
+    --md-sys-motion-duration-short4: 200ms;
+    --md-sys-motion-duration-medium1: 250ms;
+    --md-sys-motion-duration-medium2: 300ms;
+    --md-sys-motion-duration-long1: 400ms;
+    --md-sys-motion-duration-long2: 500ms;
+
+    /* ── Type scale ─────────────────────────────────────────────────────── */
+    /* Each role: font-size / line-height / weight / letter-spacing. The app
+       face is Atkinson Hyperlegible (#37); the M3 metrics still apply. */
+    --md-sys-typescale-display-large-size: 3.5625rem; /* 57px */
+    --md-sys-typescale-display-large-line: 4rem; /* 64px */
+    --md-sys-typescale-display-medium-size: 2.8125rem; /* 45px */
+    --md-sys-typescale-display-medium-line: 3.25rem; /* 52px */
+    --md-sys-typescale-display-small-size: 2.25rem; /* 36px */
+    --md-sys-typescale-display-small-line: 2.75rem; /* 44px */
+
+    --md-sys-typescale-headline-large-size: 2rem; /* 32px */
+    --md-sys-typescale-headline-large-line: 2.5rem; /* 40px */
+    --md-sys-typescale-headline-medium-size: 1.75rem; /* 28px */
+    --md-sys-typescale-headline-medium-line: 2.25rem; /* 36px */
+    --md-sys-typescale-headline-small-size: 1.5rem; /* 24px */
+    --md-sys-typescale-headline-small-line: 2rem; /* 32px */
+
+    --md-sys-typescale-title-large-size: 1.375rem; /* 22px */
+    --md-sys-typescale-title-large-line: 1.75rem; /* 28px */
+    --md-sys-typescale-title-medium-size: 1rem; /* 16px */
+    --md-sys-typescale-title-medium-line: 1.5rem; /* 24px */
+    --md-sys-typescale-title-medium-tracking: 0.009375em; /* 0.15px */
+    --md-sys-typescale-title-small-size: 0.875rem; /* 14px */
+    --md-sys-typescale-title-small-line: 1.25rem; /* 20px */
+    --md-sys-typescale-title-small-tracking: 0.00714em; /* 0.1px */
+
+    --md-sys-typescale-body-large-size: 1rem; /* 16px */
+    --md-sys-typescale-body-large-line: 1.5rem; /* 24px */
+    --md-sys-typescale-body-large-tracking: 0.03125em; /* 0.5px */
+    --md-sys-typescale-body-medium-size: 0.875rem; /* 14px */
+    --md-sys-typescale-body-medium-line: 1.25rem; /* 20px */
+    --md-sys-typescale-body-medium-tracking: 0.01786em; /* 0.25px */
+    --md-sys-typescale-body-small-size: 0.75rem; /* 12px */
+    --md-sys-typescale-body-small-line: 1rem; /* 16px */
+    --md-sys-typescale-body-small-tracking: 0.03333em; /* 0.4px */
+
+    --md-sys-typescale-label-large-size: 0.875rem; /* 14px */
+    --md-sys-typescale-label-large-line: 1.25rem; /* 20px */
+    --md-sys-typescale-label-large-tracking: 0.00714em; /* 0.1px */
+    --md-sys-typescale-label-medium-size: 0.75rem; /* 12px */
+    --md-sys-typescale-label-medium-line: 1rem; /* 16px */
+    --md-sys-typescale-label-medium-tracking: 0.03333em; /* 0.5px */
+    --md-sys-typescale-label-small-size: 0.6875rem; /* 11px */
+    --md-sys-typescale-label-small-line: 1rem; /* 16px */
+    --md-sys-typescale-label-small-tracking: 0.03333em; /* 0.5px */
+}
+
+/* Type-scale utility classes — apply an M3 role in one class. */
+.md-display-large { font-size: var(--md-sys-typescale-display-large-size); line-height: var(--md-sys-typescale-display-large-line); font-weight: 400; letter-spacing: -0.015625em; }
+.md-display-medium { font-size: var(--md-sys-typescale-display-medium-size); line-height: var(--md-sys-typescale-display-medium-line); font-weight: 400; }
+.md-display-small { font-size: var(--md-sys-typescale-display-small-size); line-height: var(--md-sys-typescale-display-small-line); font-weight: 400; }
+.md-headline-large { font-size: var(--md-sys-typescale-headline-large-size); line-height: var(--md-sys-typescale-headline-large-line); font-weight: 400; }
+.md-headline-medium { font-size: var(--md-sys-typescale-headline-medium-size); line-height: var(--md-sys-typescale-headline-medium-line); font-weight: 400; }
+.md-headline-small { font-size: var(--md-sys-typescale-headline-small-size); line-height: var(--md-sys-typescale-headline-small-line); font-weight: 400; }
+.md-title-large { font-size: var(--md-sys-typescale-title-large-size); line-height: var(--md-sys-typescale-title-large-line); font-weight: 400; }
+.md-title-medium { font-size: var(--md-sys-typescale-title-medium-size); line-height: var(--md-sys-typescale-title-medium-line); font-weight: 500; letter-spacing: var(--md-sys-typescale-title-medium-tracking); }
+.md-title-small { font-size: var(--md-sys-typescale-title-small-size); line-height: var(--md-sys-typescale-title-small-line); font-weight: 500; letter-spacing: var(--md-sys-typescale-title-small-tracking); }
+.md-body-large { font-size: var(--md-sys-typescale-body-large-size); line-height: var(--md-sys-typescale-body-large-line); font-weight: 400; letter-spacing: var(--md-sys-typescale-body-large-tracking); }
+.md-body-medium { font-size: var(--md-sys-typescale-body-medium-size); line-height: var(--md-sys-typescale-body-medium-line); font-weight: 400; letter-spacing: var(--md-sys-typescale-body-medium-tracking); }
+.md-body-small { font-size: var(--md-sys-typescale-body-small-size); line-height: var(--md-sys-typescale-body-small-line); font-weight: 400; letter-spacing: var(--md-sys-typescale-body-small-tracking); }
+.md-label-large { font-size: var(--md-sys-typescale-label-large-size); line-height: var(--md-sys-typescale-label-large-line); font-weight: 500; letter-spacing: var(--md-sys-typescale-label-large-tracking); }
+.md-label-medium { font-size: var(--md-sys-typescale-label-medium-size); line-height: var(--md-sys-typescale-label-medium-line); font-weight: 500; letter-spacing: var(--md-sys-typescale-label-medium-tracking); }
+.md-label-small { font-size: var(--md-sys-typescale-label-small-size); line-height: var(--md-sys-typescale-label-small-line); font-weight: 500; letter-spacing: var(--md-sys-typescale-label-small-tracking); }

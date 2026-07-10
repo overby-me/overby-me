@@ -32,6 +32,9 @@ const DX_THEME_CSS: Asset = asset!("/assets/dx-components-theme.css");
 // by scripts/gen-theme.ts). Defines the canonical --md-sys-color-* roles that
 // style.css's --md-* tokens alias, so the whole app re-skins from one file.
 const M3_THEME_CSS: Asset = asset!("/assets/m3-theme.css");
+// Non-colour M3 system tokens (type scale, shape/corner scale, elevation,
+// state-layer opacities, motion) — hand-authored from the M3 spec.
+const M3_TOKENS_CSS: Asset = asset!("/assets/m3-tokens.css");
 
 fn main() {
     // Print real panic messages (with a JS stack trace) to the console instead
@@ -143,6 +146,7 @@ fn App() -> Element {
     rsx! {
         document::Stylesheet { href: DX_THEME_CSS }
         document::Stylesheet { href: M3_THEME_CSS }
+        document::Stylesheet { href: M3_TOKENS_CSS }
         document::Stylesheet { href: STYLE_CSS }
         Router::<Route> {}
         snackbar::Snackbar {}
