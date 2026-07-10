@@ -627,6 +627,22 @@ select:focus {
     background-color: var(--md-surface-variant);
 }
 
+/* Dark-mode toggle row in the user menu: the label fills the row so the
+   accessible Switch sits flush right. It is a row, not a button, so no
+   pointer cursor and no hover highlight (the Switch owns the interaction). */
+.switch-row {
+    cursor: default;
+}
+
+.switch-row:hover {
+    background-color: transparent;
+}
+
+.switch-row-label {
+    flex: 1;
+    min-width: 0;
+}
+
 .list-item.selected {
     background-color: var(--md-primary-container);
     /* Left accent bar marking the current node in the tree. */

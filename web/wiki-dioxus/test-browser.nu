@@ -404,6 +404,21 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             } else {
                 log-fail $"user avatar blends into the bar: ($avc):1"; $fl = $fl + 1
             }
+            # Dark-mode toggle is now an accessible Switch (role=switch); clicking
+            # it must flip <html data-theme>. Toggle it back so later screens keep
+            # their theme.
+            let sw = (wd-execute $session_id 'return document.querySelector(".user-menu-dropdown [role=switch]")?"y":"n"')
+            if $sw == "y" {
+                let before = (wd-execute $session_id 'return document.documentElement.getAttribute("data-theme")||"light"')
+                wd-execute $session_id 'document.querySelector(".user-menu-dropdown [role=switch]").click(); return 1' | ignore
+                sleep 400ms
+                let after = (wd-execute $session_id 'return document.documentElement.getAttribute("data-theme")||"light"')
+                if $before != $after { log-ok $"theme switch flips data-theme ($before) to ($after)"; $p = $p + 1 } else { log-fail $"theme switch did not change data-theme, stayed ($before)"; $fl = $fl + 1 }
+                wd-execute $session_id 'document.querySelector(".user-menu-dropdown [role=switch]").click(); return 1' | ignore
+                sleep 300ms
+            } else {
+                log-fail "theme switch not found in user menu"; $fl = $fl + 1
+            }
             wd-execute $session_id 'var bd=document.querySelector(".menu-backdrop"); if(bd)bd.click(); return 1' | ignore
             sleep 200ms
         } else {

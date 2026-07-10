@@ -8,4 +8,5 @@ pub mod dropdown_menu;
 pub mod radio_group;
 pub mod select;
 pub mod separator;
+pub mod switch;
 pub mod tooltip;

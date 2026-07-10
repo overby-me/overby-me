@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 
+use super::ui::switch::Switch;
 use crate::graphql::{self, NodeFields};
 use crate::i18n::{t, Lang, LANG};
 use crate::route::Route;
@@ -488,22 +489,21 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                 // Full-viewport click-catcher so a click anywhere else closes it.
                 div { class: "menu-backdrop", onclick: move |_| menu_open.set(false) }
                 div { class: "user-menu-dropdown",
-                    // Theme toggle
-                    button {
-                        class: "list-item",
-                        onclick: move |_| {
-                            let new_theme = theme.read().toggle();
-                            apply_theme(&new_theme);
-                            crate::theme::save_theme(&new_theme);
-                            *THEME.write() = new_theme;
-                            menu_open.set(false);
-                        },
-                        if dark {
-                            span { class: "material-icons", "light_mode" }
-                            " {t(\"layout.light\")}"
-                        } else {
-                            span { class: "material-icons", "dark_mode" }
-                            " {t(\"layout.dark\")}"
+                    // Dark-mode toggle, as an accessible on/off switch (the menu
+                    // stays open so the flip is visible).
+                    div { class: "list-item switch-row",
+                        span { class: "material-icons",
+                            {if dark { "dark_mode" } else { "light_mode" }}
+                        }
+                        span { class: "switch-row-label", "{t(\"layout.darkMode\")}" }
+                        Switch {
+                            checked: Some(dark),
+                            on_checked_change: move |on: bool| {
+                                let new_theme = if on { ThemeMode::Dark } else { ThemeMode::Light };
+                                apply_theme(&new_theme);
+                                crate::theme::save_theme(&new_theme);
+                                *THEME.write() = new_theme;
+                            },
                         }
                     }
                     // Language toggle

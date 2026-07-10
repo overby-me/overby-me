@@ -38,7 +38,15 @@ pub fn Snackbar() -> Element {
     match message {
         Some(msg) => {
             rsx! {
-                div { class: "snackbar", "{msg.text}" }
+                // role="status" + aria-live so assistive tech announces the
+                // message (it appears and auto-dismisses without focus moving).
+                div {
+                    class: "snackbar",
+                    role: "status",
+                    aria_live: "polite",
+                    aria_atomic: "true",
+                    "{msg.text}"
+                }
             }
         }
         None => rsx! {},
