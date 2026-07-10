@@ -1,10 +1,16 @@
 use dioxus::prelude::*;
 
-use crate::graphql::NodeWithChildren;
+use crate::graphql::{self, NodeWithChildren};
+use crate::i18n::t;
 use crate::nhost::storage_url;
+use crate::route::Route;
 use crate::session::use_session;
 
 use super::loader::node_icon_el;
+use super::ui::alert_dialog::{
+    AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
+    AlertDialogTitle,
+};
 
 /// Office document mimes (legacy + OpenXML) previewable via the MS Office viewer:
 /// Word, Excel and PowerPoint.
@@ -53,7 +59,18 @@ mod tests {
 pub fn FileApp(node: NodeWithChildren) -> Element {
     let name = node.name.as_str();
     let session = use_session();
+    let nav = use_navigator();
+    let route = use_route::<Route>();
+    let segments: Vec<String> = match &route {
+        Route::PathPage { segments, .. } => segments.clone(),
+        _ => vec![],
+    };
     let created = node.created_at.as_ref().map(|t| t.0.clone());
+    let node_id = node.id.0.clone();
+    let context_id = node.context_id.clone().map(|c| c.0);
+    // Owners may delete the file (node/context owner); mirrors ContentApp gating.
+    let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
+    let mut confirm_open = use_signal(|| false);
 
     let data = node.data.map(|d| d.0);
 
@@ -99,8 +116,46 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         target: "_blank",
                         download: "{name}",
                         class: "btn-icon",
-                        title: "{crate::i18n::t(\"common.download\")}",
+                        title: "{t(\"common.download\")}",
                         span { class: "material-icons", "download" }
+                    }
+                }
+                // Delete the file (owner-only), removing member rows first.
+                if can_manage && !segments.is_empty() {
+                    button {
+                        class: "btn-icon",
+                        title: "{t(\"common.delete\")}",
+                        onclick: move |_| confirm_open.set(true),
+                        span { class: "material-icons", "delete" }
+                    }
+                    AlertDialog {
+                        open: Some(confirm_open()),
+                        on_open_change: move |v| confirm_open.set(v),
+                        AlertDialogTitle { "{t(\"content.confirmDelete\")}" }
+                        AlertDialogDescription { "{name}" }
+                        AlertDialogActions {
+                            AlertDialogCancel { "{t(\"common.cancel\")}" }
+                            AlertDialogAction {
+                                on_click: {
+                                    let node_id = node_id.clone();
+                                    let parent = segments[..segments.len() - 1].to_vec();
+                                    move |_| {
+                                        let token = session.read().access_token.clone();
+                                        let node_id = node_id.clone();
+                                        let parent = parent.clone();
+                                        confirm_open.set(false);
+                                        spawn(async move {
+                                            let _ = graphql::delete_node_members(token.as_deref(), &node_id).await;
+                                            if graphql::delete_node(token.as_deref(), &node_id).await.unwrap_or(false) {
+                                                crate::session::bump_data_version();
+                                                nav.push(Route::PathPage { segments: parent, app: None });
+                                            }
+                                        });
+                                    }
+                                },
+                                "{t(\"common.delete\")}"
+                            }
+                        }
                     }
                 }
             }
@@ -138,6 +193,12 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                     }
                 }
             }
+        }
+        // A file can be discussed too (React FileApp carries a discussion below
+        // the viewer).
+        super::comments::CommentSection {
+            node_id: node_id.clone(),
+            context_id: context_id.clone(),
         }
     }
 }
