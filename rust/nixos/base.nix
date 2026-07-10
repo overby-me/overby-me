@@ -78,9 +78,11 @@
     # Enable systemd-resolved for DNS resolution (tests the Rust resolved)
     resolved = {
       enable = true;
-      dnssec = "allow-downgrade";
-      llmnr = "true";
-      fallbackDns = ["1.1.1.1" "8.8.8.8"];
+      settings.Resolve = {
+        DNSSEC = "allow-downgrade";
+        LLMNR = "true";
+        FallbackDNS = ["1.1.1.1" "8.8.8.8"];
+      };
     };
 
     getty.autologinUser = "nixos";

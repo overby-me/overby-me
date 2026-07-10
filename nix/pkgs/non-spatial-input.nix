@@ -8,7 +8,10 @@
   libinput,
   libGL,
   wayland,
-  xorg,
+  libx11,
+  libxcursor,
+  libxrandr,
+  libxi,
 }:
 rustPlatform.buildRustPackage {
   pname = "non-spatial-input";
@@ -33,10 +36,10 @@ rustPlatform.buildRustPackage {
     libinput
     libGL
     wayland
-    xorg.libX11
-    xorg.libXcursor
-    xorg.libXrandr
-    xorg.libXi
+    libx11
+    libxcursor
+    libxrandr
+    libxi
   ];
 
   # The binaries dlopen GL/X11/Wayland at runtime, mirroring the upstream
@@ -50,10 +53,10 @@ rustPlatform.buildRustPackage {
         libinput
         libGL
         wayland
-        xorg.libX11
-        xorg.libXcursor
-        xorg.libXrandr
-        xorg.libXi
+        libx11
+        libxcursor
+        libxrandr
+        libxi
       ]
     }
     done

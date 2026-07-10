@@ -83,10 +83,12 @@
             };
           };
 
-          stalwart-mail = {
+          stalwart = {
             enable = true;
             # The module was first enabled before the 26.05 stalwart-mail -> stalwart
             # rename; pin to 25.05 to keep using the existing on-disk storage layout.
+            # Below 26.05 the module keeps the old identifier, so the service
+            # still runs as the stalwart-mail user that owns the secrets above.
             stateVersion = "25.05";
             settings = {
               server.hostname = "mail.overby.me";
