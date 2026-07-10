@@ -267,13 +267,38 @@ a:hover {
 }
 
 /* Cards — M3 elevated card: surface-container-low tone, corner-medium, a
-   level-1 tonal shadow, no outline. */
+   level-1 tonal shadow, no outline. Content fades + rises in on mount (an M3
+   emphasized-decelerate entrance) so page/list changes feel motionful. */
 .card {
     background: var(--md-surface-container-low);
     border-radius: var(--md-sys-shape-corner-medium);
     box-shadow: var(--md-sys-elevation-1);
     overflow: hidden;
     margin-bottom: 12px;
+    animation: m3-enter var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized-decelerate) both;
+}
+
+@keyframes m3-enter {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* M3 accessibility: honour a reduced-motion preference — drop the entrance and
+   collapse transitions/animations to near-instant. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }
 
 .card-header {

@@ -642,6 +642,16 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             let r = (assert-exists $session_id "vote app renders" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
             let r = (check-contrast $session_id "vote app (active app-rail highlight)" $p $fl); $p = $r.passed; $fl = $r.failed
             capture-shots $session_id "vote-app"
+            # Speak app (if this context exposes it): capture it, then return to
+            # the vote app so the downstream vote-app checks keep their state.
+            let has_speak = (wd-execute $session_id 'return document.querySelector(".app-rail a[href*=\"app=speak\"]")?"y":"n"')
+            if $has_speak == "y" {
+                wd-execute $session_id 'var a=[...document.querySelectorAll(".app-rail a")].find(function(x){return (x.getAttribute("href")||"").includes("app=speak")}); if(a){a.click()}; return 1' | ignore
+                sleep 800ms
+                capture-shots $session_id "speak-app"
+                wd-execute $session_id 'var a=[...document.querySelectorAll(".app-rail a")].find(function(x){return (x.getAttribute("href")||"").includes("app=vote")}); if(a){a.click()}; return 1' | ignore
+                sleep 600ms
+            }
             # The highlighted app must have readable contrast (icon vs its box):
             # regression for the green-on-green active state.
             # M3 nav-rail active indicator: a container-tone pill behind the icon.

@@ -45,11 +45,19 @@ light/dark × desktop/mobile:
 - `[x]` **Components** — buttons (filled/outlined/text), FAB, cards, dialogs,
   chips, snackbar, the nav-rail active indicator (container pill), text fields,
   and the dioxus-primitives (switch/checkbox/radio) themed to the green accent.
-- `[x]` **Motion** — M3 easing/duration tokens on component transitions.
-- `[~]` **Remaining** — richer motion on route/page transitions (shared-axis);
-  screenshot coverage for the poll-ballot / comments / member / speak screens
-  (validated by component reuse, not yet viewed); the floating **bar** is a
-  solid primary (M3's default is a surface app bar — kept as a brand choice).
+- `[x]` **Motion** — M3 easing/duration tokens on component transitions, an
+  emphasized-decelerate content entrance on cards (page/list changes feel
+  motionful without keyed remounts), and a `prefers-reduced-motion` guard that
+  collapses animation to near-instant.
+- `[x]` **App bar** — stays a primary (green) top app bar: the user's explicit
+  green-leads choice assigned green to the bar, and M3 permits colour-container
+  app bars. Fully spec'd: primary container, on-primary content, level-2
+  elevation, corner-large, opaque.
+- `[~]` **Screen coverage** — home / context / vote / editor / **speak** are
+  screenshot-reviewed (light/dark × desktop/mobile). The poll-ballot / comments
+  / member screens reuse the now-M3 components (cards, chips, radio/checkbox,
+  list items, avatars) so they inherit the styling, but need seeded content to
+  be individually viewed — a follow-up for the harness.
 
 ## Design direction: dioxus-components / dioxus-primitives
 
