@@ -23,8 +23,10 @@
     --md-on-primary-container: #3F0018;
     --md-secondary: #006B32;
     --md-on-secondary: #FFFFFF;
-    --md-secondary-container: #008740;
-    --md-on-secondary-container: #006B32;
+    /* A light tint + dark on-color (like primary-container): the old values were
+       green-on-green and unreadable. */
+    --md-secondary-container: #A0F5C0;
+    --md-on-secondary-container: #00210F;
     --md-tertiary: #006B32;
     --md-on-tertiary: #FFFFFF;
     --md-surface-tint: #B80F55;
@@ -35,7 +37,9 @@
     --md-surface: var(--primary-color-1, #fbfbfb);
     --md-on-surface: var(--secondary-color, #000);
     --md-surface-variant: var(--primary-color-5, #f5f5f5);
-    --md-on-surface-variant: var(--secondary-color-5, #848484);
+    /* Muted/secondary text. Darker than the shadcn default (#848484 was ~3.6:1
+       on white, below AA) so hints, timestamps and counts stay readable. */
+    --md-on-surface-variant: #616161;
     --md-outline: var(--primary-color-6, #e5e5e5);
     --md-shadow: rgba(0, 0, 0, 0.12);
     --md-error: var(--secondary-error-color, #ef4444);
@@ -53,8 +57,12 @@
     --md-on-primary-container: #FFD9DF;
     --md-secondary: #5ADF82;
     --md-on-secondary: #003917;
-    --md-secondary-container: #02A752;
-    --md-on-secondary-container: #003113;
+    /* Dark tint + light on-color (mirrors light mode): the old values were
+       green-on-green and unreadable. */
+    --md-secondary-container: #005230;
+    --md-on-secondary-container: #A0F5C0;
+    /* Muted text on the dark surface (light gray, high contrast). */
+    --md-on-surface-variant: #A1A1A1;
     --md-tertiary: #5ADF82;
     --md-on-tertiary: #003917;
     --md-surface-tint: #FFB1C2;
@@ -1345,9 +1353,22 @@ a.list-item:hover {
     border-radius: 0;
 }
 
+/* The bar is green (secondary), so its icons use the on-secondary colour for
+   contrast (black-on-green was too faint). */
+.bar .btn-icon {
+    color: var(--md-on-secondary);
+}
+
 /* User menu */
 .user-menu {
     position: relative;
+}
+
+/* The user avatar sits on the green bar; invert it (light circle, green initial)
+   so the green-on-green avatar is clearly visible. */
+.user-menu .avatar.secondary {
+    background: var(--md-on-secondary);
+    color: var(--md-secondary);
 }
 
 /* Full-viewport click-catcher behind an open popup menu, so a click anywhere
@@ -1475,8 +1496,10 @@ a.list-item:hover {
 }
 
 .btn-icon.active {
-    background: var(--md-secondary-container);
-    color: var(--md-on-secondary-container);
+    /* Saturated green + white icon: a strong highlight that stands out on the
+       light-gray app rail (the container tint would be too subtle there). */
+    background: var(--md-secondary);
+    color: var(--md-on-secondary);
 }
 
 .btn-icon .material-icons {

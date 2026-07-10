@@ -290,6 +290,16 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             if $inview == "y" { log-ok "user menu popup is within the viewport"; $p = $p + 1 } else { log-fail $"user menu popup off-screen: ($inview)"; $fl = $fl + 1 }
             let bw = (wd-execute $session_id 'var b=document.querySelector(".user-menu > button"); return getComputedStyle(b).borderTopWidth')
             if (($bw | default "") == "0px") { log-ok "user menu button has no stray border"; $p = $p + 1 } else { log-warn $"user menu button border-width: ($bw)" }
+            # The avatar must stand out from the green bar (the green-on-green
+            # complaint): its background should differ clearly from the bar's.
+            let avc = (wd-execute $session_id 'function L(c){var a=c.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]} function P(s){var m=s.match(/[0-9.]+/g);return m?[+m[0],+m[1],+m[2]]:[0,0,0]} function R(x,y){var p=L(P(x)),q=L(P(y)),h=Math.max(p,q),l=Math.min(p,q);return (h+0.05)/(l+0.05)} var av=document.querySelector(".user-menu .avatar"); var bar=document.querySelector(".bar"); if(!av||!bar) return "no"; return R(getComputedStyle(av).backgroundColor, getComputedStyle(bar).backgroundColor).toFixed(2)')
+            if $avc == "no" {
+                log-warn "could not measure avatar/bar contrast"
+            } else if ((try { $avc | into float } catch { 0.0 }) >= 1.4) {
+                log-ok $"user avatar stands out from the bar ($avc):1"; $p = $p + 1
+            } else {
+                log-fail $"user avatar blends into the bar: ($avc):1"; $fl = $fl + 1
+            }
             wd-execute $session_id 'var bd=document.querySelector(".menu-backdrop"); if(bd)bd.click(); return 1' | ignore
             sleep 200ms
         } else {
@@ -500,6 +510,16 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
                 log-fail $"app rail did not set ?app=vote; got: ($search)"; $fl = $fl + 1
             }
             let r = (assert-exists $session_id "vote app renders" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+            # The highlighted app must have readable contrast (icon vs its box):
+            # regression for the green-on-green active state.
+            let arc = (wd-execute $session_id 'function L(c){var a=c.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]} function P(s){var m=s.match(/[0-9.]+/g);return [+m[0],+m[1],+m[2]]} function R(x,y){var p=L(P(x)),q=L(P(y)),h=Math.max(p,q),l=Math.min(p,q);return (h+0.05)/(l+0.05)} var el=document.querySelector(".app-rail .btn-icon.active"); if(!el) return "noactive"; var ic=el.querySelector(".material-icons"); var cs=getComputedStyle(el); var icc=ic?getComputedStyle(ic).color:cs.color; return R(cs.backgroundColor, icc).toFixed(2)')
+            if $arc == "noactive" {
+                log-warn "no active app-rail item to contrast-check"
+            } else if ((try { $arc | into float } catch { 0.0 }) >= 3.0) {
+                log-ok $"active app highlight readable contrast ($arc):1"; $p = $p + 1
+            } else {
+                log-fail $"active app highlight is low-contrast: ($arc):1"; $fl = $fl + 1
+            }
             # The open app is badged onto the current node's breadcrumb avatar.
             sleep 1sec
             let badge = (wd-execute $session_id 'return document.querySelector(".bottom-bar .breadcrumbs .crumb-app-badge")?"y":"n"')
