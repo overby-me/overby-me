@@ -1,369 +1,214 @@
-# RadikalWiki Dioxus — test & fix plan
+# RadikalWiki Dioxus — remaining work
 
-Goal: get `web/wiki-dioxus` to behave like the reference React app in
-[`web/wiki`](../wiki) against the same NHost/Hasura backend (production is
+`web/wiki-dioxus` is a Rust/Dioxus/WASM port of the React app in
+[`web/wiki`](../wiki), against the same NHost/Hasura backend (production
 <https://radikal.wiki>; test with a real account — never commit credentials).
 
-The initial port (scaffolding through all screens) is done; this plan is about
-**verifying each area against the real backend and fixing what's broken**, and
-(see below) **moving the UI onto the dioxus-components style and component set**.
+This plan lists **only what is still missing or partial** versus the React
+original, plus features intentionally not ported (and why). It was reconciled
+against the React source by a full component-by-component audit; the previous
+"everything is done" parity list was over-optimistic — the port renders every
+screen, but several **create / admin / mobile** flows are absent.
 
-## North star: Material Design 3, 100%
-
-The active goal is to make the whole UI follow **Material Design 3** — both its
-**style** (colour, typography, shape, elevation, state layers, motion) and its
-**principles** — validated component-by-component and page-by-page with the
-screenshot + contrast tooling (`test-browser.nu --shots`, `test-contrast-audit.js`).
-Reference: <https://m3.material.io/>.
-
-**Colour (done — replaceable).** The palette is a genuine M3 scheme generated
-from the Radikale Venstre brand seeds by `scripts/gen-theme.ts`
-(Google `material-color-utilities`) into `assets/m3-theme.css` as canonical
-`--md-sys-color-*` roles (light + dark). **Green `#02944F` leads as the primary,
-magenta `#D2307E` is the tertiary accent** ("de to farver bør altid optræde
-sammen"). The app's `--md-*` tokens alias the sys roles, so re-skinning the
-entire app = change the two seeds and re-run the generator. Green drives the
-chrome (bar, buttons, avatars, app-rail, chips); magenta pops on the FAB, the
-user avatar and badges/comment avatars.
-
-**M3 conformance status.** Non-colour system tokens live in
-`assets/m3-tokens.css` (type scale, corner/shape scale, elevation levels,
-state-layer opacities, motion easing/duration). Validated with `--shots` +
-the contrast audit, viewed across home / vote / context / editor ×
-light/dark × desktop/mobile:
-- `[x]` **Shape** — corner scale applied: buttons pill, cards/tiles medium,
-  chips small, dialogs extra-large, snackbar extra-small, FAB large, bar large.
-- `[x]` **Elevation & surfaces** — tonal shadow tokens on cards (elevated,
-  surface-container-low), dialogs (level 3), snackbar, the floating bar (level 2,
-  now opaque); the surface-container tonal levels are wired.
-- `[x]` **Typography** — full M3 type scale; body → body-large, headings →
-  headline/title roles, buttons/labels → label-large.
-- `[x]` **State layers** — hover/pressed overlays (`color-mix` at 8/10%) on
-  buttons, icon buttons, chips, list/folder items and the nav-rail pill.
-- `[x]` **Focus** — `:focus-visible` rings on every interactive surface; the
-  primitives' focus ring re-pointed from blue to the M3 primary.
-- `[x]` **Components** — buttons (filled/outlined/text), FAB, cards, dialogs,
-  chips, snackbar, the nav-rail active indicator (container pill), text fields,
-  and the dioxus-primitives (switch/checkbox/radio) themed to the green accent.
-- `[x]` **Motion** — M3 easing/duration tokens on component transitions, an
-  emphasized-decelerate content entrance on cards (page/list changes feel
-  motionful without keyed remounts), and a `prefers-reduced-motion` guard that
-  collapses animation to near-instant.
-- `[x]` **App bar** — stays a primary (green) top app bar: the user's explicit
-  green-leads choice assigned green to the bar, and M3 permits colour-container
-  app bars. Fully spec'd: primary container, on-primary content, level-2
-  elevation, corner-large, opaque.
-- `[~]` **Screen coverage** — home / context / vote / editor / **speak** are
-  screenshot-reviewed (light/dark × desktop/mobile). The poll-ballot / comments
-  / member screens reuse the now-M3 components (cards, chips, radio/checkbox,
-  list items, avatars) so they inherit the styling, but need seeded content to
-  be individually viewed — a follow-up for the harness.
-
-## Design direction: dioxus-components / dioxus-primitives
-
-Adopt the [dioxus-components](https://github.com/DioxusLabs/dioxus-components)
-look and component model as the target UI style. Concretely:
-
-- **Follow that visual style.** The current CSS is a bespoke Material-ish theme
-  in `assets/style.css`; migrate it toward the dioxus-components (shadcn-style)
-  design — its tokens, spacing, radii, and neutral palette — rather than MUI.
-  New UI should be built in that style, and existing screens restyled to match
-  as they are touched.
-- **Use components from dioxus-components where it makes sense.** It ships
-  accessible (WAI-ARIA) primitives via `dioxus-primitives` (added with
-  `dx components add`). Prefer them over the hand-rolled equivalents, especially
-  the interactive, a11y-sensitive bits we currently open-code:
-  - the user-menu **dropdown/popover** (no outside-click / keyboard handling
-    today), the delete/confirm and submit **dialogs** (currently two-click
-    buttons), **tooltips**, **tabs** for the app views, and the form controls
-    (**select**, **checkbox**/**radio** in the poll ballot, **switch** for the
-    theme toggle).
-- **Isolate our own reusable components.** Factor the app-agnostic pieces with
-  no wiki/GraphQL knowledge into a shared module (later possibly a sibling
-  crate). Started: `components::ui` holds the generated dioxus-primitives, and
-  `components::widgets` holds our own (`Spinner`, `Chip`, poll `Bar`) — screen
-  components compose those. Still to extract: `Card`/`ListItem`/`Avatar`
-  wrappers, `Snackbar`.
-- **Upstream what generalises.** Anything we build that is genuinely generic and
-  higher-quality than what dioxus-components has (or missing there) is a
-  candidate to contribute back upstream.
-
-Do this **incrementally**, not as a big-bang rewrite: swap one hand-rolled
-component for a primitive (or move one into `components/ui`) at a time, keep the
-browser tests green, and prefer the highest-duplication / weakest-a11y pieces
-first. Each migration should keep `just test` + `just test-browser` passing.
-
-**Migrated so far** (the weak-a11y interactive pieces): user-menu
-**dropdown** (custom, with backdrop + keyboard-closable), poll ballot
-(`radio_group` + `checkbox`), delete confirm (`AlertDialog`), theme toggle
-(`switch`, as a labelled row that flips `html[data-theme]`), and the
-**snackbar** now announces (`role=status` + `aria-live=polite`). Add-content
-deliberately stays on a native `<select>` (accessible) until the shadcn
-`Select` trigger renders the option *label* rather than the raw value.
-**Deferred** as low-value churn (restyle as-touched, not a big-bang): wrapping
-the 100+ styled `.card` / `.btn` / `.avatar` divs in `Card`/`Button`/`Avatar`.
-A full `toast`-provider swap for the snackbar is possible (the primitive
-exists) but would rewire ~14 `show_snackbar` call sites for equivalent UX.
+Already done (not repeated here; see git history): the initial port of all
+screens, GraphQL subscriptions / real-time, the rich editor + threaded comments,
+the extra apps (graph/program/profile/social/redirect/parent/cow), pull-to-refresh,
+and the Material Design 3 colour + theming system (a replaceable M3 scheme
+generated from the Radikale brand by `scripts/gen-theme.ts` → `assets/m3-theme.css`,
+plus `assets/m3-tokens.css` for shape/elevation/type/state/motion).
 
 ## How to test
 
-- **Unit** — `just test` covers pure logic (GraphQL filter serialization, path
-  helpers). Add a test whenever a bug turns out to be wire-format/logic shaped.
-- **Browser** — `just test-browser` drives the real app in headless Servo over
-  WebDriver (see [`README.md`](./README.md)). Unauthenticated smoke tests run by
-  default; `WIKI_EMAIL=… WIKI_PASSWORD=… just test-browser` adds authenticated
-  checks against the live backend.
-- **Manual** — `just dev` + Servo/Chrome. Watch Servo stderr for
-  `RadikalWiki starting…`, `log::*` output, and wasm traps.
+- **Unit** — `just test` (pure logic: GraphQL filter serialization, path/icon/
+  ordering helpers). Add one whenever a bug is wire-format or logic shaped.
+- **Browser** — `just test-browser` drives the real app in headless Firefox over
+  WebDriver; `WIKI_EMAIL=… WIKI_PASSWORD=… just test-browser` adds authenticated
+  checks against the live backend, and `--shots` saves light/dark × desktop/mobile
+  screenshots of home/context/vote/editor/speak to `./screenshots` (read them —
+  the contrast audit can't see layout/visual bugs).
+- Workflow per gap: reproduce in `web/wiki`, build it in `wiki-dioxus`, diff the
+  GraphQL, then lock it in with a unit test and/or a `test-browser.nu` assertion.
 
-Workflow for each area below: reproduce in `web/wiki`, reproduce in
-`wiki-dioxus`, diff the GraphQL the two send, fix, then lock it in with a unit
-test and/or a `test-browser.nu` assertion.
+## Parity gaps (found by the React↔Dioxus source audit)
+
+`[ ]` open · `[~]` partial. Ordered by impact within each area.
+
+### Voting & polls — the port can *vote* but not *manage* polls
+
+- `[ ]` **Create / open a poll** (React `poll/PollDialog.tsx`). No way to start a
+  poll in the port: `FolderAdd` only offers document/folder. Needs the dialog
+  (min/max vote-range, hide-result toggle, options built from For/Imod/Blank for
+  policy/change or from `vote/candidate` children + Blank for positions), closing
+  any prior active poll (`update mutable:false`), inserting `vote/poll`, and
+  **setting the context `active` relation** (no set-active-relation mutation
+  exists yet). Without this, a poll can only be opened from the React app. **Biggest gap.**
+- `[ ]` **Stop / close a poll** (React `poll/PollAdmin.tsx`). Owner-only "Stop"
+  that sets `mutable:false` and snapshots the eligible-voter count into
+  `data.voters`. Currently a poll can never be closed from the port. (Also fix
+  `vote.rs` misusing the `poll.managePoll` string as the voter-facing subtitle.)
+- `[ ]` **Position screen** (React `vote/PositionApp.tsx`). `vote/position` falls
+  through to the generic `NodeApp`; it should compose content + candidate gallery
+  + questions + poll list. Pulls in the next three items.
+- `[ ]` **Candidate gallery + view** (React `vote/CandidateList.tsx`,
+  `CandidateApp.tsx`). Image gallery of `vote/candidate` children (photo from
+  `data.image`, per-user visibility), candidate opens as content with members
+  hidden. Today candidates render as a plain node list.
+- `[ ]` **Questions** (React `vote/QuestionList.tsx`, `AddQuestionButton.tsx`).
+  Numbered `vote/question` list under a position with author chip, add-question
+  (gated on `inserts`), and owner delete/sort. Absent. (Overlaps issue #138 —
+  "replace questions with a comment model" — decide which model first.)
+- `[ ]` **Amendments** (React `vote/AddChangeButton.tsx`). "New amendment" button
+  (gated on `inserts` containing `vote/change`) that opens the add dialog with a
+  redirect into the editor, pre-filling the title with the user's name under a
+  position. `PolicyApp` lists existing amendments but can't create one.
+- `[~]` **Poll-list affordances** (React `poll/PollList.tsx`). Poll rows under a
+  policy/position show only a name link — add the vote-count badge, created-at,
+  and owner delete.
+- `[~]` **Voting-rights status** (React `vote/VoteApp.tsx`). No `canVote`
+  permission check or "you (do not) have voting rights / you have (not) voted"
+  card — eligibility is never surfaced. (Skip React's refresh-avatar; pull-to-
+  refresh already covers it.)
+- `[~]` Owner **Sort** entry buttons in the vote/comment/question lists (SortApp
+  exists; just no link). Minor: block over-selection live on checkbox change
+  (currently only errors on submit).
+
+### Content & files — no file *creation* or file management
+
+- `[ ]` **File upload** (React `util/FileUploader.tsx` via `nhost.storage.upload`).
+  `nhost.rs` has no upload path at all, so `wiki/file` nodes can't be created and
+  a document can't get a cover image. Needs a multipart upload + presigned-URL
+  helper. **Biggest content gap.**
+- `[~]` **Add-content dialog** (React `content/AddContentDialog.tsx`). `FolderAdd`
+  hardcodes document/folder and ignores the node's `inserts` computed field
+  (already queried, only used by comments). Drive the mime `<select>` from
+  `inserts`, add the file-upload option and the free-text body for
+  `vote/question`/`vote/comment`, and add a duplicate-name check.
+- `[ ]` **Context creation + permission seeding** (React `AddContentDialog.tsx`
+  `contextPerm`). Creating a group/event/context must insert the permission
+  matrix; today a plain `insert_node` leaves a new context with no permissions.
+- `[ ]` **File-node toolbar + sub-content** (React `file/FileApp.tsx` +
+  `ContentToolbar`). A file page shows only the viewer — no delete / download-raw-
+  file / edit / members / publish, no member chips, and no comments / changes /
+  questions below it. Add the toolbar and a comment section (as documents have).
+- `[ ]` **Raw-file download** (React `content/DownloadButton.tsx`) via a presigned
+  URL, for every previewable file type (document `.odt` export already exists).
+- `[~]` **Editor cover image + date** (React `content/Editor.tsx`). No image
+  uploader/preview (writes `data.image`; ContentApp already *renders* it) and no
+  `DatePicker` for `createdAt` (context-owner, niche). Save only writes
+  content/name/mutable.
+- `[~]` **Submit/publish confirmation** (React `content/PublishButton.tsx`).
+  Submit fires directly with no confirm dialog / `submitWarning` for an
+  irreversible action (the i18n keys exist, unused). Also no publish button on
+  the read view.
+- `[ ]` **`createdAt` subtitle** (React `content/ContentHeader.tsx`) — "created N
+  ago" + absolute-time tooltip on content/file headers. Small.
+
+### Members & invites — admin downgraded to hide-only + single email
+
+- `[ ]` **Member administration** (React `member/MembersDataGrid.tsx`). Owners can
+  only hide/unhide. Add promote/demote **owner**, toggle **active**, and **remove
+  a member** (`delete_member` exists, no button). `MembersSetInput` needs
+  `owner`/`active` (and `MemberFields` doesn't even query `active`).
+- `[ ]` **Invite existing users by name** (React `invite/InvitesTextField.tsx`).
+  Only single email invites work; add a `users` `displayName _ilike` autocomplete
+  with multi-select (binding `nodeId` for known users).
+- `[ ]` **Members entry point.** No owner "Members" button on a group/event view;
+  `member` app is reachable only by typing `?app=member`.
+- `[~]` **Bulk member import** (React `invite/InvitesFab.tsx` + `util/SheetReader.tsx`).
+  Import a Fornavn/Efternavn/Email roster from `.xlsx` (on-conflict upsert).
+  Heaviest lift — needs an xlsx parser in WASM; reasonable to defer.
+
+### Mobile & navigation
+
+- `[ ]` **Mobile app navigation** (React `layout/MobileMenu.tsx`). The app rail is
+  desktop-only (≥1200px), so on a phone **Speak and Vote are unreachable** — the
+  drawer only offers the context + Home. Events are attended on phones, so this is
+  a real functional regression. (Distinct from the *styling* redesign #158, which
+  was skipped — this is about reachability, not looks.)
+- `[ ]` **Pending-invite badge** on the Home rail/nav item (React `useApps.ts`,
+  `AppList`/`MobileMenu`). The invitations data already exists (`query_invitations`);
+  surface a dot when there are unaccepted invites.
+- `[~]` **Screen / projector launch** (React `useApps.ts`). On large unauth
+  screens the rail offered a "Skærm" action opening `?app=screen` in a new tab;
+  `ScreenApp` exists but nothing links to it.
+
+### Auth & profile
+
+- `[ ]` **Resend verification email** (React `auth/AuthForm.tsx`). On an
+  unverified-user sign-in the port shows the error but never re-sends the email
+  (`nhost.rs` has no `send_verification_email`), so a user who lost the first one
+  is stuck.
+- `[~]` **Public user profile** (React `layout/UserApp.tsx`). `wiki/user` nodes
+  aren't routed (fall through to `NodeApp`); the port's `ProfileApp` is self-only
+  and omits the **authored-content** list. Add: route `wiki/user` → profile, and
+  show any user's memberships + events + authored content.
+
+### Search & smaller UX
+
+- `[~]` **Search** (React `layout/SearchField.tsx`). Add context-scoped results
+  (filter by `contextId` inside a context), a **Ctrl-K** shortcut, **arrow-key +
+  Enter** result navigation, and the parent-name secondary line on results.
+- `[~]` **Speaker join types** (React `speak/avatars.tsx`). The port has 4 of 5
+  types — the "misunderstood/announcement" type is dropped and procedure is
+  renumbered `4`→`3`, which diverges from React's `order_by data desc` and any
+  existing `speak/speak` rows with `data:"4"`. Restore type `4` or document/migrate.
+- `[~]` Minor: post-login return-to-origin (`navigate(-1)` vs always Home);
+  folder rail stays active during `?app=editor` and vote during `?app=poll`;
+  per-app scroll-position persistence; sort save batched vs sequential.
+
+## Open backlog (RadikalWiki GitHub issues still relevant)
+
+- `[ ]` `#138` Replace "questions" with a comment model (see Voting → Questions).
+- `[ ]` `#25` Content metadata attributes (e.g. a "keep longer" flag).
+- `[ ]` `#69` Node revision / history table.
+- `[ ]` `#115` Live collaborative editing.
+- `[~]` `#128` Audio/MIDI — audio/video already preview natively; MIDI needs an
+  external JS synth + soundfont (a CDN dependency).
+- `[ ]` `#41` Export event participants (a new export beside the folder `.odt`).
+- `[ ]` `#134` "Open" contexts anyone can join (backend + join UI).
+- `[ ]` `#147` New permission system + editing UI (informs the perm app).
+- `[ ]` `#145` Error / stacktrace reporting API.
+- `[~]` `#33` PWA offline — installable (manifest/icon/SW registered); full offline
+  needs the service worker served from the site **root** (`/sw.js` or
+  `Service-Worker-Allowed: /`) — a deploy config, not app code (`src/pwa.rs`).
+- `[~]` `#139` Native notifications — "your turn to speak" fires; poll-open
+  notifications still to do (needs new-poll detection).
+- `[blocked]` `#108` Drive icons/apps from mime data — the `mimes` table's `icon`
+  is only a letter/number/questionmark avatar-mode hint (not a Material icon) and
+  `MimeLoader` maps mime → a compile-time Rust component. Needs backend data first.
+- **Need your input:** `#123` MimeAvatar-path-on-screen (unclear behaviour),
+  `#155` nhost alternative (infra), `#135`/`#136` native DB primitives (backend),
+  `#153` register campaign activity (large new feature — scope?).
 
 ## Known issues
 
-1. ~~**Flaky wasm panic on authenticated load (Servo).**~~ **FIXED.** The trap
-   was a real panic, not a nondeterministic one: `main()` wrote to the `SESSION`
-   / `LANG` `GlobalSignal`s *before* `dioxus::launch`, which is only legal
-   inside the runtime, so it fired exactly when localStorage already held a
-   session. Init now runs in an `App` `use_hook`. `console_error_panic_hook`
-   surfaces real messages. (commit: global-signal init.)
+- **Release build won't load in Servo** (`Module fetching failed`); only the debug
+  build runs there. Loads fine in Chrome/Firefox. Uninvestigated, low priority.
 
-2. ~~**Navigation into a group/event.**~~ **FIXED + verified.** Two bugs: the
-   catch-all `PathPage` did not re-resolve on client-side navigation between two
-   nodes (`use_resource` only re-runs on reactive reads, not prop changes) — now
-   keyed on the path so it remounts; and the drawer tree click path is verified
-   live.
+## Intentionally excluded (React features that don't make sense to port)
 
-3. **Release build won't load in Servo** (`Module fetching failed`). Only the
-   debug build runs there. Fine for dev/testing; loads fine in Chrome/Firefox.
-   Not yet investigated.
-
-## Parity areas vs web/wiki
-
-`[x]` = ported and verified against the live backend · `[~]` = partial ·
-`[ ]` = open.
-
-- `[x]` Auth: sign in / register / reset — sign-in verified live.
-- `[x]` Home list: groups + events (owned or accepted member), events by year.
-- `[x]` **Drawer node tree** (`MenuList`): lazy expandable child tree in-context,
-  ancestors auto-expand, active row highlighted. Verified live.
-- `[x]` Folder view: child list, icons, "not submitted", index+time ordering,
-  hidden-mime filtering. Verified live.
-- `[x]` Content: Slate JSON → read-only render + author chips (members).
-  Verified live. `[ ]` optional content image not yet shown.
-- `[x]` File: image verified live (loads with token); video/audio/PDF/download
-  share the same URL path (code present, image path exercised).
-- `[x]` Editor: contenteditable save/publish via a typed update mutation —
-  persistence verified live. `[ ]` still a plain-text→paragraph serialization,
-  not full Slate.
-- `[x]` Voting: poll ballot (radio/checkbox, Blank-alone, min/max), cast a
-  vote, "you have voted" state. Verified live end to end on a test poll.
-- `[x]` Speak: reads the real `speakerlist` child's queue; join/remove wired
-  (insert path verified via the shared null-field fix).
-- `[x]` Members: real member list + author chips, and invite by email
-  (insertMember). Verified live.
-- `[x]` Invitations: home list of pending group/event invites with
-  accept (updateMember) / decline (deleteMember). Verified live end to end.
-- `[x]` Sort: drag-and-drop reorder + save (typed index mutation). Renders +
-  save path verified.
-- `[x]` Search: live `_ilike` results — verified live.
-- `[x]` `?app=` routing (modelled in the route), i18n (Da/En incl. the ported
-  vote/speak/poll/sort/invite/member sections), theme, snackbars, breadcrumbs
-  (resolved node names, verified live).
-- `[x]` **admin / perm / map / screen** (were deferred; React shipped admin &
-  perm as empty stubs). Now implemented and verified live via `?app=`:
-  - **screen**: the context's active node (MimeLoader) beside the speaker list.
-  - **admin**: a live results grid — every poll in the context with per-option
-    tallies and totals.
-  - **perm**: the context's permission rows (mime · role · insert/select/delete).
-  - **map**: a full-height OpenStreetMap view (OSM embed, centred on Denmark).
-  All four are reachable from the app rail.
-
-## Content lifecycle (CRUD)
-
-- `[x]` Create: add a document or folder from the folder view (inline form).
-- `[x]` Read: all node types render (see the parity list above).
-- `[x]` Update: edit content as text + publish/submit; drag-sort reordering.
-- `[x]` Delete: remove a document (two-click confirm) then go to the parent.
-- `[x]` `?app=vote` resolves the context's `active` relation to the open poll.
-  All verified live against the backend.
-
-## Real-time & rich features
-
-- `[x]` **GraphQL subscriptions** over the Hasura WebSocket
-  (`graphql-transport-ws`): `src/subscription.rs` does connection_init (bearer
-  token) → subscribe → `next` (answering keepalive pings), surfaced as a signal;
-  a `use_live` helper ties it to a component's refresh counter. Used by the
-  folder children, poll results, home context list, home invitations and speaker
-  list. Verified live end to end: a node inserted by a **separate client**
-  appears in an open folder within ~2s with no reload.
-- `[x]` Speaker countdown timer (from the list's `time`/`updatedAt`).
-- `[x]` Poll result tallies (bar + count/percent per option).
-- `[x]` Editor formatting: a Bold/Italic/Code toolbar that wraps the selection,
-  plus inline markdown (`**bold**`, `*italic*`, `` `code` ``) mapping to Slate
-  marks the renderer displays. Verified live: Bold wraps and renders bold.
-
-The port now covers every RadikalWiki flow end to end, all verified against the
-live backend, with real-time updates and full create/read/update/delete.
-
-## Known parity gaps (small)
-
-- **Breadcrumb collapse.** React collapses breadcrumb segments (MUI `Collapse`,
-  expand/scroll-into-view) on deep paths; our trail renders every segment. Add a
-  collapse (middle segments → `…`, expandable) for long paths.
-- Optional content inline image edit; `Card`/`ListItem`/`Avatar`/`Snackbar`
-  still hand-rolled (see the migration section above).
-
-## Backlog — from RadikalWiki GitHub issues
-
-Triaged from <https://github.com/RadikalWiki/radikalwiki/issues>. Only issues
-that apply to the Dioxus frontend are listed; legacy React/TS-only ones are
-excluded (see "Ignored"). `#N` = issue number.
-
-### Apps to port / add
-
-- `#154` "Dioxus" — the umbrella tracking issue for this whole port.
-- `[x]` `#68` Graph app — SVG node-link view of the context + children (rail +
-  `?app=graph`), child boxes link into nodes.
-- `[x]` `#60` Program app — numbered agenda timeline of the context's children
-  (rail + `?app=program`).
-- `[x]` `#57` Redirect app — node forwards to a `data.url` target; owner can set
-  it (`?app=redirect`).
-- ~~`#53` WebDAV app~~ — skipped (owner request).
-- `[x]` `#78` Profile app — signed-in user + their groups/events (rail +
-  `?app=profile`).
-- `[x]` `#137` Social wall app — **Bluesky only** via the public AppView
-  `searchPosts` (rail + `?app=social`); Mastodon/PixelFed ignored.
-- `[x]` `#82` Secret cow app — cowsay easter egg at `?app=cow` (not in the rail).
-- `[x]` `#149` Missing-parent app — lists nodes with a null `parentId` (orphans),
-  excluding the legitimate root (rail + `?app=parent`).
-- ~~`#18` Pixel app~~ — skipped (owner request).
-
-All the above build + render live (browser smoke test asserts each mounts).
-
-### Speaker list
-
-- `[x]` `#6` Allow hiding the speaker list — owner admin panel opens/closes
-  (locks) the list; when closed the join panel is hidden.
-- `[x]` `#7` Make the speaker list sortable — owner move-to-top / move-to-bottom
-  via an `index` override; default keeps procedural-priority + arrival order.
-- `[x]` `#13` Support multiple speaker-list instances per context — every
-  `speak/list` child renders as its own card.
-- `[x]` `#14` Simpler design — current speaker + next highlighted, MM:SS
-  countdown pill, speak-type icon per row.
-- Also fixed the queue ordering to match React (`data` desc = procedural motions
-  jump the queue, then `createdAt` asc). Pure ordering/countdown unit-tested;
-  build renders live. Admin/reorder flows not yet driven end-to-end in a test.
-
-### Editor
-
-- `[x]` `#92` Line-break support (shift-enter) — handled natively by the
-  contenteditable surface (Shift+Enter inserts a `<br>`).
-- `[x]` `#94` Sticky formatting toolbar on long documents — `.editor-toolbar`
-  is `position: sticky; top: 0` (`assets/style.css`).
-- `[x]` `#97` Auto-link URLs and emails — on save, `dom_to_slate` wraps bare
-  `http(s)://` / `www.` / email words in a `link` mark (`richtext::link_segments`,
-  conservative so `main.rs`-style prose is left alone). Unit-tested.
-
-### Voting / policy
-
-- `[x]` `#27` Randomise the order of voting options — ballot order is shuffled
-  once per mount (Blank kept last); unit-tested.
-- `[x]` `#112` Show all sub-changes as a tree in the policy app — amendment /
-  poll / comment rows link into their nodes, so a `vote/change` drills into its
-  own PolicyApp and the whole amendment tree is browsable.
-- `#138` Replace "questions" with a comment model.
-
-### Content / nodes
-
-- `#25` Content metadata attributes (e.g. a "keep longer" flag for programs).
-- `[x]` `#32` Comment system — nested Bluesky-style threads (`components/comments.rs`),
-  shown under documents / policies; backend permissions in the Hasura perms table.
-- `[x]` `#34` "Newest contents" — a recent-content card on the home page
-  (`RecentContents`), each item resolving to its full path on click.
-- `[x]` `#44` Don't create the node until the first save — satisfied by design:
-  the add-content form only inserts on the explicit Add action (no pre-created
-  draft node like the React flow had).
-- `#69` Node revision/history table.
-- `[blocked]` `#108` Remove hardcoded mime lists (drive icons/apps from the mime
-  data) — not feasible frontend-only. The `mimes` table's `icon` is only a
-  letter/number/questionmark avatar-*mode* hint (verified live: every mime is
-  `questionmark` except vote policy=`letter`, candidate/change=`number`), not a
-  Material icon; and `MimeLoader` maps mime → a Rust component (compile-time
-  code, not data). The one datum that IS present, `hidden`, is already used
-  (`loader.rs` filters on `mime.hidden`). Needs the backend to carry real
-  icon/app data first.
-- `[x]` `#111` Limit node name length — `maxlength` on the name inputs.
-- `[x]` `#114` Zoom/maximise images — click-to-zoom lightbox (`ZoomableImage`) in
-  the file, content-block and inline-content image views.
-- `#115` Live collaborative editing.
-- `[x]` `#117` Table of contents — heading blocks become anchored links in a TOC
-  above documents with two or more headings; unit-tested.
-- `[x]` `#119` MS Office viewer dark mode — invert + hue-rotate filter on the
-  viewer iframe under `[data-theme="dark"]`.
-- `[x]` `#125` Folder grid view mode — list/grid toggle in the folder header.
-- `[~]` `#128` Audio / MIDI file support — audio (and video) already preview via
-  native `<audio controls>` / `<video controls>` in the file viewer (`file.rs`).
-  MIDI is the only gap: browsers have no native MIDI synth, so it needs an
-  external JS synthesizer + soundfont (a CDN dependency) to actually play.
-- `[x]` `#143` Show the child count in every content overview — count badge in
-  the folder header.
-
-### Members / contexts / permissions
-
-- `#41` Export event participants.
-- `[x]` `#51` Allow users to be hidden in groups — owner can hide/unhide a
-  member (`set_member_hidden`); hidden members are dropped for non-owners.
-- `[x]` `#132` Event viewer inside groups — a folder/group's child events are
-  listed in their own "Events" section above the rest of its content.
-- `[x]` `#133` Integrate the invite list into the home list — the home screen
-  already shows pending group/event invites inline with accept / decline.
-- `#134` "Open" contexts anyone can join.
-- `#147` New permission system (informs the perm app).
-
-### Design / UX / platform
-
-- `[x]` `#37` Atkinson Hyperlegible font for accessibility — the app font family.
-- `[x]` `#73` Pull-to-refresh — drag down (touch) or over-scroll up (wheel) at the
-  top reloads the current view with a spinner (`components/pull_refresh.rs`).
-- `[skip]` `#118` Move the toolbar to the right-hand bar — skipped by request
-  (the current sticky horizontal toolbar stays).
-- `[x]` `#122` Refresh data on window focus — `use_live` re-fetches when the
-  window regains focus (via `use_focus_refresh`), recovering a dropped socket.
-- `[skip]` `#158` New bottom-bar design (list menu · app select · tools) —
-  skipped by request (the current bottom bar / desktop app-rail stays).
-- `[~]` `#33` PWA / offline mode — installable: web manifest + icon + theme-color
-  (`assets/manifest.json`, `assets/icon.svg`, wired in `main.rs`). A service
-  worker (`assets/sw.js`) is registered for offline, but full offline needs it
-  served from the site ROOT (`/sw.js` or `Service-Worker-Allowed: /`); at
-  `/assets/sw.js` its scope is limited — a deploy concern (`src/pwa.rs`).
-- `[~]` `#139` Native notifications — "your turn to speak" fires when a speaker
-  reaches the top of the queue (permission requested on Join). Poll-open
-  notifications still to do (needs new-poll detection).
-- `#145` Error/stacktrace reporting API.
-
-### Ignored (legacy React/TS only)
-
-- `#85` React strict mode (react-beautiful-dnd / devexpress).
-- `#45` Port build to deno/bun.
-- `#146` Use the Plate editor (React/Slate-only lib).
-- `#95`, `#96` Slate-specific editor bugs (our editor is a textarea, N/A).
-
-### Uncertain — need your input (questions prepared)
-
-- `#123` "MimeAvatar path on screen" — unclear which behaviour.
-- `#155` Find an nhost alternative — backend/infra, out of the frontend port?
-- `#135`, `#136` Native DB primitives / get-index DB function — backend work.
-- `#153` Register campaign activity — large new feature; scope/priority?
+- **ResultDataGrid, PollChart, PollChartSub** — commented-out / DevExpress-chart
+  dead code in React. The port renders a live results table (`admin.rs`) + per-
+  option `Bar` fractions instead — at or ahead of React.
+- **Permission-editing UI** — `PermApp`/`PermList` are `null`/commented in React;
+  the port's read-only `perm.rs` is already ahead. (Editing is issue #147.)
+- **OldBrowser version gate** — a WASM/Dioxus build can't even start on the
+  browsers it warned about, so the gate is moot.
+- **HideOnScroll** auto-hiding bar, **RightDrawer** chrome, **SpeedDial** join FAB —
+  heavy MUI interaction patterns; actions were relocated to the bar/headers and
+  dioxus-primitives has no SpeedDial. No functionality lost.
+- **"Current item" drawer jump** — dead code (`&& false`) in React.
+- **Slate.js editor engine** — reimplemented over `contenteditable`/`execCommand`
+  with Slate↔HTML round-tripping (functional parity; the only caveat is rich-paste
+  fidelity vs React's Google-Docs paste mapping).
 
 ## Cross-cutting checks
 
-- **GraphQL correctness:** every filtered query must omit unset fields (Hasura
-  rejects `null` comparison expressions). This bit the home list; grep for
-  `NodesBoolExp`/comparison structs when adding queries and prefer
-  `..Default::default()` + `skip_serializing_if`.
+- **GraphQL correctness:** filtered queries must omit unset fields (Hasura rejects
+  `null` comparison expressions). Prefer `..Default::default()` +
+  `skip_serializing_if`; grep `NodesBoolExp`/comparison structs when adding queries.
 - **Permissions:** queries run with the user token; compare row visibility with
-  `web/wiki` for the same account.
-- **Field naming:** cynic maps snake_case Rust fields to camelCase GraphQL
+  `web/wiki` for the same account. Several audit gaps (candidate/question
+  visibility, member admin) hinge on whether Hasura enforces the rule server-side.
+- **Field naming:** cynic maps snake_case Rust → camelCase GraphQL
   (`mime_id` → `mimeId`); the schema is camelCase.
