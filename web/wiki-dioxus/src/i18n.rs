@@ -59,39 +59,6 @@ fn en_translations() -> HashMap<String, serde_json::Value> {
     serde_json::from_str(EN_JSON).unwrap_or_default()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The embedded JSON must parse and contain the sections the components use.
-    /// A malformed blob would parse to an empty map and every key would silently
-    /// fall back to itself (e.g. the literal "vote.noVoteNow" rendered on screen).
-    #[test]
-    fn translations_parse_and_cover_component_keys() {
-        for (lang, map) in [("en", en_translations()), ("da", da_translations())] {
-            assert!(!map.is_empty(), "{lang} translations failed to parse");
-            for key in [
-                "common.home",
-                "vote.noVoteNow",
-                "vote.castVote",
-                "vote.amendments",
-                "speak.emptyList",
-                "speak.joinSpeakerList",
-                "poll.managePoll",
-                "sort.saveSorting",
-                "invite.nameOrEmail",
-                "member.author",
-                "mime.vote",
-            ] {
-                assert!(
-                    lookup_key(&map, key).is_some(),
-                    "{lang} missing translation for {key}"
-                );
-            }
-        }
-    }
-}
-
 fn da_translations() -> HashMap<String, serde_json::Value> {
     serde_json::from_str(DA_JSON).unwrap_or_default()
 }
@@ -622,3 +589,36 @@ const DA_JSON: &str = r#"{
         "unknown": "Ukendt"
     }
 }"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The embedded JSON must parse and contain the sections the components use.
+    /// A malformed blob would parse to an empty map and every key would silently
+    /// fall back to itself (e.g. the literal "vote.noVoteNow" rendered on screen).
+    #[test]
+    fn translations_parse_and_cover_component_keys() {
+        for (lang, map) in [("en", en_translations()), ("da", da_translations())] {
+            assert!(!map.is_empty(), "{lang} translations failed to parse");
+            for key in [
+                "common.home",
+                "vote.noVoteNow",
+                "vote.castVote",
+                "vote.amendments",
+                "speak.emptyList",
+                "speak.joinSpeakerList",
+                "poll.managePoll",
+                "sort.saveSorting",
+                "invite.nameOrEmail",
+                "member.author",
+                "mime.vote",
+            ] {
+                assert!(
+                    lookup_key(&map, key).is_some(),
+                    "{lang} missing translation for {key}"
+                );
+            }
+        }
+    }
+}

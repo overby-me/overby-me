@@ -219,19 +219,89 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
     let mut open = use_signal(|| false);
     let mut title = use_signal(String::new);
     let mut kind = use_signal(|| "wiki/document".to_string());
+    // File-upload state for the `wiki/file` kind: the uploaded file's id / type
+    // (persisted on the node's data) and an in-flight flag while it streams up.
+    let mut file_id = use_signal(|| Option::<String>::None);
+    let mut file_type = use_signal(String::new);
+    let mut file_name = use_signal(String::new);
+    let mut uploading = use_signal(|| false);
+
+    let is_file = *kind.read() == "wiki/file";
+
+    // Upload the chosen file to NHost storage, then remember its id/type so the
+    // Add button can attach it. Mirrors React's FileUploader (upload on select).
+    let on_pick_file = move |evt: FormEvent| {
+        let files = evt.files();
+        let Some(fd) = files.into_iter().next() else {
+            return;
+        };
+        let name = fd.name();
+        let ctype = fd.content_type().unwrap_or_default();
+        let token = session.read().access_token.clone();
+        uploading.set(true);
+        file_id.set(None);
+        spawn(async move {
+            match fd.read_bytes().await {
+                Ok(bytes) => {
+                    match crate::nhost::upload_file(token.as_deref(), bytes.to_vec(), &name, &ctype)
+                        .await
+                    {
+                        Ok(up) => {
+                            // Default the title to the file's stem when the user
+                            // has not typed one, so the node has a sensible name.
+                            if title.read().trim().is_empty() {
+                                let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&name);
+                                title.set(stem.to_string());
+                            }
+                            file_type.set(up.mime_type.unwrap_or(ctype));
+                            file_name.set(name);
+                            file_id.set(Some(up.id));
+                        }
+                        Err(e) => crate::snackbar::show_snackbar(&format!(
+                            "{}: {e}",
+                            t("error.somethingWentWrong")
+                        )),
+                    }
+                }
+                Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+            }
+            uploading.set(false);
+        });
+    };
 
     let submit = {
         let parent_id = parent_id.clone();
         let context_id = context_id.clone();
         move |_| {
-            let name = title.read().trim().to_string();
+            let mime = kind.read().clone();
+            let typed = title.read().trim().to_string();
+            // A file node carries `{ fileId, type }` and requires an upload; the
+            // name falls back to the uploaded filename. Other kinds need a title.
+            let data = if mime == "wiki/file" {
+                let Some(fid) = file_id.read().clone() else {
+                    return;
+                };
+                Some(crate::graphql::Jsonb(serde_json::json!({
+                    "fileId": fid,
+                    "type": file_type.read().clone(),
+                })))
+            } else {
+                if typed.is_empty() {
+                    return;
+                }
+                None
+            };
+            let name = if typed.is_empty() {
+                file_name.read().clone()
+            } else {
+                typed
+            };
             if name.is_empty() {
                 return;
             }
             let token = session.read().access_token.clone();
             let parent_id = parent_id.clone();
             let context_id = context_id.clone();
-            let mime = kind.read().clone();
             spawn(async move {
                 let key = crate::components::loader::slugify(&name);
                 let input = crate::graphql::NodesInsertInput {
@@ -240,7 +310,7 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                     mime_id: Some(mime),
                     parent_id: Some(crate::graphql::Uuid(parent_id)),
                     context_id: context_id.map(crate::graphql::Uuid),
-                    data: None,
+                    data,
                     mutable: Some(true),
                     index: None,
                 };
@@ -251,10 +321,20 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                     // Refetch the folder to show the new child (no full reload).
                     crate::session::bump_data_version();
                     title.set(String::new());
+                    file_id.set(None);
+                    file_name.set(String::new());
                     open.set(false);
                 }
             });
         }
+    };
+
+    // The Add button is enabled once the form can produce a node: a title for
+    // document/folder, or a finished upload for a file.
+    let can_submit = if is_file {
+        file_id.read().is_some() && !*uploading.read()
+    } else {
+        !title.read().trim().is_empty()
     };
 
     rsx! {
@@ -283,6 +363,24 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                             oninput: move |e| title.set(e.value()),
                         }
                     }
+                    // File picker (only for the `wiki/file` kind).
+                    if is_file {
+                        div { class: "text-field mt-2",
+                            label { "{t(\"content.uploadFile\")}" }
+                            input {
+                                r#type: "file",
+                                onchange: on_pick_file,
+                            }
+                            if *uploading.read() {
+                                div { class: "stack stack-h mt-1", style: "align-items: center; gap: 8px;",
+                                    div { class: "spinner" }
+                                    span { class: "body-small text-muted", "{t(\"content.uploadFile\")}\u{2026}" }
+                                }
+                            } else if file_id.read().is_some() {
+                                span { class: "body-small text-muted", "\u{2713} {file_name}" }
+                            }
+                        }
+                    }
                     div { class: "stack stack-h mt-2", style: "align-items: center; gap: 8px;",
                         // TODO: migrate to the shadcn Select once its trigger shows
                         // the option label (not the raw value) for value != label.
@@ -291,6 +389,7 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                             onchange: move |e| kind.set(e.value()),
                             option { value: "wiki/document", "{t(\"mime.document\")}" }
                             option { value: "wiki/folder", "{t(\"mime.folder\")}" }
+                            option { value: "wiki/file", "{t(\"mime.file\")}" }
                         }
                         div { class: "flex-grow" }
                         button {
@@ -300,7 +399,7 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                         }
                         button {
                             class: "btn btn-primary",
-                            disabled: title.read().trim().is_empty(),
+                            disabled: !can_submit,
                             onclick: submit,
                             "{t(\"common.add\")}"
                         }

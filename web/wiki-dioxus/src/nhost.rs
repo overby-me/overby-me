@@ -279,3 +279,83 @@ pub fn is_auth_error(err: &NhostError) -> bool {
 pub fn sign_out() {
     // Simply clear the session locally; NHost tokens will expire naturally
 }
+
+/// One entry of the storage `POST /files` response (`processedFiles[]`). The
+/// server sniffs and records the real `mimeType`, so it is authoritative for
+/// the `type` we persist on the `wiki/file` node's data.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadedFile {
+    pub id: String,
+    pub mime_type: Option<String>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UploadResponse {
+    #[serde(rename = "processedFiles")]
+    processed_files: Vec<UploadedFile>,
+}
+
+/// Upload a file to NHost storage (`POST /files`, multipart field `file[]`,
+/// mirroring `nhost.storage.upload`). Returns the created file's metadata; the
+/// caller stores `{ fileId: id, type: mimeType }` on a `wiki/file` node.
+pub async fn upload_file(
+    access_token: Option<&str>,
+    bytes: Vec<u8>,
+    file_name: &str,
+    content_type: &str,
+) -> Result<UploadedFile, NhostError> {
+    // An empty browser File.type would make `mime_str` reject the part; fall
+    // back to octet-stream and let the server sniff the real type.
+    let ctype = if content_type.trim().is_empty() {
+        "application/octet-stream"
+    } else {
+        content_type
+    };
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(file_name.to_string())
+        .mime_str(ctype)
+        .map_err(|e| NhostError {
+            status: None,
+            error: Some("bad_mime".to_string()),
+            message: Some(e.to_string()),
+        })?;
+    let form = reqwest::multipart::Form::new().part("file[]", part);
+
+    let client = reqwest::Client::new();
+    let mut req = client
+        .post(format!("{}/files", storage_url()))
+        .multipart(form);
+    if let Some(token) = access_token {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.send().await.map_err(|e| NhostError {
+        status: None,
+        error: Some("network_error".to_string()),
+        message: Some(e.to_string()),
+    })?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        return Err(
+            serde_json::from_value::<NhostError>(body).unwrap_or(NhostError {
+                status: Some(status.as_u16()),
+                error: Some("upload_failed".to_string()),
+                message: Some("File upload failed".to_string()),
+            }),
+        );
+    }
+
+    let body: UploadResponse = resp.json().await.map_err(|e| NhostError {
+        status: None,
+        error: Some("parse_error".to_string()),
+        message: Some(e.to_string()),
+    })?;
+    body.processed_files.into_iter().next().ok_or(NhostError {
+        status: None,
+        error: Some("no_file".to_string()),
+        message: Some("Upload returned no file".to_string()),
+    })
+}
