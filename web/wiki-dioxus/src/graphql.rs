@@ -1490,6 +1490,79 @@ pub async fn set_node_authors(
     Ok(true)
 }
 
+// --- Comments (vote/comment child nodes, nested) ---
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct CommentsVariables {
+    pub where_clause: NodesBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "CommentsVariables"
+)]
+pub struct CommentsQuery {
+    #[arguments(where: $where_clause)]
+    pub nodes: Vec<ChildNodeFields>,
+}
+
+/// The `vote/comment` children of a node (a post or another comment), oldest
+/// first. Called per level to build the nested comment thread.
+pub async fn query_comments(
+    access_token: Option<&str>,
+    parent_id: &str,
+) -> Result<Vec<ChildNodeFields>, String> {
+    use cynic::QueryBuilder;
+    let where_clause = NodesBoolExp {
+        parent_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(parent_id.to_string())),
+            is_null: None,
+        }),
+        mime_id: Some(StringComparisonExp {
+            eq: Some("vote/comment".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let op = CommentsQuery::build(CommentsVariables { where_clause });
+    let mut nodes = execute(access_token, op).await?.nodes;
+    nodes.sort_by(|a, b| {
+        let at = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+        let bt = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+        at.cmp(bt)
+    });
+    Ok(nodes)
+}
+
+/// Post a comment (a `vote/comment` node) under `parent_id` (a post or another
+/// comment for a nested reply). `author` is stored as the node name and `text`
+/// as `data.text`, matching the reference comment shape.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_comment(
+    access_token: Option<&str>,
+    parent_id: &str,
+    context_id: Option<&str>,
+    key: &str,
+    author: &str,
+    text: &str,
+) -> Result<bool, String> {
+    let input = NodesInsertInput {
+        name: Some(author.to_string()),
+        key: Some(key.to_string()),
+        mime_id: Some("vote/comment".to_string()),
+        parent_id: Some(Uuid(parent_id.to_string())),
+        context_id: context_id.map(|c| Uuid(c.to_string())),
+        data: Some(Jsonb(serde_json::json!({ "text": text }))),
+        mutable: Some(false),
+        index: None,
+    };
+    insert_node(access_token, input)
+        .await
+        .map(|inserted| inserted.is_some())
+}
+
 /// Build the `where` filter for the user's context nodes (groups or events) of
 /// a given mime type: nodes the user owns or has an accepted membership in.
 fn contexts_where_clause(user_id: &str, mime_id: &str) -> NodesBoolExp {

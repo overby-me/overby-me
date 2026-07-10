@@ -1538,3 +1538,132 @@ a.list-item:hover {
     max-width: 100%;
     height: auto;
 }
+
+/* Comment system (nested, Bluesky-style) */
+.comment-section {
+    margin-top: 8px;
+}
+
+.comment-composer {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    margin-bottom: 16px;
+}
+
+.comment-input {
+    flex: 1;
+    min-height: 40px;
+    padding: 10px 12px;
+    border: 1px solid var(--md-outline);
+    border-radius: 12px;
+    background: var(--md-surface);
+    color: var(--md-on-surface);
+    outline: none;
+    font: inherit;
+    font-size: 14px;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.comment-input:focus {
+    border-color: var(--md-primary);
+}
+
+.comment-thread-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.comment {
+    position: relative;
+    padding-top: 8px;
+}
+
+/* Thread line for nested replies. */
+.comment .comment {
+    border-left: 2px solid var(--md-outline);
+    padding-left: 12px;
+}
+
+.comment-main {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.comment-avatar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--md-secondary-container);
+    color: var(--md-on-secondary-container);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.comment-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.comment-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.comment-author {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--md-on-surface);
+}
+
+.comment-dot,
+.comment-time {
+    font-size: 13px;
+    color: var(--md-on-surface-variant);
+}
+
+.comment-text {
+    margin: 2px 0 4px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.comment-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.comment-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: none;
+    background: transparent;
+    color: var(--md-on-surface-variant);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 0;
+}
+
+.comment-action:hover {
+    color: var(--md-primary);
+}
+
+.comment-action .material-icons {
+    font-size: 16px;
+}
+
+.comment-reply-count {
+    font-size: 13px;
+    color: var(--md-on-surface-variant);
+}

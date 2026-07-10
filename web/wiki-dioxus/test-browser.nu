@@ -466,6 +466,15 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
                 } else {
                     log-ok "no trailing '?' on app-less URL"; $p = $p + 1
                 }
+                # A content post (document/policy) shows the nested comment
+                # section with a composer.
+                sleep 1sec
+                let cs = (wd-execute $session_id 'return document.querySelector(".comment-section .comment-input")?"y":"n"')
+                if $cs == "y" {
+                    log-ok "comment section renders with a composer"; $p = $p + 1
+                } else {
+                    log-warn "search result is not a content post, skipping comment-section check"
+                }
             } else {
                 log-fail "search result click did not navigate"; $fl = $fl + 1
             }

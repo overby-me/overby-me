@@ -78,12 +78,14 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         .filter(|c| c.mime_id.as_deref() == Some("vote/change"))
         .collect();
 
+    // Other children (questions etc.); comments now render in the nested
+    // CommentSection (via ContentApp), so they are excluded here.
     let comments: Vec<_> = children
         .iter()
         .filter(|c| {
             !matches!(
                 c.mime_id.as_deref(),
-                Some("vote/poll") | Some("vote/change")
+                Some("vote/poll") | Some("vote/change") | Some("vote/comment")
             )
         })
         .collect();

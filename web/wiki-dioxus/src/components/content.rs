@@ -23,6 +23,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
         _ => vec![],
     };
     let node_id = node.id.0.clone();
+    let context_id = node.context_id.as_ref().map(|u| u.0.clone());
     let mut confirm_open = use_signal(|| false);
     let name = node.name.clone();
     let members = node.members.clone();
@@ -138,12 +139,26 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                 SlateRenderer { data: data.clone() }
             }
         }
+        super::comments::CommentSection { node_id: node_id.clone(), context_id: context_id.clone() }
     }
+}
+
+/// Whether a node's `data` carries non-empty rich-text content (so a folder or
+/// context can decide whether to show its description).
+pub fn has_rich_content(data: Option<&serde_json::Value>) -> bool {
+    data.and_then(|d| d.get("content"))
+        .and_then(|c| c.as_array())
+        .map(|blocks| {
+            blocks
+                .iter()
+                .any(|b| !block_plain_text(b).trim().is_empty())
+        })
+        .unwrap_or(false)
 }
 
 /// Renders Slate.js JSON content as HTML
 #[component]
-fn SlateRenderer(data: Option<serde_json::Value>) -> Element {
+pub fn SlateRenderer(data: Option<serde_json::Value>) -> Element {
     let content = data
         .as_ref()
         .and_then(|d| d.get("content"))

@@ -134,6 +134,13 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                     }
                 }
             }
+            // The node's own description: groups, events and folders can carry
+            // rich text shown above their children (#missing content text).
+            if super::content::has_rich_content(node.data.as_ref().map(|d| &d.0)) {
+                div { class: "card-content",
+                    super::content::SlateRenderer { data: node.data.as_ref().map(|d| d.0.clone()) }
+                }
+            }
             if children.is_empty() {
                 div { class: "card-content",
                     p {

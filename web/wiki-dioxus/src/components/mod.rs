@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod auth;
+pub mod comments;
 pub mod content;
 pub mod cow;
 pub mod editor;
