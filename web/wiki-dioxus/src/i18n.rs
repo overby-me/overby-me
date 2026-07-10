@@ -197,6 +197,7 @@ const EN_JSON: &str = r#"{
         "proposedBy": "Proposed by",
         "export": "Export",
         "copy": "Copy",
+        "paste": "Paste here",
         "lock": "Lock (block adding content)",
         "unlock": "Unlock (allow adding content)"
     },
@@ -471,6 +472,7 @@ const DA_JSON: &str = r#"{
         "proposedBy": "Foresl\u00e5et af",
         "export": "Eksporter",
         "copy": "Kopier",
+        "paste": "Inds\u00e6t her",
         "lock": "L\u00e5s (bloker tilf\u00f8jelse)",
         "unlock": "L\u00e5s op (tillad tilf\u00f8jelse)"
     },

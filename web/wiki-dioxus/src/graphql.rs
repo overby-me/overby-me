@@ -1329,6 +1329,93 @@ pub async fn insert_node(
     Ok(result.insert_node)
 }
 
+/// Recursively deep-copy a node and its whole subtree (data + members) under
+/// `parent_id`. Mirrors React FolderDial's copy: fetch node + children + members,
+/// insert the copy, copy the members, then recurse into each child. The root
+/// copy's key is suffixed for uniqueness (it may land beside its source); child
+/// keys are kept verbatim (they sit under a fresh parent, so no collision).
+/// Boxed + owned args so the recursive async future is `'static`.
+pub fn deep_copy_node(
+    access_token: Option<String>,
+    copy_id: String,
+    parent_id: String,
+    context_id: Option<String>,
+    is_root: bool,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>> {
+    Box::pin(async move {
+        let node = match query_node_by_id(access_token.as_deref(), &copy_id).await? {
+            Some(n) => n,
+            None => return Ok(()),
+        };
+        let key = if is_root {
+            format!("{}-{}", node.key, (js_sys::Date::now() as u64) % 1_000_000)
+        } else {
+            node.key.clone()
+        };
+        let input = NodesInsertInput {
+            name: Some(node.name.clone()),
+            key: Some(key),
+            mime_id: node.mime_id.clone(),
+            parent_id: Some(Uuid(parent_id.clone())),
+            context_id: context_id.clone().map(Uuid),
+            data: node.data.clone(),
+            mutable: Some(node.mutable),
+            index: Some(node.index),
+        };
+        let new_id = match insert_node(access_token.as_deref(), input).await? {
+            Some(inserted) => inserted.id.0,
+            None => return Ok(()),
+        };
+        // Copy the members onto the new node.
+        for m in &node.members {
+            use cynic::MutationBuilder;
+            let object = MembersInsertInput {
+                name: m.name.clone(),
+                email: m.email.clone(),
+                node_id: m.node_id.clone(),
+                parent_id: Some(Uuid(new_id.clone())),
+            };
+            let op = InsertMemberMutation::build(InsertMemberVariables { object });
+            let _ = execute(access_token.as_deref(), op).await;
+        }
+        // Recurse over the children (keys kept verbatim under the fresh parent).
+        for child in &node.children {
+            deep_copy_node(
+                access_token.clone(),
+                child.id.0.clone(),
+                new_id.clone(),
+                context_id.clone(),
+                false,
+            )
+            .await?;
+        }
+        Ok(())
+    })
+}
+
+/// Whether `target` is `ancestor` itself or a descendant of it, by walking up the
+/// parent chain. Blocks pasting a folder into itself or its own subtree (which
+/// would recurse forever). Depth-bounded as a safety net.
+pub async fn is_descendant_of(access_token: Option<&str>, target: &str, ancestor: &str) -> bool {
+    let mut cur = Some(target.to_string());
+    let mut guard = 0;
+    while let Some(id) = cur {
+        if id == ancestor {
+            return true;
+        }
+        guard += 1;
+        if guard > 64 {
+            break;
+        }
+        cur = query_node_by_id(access_token, &id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|n| n.parent_id.map(|p| p.0));
+    }
+    false
+}
+
 /// Update a node's mutable columns (name / data / mutable / index). The jsonb
 /// `data` is passed as a GraphQL variable, not inlined (inlining a JSON object
 /// into the mutation string is invalid GraphQL and silently failed).

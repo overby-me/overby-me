@@ -9,6 +9,11 @@ use super::loader::{icon_el, visible_sorted};
 
 const FOLDER_VIEW_KEY: &str = "wiki_folder_grid";
 
+/// The copy/paste clipboard: node ids the owner has selected to deep-duplicate.
+/// A GlobalSignal so a selection survives navigating to the paste target (React
+/// keeps it on the session).
+static SELECTED: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
+
 /// Read the remembered folder view mode (grid = true) from localStorage.
 fn read_grid_pref() -> bool {
     web_sys::window()
@@ -178,6 +183,44 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                         }
                     }
                 }
+                // Paste the clipboard selection here (deep-copy). Owner-only, and
+                // only when something is selected to paste.
+                if is_context_owner && !SELECTED.read().is_empty() {
+                    button {
+                        class: "btn-icon",
+                        title: "{t(\"folder.paste\")} ({SELECTED.read().len()})",
+                        onclick: {
+                            let target = node.id.0.clone();
+                            let ctx = node.context_id.clone().map(|c| c.0);
+                            move |_| {
+                                let token = session.read().access_token.clone();
+                                let target = target.clone();
+                                let ctx = ctx.clone();
+                                spawn(async move {
+                                    let ids = SELECTED.read().clone();
+                                    for id in ids {
+                                        // Never paste a folder into itself or its
+                                        // own subtree (would recurse forever).
+                                        if graphql::is_descendant_of(token.as_deref(), &target, &id).await {
+                                            continue;
+                                        }
+                                        let _ = graphql::deep_copy_node(
+                                            token.clone(),
+                                            id,
+                                            target.clone(),
+                                            ctx.clone(),
+                                            true,
+                                        )
+                                        .await;
+                                    }
+                                    *SELECTED.write() = vec![];
+                                    crate::session::bump_data_version();
+                                });
+                            }
+                        },
+                        span { class: "material-icons", "content_paste" }
+                    }
+                }
             }
             // The node's own description: groups, events and folders can carry
             // rich text shown above their children (#missing content text).
@@ -208,6 +251,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                             parent_path: parent_path.clone(),
                             grid: false,
                             ordinal: None,
+                            selectable: is_context_owner,
                         }
                     }
                 }
@@ -221,6 +265,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                             parent_path: parent_path.clone(),
                             grid: is_grid,
                             ordinal,
+                            selectable: is_context_owner,
                         }
                     }
                 }
@@ -454,10 +499,13 @@ fn FolderItem(
     parent_path: Vec<String>,
     grid: bool,
     ordinal: Option<usize>,
+    selectable: bool,
 ) -> Element {
     let name = node.name.as_str();
     let mime_id = node.mime_id.as_deref().unwrap_or("");
     let is_mutable = node.mutable;
+    let node_id = node.id.0.clone();
+    let is_selected = SELECTED.read().contains(&node_id);
 
     // Build full path by appending this child's key to the parent path
     let mut full_path = parent_path.clone();
@@ -476,6 +524,28 @@ fn FolderItem(
             }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{name}" }
+            }
+            // Owner copy-toggle: add/remove this node from the paste clipboard
+            // without navigating (stop the click reaching the Link/anchor).
+            if selectable {
+                button {
+                    class: "btn-icon",
+                    style: "margin-left: auto;",
+                    title: "{t(\"folder.copy\")}",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        e.prevent_default();
+                        let mut sel = SELECTED.write();
+                        if let Some(pos) = sel.iter().position(|x| x == &node_id) {
+                            sel.remove(pos);
+                        } else {
+                            sel.push(node_id.clone());
+                        }
+                    },
+                    span { class: "material-icons",
+                        if is_selected { "check_box" } else { "content_copy" }
+                    }
+                }
             }
         }
     }
