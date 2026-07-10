@@ -117,12 +117,12 @@ fn InvitesUserList() -> Element {
             {match list {
                 None => rsx! {
                     div { class: "card-content",
-                        p { class: "body-medium", style: "color: var(--md-on-surface-variant);", "\u{2026}" }
+                        p { class: "body-medium", class: "text-muted", "\u{2026}" }
                     }
                 },
                 Some(items) if items.is_empty() => rsx! {
                     div { class: "card-content",
-                        p { class: "body-medium", style: "color: var(--md-on-surface-variant);", "{t(\"invite.noInvitations\")}" }
+                        p { class: "body-medium", class: "text-muted", "{t(\"invite.noInvitations\")}" }
                     }
                 },
                 Some(items) => rsx! {

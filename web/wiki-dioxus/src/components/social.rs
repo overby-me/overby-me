@@ -35,7 +35,7 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
                     h3 { class: "title-medium", "{node.name}" }
                     p {
                         class: "body-small",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"social.poweredBy\")}"
                     }
                 }
@@ -65,7 +65,7 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
                     div { class: "card-content",
                         p {
                             class: "body-medium",
-                            style: "color: var(--md-on-surface-variant);",
+                            class: "text-muted",
                             "{t(\"social.empty\")}"
                         }
                     }
@@ -103,7 +103,7 @@ fn PostCard(post: Post) -> Element {
                         div { class: "list-item-primary", "{post.display_name}" }
                         div {
                             class: "list-item-secondary",
-                            style: "color: var(--md-on-surface-variant);",
+                            class: "text-muted",
                             "@{post.handle}"
                         }
                     }

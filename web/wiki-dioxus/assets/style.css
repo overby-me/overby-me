@@ -68,6 +68,38 @@
     --md-surface-tint: #FFB1C2;
 }
 
+/* ───────────────────────────────────────────────────────────────────────────
+   COLOR SYSTEM — keep contrast correct and consistent.
+
+   Material "on-color" pairing: every background token has a matching foreground
+   ("on-") token. Put content ONLY in its paired colour:
+
+     background                 foreground (text / icons)
+     --md-surface               --md-on-surface           body text
+       (muted, on surface only) --md-on-surface-variant   hints, timestamps, labels
+     --md-primary               --md-on-primary           base avatars, primary btns
+     --md-secondary             --md-on-secondary         the bar, secondary avatars,
+                                                           active app-rail item, chips
+     --md-primary-container     --md-on-primary-container    selected drawer row
+     --md-secondary-container   --md-on-secondary-container  badges, comment avatars
+
+   Rules:
+   1. Never set a foreground colour that assumes a different background than
+      where the element renders. `--md-on-surface-variant` is muted text on a
+      SURFACE only; it is invisible on a coloured (primary/secondary) background.
+   2. A highlight / selected / active state flips BOTH background and foreground
+      together to a paired set (app-rail active = secondary + on-secondary;
+      drawer selected = primary-container + on-primary-container). If a child's
+      colour would otherwise be inherited wrong, override it in the state's rule
+      (see `.btn-icon.active .app-rail-label`).
+   3. Prefer classes over inline `style="color:…"`. Muted text: `.text-muted`.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Muted / secondary text on a surface (hints, timestamps, counts, labels). */
+.text-muted {
+    color: var(--md-on-surface-variant);
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -295,6 +327,18 @@ a:hover {
 
 .app-rail .material-icons {
     font-size: 22px;
+}
+
+/* App-rail item label. The icon inherits the button's colour (on-surface when
+   idle, on-secondary on the active green box); the label follows the same
+   on-colour pattern so it never ends up muted-on-green. */
+.app-rail-label {
+    font-size: 10px;
+    color: var(--md-on-surface-variant);
+}
+
+.btn-icon.active .app-rail-label {
+    color: var(--md-on-secondary);
 }
 
 /* "Not submitted" badge overlaid on a node avatar (mutable draft nodes). */

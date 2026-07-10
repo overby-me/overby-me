@@ -99,7 +99,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                 }
                 if list.is_empty() {
                     p { class: "body-medium comment-empty",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"vote.noComments\")}"
                     }
                 } else {

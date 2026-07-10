@@ -45,7 +45,7 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
                 div { class: "card-content",
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"speak.emptyList\")}"
                     }
                 }
@@ -156,7 +156,7 @@ fn SpeakList(
                     h3 { class: "title-medium", "{list_name}" }
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"speak.speakerList\")}"
                     }
                 }
@@ -173,7 +173,7 @@ fn SpeakList(
                 div { class: "card-content",
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"speak.emptyList\")}"
                     }
                 }

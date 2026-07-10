@@ -32,7 +32,7 @@ pub fn ParentApp() -> Element {
                     h3 { class: "title-medium", "{t(\"parent.title\")}" }
                     p {
                         class: "body-small",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"parent.description\")}"
                     }
                 }
@@ -47,7 +47,7 @@ pub fn ParentApp() -> Element {
                                     div { class: "list-item-primary", "{node.name}" }
                                     div {
                                         class: "list-item-secondary",
-                                        style: "color: var(--md-on-surface-variant);",
+                                        class: "text-muted",
                                         "{node.mime_id.clone().unwrap_or_default()} · {node.id.0}"
                                     }
                                 }
@@ -59,7 +59,7 @@ pub fn ParentApp() -> Element {
                     div { class: "card-content",
                         p {
                             class: "body-medium",
-                            style: "color: var(--md-on-surface-variant);",
+                            class: "text-muted",
                             span { class: "material-icons", style: "vertical-align: middle;", "check_circle" }
                             " {t(\"parent.none\")}"
                         }

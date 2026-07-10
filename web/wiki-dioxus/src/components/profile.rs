@@ -53,7 +53,7 @@ pub fn ProfileApp() -> Element {
                     h3 { class: "title-medium", "{user.display_name}" }
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"profile.signedInAs\")} {user.email}"
                     }
                 }
@@ -61,7 +61,7 @@ pub fn ProfileApp() -> Element {
             div { class: "card-content",
                 p {
                     class: "body-small",
-                    style: "color: var(--md-on-surface-variant);",
+                    class: "text-muted",
                     "{t(\"profile.userId\")}: {user.id}"
                 }
             }
@@ -75,7 +75,7 @@ pub fn ProfileApp() -> Element {
                 div { class: "card-content",
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"common.noContent\")}"
                     }
                 }

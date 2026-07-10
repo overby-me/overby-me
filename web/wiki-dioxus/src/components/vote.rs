@@ -344,7 +344,7 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                     h3 { class: "title-medium", "{name}" }
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         if !open { "{t(\"vote.noVoteNow\")}" } else if voted { "{t(\"vote.hasVoted\")}" } else { "{t(\"poll.managePoll\")}" }
                     }
                 }
@@ -354,7 +354,7 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                 if options.is_empty() {
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"common.noContent\")}"
                     }
                 } else if is_auth && open && !voted {

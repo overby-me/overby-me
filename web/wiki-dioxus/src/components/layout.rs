@@ -444,8 +444,8 @@ fn AppRail() -> Element {
                 class: if active { "btn-icon active" } else { "btn-icon" },
                 style: "flex-direction: column; gap: 2px; width: 56px; height: 56px;",
                 title: "{label}",
-                span { style: "font-size: 20px;", {super::loader::icon_el(mime_id)} }
-                span { style: "font-size: 10px; color: var(--md-on-surface-variant);", "{label}" }
+                span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
+                span { class: "app-rail-label", "{label}" }
             }
         }
     }
@@ -600,7 +600,7 @@ fn DrawerContent() -> Element {
                         div {
                             h3 { class: "title-medium", "{display_name}" }
                             p { class: "body-medium",
-                                style: "color: var(--md-on-surface-variant);",
+                                class: "text-muted",
                                 "{email}"
                             }
                         }
@@ -664,7 +664,7 @@ fn MenuList(segments: Vec<String>) -> Element {
             .map(|n| n.id.0)
     }));
 
-    let hint_style = "padding: 4px 16px; color: var(--md-on-surface-variant);";
+    let hint_style = "padding: 4px 16px;";
     let ctx = context.read().clone();
     match ctx {
         Some(Some(context_id)) => rsx! {
@@ -679,7 +679,7 @@ fn MenuList(segments: Vec<String>) -> Element {
         },
         Some(None) => rsx! {},
         None => rsx! {
-            p { class: "body-medium", style: "{hint_style}", "…" }
+            p { class: "body-medium text-muted", style: "{hint_style}", "…" }
         },
     }
 }
@@ -865,23 +865,23 @@ fn HomeList() -> Element {
     });
 
     let state = contexts.read().clone();
-    let hint_style = "padding: 4px 16px; color: var(--md-on-surface-variant);";
+    let hint_style = "padding: 4px 16px;";
 
     rsx! {
         div { style: "margin-top: 16px;",
             // Groups
-            h4 { class: "title-small", style: "padding: 8px 16px; color: var(--md-on-surface-variant);",
+            h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px;",
                 "{t(\"layout.groups\")}"
             }
             {match &state {
                 None => rsx! {
-                    p { class: "body-medium", style: "{hint_style}", "…" }
+                    p { class: "body-medium text-muted", style: "{hint_style}", "…" }
                 },
                 Some(Err(e)) => rsx! {
-                    p { class: "body-medium", style: "{hint_style}", "{e}" }
+                    p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
                 },
                 Some(Ok((groups, _))) if groups.is_empty() => rsx! {
-                    p { class: "body-medium", style: "{hint_style}", "{t(\"layout.noGroups\")}" }
+                    p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noGroups\")}" }
                 },
                 Some(Ok((groups, _))) => rsx! {
                     div { class: "list",
@@ -893,24 +893,24 @@ fn HomeList() -> Element {
             }}
 
             // Events, grouped by year (newest first)
-            h4 { class: "title-small", style: "padding: 8px 16px; margin-top: 8px; color: var(--md-on-surface-variant);",
+            h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px; margin-top: 8px;",
                 "{t(\"layout.events\")}"
             }
             {match &state {
                 None => rsx! {
-                    p { class: "body-medium", style: "{hint_style}", "…" }
+                    p { class: "body-medium text-muted", style: "{hint_style}", "…" }
                 },
                 Some(Err(e)) => rsx! {
-                    p { class: "body-medium", style: "{hint_style}", "{e}" }
+                    p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
                 },
                 Some(Ok((_, events))) if events.is_empty() => rsx! {
-                    p { class: "body-medium", style: "{hint_style}", "{t(\"layout.noEvents\")}" }
+                    p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noEvents\")}" }
                 },
                 Some(Ok((_, events))) => rsx! {
                     for (year , items) in group_by_year(events) {
                         div { key: "{year}",
                             p { class: "label-medium",
-                                style: "padding: 4px 16px; font-weight: 600; color: var(--md-on-surface-variant);",
+                                class: "text-muted", style: "padding: 4px 16px; font-weight: 600;",
                                 "{year}"
                             }
                             div { class: "list",

@@ -144,7 +144,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 div { class: "card-content",
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"common.noContent\")}"
                     }
                 }

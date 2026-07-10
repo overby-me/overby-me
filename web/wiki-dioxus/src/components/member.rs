@@ -31,7 +31,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                 div {
                     h3 { class: "title-medium", "{name}" }
                     p { class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"common.members\")}"
                     }
                 }
@@ -41,7 +41,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
             if members.is_empty() {
                 div { class: "card-content",
                     p { class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"common.noContent\")}"
                     }
                 }

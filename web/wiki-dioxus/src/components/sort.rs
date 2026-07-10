@@ -111,7 +111,8 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
                         // Drag handle
                         span {
                             class: "material-icons",
-                            style: "cursor: grab; margin-right: 8px; color: var(--md-on-surface-variant);",
+                            class: "text-muted",
+                            style: "cursor: grab; margin-right: 8px;",
                             "drag_indicator"
                         }
                         div { class: "avatar small",

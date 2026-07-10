@@ -40,7 +40,7 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
                 div { class: "card-content",
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"common.noContent\")}"
                     }
                 }

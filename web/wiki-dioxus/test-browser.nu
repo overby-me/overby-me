@@ -578,6 +578,17 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         }
     }
 
+    # The muted-text refactor relies on Dioxus MERGING two `class:` attributes
+    # (a base body-* class + text-muted), not last-wins. A profile paragraph must
+    # carry BOTH classes, confirming the base class was not silently dropped.
+    wd-navigate $session_id $"(base-url)($ctx_path)?app=profile"
+    if (wd-wait-for-element $session_id "#main .text-muted" 15) {
+        let merged = (wd-execute $session_id 'return document.querySelector("#main .body-medium.text-muted, #main .body-small.text-muted")?"y":"n"')
+        if $merged == "y" { log-ok "class attributes merge (base + text-muted)"; $p = $p + 1 } else { log-fail "class merge dropped the base class" ; $fl = $fl + 1 }
+    } else {
+        log-warn "no .text-muted on profile — skipping class-merge check"
+    }
+
     # ── Search resolves a result to its full node path (not just the key) ────
     wd-navigate $session_id $"(base-url)($ctx_path)"
     sleep 1sec

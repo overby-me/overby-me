@@ -23,7 +23,7 @@ pub fn ProgramApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                 div { class: "card-content",
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"program.empty\")}"
                     }
                 }
@@ -53,7 +53,7 @@ pub fn ProgramApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                         if let Some(t) = time {
                                             div {
                                                 class: "list-item-secondary",
-                                                style: "color: var(--md-on-surface-variant);",
+                                                class: "text-muted",
                                                 "{t}"
                                             }
                                         }

@@ -52,7 +52,7 @@ pub fn RedirectApp(node: NodeWithChildren) -> Element {
                     None => rsx! {
                         p {
                             class: "body-medium",
-                            style: "color: var(--md-on-surface-variant);",
+                            class: "text-muted",
                             "{t(\"redirect.noTarget\")}"
                         }
                     },

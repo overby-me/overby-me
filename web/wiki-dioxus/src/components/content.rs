@@ -187,7 +187,7 @@ pub fn SlateRenderer(data: Option<serde_json::Value>) -> Element {
             rsx! {
                 div { class: "slate-content",
                     p { class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         ""
                     }
                 }

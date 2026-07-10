@@ -36,7 +36,7 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                 if children.is_empty() {
                     p {
                         class: "body-medium",
-                        style: "color: var(--md-on-surface-variant);",
+                        class: "text-muted",
                         "{t(\"common.noContent\")}"
                     }
                 } else {
