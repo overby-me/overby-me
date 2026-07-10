@@ -42,6 +42,18 @@ component for a primitive (or move one into `components/ui`) at a time, keep the
 browser tests green, and prefer the highest-duplication / weakest-a11y pieces
 first. Each migration should keep `just test` + `just test-browser` passing.
 
+**Migrated so far** (the weak-a11y interactive pieces): user-menu
+**dropdown** (custom, with backdrop + keyboard-closable), poll ballot
+(`radio_group` + `checkbox`), delete confirm (`AlertDialog`), theme toggle
+(`switch`, as a labelled row that flips `html[data-theme]`), and the
+**snackbar** now announces (`role=status` + `aria-live=polite`). Add-content
+deliberately stays on a native `<select>` (accessible) until the shadcn
+`Select` trigger renders the option *label* rather than the raw value.
+**Deferred** as low-value churn (restyle as-touched, not a big-bang): wrapping
+the 100+ styled `.card` / `.btn` / `.avatar` divs in `Card`/`Button`/`Avatar`.
+A full `toast`-provider swap for the snackbar is possible (the primitive
+exists) but would rewire ~14 `show_snackbar` call sites for equivalent UX.
+
 ## How to test
 
 - **Unit** — `just test` covers pure logic (GraphQL filter serialization, path
