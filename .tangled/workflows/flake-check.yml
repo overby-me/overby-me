@@ -22,7 +22,8 @@ steps:
       cat /etc/nix/nix.conf 2>/dev/null || echo "(no /etc/nix/nix.conf)"
       ulimit -n 65536
       printf '{"PWD":"%s"}' "$PWD" > .env
-      nix flake check --keep-going --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" --max-jobs 1 --cores 2 --override-input env path:$(realpath $PWD/.env)
+      export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix"
+      nix run --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" .#flake-check -- --override-input env path:$(realpath $PWD/.env)
     name: Nix flake check
   - command: |-
       export PATH="$(readlink -f result)/bin:$PATH"

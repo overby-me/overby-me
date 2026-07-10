@@ -36,12 +36,22 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
       },
       {
         name = "Nix flake check",
+        # Not `nix flake check`: it instantiates all ~3265 checks in a single
+        # evaluator, which keeps the whole value graph reachable and peaks past
+        # 30 GiB before any build starts. `--max-jobs` caps build concurrency,
+        # not evaluation, so it does not help. `.#flake-check` evaluates in
+        # memory-capped nix-eval-jobs workers, skips derivations cachix already
+        # has, and realises the rest one build job at a time.
+        #
+        # NIX_CONFIG is exported by this shell rather than injected by the
+        # engine, so every nix process the script spawns inherits the features.
         command = m%%"
           echo "=== runs as: $(id -un); /etc/nix/nix.conf: ==="
           cat /etc/nix/nix.conf 2>/dev/null || echo "(no /etc/nix/nix.conf)"
           ulimit -n 65536
           printf '{"PWD":"%s"}' "$PWD" > .env
-          nix flake check --keep-going --extra-experimental-features "%%{nixFeatures}" --max-jobs 1 --cores 2 --override-input env path:$(realpath $PWD/.env)
+          export NIX_CONFIG="experimental-features = %%{nixFeatures}"
+          nix run --extra-experimental-features "%%{nixFeatures}" .#flake-check -- --override-input env path:$(realpath $PWD/.env)
         "%%,
       },
       {
