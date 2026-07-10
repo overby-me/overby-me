@@ -45,13 +45,26 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
         #
         # NIX_CONFIG is exported by this shell rather than injected by the
         # engine, so every nix process the script spawns inherits the features.
+        #
+        # The check outputs are pushed here rather than in "Push to Cachix":
+        # that step only runs on success and only uploads `nix flake archive`
+        # paths (the flake source and its inputs), never build results. Without
+        # this every run rebuilds all checks from scratch. Pushing regardless of
+        # the exit status means a partial run still makes the next one cheaper.
         command = m%%"
           echo "=== runs as: $(id -un); /etc/nix/nix.conf: ==="
           cat /etc/nix/nix.conf 2>/dev/null || echo "(no /etc/nix/nix.conf)"
           ulimit -n 65536
           printf '{"PWD":"%s"}' "$PWD" > .env
+          export PATH="$(readlink -f result)/bin:$PATH"
           export NIX_CONFIG="experimental-features = %%{nixFeatures}"
-          nix run --extra-experimental-features "%%{nixFeatures}" .#flake-check -- --override-input env path:$(realpath $PWD/.env)
+          export OUT_PATHS_FILE="$PWD/check-outputs.txt"
+          rc=0
+          nix run --extra-experimental-features "%%{nixFeatures}" .#flake-check -- --override-input env path:$(realpath $PWD/.env) || rc=$?
+          if [ -s "$OUT_PATHS_FILE" ]; then
+            cachix push overby-me < "$OUT_PATHS_FILE" || echo "cachix push failed; continuing"
+          fi
+          exit $rc
         "%%,
       },
       {

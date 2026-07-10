@@ -29,7 +29,19 @@ writeShellApplication {
     check_fragment="''${CHECK_FRAGMENT:-checks.$system}"
 
     out="$(mktemp -d)"
-    trap 'rm -rf "$out"' EXIT
+
+    # Nothing pushes check outputs to the binary cache today: CI's `nix flake
+    # archive` only uploads the flake source and its inputs, so every run
+    # rebuilds all checks from scratch. Record what we realise here, and let the
+    # caller push it. Written even when a check fails, so a partial run still
+    # makes the next one cheaper.
+    cleanup() {
+      if [ -n "''${OUT_PATHS_FILE:-}" ] && [ -s "$out/built-paths.txt" ]; then
+        sort -u "$out/built-paths.txt" > "$OUT_PATHS_FILE"
+      fi
+      rm -rf "$out"
+    }
+    trap cleanup EXIT
 
     # Any remaining arguments are forwarded to the evaluation, so callers can
     # pass flake options such as --override-input.
@@ -78,25 +90,32 @@ writeShellApplication {
     # One build job at a time: several checks are NixOS VM tests, which are
     # memory-hungry to run even though they are cheap to schedule.
     failures="$out/build-failures.txt"
+    built="$out/built-paths.txt"
     : > "$failures"
+    : > "$built"
     i=0
     while [ "$i" -lt "''${#drvs[@]}" ]; do
       targets=()
       for drv in "''${drvs[@]:i:batch}"; do targets+=("$drv^*"); done
-      if ! nix build --max-jobs 1 --cores 2 --keep-going --no-link "''${targets[@]}"; then
+      if ! nix build --max-jobs 1 --cores 2 --keep-going --no-link --print-out-paths \
+             "''${targets[@]}" >> "$built"; then
         # --keep-going reports the batch as failed; re-run singly to name them.
         for drv in "''${drvs[@]:i:batch}"; do
-          nix build --max-jobs 1 --cores 2 --no-link "$drv^*" > /dev/null 2>&1 \
+          nix build --max-jobs 1 --cores 2 --no-link --print-out-paths "$drv^*" >> "$built" 2>/dev/null \
             || echo "$drv" >> "$failures"
         done
       fi
       i=$(( i + batch ))
-      echo ">> built $(( i < ''${#drvs[@]} ? i : ''${#drvs[@]} ))/''${#drvs[@]}"
+      echo ">> processed $(( i < ''${#drvs[@]} ? i : ''${#drvs[@]} ))/''${#drvs[@]}"
     done
 
     if [ -s "$failures" ]; then
       echo ">> failed checks:" >&2
-      sed 's/^/  /' "$failures" >&2
+      while read -r drv; do
+        # Report the check name; the drv path alone says little.
+        attr="$(jq -r --arg d "$drv" 'select(.drvPath == $d) | .attr' "$out/checks.jsonl" | head -1)"
+        echo "  ''${attr:-?} ($drv)" >&2
+      done < "$failures"
       exit 1
     fi
     echo ">> all checks passed"
