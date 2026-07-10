@@ -54,6 +54,31 @@ pub struct NodeByIdQuery {
     pub node: Option<NodeFields>,
 }
 
+// --- Query: a node's allowed child mimes (the `inserts` computed field) ---
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "NodeByIdVariables"
+)]
+pub struct NodeInsertsQuery {
+    #[arguments(id: $id)]
+    pub node: Option<NodeInserts>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct NodeInserts {
+    pub inserts: Option<Vec<InsertMime>>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "mimes")]
+pub struct InsertMime {
+    pub id: String,
+}
+
 // --- Query: Fetch nodes with a where filter ---
 
 #[derive(cynic::QueryVariables, Debug)]
@@ -1510,6 +1535,25 @@ pub struct CommentsQuery {
 
 /// The `vote/comment` children of a node (a post or another comment), oldest
 /// first. Called per level to build the nested comment thread.
+/// The mime ids this node allows as children (its `inserts` computed field,
+/// evaluated server-side against the caller's membership). Used to gate the
+/// comment composer to where `vote/comment` can actually be inserted, mirroring
+/// the old wiki's AddCommentButton. Returns an empty list on error or for a
+/// caller with no permission.
+pub async fn node_insert_mimes(access_token: Option<&str>, node_id: &str) -> Vec<String> {
+    let op = NodeInsertsQuery::build(NodeByIdVariables {
+        id: Uuid(node_id.to_string()),
+    });
+    match execute(access_token, op).await {
+        Ok(data) => data
+            .node
+            .and_then(|n| n.inserts)
+            .map(|mimes| mimes.into_iter().map(|m| m.id).collect())
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
 pub async fn query_comments(
     access_token: Option<&str>,
     parent_id: &str,

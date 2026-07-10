@@ -59,6 +59,23 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     }));
     let list = comments.read().clone().unwrap_or_default();
 
+    // Whether the current user may comment here: gate the composer on the node's
+    // `inserts` (allowed child mimes), matching the old wiki's AddCommentButton.
+    // Within a context this also governs replies, since comment nodes share the
+    // context's permission, so the post's verdict is passed down to every thread.
+    let nid2 = node_id.clone();
+    let tok2 = session.read().access_token.clone();
+    let can_comment_res = use_resource(use_reactive!(|(nid2, tok2)| async move {
+        if tok2.is_none() {
+            return false;
+        }
+        graphql::node_insert_mimes(tok2.as_deref(), &nid2)
+            .await
+            .iter()
+            .any(|m| m == "vote/comment")
+    }));
+    let can_comment = (*can_comment_res.read()).unwrap_or(false);
+
     rsx! {
         div { class: "card comment-section",
             div { class: "card-header",
@@ -69,7 +86,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                 }
             }
             div { class: "card-content",
-                if is_auth {
+                if is_auth && can_comment {
                     CommentComposer {
                         parent_id: node_id.clone(),
                         context_id: context_id.clone(),
@@ -92,6 +109,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                                 context_id: context_id.clone(),
                                 depth: 0,
                                 refresh,
+                                can_comment,
                             }
                         }
                     }
@@ -109,6 +127,7 @@ fn CommentThread(
     context_id: Option<String>,
     depth: usize,
     refresh: Signal<u32>,
+    can_comment: bool,
 ) -> Element {
     let session = use_session();
     let token = session.read().access_token.clone();
@@ -158,7 +177,7 @@ fn CommentThread(
                     }
                     p { class: "comment-text", "{text}" }
                     div { class: "comment-actions",
-                        if is_auth {
+                        if is_auth && can_comment {
                             button {
                                 class: "comment-action",
                                 onclick: move |_| {
@@ -193,6 +212,7 @@ fn CommentThread(
                     context_id: context_id.clone(),
                     depth: depth + 1,
                     refresh,
+                    can_comment,
                 }
             }
         }
