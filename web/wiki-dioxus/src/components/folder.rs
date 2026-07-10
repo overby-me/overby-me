@@ -29,6 +29,10 @@ fn write_grid_pref(grid: bool) {
 pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
+    // Owner-only admin (reorder), and the folder "lock": adding children is only
+    // offered when the node is `attachable`. Mirrors React FolderDial/AddContentFab.
+    let is_context_owner = node.is_context_owner.unwrap_or(false);
+    let attachable = node.attachable;
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let access_token = session.read().access_token.clone();
     let name = node.name.clone();
@@ -134,7 +138,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 }
                 // Reorder children (the sort app) — only worth showing when there
                 // is more than one child and the user can act on it.
-                if is_auth && count > 1 && !parent_path.is_empty() {
+                if is_context_owner && count > 1 && !parent_path.is_empty() {
                     Link {
                         to: Route::PathPage {
                             segments: parent_path.clone(),
@@ -193,9 +197,9 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 }
             }
 
-            // Create a document or subfolder here (a folder/group/event the user
-            // can add to). Mirrors the React AddContent flow for the simple mimes.
-            if is_auth {
+            // Create a document or subfolder here — only when the folder accepts
+            // children (`attachable`); the backend permissions gate what mimes.
+            if is_auth && attachable {
                 FolderAdd {
                     parent_id: node.id.0.clone(),
                     context_id: node.context_id.clone().map(|c| c.0),

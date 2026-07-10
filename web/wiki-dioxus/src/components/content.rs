@@ -16,7 +16,6 @@ use super::ui::alert_dialog::{
 pub fn ContentApp(node: NodeWithChildren) -> Element {
     let session = use_session();
     let nav = use_navigator();
-    let is_auth = session.read().is_authenticated();
     let route = use_route::<Route>();
     let segments: Vec<String> = match &route {
         Route::PathPage { segments, .. } => segments.clone(),
@@ -28,6 +27,10 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     let name = node.name.clone();
     let members = node.members.clone();
     let data = node.data.map(|d| d.0);
+    // Owner-only actions (mirrors the React ContentToolbar gating): a node/context
+    // owner may delete; editing also requires the node to still be mutable.
+    let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
+    let can_edit = can_manage && node.mutable;
 
     // Optional inline image (a `data.image` file id), mirroring React's Content.
     let image_url = data
@@ -64,7 +67,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     },
                     span { class: "material-icons", "download" }
                 }
-                if is_auth && !segments.is_empty() {
+                if can_edit && !segments.is_empty() {
                     Link {
                         to: Route::PathPage {
                             segments: segments.clone(),
@@ -74,6 +77,8 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         title: "{t(\"mime.editor\")}",
                         {icon_el("app/editor")}
                     }
+                }
+                if can_manage && !segments.is_empty() {
                     // Delete via an accessible modal confirm dialog.
                     button {
                         class: "btn-icon",
