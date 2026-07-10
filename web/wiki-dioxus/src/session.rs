@@ -32,6 +32,17 @@ impl Session {
 
 pub static SESSION: GlobalSignal<Session> = Signal::global(Session::default);
 
+/// Bumped after a mutation so cached data queries refetch instead of serving a
+/// stale result. `use_resource` only re-runs when its dependencies change, so a
+/// query that reads this in its `use_reactive` deps refetches on every bump.
+pub static DATA_VERSION: GlobalSignal<u32> = Signal::global(|| 0);
+
+/// Invalidate cached data queries; call after a successful mutation so views
+/// showing the changed node refetch instead of staying stale until a reload.
+pub fn bump_data_version() {
+    *DATA_VERSION.write() += 1;
+}
+
 pub fn use_session() -> Signal<Session> {
     SESSION.signal()
 }

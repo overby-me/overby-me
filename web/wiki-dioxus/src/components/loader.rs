@@ -57,8 +57,14 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     // `key` does not reliably force a remount in the web renderer (it does in
     // Servo, which is why this only showed up in real browsers), so a
     // path-change navigation would otherwise keep the previously resolved node.
+    // Also depend on the global data version so a mutation (e.g. saving the
+    // editor and returning to this same path) forces a refetch: the path and
+    // token are unchanged, so without this the resolver would serve the stale
+    // pre-edit node until a full reload.
     let segs = segments.clone();
-    let node_future = use_resource(use_reactive!(|(segs, access_token)| async move {
+    let version = crate::session::DATA_VERSION();
+    let node_future = use_resource(use_reactive!(|(segs, access_token, version)| async move {
+        let _ = version;
         graphql::resolve_path(access_token.as_deref(), &segs).await
     }));
 

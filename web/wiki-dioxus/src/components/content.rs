@@ -101,6 +101,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                                 .await
                                                 .unwrap_or(false)
                                             {
+                                                crate::session::bump_data_version();
                                                 nav.push(Route::PathPage {
                                                     segments: parent,
                                                     app: None,

@@ -207,10 +207,10 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                     .await
                     .is_ok()
                 {
-                    // Re-resolve the folder to show the new child.
-                    if let Some(w) = web_sys::window() {
-                        let _ = w.location().reload();
-                    }
+                    // Refetch the folder to show the new child (no full reload).
+                    crate::session::bump_data_version();
+                    title.set(String::new());
+                    open.set(false);
                 }
             });
         }

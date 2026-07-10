@@ -112,6 +112,9 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 match graphql::update_node(token.as_deref(), &node_id, set).await {
                     Ok(true) => {
                         show_snackbar(&t("common.save"));
+                        // Invalidate the cached node so the view we return to
+                        // shows the saved content instead of the stale copy.
+                        crate::session::bump_data_version();
                         nav.push(Route::PathPage {
                             segments: segments.clone(),
                             app: None,

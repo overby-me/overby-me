@@ -49,6 +49,8 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
 
                 show_snackbar(&t("sort.saveSorting"));
                 saving.set(false);
+                // Invalidate the cached folder so the new order shows on return.
+                crate::session::bump_data_version();
                 // Return to the folder's rendered (non-app) view.
                 nav.push(Route::PathPage {
                     segments,
