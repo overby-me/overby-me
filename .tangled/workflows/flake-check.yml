@@ -8,31 +8,17 @@ engine: microvm
 image: nixos
 steps:
   - command: |-
-      nix build --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" --max-jobs auto .#rust-cachix
-      export PATH="$(readlink -f result)/bin:$PATH"
-      cachix --version
-    name: Build Cachix
-  - command: |-
-      export PATH="$(readlink -f result)/bin:$PATH"
+      echo "=== runs as: $(id -un) ==="
+      ulimit -n 65536
       mkdir -p $HOME/.config/nix
-      cachix use overby-me
       echo "extra-substituters = https://cache.nixos.org" >> $HOME/.config/nix/nix.conf
       echo "extra-trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" >> $HOME/.config/nix/nix.conf
-    name: Setup Cachix
-  - command: |-
-      echo "=== runs as: $(id -un); /etc/nix/nix.conf: ==="
-      cat /etc/nix/nix.conf 2>/dev/null || echo "(no /etc/nix/nix.conf)"
-      ulimit -n 65536
       printf '{"PWD":"%s"}' "$PWD" > .env
       export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix"
       nix build --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" --max-jobs 1 --cores 2 \
         --no-link --print-build-logs .#checks.x86_64-linux.formatting \
         --override-input env path:$(realpath $PWD/.env)
     name: Nix flake check (formatting)
-  - command: |-
-      export PATH="$(readlink -f result)/bin:$PATH"
-      nix flake archive --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" --json --override-input env path:$(realpath $PWD/.env) | nix run --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" nixpkgs#jq -- -r '.path,(.inputs|to_entries[].value.path)' | cachix push overby-me
-    name: Push to Cachix
 when:
   - branch: '**'
     event:
