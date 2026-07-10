@@ -150,12 +150,14 @@ a:hover {
     }
 }
 
-/* Bar (bottom/top navigation bar) */
+/* Floating navigation bar — M3 primary container with a level-2 shadow (it
+   floats over scrolling content). Opaque (the old 0.9 opacity dimmed its icons
+   and text, hurting contrast). */
 .bar {
     position: relative;
-    border-radius: 20px;
+    border-radius: var(--md-sys-shape-corner-large);
     background-color: var(--md-primary);
-    opacity: 0.9;
+    box-shadow: var(--md-sys-elevation-2);
     width: 100%;
     display: flex;
     align-items: center;
@@ -622,6 +624,36 @@ a:hover {
 
 .btn-full {
     width: 100%;
+}
+
+/* M3 keyboard-focus indicator: a clear ring shown only on keyboard navigation
+   (:focus-visible), so pointer clicks don't leave a ring. Applies to every
+   interactive surface the app draws itself. */
+.btn:focus-visible,
+.btn-icon:focus-visible,
+.fab:focus-visible,
+.chip:focus-visible,
+.list-item:focus-visible,
+.folder-item:focus-visible,
+.folder-tile:focus-visible,
+a.list-item:focus-visible,
+a.folder-item:focus-visible {
+    outline: 3px solid var(--md-primary);
+    outline-offset: 2px;
+}
+
+/* On the coloured bar / active rail pill, ring in the on-colour so it shows. */
+.bar .btn-icon:focus-visible {
+    outline-color: var(--md-on-primary);
+}
+
+.app-rail .btn-icon:focus-visible {
+    outline: none;
+}
+
+.app-rail .btn-icon:focus-visible .app-rail-icon {
+    outline: 3px solid var(--md-primary);
+    outline-offset: 2px;
 }
 
 /* Form inputs */
