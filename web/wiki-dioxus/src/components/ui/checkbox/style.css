@@ -19,9 +19,10 @@
 }
 
 .dx-checkbox[data-state="checked"] {
-    background-color: var(--secondary-color-2);
+    /* M3 accent (Radikale green) box with a white check. */
+    background-color: var(--md-sys-color-primary);
     box-shadow: none;
-    color: var(--primary-color);
+    color: var(--md-sys-color-on-primary);
 }
 
 .dx-checkbox:focus-visible {

@@ -38,8 +38,10 @@
 }
 
 .dx-radio-item[data-state="checked"]::before {
-  border: 0.25rem solid var(--light, var(--primary-color)) var(--dark, var(--primary-color-3));
-  background: var(--secondary-color-4);
+  /* M3 selected radio: green outer ring, surface gap, green centre dot. */
+  border: 0.25rem solid var(--md-sys-color-surface);
+  background: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 1px var(--md-sys-color-primary);
 }
 
 .dx-radio-item:disabled {

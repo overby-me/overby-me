@@ -64,6 +64,10 @@
     --md-inverse-surface: var(--md-sys-color-inverse-surface);
     --md-inverse-on-surface: var(--md-sys-color-inverse-on-surface);
     --md-inverse-primary: var(--md-sys-color-inverse-primary);
+
+    /* Point the dioxus-primitives focus ring at the M3 primary (was a blue
+       #2b7fff) so their focus states match the rest of the app. */
+    --focused-border-color: var(--md-sys-color-primary);
 }
 
 /* ───────────────────────────────────────────────────────────────────────────

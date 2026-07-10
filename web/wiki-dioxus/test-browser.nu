@@ -414,6 +414,15 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
                 sleep 400ms
                 let after = (wd-execute $session_id 'return document.documentElement.getAttribute("data-theme")||"light"')
                 if $before != $after { log-ok $"theme switch flips data-theme ($before) to ($after)"; $p = $p + 1 } else { log-fail $"theme switch did not change data-theme, stayed ($before)"; $fl = $fl + 1 }
+                # Now checked: the switch must use the M3 green accent, not the dx
+                # grayscale (regression guard for the primitive re-theming).
+                let swbg = (wd-execute $session_id 'var s=document.querySelector(".user-menu-dropdown [role=switch]"); if(!s) return "none"; var m=getComputedStyle(s).backgroundColor.match(/[0-9.]+/g); return m?JSON.stringify({r:+m[0],g:+m[1],b:+m[2]}):"none"')
+                if $swbg != "none" {
+                    let c = ($swbg | from json)
+                    if ($c.g > $c.r) and ($c.g > $c.b) { log-ok $"checked switch uses the green accent rgb\(($c.r),($c.g),($c.b)\)"; $p = $p + 1 } else { log-fail $"checked switch not green: rgb\(($c.r),($c.g),($c.b)\)"; $fl = $fl + 1 }
+                } else {
+                    log-warn "could not read switch colour"
+                }
                 wd-execute $session_id 'document.querySelector(".user-menu-dropdown [role=switch]").click(); return 1' | ignore
                 sleep 300ms
             } else {

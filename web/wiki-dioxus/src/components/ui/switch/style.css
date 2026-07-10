@@ -17,7 +17,8 @@
 }
 
 .dx-switch[data-state="checked"] {
-  background-color: var(--secondary-color-2);
+  /* M3 accent (Radikale green) instead of the dx grayscale. */
+  background-color: var(--md-sys-color-primary);
 }
 
 .dx-switch:focus-visible {
@@ -37,7 +38,8 @@
 }
 
 .dx-switch[data-state="checked"] .dx-switch-thumb {
-  background-color: var(--light, var(--primary-color)) var(--dark, var(--primary-color-3));
+  /* White thumb on the green track (the checked on-primary). */
+  background-color: var(--md-sys-color-on-primary);
   transform: translateX(calc(2rem - 1px - (1.15rem - 2px)));
 }
 
