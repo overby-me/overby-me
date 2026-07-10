@@ -1593,6 +1593,13 @@ h6, .title-small {
     }
 }
 
+/* Projector view (?app=screen): full-screen content, no drawer/rail/bar chrome. */
+.screen-full {
+    padding: 16px;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
 /* The groups/events list rendered in the Home main pane — mobile only; on desktop
    the always-visible drawer already carries it. Block-level (unlike .mobile-only,
    which is inline-flex for buttons). */

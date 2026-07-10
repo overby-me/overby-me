@@ -140,6 +140,17 @@ pub fn Layout() -> Element {
         };
     }
 
+    // The projector view (`?app=screen`) is full-screen: no drawer / rail / bar,
+    // just the active content + speaker list (React renders it chrome-less).
+    let is_screen = matches!(&route, Route::PathPage { app: Some(a), .. } if a == "screen");
+    if is_screen {
+        return rsx! {
+            div { class: "screen-full",
+                Outlet::<Route> {}
+            }
+        };
+    }
+
     rsx! {
         div { class: "app-shell",
             // Pull-to-refresh spinner (fixed overlay; listens on the window).

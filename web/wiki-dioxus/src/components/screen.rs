@@ -19,7 +19,21 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         .map(|c| c.0)
         .unwrap_or_else(|| node.id.0.clone());
 
-    let active = crate::use_data_resource!(|(context_id, access_token)| async move {
+    // Live projector: subscribe to the context `active` relation so switching the
+    // active node (remotely, from the admin) updates the projected pane without a
+    // reload — the whole point of the screen view (React ScreenApp's useSubsGet).
+    let refresh = use_signal(|| 0u32);
+    let sub_ctx = context_id.clone();
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _eq: \"active\" }} }}) {{ nodeId }} }}"
+        ),
+        refresh,
+    );
+    let rev = *refresh.read();
+
+    let active = crate::use_data_resource!(|(context_id, access_token, rev)| async move {
+        let _ = rev;
         let id = graphql::active_node_id(access_token.as_deref(), &context_id)
             .await
             .ok()
