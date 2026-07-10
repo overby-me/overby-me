@@ -22,7 +22,9 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
         _ => vec![],
     };
 
-    let mut items = use_signal(|| node.children.clone());
+    // Only the visible children are reorderable (hidden mimes — e.g. vote/vote
+    // entries — must not appear in the sort list); seeded in current index order.
+    let mut items = use_signal(|| super::loader::visible_sorted(&node.children));
     let mut dragging_idx = use_signal(|| None::<usize>);
     let mut saving = use_signal(|| false);
 
