@@ -986,6 +986,17 @@ pub struct Crumb {
     pub ordinal: Option<usize>,
 }
 
+/// How many leading path segments belong to the current node's context: the
+/// depth of the deepest group/event in the crumbs (the node's `contextId` in the
+/// React app). 0 means the path has no context (the groups/events home applies).
+pub fn deepest_context_depth(crumbs: &[Crumb]) -> usize {
+    crumbs
+        .iter()
+        .rposition(|c| matches!(c.mime_id.as_deref(), Some("wiki/group" | "wiki/event")))
+        .map(|i| i + 1)
+        .unwrap_or(0)
+}
+
 /// Resolve each path segment to its `(name, mime_id)`, walking from the root like
 /// `resolve_path`. Feeds the breadcrumb trail its per-segment avatar + name.
 pub async fn path_crumbs(

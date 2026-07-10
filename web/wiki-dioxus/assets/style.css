@@ -828,6 +828,29 @@ h6, .title-small {
 
 .crumb-avatar {
     flex: 0 0 auto;
+    position: relative;
+}
+
+/* The open app (e.g. vote/editor) badged onto the current crumb's avatar. */
+.crumb-app-badge {
+    position: absolute;
+    right: -5px;
+    bottom: -5px;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: var(--md-secondary-container);
+    color: var(--md-on-secondary-container);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid var(--md-surface);
+    box-sizing: border-box;
+}
+
+.crumb-app-badge .material-icons {
+    font-size: 11px;
+    line-height: 1;
 }
 
 .crumb-name {

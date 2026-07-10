@@ -10,6 +10,21 @@ use super::ui::dropdown_menu::{
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 };
 
+/// Per-navigation chrome state, resolved once in [`Layout`]: the breadcrumb
+/// crumbs for the current path and the current context depth (how many leading
+/// segments belong to the nearest group/event, per
+/// [`graphql::deepest_context_depth`]). The breadcrumbs, drawer and app rail all
+/// read these so they agree on the context without each re-querying the path.
+static NAV_CRUMBS: GlobalSignal<Vec<graphql::Crumb>> = Signal::global(Vec::new);
+static CONTEXT_DEPTH: GlobalSignal<usize> = Signal::global(|| 0);
+
+/// The current context's key-path: the leading `CONTEXT_DEPTH` segments (or the
+/// first segment as a fallback until the context resolves).
+fn context_path(segments: &[String]) -> Vec<String> {
+    let depth = CONTEXT_DEPTH().max(1);
+    segments.iter().take(depth).cloned().collect()
+}
+
 #[component]
 pub fn Layout() -> Element {
     let mut open_drawer = use_signal(|| false);
@@ -19,6 +34,24 @@ pub fn Layout() -> Element {
     let menu_open = use_signal(|| false);
 
     let route = use_route::<Route>();
+
+    // Resolve the path once for the whole chrome. The breadcrumbs, drawer and app
+    // rail all key off the current context (the nearest group/event), so
+    // resolving it here keeps them consistent and avoids each re-querying.
+    {
+        let segments = match &route {
+            Route::PathPage { segments, .. } => segments.clone(),
+            _ => vec![],
+        };
+        let token = SESSION.read().access_token.clone();
+        use_resource(use_reactive!(|(segments, token)| async move {
+            let crumbs = graphql::path_crumbs(token.as_deref(), &segments)
+                .await
+                .unwrap_or_default();
+            *CONTEXT_DEPTH.write() = graphql::deepest_context_depth(&crumbs);
+            *NAV_CRUMBS.write() = crumbs;
+        }));
+    }
 
     // Dioxus renders a lone "?" for the optional `app` query even when it is
     // None (e.g. "/group?"); strip it from the address bar on each navigation so
@@ -243,48 +276,36 @@ fn SearchBar(
     }
 }
 
-/// Breadcrumb navigation based on current route. Mirrors the old wiki: a row of
-/// mime avatars (home + each path node); only the current node's name is shown,
-/// and hovering a crumb reveals its name (the whole bar resets on mouse-leave).
+/// Breadcrumb navigation based on the current route. Mirrors the old wiki: a row
+/// of mime avatars (each path node); only the current node's name is shown, and
+/// hovering a crumb reveals its name (the whole bar resets on mouse-leave). The
+/// trail STARTS at the current context (the nearest group/event) rather than the
+/// root, so it begins with the selected event/group. The open app is shown as a
+/// badge on the current node's avatar.
 #[component]
 fn Breadcrumbs() -> Element {
     let route = use_route::<Route>();
-
-    let segments: Vec<String> = match &route {
-        Route::PathPage { segments, .. } => segments.clone(),
-        _ => vec![],
+    let (segments, app) = match &route {
+        Route::PathPage { segments, app } => (segments.clone(), app.clone()),
+        _ => (vec![], None),
     };
 
-    let mut hovered = use_signal(|| None::<usize>);
-    let key = segments.join("\u{1f}");
-    rsx! {
-        div {
-            class: "breadcrumbs",
-            onmouseleave: move |_| hovered.set(None),
-            BreadcrumbTrail { key: "{key}", segments: segments.clone(), hovered }
-        }
-    }
-}
-
-/// The breadcrumb crumbs: home (id 0) then one per path segment (id 1..=n), each
-/// an avatar + a collapsible name. Keyed on the path so it re-resolves on nav.
-#[component]
-fn BreadcrumbTrail(segments: Vec<String>, hovered: Signal<Option<usize>>) -> Element {
-    let session = use_session();
-    let token = session.read().access_token.clone();
-    // Reactively depend on the path so crumbs re-resolve on navigation (a keyed
-    // remount is unreliable in the web renderer).
-    let segs = segments.clone();
-    let crumbs_res = use_resource(use_reactive!(|(segs, token)| async move {
-        graphql::path_crumbs(token.as_deref(), &segs)
-            .await
-            .unwrap_or_default()
-    }));
-    let crumbs = crumbs_res.read().clone().unwrap_or_default();
-
+    // Resolved once by `Layout`; read reactively so crumbs update on navigation.
+    let crumbs = NAV_CRUMBS();
+    let depth = CONTEXT_DEPTH();
     let total = segments.len();
-    // The crumb shown by default (no hover) is the deepest one: the last segment,
-    // or home when at the root.
+
+    let mut hovered = use_signal(|| None::<usize>);
+
+    // Begin at the context (deepest group/event). With no context in the path
+    // (e.g. the home route) fall back to showing Home plus the full path.
+    let (show_home, start) = if depth >= 1 {
+        (false, depth - 1)
+    } else {
+        (true, 0)
+    };
+
+    // The default (unhovered) open crumb is the deepest one.
     let last_id = if total > 0 { total } else { 0 };
     let hov = *hovered.read();
     let is_open = move |c: usize| match hov {
@@ -292,37 +313,47 @@ fn BreadcrumbTrail(segments: Vec<String>, hovered: Signal<Option<usize>>) -> Ele
         None => c == last_id,
     };
 
+    // The open app, badged onto the current (last) crumb's avatar.
+    let app_badge = app.map(|a| format!("app/{a}"));
+
     rsx! {
-        // Home crumb (id 0).
-        BreadcrumbCrumb {
-            to: Route::HomeApp {},
-            mime: "app/home".to_string(),
-            name: t("common.home"),
-            ordinal: None,
-            open: is_open(0),
-            crumb_id: 0,
-            hovered,
-        }
-        // One crumb per path segment (id = index + 1).
-        for i in 0..total {
-            {
-                let info = crumbs.get(i);
-                let name = info
-                    .map(|c| c.name.clone())
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or_else(|| segments[i].clone());
-                let mime = info.and_then(|c| c.mime_id.clone()).unwrap_or_default();
-                let ordinal = info.and_then(|c| c.ordinal);
-                rsx! {
-                    BreadcrumbCrumb {
-                        key: "{i}",
-                        to: Route::PathPage { segments: segments[..=i].to_vec(), app: None },
-                        mime,
-                        name,
-                        ordinal,
-                        open: is_open(i + 1),
-                        crumb_id: i + 1,
-                        hovered,
+        div {
+            class: "breadcrumbs",
+            onmouseleave: move |_| hovered.set(None),
+            if show_home {
+                BreadcrumbCrumb {
+                    to: Route::HomeApp {},
+                    mime: "app/home".to_string(),
+                    name: t("common.home"),
+                    ordinal: None,
+                    open: is_open(0),
+                    crumb_id: 0,
+                    hovered,
+                    app_badge: None,
+                }
+            }
+            for i in start..total {
+                {
+                    let info = crumbs.get(i);
+                    let name = info
+                        .map(|c| c.name.clone())
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or_else(|| segments[i].clone());
+                    let mime = info.and_then(|c| c.mime_id.clone()).unwrap_or_default();
+                    let ordinal = info.and_then(|c| c.ordinal);
+                    let badge = if i + 1 == total { app_badge.clone() } else { None };
+                    rsx! {
+                        BreadcrumbCrumb {
+                            key: "{i}",
+                            to: Route::PathPage { segments: segments[..=i].to_vec(), app: None },
+                            mime,
+                            name,
+                            ordinal,
+                            open: is_open(i + 1),
+                            crumb_id: i + 1,
+                            hovered,
+                            app_badge: badge,
+                        }
                     }
                 }
             }
@@ -341,6 +372,7 @@ fn BreadcrumbCrumb(
     open: bool,
     crumb_id: usize,
     hovered: Signal<Option<usize>>,
+    app_badge: Option<String>,
 ) -> Element {
     let mut hovered = hovered;
     rsx! {
@@ -350,6 +382,10 @@ fn BreadcrumbCrumb(
             Link { to, class: "crumb-link",
                 div { class: "avatar small crumb-avatar",
                     {super::loader::node_avatar(&mime, &name, ordinal)}
+                    // The open app (e.g. vote, editor) badged onto the avatar.
+                    if let Some(badge) = app_badge {
+                        span { class: "crumb-app-badge", {super::loader::icon_el(&badge)} }
+                    }
                 }
                 span {
                     class: if open { "crumb-name open" } else { "crumb-name" },
@@ -380,11 +416,10 @@ fn AppRail() -> Element {
         return rsx! {};
     }
 
-    // The apps operate on the context (the first path segment), mirroring the
-    // React `useApps`: Home, Folder, and — when signed in — Speak and Vote. The
-    // app is part of the route's query, so these navigate client-side and the
-    // resolver swaps the view without a reload.
-    let context = segments.first().cloned().unwrap_or_default();
+    // The apps operate on the current context (the nearest group/event), mirroring
+    // the React `useApps`. The app is part of the route's query, so these navigate
+    // client-side and the resolver swaps the view without a reload.
+    let ctx_path = context_path(&segments);
 
     let mut apps: Vec<(&str, String, Route, bool)> = vec![
         ("app/home", t("common.home"), Route::HomeApp {}, false),
@@ -392,7 +427,7 @@ fn AppRail() -> Element {
             "app/folder",
             t("mime.folder"),
             Route::PathPage {
-                segments: vec![context.clone()],
+                segments: ctx_path.clone(),
                 app: None,
             },
             current_app.is_none(),
@@ -403,7 +438,7 @@ fn AppRail() -> Element {
             "app/speak",
             t("mime.speak"),
             Route::PathPage {
-                segments: vec![context.clone()],
+                segments: ctx_path.clone(),
                 app: Some("speak".to_string()),
             },
             current_app.as_deref() == Some("speak"),
@@ -412,7 +447,7 @@ fn AppRail() -> Element {
             "app/vote",
             t("mime.vote"),
             Route::PathPage {
-                segments: vec![context.clone()],
+                segments: ctx_path.clone(),
                 app: Some("vote".to_string()),
             },
             current_app.as_deref() == Some("vote"),
@@ -433,7 +468,7 @@ fn AppRail() -> Element {
                 icon,
                 t(key),
                 Route::PathPage {
-                    segments: vec![context.clone()],
+                    segments: ctx_path.clone(),
                     app: Some(app.to_string()),
                 },
                 current_app.as_deref() == Some(app),
@@ -629,19 +664,22 @@ fn DrawerContent() -> Element {
     }
 }
 
-/// MenuList — the in-context drawer tree. Resolves the context (first path
-/// segment) node, then renders its children lazily and expandably, mirroring
-/// the React `MenuList`/`DrawerList`/`DrawerElement` trio.
+/// MenuList: the in-context drawer tree. Resolves the current context (the
+/// nearest group/event, which may be nested below the top path segment), then
+/// renders its children lazily and expandably, mirroring the React
+/// `MenuList`/`DrawerList`/`DrawerElement` trio.
 #[component]
 fn MenuList(segments: Vec<String>) -> Element {
     let session = use_session();
     let access_token = session.read().access_token.clone();
-    let context_key = segments.first().cloned().unwrap_or_default();
+    // Root the tree at the context (deepest group/event) rather than the first
+    // segment, so a nested event shows its own contents.
+    let ctx_path = context_path(&segments);
 
-    // Re-resolve reactively when the context changes (keyed remount is not
-    // reliable in the web renderer).
-    let context = use_resource(use_reactive!(|(context_key, access_token)| async move {
-        graphql::resolve_path(access_token.as_deref(), &[context_key])
+    // Re-resolve reactively when the context path changes.
+    let cpath = ctx_path.clone();
+    let context = use_resource(use_reactive!(|(cpath, access_token)| async move {
+        graphql::resolve_path(access_token.as_deref(), &cpath)
             .await
             .ok()
             .flatten()
@@ -655,7 +693,7 @@ fn MenuList(segments: Vec<String>) -> Element {
             div { class: "list", style: "margin-top: 8px;",
                 DrawerLevel {
                     parent_id: context_id,
-                    path_prefix: segments[..1].to_vec(),
+                    path_prefix: ctx_path.clone(),
                     current_path: segments.clone(),
                     depth: 0,
                 }

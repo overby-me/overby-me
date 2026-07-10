@@ -390,11 +390,33 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
                 log-fail $"app rail did not set ?app=vote; got: ($search)"; $fl = $fl + 1
             }
             let r = (assert-exists $session_id "vote app renders" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+            # The open app is badged onto the current node's breadcrumb avatar.
+            sleep 1sec
+            let badge = (wd-execute $session_id 'return document.querySelector(".bottom-bar .breadcrumbs .crumb-app-badge")?"y":"n"')
+            if $badge == "y" {
+                log-ok "open app shows a breadcrumb badge"; $p = $p + 1
+            } else {
+                log-fail "no app badge on the breadcrumb avatar"; $fl = $fl + 1
+            }
         } else {
             log-warn "no vote rail item — skipping app-switch check"
         }
     } else {
         log-warn "app rail not found — skipping app-switch check"
+    }
+
+    # ── Breadcrumbs start at the context (nearest group/event), not the root ──
+    wd-navigate $session_id $"(base-url)($ctx_path)"
+    sleep 2sec
+    # At a top-level context the trail begins with the context itself, so there
+    # is no Home crumb (a breadcrumb link to "/").
+    let home_crumb = (wd-execute $session_id 'return document.querySelector(".bottom-bar .breadcrumbs a[href=\"/\"]")?"y":"n"')
+    let crumbs = (wd-execute $session_id 'return document.querySelectorAll(".bottom-bar .breadcrumbs .crumb").length')
+    let ok = (try { ($home_crumb == "n") and (($crumbs | into int) >= 1) } catch { false })
+    if $ok {
+        log-ok $"breadcrumbs start at the context, no home crumb, crumbs=($crumbs)"; $p = $p + 1
+    } else {
+        log-fail $"breadcrumbs did not start at context: home=($home_crumb) crumbs=($crumbs)"; $fl = $fl + 1
     }
 
     # ── New apps render via ?app= (graph / program / social / profile / cow) ──
