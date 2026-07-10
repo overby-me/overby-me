@@ -1533,6 +1533,18 @@ h6, .title-small {
     }
 }
 
+/* A drawer list-item shown only on mobile (keeps flex layout, unlike
+   .mobile-only which is inline-flex). Desktop reaches Home via the app rail. */
+.drawer-mobile-home {
+    display: flex;
+}
+
+@media (min-width: 1200px) {
+    .drawer-mobile-home {
+        display: none;
+    }
+}
+
 /* Folder item as link */
 a.folder-item {
     text-decoration: none;

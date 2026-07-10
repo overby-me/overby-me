@@ -598,6 +598,17 @@ fn DrawerContent() -> Element {
         .map(|u| u.email.clone())
         .unwrap_or_default();
 
+    // The drawer's top entry switches from Home to the current context (the
+    // nearest group/event, linking to its root) once inside one — mirroring the
+    // old wiki's drawer, whose title switched Home → the selected context.
+    let ctx_path = context_path(&segments);
+    let ctx_name = NAV_CRUMBS()
+        .get(ctx_path.len().saturating_sub(1))
+        .map(|c| c.name.clone())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| ctx_path.last().cloned().unwrap_or_default());
+    let ctx_abbr = abbrev_context_name(&ctx_name);
+
     rsx! {
         div { style: "padding: 16px;",
             if is_auth {
@@ -616,12 +627,36 @@ fn DrawerContent() -> Element {
             }
 
             div { class: "list", style: "margin-top: 8px;",
-                Link {
-                    to: Route::HomeApp {},
-                    class: "list-item",
-                    div { class: "avatar small", span { class: "material-icons", "home" } }
-                    div { class: "list-item-text",
-                        div { class: "list-item-primary", "{t(\"common.home\")}" }
+                if segments.is_empty() {
+                    // At the home route: the Home entry.
+                    Link {
+                        to: Route::HomeApp {},
+                        class: "list-item",
+                        div { class: "avatar small", span { class: "material-icons", "home" } }
+                        div { class: "list-item-text",
+                            div { class: "list-item-primary", "{t(\"common.home\")}" }
+                        }
+                    }
+                } else {
+                    // Inside a context: the current context (abbrev avatar + name),
+                    // linking to its root.
+                    Link {
+                        to: Route::PathPage { segments: ctx_path.clone(), app: None },
+                        class: "list-item",
+                        div { class: "avatar small secondary", "{ctx_abbr}" }
+                        div { class: "list-item-text",
+                            div { class: "list-item-primary", "{ctx_name}" }
+                        }
+                    }
+                    // On mobile there is no app rail, so keep Home reachable here
+                    // (desktop reaches it via the rail).
+                    Link {
+                        to: Route::HomeApp {},
+                        class: "list-item drawer-mobile-home",
+                        div { class: "avatar small", span { class: "material-icons", "home" } }
+                        div { class: "list-item-text",
+                            div { class: "list-item-primary", "{t(\"common.home\")}" }
+                        }
                     }
                 }
             }
