@@ -25,10 +25,11 @@ steps:
       ulimit -n 65536
       printf '{"PWD":"%s"}' "$PWD" > .env
       export NIX_CONFIG="experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix"
-      nix build --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" --max-jobs 1 --cores 2 \
-        --no-link --print-build-logs .#checks.x86_64-linux.formatting \
-        --override-input env path:$(realpath $PWD/.env)
-    name: Nix flake check (formatting)
+      export WORKERS=1
+      export MAX_MEMORY_MB=1024
+      export BATCH=5
+      nix run --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" .#flake-check -- --override-input env path:$(realpath $PWD/.env)
+    name: Nix flake check
   - command: |-
       export PATH="$(readlink -f result)/bin:$PATH"
       nix flake archive --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" --json --override-input env path:$(realpath $PWD/.env) | nix run --extra-experimental-features "nix-command flakes ca-derivations dynamic-derivations recursive-nix" nixpkgs#jq -- -r '.path,(.inputs|to_entries[].value.path)' | cachix push overby-me

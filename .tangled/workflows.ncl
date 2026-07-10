@@ -46,31 +46,31 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
         "%%,
       },
       {
-        name = "Nix flake check (formatting)",
-        # Scoped to the formatting check. The full check set (~3266 checks) does
-        # not fit this CI's microVM: it has ~2 GiB RAM and a 5-minute step
-        # timeout, and 686 checks are NixOS VM tests that boot a nested QEMU
-        # guest, which cannot even complete a first build in 2 GiB. Local
-        # `just check` runs the full `.#flake-check` on a real machine.
+        name = "Nix flake check",
+        # The full check set does not obviously fit this CI's microVM (~2 GiB
+        # RAM, 5-minute step timeout, 686 nested-QEMU VM tests). This attempts
+        # it anyway and relies on tangled's cache to carry build progress across
+        # runs: nix-eval-jobs streams each check, --check-cache-status skips what
+        # the cache already has, and each build is uploaded as it completes, so a
+        # run that is killed still advances the next one. WORKERS=1 and a low
+        # per-worker memory cap keep the evaluator inside the microVM's RAM
+        # rather than repeating the 2-worker OOM.
         #
-        # `checks.<system>.formatting` is the one check that fits: nix forces
-        # only that attribute (not the whole 3266-check graph), and the formatter
-        # tools it builds are substituted from cache.nixos.org. It catches
-        # unformatted code and, by evaluating far enough to produce the check,
-        # gross flake-evaluation breakage. Tangled's own cache stores the result,
-        # so repeat runs on an unchanged tree are fast; no explicit push needed.
-        #
-        # NIX_CONFIG is exported here so the inner nix build inherits the
-        # experimental features this flake's build system relies on.
+        # The known risk: evaluation is not cached by tangled's store cache, so
+        # if a full eval cannot finish within the 5-minute step it is killed
+        # before building and never converges. If that happens, scope back to
+        # `.#checks.x86_64-linux.formatting`, which does fit. Local `just check`
+        # runs this same tool on a real machine.
         command = m%%"
           echo "=== runs as: $(id -un); /etc/nix/nix.conf: ==="
           cat /etc/nix/nix.conf 2>/dev/null || echo "(no /etc/nix/nix.conf)"
           ulimit -n 65536
           printf '{"PWD":"%s"}' "$PWD" > .env
           export NIX_CONFIG="experimental-features = %%{nixFeatures}"
-          nix build --extra-experimental-features "%%{nixFeatures}" --max-jobs 1 --cores 2 \
-            --no-link --print-build-logs .#checks.x86_64-linux.formatting \
-            --override-input env path:$(realpath $PWD/.env)
+          export WORKERS=1
+          export MAX_MEMORY_MB=1024
+          export BATCH=5
+          nix run --extra-experimental-features "%%{nixFeatures}" .#flake-check -- --override-input env path:$(realpath $PWD/.env)
         "%%,
       },
       {
