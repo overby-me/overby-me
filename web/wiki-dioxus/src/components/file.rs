@@ -53,6 +53,7 @@ mod tests {
 pub fn FileApp(node: NodeWithChildren) -> Element {
     let name = node.name.as_str();
     let session = use_session();
+    let created = node.created_at.as_ref().map(|t| t.0.clone());
 
     let data = node.data.map(|d| d.0);
 
@@ -78,7 +79,30 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
         div { class: "card",
             div { class: "card-header",
                 div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
-                h3 { class: "title-medium", "{name}" }
+                div {
+                    h3 { class: "title-medium", "{name}" }
+                    if let Some(iso) = created.as_ref() {
+                        p {
+                            class: "body-small",
+                            class: "text-muted",
+                            title: "{super::loader::full_datetime(iso)}",
+                            span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
+                            " {super::loader::relative_time(iso)}"
+                        }
+                    }
+                }
+                div { class: "flex-grow" }
+                // Download the raw file (any previewable type), not just view it.
+                if !file_url.is_empty() {
+                    a {
+                        href: "{file_url}",
+                        target: "_blank",
+                        download: "{name}",
+                        class: "btn-icon",
+                        title: "{crate::i18n::t(\"common.download\")}",
+                        span { class: "material-icons", "download" }
+                    }
+                }
             }
             div { class: "file-viewer",
                 if file_url.is_empty() {

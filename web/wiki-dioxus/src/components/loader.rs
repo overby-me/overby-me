@@ -141,6 +141,35 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
     }
 }
 
+/// A compact relative time ("5m", "3h", "2d") from an ISO timestamp. Shared by
+/// the comment thread and the content/file "created" subtitles.
+pub fn relative_time(iso: &str) -> String {
+    let then = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(iso)).get_time();
+    if then.is_nan() {
+        return String::new();
+    }
+    let secs = ((js_sys::Date::now() - then) / 1000.0).max(0.0);
+    if secs < 60.0 {
+        format!("{}s", secs as u64)
+    } else if secs < 3600.0 {
+        format!("{}m", (secs / 60.0) as u64)
+    } else if secs < 86_400.0 {
+        format!("{}h", (secs / 3600.0) as u64)
+    } else {
+        format!("{}d", (secs / 86_400.0) as u64)
+    }
+}
+
+/// The absolute, localised date/time for an ISO timestamp — used as the tooltip
+/// behind a compact relative time.
+pub fn full_datetime(iso: &str) -> String {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(iso));
+    if d.get_time().is_nan() {
+        return String::new();
+    }
+    String::from(&d.to_locale_string("da-DK", &wasm_bindgen::JsValue::UNDEFINED))
+}
+
 /// Mime type to a **Material Icons ligature name**, matching the reference React
 /// app's `IconId` (core/mime.tsx), which renders `@mui/icons-material` (filled
 /// Material Icons). Render via `icon_el` (or a `.material-icons` span) so the

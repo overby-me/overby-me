@@ -26,6 +26,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     let mut confirm_open = use_signal(|| false);
     let name = node.name.clone();
     let members = node.members.clone();
+    let created = node.created_at.as_ref().map(|t| t.0.clone());
     let data = node.data.map(|d| d.0);
     // Owner-only actions (mirrors the React ContentToolbar gating): a node/context
     // owner may delete; editing also requires the node to still be mutable.
@@ -47,7 +48,18 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
         div { class: "card",
             div { class: "card-header",
                 div { class: "avatar", {icon_el("wiki/document")} }
-                h3 { class: "title-medium", "{name}" }
+                div {
+                    h3 { class: "title-medium", "{name}" }
+                    if let Some(iso) = created.as_ref() {
+                        p {
+                            class: "body-small",
+                            class: "text-muted",
+                            title: "{super::loader::full_datetime(iso)}",
+                            span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
+                            " {super::loader::relative_time(iso)}"
+                        }
+                    }
+                }
                 div { class: "flex-grow" }
                 // Export this document (and any nested content) to an .odt file.
                 button {

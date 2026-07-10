@@ -10,23 +10,7 @@ use crate::graphql::{self, ChildNodeFields};
 use crate::i18n::t;
 use crate::session::use_session;
 
-/// A short relative time ("5m", "3h", "2d") from an ISO timestamp.
-fn relative_time(iso: &str) -> String {
-    let then = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(iso)).get_time();
-    if then.is_nan() {
-        return String::new();
-    }
-    let secs = ((js_sys::Date::now() - then) / 1000.0).max(0.0);
-    if secs < 60.0 {
-        format!("{}s", secs as u64)
-    } else if secs < 3600.0 {
-        format!("{}m", (secs / 60.0) as u64)
-    } else if secs < 86_400.0 {
-        format!("{}h", (secs / 3600.0) as u64)
-    } else {
-        format!("{}d", (secs / 86_400.0) as u64)
-    }
-}
+use super::loader::relative_time;
 
 /// The comment text stored on a `vote/comment` node (`data.text`).
 fn comment_text(comment: &ChildNodeFields) -> String {
