@@ -6,10 +6,6 @@ use crate::route::Route;
 use crate::session::{save_session, use_session, SESSION};
 use crate::theme::{apply_theme, use_theme, ThemeMode, THEME};
 
-use super::ui::dropdown_menu::{
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-};
-
 /// Per-navigation chrome state, resolved once in [`Layout`]: the breadcrumb
 /// crumbs for the current path and the current context depth (how many leading
 /// segments belong to the nearest group/event, per
@@ -474,84 +470,97 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
     let dark = *theme.read() == ThemeMode::Dark;
 
     rsx! {
-        DropdownMenu {
-            open: Some(menu_open()),
-            on_open_change: move |v| menu_open.set(v),
-            DropdownMenuTrigger {
+        div { class: "user-menu",
+            button {
                 class: "btn-icon",
+                aria_label: "{t(\"layout.userMenu\")}",
+                onclick: move |_| {
+                    let v = menu_open();
+                    menu_open.set(!v);
+                },
                 if is_auth {
                     span { class: "avatar small secondary", "{initial}" }
                 } else {
                     span { class: "avatar small", span { class: "material-icons", "person" } }
                 }
             }
-            DropdownMenuContent {
-                // Theme toggle
-                DropdownMenuItem::<String> {
-                    value: "theme".to_string(),
-                    index: 0usize,
-                    on_select: move |_| {
-                        let new_theme = theme.read().toggle();
-                        apply_theme(&new_theme);
-                        crate::theme::save_theme(&new_theme);
-                        *THEME.write() = new_theme;
-                    },
-                    if dark {
-                        span { class: "material-icons", "light_mode" }
-                        " {t(\"layout.light\")}"
-                    } else {
-                        span { class: "material-icons", "dark_mode" }
-                        " {t(\"layout.dark\")}"
-                    }
-                }
-                // Language toggle
-                DropdownMenuItem::<String> {
-                    value: "lang".to_string(),
-                    index: 1usize,
-                    on_select: move |_| {
-                        let new_lang = match *LANG.read() {
-                            Lang::En => Lang::Da,
-                            Lang::Da => Lang::En,
-                        };
-                        *LANG.write() = new_lang;
-                    },
-                    span { class: "material-icons", "language" }
-                    {match *LANG.read() { Lang::En => " Dansk", Lang::Da => " English" }}
-                }
-                if is_auth {
-                    DropdownMenuItem::<String> {
-                        value: "setpw".to_string(),
-                        index: 2usize,
-                        on_select: move |_| { nav.push(Route::SetPassword {}); },
-                        span { class: "material-icons", "lock" }
-                        " {t(\"auth.setPassword\")}"
-                    }
-                    DropdownMenuItem::<String> {
-                        value: "logout".to_string(),
-                        index: 3usize,
-                        on_select: move |_| {
-                            crate::nhost::sign_out();
-                            *SESSION.write() = Default::default();
-                            save_session(&Default::default());
-                            nav.push(Route::HomeApp {});
+            if menu_open() {
+                // Full-viewport click-catcher so a click anywhere else closes it.
+                div { class: "menu-backdrop", onclick: move |_| menu_open.set(false) }
+                div { class: "user-menu-dropdown",
+                    // Theme toggle
+                    button {
+                        class: "list-item",
+                        onclick: move |_| {
+                            let new_theme = theme.read().toggle();
+                            apply_theme(&new_theme);
+                            crate::theme::save_theme(&new_theme);
+                            *THEME.write() = new_theme;
+                            menu_open.set(false);
                         },
-                        span { class: "material-icons", "logout" }
-                        " {t(\"auth.logout\")}"
+                        if dark {
+                            span { class: "material-icons", "light_mode" }
+                            " {t(\"layout.light\")}"
+                        } else {
+                            span { class: "material-icons", "dark_mode" }
+                            " {t(\"layout.dark\")}"
+                        }
                     }
-                } else {
-                    DropdownMenuItem::<String> {
-                        value: "login".to_string(),
-                        index: 2usize,
-                        on_select: move |_| { nav.push(Route::Login {}); },
-                        span { class: "material-icons", "login" }
-                        " {t(\"common.logIn\")}"
+                    // Language toggle
+                    button {
+                        class: "list-item",
+                        onclick: move |_| {
+                            let new_lang = match *LANG.read() {
+                                Lang::En => Lang::Da,
+                                Lang::Da => Lang::En,
+                            };
+                            *LANG.write() = new_lang;
+                            menu_open.set(false);
+                        },
+                        span { class: "material-icons", "language" }
+                        {match *LANG.read() { Lang::En => " Dansk", Lang::Da => " English" }}
                     }
-                    DropdownMenuItem::<String> {
-                        value: "register".to_string(),
-                        index: 3usize,
-                        on_select: move |_| { nav.push(Route::Register {}); },
-                        span { class: "material-icons", "person_add" }
-                        " {t(\"auth.register\")}"
+                    if is_auth {
+                        button {
+                            class: "list-item",
+                            onclick: move |_| {
+                                menu_open.set(false);
+                                nav.push(Route::SetPassword {});
+                            },
+                            span { class: "material-icons", "lock" }
+                            " {t(\"auth.setPassword\")}"
+                        }
+                        button {
+                            class: "list-item",
+                            onclick: move |_| {
+                                menu_open.set(false);
+                                crate::nhost::sign_out();
+                                *SESSION.write() = Default::default();
+                                save_session(&Default::default());
+                                nav.push(Route::HomeApp {});
+                            },
+                            span { class: "material-icons", "logout" }
+                            " {t(\"auth.logout\")}"
+                        }
+                    } else {
+                        button {
+                            class: "list-item",
+                            onclick: move |_| {
+                                menu_open.set(false);
+                                nav.push(Route::Login {});
+                            },
+                            span { class: "material-icons", "login" }
+                            " {t(\"common.logIn\")}"
+                        }
+                        button {
+                            class: "list-item",
+                            onclick: move |_| {
+                                menu_open.set(false);
+                                nav.push(Route::Register {});
+                            },
+                            span { class: "material-icons", "person_add" }
+                            " {t(\"auth.register\")}"
+                        }
                     }
                 }
             }

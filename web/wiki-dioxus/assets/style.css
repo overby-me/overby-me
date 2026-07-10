@@ -1345,6 +1345,19 @@ a.list-item:hover {
     border-radius: 0;
 }
 
+/* User menu */
+.user-menu {
+    position: relative;
+}
+
+/* Full-viewport click-catcher behind an open popup menu, so a click anywhere
+   else dismisses it. */
+.menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 290;
+}
+
 /* User menu dropdown */
 .user-menu-dropdown {
     position: absolute;
@@ -1374,6 +1387,17 @@ a.list-item:hover {
     margin: 0;
     border-radius: 0;
     padding: 12px 16px;
+    /* These rows are <button>s: strip the native chrome and fill the width. */
+    width: 100%;
+    border: none;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+}
+
+.user-menu-dropdown .list-item:hover {
+    background: var(--md-surface-variant);
 }
 
 /* Sort drag-and-drop */

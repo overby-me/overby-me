@@ -276,6 +276,29 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
 
     # The greeting should replace the logged-out copy.
     let r = (assert-contains $session_id "greeting shows the user" "#main .body-large" "Hello" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+
+    # User menu: clicking the avatar opens a dropdown that stays fully within the
+    # viewport, and the trigger has no stray border (regression: the primitive
+    # drew a rounded square and positioned the popup off-screen).
+    let umbtn = (wd-execute $session_id 'var b=document.querySelector(".user-menu > button"); if(b){b.click(); return "y"} return "n"')
+    if $umbtn == "y" {
+        sleep 400ms
+        let dd = (wd-execute $session_id 'return document.querySelector(".user-menu-dropdown")?"y":"n"')
+        if $dd == "y" {
+            log-ok "user menu opens a dropdown"; $p = $p + 1
+            let inview = (wd-execute $session_id 'var d=document.querySelector(".user-menu-dropdown"); var r=d.getBoundingClientRect(); return (r.left>=-1 && r.top>=-1 && r.right<=window.innerWidth+1 && r.bottom<=window.innerHeight+1)?"y":JSON.stringify({l:Math.round(r.left),t:Math.round(r.top),r:Math.round(r.right),b:Math.round(r.bottom),w:window.innerWidth,h:window.innerHeight})')
+            if $inview == "y" { log-ok "user menu popup is within the viewport"; $p = $p + 1 } else { log-fail $"user menu popup off-screen: ($inview)"; $fl = $fl + 1 }
+            let bw = (wd-execute $session_id 'var b=document.querySelector(".user-menu > button"); return getComputedStyle(b).borderTopWidth')
+            if (($bw | default "") == "0px") { log-ok "user menu button has no stray border"; $p = $p + 1 } else { log-warn $"user menu button border-width: ($bw)" }
+            wd-execute $session_id 'var bd=document.querySelector(".menu-backdrop"); if(bd)bd.click(); return 1' | ignore
+            sleep 200ms
+        } else {
+            log-fail "user menu did not open a dropdown"; $fl = $fl + 1
+        }
+    } else {
+        log-warn "user menu button not found — skipping user-menu check"
+    }
+
     # Groups + events render as context items (avatar badges) in the drawer.
     let r = (assert-count $session_id "drawer shows group/event items" ".drawer .avatar.secondary" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
 

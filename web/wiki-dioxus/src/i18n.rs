@@ -214,7 +214,8 @@ const EN_JSON: &str = r#"{
         "exitSearch": "Exit Search Field",
         "notSubmitted": "Not submitted",
         "dark": "Dark",
-        "light": "Light"
+        "light": "Light",
+        "userMenu": "User menu"
     },
     "error": {
         "somethingWentWrong": "Something went wrong!",
@@ -466,7 +467,8 @@ const DA_JSON: &str = r#"{
         "currentItem": "Nuv\u00e6rende punkt",
         "exitSearch": "Forlad s\u00f8gefeltet",
         "dark": "M\u00f8rk",
-        "light": "Lys"
+        "light": "Lys",
+        "userMenu": "Brugermenu"
     },
     "error": {
         "somethingWentWrong": "Noget gik galt!",
