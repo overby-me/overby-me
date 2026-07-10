@@ -14,7 +14,7 @@ use super::member::MemberApp;
 use super::node::NodeApp;
 use super::sort::SortApp;
 use super::speak::SpeakApp;
-use super::vote::{PolicyApp, PollApp, VoteApp};
+use super::vote::{PolicyApp, PollApp, PositionApp, VoteApp};
 
 /// The catch-all path page. Re-keys the resolver on the full path so navigating
 /// between two `PathPage` routes remounts it and re-runs the query: `use_resource`
@@ -130,10 +130,12 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
             rsx! { PolicyApp { node: node.clone(), path } }
         }
         "vote/position" => {
-            rsx! { NodeApp { node: node.clone(), title: t("mime.position") } }
+            rsx! { PositionApp { node: node.clone(), path } }
         }
+        // A candidate reads as content (its photo is `data.image`, description is
+        // the content); React hides members, which the port already omits here.
         "vote/candidate" => {
-            rsx! { NodeApp { node: node.clone(), title: t("mime.candidate") } }
+            rsx! { ContentApp { node: node.clone() } }
         }
         "vote/poll" => rsx! { PollApp { node: node.clone() } },
         "map/map" => rsx! { super::map::MapApp { node: node.clone() } },
