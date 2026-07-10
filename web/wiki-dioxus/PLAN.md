@@ -262,10 +262,12 @@ All the above build + render live (browser smoke test asserts each mounts).
 - `[x]` `#37` Atkinson Hyperlegible font for accessibility — the app font family.
 - `[x]` `#73` Pull-to-refresh — drag down (touch) or over-scroll up (wheel) at the
   top reloads the current view with a spinner (`components/pull_refresh.rs`).
-- `#118` Move the toolbar to the right-hand bar.
+- `[skip]` `#118` Move the toolbar to the right-hand bar — skipped by request
+  (the current sticky horizontal toolbar stays).
 - `[x]` `#122` Refresh data on window focus — `use_live` re-fetches when the
   window regains focus (via `use_focus_refresh`), recovering a dropped socket.
-- `#158` New bottom-bar design (list menu · app select · tools).
+- `[skip]` `#158` New bottom-bar design (list menu · app select · tools) —
+  skipped by request (the current bottom bar / desktop app-rail stays).
 - `[~]` `#33` PWA / offline mode — installable: web manifest + icon + theme-color
   (`assets/manifest.json`, `assets/icon.svg`, wired in `main.rs`). A service
   worker (`assets/sw.js`) is registered for offline, but full offline needs it
