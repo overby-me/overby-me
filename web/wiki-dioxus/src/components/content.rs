@@ -103,6 +103,14 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                         let parent = parent.clone();
                                         confirm_open.set(false);
                                         spawn(async move {
+                                            // Remove the node's member rows first
+                                            // so deleting it leaves no orphans
+                                            // (React DeleteButton order).
+                                            let _ = graphql::delete_node_members(
+                                                token.as_deref(),
+                                                &node_id,
+                                            )
+                                            .await;
                                             if graphql::delete_node(token.as_deref(), &node_id)
                                                 .await
                                                 .unwrap_or(false)

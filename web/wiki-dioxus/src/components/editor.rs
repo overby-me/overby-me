@@ -218,10 +218,18 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
         let token = session.read().access_token.clone();
         let node_id = node_id.clone();
         let segments = segments.clone();
+        // Preserve the node's other `data` keys (e.g. a cover `image`) that this
+        // editor does not manage; save only overwrites the `content` tree.
+        let base_data = node
+            .data
+            .as_ref()
+            .and_then(|d| d.0.as_object().cloned())
+            .unwrap_or_default();
         move |mutable: bool| {
             let token = token.clone();
             let node_id = node_id.clone();
             let segments = segments.clone();
+            let base_data = base_data.clone();
             let title_val = title.read().clone();
             spawn(async move {
                 saving.set(true);
@@ -249,7 +257,9 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 let content_json = richtext::serialize_editor(EDITOR_ID).unwrap_or_else(
                     || serde_json::json!([{ "type": "paragraph", "children": [{"text": ""}] }]),
                 );
-                let data = serde_json::json!({ "content": content_json });
+                let mut data_obj = base_data;
+                data_obj.insert("content".to_string(), content_json);
+                let data = serde_json::Value::Object(data_obj);
 
                 let set = graphql::NodesSetInput {
                     name: Some(title_val),

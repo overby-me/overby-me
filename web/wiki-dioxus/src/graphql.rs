@@ -1740,6 +1740,27 @@ pub struct MembersAffected {
     pub affected_rows: i32,
 }
 
+/// Delete every member row belonging to a node (`members` where
+/// `parent_id = node_id`). React's DeleteButton removes members before the node
+/// itself so no orphan member rows are left behind.
+pub async fn delete_node_members(
+    access_token: Option<&str>,
+    node_id: &str,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let del = DeleteMembersMutation::build(DeleteMembersVariables {
+        where_clause: MembersBoolExp {
+            parent_id: Some(UuidComparisonExp {
+                eq: Some(Uuid(node_id.to_string())),
+                is_null: None,
+            }),
+            ..Default::default()
+        },
+    });
+    execute(access_token, del).await?;
+    Ok(true)
+}
+
 /// Replace a node's authors: delete the current members and insert `authors`. A
 /// group/user author carries its `node_id`; a free-text author is stored by name
 /// only. Mirrors the React editor's save.

@@ -650,9 +650,24 @@ mod dom {
         }
     }
 
-    /// Wrap the current selection in `<code>` (there is no `execCommand` for it).
+    /// Toggle a `<code>` span around the current selection (there is no
+    /// `execCommand` for it). When the caret already sits inside a `<code>`
+    /// element the mark is removed (unwrapped to plain text) rather than nested.
     pub fn wrap_selection_code() {
         let Some(sel) = selection() else { return };
+        // Toggle off: select the whole enclosing <code> and replace it with its
+        // plain text, so a second click clears the mark instead of nesting it.
+        if let Some(code_el) = selection_code_ancestor(&sel) {
+            let text = code_el.text_content().unwrap_or_default();
+            if let Some(range) = document().and_then(|d| d.create_range().ok()) {
+                if range.select_node(&code_el).is_ok() {
+                    let _ = sel.remove_all_ranges();
+                    let _ = sel.add_range(&range);
+                    exec_value("insertHTML", &super::html_escape(&text));
+                }
+            }
+            return;
+        }
         let text = sel.to_string().as_string().unwrap_or_default();
         if text.is_empty() {
             return;
@@ -661,6 +676,20 @@ mod dom {
             "insertHTML",
             &format!("<code>{}</code>", super::html_escape(&text)),
         );
+    }
+
+    /// The `<code>` element the selection's anchor sits within, if any.
+    fn selection_code_ancestor(sel: &web_sys::Selection) -> Option<web_sys::Element> {
+        let mut cur = sel.anchor_node();
+        while let Some(n) = cur {
+            if let Some(el) = n.dyn_ref::<web_sys::Element>() {
+                if el.tag_name().eq_ignore_ascii_case("code") {
+                    return Some(el.clone());
+                }
+            }
+            cur = n.parent_node();
+        }
+        None
     }
 
     /// Make sure `execCommand` emits semantic tags (`<b>`, `<i>`), not styled
