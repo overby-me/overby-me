@@ -22,7 +22,7 @@ use renderer::Renderer;
 use simulation::Simulation;
 use texture::TextureManager;
 
-fn mouse_client_xy(evt: &MouseEvent) -> (f32, f32) {
+fn pointer_client_xy(evt: &PointerEvent) -> (f32, f32) {
     let coords = evt.data().client_coordinates();
     (coords.x as f32, coords.y as f32)
 }
@@ -111,8 +111,8 @@ pub fn Graph() -> Element {
         });
     };
 
-    let onmousedown = move |evt: MouseEvent| {
-        let (x, y) = mouse_client_xy(&evt);
+    let onpointerdown = move |evt: PointerEvent| {
+        let (x, y) = pointer_client_xy(&evt);
         if let Some(ref gs) = *state.read() {
             let mut gs = gs.borrow_mut();
 
@@ -146,9 +146,9 @@ pub fn Graph() -> Element {
         }
     };
 
-    let onmousemove = {
-        move |evt: MouseEvent| {
-            let (x, y) = mouse_client_xy(&evt);
+    let onpointermove = {
+        move |evt: PointerEvent| {
+            let (x, y) = pointer_client_xy(&evt);
             if let Some(ref gs) = *state.read() {
                 let mut gs_mut = gs.borrow_mut();
 
@@ -226,20 +226,34 @@ pub fn Graph() -> Element {
         }
     };
 
-    let onmouseup = move |_evt: MouseEvent| {
+    let onpointerup = move |_evt: PointerEvent| {
         if let Some(ref gs) = *state.read() {
             let mut gs = gs.borrow_mut();
             if let Some(idx) = gs.dragging_node.take() {
                 // Release the node and let the reheated layout absorb it.
                 gs.simulation.unpin(idx);
                 gs.simulation.set_alpha_target(0.0);
-                // A grab that never moved is a click: follow the node's link.
+                // A grab that never moved is a click/tap: follow the node's link.
                 if !gs.drag_moved
                     && let Some(url) = NODES[idx].url
                     && let Some(window) = web_sys::window()
                 {
                     let _ = window.location().set_href(url);
                 }
+            } else {
+                gs.camera.on_mouse_up();
+            }
+        }
+    };
+
+    // A cancelled pointer (e.g. the browser reclaims a touch gesture) releases
+    // whatever was grabbed without treating it as a click.
+    let onpointercancel = move |_evt: PointerEvent| {
+        if let Some(ref gs) = *state.read() {
+            let mut gs = gs.borrow_mut();
+            if let Some(idx) = gs.dragging_node.take() {
+                gs.simulation.unpin(idx);
+                gs.simulation.set_alpha_target(0.0);
             } else {
                 gs.camera.on_mouse_up();
             }
@@ -264,11 +278,14 @@ pub fn Graph() -> Element {
             style: "width: 100vw; height: 100vh; position: relative; overflow: hidden; background: #222222;",
             canvas {
                 id: "graph-canvas",
-                style: "width: 100%; height: 100%; display: block; cursor: {cursor};",
+                // touch-action: none keeps the browser from swallowing touch
+                // drags as scroll/zoom so pointer moves reach us on mobile.
+                style: "width: 100%; height: 100%; display: block; cursor: {cursor}; touch-action: none; -webkit-user-select: none; user-select: none;",
                 onmounted: onmounted,
-                onmousedown: onmousedown,
-                onmousemove: onmousemove,
-                onmouseup: onmouseup,
+                onpointerdown: onpointerdown,
+                onpointermove: onpointermove,
+                onpointerup: onpointerup,
+                onpointercancel: onpointercancel,
                 onwheel: onwheel,
             }
             // Tooltip overlay
