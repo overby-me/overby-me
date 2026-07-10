@@ -28,10 +28,21 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
       },
       {
         name = "Setup Cachix",
+        # `cachix use` only adds overby-me, which holds this repo's own build
+        # outputs. It does not add cache.nixos.org, and the microVM image has no
+        # substituters of its own, so nixpkgs itself cannot be substituted. That
+        # forces a from-source rebuild of nixpkgs' bootstrap, whose
+        # minimal-bootstrap/tinycc source is a repo.or.cz cgit snapshot with a
+        # rotted, non-reproducible hash, so the build dies on a FOD hash
+        # mismatch. cache.nixos.org has that output signed and cached; add it so
+        # the bootstrap substitutes instead of rebuilding. Appended to the same
+        # nix.conf cachix writes, so it persists into the flake-check step.
         command = m%%"
           export PATH="$(readlink -f result)/bin:$PATH"
           mkdir -p $HOME/.config/nix
           cachix use overby-me
+          echo "extra-substituters = https://cache.nixos.org" >> $HOME/.config/nix/nix.conf
+          echo "extra-trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" >> $HOME/.config/nix/nix.conf
         "%%,
       },
       {

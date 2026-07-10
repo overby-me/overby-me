@@ -16,6 +16,8 @@ steps:
       export PATH="$(readlink -f result)/bin:$PATH"
       mkdir -p $HOME/.config/nix
       cachix use overby-me
+      echo "extra-substituters = https://cache.nixos.org" >> $HOME/.config/nix/nix.conf
+      echo "extra-trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" >> $HOME/.config/nix/nix.conf
     name: Setup Cachix
   - command: |-
       echo "=== runs as: $(id -un); /etc/nix/nix.conf: ==="
