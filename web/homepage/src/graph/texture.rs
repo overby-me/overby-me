@@ -16,7 +16,7 @@ fn icon_url(icon: &str) -> String {
         "give.avif" => asset!("/assets/icons/give.avif").to_string(),
         "fediverse.avif" => asset!("/assets/icons/fediverse.avif").to_string(),
         "linkedin.avif" => asset!("/assets/icons/linkedin.avif").to_string(),
-        "pixelfed.avif" => asset!("/assets/icons/pixelfed.avif").to_string(),
+        "pinkleap.avif" => asset!("/assets/icons/pinkleap.avif").to_string(),
         "mail.avif" => asset!("/assets/icons/mail.avif").to_string(),
         "matrix.avif" => asset!("/assets/icons/matrix.avif").to_string(),
         "signal.avif" => asset!("/assets/icons/signal.avif").to_string(),

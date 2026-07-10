@@ -70,12 +70,12 @@ pub static NODES: &[GraphNode] = &[
         url: Some("https://www.linkedin.com/in/niclasoverby"),
     },
     GraphNode {
-        id: "PixelFed",
-        desc: "PixelFed\nProfile",
-        icon: "pixelfed.avif",
+        id: "PinkLeap",
+        desc: "PinkLeap\nProfile",
+        icon: "pinkleap.avif",
         color: None,
         opacity: None,
-        url: Some("https://pixelfed.social/niclasoverby"),
+        url: Some("https://pinkleap.app/@overby.me"),
     },
     GraphNode {
         id: "Mail",
@@ -264,7 +264,7 @@ pub static LINKS: &[GraphLink] = &[
     },
     GraphLink {
         source: "Connect",
-        target: "PixelFed",
+        target: "PinkLeap",
     },
     GraphLink {
         source: "Connect",
@@ -296,7 +296,7 @@ pub static LINKS: &[GraphLink] = &[
     },
     GraphLink {
         source: "Immerse",
-        target: "PixelFed",
+        target: "PinkLeap",
     },
     GraphLink {
         source: "Immerse",
