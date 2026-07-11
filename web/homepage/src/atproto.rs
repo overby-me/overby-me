@@ -304,9 +304,10 @@ fn curated(prefix: &str) -> Option<Curated> {
 /// The public profile URL for this account on a given app. Where an app has a
 /// per-user profile page we link straight to it; otherwise we fall back to the
 /// app's homepage (`domain` is the app's reverse-DNS domain). Patterns were
-/// verified per app against overby.me's live profile pages — most key on the
-/// handle, PopFeed on the DID, and several apps (Leaflet, Smoke Signal, atwork,
-/// Flashes, Aetheros, Spark, Cosmik, …) have no per-user web page at all.
+/// verified per app against overby.me's live profile pages (server-rendered
+/// title/OG or the app's own route table) — most key on the handle, PopFeed on
+/// the DID. Apps with no public per-user web page (Teal.fm pre-launch, atwork,
+/// Flashes, Aetheros, FitSky, Skyreader, Cartes) fall through to the homepage.
 fn profile_url(prefix: &str, domain: &str, handle: &str, did: &str) -> String {
     match prefix {
         "app.bsky" => format!("https://bsky.app/profile/{handle}"),
@@ -319,6 +320,10 @@ fn profile_url(prefix: &str, domain: &str, handle: &str, did: &str) -> String {
         "com.semble" => format!("https://semble.so/profile/{handle}"),
         "blue.linkat" => format!("https://linkat.blue/{handle}"),
         "app.pinkleap" => format!("https://pinkleap.app/@{handle}"),
+        "pub.leaflet" => format!("https://leaflet.pub/p/{handle}"),
+        "events.smokesignal" => format!("https://smokesignal.events/@{handle}"),
+        "so.sprk" => format!("https://sprk.so/profile/{handle}"),
+        "net.anisota" => format!("https://anisota.net/profile/{handle}"),
         _ => format!("https://{domain}"),
     }
 }
@@ -853,8 +858,20 @@ mod tests {
             p("social.popfeed", "popfeed.social"),
             "https://popfeed.social/profile/did:plc:eukcx4amfqmhfrnkix7zwm34"
         );
+        assert_eq!(
+            p("pub.leaflet", "leaflet.pub"),
+            "https://leaflet.pub/p/overby.me"
+        );
+        assert_eq!(
+            p("events.smokesignal", "smokesignal.events"),
+            "https://smokesignal.events/@overby.me"
+        );
+        assert_eq!(p("so.sprk", "sprk.so"), "https://sprk.so/profile/overby.me");
+        assert_eq!(
+            p("net.anisota", "anisota.net"),
+            "https://anisota.net/profile/overby.me"
+        );
         // Apps with no per-user web page fall back to the homepage.
-        assert_eq!(p("pub.leaflet", "leaflet.pub"), "https://leaflet.pub");
         assert_eq!(
             p("computer.aetheros", "aetheros.computer"),
             "https://aetheros.computer"
