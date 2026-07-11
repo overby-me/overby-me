@@ -91,7 +91,7 @@ pub fn Graph(data: GraphData) -> Element {
             // A collapsible graph starts collapsed: only the center + hubs show.
             let expanded = std::collections::HashSet::new();
             let visible = filtered_graph(&data, &expanded);
-            let distance = fit_camera_distance(&visible, aspect);
+            let distance = fit_camera_distance(&visible, aspect, OVERVIEW_MARGIN);
             camera.distance = distance;
 
             let simulation = Simulation::new(&visible);
@@ -418,17 +418,30 @@ fn rebuild(gs: &mut GraphState) {
     simulation.set_positions(&new_data, &seed);
     simulation.set_alpha(0.7);
     gs.particle_system = ParticleSystem::new(&new_data);
-    gs.target_distance = fit_camera_distance(&new_data, gs.aspect);
+    // Keep the roomy overview only while fully collapsed; once a category is
+    // open, frame tighter so expanding barely changes the zoom.
+    let margin = if gs.expanded.is_empty() {
+        OVERVIEW_MARGIN
+    } else {
+        EXPANDED_MARGIN
+    };
+    gs.target_distance = fit_camera_distance(&new_data, gs.aspect, margin);
     gs.simulation = simulation;
     gs.data = new_data;
 }
 
+/// Camera framing margins. A roomy overview when the graph is fully collapsed,
+/// and a tighter frame once a category is expanded, so revealing a hub's leaves
+/// only nudges the zoom instead of pulling the camera way back.
+const OVERVIEW_MARGIN: f32 = 1.9;
+const EXPANDED_MARGIN: f32 = 1.45;
+
 /// Pick a camera distance that frames the whole graph, whatever its size. A
 /// throwaway copy of the layout is settled to measure its radius, then the
-/// distance is `R / tan(fov/2)` with margin (and a portrait correction). This
+/// distance is `R / tan(fov/2)` with `margin` (and a portrait correction). This
 /// reproduces the hand-tuned ~240 for the personal graph and pulls in tighter
 /// for the more compact atproto star graphs.
-fn fit_camera_distance(data: &GraphData, aspect: f32) -> f32 {
+fn fit_camera_distance(data: &GraphData, aspect: f32, margin: f32) -> f32 {
     let mut sim = Simulation::new(data);
     let mut ticks = 0;
     while sim.is_active() && ticks < 1000 {
@@ -442,10 +455,10 @@ fn fit_camera_distance(data: &GraphData, aspect: f32) -> f32 {
         .fold(0.0_f32, f32::max);
 
     // Pad the measured radius so the outermost node's bubble (up to ~24 units)
-    // isn't clipped, then frame it with headroom for a calmer, more zoomed-out view.
+    // isn't clipped, then frame it with the caller's margin.
     let half_fov = Camera::new().fov * 0.5;
     let fit = (max_r + 24.0) / half_fov.tan() / aspect.min(1.0);
-    (fit * 1.9).clamp(150.0, 2000.0)
+    (fit * margin).clamp(150.0, 2000.0)
 }
 
 type AnimationClosure = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
