@@ -461,15 +461,17 @@ pub fn detect_platforms(collections: &[String], handle: &str, did: &str) -> Vec<
 }
 
 /// A fediverse leaf for an account that Bridgy Fed has bridged into ActivityPub
-/// (an opt-in bridge). It sits under Social and links to the bridged profile at
-/// `@{handle}@bsky.brid.gy`, which resolves on any fediverse instance. The caller
-/// in [`crate::atproto_web`] adds it after confirming the bridge via webfinger.
+/// (an opt-in bridge). It sits under Social. The fediverse handle is
+/// `@{handle}@bsky.brid.gy`, but we link to the account's Bridgy Fed profile page
+/// rather than a specific instance: a logged-out instance bounces a remote
+/// account straight back to its Bluesky canonical URL, which is not what we want.
+/// The caller in [`crate::atproto_web`] adds it after confirming the bridge.
 pub fn bridged_mastodon(handle: &str) -> Platform {
     Platform {
         name: "Mastodon".to_string(),
         domain: "bsky.brid.gy".to_string(),
         icon: Icon::Bundled("mastodon.avif"),
-        profile_url: format!("https://mastodon.social/@{handle}@bsky.brid.gy"),
+        profile_url: format!("https://fed.brid.gy/bsky/{handle}"),
         category: "Social",
     }
 }
@@ -935,10 +937,7 @@ mod tests {
         assert_eq!(m.name, "Mastodon");
         assert_eq!(m.category, "Social");
         assert_eq!(m.icon, Icon::Bundled("mastodon.avif"));
-        assert_eq!(
-            m.profile_url,
-            "https://mastodon.social/@overby.me@bsky.brid.gy"
-        );
+        assert_eq!(m.profile_url, "https://fed.brid.gy/bsky/overby.me");
     }
 
     #[test]
