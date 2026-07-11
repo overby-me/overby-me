@@ -9,12 +9,6 @@ use crate::session::use_session;
 pub fn HomeApp() -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
-    let display_name = session
-        .read()
-        .user
-        .as_ref()
-        .map(|u| u.display_name.clone())
-        .unwrap_or_default();
 
     // The welcome text is the root node's content, editable by its owner. It
     // refetches after an edit (use_data_resource tracks the global data version).
@@ -74,12 +68,6 @@ pub fn HomeApp() -> Element {
                         }
                     }
                     div { class: "card-content",
-                        // Personalised greeting stays dynamic, above the welcome.
-                        if is_auth {
-                            p { class: "body-large mb-2",
-                                "{t_with(\"layout.greeting\", &[(\"name\", &display_name)])}"
-                            }
-                        }
                         // The editable welcome: the root node's content, or the
                         // original static copy until an owner writes one.
                         if has_welcome {
