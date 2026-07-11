@@ -1931,6 +1931,11 @@ h6,
 	max-width: 260px;
 	opacity: 1;
 	margin: 0 8px 0 4px;
+	/* Expressive: the current location is the top app bar's focal title, so give
+	   it title-medium emphasis against the calmer parent crumbs. */
+	font-size: var(--md-sys-typescale-title-medium-size);
+	font-weight: 600;
+	letter-spacing: var(--md-sys-typescale-title-medium-tracking);
 }
 
 /* Content (Slate document renderer) */
