@@ -284,38 +284,33 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
             }
         }
 
-        // Edit member (name / email) modal.
-        if edit_id.read().is_some() {
-            div { class: "modal-backdrop", onclick: move |_| edit_id.set(None),
-                div {
-                    class: "modal-card",
-                    onclick: move |e| e.stop_propagation(),
-                    h3 { class: "title-medium mb-2", "{t(\"member.edit\")}" }
-                    div { class: "text-field",
-                        label { "{t(\"member.name\")}" }
-                        input {
-                            r#type: "text",
-                            value: "{edit_name}",
-                            oninput: move |e| edit_name.set(e.value()),
-                        }
-                    }
-                    div { class: "text-field mt-2",
-                        label { "{t(\"member.email\")}" }
-                        input {
-                            r#type: "email",
-                            value: "{edit_email}",
-                            oninput: move |e| edit_email.set(e.value()),
-                        }
-                    }
-                    div { class: "stack stack-h mt-2", style: "align-items: center; gap: 8px;",
-                        div { class: "flex-grow" }
-                        button {
-                            class: "btn btn-outlined",
-                            onclick: move |_| edit_id.set(None),
-                            "{t(\"common.cancel\")}"
-                        }
-                        button { class: "btn btn-primary", onclick: save_edit, "{t(\"common.save\")}" }
-                    }
+        // Edit member (name / email) dialog.
+        super::widgets::Dialog {
+            open: edit_id.read().is_some(),
+            on_dismiss: move |_| edit_id.set(None),
+            headline: t("member.edit"),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| edit_id.set(None),
+                    "{t(\"common.cancel\")}"
+                }
+                button { class: "btn btn-primary", onclick: save_edit, "{t(\"common.save\")}" }
+            },
+            div { class: "text-field",
+                label { "{t(\"member.name\")}" }
+                input {
+                    r#type: "text",
+                    value: "{edit_name}",
+                    oninput: move |e| edit_name.set(e.value()),
+                }
+            }
+            div { class: "text-field mt-2",
+                label { "{t(\"member.email\")}" }
+                input {
+                    r#type: "email",
+                    value: "{edit_email}",
+                    oninput: move |e| edit_email.set(e.value()),
                 }
             }
         }

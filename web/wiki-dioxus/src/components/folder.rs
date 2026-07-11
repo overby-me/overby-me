@@ -432,7 +432,8 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
 
         // Add-content dialog (the reusable M3 widgets::Dialog).
         super::widgets::Dialog {
-            open,
+            open: open(),
+            on_dismiss: move |_| open.set(false),
             headline: t("content.addContent"),
             actions: rsx! {
                 button {

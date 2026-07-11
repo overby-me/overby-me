@@ -58,20 +58,21 @@ pub fn Badge(count: Option<usize>) -> Element {
 /// `.modal-backdrop`/`.modal-card` markup across screens.
 #[component]
 pub fn Dialog(
-    open: Signal<bool>,
+    open: bool,
+    on_dismiss: EventHandler<()>,
     headline: String,
     actions: Element,
     icon: Option<String>,
     children: Element,
 ) -> Element {
-    if !open() {
+    if !open {
         return rsx! {};
     }
     rsx! {
         div {
             class: "m3-dialog-scrim",
             role: "presentation",
-            onclick: move |_| open.set(false),
+            onclick: move |_| on_dismiss.call(()),
             div {
                 class: "m3-dialog",
                 role: "dialog",

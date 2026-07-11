@@ -541,34 +541,29 @@ fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Element {
             span { class: "material-icons", "add" }
             " {t(\"vote.newAmendment\")}"
         }
-        if open() {
-            div { class: "modal-backdrop", onclick: move |_| open.set(false),
-                div {
-                    class: "modal-card",
-                    onclick: move |e| e.stop_propagation(),
-                    h3 { class: "title-medium mb-2", "{t(\"vote.newAmendment\")}" }
-                    div { class: "text-field",
-                        label { "{t(\"common.title\")}" }
-                        input {
-                            r#type: "text",
-                            value: "{title}",
-                            oninput: move |e| title.set(e.value()),
-                        }
-                    }
-                    div { class: "stack stack-h mt-2", style: "align-items: center; gap: 8px;",
-                        div { class: "flex-grow" }
-                        button {
-                            class: "btn btn-outlined",
-                            onclick: move |_| open.set(false),
-                            "{t(\"common.cancel\")}"
-                        }
-                        button {
-                            class: "btn btn-primary",
-                            disabled: title.read().trim().is_empty(),
-                            onclick: submit,
-                            "{t(\"common.add\")}"
-                        }
-                    }
+        super::widgets::Dialog {
+            open: open(),
+            on_dismiss: move |_| open.set(false),
+            headline: t("vote.newAmendment"),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: title.read().trim().is_empty(),
+                    onclick: submit,
+                    "{t(\"common.add\")}"
+                }
+            },
+            div { class: "text-field",
+                label { "{t(\"common.title\")}" }
+                input {
+                    r#type: "text",
+                    value: "{title}",
+                    oninput: move |e| title.set(e.value()),
                 }
             }
         }
