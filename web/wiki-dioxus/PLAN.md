@@ -234,10 +234,11 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   passed-in node.)
 - `[~]` Polish: done — theme-color synced to the active scheme, `document.title` set
   to the node name, the folder rail stays active during `?app=editor`/`?app=sort`,
-  and the ballot blocks over-selection live. Intentionally left (low value / high
-  risk for the churn): breadcrumb-reclick scroll-to-top, drawer rounded corners +
-  close-on-mouseleave, Danish relative-time (already `m/h/d`, language-neutral),
-  per-app scroll restore, batching the sort-save mutations. **minor**
+  the ballot blocks over-selection live, breadcrumb click scrolls to top, and the
+  desktop drawer has rounded right corners. Intentionally left: drawer
+  close-on-mouseleave (bad UX for an always-visible drawer), Danish relative-time
+  (already `m/h/d`, language-neutral), per-app scroll restore + batching the
+  sort-save mutations (marginal, both already work). **minor**
 
 ---
 
