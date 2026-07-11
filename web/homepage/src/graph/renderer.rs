@@ -598,15 +598,16 @@ fn create_sphere_mesh(
     })
 }
 
-// Category hubs are drawn as bigger bubbles than platform leaves: their icon
-// carries a baked-in name label, and the halo is scaled to match.
-const HUB_HALO_SCALE: f32 = 1.5;
+// Category hubs are drawn as bubbles between the center and the leaves in size:
+// big enough for their baked-in name label, but clearly smaller than the center.
+// The halo is scaled to sit just outside the icon.
+const HUB_HALO_SCALE: f32 = 1.3;
 
 fn node_size(node: &super::data::GraphNode) -> f32 {
-    // The center avatar and the category hubs are the big nodes; the hubs need
-    // the room for their baked-in name label.
-    if node.center || node.hub {
+    if node.center {
         40.0
+    } else if node.hub {
+        32.0
     } else if node.color.is_some() {
         20.0
     } else {
