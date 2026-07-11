@@ -1417,6 +1417,11 @@ h6, .title-small {
 /* Click-to-zoom images (#114). */
 .zoomable {
     cursor: zoom-in;
+    /* Fit the container and keep the card's rounded look (content images). */
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--md-sys-shape-corner-medium, 12px);
     /* Fade in on mount so images don't pop in abruptly. */
     animation: image-fade-in var(--md-sys-motion-duration-medium2, 300ms)
         var(--md-sys-motion-easing-standard, ease);
