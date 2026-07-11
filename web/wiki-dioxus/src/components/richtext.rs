@@ -714,6 +714,116 @@ mod dom {
         }
     }
 
+    /// Tags kept when sanitizing pasted HTML; everything else is unwrapped to its
+    /// children/text. Matches what [`dom_to_slate`] understands.
+    const PASTE_ALLOWED_TAGS: &[&str] = &[
+        "p",
+        "br",
+        "b",
+        "strong",
+        "i",
+        "em",
+        "u",
+        "s",
+        "strike",
+        "code",
+        "a",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ul",
+        "ol",
+        "li",
+        "blockquote",
+    ];
+
+    /// Tags dropped whole (with their content) rather than unwrapped, so their
+    /// text/code never leaks into the document.
+    const PASTE_STRIP_TAGS: &[&str] = &[
+        "script", "style", "noscript", "head", "meta", "link", "title", "iframe", "object",
+    ];
+
+    /// Sanitize pasted HTML to the editor's semantic subset: keep the whitelisted
+    /// tags (only `href` on links), unwrap everything else (styled spans/divs,
+    /// Office markup, ...), and strip all other attributes. Mirrors React Slate's
+    /// `withHtml` / `deserialize`.
+    fn sanitize_pasted_html(html: &str) -> Option<String> {
+        let doc = web_sys::window()?.document()?;
+        let container = doc.create_element("div").ok()?;
+        container.set_inner_html(html);
+        // Deepest-first, so unwrapping a parent never disturbs children we have
+        // not visited yet.
+        if let Ok(all) = container.query_selector_all("*") {
+            for i in (0..all.length()).rev() {
+                let Some(el) = all.item(i).and_then(|n| n.dyn_into::<Element>().ok()) else {
+                    continue;
+                };
+                let tag = el.tag_name().to_lowercase();
+                let el_node: &Node = el.unchecked_ref();
+                if PASTE_ALLOWED_TAGS.contains(&tag.as_str()) {
+                    for name in el
+                        .get_attribute_names()
+                        .iter()
+                        .filter_map(|n| n.as_string())
+                    {
+                        if !(tag == "a" && name == "href") {
+                            let _ = el.remove_attribute(&name);
+                        }
+                    }
+                } else if PASTE_STRIP_TAGS.contains(&tag.as_str()) {
+                    // Drop the element and its content entirely.
+                    if let Some(parent) = el.parent_node() {
+                        let _ = parent.remove_child(el_node);
+                    }
+                } else if let Some(parent) = el.parent_node() {
+                    // Unwrap: move children out, then drop the wrapper.
+                    while let Some(child) = el.first_child() {
+                        let _ = parent.insert_before(&child, Some(el_node));
+                    }
+                    let _ = parent.remove_child(el_node);
+                }
+            }
+        }
+        Some(container.inner_html())
+    }
+
+    /// Intercept paste on the editor and insert sanitized HTML instead of the raw
+    /// browser paste (with a plain-text fallback). Attached once on mount.
+    pub fn install_paste_handler(id: &str) {
+        use wasm_bindgen::closure::Closure;
+        let Some(el) = document().and_then(|d| d.get_element_by_id(id)) else {
+            return;
+        };
+        let closure = Closure::wrap(Box::new(move |evt: web_sys::Event| {
+            let Some(ce) = evt.dyn_ref::<web_sys::ClipboardEvent>() else {
+                return;
+            };
+            let Some(cd) = ce.clipboard_data() else {
+                return;
+            };
+            evt.prevent_default();
+            let html = cd.get_data("text/html").unwrap_or_default();
+            if !html.is_empty() {
+                if let Some(clean) = sanitize_pasted_html(&html) {
+                    exec_value("insertHTML", &clean);
+                    return;
+                }
+            }
+            // No HTML on the clipboard: insert plain text, keeping line breaks.
+            let text = cd.get_data("text/plain").unwrap_or_default();
+            exec_value(
+                "insertHTML",
+                &super::html_escape(&text).replace('\n', "<br>"),
+            );
+        }) as Box<dyn FnMut(web_sys::Event)>);
+        let _ = el.add_event_listener_with_callback("paste", closure.as_ref().unchecked_ref());
+        // Leak the closure so the listener lives as long as the editor.
+        closure.forget();
+    }
+
     /// Focus the editor element (so `execCommand` acts on it).
     pub fn focus_editor(id: &str) {
         if let Some(el) = document()
@@ -744,8 +854,9 @@ mod dom {
 
 #[cfg(target_arch = "wasm32")]
 pub use dom::{
-    current_link, exec, exec_value, focus_editor, query_state, query_value, restore_selection,
-    save_selection, seed_editor, serialize_editor, use_semantic_tags, wrap_selection_code,
+    current_link, exec, exec_value, focus_editor, install_paste_handler, query_state, query_value,
+    restore_selection, save_selection, seed_editor, serialize_editor, use_semantic_tags,
+    wrap_selection_code,
 };
 
 /// Non-wasm stubs so the editor component still compiles for host `cargo test`
@@ -771,6 +882,7 @@ mod dom_stub {
     }
     pub fn seed_editor(_id: &str, _html: &str) {}
     pub fn focus_editor(_id: &str) {}
+    pub fn install_paste_handler(_id: &str) {}
     pub fn current_link() -> Option<String> {
         None
     }
@@ -781,8 +893,9 @@ mod dom_stub {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use dom_stub::{
-    current_link, exec, exec_value, focus_editor, query_state, query_value, restore_selection,
-    save_selection, seed_editor, serialize_editor, use_semantic_tags, wrap_selection_code,
+    current_link, exec, exec_value, focus_editor, install_paste_handler, query_state, query_value,
+    restore_selection, save_selection, seed_editor, serialize_editor, use_semantic_tags,
+    wrap_selection_code,
 };
 
 #[cfg(test)]

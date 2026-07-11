@@ -601,6 +601,8 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     onmounted: move |_| {
                         richtext::seed_editor(EDITOR_ID, &cmd_seed);
                         richtext::use_semantic_tags();
+                        // Sanitize pasted HTML to the editor's semantic subset.
+                        richtext::install_paste_handler(EDITOR_ID);
                     },
                     // Ctrl/Cmd + ` toggles code (bold/italic/underline shortcuts
                     // are handled natively by the contenteditable surface).
