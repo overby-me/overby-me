@@ -197,6 +197,11 @@ pub fn Layout() -> Element {
             // Main content area
             div { class: "main-content",
                 Outlet::<Route> {}
+                // Bottom spacer so content scrolls clear of the fixed bar. It
+                // lives inside the content column (not the app-shell flex row),
+                // otherwise it sits beside the content and steals width on the
+                // right (#mobile-padding).
+                div { class: "bar-spacer" }
             }
 
             // Desktop drawer (sidebar)
@@ -253,9 +258,6 @@ pub fn Layout() -> Element {
                     UserMenu { menu_open }
                 }
             }
-
-            // Spacer for bottom bar
-            div { class: "bar-spacer" }
         }
 
         // Mobile drawer overlay
