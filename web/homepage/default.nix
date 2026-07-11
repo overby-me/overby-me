@@ -28,6 +28,8 @@
     wasm-bindgen-cli,
     binaryen,
     lld,
+    just,
+    which,
     ...
   }:
     rustPlatform.buildRustPackage {
@@ -40,6 +42,7 @@
           ./Cargo.toml
           ./Cargo.lock
           ./Dioxus.toml
+          ./justfile
           ./src
           ./assets
         ];
@@ -48,6 +51,10 @@
       cargoLock.lockFile = ./Cargo.lock;
 
       nativeBuildInputs = [
+        # `just build` drives the build; `which` resolves the dioxus `dx` binary
+        # the way the justfile expects.
+        just
+        which
         dioxus-cli
         wasm-bindgen-cli
         binaryen
@@ -55,9 +62,11 @@
         lld
       ];
 
+      # `just build` runs `dx build --release` and copies the host `_redirects`
+      # into the bundle (dx drops it), so this package matches a local build.
       buildPhase = ''
         runHook preBuild
-        dx build --release --platform web
+        just build
         runHook postBuild
       '';
 
@@ -65,10 +74,6 @@
       installPhase = ''
         runHook preInstall
         cp -r target/dx/homepage/release/web/public $out
-        # dx drops files from assets/ it doesn't recognize, so the host's
-        # `_redirects` (SPA fallback `/* /index.html 200` + matrix well-knowns)
-        # never reaches the bundle. Copy it to the served root ourselves.
-        cp assets/_redirects $out/_redirects
         runHook postInstall
       '';
 
