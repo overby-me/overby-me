@@ -74,6 +74,8 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "com.vibe-coded" => "vibecoded.avif",
         "place.atwork" => "atwork.avif",
         "app.shadowsky" | "com.shadowsky" => "shadowsky.avif",
+        "blue.pronouns" => "pronouns.avif",
+        "farm.smol" => "smol.avif",
         _ => return None,
     })
 }
@@ -121,11 +123,13 @@ fn category_for(prefix: &str) -> &'static str {
         "pub.leaflet" | "sh.tangled" | "dev.npmx" | "com.vibe-coded" => "Create",
         // Music, video, games, reading.
         "app.rocksky" | "fm.teal" | "place.stream" | "app.skytube" | "app.skyreader"
-        | "social.popfeed" | "net.anisota" | "actor.rpg" | "equipment.rpg" => "Immerse",
+        | "social.popfeed" | "net.anisota" | "actor.rpg" | "equipment.rpg" | "farm.smol" => {
+            "Immerse"
+        }
         // Events, community, links.
         "events.smokesignal" | "link.woosh" | "com.atprotofans" => "Gather",
         // Profile, work, fitness, identity.
-        "id.sifa" | "place.atwork" | "app.fitsky" | "computer.aetheros" => "Grow",
+        "id.sifa" | "place.atwork" | "app.fitsky" | "computer.aetheros" | "blue.pronouns" => "Grow",
         _ => "Explore",
     }
 }
