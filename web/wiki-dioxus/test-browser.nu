@@ -16,7 +16,7 @@
 #   nu test-browser.nu                     # Unauthenticated smoke tests (Servo)
 #   nu test-browser.nu --firefox           # Drive real Firefox (geckodriver)
 #   nu test-browser.nu --firefox --shots   # Also save light/dark x desktop/mobile
-#                                          #   PNGs of key screens to ./screenshots
+#                                          #   PNG images of key screens to ./screenshots
 #   nu test-browser.nu --timeout 30        # Per-wait timeout (seconds)
 #   nu test-browser.nu --verbose           # Print WebDriver-server stderr at end
 #   nu test-browser.nu --keep              # Keep dx serve + browser running after
@@ -376,10 +376,26 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     log-ok "login established a session"; $p = $p + 1
     sleep 3sec
 
-    # The greeting should replace the logged-out copy.
-    let r = (assert-contains $session_id "greeting shows the user" "#main .body-large" "Hello" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    # The welcome card (the root node's content) renders for the authed user; its
+    # title carries "RadikalWiki" in every locale. This also proves the catch-all
+    # serves `/` (empty segments -> root node -> wiki/home -> HomeApp).
+    let r = (assert-contains $session_id "home shows the welcome card" "#main" "RadikalWiki" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (check-contrast $session_id "home (authenticated)" $p $fl); $p = $r.passed; $fl = $r.failed
     capture-shots $session_id "home"
+
+    # The root editor is reachable at `/?app=editor` (the owner "edit" button on
+    # the welcome card links here). The root has no URL path, so this exercises the
+    # dedicated `/` route sharing the resolver, not a separate `/edit/welcome` route.
+    wd-navigate $session_id $"(base-url)/?app=editor"
+    sleep 2800ms
+    let root_ed = (wd-execute $session_id 'return (document.querySelector(".author-field") && document.querySelector("[contenteditable]"))?"y":"n"')
+    if $root_ed == "y" { log-ok "root editor renders at /?app=editor"; $p = $p + 1 } else { log-fail "root editor did not render at /?app=editor"; $fl = $fl + 1 }
+    # Returning to `/` must show the welcome again (the `Home` route round-trips;
+    # regression: an empty catch-all serialized to a relative "?" and stuck).
+    wd-navigate $session_id $"(base-url)/"
+    sleep 2000ms
+    let back_home = (wd-execute $session_id 'return [...document.querySelectorAll(".material-icons")].some(function(e){return e.textContent.trim()==="waving_hand"})?"y":"n"')
+    if $back_home == "y" { log-ok "navigating back to / shows the welcome"; $p = $p + 1 } else { log-fail "/ did not show the welcome after the editor"; $fl = $fl + 1 }
 
     # User menu: clicking the avatar opens a dropdown that stays fully within the
     # viewport, and the trigger has no stray border (regression: the primitive

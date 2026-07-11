@@ -284,11 +284,10 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         // Invalidate the cached node so the view we return to
                         // shows the saved content instead of the stale copy.
                         crate::session::bump_data_version();
-                        // Empty segments means the parent-less root node (its
-                        // content backs the welcome page), which lives at the
-                        // Home route rather than a `PathPage`.
+                        // Return to the node we just edited. Empty segments is the
+                        // root node, which has its own `/` route (`Home`).
                         if segments.is_empty() {
-                            nav.push(Route::HomeApp {});
+                            nav.push(Route::Home { app: None });
                         } else {
                             nav.push(Route::PathPage {
                                 segments: segments.clone(),

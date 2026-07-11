@@ -45,6 +45,16 @@ pub fn PathPage(segments: Vec<String>, app: Option<String>) -> Element {
     }
 }
 
+/// `/`: its own route (Dioxus 0.7 can't serialize the empty catch-all to a
+/// usable URL), sharing the same [`PathResolver`] as every other path. Without
+/// an app it renders the welcome; `?app=editor` opens the owner-only root editor.
+#[component]
+pub fn Home(app: Option<String>) -> Element {
+    rsx! {
+        PathResolver { segments: Vec::<String>::new(), app }
+    }
+}
+
 /// Resolves a path to a node and renders the matching app. The query re-runs
 /// whenever the path (or token) changes.
 #[component]
@@ -63,8 +73,24 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     // pre-edit node until a full reload.
     let segs = segments.clone();
     let node_future = crate::use_data_resource!(|(segs, access_token)| async move {
-        graphql::resolve_path(access_token.as_deref(), &segs).await
+        // Empty segments is `/?app=editor` (the root editor): the root has no path
+        // row, so `resolve_path(&[])` is `None`; fetch it by id instead. The
+        // plain `/` welcome below does not depend on this succeeding.
+        if segs.is_empty() {
+            graphql::query_root_node(access_token.as_deref()).await
+        } else {
+            graphql::resolve_path(access_token.as_deref(), &segs).await
+        }
     });
+
+    // `/` (empty path, no app) is the welcome page. Render HomeApp directly: it
+    // fetches the root itself and still renders when logged out (or when the root
+    // isn't readable), whereas resolving the root here would 404 for an anonymous
+    // visitor and hide the welcome card + login links. `/?app=editor` falls
+    // through to the resolver below to open the owner editor on the root node.
+    if segments.is_empty() && app.as_deref() != Some("editor") {
+        return rsx! { HomeApp {} };
+    }
 
     let result = node_future.read().clone();
     match result {

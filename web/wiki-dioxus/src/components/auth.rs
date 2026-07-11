@@ -85,7 +85,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                             // Refetch everything for the new session so no data
                             // from a previous one lingers (React clears its cache).
                             crate::session::bump_data_version();
-                            nav.push(Route::HomeApp {});
+                            nav.push(Route::Home { app: None });
                         }
                         Err(err) => {
                             if err.error.as_deref() == Some("unverified-user") {
@@ -170,7 +170,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                     let token = SESSION.read().access_token.clone().unwrap_or_default();
                     match nhost::change_password(&token, &pw).await {
                         Ok(()) => {
-                            nav.push(Route::HomeApp {});
+                            nav.push(Route::Home { app: None });
                         }
                         Err(err) => {
                             error_password.set(err.to_string());

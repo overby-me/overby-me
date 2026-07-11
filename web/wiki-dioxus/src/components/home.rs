@@ -47,7 +47,7 @@ pub fn HomeApp() -> Element {
                         // Owner-only: edit the welcome text (root node content).
                         if can_edit {
                             Link {
-                                to: Route::EditWelcome {},
+                                to: Route::Home { app: Some("editor".to_string()) },
                                 class: "btn-icon",
                                 title: "{t(\"mime.editor\")}",
                                 span { class: "material-icons", "edit" }
@@ -117,46 +117,6 @@ pub fn HomeApp() -> Element {
                 }
             }
         }
-    }
-}
-
-/// Owner-only editor for the root node's content (the welcome text). The normal
-/// `?app=editor` route can't reach the root (it has no URL path, so
-/// `resolve_path(&[])` is `None`), so this thin wrapper loads the root node and
-/// hands it to the shared [`EditorApp`].
-#[component]
-pub fn EditWelcome() -> Element {
-    let session = use_session();
-    let token = session.read().access_token.clone();
-    let root = crate::use_data_resource!(|(token)| async move {
-        graphql::query_root_node(token.as_deref())
-            .await
-            .ok()
-            .flatten()
-    });
-
-    let state = root.read().clone();
-    match state {
-        Some(Some(node)) => {
-            let can_edit = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
-            if can_edit {
-                rsx! {
-                    super::editor::EditorApp { node }
-                }
-            } else {
-                rsx! {
-                    div { class: "card",
-                        div { class: "card-content",
-                            p { class: "body-large", "{t(\"node.documentUnavailable\")}" }
-                        }
-                    }
-                }
-            }
-        }
-        Some(None) => rsx! {},
-        None => rsx! {
-            super::widgets::Spinner {}
-        },
     }
 }
 

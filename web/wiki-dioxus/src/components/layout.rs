@@ -518,7 +518,7 @@ fn Breadcrumbs() -> Element {
             onmouseleave: move |_| hovered.set(None),
             if show_home {
                 BreadcrumbCrumb {
-                    to: Route::HomeApp {},
+                    to: Route::Home { app: None },
                     mime: "app/home".to_string(),
                     name: t("common.home"),
                     ordinal: None,
@@ -620,7 +620,12 @@ fn context_apps(route: &Route, is_auth: bool) -> Vec<(&'static str, String, Rout
         // Home: the folder/speak/vote/member apps all need a context, but show
         // the Home destination (active) so the rail isn't blank on the landing
         // page.
-        return vec![("app/home", t("common.home"), Route::HomeApp {}, true)];
+        return vec![(
+            "app/home",
+            t("common.home"),
+            Route::Home { app: None },
+            true,
+        )];
     }
     let current_app = match route {
         Route::PathPage { app, .. } => app.clone(),
@@ -631,7 +636,12 @@ fn context_apps(route: &Route, is_auth: bool) -> Vec<(&'static str, String, Rout
     let ctx_path = context_path(&segments);
 
     let mut apps: Vec<(&str, String, Route, bool)> = vec![
-        ("app/home", t("common.home"), Route::HomeApp {}, false),
+        (
+            "app/home",
+            t("common.home"),
+            Route::Home { app: None },
+            false,
+        ),
         (
             "app/folder",
             t("mime.folder"),
@@ -846,7 +856,7 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                                 // Drop cached data so nothing from the old session
                                 // lingers (React clears the GraphQL cache here).
                                 crate::session::bump_data_version();
-                                nav.push(Route::HomeApp {});
+                                nav.push(Route::Home { app: None });
                             },
                             span { class: "material-icons", "logout" }
                             " {t(\"auth.logout\")}"
@@ -908,7 +918,7 @@ fn DrawerContent() -> Element {
                 if segments.is_empty() {
                     // At the home route: Home, styled as a bar like the top panel.
                     Link {
-                        to: Route::HomeApp {},
+                        to: Route::Home { app: None },
                         class: "bar drawer-context-bar",
                         div { class: "avatar small", span { class: "material-icons", "home" } }
                         span { class: "drawer-context-name", "{t(\"common.home\")}" }
@@ -926,7 +936,7 @@ fn DrawerContent() -> Element {
                     // On mobile there is no app rail, so keep Home reachable here
                     // (desktop reaches it via the rail).
                     Link {
-                        to: Route::HomeApp {},
+                        to: Route::Home { app: None },
                         class: "list-item drawer-mobile-home",
                         div { class: "avatar small", span { class: "material-icons", "home" } }
                         div { class: "list-item-text",
