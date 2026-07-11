@@ -948,12 +948,6 @@ fn MenuList(segments: Vec<String>) -> Element {
     }
 }
 
-/// Whether a mime type can hold children (so its drawer row gets an expander).
-/// Leaves (documents, files, maps) never do.
-fn mime_has_children(mime_id: &str) -> bool {
-    !matches!(mime_id, "wiki/document" | "wiki/file" | "map/map")
-}
-
 /// One lazily-loaded level of the drawer tree: the visible children of
 /// `parent_id`, ordered like the folder view.
 #[component]
@@ -972,7 +966,7 @@ fn DrawerLevel(
         let Some(user_id) = user_id else {
             return Vec::new();
         };
-        graphql::query_children(access_token.as_deref(), &parent, &user_id)
+        graphql::query_drawer_children(access_token.as_deref(), &parent, &user_id)
             .await
             .unwrap_or_default()
     });
@@ -1003,7 +997,7 @@ fn DrawerLevel(
 /// path start expanded and the active node is highlighted.
 #[component]
 fn DrawerNodeItem(
-    node: graphql::ChildNodeFields,
+    node: graphql::DrawerChildFields,
     path_prefix: Vec<String>,
     current_path: Vec<String>,
     depth: usize,
@@ -1023,7 +1017,10 @@ fn DrawerNodeItem(
     let selected = full_path == current_path;
 
     let mime_id = node.mime_id.clone().unwrap_or_default();
-    let expandable = mime_has_children(&mime_id);
+    // Show the expander only when the node actually has children the user can
+    // see (per-row `children_aggregate` count), not merely because its mime type
+    // *could* have children. Mirrors the React DrawerElement gate.
+    let expandable = node.has_children();
     let node_name = node.name.clone();
 
     // Auto-expand ancestors of the current node; let the user toggle the rest.

@@ -238,6 +238,9 @@ pub struct ChildNodeFields {
     pub is_context_owner: Option<bool>,
     // Creating user (fallback label for questions/candidates/comments/amendments).
     pub owner: Option<UserRef>,
+    // The parent node, for the "Newest" list's secondary line ("in <parent>"),
+    // matching how search results show their context.
+    pub parent: Option<ParentNodeFields>,
 }
 
 // --- Mime type ---
@@ -327,6 +330,62 @@ pub struct ChildrenQuery {
     pub nodes: Vec<ChildNodeFields>,
 }
 
+#[derive(cynic::QueryVariables, Debug)]
+pub struct DrawerChildrenVariables {
+    pub where_clause: NodesBoolExp,
+    pub order_by: Option<Vec<NodesOrderBy>>,
+    // Filter for the per-row `children_aggregate` count, so the drawer expander
+    // only appears for nodes that actually have children the user can see.
+    pub child_visible: NodesBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "DrawerChildrenVariables"
+)]
+pub struct DrawerChildrenQuery {
+    #[arguments(where: $where_clause, order_by: $order_by)]
+    pub nodes: Vec<DrawerChildFields>,
+}
+
+/// One drawer-tree row: just enough to render the node, plus a count of the
+/// node's visible children so the expander chevron only shows when there is
+/// something to expand (mirrors the React `DrawerElement`'s `children_aggregate`
+/// gate). Kept separate from `ChildNodeFields` so the `$child_visible` variable
+/// stays local to the drawer query.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "nodes",
+    variables = "DrawerChildrenVariables"
+)]
+pub struct DrawerChildFields {
+    pub id: Uuid,
+    pub name: String,
+    pub key: String,
+    pub mime_id: Option<String>,
+    pub mutable: bool,
+    pub data: Option<Jsonb>,
+    #[cynic(rename = "children_aggregate")]
+    #[arguments(where: $child_visible)]
+    pub children_aggregate: NodesAggregate,
+}
+
+impl DrawerChildFields {
+    /// Whether this node has at least one child visible to the caller — the gate
+    /// for showing the drawer expander. Matches React's `childrenCount > 0`.
+    pub fn has_children(&self) -> bool {
+        self.children_aggregate
+            .aggregate
+            .as_ref()
+            .map(|a| a.count)
+            .unwrap_or(0)
+            > 0
+    }
+}
+
 // --- Query: recent nodes across the user's contexts (home "Newest") ---
 
 #[derive(cynic::QueryVariables, Debug)]
@@ -377,6 +436,10 @@ pub struct NodesBoolExp {
     pub members: Option<MembersBoolExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub mime: Option<MimesBoolExp>,
+    // The node's context (nearest group/event). Boxed for the self-reference.
+    // Used to keep the "Newest" list to contexts the user belongs to.
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub context: Option<Box<NodesBoolExp>>,
 }
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -1719,7 +1782,7 @@ pub struct NodesCountQuery {
     pub nodes_aggregate: NodesAggregate,
 }
 
-#[derive(cynic::QueryFragment, Debug)]
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "nodes_aggregate"
@@ -1728,7 +1791,7 @@ pub struct NodesAggregate {
     pub aggregate: Option<NodesAggregateFields>,
 }
 
-#[derive(cynic::QueryFragment, Debug)]
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "nodes_aggregate_fields"
@@ -1898,22 +1961,41 @@ pub async fn search_nodes(
     Ok(result.nodes)
 }
 
-/// The most recently created content nodes the user can see (home "Newest",
-/// #34). Hasura's row permissions already scope this to the caller's visible
-/// nodes, so no per-context filter is needed.
-pub async fn query_recent_nodes(access_token: Option<&str>, limit: i32) -> Vec<ChildNodeFields> {
+/// The most recently created content nodes for the home "Newest" list (#34):
+/// submitted (immutable) content whose context (group/event) the user belongs
+/// to. Drafts and content from contexts the user is not part of are excluded.
+pub async fn query_recent_nodes(
+    access_token: Option<&str>,
+    limit: i32,
+    user_id: &str,
+) -> Vec<ChildNodeFields> {
     let where_clause = NodesBoolExp {
-        mime_id: Some(StringComparisonExp {
-            in_: Some(vec![
-                "wiki/document".to_string(),
-                "vote/policy".to_string(),
-                "vote/change".to_string(),
-                "vote/position".to_string(),
-                "vote/candidate".to_string(),
-                "wiki/file".to_string(),
-            ]),
-            ..Default::default()
-        }),
+        and: Some(vec![
+            NodesBoolExp {
+                mime_id: Some(StringComparisonExp {
+                    in_: Some(vec![
+                        "wiki/document".to_string(),
+                        "vote/policy".to_string(),
+                        "vote/change".to_string(),
+                        "vote/position".to_string(),
+                        "vote/candidate".to_string(),
+                        "wiki/file".to_string(),
+                    ]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            // Submitted only — drafts (mutable) never appear in Newest.
+            NodesBoolExp {
+                mutable: Some(BooleanComparisonExp { eq: Some(false) }),
+                ..Default::default()
+            },
+            // Only content in a context (group/event) the user belongs to.
+            NodesBoolExp {
+                context: Some(Box::new(belongs_to_user(user_id))),
+                ..Default::default()
+            },
+        ]),
         ..Default::default()
     };
     let order_by = vec![NodesOrderBy {
@@ -2287,7 +2369,9 @@ pub async fn insert_comment(
 
 /// Build the `where` filter for the user's context nodes (groups or events) of
 /// a given mime type: nodes the user owns or has an accepted membership in.
-fn contexts_where_clause(user_id: &str, mime_id: &str) -> NodesBoolExp {
+/// Nodes the user "belongs to": ones they own or have an accepted membership in.
+/// Shared by the contexts list and the "Newest" list's context filter.
+fn belongs_to_user(user_id: &str) -> NodesBoolExp {
     let owned = NodesBoolExp {
         owner_id: Some(UuidComparisonExp {
             eq: Some(Uuid(user_id.to_string())),
@@ -2314,7 +2398,13 @@ fn contexts_where_clause(user_id: &str, mime_id: &str) -> NodesBoolExp {
         }),
         ..Default::default()
     };
+    NodesBoolExp {
+        or: Some(vec![owned, member]),
+        ..Default::default()
+    }
+}
 
+fn contexts_where_clause(user_id: &str, mime_id: &str) -> NodesBoolExp {
     NodesBoolExp {
         and: Some(vec![
             NodesBoolExp {
@@ -2324,10 +2414,7 @@ fn contexts_where_clause(user_id: &str, mime_id: &str) -> NodesBoolExp {
                 }),
                 ..Default::default()
             },
-            NodesBoolExp {
-                or: Some(vec![owned, member]),
-                ..Default::default()
-            },
+            belongs_to_user(user_id),
         ]),
         ..Default::default()
     }
@@ -2371,8 +2458,11 @@ pub async fn query_orphans(access_token: Option<&str>) -> Result<Vec<ContextNode
 /// Build the `where` filter for a node's visible children, mirroring the React
 /// drawer (`DrawerList`): children the user may see (immutable, or owned, or a
 /// member of) whose mime is not hidden.
-fn children_where_clause(parent_id: &str, user_id: &str) -> NodesBoolExp {
-    let visible = NodesBoolExp {
+/// A node is "visible" to the user when it is published, owned by them, or one
+/// they are a member of. Shared by the drawer's child query and its per-row
+/// `children_aggregate` count.
+fn visible_to_user(user_id: &str) -> NodesBoolExp {
+    NodesBoolExp {
         or: Some(vec![
             NodesBoolExp {
                 mutable: Some(BooleanComparisonExp { eq: Some(false) }),
@@ -2397,8 +2487,31 @@ fn children_where_clause(parent_id: &str, user_id: &str) -> NodesBoolExp {
             },
         ]),
         ..Default::default()
-    };
+    }
+}
 
+/// Filter excluding nodes whose mime type is marked hidden.
+fn mime_not_hidden() -> NodesBoolExp {
+    NodesBoolExp {
+        mime: Some(MimesBoolExp {
+            hidden: Some(BooleanComparisonExp { eq: Some(false) }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// The filter for a node's *visible* children (no parent constraint — the
+/// `children_aggregate` relation is already scoped to the node). Drives the
+/// drawer expander so it only appears when there are children to reveal.
+fn child_visibility_clause(user_id: &str) -> NodesBoolExp {
+    NodesBoolExp {
+        and: Some(vec![visible_to_user(user_id), mime_not_hidden()]),
+        ..Default::default()
+    }
+}
+
+fn children_where_clause(parent_id: &str, user_id: &str) -> NodesBoolExp {
     NodesBoolExp {
         and: Some(vec![
             NodesBoolExp {
@@ -2408,14 +2521,8 @@ fn children_where_clause(parent_id: &str, user_id: &str) -> NodesBoolExp {
                 }),
                 ..Default::default()
             },
-            visible,
-            NodesBoolExp {
-                mime: Some(MimesBoolExp {
-                    hidden: Some(BooleanComparisonExp { eq: Some(false) }),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
+            visible_to_user(user_id),
+            mime_not_hidden(),
         ]),
         ..Default::default()
     }
@@ -2429,7 +2536,39 @@ pub async fn query_children(
     user_id: &str,
 ) -> Result<Vec<ChildNodeFields>, String> {
     let where_clause = children_where_clause(parent_id, user_id);
-    let order_by = vec![
+    let order_by = drawer_child_order();
+    let operation = ChildrenQuery::build(ChildrenVariables {
+        where_clause,
+        order_by: Some(order_by),
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.nodes)
+}
+
+/// The drawer-tree variant of `query_children`: same visible-children filter and
+/// ordering, but each row also carries a `children_aggregate` count so the
+/// expander chevron only shows for nodes that actually have visible children.
+pub async fn query_drawer_children(
+    access_token: Option<&str>,
+    parent_id: &str,
+    user_id: &str,
+) -> Result<Vec<DrawerChildFields>, String> {
+    let where_clause = children_where_clause(parent_id, user_id);
+    let child_visible = child_visibility_clause(user_id);
+    let order_by = drawer_child_order();
+    let operation = DrawerChildrenQuery::build(DrawerChildrenVariables {
+        where_clause,
+        order_by: Some(order_by),
+        child_visible,
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.nodes)
+}
+
+/// Shared ordering for a node's children: by explicit index, then creation time
+/// (the folder view's order).
+fn drawer_child_order() -> Vec<NodesOrderBy> {
+    vec![
         NodesOrderBy {
             index: Some(OrderBy::Asc),
             created_at: None,
@@ -2438,13 +2577,7 @@ pub async fn query_children(
             index: None,
             created_at: Some(OrderBy::Asc),
         },
-    ];
-    let operation = ChildrenQuery::build(ChildrenVariables {
-        where_clause,
-        order_by: Some(order_by),
-    });
-    let result = execute(access_token, operation).await?;
-    Ok(result.nodes)
+    ]
 }
 
 /// Resolve the path (list of keys from the root's child down to the node) for a

@@ -81,9 +81,13 @@ pub fn HomeApp() -> Element {
 fn RecentContents() -> Element {
     let session = use_session();
     let token = session.read().access_token.clone();
+    let user_id = session.read().user.as_ref().map(|u| u.id.clone());
 
-    let recent = crate::use_data_resource!(|(token)| async move {
-        graphql::query_recent_nodes(token.as_deref(), 8).await
+    let recent = crate::use_data_resource!(|(token, user_id)| async move {
+        let Some(user_id) = user_id else {
+            return Vec::new();
+        };
+        graphql::query_recent_nodes(token.as_deref(), 8, &user_id).await
     });
     let items = recent.read().clone().unwrap_or_default();
     if items.is_empty() {
@@ -94,7 +98,7 @@ fn RecentContents() -> Element {
         div { class: "card mt-2",
             div { class: "card-header",
                 div { class: "avatar", span { class: "material-icons", "schedule" } }
-                h3 { class: "title-medium", "{t(\"layout.newest\")}" }
+                h3 { class: "title-medium", "{t(\"layout.newestContent\")}" }
             }
             div { class: "list",
                 for node in items.iter() {
@@ -134,6 +138,9 @@ fn RecentItem(node: graphql::ChildNodeFields) -> Element {
             }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{node.name}" }
+                if let Some(parent) = node.parent.as_ref() {
+                    div { class: "list-item-secondary", "{parent.name}" }
+                }
             }
         }
     }

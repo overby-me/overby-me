@@ -322,15 +322,34 @@ pub fn NodeAvatar(
     }
 }
 
+/// Nodes that expose a mime id, so `sibling_ordinals` can run over either the
+/// full `ChildNodeFields` (folder view, export) or the lean `DrawerChildFields`
+/// (drawer tree).
+pub trait HasMimeId {
+    fn mime_id_str(&self) -> Option<&str>;
+}
+
+impl HasMimeId for graphql::ChildNodeFields {
+    fn mime_id_str(&self) -> Option<&str> {
+        self.mime_id.as_deref()
+    }
+}
+
+impl HasMimeId for graphql::DrawerChildFields {
+    fn mime_id_str(&self) -> Option<&str> {
+        self.mime_id.as_deref()
+    }
+}
+
 /// For each child, its ordinal among preceding siblings of the SAME lettered /
 /// numbered mime (policies, changes). Others get `None`. Feeds `node_avatar` so
 /// the A/B/C and 1/2/3 labels count within their own type, like the old wiki.
-pub fn sibling_ordinals(children: &[graphql::ChildNodeFields]) -> Vec<Option<usize>> {
+pub fn sibling_ordinals<T: HasMimeId>(children: &[T]) -> Vec<Option<usize>> {
     let mut policies = 0usize;
     let mut changes = 0usize;
     children
         .iter()
-        .map(|c| match c.mime_id.as_deref() {
+        .map(|c| match c.mime_id_str() {
             Some("vote/policy") => {
                 let o = policies;
                 policies += 1;
@@ -437,6 +456,7 @@ mod tests {
             is_owner: None,
             is_context_owner: None,
             owner: None,
+            parent: None,
             data: None,
             mime: Some(MimeFields {
                 id: "wiki/folder".to_string(),

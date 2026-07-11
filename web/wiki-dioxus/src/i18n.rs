@@ -189,7 +189,7 @@ const EN_JSON: &str = r#"{
         "dark": "Dark",
         "light": "Light",
         "userMenu": "User menu",
-        "newest": "Newest",
+        "newestContent": "Newest content",
         "darkMode": "Dark mode"
     },
     "error": {
@@ -472,7 +472,7 @@ const DA_JSON: &str = r#"{
         "dark": "M\u00f8rk",
         "light": "Lys",
         "userMenu": "Brugermenu",
-        "newest": "Nyeste",
+        "newestContent": "Nyeste indhold",
         "darkMode": "Mørk tilstand"
     },
     "error": {

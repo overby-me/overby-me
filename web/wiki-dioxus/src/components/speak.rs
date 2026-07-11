@@ -597,6 +597,7 @@ mod tests {
             is_owner: None,
             is_context_owner: None,
             owner: None,
+            parent: None,
             data: Some(Jsonb(serde_json::Value::String(kind.to_string()))),
             mime: None,
         }
