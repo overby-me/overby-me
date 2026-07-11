@@ -42,6 +42,8 @@ pub struct Platform {
     /// Where clicking the node should take you (a profile if we know the shape,
     /// otherwise the app's homepage).
     pub profile_url: String,
+    /// The intermediate category node this platform groups under.
+    pub category: &'static str,
 }
 
 /// Real bundled logos, keyed by NSID authority. These are pre-made circular
@@ -105,6 +107,58 @@ fn canonical_prefix(prefix: &str) -> &str {
         "social.pinksky" => "app.pinkleap",
         other => other,
     }
+}
+
+/// The intermediate category a platform groups under (like the personal graph's
+/// Connect / Immerse / … hubs). Unknown apps land under `Explore`.
+fn category_for(prefix: &str) -> &'static str {
+    match prefix {
+        // Social & messaging.
+        "app.bsky" | "app.pinkleap" | "so.sprk" | "app.shadowsky" | "com.shadowsky" => "Connect",
+        // Writing, code, publishing.
+        "pub.leaflet" | "sh.tangled" | "dev.npmx" | "com.vibe-coded" => "Create",
+        // Music, video, games, reading.
+        "app.rocksky" | "fm.teal" | "place.stream" | "app.skytube" | "app.skyreader"
+        | "social.popfeed" | "net.anisota" | "actor.rpg" | "equipment.rpg" => "Immerse",
+        // Events, community, links.
+        "events.smokesignal" | "link.woosh" | "com.atprotofans" => "Gather",
+        // Profile, work, fitness, identity.
+        "id.sifa" | "place.atwork" | "app.fitsky" | "computer.aetheros" => "Grow",
+        _ => "Explore",
+    }
+}
+
+/// Category node ordering, so hubs appear in a stable, sensible sequence.
+pub const CATEGORY_ORDER: &[&str] = &["Connect", "Create", "Immerse", "Gather", "Grow", "Explore"];
+
+// Category hub symbols: white glyphs on a transparent background, shown inside
+// the node's translucent colored halo.
+const CONNECT_SYMBOL: &str = "<rect x='56' y='66' width='144' height='100' rx='26' fill='#fff'/><polygon points='96,166 96,198 128,166' fill='#fff'/>";
+const CREATE_SYMBOL: &str =
+    "<polygon points='128,58 143,113 198,128 143,143 128,198 113,143 58,128 113,113' fill='#fff'/>";
+const IMMERSE_SYMBOL: &str = "<polygon points='104,82 104,174 182,128' fill='#fff'/>";
+const GATHER_SYMBOL: &str = "<circle cx='100' cy='114' r='28' fill='#fff'/><circle cx='156' cy='114' r='28' fill='#fff'/><circle cx='128' cy='166' r='28' fill='#fff'/>";
+const GROW_SYMBOL: &str =
+    "<polygon points='128,58 192,128 156,128 156,198 100,198 100,128 64,128' fill='#fff'/>";
+const EXPLORE_SYMBOL: &str = "<circle cx='128' cy='128' r='56' fill='none' stroke='#fff' stroke-width='14'/><polygon points='128,98 140,128 128,158 116,128' fill='#fff'/>";
+
+/// Halo color + symbol icon (SVG data URL) for a category hub node.
+pub fn category_meta(name: &str) -> (&'static str, String) {
+    let (color, symbol) = match name {
+        "Connect" => ("#e34234", CONNECT_SYMBOL),
+        "Create" => ("#7fc24a", CREATE_SYMBOL),
+        "Immerse" => ("#ff7f50", IMMERSE_SYMBOL),
+        "Gather" => ("#45b1e8", GATHER_SYMBOL),
+        "Grow" => ("#6a5acd", GROW_SYMBOL),
+        _ => ("#9aa0b5", EXPLORE_SYMBOL),
+    };
+    let svg = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 256 256'>{symbol}</svg>"
+    );
+    (
+        color,
+        format!("data:image/svg+xml,{}", percent_encode(&svg)),
+    )
 }
 
 /// Reverse a 2-segment prefix into a domain: `sh.tangled` -> `tangled.sh`.
@@ -301,6 +355,7 @@ pub fn detect_platforms(collections: &[String], handle: &str, did: &str) -> Vec<
         };
         platforms.push(Platform {
             icon,
+            category: category_for(prefix),
             name,
             domain,
             profile_url,
@@ -415,6 +470,46 @@ mod tests {
         assert_eq!(icon_of("Teal.fm"), Some(Icon::Bundled("teal.avif")));
         // (The generated-badge fallback for logo-less apps is covered by
         // `derives_name_and_badge_for_unknown_apps`.)
+    }
+
+    #[test]
+    fn assigns_platforms_to_categories() {
+        let p = detect_platforms(&overby_collections(), "overby.me", "did:plc:abc");
+        let cat_of = |name: &str| p.iter().find(|x| x.name == name).map(|x| x.category);
+        assert_eq!(cat_of("Bluesky"), Some("Connect"));
+        assert_eq!(cat_of("Tangled"), Some("Create"));
+        assert_eq!(cat_of("Rocksky"), Some("Immerse"));
+        assert_eq!(cat_of("Smoke Signal"), Some("Gather"));
+        assert_eq!(cat_of("Sifa"), Some("Grow"));
+        // Every category used must be listed in CATEGORY_ORDER.
+        for platform in &p {
+            assert!(
+                CATEGORY_ORDER.contains(&platform.category),
+                "{}",
+                platform.category
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_apps_fall_under_explore() {
+        let p = detect_platforms(
+            &["com.example.thing.record".to_string()],
+            "overby.me",
+            "did:plc:abc",
+        );
+        assert_eq!(p[0].category, "Explore");
+    }
+
+    #[test]
+    fn category_meta_gives_color_and_svg_icon() {
+        for cat in CATEGORY_ORDER {
+            let (color, icon) = category_meta(cat);
+            assert!(color.starts_with('#'), "{cat} color: {color}");
+            assert!(icon.starts_with("data:image/svg+xml,"), "{cat} icon");
+        }
+        // Unknown name uses the Explore fallback styling.
+        assert_eq!(category_meta("Nonsense").0, "#9aa0b5");
     }
 
     #[test]

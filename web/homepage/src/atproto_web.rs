@@ -9,7 +9,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::Response;
 
-use crate::atproto::{Platform, detect_platforms, fallback_avatar};
+use crate::atproto::{CATEGORY_ORDER, Platform, category_meta, detect_platforms, fallback_avatar};
 use crate::graph::data::{GraphData, GraphLink, GraphNode};
 
 // --- JSON response shapes (only the fields we consume) ---
@@ -145,8 +145,8 @@ async fn fetch_profile(pds: &str, did: &str) -> (Option<String>, Option<String>)
     (value.display_name, avatar_url)
 }
 
-/// Assemble the hub-and-spoke graph: the account at the center, one leaf per
-/// detected platform, each linked to the center.
+/// Assemble the graph: the account at the center, intermediate category hubs
+/// (Connect / Create / …), and each detected platform as a leaf under its hub.
 fn build_graph(
     display_name: Option<String>,
     avatar_url: Option<String>,
@@ -154,9 +154,10 @@ fn build_graph(
     did: &str,
     platforms: Vec<Platform>,
 ) -> GraphData {
-    // A stable center id independent of the (user-controlled) display text, so
-    // it can never collide with a platform node's id.
+    // Node ids are namespaced with a control char so the center and category
+    // hubs can never collide with a (user-controlled) platform name.
     const CENTER_ID: &str = "\u{1}center";
+    let cat_id = |c: &str| format!("\u{1}{c}");
 
     let is_did_handle = handle.starts_with("did:");
     let name = display_name.unwrap_or_else(|| handle.to_string());
@@ -180,11 +181,34 @@ fn build_graph(
         )),
         center: true,
     }];
-    let mut links = Vec::with_capacity(platforms.len());
+    let mut links = Vec::new();
 
-    for p in platforms {
+    // Intermediate category hubs: one per category that has platforms, each
+    // linked to the center and drawn with a translucent colored halo.
+    for &cat in CATEGORY_ORDER {
+        if !platforms.iter().any(|p| p.category == cat) {
+            continue;
+        }
+        let (color, icon) = category_meta(cat);
         links.push(GraphLink {
             source: CENTER_ID.to_string(),
+            target: cat_id(cat),
+        });
+        nodes.push(GraphNode {
+            id: cat_id(cat),
+            desc: cat.to_string(),
+            icon,
+            color: Some(color.to_string()),
+            opacity: None,
+            url: None,
+            center: false,
+        });
+    }
+
+    // Platform leaves, each linked to its category hub.
+    for p in platforms {
+        links.push(GraphLink {
+            source: cat_id(p.category),
             target: p.name.clone(),
         });
         nodes.push(GraphNode {
