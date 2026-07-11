@@ -613,7 +613,7 @@ pub async fn export_tree(token: Option<String>, node_id: String, name: String) {
 }
 
 /// A filesystem-safe version of a node name for the download filename.
-fn sanitize_filename(name: &str) -> String {
+pub fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name
         .trim()
         .chars()

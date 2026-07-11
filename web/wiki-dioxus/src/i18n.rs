@@ -318,7 +318,8 @@ const EN_JSON: &str = r#"{
         "deactivate": "Mark inactive",
         "remove": "Remove member",
         "edit": "Edit member",
-        "confirmRemove": "Remove this member?"
+        "confirmRemove": "Remove this member?",
+        "export": "Export participants (CSV)"
     },
     "mime": {
         "group": "Group",
@@ -600,7 +601,8 @@ const DA_JSON: &str = r#"{
         "deactivate": "Markér inaktiv",
         "remove": "Fjern medlem",
         "edit": "Rediger medlem",
-        "confirmRemove": "Fjern dette medlem?"
+        "confirmRemove": "Fjern dette medlem?",
+        "export": "Eksportér deltagere (CSV)"
     },
     "mime": {
         "group": "Gruppe",

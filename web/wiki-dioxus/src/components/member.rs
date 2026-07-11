@@ -79,6 +79,31 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                         "{t(\"common.members\")}"
                     }
                 }
+                div { class: "flex-grow" }
+                // Export the participant roster as CSV (owner action, #41).
+                if can_manage && !members.is_empty() {
+                    button {
+                        class: "btn-icon",
+                        title: "{t(\"member.export\")}",
+                        aria_label: "{t(\"member.export\")}",
+                        onclick: {
+                            let members = members.clone();
+                            let fname = name.clone();
+                            move |_| {
+                                let mut csv = String::from("Name,Email\n");
+                                for m in &members {
+                                    csv.push_str(&csv_field(&m.label()));
+                                    csv.push(',');
+                                    csv.push_str(&csv_field(m.email.as_deref().unwrap_or("")));
+                                    csv.push('\n');
+                                }
+                                let file = format!("{}-participants.csv", crate::export::sanitize_filename(&fname));
+                                crate::export::download_bytes(&file, "text/csv;charset=utf-8", csv.as_bytes());
+                            }
+                        },
+                        span { class: "material-icons", "download" }
+                    }
+                }
             }
 
             // Member list (the node's actual memberships, not its children).
@@ -428,6 +453,16 @@ fn MemberRow(
                 }
             }
         }
+    }
+}
+
+/// Quote a CSV field when it contains a comma, quote, or newline (RFC 4180:
+/// wrap in quotes and double any inner quotes).
+fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
     }
 }
 

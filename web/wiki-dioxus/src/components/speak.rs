@@ -406,11 +406,15 @@ fn SpeakList(
                 div { class: "card-content",
                     div { class: "stack stack-v",
                         {
+                            // Five join types, indexed 0..4 to match React and the
+                            // existing `data` rows ("4" = procedure); higher jumps
+                            // the queue (order_by data desc).
                             let speak_types = [
                                 ("0", t("speak.talk")),
                                 ("1", t("speak.question")),
                                 ("2", t("speak.clarify")),
-                                ("3", t("speak.procedure")),
+                                ("3", t("speak.misunderstood")),
+                                ("4", t("speak.procedure")),
                             ];
                             rsx! {
                                 for (type_key , label) in speak_types {
@@ -490,9 +494,9 @@ fn move_timer(token: Option<String>, list_id: String, secs: i32, mut refresh: Si
     });
 }
 
-/// The speak type stored on a `speak/speak` node's data: `"0"`..`"3"` (talk,
-/// question, clarify, procedure). Higher numbers are procedural and jump the
-/// queue, matching the React `order_by: [{ data: desc }, { createdAt: asc }]`.
+/// The speak type stored on a `speak/speak` node's data: `"0"`..`"4"` (talk,
+/// question, clarify, misunderstood, procedure). Higher numbers are procedural
+/// and jump the queue, matching React `order_by: [{ data: desc }, { createdAt: asc }]`.
 fn speaker_type(node: &ChildNodeFields) -> i64 {
     node.data
         .as_ref()
@@ -507,7 +511,8 @@ fn speaker_type(node: &ChildNodeFields) -> i64 {
 /// Icon + i18n key for a speak type.
 fn speak_type_meta(kind: i64) -> (&'static str, &'static str) {
     match kind {
-        3 => ("gavel", "speak.procedure"),
+        4 => ("gavel", "speak.procedure"),
+        3 => ("campaign", "speak.misunderstood"),
         2 => ("lightbulb", "speak.clarify"),
         1 => ("question_mark", "speak.question"),
         _ => ("record_voice_over", "speak.talk"),
@@ -617,12 +622,12 @@ mod tests {
 
     #[test]
     fn priority_then_arrival_then_owner_override() {
-        // A later procedure (type 3) jumps ahead of an earlier talk (type 0);
+        // A later procedure (type 4) jumps ahead of an earlier talk (type 0);
         // same-type entries keep arrival order.
         let list = vec![
             speaker("talk-early", "0", 0, "2024-01-01T10:00:00Z"),
             speaker("talk-late", "0", 0, "2024-01-01T10:05:00Z"),
-            speaker("procedure", "3", 0, "2024-01-01T10:10:00Z"),
+            speaker("procedure", "4", 0, "2024-01-01T10:10:00Z"),
         ];
         let order: Vec<String> = sorted_speakers(&list)
             .iter()
