@@ -34,12 +34,22 @@ pub fn Chip(icon: Option<String>, label: String, title: Option<String>) -> Eleme
 #[component]
 pub fn ZoomableImage(src: String, alt: String) -> Element {
     let mut zoomed = use_signal(|| false);
+    let mut errored = use_signal(|| false);
     rsx! {
-        img {
-            src: "{src}",
-            alt: "{alt}",
-            class: "zoomable",
-            onclick: move |_| zoomed.set(true),
+        if *errored.read() {
+            // Error state: a broken-image placeholder instead of a dead <img>.
+            div { class: "image-error", title: "{alt}",
+                span { class: "material-icons", "broken_image" }
+            }
+        } else {
+            img {
+                src: "{src}",
+                alt: "{alt}",
+                // `.zoomable` fades the image in on mount (see CSS).
+                class: "zoomable",
+                onerror: move |_| errored.set(true),
+                onclick: move |_| zoomed.set(true),
+            }
         }
         if *zoomed.read() {
             div {
