@@ -192,17 +192,8 @@ pub fn SlateRenderer(data: Option<serde_json::Value>) -> Element {
 
     match content {
         Some(serde_json::Value::Array(blocks)) => {
-            // Table of contents (#117): heading blocks become anchored links.
-            let headings = extract_headings(blocks);
             rsx! {
                 div { class: "slate-content",
-                    if headings.len() >= 2 {
-                        nav { class: "toc", aria_label: "{t(\"content.tableOfContents\")}",
-                            for (level , text , anchor) in headings.iter() {
-                                a { class: "toc-item toc-l{level}", href: "#{anchor}", "{text}" }
-                            }
-                        }
-                    }
                     for (i , block) in blocks.iter().enumerate() {
                         SlateBlock { key: "{i}", index: i, block: block.clone() }
                     }
@@ -220,25 +211,6 @@ pub fn SlateRenderer(data: Option<serde_json::Value>) -> Element {
             }
         }
     }
-}
-
-/// The heading blocks of a Slate document as `(level, text, anchor)`, for the
-/// table of contents. The anchor matches the `id` `SlateBlock` renders.
-fn extract_headings(blocks: &[serde_json::Value]) -> Vec<(u8, String, String)> {
-    blocks
-        .iter()
-        .enumerate()
-        .filter_map(|(i, block)| {
-            let ty = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
-            let level = heading_level(ty)?;
-            let text = block_plain_text(block);
-            if text.trim().is_empty() {
-                return None;
-            }
-            let anchor = heading_anchor(i, &text);
-            Some((level, text, anchor))
-        })
-        .collect()
 }
 
 /// Heading depth (1..6) for a Slate block type, or None if it is not a heading.
@@ -533,21 +505,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn headings_extracted_with_stable_anchors() {
-        let blocks = vec![
-            serde_json::json!({ "type": "heading-one", "children": [{"text": "Intro"}] }),
-            serde_json::json!({ "type": "paragraph", "children": [{"text": "body"}] }),
-            serde_json::json!({ "type": "heading-two", "children": [{"text": "Intro"}] }),
-            serde_json::json!({ "type": "heading-three", "children": [{"text": "  "}] }),
-        ];
-        let hs = extract_headings(&blocks);
-        // Two non-empty headings; the blank one is skipped.
-        assert_eq!(hs.len(), 2);
-        assert_eq!(hs[0], (1, "Intro".to_string(), "h0-intro".to_string()));
-        // Duplicate text gets a distinct anchor via the block index.
-        assert_eq!(hs[1], (2, "Intro".to_string(), "h2-intro".to_string()));
-        // The block renderer computes the same anchor for the same index/text.
+    fn heading_anchor_is_stable_and_slugified() {
+        // Anchor = block index + a slug of the text, so duplicate headings at
+        // different positions still get distinct, stable ids.
         assert_eq!(heading_anchor(0, "Intro"), "h0-intro");
+        assert_eq!(heading_anchor(2, "Intro"), "h2-intro");
+        assert_eq!(heading_anchor(1, "  Hello, World!  "), "h1-hello-world");
     }
 
     #[test]
