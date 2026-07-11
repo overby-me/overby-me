@@ -532,6 +532,13 @@ fn BreadcrumbCrumb(
         div {
             class: "crumb",
             onmouseenter: move |_| hovered.set(Some(crumb_id)),
+            // Clicking a crumb (navigating to an ancestor, or re-clicking the
+            // current node) scrolls the content back to the top.
+            onclick: move |_| {
+                if let Some(win) = web_sys::window() {
+                    win.scroll_to_with_x_and_y(0.0, 0.0);
+                }
+            },
             Link { to, class: "crumb-link",
                 div { class: "avatar small crumb-avatar",
                     {super::loader::node_avatar(&mime, &name, ordinal)}

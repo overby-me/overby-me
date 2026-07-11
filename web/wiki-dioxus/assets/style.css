@@ -246,6 +246,8 @@ a:hover {
         bottom: 0;
         width: 400px;
         border-right: 1px solid var(--md-outline);
+        border-top-right-radius: 16px;
+        border-bottom-right-radius: 16px;
         background: var(--md-surface);
         overflow-y: auto;
         /* 8px so the context bar aligns with the top panel (which is top:0 +
