@@ -12,6 +12,11 @@ _: {
           "browser.ml.chat.shortcuts.custom" = true;
           "browser.ml.chat.sidebar" = true;
           "layout.spellcheckDefault" = 0;
+          # Hardware-accelerated video decoding via VA-API (Intel iHD iGPU).
+          # Without these, Zen falls back to multi-threaded ffmpeg software
+          # H.264 decode, which can saturate ~17 cores on video-heavy pages.
+          "media.ffmpeg.vaapi.enabled" = true;
+          "media.hardware-video-decoding.force-enabled" = true;
         };
       };
       dev =
