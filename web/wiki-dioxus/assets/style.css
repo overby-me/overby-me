@@ -324,7 +324,9 @@ a:hover {
         bottom: 0;
         padding-top: 64px;
         gap: 8px;
-        background: var(--md-surface-container);
+        /* Same surface as the drawer to its right, so the left chrome (rail +
+         * drawer) reads as one continuous panel instead of two tones. */
+        background: var(--md-surface);
     }
 }
 

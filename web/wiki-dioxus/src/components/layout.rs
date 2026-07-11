@@ -617,7 +617,10 @@ fn context_apps(route: &Route, is_auth: bool) -> Vec<(&'static str, String, Rout
         _ => vec![],
     };
     if segments.is_empty() {
-        return vec![];
+        // Home: the folder/speak/vote/member apps all need a context, but show
+        // the Home destination (active) so the rail isn't blank on the landing
+        // page.
+        return vec![("app/home", t("common.home"), Route::HomeApp {}, true)];
     }
     let current_app = match route {
         Route::PathPage { app, .. } => app.clone(),
