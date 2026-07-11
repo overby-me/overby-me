@@ -121,6 +121,8 @@ pub struct NodeFields {
     pub is_owner: Option<bool>,
     pub is_context_owner: Option<bool>,
     pub created_at: Option<Timestamptz>,
+    // The parent node, for the search-result secondary line ("in <parent>").
+    pub parent: Option<ParentNodeFields>,
 }
 
 // --- Node with children ---
@@ -385,6 +387,8 @@ pub struct NodesBoolExp {
 pub struct MimesBoolExp {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub hidden: Option<BooleanComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub context: Option<BooleanComparisonExp>,
 }
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -1803,13 +1807,44 @@ pub async fn search_nodes(
     }
 
     let where_clause = NodesBoolExp {
-        and: Some(vec![NodesBoolExp {
-            name: Some(StringComparisonExp {
-                ilike: Some(format!("%{query}%")),
+        and: Some(vec![
+            NodesBoolExp {
+                name: Some(StringComparisonExp {
+                    ilike: Some(format!("%{query}%")),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        }]),
+            },
+            // Exclude orphan/root nodes (no parent), matching React's search.
+            NodesBoolExp {
+                parent_id: Some(UuidComparisonExp {
+                    eq: None,
+                    is_null: Some(false),
+                }),
+                ..Default::default()
+            },
+            // Hide system/hidden mimes unless they are contexts (groups/events):
+            // `mime.hidden = false OR mime.context = true`.
+            NodesBoolExp {
+                or: Some(vec![
+                    NodesBoolExp {
+                        mime: Some(MimesBoolExp {
+                            hidden: Some(BooleanComparisonExp { eq: Some(false) }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    NodesBoolExp {
+                        mime: Some(MimesBoolExp {
+                            context: Some(BooleanComparisonExp { eq: Some(true) }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ]),
+                ..Default::default()
+            },
+        ]),
         ..Default::default()
     };
 
@@ -2332,6 +2367,7 @@ fn children_where_clause(parent_id: &str, user_id: &str) -> NodesBoolExp {
             NodesBoolExp {
                 mime: Some(MimesBoolExp {
                     hidden: Some(BooleanComparisonExp { eq: Some(false) }),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },

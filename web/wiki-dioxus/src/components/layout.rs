@@ -382,6 +382,9 @@ fn SearchBar(
                             }
                             div { class: "list-item-text",
                                 div { class: "list-item-primary", "{node.name}" }
+                                if let Some(parent) = node.parent.as_ref() {
+                                    div { class: "list-item-secondary", "{parent.name}" }
+                                }
                             }
                         }
                     }
