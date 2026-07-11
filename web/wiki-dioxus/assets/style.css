@@ -1098,18 +1098,6 @@ select:focus {
     cursor: pointer;
 }
 
-/* Freeform custom colours share a single row: label on the left, the two
-   "any colour" chips on the right. */
-.color-custom-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.color-custom-row .color-picker-label {
-    flex: 1;
-}
-
 .list-item.selected {
     background-color: var(--md-primary-container);
     /* Left accent bar marking the current node in the tree. */

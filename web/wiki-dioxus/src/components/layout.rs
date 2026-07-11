@@ -827,46 +827,34 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                     // app at runtime (see crate::theme::apply_seeds).
                     div { class: "menu-color-section",
                         span { class: "menu-color-title", "{t(\"layout.themeColor\")}" }
+                        // Five preset swatches; the sixth circle in each row is the
+                        // freeform custom picker. The first swatch is the brand
+                        // default (selecting it clears the override).
                         super::widgets::ColorPicker {
                             label: t("layout.primaryColor"),
                             value: crate::theme::effective_primary(),
+                            custom_title: t("layout.customColor"),
                             swatches: vec![
                                 crate::theme::BRAND_PRIMARY.to_string(),
                                 "#1565C0".to_string(),
                                 "#6750A4".to_string(),
                                 "#00796B".to_string(),
                                 "#C62828".to_string(),
-                                "#EF6C00".to_string(),
                             ],
                             on_change: move |hex: String| crate::theme::set_primary_seed(hex),
                         }
                         super::widgets::ColorPicker {
                             label: t("layout.accentColor"),
                             value: crate::theme::effective_accent(),
+                            custom_title: t("layout.customColor"),
                             swatches: vec![
                                 crate::theme::BRAND_ACCENT.to_string(),
                                 "#7B1FA2".to_string(),
                                 "#0097A7".to_string(),
                                 "#F9A825".to_string(),
                                 "#2E7D32".to_string(),
-                                "#5D4037".to_string(),
                             ],
                             on_change: move |hex: String| crate::theme::set_accent_seed(hex),
-                        }
-                        // Freeform custom colours on their own single row. Selecting
-                        // the first (brand) swatch above is the way back to default.
-                        div { class: "color-custom-row",
-                            span { class: "color-picker-label", "{t(\"layout.customColor\")}" }
-                            super::widgets::CustomColorSwatch {
-                                value: crate::theme::effective_primary(),
-                                title: t("layout.primaryColor"),
-                                on_change: move |hex: String| crate::theme::set_primary_seed(hex),
-                            }
-                            super::widgets::CustomColorSwatch {
-                                value: crate::theme::effective_accent(),
-                                title: t("layout.accentColor"),
-                                on_change: move |hex: String| crate::theme::set_accent_seed(hex),
-                            }
                         }
                     }
                     // Language toggle

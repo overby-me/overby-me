@@ -29,16 +29,17 @@ pub fn Chip(icon: Option<String>, label: String, title: Option<String>) -> Eleme
     }
 }
 
-/// A reusable Material Design 3 colour-swatch row: a label plus preset swatches.
+/// A reusable Material Design 3 colour-swatch row: a label, preset swatches, and
+/// a trailing custom "any colour" chip ([`CustomColorSwatch`]) as the last circle.
 /// Emits the chosen `#rrggbb` hex through `on_change`; `value` is the active
-/// colour (it highlights a matching swatch). Pair with [`CustomColorSwatch`] for
-/// freeform picks. App-agnostic: labels are passed in, no theme/i18n knowledge.
+/// colour (it highlights a matching swatch). App-agnostic: labels are passed in.
 #[component]
 pub fn ColorPicker(
     label: String,
     value: String,
     swatches: Vec<String>,
     on_change: EventHandler<String>,
+    custom_title: Option<String>,
 ) -> Element {
     rsx! {
         div { class: "color-picker",
@@ -63,6 +64,8 @@ pub fn ColorPicker(
                         }
                     }
                 }
+                // The last circle is the freeform custom picker.
+                CustomColorSwatch { value: value.clone(), on_change, title: custom_title.clone() }
             }
         }
     }
