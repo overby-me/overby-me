@@ -76,6 +76,10 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "app.shadowsky" | "com.shadowsky" => "shadowsky.avif",
         "blue.pronouns" => "pronouns.avif",
         "farm.smol" => "smol.avif",
+        "app.sidetrail" => "sidetrail.avif",
+        "at.marque" => "marque.avif",
+        "blue.checkmate" => "checkmate.avif",
+        "site.standard" => "standard.avif",
         _ => return None,
     })
 }
@@ -85,6 +89,7 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
 const SKIP_PREFIXES: &[&str] = &[
     "com.atproto",       // core protocol
     "community.lexicon", // shared community lexicons (e.g. calendar)
+    "my.test",           // scratch/test records, not a real app
 ];
 
 /// The 2-segment authority prefix of an NSID (`app.bsky.feed.post` -> `app.bsky`).
@@ -119,17 +124,18 @@ fn category_for(prefix: &str) -> &'static str {
     match prefix {
         // Social & messaging.
         "app.bsky" | "app.pinkleap" | "so.sprk" | "app.shadowsky" | "com.shadowsky" => "Connect",
-        // Writing, code, publishing.
-        "pub.leaflet" | "sh.tangled" | "dev.npmx" | "com.vibe-coded" => "Create",
+        // Writing, code, publishing, tools.
+        "pub.leaflet" | "sh.tangled" | "dev.npmx" | "com.vibe-coded" | "site.standard"
+        | "at.marque" | "com.minomobi" => "Create",
         // Music, video, games, reading.
         "app.rocksky" | "fm.teal" | "place.stream" | "app.skytube" | "app.skyreader"
-        | "social.popfeed" | "net.anisota" | "actor.rpg" | "equipment.rpg" | "farm.smol" => {
-            "Immerse"
-        }
+        | "social.popfeed" | "net.anisota" | "actor.rpg" | "equipment.rpg" | "farm.smol"
+        | "blue.checkmate" => "Immerse",
         // Events, community, links.
         "events.smokesignal" | "link.woosh" | "com.atprotofans" => "Gather",
         // Profile, work, fitness, identity.
-        "id.sifa" | "place.atwork" | "app.fitsky" | "computer.aetheros" | "blue.pronouns" => "Grow",
+        "id.sifa" | "place.atwork" | "app.fitsky" | "computer.aetheros" | "blue.pronouns"
+        | "app.sidetrail" => "Grow",
         _ => "Explore",
     }
 }

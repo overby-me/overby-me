@@ -61,6 +61,10 @@ pub fn icon_url(icon: &str) -> String {
         "shadowsky.avif" => asset!("/assets/icons/shadowsky.avif").to_string(),
         "pronouns.avif" => asset!("/assets/icons/pronouns.avif").to_string(),
         "smol.avif" => asset!("/assets/icons/smol.avif").to_string(),
+        "sidetrail.avif" => asset!("/assets/icons/sidetrail.avif").to_string(),
+        "marque.avif" => asset!("/assets/icons/marque.avif").to_string(),
+        "checkmate.avif" => asset!("/assets/icons/checkmate.avif").to_string(),
+        "standard.avif" => asset!("/assets/icons/standard.avif").to_string(),
         other => {
             log::warn!("Unknown icon: {other}");
             String::new()
