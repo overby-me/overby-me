@@ -83,9 +83,22 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "blue.2048" => "2048.avif",
         "blue.linkat" => "linkat.avif",
         "com.skymeetsblue" => "skymeetsblue.avif",
-        // Known apps with no fetchable logo (dead/parked domain or banner-only
-        // og:image) — they fall back to a generated badge. Add here if a logo
-        // turns up: skytube, com.minomobi (mmopaint), xyz.atmomo, blue.protopro.
+        "at.youandme" => "youandme.avif",
+        "blog.pckt" => "pckt.avif",
+        "network.cosmik" => "cosmik.avif",
+        "org.atmosphereconf" => "atmoconf.avif",
+        "pub.chive" => "chive.avif",
+        "social.mu" => "musocial.avif",
+        "social.twinkl" => "twinkl.avif",
+        "space.roomy" => "roomy.avif",
+        "app.cartes" => "cartes.avif",
+        "coop.hypha" => "hypha.avif",
+        // Known apps with no fetchable logo (dead/parked domain, Cloudflare-
+        // locked, banner-only og:image, or same-name GitHub is an unrelated
+        // person) — they fall back to a generated badge. Add here if a logo
+        // turns up: skytube, com.minomobi (mmopaint), xyz.atmomo, blue.protopro,
+        // my.skylights, com.semble, app.lanyards, app.loghz, africa.kandake,
+        // ing.dasl, space.polypod.
         _ => return None,
     })
 }
@@ -132,19 +145,24 @@ fn category_for(prefix: &str) -> &'static str {
     match prefix {
         // Social & messaging.
         "app.bsky" | "app.pinkleap" | "so.sprk" | "app.shadowsky" | "com.shadowsky"
-        | "com.skymeetsblue" => "Connect",
+        | "com.skymeetsblue" | "at.youandme" | "social.twinkl" | "space.roomy" | "social.mu" => {
+            "Connect"
+        }
         // Writing, code, publishing, tools.
         "pub.leaflet" | "sh.tangled" | "dev.npmx" | "com.vibe-coded" | "site.standard"
-        | "at.marque" | "com.minomobi" | "blue.protopro" => "Create",
-        // Music, video, games, reading.
+        | "at.marque" | "com.minomobi" | "blue.protopro" | "blog.pckt" | "pub.chive"
+        | "app.cartes" | "coop.hypha" | "ing.dasl" | "space.polypod" | "app.loghz" => "Create",
+        // Music, video, games, reading, collections.
         "app.rocksky" | "fm.teal" | "place.stream" | "app.skytube" | "app.skyreader"
         | "social.popfeed" | "net.anisota" | "actor.rpg" | "equipment.rpg" | "farm.smol"
-        | "blue.checkmate" | "blue.2048" | "xyz.atmomo" => "Immerse",
+        | "blue.checkmate" | "blue.2048" | "xyz.atmomo" | "network.cosmik" | "africa.kandake"
+        | "com.semble" | "my.skylights" => "Immerse",
         // Events, community, links.
-        "events.smokesignal" | "link.woosh" | "com.atprotofans" | "blue.linkat" => "Gather",
+        "events.smokesignal" | "link.woosh" | "com.atprotofans" | "blue.linkat"
+        | "org.atmosphereconf" => "Gather",
         // Profile, work, fitness, identity.
         "id.sifa" | "place.atwork" | "app.fitsky" | "computer.aetheros" | "blue.pronouns"
-        | "app.sidetrail" => "Grow",
+        | "app.sidetrail" | "app.lanyards" => "Grow",
         _ => "Explore",
     }
 }

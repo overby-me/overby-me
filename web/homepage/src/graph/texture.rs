@@ -68,6 +68,16 @@ pub fn icon_url(icon: &str) -> String {
         "2048.avif" => asset!("/assets/icons/2048.avif").to_string(),
         "linkat.avif" => asset!("/assets/icons/linkat.avif").to_string(),
         "skymeetsblue.avif" => asset!("/assets/icons/skymeetsblue.avif").to_string(),
+        "youandme.avif" => asset!("/assets/icons/youandme.avif").to_string(),
+        "pckt.avif" => asset!("/assets/icons/pckt.avif").to_string(),
+        "cosmik.avif" => asset!("/assets/icons/cosmik.avif").to_string(),
+        "atmoconf.avif" => asset!("/assets/icons/atmoconf.avif").to_string(),
+        "chive.avif" => asset!("/assets/icons/chive.avif").to_string(),
+        "musocial.avif" => asset!("/assets/icons/musocial.avif").to_string(),
+        "twinkl.avif" => asset!("/assets/icons/twinkl.avif").to_string(),
+        "roomy.avif" => asset!("/assets/icons/roomy.avif").to_string(),
+        "cartes.avif" => asset!("/assets/icons/cartes.avif").to_string(),
+        "hypha.avif" => asset!("/assets/icons/hypha.avif").to_string(),
         other => {
             log::warn!("Unknown icon: {other}");
             String::new()
