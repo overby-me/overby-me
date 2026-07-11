@@ -297,7 +297,10 @@ const EN_JSON: &str = r#"{
         "invitations": "Invitations",
         "invite": "Invite",
         "nameOrEmail": "Name or Email",
-        "acceptInvitation": "Accept invitation to {{name}}"
+        "acceptInvitation": "Accept invitation to {{name}}",
+        "importRoster": "Import roster (.xlsx: Fornavn, Efternavn, Email)",
+        "imported": "Imported {{count}} members",
+        "noRosterRows": "No rows with an email found in the file"
     },
     "member": {
         "name": "Name",
@@ -576,7 +579,10 @@ const DA_JSON: &str = r#"{
         "invitations": "Invitationer",
         "invite": "Inviter",
         "nameOrEmail": "Navn eller Email",
-        "acceptInvitation": "Accepter invitation til {{name}}"
+        "acceptInvitation": "Accepter invitation til {{name}}",
+        "importRoster": "Importér liste (.xlsx: Fornavn, Efternavn, Email)",
+        "imported": "Importerede {{count}} medlemmer",
+        "noRosterRows": "Ingen rækker med en email fundet i filen"
     },
     "member": {
         "name": "Navn",

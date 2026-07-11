@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::graphql::{self, MemberFields, MembersSetInput, NodeWithChildren};
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
@@ -206,6 +206,48 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                             }
                         },
                         "{t(\"invite.invite\")}"
+                    }
+                    // Bulk-import a Fornavn/Efternavn/Email roster from an .xlsx
+                    // (React InvitesFab). Each row with an email becomes an invite.
+                    div { class: "text-field mt-2",
+                        label { "{t(\"invite.importRoster\")}" }
+                        input {
+                            r#type: "file",
+                            accept: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            onchange: {
+                                let node_id = node_id.clone();
+                                move |evt: FormEvent| {
+                                    let files = evt.files();
+                                    let Some(fd) = files.into_iter().next() else {
+                                        return;
+                                    };
+                                    let token = session.read().access_token.clone();
+                                    let node_id = node_id.clone();
+                                    spawn(async move {
+                                        let Ok(bytes) = fd.read_bytes().await else {
+                                            show_snackbar(&t("error.somethingWentWrong"));
+                                            return;
+                                        };
+                                        let roster: Vec<(String, String)> =
+                                            crate::roster::parse_member_roster(bytes.to_vec())
+                                                .into_iter()
+                                                .map(|e| (e.name, e.email))
+                                                .collect();
+                                        if roster.is_empty() {
+                                            show_snackbar(&t("invite.noRosterRows"));
+                                            return;
+                                        }
+                                        match graphql::invite_members(token.as_deref(), &node_id, &roster).await {
+                                            Ok(n) if n > 0 => {
+                                                show_snackbar(&t_with("invite.imported", &[("count", &n.to_string())]));
+                                                crate::session::bump_data_version();
+                                            }
+                                            _ => show_snackbar(&t("error.somethingWentWrong")),
+                                        }
+                                    });
+                                }
+                            },
+                        }
                     }
                 }
             }

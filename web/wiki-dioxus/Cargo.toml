@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# Pure-Rust xlsx reader for the bulk member-import roster. Default features only
+# (no chrono/dates/picture), so it stays wasm32-friendly.
+calamine = "0.36"
 console_error_panic_hook = "0.1"
 cynic = { version = "3", features = ["http-reqwest"] }
 dioxus = { version = "0.7.9" }

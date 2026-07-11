@@ -10,6 +10,8 @@ mod logging;
 #[allow(dead_code)]
 mod nhost;
 mod pwa;
+#[allow(dead_code)]
+mod roster;
 mod route;
 #[allow(dead_code)]
 mod session;

@@ -852,6 +852,51 @@ pub struct MembersInsertInput {
     pub parent_id: Option<Uuid>,
 }
 
+#[derive(cynic::QueryVariables, Debug)]
+pub struct InsertMembersVariables {
+    pub objects: Vec<MembersInsertInput>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "mutation_root",
+    variables = "InsertMembersVariables"
+)]
+pub struct InsertMembersMutation {
+    #[arguments(objects: $objects)]
+    pub insert_members: Option<MembersAffected>,
+}
+
+/// Bulk-invite members from an imported roster: one email invite per `(name,
+/// email)` pair in a single `insertMembers`. Mirrors React InvitesFab's bulk
+/// insert. Returns how many rows were inserted.
+pub async fn invite_members(
+    access_token: Option<&str>,
+    parent_id: &str,
+    roster: &[(String, String)],
+) -> Result<usize, String> {
+    use cynic::MutationBuilder;
+    let objects: Vec<MembersInsertInput> = roster
+        .iter()
+        .filter(|(_, email)| !email.trim().is_empty())
+        .map(|(name, email)| MembersInsertInput {
+            name: (!name.trim().is_empty()).then(|| name.clone()),
+            email: Some(email.to_lowercase()),
+            parent_id: Some(Uuid(parent_id.to_string())),
+            ..Default::default()
+        })
+        .collect();
+    if objects.is_empty() {
+        return Ok(0);
+    }
+    let op = InsertMembersMutation::build(InsertMembersVariables { objects });
+    let r = execute(access_token, op).await?;
+    Ok(r.insert_members
+        .map(|m| m.affected_rows.max(0) as usize)
+        .unwrap_or(0))
+}
+
 /// Invite someone to a context by email (a pending membership they accept from
 /// their home screen). Mirrors the React invite: email set, no node id yet.
 pub async fn invite_member(
