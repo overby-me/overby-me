@@ -13,61 +13,118 @@
  * readers (#37). Loaded from Google Fonts; if the fetch is blocked the
  * body font-family falls back to the system stack below. @import must precede
  * every rule set, so it stays at the very top. */
-@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap");
 
 /* Material Icons (filled) — the exact icon set the reference React app uses via
  * @mui/icons-material. Rendered as ligatures: <span class="material-icons">home
  * </span>. Kept identical to the old wiki's IconId map. */
-@import url('https://fonts.googleapis.com/icon?family=Material+Icons');
+@import url("https://fonts.googleapis.com/icon?family=Material+Icons");
 
 :root {
-    /* App semantic tokens — thin aliases over the generated M3 system colours
+	/* App semantic tokens — thin aliases over the generated M3 system colours
        (assets/m3-theme.css). Light/dark is handled there, so these are defined
        once. Regenerate that file to re-skin; nothing here changes. */
-    --md-primary: var(--md-sys-color-primary);
-    --md-on-primary: var(--md-sys-color-on-primary);
-    --md-primary-container: var(--md-sys-color-primary-container);
-    --md-on-primary-container: var(--md-sys-color-on-primary-container);
-    --md-secondary: var(--md-sys-color-secondary);
-    --md-on-secondary: var(--md-sys-color-on-secondary);
-    --md-secondary-container: var(--md-sys-color-secondary-container);
-    --md-on-secondary-container: var(--md-sys-color-on-secondary-container);
-    /* Tertiary = the Radikale magenta accent. */
-    --md-tertiary: var(--md-sys-color-tertiary);
-    --md-on-tertiary: var(--md-sys-color-on-tertiary);
-    --md-tertiary-container: var(--md-sys-color-tertiary-container);
-    --md-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
-    --md-surface-tint: var(--md-sys-color-surface-tint);
+	--md-primary: var(--md-sys-color-primary);
+	--md-on-primary: var(--md-sys-color-on-primary);
+	--md-primary-container: var(--md-sys-color-primary-container);
+	--md-on-primary-container: var(--md-sys-color-on-primary-container);
+	--md-secondary: var(--md-sys-color-secondary);
+	--md-on-secondary: var(--md-sys-color-on-secondary);
+	--md-secondary-container: var(--md-sys-color-secondary-container);
+	--md-on-secondary-container: var(--md-sys-color-on-secondary-container);
+	/* Tertiary = the Radikale magenta accent. */
+	--md-tertiary: var(--md-sys-color-tertiary);
+	--md-on-tertiary: var(--md-sys-color-on-tertiary);
+	--md-tertiary-container: var(--md-sys-color-tertiary-container);
+	--md-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
+	--md-surface-tint: var(--md-sys-color-surface-tint);
 
-    --md-background: var(--md-sys-color-background);
-    --md-on-background: var(--md-sys-color-on-background);
-    --md-surface: var(--md-sys-color-surface);
-    --md-on-surface: var(--md-sys-color-on-surface);
-    --md-surface-variant: var(--md-sys-color-surface-variant);
-    --md-on-surface-variant: var(--md-sys-color-on-surface-variant);
-    /* M3 tonal surface-container elevation levels. */
-    --md-surface-container-lowest: var(--md-sys-color-surface-container-lowest);
-    --md-surface-container-low: var(--md-sys-color-surface-container-low);
-    --md-surface-container: var(--md-sys-color-surface-container);
-    --md-surface-container-high: var(--md-sys-color-surface-container-high);
-    --md-surface-container-highest: var(--md-sys-color-surface-container-highest);
-    /* App borders are decorative, so alias the subtle M3 outline-variant;
+	--md-background: var(--md-sys-color-background);
+	--md-on-background: var(--md-sys-color-on-background);
+	--md-surface: var(--md-sys-color-surface);
+	--md-on-surface: var(--md-sys-color-on-surface);
+	--md-surface-variant: var(--md-sys-color-surface-variant);
+	--md-on-surface-variant: var(--md-sys-color-on-surface-variant);
+	/* M3 tonal surface-container elevation levels. */
+	--md-surface-container-lowest: var(--md-sys-color-surface-container-lowest);
+	--md-surface-container-low: var(--md-sys-color-surface-container-low);
+	--md-surface-container: var(--md-sys-color-surface-container);
+	--md-surface-container-high: var(--md-sys-color-surface-container-high);
+	--md-surface-container-highest: var(--md-sys-color-surface-container-highest);
+	/* App borders are decorative, so alias the subtle M3 outline-variant;
        --md-outline-strong is the emphasis boundary (text fields, dividers). */
-    --md-outline: var(--md-sys-color-outline-variant);
-    --md-outline-strong: var(--md-sys-color-outline);
-    --md-outline-variant: var(--md-sys-color-outline-variant);
-    --md-shadow: rgba(0, 0, 0, 0.12);
-    --md-error: var(--md-sys-color-error);
-    --md-on-error: var(--md-sys-color-on-error);
-    --md-error-container: var(--md-sys-color-error-container);
-    --md-on-error-container: var(--md-sys-color-on-error-container);
-    --md-inverse-surface: var(--md-sys-color-inverse-surface);
-    --md-inverse-on-surface: var(--md-sys-color-inverse-on-surface);
-    --md-inverse-primary: var(--md-sys-color-inverse-primary);
+	--md-outline: var(--md-sys-color-outline-variant);
+	--md-outline-strong: var(--md-sys-color-outline);
+	--md-outline-variant: var(--md-sys-color-outline-variant);
+	--md-shadow: rgba(0, 0, 0, 0.12);
+	--md-error: var(--md-sys-color-error);
+	--md-on-error: var(--md-sys-color-on-error);
+	--md-error-container: var(--md-sys-color-error-container);
+	--md-on-error-container: var(--md-sys-color-on-error-container);
+	--md-inverse-surface: var(--md-sys-color-inverse-surface);
+	--md-inverse-on-surface: var(--md-sys-color-inverse-on-surface);
+	--md-inverse-primary: var(--md-sys-color-inverse-primary);
 
-    /* Point the dioxus-primitives focus ring at the M3 primary (was a blue
+	/* Point the dioxus-primitives focus ring at the M3 primary (was a blue
        #2b7fff) so their focus states match the rest of the app. */
-    --focused-border-color: var(--md-sys-color-primary);
+	--focused-border-color: var(--md-sys-color-primary);
+
+	/* Component-role colour aliases (M3 assigns fixed roles to some surfaces). */
+	--md-snackbar: var(--md-sys-color-inverse-surface);
+	--md-on-snackbar: var(--md-sys-color-inverse-on-surface);
+	--md-snackbar-action: var(--md-sys-color-inverse-primary);
+	--md-scrim: var(--md-sys-color-scrim);
+}
+
+/* ═══ Adaptive spacing per window-size class (M3: 600 / 840 / 1200 / 1600 dp) ══
+   The pane / rail / margin tokens default to COMPACT in m3-tokens.css; step them
+   up as the viewport widens so panes, gutters and body margins breathe on the
+   desktop without any device sniffing (everything keys off window WIDTH). */
+@media (min-width: 600px) {
+	:root {
+		--md-sys-margin: 24px;
+		--md-sys-gutter: 24px;
+	}
+}
+@media (min-width: 840px) {
+	:root {
+		--md-sys-rail-width: 96px;
+	}
+}
+@media (min-width: 1600px) {
+	:root {
+		--md-sys-list-pane-width: 400px;
+		--md-sys-rail-expanded: 360px;
+	}
+}
+
+/* ═══ Shared M3 state-layer mixin ═══
+   Add `.state-layer` to any interactive element for the M3 hover / focus /
+   pressed overlay of the current text colour. Set `--state-color` to retint it.
+   The ::before paints between the element's background and its content, so text
+   stays legible. Replaces the ~50 ad-hoc color-mix() opacity literals. */
+.state-layer {
+	position: relative;
+}
+.state-layer::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background-color: var(--state-color, currentColor);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+.state-layer:hover::before {
+	opacity: var(--md-sys-state-hover-opacity);
+}
+.state-layer:focus-visible::before {
+	opacity: var(--md-sys-state-focus-opacity);
+}
+.state-layer:active::before {
+	opacity: var(--md-sys-state-pressed-opacity);
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -103,342 +160,354 @@
 
 /* Muted / secondary text on a surface (hints, timestamps, counts, labels). */
 .text-muted {
-    color: var(--md-on-surface-variant);
+	color: var(--md-on-surface-variant);
 }
 
 * {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
 }
 
 body {
-    font-family: 'Atkinson Hyperlegible', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background-color: var(--md-background);
-    color: var(--md-on-background);
-    /* M3 body-large is the default reading role. */
-    font-size: var(--md-sys-typescale-body-large-size);
-    line-height: var(--md-sys-typescale-body-large-line);
-    letter-spacing: var(--md-sys-typescale-body-large-tracking);
-    /* Take over the top over-scroll so the custom pull-to-refresh runs instead
+	font-family:
+		"Atkinson Hyperlegible", "Roboto", -apple-system, BlinkMacSystemFont,
+		"Segoe UI", sans-serif;
+	background-color: var(--md-background);
+	color: var(--md-on-background);
+	/* M3 body-large is the default reading role. */
+	font-size: var(--md-sys-typescale-body-large-size);
+	line-height: var(--md-sys-typescale-body-large-line);
+	letter-spacing: var(--md-sys-typescale-body-large-tracking);
+	/* Take over the top over-scroll so the custom pull-to-refresh runs instead
        of the browser's native one. */
-    overscroll-behavior-y: contain;
+	overscroll-behavior-y: contain;
 }
 
 a {
-    color: var(--md-primary);
-    text-decoration: none;
+	color: var(--md-primary);
+	text-decoration: none;
 }
 
 a:hover {
-    text-decoration: underline;
+	text-decoration: underline;
 }
 
 /* Layout */
 .app-shell {
-    display: flex;
-    min-height: 100vh;
+	display: flex;
+	min-height: 100vh;
 }
 
 .main-content {
-    flex: 1;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 8px;
-    width: 100%;
+	flex: 1;
+	max-width: 1200px;
+	margin: 0 auto;
+	padding: 8px;
+	width: 100%;
 }
 
 @media (min-width: 1200px) {
-    .main-content {
-        padding-top: 64px;
-    }
+	.main-content {
+		padding-top: 64px;
+	}
 }
 
 /* Floating navigation bar — M3 primary container with a level-2 shadow (it
    floats over scrolling content). Opaque (the old 0.9 opacity dimmed its icons
    and text, hurting contrast). */
 .bar {
-    position: relative;
-    border-radius: var(--md-sys-shape-corner-large);
-    background-color: var(--md-primary);
-    box-shadow: var(--md-sys-elevation-2);
-    width: 100%;
-    display: flex;
-    align-items: center;
-    padding: 4px;
+	position: relative;
+	border-radius: var(--md-sys-shape-corner-large);
+	background-color: var(--md-primary);
+	box-shadow: var(--md-sys-elevation-2);
+	width: 100%;
+	display: flex;
+	align-items: center;
+	padding: 4px;
 }
 
 /* Drawer's Home / current-context entry, styled like the top panel: a green
    bar (.bar) with an inverted avatar (light on green) and an on-primary name. */
 .drawer-context-bar {
-    gap: 8px;
-    /* Match the top panel's height (its 40px icon buttons + 8px padding). */
-    min-height: 48px;
-    padding: 4px 10px;
-    text-decoration: none;
-    margin-bottom: 8px;
+	gap: 8px;
+	/* Match the top panel's height (its 40px icon buttons + 8px padding). */
+	min-height: 48px;
+	padding: 4px 10px;
+	text-decoration: none;
+	margin-bottom: 8px;
 }
 
 .drawer-context-bar .avatar {
-    background: var(--md-on-primary);
-    color: var(--md-primary);
-    flex-shrink: 0;
+	background: var(--md-on-primary);
+	color: var(--md-primary);
+	flex-shrink: 0;
 }
 
 .drawer-context-name {
-    min-width: 0;
-    font-size: var(--md-sys-typescale-title-medium-size);
-    line-height: var(--md-sys-typescale-title-medium-line);
-    font-weight: 500;
-    color: var(--md-on-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+	min-width: 0;
+	font-size: var(--md-sys-typescale-title-medium-size);
+	line-height: var(--md-sys-typescale-title-medium-line);
+	font-weight: 500;
+	color: var(--md-on-primary);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .bottom-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 100;
-    padding: 8px;
-    background: transparent;
-    pointer-events: none;
+	position: fixed;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	z-index: 100;
+	padding: 8px;
+	background: transparent;
+	pointer-events: none;
 }
 
 .bottom-bar > * {
-    pointer-events: auto;
+	pointer-events: auto;
 }
 
 @media (min-width: 1200px) {
-    .bottom-bar {
-        position: fixed;
-        top: 0;
-        bottom: auto;
-        left: 472px;
-    }
+	.bottom-bar {
+		position: fixed;
+		top: 0;
+		bottom: auto;
+		left: 472px;
+	}
 }
 
 .bar-spacer {
-    padding: 32px;
+	padding: 32px;
 }
 
 /* Drawer (sidebar) */
 .drawer {
-    display: none;
+	display: none;
 }
 
 @media (min-width: 1200px) {
-    .drawer {
-        display: block;
-        /* Reserve the whole left chrome (72px rail + 400px drawer) at the start
+	.drawer {
+		display: block;
+		/* Reserve the whole left chrome (72px rail + 400px drawer) at the start
          * of the flex row so the content begins to their right. */
-        width: 472px;
-        flex-shrink: 0;
-        order: -1;
-    }
-    .drawer-inner {
-        position: fixed;
-        /* Right of the app rail (which is the leftmost 72px). */
-        left: 72px;
-        top: 0;
-        bottom: 0;
-        width: 400px;
-        border-right: 1px solid var(--md-outline);
-        border-top-right-radius: 16px;
-        border-bottom-right-radius: 16px;
-        background: var(--md-surface);
-        overflow-y: auto;
-        /* 8px so the context bar aligns with the top panel (which is top:0 +
+		width: 472px;
+		flex-shrink: 0;
+		order: -1;
+	}
+	.drawer-inner {
+		position: fixed;
+		/* Right of the app rail (which is the leftmost 72px). */
+		left: 72px;
+		top: 0;
+		bottom: 0;
+		width: 400px;
+		border-right: 1px solid var(--md-outline);
+		border-top-right-radius: 16px;
+		border-bottom-right-radius: 16px;
+		background: var(--md-surface);
+		overflow-y: auto;
+		/* 8px so the context bar aligns with the top panel (which is top:0 +
            8px padding); the bar (48px) + its 8px margin then place the tree at
            64px, level with the main content. */
-        padding-top: 8px;
-        scrollbar-width: none;
-    }
-    .drawer-inner::-webkit-scrollbar {
-        display: none;
-    }
+		padding-top: 8px;
+		scrollbar-width: none;
+	}
+	.drawer-inner::-webkit-scrollbar {
+		display: none;
+	}
 }
 
 .mobile-drawer {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: var(--md-surface);
-    z-index: 200;
-    overflow-y: auto;
-    padding-bottom: 80px;
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: var(--md-surface);
+	z-index: 200;
+	overflow-y: auto;
+	padding-bottom: 80px;
 }
 
 .mobile-drawer.hidden {
-    display: none;
+	display: none;
 }
 
 /* Mobile app bar — a floating horizontal row of the context apps, bottom-left
    (the FAB owns bottom-right), above the bottom bar. Only on phones; hidden once
    the desktop rail appears at 1200px. */
 .mobile-app-bar {
-    display: flex;
-    position: fixed;
-    left: 8px;
-    bottom: 84px;
-    gap: 2px;
-    padding: 4px;
-    background: var(--md-surface-container);
-    border-radius: 20px;
-    box-shadow: var(--md-sys-elevation-2);
-    z-index: 120;
-    max-width: calc(100vw - 96px);
-    overflow-x: auto;
+	display: flex;
+	position: fixed;
+	left: 8px;
+	bottom: 84px;
+	gap: 2px;
+	padding: 4px;
+	background: var(--md-surface-container);
+	border-radius: 20px;
+	box-shadow: var(--md-sys-elevation-2);
+	z-index: 120;
+	max-width: calc(100vw - 96px);
+	overflow-x: auto;
 }
 
 .mobile-app-bar .btn-icon.active {
-    background: var(--md-primary);
-    color: var(--md-on-primary);
+	background: var(--md-primary);
+	color: var(--md-on-primary);
 }
 
 @media (min-width: 1200px) {
-    .mobile-app-bar {
-        display: none;
-    }
+	.mobile-app-bar {
+		display: none;
+	}
 }
 
 /* App sidebar (icon rail on large screens) */
 .app-rail {
-    display: none;
+	display: none;
 }
 
 @media (min-width: 1200px) {
-    .app-rail {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        width: 72px;
-        position: fixed;
-        /* Leftmost column, to the left of the drawer. */
-        left: 0;
-        top: 0;
-        bottom: 0;
-        padding-top: 64px;
-        gap: 8px;
-        /* Same surface as the drawer to its right, so the left chrome (rail +
+	.app-rail {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		width: 72px;
+		position: fixed;
+		/* Leftmost column, to the left of the drawer. */
+		left: 0;
+		top: 0;
+		bottom: 0;
+		padding-top: 64px;
+		gap: 8px;
+		/* Same surface as the drawer to its right, so the left chrome (rail +
          * drawer) reads as one continuous panel instead of two tones. */
-        background: var(--md-surface);
-    }
+		background: var(--md-surface);
+	}
 }
 
 /* Cards — M3 elevated card: surface-container-low tone, corner-medium, a
    level-1 tonal shadow, no outline. Content fades + rises in on mount (an M3
    emphasized-decelerate entrance) so page/list changes feel motionful. */
 .card {
-    background: var(--md-surface-container-low);
-    border-radius: var(--md-sys-shape-corner-medium);
-    box-shadow: var(--md-sys-elevation-1);
-    overflow: hidden;
-    margin-bottom: 12px;
-    animation: m3-enter var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized-decelerate) both;
+	background: var(--md-surface-container-low);
+	border-radius: var(--md-sys-shape-corner-medium);
+	box-shadow: var(--md-sys-elevation-1);
+	overflow: hidden;
+	margin-bottom: 12px;
+	animation: m3-enter var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-emphasized-decelerate) both;
 }
 
 @keyframes m3-enter {
-    from {
-        opacity: 0;
-        transform: translateY(6px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }
 
 /* M3 accessibility: honour a reduced-motion preference — drop the entrance and
    collapse transitions/animations to near-instant. */
 @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-    }
+	*,
+	*::before,
+	*::after {
+		/* 0.01ms (not `none`) so code awaiting transitionend/animationend still
+           fires; springs/morphs below collapse to instant. */
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+	/* Skip the View Transitions API cross-fades / container-transforms entirely. */
+	::view-transition-group(*),
+	::view-transition-old(*),
+	::view-transition-new(*) {
+		animation: none !important;
+	}
 }
 
 .card-header {
-    display: flex;
-    align-items: center;
-    padding: 16px;
-    gap: 12px;
-    border-bottom: 1px solid var(--md-outline-variant);
+	display: flex;
+	align-items: center;
+	padding: 16px;
+	gap: 12px;
+	border-bottom: 1px solid var(--md-outline-variant);
 }
 
 .card-content {
-    padding: 16px;
+	padding: 16px;
 }
 
 /* Avatar */
 .avatar {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    line-height: 1;
-    /* Labels/abbreviations must never wrap to a second line inside the circle. */
-    white-space: nowrap;
-    color: var(--md-on-primary);
-    background-color: var(--md-primary);
-    flex-shrink: 0;
+	width: 40px;
+	height: 40px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 18px;
+	line-height: 1;
+	/* Labels/abbreviations must never wrap to a second line inside the circle. */
+	white-space: nowrap;
+	color: var(--md-on-primary);
+	background-color: var(--md-primary);
+	flex-shrink: 0;
 }
 
 /* Context (group/event) name abbreviation: smaller so 2-3 letters fit the
  * circle on one line (e.g. "EU", "KM", "HB"). */
 .avatar-abbr {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0;
 }
 
 .avatar.secondary {
-    background-color: var(--md-primary);
-    color: var(--md-on-primary);
+	background-color: var(--md-primary);
+	color: var(--md-on-primary);
 }
 
 .avatar.small {
-    width: 24px;
-    height: 24px;
-    font-size: 12px;
+	width: 24px;
+	height: 24px;
+	font-size: 12px;
 }
 
 /* Material Icons ligature rendering (exact old-wiki icon set). */
 .material-icons {
-    font-family: 'Material Icons';
-    font-weight: normal;
-    font-style: normal;
-    font-size: 22px;
-    line-height: 1;
-    letter-spacing: normal;
-    text-transform: none;
-    display: inline-block;
-    white-space: nowrap;
-    word-wrap: normal;
-    direction: ltr;
-    font-feature-settings: 'liga';
-    -webkit-font-feature-settings: 'liga';
-    -webkit-font-smoothing: antialiased;
-    vertical-align: middle;
+	font-family: "Material Icons";
+	font-weight: normal;
+	font-style: normal;
+	font-size: 22px;
+	line-height: 1;
+	letter-spacing: normal;
+	text-transform: none;
+	display: inline-block;
+	white-space: nowrap;
+	word-wrap: normal;
+	direction: ltr;
+	font-feature-settings: "liga";
+	-webkit-font-feature-settings: "liga";
+	-webkit-font-smoothing: antialiased;
+	vertical-align: middle;
 }
 
 /* Icons scale to their container (small avatars, the app rail). */
 .avatar.small .material-icons {
-    font-size: 16px;
+	font-size: 16px;
 }
 
 .app-rail .material-icons {
-    font-size: 22px;
+	font-size: 22px;
 }
 
 /* App-rail item label. The icon inherits the button's colour (on-surface when
@@ -448,291 +517,306 @@ a:hover {
    the label. The active pill uses the secondary-container tone (not a full
    button fill), matching the M3 NavigationRail active indicator. */
 .app-rail .btn-icon {
-    width: auto;
-    height: auto;
-    flex-direction: column;
-    gap: 4px;
-    padding: 0;
-    border-radius: 0;
-    background: transparent;
+	width: auto;
+	height: auto;
+	flex-direction: column;
+	gap: 4px;
+	padding: 0;
+	border-radius: 0;
+	background: transparent;
 }
 
 .app-rail .app-rail-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 56px;
-    height: 32px;
-    border-radius: var(--md-sys-shape-corner-full);
-    color: var(--md-on-surface-variant);
-    transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 56px;
+	height: 32px;
+	border-radius: var(--md-sys-shape-corner-full);
+	color: var(--md-on-surface-variant);
+	transition: background-color var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard);
 }
 
 .app-rail .btn-icon:hover .app-rail-icon {
-    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
 /* Active indicator: a secondary-container pill behind the icon; the button
    itself stays transparent (override the generic .btn-icon.active fill). */
 .app-rail .btn-icon.active {
-    background: transparent;
-    color: inherit;
+	background: transparent;
+	color: inherit;
 }
 
 .app-rail .btn-icon.active .app-rail-icon {
-    /* primary-container (not secondary-container): this scheme's secondary is
+	/* primary-container (not secondary-container): this scheme's secondary is
        very low-chroma, so a secondary pill is invisible on the neutral rail;
        the brighter primary-container reads clearly by hue while staying a
        tonal container indicator. */
-    background: var(--md-primary-container);
-    color: var(--md-on-primary-container);
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
 }
 
 .app-rail-label {
-    font-size: var(--md-sys-typescale-label-medium-size);
-    line-height: var(--md-sys-typescale-label-medium-line);
-    font-weight: 500;
-    letter-spacing: var(--md-sys-typescale-label-medium-tracking);
-    color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-label-medium-size);
+	line-height: var(--md-sys-typescale-label-medium-line);
+	font-weight: 500;
+	letter-spacing: var(--md-sys-typescale-label-medium-tracking);
+	color: var(--md-on-surface-variant);
 }
 
 .app-rail .btn-icon.active .app-rail-label {
-    color: var(--md-on-surface);
+	color: var(--md-on-surface);
 }
 
 /* "Not submitted" badge overlaid on a node avatar (mutable draft nodes). */
 .avatar-badged {
-    position: relative;
-    display: inline-flex;
-    flex: 0 0 auto;
+	position: relative;
+	display: inline-flex;
+	flex: 0 0 auto;
 }
 
 .avatar-badge {
-    position: absolute;
-    right: -3px;
-    bottom: -3px;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--md-primary);
-    color: var(--md-on-primary);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1.5px solid var(--md-surface);
+	position: absolute;
+	right: -3px;
+	bottom: -3px;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: var(--md-primary);
+	color: var(--md-on-primary);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1.5px solid var(--md-surface);
 }
 
 .avatar-badge .material-icons {
-    font-size: 11px;
+	font-size: 11px;
 }
 
 /* Letter/number avatars for policy (A, B, C…) and change proposals (1, 2, 3…). */
 .avatar-label {
-    font-weight: 700;
-    font-size: 16px;
-    line-height: 1;
+	font-weight: 700;
+	font-size: 16px;
+	line-height: 1;
 }
 
 .avatar.small .avatar-label {
-    font-size: 13px;
+	font-size: 13px;
 }
 
 /* Folder avatar: the folder icon with the name's first letter overlaid. */
 .folder-avatar {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	line-height: 1;
 }
 
 .folder-letter {
-    position: absolute;
-    top: 58%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-weight: 700;
-    font-size: 10px;
-    /* The folder glyph is drawn in the avatar's on-primary colour (white in
+	position: absolute;
+	top: 58%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	font-weight: 700;
+	font-size: 10px;
+	/* The folder glyph is drawn in the avatar's on-primary colour (white in
        light mode, dark in dark mode). The primary-container "on" colour is its
        natural counterpart, so the letter always contrasts with the glyph it sits
        on: a dark letter on the white glyph, a light letter on the dark glyph. */
-    color: var(--md-on-primary-container, #3f0018);
-    text-shadow: none;
+	color: var(--md-on-primary-container, #3f0018);
+	text-shadow: none;
 }
 
 .avatar.small .folder-letter {
-    font-size: 8px;
+	font-size: 8px;
 }
 
 /* Floating action button (Material pattern; dioxus-primitives has no FAB). */
 .fab {
-    position: fixed;
-    right: 24px;
-    bottom: 88px;
-    width: 56px;
-    height: 56px;
-    border: none;
-    /* M3 FAB shape: large rounded rectangle, not a full circle. */
-    border-radius: 16px;
-    /* Magenta accent (tertiary) — the brand's second colour, paired with the
+	position: fixed;
+	right: 24px;
+	bottom: 88px;
+	width: 56px;
+	height: 56px;
+	border: none;
+	/* M3 FAB shape: large rounded rectangle, not a full circle. */
+	border-radius: 16px;
+	/* Magenta accent (tertiary) — the brand's second colour, paired with the
        green chrome (a FAB is the M3-idiomatic place for the accent). */
-    background: var(--md-tertiary);
-    color: var(--md-on-tertiary);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 120;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+	background: var(--md-tertiary);
+	color: var(--md-on-tertiary);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 120;
+	transition:
+		transform 0.15s ease,
+		box-shadow 0.15s ease;
 }
 
 .fab:hover {
-    transform: scale(1.06);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.36);
+	transform: scale(1.06);
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.36);
 }
 
 .fab .material-icons {
-    font-size: 26px;
+	font-size: 26px;
 }
 
 /* On large screens the bar is at the top, so the bottom-right is free. */
 @media (min-width: 1200px) {
-    .fab {
-        bottom: 24px;
-    }
+	.fab {
+		bottom: 24px;
+	}
 }
 
 /* Modal overlay + card (add-content dialog). */
 .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 300;
-    /* M3 scrim. */
-    background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
+	position: fixed;
+	inset: 0;
+	z-index: 300;
+	/* M3 scrim. */
+	background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 16px;
 }
 
 /* M3 dialog: surface-container-high tone, extra-large corners, level-3 shadow. */
 .modal-card {
-    background: var(--md-surface-container-high);
-    border-radius: var(--md-sys-shape-corner-extra-large);
-    padding: 24px;
-    width: 100%;
-    max-width: 420px;
-    box-shadow: var(--md-sys-elevation-3);
+	background: var(--md-surface-container-high);
+	border-radius: var(--md-sys-shape-corner-extra-large);
+	padding: 24px;
+	width: 100%;
+	max-width: 420px;
+	box-shadow: var(--md-sys-elevation-3);
 }
 
 /* Buttons — M3 common button: 40px tall, full (pill) shape, label-large text. */
 .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 40px;
-    padding: 10px 24px;
-    border-radius: var(--md-sys-shape-corner-full);
-    border: none;
-    cursor: pointer;
-    font-size: var(--md-sys-typescale-label-large-size);
-    line-height: var(--md-sys-typescale-label-large-line);
-    font-weight: 500;
-    letter-spacing: var(--md-sys-typescale-label-large-tracking);
-    transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-        box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-    text-decoration: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	min-height: 40px;
+	padding: 10px 24px;
+	border-radius: var(--md-sys-shape-corner-full);
+	border: none;
+	cursor: pointer;
+	font-size: var(--md-sys-typescale-label-large-size);
+	line-height: var(--md-sys-typescale-label-large-line);
+	font-weight: 500;
+	letter-spacing: var(--md-sys-typescale-label-large-tracking);
+	transition:
+		background-color var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard),
+		box-shadow var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard);
+	text-decoration: none;
 }
 
 /* Filled button (M3): primary fill; hover adds a level-1 shadow + an 8%
    on-colour state layer (color-mix), pressed goes to 10%. */
 .btn-primary {
-    background-color: var(--md-primary);
-    color: var(--md-on-primary);
+	background-color: var(--md-primary);
+	color: var(--md-on-primary);
 }
 
 .btn-primary:hover {
-    background-color: color-mix(in srgb, var(--md-on-primary) 8%, var(--md-primary));
-    box-shadow: var(--md-sys-elevation-1);
+	background-color: color-mix(
+		in srgb,
+		var(--md-on-primary) 8%,
+		var(--md-primary)
+	);
+	box-shadow: var(--md-sys-elevation-1);
 }
 
 .btn-primary:active {
-    background-color: color-mix(in srgb, var(--md-on-primary) 10%, var(--md-primary));
-    box-shadow: var(--md-sys-elevation-0);
+	background-color: color-mix(
+		in srgb,
+		var(--md-on-primary) 10%,
+		var(--md-primary)
+	);
+	box-shadow: var(--md-sys-elevation-0);
 }
 
 .btn-primary:disabled {
-    background-color: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
-    color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
-    box-shadow: none;
-    cursor: not-allowed;
+	background-color: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+	color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+	box-shadow: none;
+	cursor: not-allowed;
 }
 
 .btn-secondary {
-    background-color: var(--md-primary);
-    color: var(--md-on-primary);
+	background-color: var(--md-primary);
+	color: var(--md-on-primary);
 }
 
 /* Outlined button (M3): 1px outline, primary label, state layer on hover. */
 .btn-outlined {
-    background: transparent;
-    border: 1px solid var(--md-outline-strong);
-    color: var(--md-primary);
+	background: transparent;
+	border: 1px solid var(--md-outline-strong);
+	color: var(--md-primary);
 }
 
 .btn-outlined:hover {
-    background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
 }
 
 .btn-outlined:active {
-    background-color: color-mix(in srgb, var(--md-primary) 10%, transparent);
+	background-color: color-mix(in srgb, var(--md-primary) 10%, transparent);
 }
 
 /* Text button (M3). */
 .btn-text {
-    background: transparent;
-    color: var(--md-primary);
-    padding: 10px 12px;
+	background: transparent;
+	color: var(--md-primary);
+	padding: 10px 12px;
 }
 
 .btn-text:hover {
-    background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
 }
 
 .btn-text:active {
-    background-color: color-mix(in srgb, var(--md-primary) 10%, transparent);
+	background-color: color-mix(in srgb, var(--md-primary) 10%, transparent);
 }
 
 /* Icon button (M3): 40px target, circular state layer of the on-surface
    colour (8% hover / 10% pressed). */
 .btn-icon {
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    border-radius: var(--md-sys-shape-corner-full);
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--md-on-surface);
-    transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+	width: 40px;
+	height: 40px;
+	padding: 0;
+	border-radius: var(--md-sys-shape-corner-full);
+	border: none;
+	background: transparent;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--md-on-surface);
+	transition: background-color var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard);
 }
 
 .btn-icon:hover {
-    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
 .btn-icon:active {
-    background-color: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+	background-color: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
 }
 
 .btn-full {
-    width: 100%;
+	width: 100%;
 }
 
 /* M3 keyboard-focus indicator: a clear ring shown only on keyboard navigation
@@ -747,46 +831,46 @@ a:hover {
 .folder-tile:focus-visible,
 a.list-item:focus-visible,
 a.folder-item:focus-visible {
-    outline: 3px solid var(--md-primary);
-    outline-offset: 2px;
+	outline: 3px solid var(--md-primary);
+	outline-offset: 2px;
 }
 
 /* On the coloured bar / active rail pill, ring in the on-colour so it shows. */
 .bar .btn-icon:focus-visible {
-    outline-color: var(--md-on-primary);
+	outline-color: var(--md-on-primary);
 }
 
 .app-rail .btn-icon:focus-visible {
-    outline: none;
+	outline: none;
 }
 
 .app-rail .btn-icon:focus-visible .app-rail-icon {
-    outline: 3px solid var(--md-primary);
-    outline-offset: 2px;
+	outline: 3px solid var(--md-primary);
+	outline-offset: 2px;
 }
 
 /* Form inputs */
 .text-field {
-    width: 100%;
-    position: relative;
+	width: 100%;
+	position: relative;
 }
 
 .text-field input {
-    width: 100%;
-    padding: 16px;
-    border: 1px solid var(--md-outline);
-    border-radius: 4px;
-    font-size: 16px;
-    background: transparent;
-    color: var(--md-on-surface);
-    outline: none;
-    transition: border-color 0.2s;
+	width: 100%;
+	padding: 16px;
+	border: 1px solid var(--md-outline);
+	border-radius: 4px;
+	font-size: 16px;
+	background: transparent;
+	color: var(--md-on-surface);
+	outline: none;
+	transition: border-color 0.2s;
 }
 
 .text-field input:focus {
-    border-color: var(--md-primary);
-    border-width: 2px;
-    padding: 15px;
+	border-color: var(--md-primary);
+	border-width: 2px;
+	padding: 15px;
 }
 
 /* Styled file upload: a dashed drop-zone control wrapping a hidden native
@@ -795,318 +879,326 @@ a.folder-item:focus-visible {
  * `label` is an absolutely-positioned floating label that would drag the picker
  * out of flow). */
 .file-upload-label {
-    display: block;
-    margin-bottom: 6px;
-    font-size: 12px;
-    color: var(--md-on-surface-variant);
+	display: block;
+	margin-bottom: 6px;
+	font-size: 12px;
+	color: var(--md-on-surface-variant);
 }
 
 .file-upload-input {
-    display: none;
+	display: none;
 }
 
 .file-upload {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 14px 16px;
-    border: 1.5px dashed var(--md-outline);
-    border-radius: var(--md-sys-shape-corner-medium, 12px);
-    background: var(--md-surface-variant);
-    color: var(--md-on-surface-variant);
-    cursor: pointer;
-    transition: border-color 0.2s, background-color 0.2s;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 16px;
+	border: 1.5px dashed var(--md-outline);
+	border-radius: var(--md-sys-shape-corner-medium, 12px);
+	background: var(--md-surface-variant);
+	color: var(--md-on-surface-variant);
+	cursor: pointer;
+	transition:
+		border-color 0.2s,
+		background-color 0.2s;
 }
 
 .file-upload:hover {
-    border-color: var(--md-primary);
-    background: color-mix(in srgb, var(--md-primary) 6%, var(--md-surface-variant));
+	border-color: var(--md-primary);
+	background: color-mix(
+		in srgb,
+		var(--md-primary) 6%,
+		var(--md-surface-variant)
+	);
 }
 
 .file-upload .material-icons {
-    color: var(--md-primary);
+	color: var(--md-primary);
 }
 
 .file-upload-text {
-    font-size: 14px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+	font-size: 14px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .file-upload-done {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 8px;
-    color: var(--md-secondary);
-    font-size: 13px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 8px;
+	color: var(--md-secondary);
+	font-size: 13px;
 }
 
 .file-upload-done .material-icons {
-    font-size: 18px;
-    color: var(--md-secondary);
+	font-size: 18px;
+	color: var(--md-secondary);
 }
 
 /* Native <select> styled to match the text inputs (shadcn-ish), with a custom
  * chevron so it doesn't fall back to the browser's default look. */
 select {
-    padding: 10px 36px 10px 12px;
-    border: 1px solid var(--md-outline);
-    border-radius: 8px;
-    font-size: 15px;
-    font-family: inherit;
-    line-height: 1.4;
-    background-color: var(--md-surface);
-    color: var(--md-on-surface);
-    outline: none;
-    cursor: pointer;
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23848484' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    transition: border-color 0.15s ease;
+	padding: 10px 36px 10px 12px;
+	border: 1px solid var(--md-outline);
+	border-radius: 8px;
+	font-size: 15px;
+	font-family: inherit;
+	line-height: 1.4;
+	background-color: var(--md-surface);
+	color: var(--md-on-surface);
+	outline: none;
+	cursor: pointer;
+	appearance: none;
+	-webkit-appearance: none;
+	-moz-appearance: none;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23848484' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 10px center;
+	transition: border-color 0.15s ease;
 }
 
 select:hover {
-    border-color: var(--md-on-surface-variant);
+	border-color: var(--md-on-surface-variant);
 }
 
 select:focus {
-    border-color: var(--md-primary);
+	border-color: var(--md-primary);
 }
 
 .text-field.error input {
-    border-color: var(--md-error);
+	border-color: var(--md-error);
 }
 
 .text-field label {
-    position: absolute;
-    left: 16px;
-    top: -8px;
-    background: var(--md-background);
-    padding: 0 4px;
-    font-size: 12px;
-    color: var(--md-on-surface-variant);
+	position: absolute;
+	left: 16px;
+	top: -8px;
+	background: var(--md-background);
+	padding: 0 4px;
+	font-size: 12px;
+	color: var(--md-on-surface-variant);
 }
 
 .text-field .helper-text {
-    font-size: 12px;
-    padding: 4px 16px 0;
-    color: var(--md-on-surface-variant);
+	font-size: 12px;
+	padding: 4px 16px 0;
+	color: var(--md-on-surface-variant);
 }
 
 .text-field.error .helper-text {
-    color: var(--md-error);
+	color: var(--md-error);
 }
 
 /* Newest list as a compact social feed (MD3): an author avatar, a who/when meta
  * line, the content title, and the context it lives in. */
 .recent-item {
-    display: flex;
-    gap: 12px;
-    padding: 12px 16px;
-    cursor: pointer;
-    border-radius: 12px;
-    margin: 2px 8px;
-    transition: background-color 0.15s;
+	display: flex;
+	gap: 12px;
+	padding: 12px 16px;
+	cursor: pointer;
+	border-radius: 12px;
+	margin: 2px 8px;
+	transition: background-color 0.15s;
 }
 
 .recent-item:hover {
-    background-color: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+	background-color: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
 }
 
 .recent-avatar {
-    align-self: flex-start;
-    flex-shrink: 0;
-    background-color: var(--md-primary-container);
-    color: var(--md-on-primary-container);
-    font-size: 11px;
-    font-weight: 600;
+	align-self: flex-start;
+	flex-shrink: 0;
+	background-color: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+	font-size: 11px;
+	font-weight: 600;
 }
 
 .recent-body {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
 }
 
 .recent-meta {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    flex-wrap: wrap;
-    font-size: 12px;
-    color: var(--md-on-surface-variant);
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	flex-wrap: wrap;
+	font-size: 12px;
+	color: var(--md-on-surface-variant);
 }
 
 .recent-author {
-    font-weight: 600;
-    color: var(--md-on-surface);
+	font-weight: 600;
+	color: var(--md-on-surface);
 }
 
 .recent-title {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--md-on-surface);
-    overflow-wrap: anywhere;
+	font-size: 15px;
+	font-weight: 500;
+	color: var(--md-on-surface);
+	overflow-wrap: anywhere;
 }
 
 .recent-context {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-top: 2px;
-    font-size: 12px;
-    color: var(--md-on-surface-variant);
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-top: 2px;
+	font-size: 12px;
+	color: var(--md-on-surface-variant);
 }
 
 .recent-context .material-icons {
-    font-size: 15px;
+	font-size: 15px;
 }
 
 /* List */
 .list {
-    list-style: none;
+	list-style: none;
 }
 
 .list-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 16px;
-    cursor: pointer;
-    transition: background-color 0.15s;
-    border-radius: 8px;
-    margin: 2px 8px;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 8px 16px;
+	cursor: pointer;
+	transition: background-color 0.15s;
+	border-radius: 8px;
+	margin: 2px 8px;
 }
 
 .list-item:hover {
-    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
 /* Dark-mode toggle row in the user menu: the label fills the row so the
    accessible Switch sits flush right. It is a row, not a button, so no
    pointer cursor and no hover highlight (the Switch owns the interaction). */
 .switch-row {
-    cursor: default;
+	cursor: default;
 }
 
 .switch-row:hover {
-    background-color: transparent;
+	background-color: transparent;
 }
 
 .switch-row-label {
-    flex: 1;
-    min-width: 0;
+	flex: 1;
+	min-width: 0;
 }
 
 /* Theme-colour picker in the user menu (the reusable ColorPicker widget). */
 .menu-color-section {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 10px 16px 6px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 10px 16px 6px;
 }
 
 .menu-color-title {
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--md-on-surface-variant);
+	font-size: 0.7rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--md-on-surface-variant);
 }
 
 .color-picker {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
 }
 
 .color-picker-label {
-    font-size: 0.8rem;
-    color: var(--md-on-surface-variant);
+	font-size: 0.8rem;
+	color: var(--md-on-surface-variant);
 }
 
 .color-swatches {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
 }
 
 .color-swatch {
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    padding: 0;
-    cursor: pointer;
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    /* Subtle ring so light swatches read against the menu surface. */
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
-    transition: transform 120ms ease, border-color 120ms ease;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	border: 2px solid transparent;
+	padding: 0;
+	cursor: pointer;
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	/* Subtle ring so light swatches read against the menu surface. */
+	box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+	transition:
+		transform 120ms ease,
+		border-color 120ms ease;
 }
 
 .color-swatch:hover {
-    transform: scale(1.12);
+	transform: scale(1.12);
 }
 
 .color-swatch.active {
-    border-color: var(--md-on-surface);
+	border-color: var(--md-on-surface);
 }
 
 .color-swatch .material-icons {
-    font-size: 15px;
-    color: #fff;
-    /* A dark halo keeps the check visible on light swatches too. */
-    text-shadow: 0 0 2px rgb(0 0 0 / 55%);
+	font-size: 15px;
+	color: #fff;
+	/* A dark halo keeps the check visible on light swatches too. */
+	text-shadow: 0 0 2px rgb(0 0 0 / 55%);
 }
 
 /* The "any colour" chip: a rainbow that opens the native OS picker. */
 .color-swatch-custom {
-    background: conic-gradient(
-        from 0deg,
-        #f44336,
-        #ff9800,
-        #ffeb3b,
-        #4caf50,
-        #2196f3,
-        #9c27b0,
-        #f44336
-    );
-    overflow: hidden;
+	background: conic-gradient(
+		from 0deg,
+		#f44336,
+		#ff9800,
+		#ffeb3b,
+		#4caf50,
+		#2196f3,
+		#9c27b0,
+		#f44336
+	);
+	overflow: hidden;
 }
 
 .color-swatch-custom .material-icons {
-    text-shadow: 0 0 3px rgb(0 0 0 / 70%);
+	text-shadow: 0 0 3px rgb(0 0 0 / 70%);
 }
 
 .color-input-native {
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    border: none;
-    padding: 0;
-    cursor: pointer;
+	position: absolute;
+	inset: 0;
+	opacity: 0;
+	border: none;
+	padding: 0;
+	cursor: pointer;
 }
 
 .list-item.selected {
-    background-color: var(--md-primary-container);
-    /* Left accent bar marking the current node in the tree. */
-    box-shadow: inset 3px 0 0 var(--md-primary);
+	background-color: var(--md-primary-container);
+	/* Left accent bar marking the current node in the tree. */
+	box-shadow: inset 3px 0 0 var(--md-primary);
 }
 
 .list-item.selected .list-item-primary {
-    color: var(--md-on-primary-container);
-    font-weight: 600;
+	color: var(--md-on-primary-container);
+	font-weight: 600;
 }
 
 /* Ancestors of the selected node (its parents on the active path): a lower-
@@ -1114,271 +1206,283 @@ select:focus {
  * faded accent bar — so the path to the current node reads without competing
  * with it (like the selected item, it keeps its tint over the hover state). */
 .list-item.ancestor {
-    background-color: color-mix(in srgb, var(--md-primary-container) 40%, transparent);
-    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--md-primary) 35%, transparent);
+	background-color: color-mix(
+		in srgb,
+		var(--md-primary-container) 40%,
+		transparent
+	);
+	box-shadow: inset 3px 0 0
+		color-mix(in srgb, var(--md-primary) 35%, transparent);
 }
 
 .list-item.ancestor .list-item-primary {
-    color: var(--md-on-surface);
-    font-weight: 500;
+	color: var(--md-on-surface);
+	font-weight: 500;
 }
 
 .list-item-text {
-    flex: 1;
-    min-width: 0;
+	flex: 1;
+	min-width: 0;
 }
 
 .list-item-primary {
-    font-size: 14px;
-    color: var(--md-on-surface);
-    word-break: break-word;
-    hyphens: auto;
+	font-size: 14px;
+	color: var(--md-on-surface);
+	word-break: break-word;
+	hyphens: auto;
 }
 
 .list-item-secondary {
-    font-size: 12px;
-    color: var(--md-on-surface-variant);
+	font-size: 12px;
+	color: var(--md-on-surface-variant);
 }
 
 /* Member / author chips */
 .chip-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	align-items: center;
 }
 /* Outlined "secondary" chip, matching the old wiki's MUI
  * <Chip color="secondary" variant="outlined"> (author chips etc.): a pill with
  * a secondary-coloured border + label and a small inline icon. */
 .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 32px;
-    padding: 0 12px 0 8px;
-    border: 1px solid var(--md-outline-strong);
-    border-radius: var(--md-sys-shape-corner-small);
-    font-size: var(--md-sys-typescale-label-large-size);
-    line-height: 1;
-    letter-spacing: var(--md-sys-typescale-label-large-tracking);
-    color: var(--md-primary);
-    background: transparent;
-    max-width: 100%;
-    transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 32px;
+	padding: 0 12px 0 8px;
+	border: 1px solid var(--md-outline-strong);
+	border-radius: var(--md-sys-shape-corner-small);
+	font-size: var(--md-sys-typescale-label-large-size);
+	line-height: 1;
+	letter-spacing: var(--md-sys-typescale-label-large-tracking);
+	color: var(--md-primary);
+	background: transparent;
+	max-width: 100%;
+	transition: background-color var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard);
 }
 
 .chip:hover {
-    background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
 }
 
 .chip .material-icons {
-    font-size: 18px;
-    color: var(--md-primary);
+	font-size: 18px;
+	color: var(--md-primary);
 }
 
 .chip-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* Author autocomplete field (editor) */
 .author-field > label {
-    display: block;
-    font-size: 12px;
-    color: var(--md-on-surface-variant);
-    margin-bottom: 4px;
+	display: block;
+	font-size: 12px;
+	color: var(--md-on-surface-variant);
+	margin-bottom: 4px;
 }
 
 .author-field .chip-row {
-    margin-bottom: 6px;
+	margin-bottom: 6px;
 }
 
 .chip-remove {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    background: transparent;
-    color: var(--md-primary);
-    cursor: pointer;
-    padding: 0;
-    margin-left: 2px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: none;
+	background: transparent;
+	color: var(--md-primary);
+	cursor: pointer;
+	padding: 0;
+	margin-left: 2px;
 }
 
 .chip-remove .material-icons {
-    font-size: 16px;
+	font-size: 16px;
 }
 
 .author-input-wrap {
-    position: relative;
+	position: relative;
 }
 
 .author-input-wrap > input {
-    width: 100%;
-    height: 40px;
-    padding: 0 12px;
-    border: 1px solid var(--md-outline);
-    border-radius: 8px;
-    background: var(--md-surface);
-    color: var(--md-on-surface);
-    outline: none;
-    font-size: 15px;
-    box-sizing: border-box;
+	width: 100%;
+	height: 40px;
+	padding: 0 12px;
+	border: 1px solid var(--md-outline);
+	border-radius: 8px;
+	background: var(--md-surface);
+	color: var(--md-on-surface);
+	outline: none;
+	font-size: 15px;
+	box-sizing: border-box;
 }
 
 .author-input-wrap > input:focus {
-    border-color: var(--md-primary);
+	border-color: var(--md-primary);
 }
 
 .author-suggestions {
-    position: absolute;
-    z-index: 5;
-    left: 0;
-    right: 0;
-    top: calc(100% + 4px);
-    max-height: 240px;
-    overflow-y: auto;
-    background: var(--md-surface);
-    border: 1px solid var(--md-outline);
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	position: absolute;
+	z-index: 5;
+	left: 0;
+	right: 0;
+	top: calc(100% + 4px);
+	max-height: 240px;
+	overflow-y: auto;
+	background: var(--md-surface);
+	border: 1px solid var(--md-outline);
+	border-radius: 8px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .author-suggestion {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 8px 12px;
-    border: none;
-    background: transparent;
-    color: var(--md-on-surface);
-    cursor: pointer;
-    text-align: left;
-    font-size: 14px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	padding: 8px 12px;
+	border: none;
+	background: transparent;
+	color: var(--md-on-surface);
+	cursor: pointer;
+	text-align: left;
+	font-size: 14px;
 }
 
 .author-suggestion:hover {
-    background: var(--md-surface-variant);
+	background: var(--md-surface-variant);
 }
 
 .author-suggestion .material-icons {
-    font-size: 18px;
-    color: var(--md-on-surface-variant);
+	font-size: 18px;
+	color: var(--md-on-surface-variant);
 }
 
 /* Poll result bars */
 .vote-bar {
-    height: 6px;
-    border-radius: 3px;
-    background: var(--md-surface-variant, #e7e0ec);
-    overflow: hidden;
-    margin: 4px 0;
+	height: 6px;
+	border-radius: 3px;
+	background: var(--md-surface-variant, #e7e0ec);
+	overflow: hidden;
+	margin: 4px 0;
 }
 .vote-bar-fill {
-    height: 100%;
-    background: var(--md-primary, #6750a4);
-    transition: width 0.3s ease;
+	height: 100%;
+	background: var(--md-primary, #6750a4);
+	transition: width 0.3s ease;
 }
 
 /* Typography */
-h1, .headline-large {
-    font-size: 32px;
-    font-weight: 400;
-    line-height: 40px;
+h1,
+.headline-large {
+	font-size: 32px;
+	font-weight: 400;
+	line-height: 40px;
 }
 
-h2, .headline-medium {
-    font-size: 28px;
-    font-weight: 400;
-    line-height: 36px;
+h2,
+.headline-medium {
+	font-size: 28px;
+	font-weight: 400;
+	line-height: 36px;
 }
 
-h3, .headline-small {
-    font-size: 24px;
-    font-weight: 400;
-    line-height: 32px;
+h3,
+.headline-small {
+	font-size: 24px;
+	font-weight: 400;
+	line-height: 32px;
 }
 
-h4, .title-large {
-    font-size: 22px;
-    font-weight: 400;
-    line-height: 28px;
+h4,
+.title-large {
+	font-size: 22px;
+	font-weight: 400;
+	line-height: 28px;
 }
 
-h5, .title-medium {
-    font-size: 16px;
-    font-weight: 500;
-    line-height: 24px;
-    letter-spacing: 0.15px;
+h5,
+.title-medium {
+	font-size: 16px;
+	font-weight: 500;
+	line-height: 24px;
+	letter-spacing: 0.15px;
 }
 
-h6, .title-small {
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 20px;
-    letter-spacing: 0.1px;
+h6,
+.title-small {
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 20px;
+	letter-spacing: 0.1px;
 }
 
 .body-large {
-    font-size: 16px;
-    line-height: 24px;
-    letter-spacing: 0.5px;
+	font-size: 16px;
+	line-height: 24px;
+	letter-spacing: 0.5px;
 }
 
 .body-medium {
-    font-size: 14px;
-    line-height: 20px;
-    letter-spacing: 0.25px;
+	font-size: 14px;
+	line-height: 20px;
+	letter-spacing: 0.25px;
 }
 
 .label-large {
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 20px;
-    letter-spacing: 0.1px;
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 20px;
+	letter-spacing: 0.1px;
 }
 
 /* Grid */
 .grid {
-    display: grid;
-    gap: 8px;
+	display: grid;
+	gap: 8px;
 }
 
 .grid-2 {
-    grid-template-columns: 1fr;
+	grid-template-columns: 1fr;
 }
 
 @media (min-width: 900px) {
-    .grid-2 {
-        grid-template-columns: 1fr 1fr;
-    }
+	.grid-2 {
+		grid-template-columns: 1fr 1fr;
+	}
 }
 
 .grid-3 {
-    grid-template-columns: 1fr;
+	grid-template-columns: 1fr;
 }
 
 @media (min-width: 900px) {
-    .grid-3 {
-        grid-template-columns: 2fr 1fr;
-    }
+	.grid-3 {
+		grid-template-columns: 2fr 1fr;
+	}
 }
 
 /* Stack */
 .stack {
-    display: flex;
-    gap: 8px;
+	display: flex;
+	gap: 8px;
 }
 
 .stack-v {
-    flex-direction: column;
+	flex-direction: column;
 }
 
 .stack-h {
-    flex-direction: row;
-    align-items: center;
+	flex-direction: row;
+	align-items: center;
 }
 
 /* Snackbar — M3: inverse-surface, extra-small corners, level-3 shadow. */
@@ -1386,642 +1490,667 @@ h6, .title-small {
    On desktop the bar sits at the top-left of the content column, so bottom-centre
    stays clear of the drawer/rail. */
 .snackbar-stack {
-    position: fixed;
-    bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 300;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    max-width: min(90vw, 480px);
+	position: fixed;
+	bottom: 80px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 300;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	max-width: min(90vw, 480px);
 }
 
 .snackbar {
-    position: relative;
-    background: var(--md-inverse-surface);
-    color: var(--md-inverse-on-surface);
-    padding: 14px 16px;
-    border-radius: var(--md-sys-shape-corner-extra-small);
-    z-index: 300;
-    box-shadow: var(--md-sys-elevation-3);
-    font-size: var(--md-sys-typescale-body-medium-size);
-    line-height: var(--md-sys-typescale-body-medium-line);
-    animation: snackbar-in var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-emphasized-decelerate);
+	position: relative;
+	background: var(--md-inverse-surface);
+	color: var(--md-inverse-on-surface);
+	padding: 14px 16px;
+	border-radius: var(--md-sys-shape-corner-extra-small);
+	z-index: 300;
+	box-shadow: var(--md-sys-elevation-3);
+	font-size: var(--md-sys-typescale-body-medium-size);
+	line-height: var(--md-sys-typescale-body-medium-line);
+	animation: snackbar-in var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-easing-emphasized-decelerate);
 }
 
 @keyframes snackbar-in {
-    from {
-        opacity: 0;
-        transform: translateX(-50%) translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
-    }
+	from {
+		opacity: 0;
+		transform: translateX(-50%) translateY(20px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(-50%) translateY(0);
+	}
 }
 
 /* Loading spinner */
 .spinner {
-    width: 24px;
-    height: 24px;
-    border: 3px solid var(--md-surface-variant);
-    border-top: 3px solid var(--md-primary);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
+	width: 24px;
+	height: 24px;
+	border: 3px solid var(--md-surface-variant);
+	border-top: 3px solid var(--md-primary);
+	border-radius: 50%;
+	animation: spin 1s linear infinite;
 }
 
 @keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .spinner-overlay {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 32px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 32px;
 }
 
 /* Breadcrumbs */
 .breadcrumbs {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    flex: 1;
-    min-width: 0;
-    padding: 6px 12px;
-    color: #fff;
-    font-size: 14px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	flex: 1;
+	min-width: 0;
+	padding: 6px 12px;
+	color: #fff;
+	font-size: 14px;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
 }
 
 .breadcrumbs::-webkit-scrollbar {
-    display: none;
+	display: none;
 }
 
 /* One breadcrumb crumb: an always-visible mime avatar + a name that expands on
  * hover (horizontal collapse), matching the old wiki. */
 .crumb {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
 }
 
 .crumb-link {
-    display: inline-flex;
-    align-items: center;
-    text-decoration: none;
-    color: #fff;
-    cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	text-decoration: none;
+	color: #fff;
+	cursor: pointer;
 }
 
 .crumb-avatar {
-    flex: 0 0 auto;
-    position: relative;
+	flex: 0 0 auto;
+	position: relative;
 }
 
 /* The open app (e.g. vote/editor) badged onto the current crumb's avatar. */
 .crumb-app-badge {
-    position: absolute;
-    right: -5px;
-    bottom: -5px;
-    width: 17px;
-    height: 17px;
-    border-radius: 50%;
-    background: var(--md-tertiary-container);
-    color: var(--md-on-tertiary-container);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1.5px solid var(--md-surface);
-    box-sizing: border-box;
+	position: absolute;
+	right: -5px;
+	bottom: -5px;
+	width: 17px;
+	height: 17px;
+	border-radius: 50%;
+	background: var(--md-tertiary-container);
+	color: var(--md-on-tertiary-container);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 1.5px solid var(--md-surface);
+	box-sizing: border-box;
 }
 
 .crumb-app-badge .material-icons {
-    font-size: 11px;
-    line-height: 1;
+	font-size: 11px;
+	line-height: 1;
 }
 
 .crumb-name {
-    max-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    opacity: 0;
-    color: #fff;
-    transition: max-width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+	max-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	opacity: 0;
+	color: #fff;
+	transition:
+		max-width 0.25s ease,
+		opacity 0.2s ease,
+		margin 0.25s ease;
 }
 
 .crumb-name.open {
-    max-width: 260px;
-    opacity: 1;
-    margin: 0 8px 0 4px;
+	max-width: 260px;
+	opacity: 1;
+	margin: 0 8px 0 4px;
 }
 
 /* Content (Slate document renderer) */
 .slate-content {
-    padding: 16px;
-    font-size: inherit;
-    overflow-x: auto;
+	padding: 16px;
+	font-size: inherit;
+	overflow-x: auto;
 }
 
 /* Soft line breaks (#92): a "\n" text leaf inside a paragraph must render as a
  * line break rather than collapse to a space. Preserve newlines but keep wrap. */
 .slate-content p {
-    white-space: pre-wrap;
+	white-space: pre-wrap;
 }
 
 /* Table of contents (#117): a boxed list of heading anchors above the content. */
 .toc {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin: 0 0 16px;
-    padding: 12px 16px;
-    border: 1px solid var(--md-outline);
-    border-radius: 8px;
-    background: var(--md-surface-variant);
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin: 0 0 16px;
+	padding: 12px 16px;
+	border: 1px solid var(--md-outline);
+	border-radius: 8px;
+	background: var(--md-surface-variant);
 }
 
 .toc-item {
-    color: var(--md-on-surface);
-    text-decoration: none;
-    font-size: 14px;
-    padding: 2px 0;
+	color: var(--md-on-surface);
+	text-decoration: none;
+	font-size: 14px;
+	padding: 2px 0;
 }
 
 .toc-item:hover {
-    text-decoration: underline;
-    color: var(--md-primary);
+	text-decoration: underline;
+	color: var(--md-primary);
 }
 
 .toc-l2 {
-    padding-left: 16px;
+	padding-left: 16px;
 }
 
 .toc-l3 {
-    padding-left: 32px;
+	padding-left: 32px;
 }
 
 .toc-l4,
 .toc-l5,
 .toc-l6 {
-    padding-left: 48px;
+	padding-left: 48px;
 }
 
 .slate-content blockquote {
-    border-left: 3px solid var(--md-outline);
-    padding-left: 16px;
-    margin: 8px 0;
-    color: var(--md-on-surface-variant);
+	border-left: 3px solid var(--md-outline);
+	padding-left: 16px;
+	margin: 8px 0;
+	color: var(--md-on-surface-variant);
 }
 
 .slate-content pre {
-    background: var(--md-surface-variant);
-    padding: 16px;
-    border-radius: 8px;
-    overflow-x: auto;
-    font-family: monospace;
+	background: var(--md-surface-variant);
+	padding: 16px;
+	border-radius: 8px;
+	overflow-x: auto;
+	font-family: monospace;
 }
 
 .slate-content ul,
 .slate-content ol {
-    padding-left: 24px;
-    margin: 8px 0;
+	padding-left: 24px;
+	margin: 8px 0;
 }
 
 .slate-content img {
-    max-width: 100%;
-    border-radius: 8px;
+	max-width: 100%;
+	border-radius: 8px;
 }
 
 /* Speaker list (#14): highlight the current speaker and the one on deck so the
  * room can see who is up now and next at a glance. */
 .speak-current {
-    border-left: 4px solid var(--md-primary);
-    background: var(--md-primary-container);
-    color: var(--md-on-primary-container);
-    border-radius: 8px;
+	border-left: 4px solid var(--md-primary);
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+	border-radius: 8px;
 }
 
 .speak-next {
-    border-left: 4px solid var(--md-primary);
-    background: var(--md-surface-variant);
-    border-radius: 8px;
+	border-left: 4px solid var(--md-primary);
+	background: var(--md-surface-variant);
+	border-radius: 8px;
 }
 
 /* Speaking-time countdown pill in the list header. */
 .chip-timer {
-    background: var(--md-primary);
-    color: var(--md-on-primary);
-    padding: 4px 14px;
-    border-radius: 20px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
+	background: var(--md-primary);
+	color: var(--md-on-primary);
+	padding: 4px 14px;
+	border-radius: 20px;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
 }
 
 /* Programme / agenda timeline (#60). */
 .program-timeline {
-    padding: 8px 0;
+	padding: 8px 0;
 }
 
 .program-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    cursor: pointer;
-    border-left: 2px solid var(--md-outline);
-    margin-left: 24px;
-    transition: background-color 0.15s;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 16px;
+	cursor: pointer;
+	border-left: 2px solid var(--md-outline);
+	margin-left: 24px;
+	transition: background-color 0.15s;
 }
 
 .program-item:hover {
-    background-color: var(--md-surface-variant);
+	background-color: var(--md-surface-variant);
 }
 
 .program-index {
-    flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
-    margin-left: -30px;
-    border-radius: 50%;
-    background: var(--md-primary);
-    color: var(--md-on-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    font-size: 13px;
+	flex: 0 0 auto;
+	width: 28px;
+	height: 28px;
+	margin-left: -30px;
+	border-radius: 50%;
+	background: var(--md-primary);
+	color: var(--md-on-primary);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 700;
+	font-size: 13px;
 }
 
 /* Click-to-zoom images (#114). */
 .zoomable {
-    cursor: zoom-in;
-    /* Fit the container and keep the card's rounded look (content images). */
-    display: block;
-    max-width: 100%;
-    height: auto;
-    border-radius: var(--md-sys-shape-corner-medium, 12px);
-    /* Fade in on mount so images don't pop in abruptly. */
-    animation: image-fade-in var(--md-sys-motion-duration-medium2, 300ms)
-        var(--md-sys-motion-easing-standard, ease);
+	cursor: zoom-in;
+	/* Fit the container and keep the card's rounded look (content images). */
+	display: block;
+	max-width: 100%;
+	height: auto;
+	border-radius: var(--md-sys-shape-corner-medium, 12px);
+	/* Fade in on mount so images don't pop in abruptly. */
+	animation: image-fade-in var(--md-sys-motion-duration-medium2, 300ms)
+		var(--md-sys-motion-easing-standard, ease);
 }
 
 @keyframes image-fade-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
 }
 
 /* Broken-image placeholder shown when an image fails to load. */
 .image-error {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 120px;
-    border-radius: var(--md-sys-shape-corner-medium, 12px);
-    background: var(--md-surface-variant);
-    color: var(--md-on-surface-variant);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 120px;
+	border-radius: var(--md-sys-shape-corner-medium, 12px);
+	background: var(--md-surface-variant);
+	color: var(--md-on-surface-variant);
 }
 
 .image-error .material-icons {
-    font-size: 48px;
+	font-size: 48px;
 }
 
 .image-lightbox {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: rgba(0, 0, 0, 0.85);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: zoom-out;
-    padding: 16px;
+	position: fixed;
+	inset: 0;
+	z-index: 1000;
+	background: rgba(0, 0, 0, 0.85);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: zoom-out;
+	padding: 16px;
 }
 
 .image-lightbox img {
-    max-width: 95vw;
-    max-height: 95vh;
-    border-radius: 8px;
-    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+	max-width: 95vw;
+	max-height: 95vh;
+	border-radius: 8px;
+	box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
 }
 
 /* Cowsay easter egg (#82). */
 .cowsay {
-    font-family: monospace;
-    line-height: 1.2;
-    white-space: pre;
-    overflow-x: auto;
+	font-family: monospace;
+	line-height: 1.2;
+	white-space: pre;
+	overflow-x: auto;
 }
 
 /* Folder list */
 .folder-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    cursor: pointer;
-    transition: background-color 0.15s;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 16px;
+	cursor: pointer;
+	transition: background-color 0.15s;
 }
 
 .folder-item:hover {
-    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
 /* Child count badge in a folder header (#143). */
 .count-badge {
-    margin-left: 8px;
-    padding: 1px 10px;
-    border-radius: 12px;
-    background: var(--md-surface-variant);
-    color: var(--md-on-surface-variant);
-    font-size: 13px;
-    font-weight: 600;
+	margin-left: 8px;
+	padding: 1px 10px;
+	border-radius: 12px;
+	background: var(--md-surface-variant);
+	color: var(--md-on-surface-variant);
+	font-size: 13px;
+	font-weight: 600;
 }
 
 /* Folder grid view (#125): responsive tiles. */
 .folder-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 10px;
-    padding: 12px 16px;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+	gap: 10px;
+	padding: 12px 16px;
 }
 
 .folder-tile {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 8px;
-    padding: 16px 10px;
-    border: 1px solid var(--md-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
-    cursor: pointer;
-    transition: background-color var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	gap: 8px;
+	padding: 16px 10px;
+	border: 1px solid var(--md-outline-variant);
+	border-radius: var(--md-sys-shape-corner-medium);
+	cursor: pointer;
+	transition: background-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
 }
 
 .folder-tile:hover {
-    background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
 .folder-tile .list-item-text {
-    min-width: 0;
-    width: 100%;
+	min-width: 0;
+	width: 100%;
 }
 
 .folder-tile .list-item-primary {
-    /* Keep long names (e.g. candidate names) inside the tile: fill its width and
+	/* Keep long names (e.g. candidate names) inside the tile: fill its width and
      * wrap instead of overflowing on a single nowrap line. */
-    width: 100%;
-    overflow-wrap: break-word;
-    hyphens: auto;
+	width: 100%;
+	overflow-wrap: break-word;
+	hyphens: auto;
 }
 
 /* Theme toggle */
 .theme-toggle {
-    cursor: pointer;
-    padding: 8px;
+	cursor: pointer;
+	padding: 8px;
 }
 
 /* Error boundary */
 .error-fallback {
-    padding: 24px;
+	padding: 24px;
 }
 
 .error-fallback pre {
-    background: #EDEDED;
-    padding: 20px;
-    overflow-x: auto;
-    border-radius: 8px;
-    margin-top: 12px;
+	background: #ededed;
+	padding: 20px;
+	overflow-x: auto;
+	border-radius: 8px;
+	margin-top: 12px;
 }
 
 /* Auth form */
 .auth-container {
-    max-width: 400px;
-    margin: 0 auto;
-    padding: 24px;
+	max-width: 400px;
+	margin: 0 auto;
+	padding: 24px;
 }
 
 .auth-form {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 16px;
 }
 
 /* File viewers */
 .file-viewer {
-    width: 100%;
-    text-align: center;
-    padding: 16px;
+	width: 100%;
+	text-align: center;
+	padding: 16px;
 }
 
 .file-viewer img {
-    max-width: 100%;
-    border-radius: 8px;
+	max-width: 100%;
+	border-radius: 8px;
 }
 
 .file-viewer video,
 .file-viewer audio {
-    max-width: 100%;
+	max-width: 100%;
 }
 
 .file-viewer iframe {
-    width: 100%;
-    /* Fill the viewport height minus the chrome (top/bottom bar + padding)
+	width: 100%;
+	/* Fill the viewport height minus the chrome (top/bottom bar + padding)
        rather than a fixed 80vh, so a PDF/office preview uses the whole screen. */
-    height: calc(100vh - 160px);
-    min-height: 480px;
-    border: none;
-    border-radius: 8px;
+	height: calc(100vh - 160px);
+	min-height: 480px;
+	border: none;
+	border-radius: 8px;
 }
 
 /* #119: dark mode for the embedded (white) Office / PDF viewers. The iframe is
    cross-origin so we can only filter the whole element: invert + hue-rotate
    keeps colours roughly intact while turning the white page dark. */
 [data-theme="dark"] .file-viewer iframe {
-    filter: invert(0.92) hue-rotate(180deg);
-    background: var(--md-surface);
+	filter: invert(0.92) hue-rotate(180deg);
+	background: var(--md-surface);
 }
 
 /* Home page */
 .home-welcome {
-    text-align: center;
-    padding: 32px 16px;
+	text-align: center;
+	padding: 32px 16px;
 }
 
 /* Utility */
 .flex-grow {
-    flex-grow: 1;
+	flex-grow: 1;
 }
 
 .text-center {
-    text-align: center;
+	text-align: center;
 }
 
 .hidden {
-    display: none;
+	display: none;
 }
 
-.p-1 { padding: 8px; }
-.p-2 { padding: 16px; }
-.p-3 { padding: 24px; }
-.m-1 { margin: 8px; }
-.m-2 { margin: 16px; }
-.mt-1 { margin-top: 8px; }
-.mt-2 { margin-top: 16px; }
-.mb-1 { margin-bottom: 8px; }
-.mb-2 { margin-bottom: 16px; }
-.w-full { width: 100%; }
+.p-1 {
+	padding: 8px;
+}
+.p-2 {
+	padding: 16px;
+}
+.p-3 {
+	padding: 24px;
+}
+.m-1 {
+	margin: 8px;
+}
+.m-2 {
+	margin: 16px;
+}
+.mt-1 {
+	margin-top: 8px;
+}
+.mt-2 {
+	margin-top: 16px;
+}
+.mb-1 {
+	margin-bottom: 8px;
+}
+.mb-2 {
+	margin-bottom: 16px;
+}
+.w-full {
+	width: 100%;
+}
 
 /* Mobile-only elements */
 .mobile-only {
-    display: inline-flex;
+	display: inline-flex;
 }
 
 @media (min-width: 1200px) {
-    .mobile-only {
-        display: none;
-    }
+	.mobile-only {
+		display: none;
+	}
 }
 
 /* Pending-invite count badge on the Home nav item (rail + mobile bar). */
 .nav-badge {
-    position: absolute;
-    top: 2px;
-    right: 8px;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 8px;
-    background: var(--md-tertiary);
-    color: var(--md-on-tertiary);
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 16px;
-    text-align: center;
-    box-sizing: border-box;
+	position: absolute;
+	top: 2px;
+	right: 8px;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 8px;
+	background: var(--md-tertiary);
+	color: var(--md-on-tertiary);
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 16px;
+	text-align: center;
+	box-sizing: border-box;
 }
 
 /* Projector view (?app=screen): full-screen content, no drawer/rail/bar chrome. */
 .screen-full {
-    padding: 16px;
-    min-height: 100vh;
-    box-sizing: border-box;
+	padding: 16px;
+	min-height: 100vh;
+	box-sizing: border-box;
 }
 
 /* The groups/events list rendered in the Home main pane — mobile only; on desktop
    the always-visible drawer already carries it. Block-level (unlike .mobile-only,
    which is inline-flex for buttons). */
 .home-mobile-list {
-    display: block;
+	display: block;
 }
 
 @media (min-width: 1200px) {
-    .home-mobile-list {
-        display: none;
-    }
+	.home-mobile-list {
+		display: none;
+	}
 }
 
 /* A drawer list-item shown only on mobile (keeps flex layout, unlike
    .mobile-only which is inline-flex). Desktop reaches Home via the app rail. */
 .drawer-mobile-home {
-    display: flex;
+	display: flex;
 }
 
 @media (min-width: 1200px) {
-    .drawer-mobile-home {
-        display: none;
-    }
+	.drawer-mobile-home {
+		display: none;
+	}
 }
 
 /* Folder item as link */
 a.folder-item {
-    text-decoration: none;
-    color: inherit;
+	text-decoration: none;
+	color: inherit;
 }
 
 a.folder-item:hover {
-    text-decoration: none;
+	text-decoration: none;
 }
 
 /* Link as list-item */
 a.list-item {
-    text-decoration: none;
-    color: inherit;
+	text-decoration: none;
+	color: inherit;
 }
 
 a.list-item:hover {
-    text-decoration: none;
-    background-color: var(--md-surface-variant);
+	text-decoration: none;
+	background-color: var(--md-surface-variant);
 }
 
 /* Search results dropdown */
 .search-results {
-    position: absolute;
-    bottom: 100%;
-    left: 0;
-    right: 0;
-    background: var(--md-surface);
-    border: 1px solid var(--md-outline);
-    border-radius: 12px;
-    max-height: 300px;
-    overflow-y: auto;
-    z-index: 300;
-    margin-bottom: 8px;
-    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+	position: absolute;
+	bottom: 100%;
+	left: 0;
+	right: 0;
+	background: var(--md-surface);
+	border: 1px solid var(--md-outline);
+	border-radius: 12px;
+	max-height: 300px;
+	overflow-y: auto;
+	z-index: 300;
+	margin-bottom: 8px;
+	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
 }
 
 @media (min-width: 1200px) {
-    .search-results {
-        bottom: auto;
-        top: 100%;
-        margin-bottom: 0;
-        margin-top: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
+	.search-results {
+		bottom: auto;
+		top: 100%;
+		margin-bottom: 0;
+		margin-top: 8px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	}
 }
 
 .search-results .list-item {
-    margin: 0;
-    border-radius: 0;
+	margin: 0;
+	border-radius: 0;
 }
 
 /* Keyboard-highlighted search result (arrow-key navigation). */
 .search-results .list-item.selected {
-    background: var(--md-surface-variant);
+	background: var(--md-surface-variant);
 }
 
 /* The bar is green (secondary), so its icons use the on-secondary colour for
    contrast (black-on-green was too faint). */
 .bar .btn-icon {
-    color: var(--md-on-primary);
+	color: var(--md-on-primary);
 }
 
 /* On the coloured bar the icon state layer is the on-primary (white), not the
    default on-surface. */
 .bar .btn-icon:hover {
-    background-color: color-mix(in srgb, var(--md-on-primary) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-on-primary) 8%, transparent);
 }
 
 .bar .btn-icon:active {
-    background-color: color-mix(in srgb, var(--md-on-primary) 10%, transparent);
+	background-color: color-mix(in srgb, var(--md-on-primary) 10%, transparent);
 }
 
 /* User menu */
 .user-menu {
-    position: relative;
+	position: relative;
 }
 
 /* The user avatar sits on the green bar; make it the light-magenta accent
@@ -2029,205 +2158,207 @@ a.list-item:hover {
    on green gives clear luminance contrast (a bold magenta would match the
    green's luminance and vibrate against it). */
 .user-menu .avatar.secondary {
-    background: var(--md-tertiary-container);
-    color: var(--md-on-tertiary-container);
+	background: var(--md-tertiary-container);
+	color: var(--md-on-tertiary-container);
 }
 
 /* Full-viewport click-catcher behind an open popup menu, so a click anywhere
    else dismisses it. */
 .menu-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 290;
+	position: fixed;
+	inset: 0;
+	z-index: 290;
 }
 
 /* User menu dropdown */
 .user-menu-dropdown {
-    position: absolute;
-    bottom: 100%;
-    right: 0;
-    background: var(--md-surface);
-    border: 1px solid var(--md-outline);
-    border-radius: 12px;
-    min-width: 240px;
-    max-width: 300px;
-    z-index: 300;
-    margin-bottom: 8px;
-    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
-    overflow: hidden;
+	position: absolute;
+	bottom: 100%;
+	right: 0;
+	background: var(--md-surface);
+	border: 1px solid var(--md-outline);
+	border-radius: 12px;
+	min-width: 240px;
+	max-width: 300px;
+	z-index: 300;
+	margin-bottom: 8px;
+	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+	overflow: hidden;
 }
 
 /* Signed-in identity header at the top of the account menu. */
 .user-menu-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--md-outline-variant);
-    margin-bottom: 4px;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 16px;
+	border-bottom: 1px solid var(--md-outline-variant);
+	margin-bottom: 4px;
 }
 
 .user-menu-identity {
-    min-width: 0;
+	min-width: 0;
 }
 
 .user-menu-name {
-    font-size: var(--md-sys-typescale-title-small-size);
-    line-height: var(--md-sys-typescale-title-small-line);
-    font-weight: 500;
-    color: var(--md-on-surface);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+	font-size: var(--md-sys-typescale-title-small-size);
+	line-height: var(--md-sys-typescale-title-small-line);
+	font-weight: 500;
+	color: var(--md-on-surface);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .user-menu-email {
-    font-size: var(--md-sys-typescale-body-small-size);
-    line-height: var(--md-sys-typescale-body-small-line);
-    color: var(--md-on-surface-variant);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+	font-size: var(--md-sys-typescale-body-small-size);
+	line-height: var(--md-sys-typescale-body-small-line);
+	color: var(--md-on-surface-variant);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 @media (min-width: 1200px) {
-    .user-menu-dropdown {
-        bottom: auto;
-        top: 100%;
-        margin-bottom: 0;
-        margin-top: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
+	.user-menu-dropdown {
+		bottom: auto;
+		top: 100%;
+		margin-bottom: 0;
+		margin-top: 8px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	}
 }
 
 .user-menu-dropdown .list-item {
-    margin: 0;
-    border-radius: 0;
-    padding: 12px 16px;
-    /* These rows are <button>s: strip the native chrome and fill the width. */
-    width: 100%;
-    border: none;
-    background: transparent;
-    font: inherit;
-    color: inherit;
-    text-align: left;
+	margin: 0;
+	border-radius: 0;
+	padding: 12px 16px;
+	/* These rows are <button>s: strip the native chrome and fill the width. */
+	width: 100%;
+	border: none;
+	background: transparent;
+	font: inherit;
+	color: inherit;
+	text-align: left;
 }
 
 .user-menu-dropdown .list-item:hover {
-    background: var(--md-surface-variant);
+	background: var(--md-surface-variant);
 }
 
 /* Sort drag-and-drop */
 .sort-list .sort-item {
-    cursor: grab;
-    user-select: none;
-    transition: background-color 0.15s, opacity 0.15s;
+	cursor: grab;
+	user-select: none;
+	transition:
+		background-color 0.15s,
+		opacity 0.15s;
 }
 
 .sort-list .sort-item:active {
-    cursor: grabbing;
+	cursor: grabbing;
 }
 
 .sort-list .sort-item.dragging {
-    opacity: 0.4;
-    background-color: var(--md-primary-container);
+	opacity: 0.4;
+	background-color: var(--md-primary-container);
 }
 
 .sort-list .sort-item:hover {
-    background-color: var(--md-surface-variant);
+	background-color: var(--md-surface-variant);
 }
 
 /* Sticky formatting toolbar (#94): keeps Save/format controls visible while
  * scrolling a long document. Sits at the top of the scroll container with an
  * opaque surface so text doesn't show through. */
 .editor-toolbar {
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    background: var(--md-surface);
-    padding-top: 8px;
-    margin-bottom: 8px;
-    border-bottom: 1px solid var(--md-outline);
+	position: sticky;
+	top: 0;
+	z-index: 3;
+	background: var(--md-surface);
+	padding-top: 8px;
+	margin-bottom: 8px;
+	border-bottom: 1px solid var(--md-outline);
 }
 
 /* Editor area */
 .editor-area {
-    min-height: 200px;
-    border: 1px solid var(--md-outline);
-    border-radius: 8px;
-    padding: 16px;
-    outline: none;
-    font-size: 16px;
-    line-height: 1.6;
-    color: var(--md-on-surface);
+	min-height: 200px;
+	border: 1px solid var(--md-outline);
+	border-radius: 8px;
+	padding: 16px;
+	outline: none;
+	font-size: 16px;
+	line-height: 1.6;
+	color: var(--md-on-surface);
 }
 
 .editor-area:focus {
-    border-color: var(--md-primary);
-    border-width: 2px;
-    padding: 15px;
+	border-color: var(--md-primary);
+	border-width: 2px;
+	padding: 15px;
 }
 
 /* Rich-text toolbar */
 .editor-tools {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 2px;
-    margin-bottom: 8px;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px;
+	margin-bottom: 8px;
 }
 
 .editor-select {
-    height: 36px;
-    min-width: 130px;
-    margin-right: 4px;
+	height: 36px;
+	min-width: 130px;
+	margin-right: 4px;
 }
 
 .editor-divider {
-    width: 1px;
-    align-self: stretch;
-    min-height: 24px;
-    margin: 0 4px;
-    background: var(--md-outline);
+	width: 1px;
+	align-self: stretch;
+	min-height: 24px;
+	margin: 0 4px;
+	background: var(--md-outline);
 }
 
 .btn-icon.active {
-    /* Saturated green + white icon: a strong highlight that stands out on the
+	/* Saturated green + white icon: a strong highlight that stands out on the
        light-gray app rail (the container tint would be too subtle there). */
-    background: var(--md-primary);
-    color: var(--md-on-primary);
+	background: var(--md-primary);
+	color: var(--md-on-primary);
 }
 
 .btn-icon .material-icons {
-    font-size: 20px;
+	font-size: 20px;
 }
 
 /* Link popover */
 .link-popover {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 8px;
-    margin-bottom: 8px;
-    border: 1px solid var(--md-outline);
-    border-radius: 8px;
-    background: var(--md-surface);
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	padding: 8px;
+	margin-bottom: 8px;
+	border: 1px solid var(--md-outline);
+	border-radius: 8px;
+	background: var(--md-surface);
 }
 
 .link-input {
-    flex: 1 1 200px;
-    height: 36px;
-    padding: 0 12px;
-    border: 1px solid var(--md-outline);
-    border-radius: 8px;
-    background: var(--md-surface);
-    color: var(--md-on-surface);
+	flex: 1 1 200px;
+	height: 36px;
+	padding: 0 12px;
+	border: 1px solid var(--md-outline);
+	border-radius: 8px;
+	background: var(--md-surface);
+	color: var(--md-on-surface);
 }
 
 .btn-sm {
-    padding: 6px 12px;
-    font-size: 13px;
+	padding: 6px 12px;
+	font-size: 13px;
 }
 
 /* Rendered rich content inside the editing surface */
@@ -2237,238 +2368,252 @@ a.list-item:hover {
 .rich-editor h4,
 .rich-editor h5,
 .rich-editor h6 {
-    margin: 0.4em 0 0.2em;
-    line-height: 1.25;
-    font-weight: 600;
+	margin: 0.4em 0 0.2em;
+	line-height: 1.25;
+	font-weight: 600;
 }
 
-.rich-editor h1 { font-size: 2em; }
-.rich-editor h2 { font-size: 1.6em; }
-.rich-editor h3 { font-size: 1.35em; }
-.rich-editor h4 { font-size: 1.2em; }
-.rich-editor h5 { font-size: 1.1em; }
-.rich-editor h6 { font-size: 1em; }
+.rich-editor h1 {
+	font-size: 2em;
+}
+.rich-editor h2 {
+	font-size: 1.6em;
+}
+.rich-editor h3 {
+	font-size: 1.35em;
+}
+.rich-editor h4 {
+	font-size: 1.2em;
+}
+.rich-editor h5 {
+	font-size: 1.1em;
+}
+.rich-editor h6 {
+	font-size: 1em;
+}
 
 .rich-editor p {
-    margin: 0 0 0.5em;
+	margin: 0 0 0.5em;
 }
 
 .rich-editor ul,
 .rich-editor ol {
-    margin: 0 0 0.5em;
-    padding-left: 1.6em;
+	margin: 0 0 0.5em;
+	padding-left: 1.6em;
 }
 
 .rich-editor blockquote {
-    margin: 0 0 0.5em;
-    padding-left: 12px;
-    border-left: 3px solid var(--md-outline);
-    color: var(--md-on-surface-variant);
+	margin: 0 0 0.5em;
+	padding-left: 12px;
+	border-left: 3px solid var(--md-outline);
+	color: var(--md-on-surface-variant);
 }
 
 .rich-editor pre {
-    margin: 0 0 0.5em;
-    padding: 12px;
-    border-radius: 6px;
-    background: var(--md-surface-variant);
-    font-family: "Courier New", monospace;
-    white-space: pre-wrap;
+	margin: 0 0 0.5em;
+	padding: 12px;
+	border-radius: 6px;
+	background: var(--md-surface-variant);
+	font-family: "Courier New", monospace;
+	white-space: pre-wrap;
 }
 
 .rich-editor code {
-    padding: 1px 4px;
-    border-radius: 4px;
-    background: var(--md-surface-variant);
-    font-family: "Courier New", monospace;
+	padding: 1px 4px;
+	border-radius: 4px;
+	background: var(--md-surface-variant);
+	font-family: "Courier New", monospace;
 }
 
 .rich-editor a {
-    color: var(--md-primary);
-    text-decoration: underline;
+	color: var(--md-primary);
+	text-decoration: underline;
 }
 
 .rich-editor img {
-    max-width: 100%;
-    height: auto;
+	max-width: 100%;
+	height: auto;
 }
 
 /* Comment system (nested, Bluesky-style) */
 .comment-section {
-    margin-top: 8px;
+	margin-top: 8px;
 }
 
 .comment-composer {
-    display: flex;
-    gap: 8px;
-    align-items: flex-end;
-    margin-bottom: 16px;
+	display: flex;
+	gap: 8px;
+	align-items: flex-end;
+	margin-bottom: 16px;
 }
 
 .comment-input {
-    flex: 1;
-    min-height: 40px;
-    padding: 10px 12px;
-    border: 1px solid var(--md-outline);
-    border-radius: 12px;
-    background: var(--md-surface);
-    color: var(--md-on-surface);
-    outline: none;
-    font: inherit;
-    font-size: 14px;
-    resize: vertical;
-    box-sizing: border-box;
+	flex: 1;
+	min-height: 40px;
+	padding: 10px 12px;
+	border: 1px solid var(--md-outline);
+	border-radius: 12px;
+	background: var(--md-surface);
+	color: var(--md-on-surface);
+	outline: none;
+	font: inherit;
+	font-size: 14px;
+	resize: vertical;
+	box-sizing: border-box;
 }
 
 .comment-input:focus {
-    border-color: var(--md-primary);
+	border-color: var(--md-primary);
 }
 
 .comment-thread-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
 }
 
 .comment {
-    position: relative;
-    padding-top: 8px;
+	position: relative;
+	padding-top: 8px;
 }
 
 /* Thread line for nested replies. */
 .comment .comment {
-    border-left: 2px solid var(--md-outline);
-    padding-left: 12px;
+	border-left: 2px solid var(--md-outline);
+	padding-left: 12px;
 }
 
 .comment-main {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
+	display: flex;
+	gap: 10px;
+	align-items: flex-start;
 }
 
 .comment-avatar {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--md-tertiary-container);
-    color: var(--md-on-tertiary-container);
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: uppercase;
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--md-tertiary-container);
+	color: var(--md-on-tertiary-container);
+	font-size: 13px;
+	font-weight: 600;
+	text-transform: uppercase;
 }
 
 .comment-body {
-    flex: 1;
-    min-width: 0;
+	flex: 1;
+	min-width: 0;
 }
 
 .comment-meta {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    flex-wrap: wrap;
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	flex-wrap: wrap;
 }
 
 .comment-author {
-    font-weight: 600;
-    font-size: 14px;
-    color: var(--md-on-surface);
+	font-weight: 600;
+	font-size: 14px;
+	color: var(--md-on-surface);
 }
 
 .comment-dot,
 .comment-time {
-    font-size: 13px;
-    color: var(--md-on-surface-variant);
+	font-size: 13px;
+	color: var(--md-on-surface-variant);
 }
 
 .comment-text {
-    margin: 2px 0 4px;
-    font-size: 14px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
+	margin: 2px 0 4px;
+	font-size: 14px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
 }
 
 .comment-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+	display: flex;
+	align-items: center;
+	gap: 12px;
 }
 
 .comment-action {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border: none;
-    background: transparent;
-    color: var(--md-on-surface-variant);
-    cursor: pointer;
-    font-size: 13px;
-    padding: 2px 0;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	border: none;
+	background: transparent;
+	color: var(--md-on-surface-variant);
+	cursor: pointer;
+	font-size: 13px;
+	padding: 2px 0;
 }
 
 .comment-action:hover {
-    color: var(--md-primary);
+	color: var(--md-primary);
 }
 
 .comment-action .material-icons {
-    font-size: 16px;
+	font-size: 16px;
 }
 
 .comment-reply-count {
-    font-size: 13px;
-    color: var(--md-on-surface-variant);
+	font-size: 13px;
+	color: var(--md-on-surface-variant);
 }
 
 /* Pull-to-refresh indicator */
 .ptr-indicator {
-    position: fixed;
-    top: 0;
-    left: 50%;
-    z-index: 1200;
-    display: grid;
-    place-items: center;
-    width: 40px;
-    height: 40px;
-    margin-top: 6px;
-    border-radius: 50%;
-    background: var(--md-surface-container-high, var(--md-surface));
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-    color: var(--md-primary);
-    /* Default transform is set inline (follows the finger); opacity always eases. */
-    transition: opacity 0.15s ease;
-    pointer-events: none;
+	position: fixed;
+	top: 0;
+	left: 50%;
+	z-index: 1200;
+	display: grid;
+	place-items: center;
+	width: 40px;
+	height: 40px;
+	margin-top: 6px;
+	border-radius: 50%;
+	background: var(--md-surface-container-high, var(--md-surface));
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+	color: var(--md-primary);
+	/* Default transform is set inline (follows the finger); opacity always eases. */
+	transition: opacity 0.15s ease;
+	pointer-events: none;
 }
 
 /* When settling / parking (not actively dragging) also ease the transform so the
    indicator glides back or into place instead of jumping. */
 .ptr-indicator.settling {
-    transition: transform 0.25s ease, opacity 0.15s ease;
+	transition:
+		transform 0.25s ease,
+		opacity 0.15s ease;
 }
 
 .ptr-indicator.hidden {
-    opacity: 0 !important;
+	opacity: 0 !important;
 }
 
 .ptr-indicator .material-icons {
-    font-size: 22px;
-    transition: transform 0.15s ease;
+	font-size: 22px;
+	transition: transform 0.15s ease;
 }
 
 /* Armed (pulled past the threshold): flip the arrow to say "release to refresh". */
 .ptr-indicator.armed .material-icons {
-    transform: rotate(180deg);
+	transform: rotate(180deg);
 }
 
 .ptr-indicator.refreshing .ptr-spinner {
-    display: grid;
-    place-items: center;
-    animation: ptr-spin 0.8s linear infinite;
+	display: grid;
+	place-items: center;
+	animation: ptr-spin 0.8s linear infinite;
 }
 
 @keyframes ptr-spin {
-    to {
-        transform: rotate(360deg);
-    }
+	to {
+		transform: rotate(360deg);
+	}
 }
