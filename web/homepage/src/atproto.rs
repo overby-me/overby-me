@@ -93,12 +93,14 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "space.roomy" => "roomy.avif",
         "app.cartes" => "cartes.avif",
         "coop.hypha" => "hypha.avif",
-        // Known apps with no fetchable logo (dead/parked domain, Cloudflare-
-        // locked, banner-only og:image, or same-name GitHub is an unrelated
-        // person) — they fall back to a generated badge. Add here if a logo
-        // turns up: skytube, com.minomobi (mmopaint), xyz.atmomo, blue.protopro,
-        // my.skylights, com.semble, app.lanyards, app.loghz, africa.kandake,
-        // ing.dasl, space.polypod.
+        "app.lanyards" => "lanyards.avif",
+        "com.semble" => "semble.avif",
+        // Known apps with no fetchable logo (dead/parked/unreachable domain,
+        // Cloudflare-locked, banner-only og:image, or same-name GitHub is an
+        // unrelated person) — they fall back to a generated badge. Add here if a
+        // logo turns up: skytube, com.minomobi (mmopaint), xyz.atmomo,
+        // blue.protopro, my.skylights, app.loghz, africa.kandake, ing.dasl,
+        // space.polypod.
         _ => return None,
     })
 }
@@ -270,6 +272,9 @@ fn curated(prefix: &str, handle: &str, did: &str) -> Option<Curated> {
             "https://stream.place".to_string(),
         ),
         "id.sifa" => c("Sifa", "#2563eb", "https://sifa.id".to_string()),
+        // NSID reverses to semble.com (an unrelated healthcare site); the real
+        // atproto app is semble.so.
+        "com.semble" => c("Semble", "#f97316", "https://semble.so".to_string()),
         _ => return None,
     })
 }

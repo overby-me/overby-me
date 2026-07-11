@@ -78,6 +78,8 @@ pub fn icon_url(icon: &str) -> String {
         "roomy.avif" => asset!("/assets/icons/roomy.avif").to_string(),
         "cartes.avif" => asset!("/assets/icons/cartes.avif").to_string(),
         "hypha.avif" => asset!("/assets/icons/hypha.avif").to_string(),
+        "lanyards.avif" => asset!("/assets/icons/lanyards.avif").to_string(),
+        "semble.avif" => asset!("/assets/icons/semble.avif").to_string(),
         other => {
             log::warn!("Unknown icon: {other}");
             String::new()
