@@ -66,6 +66,11 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "dev.npmx" => "npmx.avif",
         "net.anisota" => "anisota.avif",
         "so.sprk" => "spark.avif",
+        "fm.teal" => "teal.avif",
+        "actor.rpg" => "rpg.avif",
+        "equipment.rpg" => "rpg.avif",
+        "link.woosh" => "woosh.avif",
+        "com.vibe-coded" => "vibecoded.avif",
         _ => return None,
     })
 }
@@ -382,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn known_apps_use_bundled_logos_unknown_get_badges() {
+    fn known_apps_use_bundled_logos() {
         let p = detect_platforms(&overby_collections(), "overby.me", "did:plc:abc");
         let icon_of = |name: &str| p.iter().find(|x| x.name == name).map(|x| x.icon.clone());
         assert_eq!(icon_of("Bluesky"), Some(Icon::Bundled("bluesky.avif")));
@@ -392,11 +397,9 @@ mod tests {
             icon_of("Stream.place"),
             Some(Icon::Bundled("streamplace.avif"))
         );
-        // Teal.fm ships no bundled logo -> generated badge fallback.
-        match icon_of("Teal.fm") {
-            Some(Icon::Badge(url)) => assert!(url.starts_with("data:image/svg+xml,")),
-            other => panic!("Teal.fm should fall back to a badge, got {other:?}"),
-        }
+        assert_eq!(icon_of("Teal.fm"), Some(Icon::Bundled("teal.avif")));
+        // (The generated-badge fallback for logo-less apps is covered by
+        // `derives_name_and_badge_for_unknown_apps`.)
     }
 
     #[test]
