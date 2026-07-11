@@ -142,9 +142,9 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   and not carried. **minor**
 - `[ ]` Editor: strip the empty leading paragraph on save; add an editor error
   fallback; audio/video `autoPlay` + video width. **minor**
-- `[~]` **Bulk member import** / **xlsx SheetReader** (React `invite/InvitesFab.tsx`)
-  — import a Fornavn/Efternavn/Email roster from `.xlsx`. Heaviest lift (needs a
-  WASM xlsx parser); reasonable to defer.
+- `[x]` **Bulk member import** / **xlsx SheetReader** — done: an owner .xlsx file
+  input imports a Fornavn/Efternavn/Email roster via the pure-Rust `calamine`
+  parser (wasm32) + a bulk `insertMembers`. End-to-end validated.
 
 ## 5. Members & invites
 
