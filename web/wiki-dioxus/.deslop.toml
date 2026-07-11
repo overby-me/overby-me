@@ -78,4 +78,13 @@ disabled_rules = [
   "rust_partial_init_escape",
   "rust_public_bool_parameter_api",
   "comment_style_tutorial",
+
+  # ── wiki-backend (atproto OAuth) ──────────────────────────────────────
+  # The Scaleway function models opaque OAuth values (the CSRF `state`, the
+  # authorization `code`, DID/handle strings) as `String` because that is
+  # exactly what they are on the wire; they are not closed enumerations.
+  "rust_stringly_typed_enum_boundary",
+  # Query-string percent-decoding runs a couple of times per OAuth redirect, not
+  # in any hot path, so a UTF-8 check there is fine.
+  "rust_utf8_validate_hot_path",
 ]

@@ -2,43 +2,61 @@
 //!
 //! Its first job is the "Link Bluesky account" (atproto OAuth) flow. The browser
 //! cannot do this cleanly on its own — PAR, DPoP-bound token exchange and the
-//! redirect callback all belong server-side — so it lives here (the same idea as
-//! the earlier `wiki-auth` service, but as a stateless Scaleway function).
+//! redirect callback all belong server-side — so it lives here (a stateless
+//! version of the earlier `wiki-auth` idea).
 //!
 //! Routes:
 //!   GET /atproto/client-metadata.json  the OAuth client document (also client_id)
-//!   GET /atproto/start                 begin linking: verify the NHost user,
-//!                                       resolve handle -> DID -> PDS/auth server,
-//!                                       run PAR, then 302 to the authorize URL
-//!   GET /atproto/callback              exchange code -> DPoP tokens, read the DID,
-//!                                       write the user_providers link, 302 back
+//!   GET /atproto/start?handle=&token=  begin linking (token = NHost access token)
+//!   GET /atproto/callback              finish linking, write user_providers
 //!   GET /health                        liveness
 //!
-//! Config comes from Scaleway function secrets (environment variables):
-//!   APP_ORIGIN           the wiki origin to redirect back to after linking
-//!   FUNCTION_ORIGIN      this function's public base URL (the OAuth client_id host)
-//!   HASURA_GRAPHQL_URL   GraphQL endpoint used to write user_providers
-//!   HASURA_ADMIN_SECRET  service access to insert the link row
-//!   NHOST_JWKS_URL       to verify the caller's NHost access token
+//! Config comes from Scaleway function secrets (see [`oauth::Config::from_env`]).
 
 use axum::{body::Body, extract::Request, response::Response};
 use http::StatusCode;
 
+mod dpop;
+mod nhost;
+mod oauth;
+mod pkce;
+mod statecookie;
+mod util;
+
 pub async fn handle(req: Request<Body>) -> Response<Body> {
+    let cfg = oauth::Config::from_env();
+    let client = reqwest::Client::new();
     match req.uri().path() {
-        "/atproto/client-metadata.json" => client_metadata(),
-        "/atproto/start" => atproto_start(req).await,
-        "/atproto/callback" => atproto_callback(req).await,
+        "/atproto/client-metadata.json" => client_metadata(&cfg),
+        "/atproto/start" => oauth::start(&cfg, &client, &req).await,
+        "/atproto/callback" => oauth::callback(&cfg, &client, &req).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }
 }
 
-fn env(key: &str) -> String {
-    std::env::var(key).unwrap_or_default()
+/// The atproto OAuth *client metadata* document, served at a stable public URL
+/// that doubles as the `client_id`. A public client (`token_endpoint_auth_method
+/// = none`) with PKCE + DPoP, so no client secret / JWKS is required.
+fn client_metadata(cfg: &oauth::Config) -> Response<Body> {
+    let doc = serde_json::json!({
+        "client_id": cfg.client_id(),
+        "client_name": "RadikalWiki",
+        "client_uri": cfg.app_origin,
+        "redirect_uris": [cfg.redirect_uri()],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "scope": oauth::SCOPE,
+        "token_endpoint_auth_method": "none",
+        "application_type": "web",
+        "dpop_bound_access_tokens": true,
+    });
+    json(StatusCode::OK, doc.to_string())
 }
 
-fn text(status: StatusCode, body: &str) -> Response<Body> {
+// --- response helpers (shared with the oauth module) -----------------------
+
+pub(crate) fn text(status: StatusCode, body: &str) -> Response<Body> {
     Response::builder()
         .status(status)
         .header("Content-Type", "text/plain")
@@ -46,7 +64,7 @@ fn text(status: StatusCode, body: &str) -> Response<Body> {
         .unwrap()
 }
 
-fn json(status: StatusCode, body: String) -> Response<Body> {
+pub(crate) fn json(status: StatusCode, body: String) -> Response<Body> {
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json")
@@ -55,45 +73,22 @@ fn json(status: StatusCode, body: String) -> Response<Body> {
         .unwrap()
 }
 
-/// The atproto OAuth *client metadata* document. Served at a stable public URL
-/// which doubles as the `client_id`. A public client (`token_endpoint_auth_method
-/// = none`) with PKCE + DPoP, so no client secret / JWKS is needed.
-/// See https://atproto.com/specs/oauth.
-fn client_metadata() -> Response<Body> {
-    let func = env("FUNCTION_ORIGIN");
-    let doc = serde_json::json!({
-        "client_id": format!("{func}/atproto/client-metadata.json"),
-        "client_name": "RadikalWiki",
-        "client_uri": env("APP_ORIGIN"),
-        "redirect_uris": [format!("{func}/atproto/callback")],
-        "grant_types": ["authorization_code", "refresh_token"],
-        "response_types": ["code"],
-        "scope": "atproto",
-        "token_endpoint_auth_method": "none",
-        "application_type": "web",
-        "dpop_bound_access_tokens": true,
-    });
-    json(StatusCode::OK, doc.to_string())
+pub(crate) fn redirect(location: &str, err: Option<&str>) -> Response<Body> {
+    if let Some(e) = err {
+        eprintln!("atproto link error: {e}");
+    }
+    Response::builder()
+        .status(StatusCode::FOUND)
+        .header("Location", location)
+        .body(Body::empty())
+        .unwrap()
 }
 
-async fn atproto_start(_req: Request<Body>) -> Response<Body> {
-    // TODO: verify the NHost access token (query param) to know which user is
-    // linking; resolve the handle to a DID, PDS and authorization server;
-    // generate PKCE + DPoP key; run a pushed authorization request (PAR); then
-    // 302 to the authorization endpoint with the returned request_uri.
-    text(
-        StatusCode::NOT_IMPLEMENTED,
-        "atproto link start: not yet implemented",
-    )
-}
-
-async fn atproto_callback(_req: Request<Body>) -> Response<Body> {
-    // TODO: exchange the authorization code for DPoP-bound tokens, read the DID
-    // from the token response, insert the user_providers row (provider=atproto,
-    // provider_id=DID, handle) via the Hasura admin secret, then 302 back to
-    // APP_ORIGIN with a success flag.
-    text(
-        StatusCode::NOT_IMPLEMENTED,
-        "atproto link callback: not yet implemented",
-    )
+pub(crate) fn redirect_set_cookie(location: &str, cookie: &str) -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::FOUND)
+        .header("Location", location)
+        .header("Set-Cookie", cookie)
+        .body(Body::empty())
+        .unwrap()
 }

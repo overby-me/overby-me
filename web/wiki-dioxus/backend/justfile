@@ -5,5 +5,5 @@ test:
     cargo test
 
 deploy:
-  zip deployment.zip Cargo.toml Cargo.lock src/handle.rs
+  zip -r deployment.zip Cargo.toml Cargo.lock src
   scw function deploy name=wiki-backend runtime=rust185 zip-file=deployment.zip
