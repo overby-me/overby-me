@@ -27,6 +27,9 @@ pub struct GraphLink {
 pub struct GraphData {
     pub nodes: Vec<GraphNode>,
     pub links: Vec<GraphLink>,
+    /// Clip icon sprites to a circle (used by the atproto graphs, whose badges
+    /// and avatars are square textures). The personal graph leaves this off.
+    pub circular_icons: bool,
 }
 
 impl GraphData {
@@ -327,6 +330,10 @@ impl GraphData {
             link("Improve", "PopFeed"),
         ];
 
-        GraphData { nodes, links }
+        GraphData {
+            nodes,
+            links,
+            circular_icons: false,
+        }
     }
 }

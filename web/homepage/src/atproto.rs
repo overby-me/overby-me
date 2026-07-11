@@ -5,26 +5,21 @@
 //! every collection NSID is a reverse-DNS domain identifying the app that owns
 //! that lexicon. This module turns that raw list into a tidy set of platforms.
 //!
+//! Each platform gets a generated circular badge icon (a colored disc with the
+//! platform's initial) rather than a fetched favicon, so every node looks
+//! consistent and stays crisp at any resolution.
+//!
 //! It is deliberately pure (no web-sys), so the interesting logic — grouping,
-//! aliasing, domain derivation, profile links — is unit tested on the host. The
-//! browser-only fetch glue lives in [`crate::atproto_web`].
-
-/// Where a platform node's icon comes from.
-#[derive(Clone, PartialEq, Debug)]
-pub enum IconSpec {
-    /// A bundled local logo, by asset filename (e.g. `"bluesky.avif"`).
-    Bundled(&'static str),
-    /// The favicon of the given domain, fetched through a CORS-enabled service.
-    Favicon(String),
-}
+//! aliasing, domain derivation, badge generation, profile links — is unit
+//! tested on the host. The browser-only fetch glue lives in [`crate::atproto_web`].
 
 /// One atproto app the account has records in.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Platform {
     pub name: String,
     pub domain: String,
-    pub color: Option<&'static str>,
-    pub icon: IconSpec,
+    /// A generated high-res circular badge (an SVG data URL).
+    pub icon: String,
     /// Where clicking the node should take you (a profile if we know the shape,
     /// otherwise the app's homepage).
     pub profile_url: String,
@@ -79,98 +74,141 @@ fn title_case(s: &str) -> String {
 
 struct Curated {
     name: &'static str,
-    color: Option<&'static str>,
-    /// Bundled logo filename, or `None` to fall back to the domain favicon.
-    icon: Option<&'static str>,
+    /// Brand color for the badge disc.
+    color: &'static str,
     profile_url: String,
 }
 
-/// Hand-curated metadata for well-known apps: nice names, brand-accurate logos,
-/// and real profile links. Unknown apps fall back to derived values.
+/// Hand-curated metadata for well-known apps: nice names, brand colors, and real
+/// profile links. Unknown apps fall back to derived values.
 fn curated(prefix: &str, handle: &str, did: &str) -> Option<Curated> {
-    let c = |name, color, icon, profile_url: String| Curated {
+    let c = |name, color, profile_url| Curated {
         name,
         color,
-        icon,
         profile_url,
     };
     Some(match prefix {
         "app.bsky" => c(
             "Bluesky",
-            None,
-            Some("bluesky.avif"),
+            "#1185fe",
             format!("https://bsky.app/profile/{handle}"),
         ),
         "sh.tangled" => c(
             "Tangled",
-            None,
-            Some("tangled.avif"),
+            "#5b4bff",
             format!("https://tangled.org/@{handle}"),
         ),
         "app.rocksky" => c(
             "Rocksky",
-            None,
-            Some("rocksky.avif"),
+            "#e0245e",
             format!("https://rocksky.app/profile/{handle}"),
         ),
         "app.pinkleap" => c(
             "PinkLeap",
-            None,
-            Some("pinkleap.avif"),
+            "#ec4899",
             format!("https://pinkleap.app/@{handle}"),
         ),
         "social.popfeed" => c(
             "PopFeed",
-            None,
-            Some("popfeed.avif"),
+            "#e8590c",
             format!("https://popfeed.social/profile/{did}"),
         ),
         "social.pinksky" => c(
             "Pinksky",
-            None,
-            None,
+            "#f6339a",
             format!("https://pinksky.social/profile/{handle}"),
         ),
-        "pub.leaflet" => c("Leaflet", None, None, "https://leaflet.pub".to_string()),
-        "fm.teal" => c("Teal.fm", None, None, "https://teal.fm".to_string()),
+        "pub.leaflet" => c("Leaflet", "#0f9d58", "https://leaflet.pub".to_string()),
+        "fm.teal" => c("Teal.fm", "#0d9488", "https://teal.fm".to_string()),
         "events.smokesignal" => c(
             "Smoke Signal",
-            None,
-            None,
+            "#ea580c",
             "https://smokesignal.events".to_string(),
         ),
         "place.stream" => c(
             "Stream.place",
-            None,
-            None,
+            "#7c3aed",
             "https://stream.place".to_string(),
         ),
-        "id.sifa" => c("Sifa", None, None, "https://sifa.id".to_string()),
+        "id.sifa" => c("Sifa", "#2563eb", "https://sifa.id".to_string()),
         _ => return None,
     })
 }
 
-/// The favicon URL for a domain, via a CORS-enabled favicon service (required so
-/// the image can be used as a WebGL texture without tainting the canvas).
-pub fn favicon_url(domain: &str) -> String {
-    format!("https://favicone.com/{domain}?s=128")
-}
-
-impl IconSpec {
-    /// Resolve to a final, loadable image URL.
-    pub fn resolve(&self) -> String {
-        match self {
-            IconSpec::Bundled(name) => crate::graph::texture::icon_url(name),
-            IconSpec::Favicon(domain) => favicon_url(domain),
+/// Percent-encode a string for use in a data URL (encode everything outside the
+/// unreserved set, so arbitrary SVG/text is always safe).
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
         }
     }
+    out
+}
+
+/// A high-res circular badge as an SVG data URL: a filled disc in `color` with
+/// `name`'s uppercase initial in white. Uniform across platforms and crisp at
+/// any size, unlike fetched favicons.
+pub fn badge_icon(name: &str, color: &str) -> String {
+    let initial: String = name
+        .chars()
+        .find(|c| c.is_alphanumeric())
+        .map_or_else(|| "?".to_string(), |c| c.to_uppercase().to_string());
+    let svg = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 256 256'>\
+         <circle cx='128' cy='128' r='128' fill='{color}'/>\
+         <text x='128' y='128' text-anchor='middle' dominant-baseline='central' \
+         font-family='Space Grotesk, system-ui, sans-serif' font-size='140' font-weight='700' \
+         fill='#ffffff'>{initial}</text></svg>"
+    );
+    format!("data:image/svg+xml,{}", percent_encode(&svg))
+}
+
+/// A stable, pleasant disc color for apps without a brand color: hash the seed
+/// to a hue with fixed saturation/lightness so the palette stays cohesive and
+/// white text keeps good contrast.
+fn derived_color(seed: &str) -> String {
+    // FNV-1a hash -> hue.
+    let mut h: u32 = 2_166_136_261;
+    for b in seed.bytes() {
+        h = (h ^ b as u32).wrapping_mul(16_777_619);
+    }
+    hsl_to_hex((h % 360) as f32, 0.62, 0.48)
+}
+
+fn hsl_to_hex(h: f32, s: f32, l: f32) -> String {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = h / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r, g, b) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    let byte = |v: f32| ((v + m) * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", byte(r), byte(g), byte(b))
+}
+
+/// A fallback avatar badge for an account with no picture: its display initial
+/// on a derived color, matching the platform badges.
+pub fn fallback_avatar(name: &str, seed: &str) -> String {
+    badge_icon(name, &derived_color(seed))
 }
 
 /// Detect the platforms an account uses from its `describeRepo` collection list.
 ///
 /// Collections are grouped by 2-segment NSID authority, aliased and de-duped by
 /// display name, then enriched from the curated registry (or derived for unknown
-/// apps). The result is sorted by name for a stable, tidy graph.
+/// apps) and given a generated badge. The result is sorted by name for a stable,
+/// tidy graph.
 pub fn detect_platforms(collections: &[String], handle: &str, did: &str) -> Vec<Platform> {
     // Unique canonical prefixes, skipping shared/infra namespaces.
     let mut prefixes: Vec<String> = Vec::new();
@@ -191,36 +229,31 @@ pub fn detect_platforms(collections: &[String], handle: &str, did: &str) -> Vec<
     let mut seen_names: Vec<String> = Vec::new();
     for prefix in &prefixes {
         let domain = reverse_domain(prefix);
-        let platform = match curated(prefix, handle, did) {
-            Some(c) => Platform {
-                name: c.name.to_string(),
-                domain: domain.clone(),
-                color: c.color,
-                icon: c
-                    .icon
-                    .map_or_else(|| IconSpec::Favicon(domain.clone()), IconSpec::Bundled),
-                profile_url: c.profile_url,
-            },
+        let (name, color, profile_url) = match curated(prefix, handle, did) {
+            Some(c) => (c.name.to_string(), c.color.to_string(), c.profile_url),
             None => {
                 // org label is the second segment (e.g. `sifa` in `id.sifa`).
                 let org = prefix.split('.').nth(1).unwrap_or(prefix);
-                Platform {
-                    name: title_case(org),
-                    domain: domain.clone(),
-                    color: None,
-                    icon: IconSpec::Favicon(domain.clone()),
-                    profile_url: format!("https://{domain}"),
-                }
+                (
+                    title_case(org),
+                    derived_color(&domain),
+                    format!("https://{domain}"),
+                )
             }
         };
         // Collapse apps that resolve to the same display name across TLDs
         // (e.g. `app.shadowsky` + `com.shadowsky`).
-        let key = platform.name.to_lowercase();
+        let key = name.to_lowercase();
         if seen_names.contains(&key) {
             continue;
         }
         seen_names.push(key);
-        platforms.push(platform);
+        platforms.push(Platform {
+            icon: badge_icon(&name, &color),
+            name,
+            domain,
+            profile_url,
+        });
     }
 
     platforms.sort_by_key(|p| p.name.to_lowercase());
@@ -299,6 +332,20 @@ mod tests {
     }
 
     #[test]
+    fn every_platform_gets_a_circular_badge() {
+        let p = detect_platforms(&overby_collections(), "overby.me", "did:plc:abc");
+        assert!(!p.is_empty());
+        for platform in &p {
+            assert!(
+                platform.icon.starts_with("data:image/svg+xml,"),
+                "{} icon should be a generated SVG badge: {}",
+                platform.name,
+                platform.icon
+            );
+        }
+    }
+
+    #[test]
     fn merges_bluesky_chat_into_one_node() {
         let p = detect_platforms(&overby_collections(), "overby.me", "did:plc:abc");
         let bsky = p.iter().filter(|p| p.name == "Bluesky").count();
@@ -320,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn derives_domain_and_favicon_for_unknown_apps() {
+    fn derives_name_and_badge_for_unknown_apps() {
         let p = detect_platforms(
             &["net.anisota.beta.game.log".to_string()],
             "overby.me",
@@ -329,20 +376,32 @@ mod tests {
         assert_eq!(p.len(), 1);
         assert_eq!(p[0].name, "Anisota");
         assert_eq!(p[0].domain, "anisota.net");
-        assert_eq!(p[0].icon, IconSpec::Favicon("anisota.net".to_string()));
+        assert!(p[0].icon.starts_with("data:image/svg+xml,"));
         assert_eq!(p[0].profile_url, "https://anisota.net");
     }
 
     #[test]
-    fn curated_bluesky_uses_bundled_icon_and_profile_link() {
+    fn curated_uses_brand_color_and_profile_link() {
         let p = detect_platforms(
             &["app.bsky.feed.post".to_string()],
             "overby.me",
             "did:plc:abc",
         );
         assert_eq!(p.len(), 1);
-        assert_eq!(p[0].icon, IconSpec::Bundled("bluesky.avif"));
         assert_eq!(p[0].profile_url, "https://bsky.app/profile/overby.me");
+        // Bluesky brand color #1185fe; '#' percent-encodes to %23 in the badge.
+        assert!(
+            p[0].icon.contains("%231185fe"),
+            "expected brand color in badge: {}",
+            p[0].icon
+        );
+    }
+
+    #[test]
+    fn hsl_to_hex_matches_known_values() {
+        assert_eq!(hsl_to_hex(0.0, 1.0, 0.5), "#ff0000");
+        assert_eq!(hsl_to_hex(120.0, 1.0, 0.5), "#00ff00");
+        assert_eq!(hsl_to_hex(240.0, 1.0, 0.5), "#0000ff");
     }
 
     #[test]

@@ -1,15 +1,15 @@
 //! Browser-side atproto resolution: the thin, `web-sys`-dependent glue that
 //! fetches from PDS/appview/PLC and hands the pure logic in [`crate::atproto`]
-//! the data it needs. All endpoints used here are CORS-enabled (verified), and
-//! every image URL produced (avatar via the PDS blob store, favicons) can be
-//! loaded as a WebGL texture without tainting the canvas.
+//! the data it needs. All endpoints used here are CORS-enabled (verified), so
+//! the avatar (loaded via the PDS blob store) can texture WebGL without tainting
+//! the canvas; platform icons are generated badges, not fetched.
 
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::Response;
 
-use crate::atproto::{Platform, detect_platforms, favicon_url};
+use crate::atproto::{Platform, detect_platforms, fallback_avatar};
 use crate::graph::data::{GraphData, GraphLink, GraphNode};
 
 // --- JSON response shapes (only the fields we consume) ---
@@ -165,8 +165,8 @@ fn build_graph(
     } else {
         format!("{name}\n@{handle}")
     };
-    // Prefer the real avatar; otherwise the handle domain's favicon.
-    let center_icon = avatar_url.unwrap_or_else(|| favicon_url(handle));
+    // Prefer the real avatar; otherwise a matching generated badge.
+    let center_icon = avatar_url.unwrap_or_else(|| fallback_avatar(&name, handle));
 
     let mut nodes = vec![GraphNode {
         id: CENTER_ID.to_string(),
@@ -190,15 +190,20 @@ fn build_graph(
         nodes.push(GraphNode {
             id: p.name.clone(),
             desc: format!("{}\nProfile", p.name),
-            icon: p.icon.resolve(),
-            color: p.color.map(str::to_string),
+            icon: p.icon,
+            color: None,
             opacity: None,
             url: Some(p.profile_url),
             center: false,
         });
     }
 
-    GraphData { nodes, links }
+    // Atproto badges + the avatar are square textures; render them as circles.
+    GraphData {
+        nodes,
+        links,
+        circular_icons: true,
+    }
 }
 
 /// Resolve an atproto handle (as typed after the `@`, or a raw DID) into a

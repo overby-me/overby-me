@@ -28,11 +28,18 @@ const SPRITE_FRAG: &str = r#"
     precision mediump float;
     varying vec2 v_uv;
     uniform sampler2D u_texture;
+    uniform float u_circle;
     void main() {
         vec4 color = texture2D(u_texture, v_uv);
         // Alpha cutout: only solid texels draw (and write depth), so icons
         // occlude by true depth rather than draw order.
         if (color.a < 0.5) discard;
+        // Optionally clip to the inscribed circle so square textures (atproto
+        // badges, the avatar photo) render as round icons.
+        if (u_circle > 0.5) {
+            vec2 d = v_uv - vec2(0.5);
+            if (dot(d, d) > 0.25) discard;
+        }
         gl_FragColor = color;
     }
 "#;
@@ -204,7 +211,15 @@ impl Renderer {
         for (i, node) in data.nodes.iter().enumerate() {
             let size = node_size(node);
             if let Some(tex) = textures.get(&node.icon) {
-                self.draw_sprite(gl, &view, &proj, simulation.positions[i], size, tex);
+                self.draw_sprite(
+                    gl,
+                    &view,
+                    &proj,
+                    simulation.positions[i],
+                    size,
+                    tex,
+                    data.circular_icons,
+                );
             }
         }
 
@@ -400,6 +415,7 @@ impl Renderer {
         gl.disable_vertex_attrib_array(a_normal);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_sprite(
         &self,
         gl: &GL,
@@ -408,6 +424,7 @@ impl Renderer {
         pos: Vec3,
         size: f32,
         texture: &WebGlTexture,
+        circle: bool,
     ) {
         gl.use_program(Some(&self.sprite_program.program));
 
@@ -425,6 +442,10 @@ impl Renderer {
             pos.z,
         );
         gl.uniform1f(self.sprite_program.get_uniform(gl, "u_size").as_ref(), size);
+        gl.uniform1f(
+            self.sprite_program.get_uniform(gl, "u_circle").as_ref(),
+            if circle { 1.0 } else { 0.0 },
+        );
         gl.uniform_matrix4fv_with_f32_array(
             self.sprite_program.get_uniform(gl, "u_view").as_ref(),
             false,
