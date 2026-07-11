@@ -12,8 +12,8 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::Response;
 
 use crate::atproto::{
-    CATEGORY_ORDER, Icon, Platform, category_meta, detect_platforms, external_platforms,
-    fallback_avatar,
+    CATEGORY_ORDER, Icon, Platform, bridged_mastodon, category_meta, detect_platforms,
+    external_platforms, fallback_avatar,
 };
 use crate::graph::data::{GraphData, GraphLink, GraphNode};
 
@@ -282,6 +282,36 @@ async fn fetch_profile(pds: &str, did: &str) -> (Option<String>, Option<String>,
     (value.display_name, avatar_url, value.description)
 }
 
+/// GET `url` and report only whether it returned a success status — an existence
+/// probe, used for the Bridgy Fed webfinger where we don't need the body.
+async fn fetch_ok(url: &str) -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(value) = JsFuture::from(window.fetch_with_str(url)).await else {
+        return false;
+    };
+    value
+        .dyn_into::<Response>()
+        .map(|resp| resp.ok())
+        .unwrap_or(false)
+}
+
+/// Bridgy Fed's fediverse host for the Bluesky bridge.
+const BRIDGY_HOST: &str = "bsky.brid.gy";
+
+/// Whether Bridgy Fed has bridged this account into the fediverse. Bridged
+/// (opt-in) accounts resolve at Bridgy's webfinger; others 404. The endpoint is
+/// CORS-enabled; a raw DID is never bridge-addressable by handle.
+async fn is_bridged(handle: &str) -> bool {
+    if handle.starts_with("did:") {
+        return false;
+    }
+    let resource = format!("acct:{handle}@{BRIDGY_HOST}");
+    let url = format!("https://{BRIDGY_HOST}/.well-known/webfinger?resource={resource}");
+    fetch_ok(&url).await
+}
+
 /// A `listRecords` URL for one collection (first page, generous limit).
 fn list_url(pds: &str, did: &str, collection: &str) -> String {
     format!("{pds}/xrpc/com.atproto.repo.listRecords?repo={did}&collection={collection}&limit=100")
@@ -510,6 +540,12 @@ pub async fn resolve_graph(raw: &str) -> Result<GraphData, String> {
     // Only pay for the atstore.fyi catalog when a detected atproto app lacks a
     // bundled logo — external links are never in that registry.
     let need_atstore = platforms.iter().any(|p| matches!(p.icon, Icon::Badge(_)));
+
+    // A fediverse presence via Bridgy Fed (opt-in bridge) shows as a Mastodon
+    // leaf. Added before external links so those dedupe against it.
+    if is_bridged(&handle).await {
+        platforms.push(bridged_mastodon(&handle));
+    }
 
     // Enrich with any off-atproto profile links the account has published in
     // link-aggregator records or its bio.

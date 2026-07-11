@@ -460,6 +460,20 @@ pub fn detect_platforms(collections: &[String], handle: &str, did: &str) -> Vec<
     platforms
 }
 
+/// A fediverse leaf for an account that Bridgy Fed has bridged into ActivityPub
+/// (an opt-in bridge). It sits under Social and links to the bridged profile at
+/// `@{handle}@bsky.brid.gy`, which resolves on any fediverse instance. The caller
+/// in [`crate::atproto_web`] adds it after confirming the bridge via webfinger.
+pub fn bridged_mastodon(handle: &str) -> Platform {
+    Platform {
+        name: "Mastodon".to_string(),
+        domain: "bsky.brid.gy".to_string(),
+        icon: Icon::Bundled("mastodon.avif"),
+        profile_url: format!("https://mastodon.social/@{handle}@bsky.brid.gy"),
+        category: "Social",
+    }
+}
+
 // --- External (non-atproto) profile links ---
 //
 // Some atproto apps store links to a user's presence *off* atproto: Sifa's
@@ -913,6 +927,18 @@ mod tests {
         assert_eq!(p[0].domain, "shadowsky.com");
         assert_eq!(p[0].profile_url, "https://shadowsky.com");
         assert_eq!(p[0].icon, Icon::Bundled("shadowsky.avif"));
+    }
+
+    #[test]
+    fn bridged_mastodon_points_to_the_fediverse_profile() {
+        let m = bridged_mastodon("overby.me");
+        assert_eq!(m.name, "Mastodon");
+        assert_eq!(m.category, "Social");
+        assert_eq!(m.icon, Icon::Bundled("mastodon.avif"));
+        assert_eq!(
+            m.profile_url,
+            "https://mastodon.social/@overby.me@bsky.brid.gy"
+        );
     }
 
     #[test]
