@@ -41,6 +41,19 @@ pub fn icon_url(icon: &str) -> String {
         "wikipedia.avif" => asset!("/assets/icons/wikipedia.avif").to_string(),
         "happycow.avif" => asset!("/assets/icons/happycow.avif").to_string(),
         "lemmy.avif" => asset!("/assets/icons/lemmy.avif").to_string(),
+        // Bundled atproto app logos (pre-made circular badges).
+        "leaflet.avif" => asset!("/assets/icons/leaflet.avif").to_string(),
+        "smokesignal.avif" => asset!("/assets/icons/smokesignal.avif").to_string(),
+        "pinksky.avif" => asset!("/assets/icons/pinksky.avif").to_string(),
+        "streamplace.avif" => asset!("/assets/icons/streamplace.avif").to_string(),
+        "sifa.avif" => asset!("/assets/icons/sifa.avif").to_string(),
+        "fitsky.avif" => asset!("/assets/icons/fitsky.avif").to_string(),
+        "atprotofans.avif" => asset!("/assets/icons/atprotofans.avif").to_string(),
+        "skyreader.avif" => asset!("/assets/icons/skyreader.avif").to_string(),
+        "aetheros.avif" => asset!("/assets/icons/aetheros.avif").to_string(),
+        "npmx.avif" => asset!("/assets/icons/npmx.avif").to_string(),
+        "anisota.avif" => asset!("/assets/icons/anisota.avif").to_string(),
+        "spark.avif" => asset!("/assets/icons/spark.avif").to_string(),
         other => {
             log::warn!("Unknown icon: {other}");
             String::new()

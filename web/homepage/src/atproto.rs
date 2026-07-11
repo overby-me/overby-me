@@ -5,24 +5,69 @@
 //! every collection NSID is a reverse-DNS domain identifying the app that owns
 //! that lexicon. This module turns that raw list into a tidy set of platforms.
 //!
-//! Each platform gets a generated circular badge icon (a colored disc with the
-//! platform's initial) rather than a fetched favicon, so every node looks
-//! consistent and stays crisp at any resolution.
+//! Each platform gets a real bundled logo where we ship one (pre-made circular
+//! badges in `assets/icons/`), otherwise a generated circular badge — never a
+//! runtime fetch — so every node looks consistent and stays crisp.
 //!
 //! It is deliberately pure (no web-sys), so the interesting logic — grouping,
 //! aliasing, domain derivation, badge generation, profile links — is unit
 //! tested on the host. The browser-only fetch glue lives in [`crate::atproto_web`].
+
+/// A platform's icon: a real bundled logo where we ship one, otherwise a
+/// generated circular badge (so any app still gets a consistent round icon).
+#[derive(Clone, PartialEq, Debug)]
+pub enum Icon {
+    /// A bundled logo asset filename (e.g. `"leaflet.avif"`).
+    Bundled(&'static str),
+    /// A generated circular badge as an SVG data URL.
+    Badge(String),
+}
+
+impl Icon {
+    /// Resolve to a final, loadable image URL.
+    pub fn resolve(&self) -> String {
+        match self {
+            Icon::Bundled(file) => crate::graph::texture::icon_url(file),
+            Icon::Badge(data_url) => data_url.clone(),
+        }
+    }
+}
 
 /// One atproto app the account has records in.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Platform {
     pub name: String,
     pub domain: String,
-    /// A generated high-res circular badge (an SVG data URL).
-    pub icon: String,
+    pub icon: Icon,
     /// Where clicking the node should take you (a profile if we know the shape,
     /// otherwise the app's homepage).
     pub profile_url: String,
+}
+
+/// Real bundled logos, keyed by NSID authority. These are pre-made circular
+/// badges in `assets/icons/` (fetched from each app and processed once), so the
+/// runtime fetches nothing. Apps without an entry fall back to a generated badge.
+fn bundled_icon(prefix: &str) -> Option<&'static str> {
+    Some(match prefix {
+        "app.bsky" => "bluesky.avif",
+        "sh.tangled" => "tangled.avif",
+        "app.rocksky" => "rocksky.avif",
+        "app.pinkleap" => "pinkleap.avif",
+        "social.popfeed" => "popfeed.avif",
+        "pub.leaflet" => "leaflet.avif",
+        "events.smokesignal" => "smokesignal.avif",
+        "social.pinksky" => "pinksky.avif",
+        "place.stream" => "streamplace.avif",
+        "id.sifa" => "sifa.avif",
+        "app.fitsky" => "fitsky.avif",
+        "com.atprotofans" => "atprotofans.avif",
+        "app.skyreader" => "skyreader.avif",
+        "computer.aetheros" => "aetheros.avif",
+        "dev.npmx" => "npmx.avif",
+        "net.anisota" => "anisota.avif",
+        "so.sprk" => "spark.avif",
+        _ => return None,
+    })
 }
 
 /// NSID prefixes that are shared/community namespaces or core protocol, not a
@@ -248,8 +293,13 @@ pub fn detect_platforms(collections: &[String], handle: &str, did: &str) -> Vec<
             continue;
         }
         seen_names.push(key);
+        // Prefer a real bundled logo; otherwise a generated badge.
+        let icon = match bundled_icon(prefix) {
+            Some(file) => Icon::Bundled(file),
+            None => Icon::Badge(badge_icon(&name, &color)),
+        };
         platforms.push(Platform {
-            icon: badge_icon(&name, &color),
+            icon,
             name,
             domain,
             profile_url,
@@ -332,16 +382,20 @@ mod tests {
     }
 
     #[test]
-    fn every_platform_gets_a_circular_badge() {
+    fn known_apps_use_bundled_logos_unknown_get_badges() {
         let p = detect_platforms(&overby_collections(), "overby.me", "did:plc:abc");
-        assert!(!p.is_empty());
-        for platform in &p {
-            assert!(
-                platform.icon.starts_with("data:image/svg+xml,"),
-                "{} icon should be a generated SVG badge: {}",
-                platform.name,
-                platform.icon
-            );
+        let icon_of = |name: &str| p.iter().find(|x| x.name == name).map(|x| x.icon.clone());
+        assert_eq!(icon_of("Bluesky"), Some(Icon::Bundled("bluesky.avif")));
+        assert_eq!(icon_of("Leaflet"), Some(Icon::Bundled("leaflet.avif")));
+        assert_eq!(icon_of("Sifa"), Some(Icon::Bundled("sifa.avif")));
+        assert_eq!(
+            icon_of("Stream.place"),
+            Some(Icon::Bundled("streamplace.avif"))
+        );
+        // Teal.fm ships no bundled logo -> generated badge fallback.
+        match icon_of("Teal.fm") {
+            Some(Icon::Badge(url)) => assert!(url.starts_with("data:image/svg+xml,")),
+            other => panic!("Teal.fm should fall back to a badge, got {other:?}"),
         }
     }
 
@@ -369,32 +423,33 @@ mod tests {
     #[test]
     fn derives_name_and_badge_for_unknown_apps() {
         let p = detect_platforms(
-            &["net.anisota.beta.game.log".to_string()],
+            &["com.example.thing.record".to_string()],
             "overby.me",
             "did:plc:abc",
         );
         assert_eq!(p.len(), 1);
-        assert_eq!(p[0].name, "Anisota");
-        assert_eq!(p[0].domain, "anisota.net");
-        assert!(p[0].icon.starts_with("data:image/svg+xml,"));
-        assert_eq!(p[0].profile_url, "https://anisota.net");
+        assert_eq!(p[0].name, "Example");
+        assert_eq!(p[0].domain, "example.com");
+        assert_eq!(p[0].profile_url, "https://example.com");
+        // A '#'-bearing brand color percent-encodes to %23 in the badge SVG.
+        match &p[0].icon {
+            Icon::Badge(url) => {
+                assert!(url.starts_with("data:image/svg+xml,") && url.contains("%23"))
+            }
+            other => panic!("unknown app should get a generated badge, got {other:?}"),
+        }
     }
 
     #[test]
-    fn curated_uses_brand_color_and_profile_link() {
+    fn curated_bluesky_uses_bundled_logo_and_profile_link() {
         let p = detect_platforms(
             &["app.bsky.feed.post".to_string()],
             "overby.me",
             "did:plc:abc",
         );
         assert_eq!(p.len(), 1);
+        assert_eq!(p[0].icon, Icon::Bundled("bluesky.avif"));
         assert_eq!(p[0].profile_url, "https://bsky.app/profile/overby.me");
-        // Bluesky brand color #1185fe; '#' percent-encodes to %23 in the badge.
-        assert!(
-            p[0].icon.contains("%231185fe"),
-            "expected brand color in badge: {}",
-            p[0].icon
-        );
     }
 
     #[test]

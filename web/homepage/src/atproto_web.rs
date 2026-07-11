@@ -190,7 +190,7 @@ fn build_graph(
         nodes.push(GraphNode {
             id: p.name.clone(),
             desc: format!("{}\nProfile", p.name),
-            icon: p.icon,
+            icon: p.icon.resolve(),
             color: None,
             opacity: None,
             url: Some(p.profile_url),
