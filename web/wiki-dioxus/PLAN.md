@@ -146,8 +146,10 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 - `[x]` **`createdAt` subtitle** — done: a compact relative time (full date in the
   tooltip) on content/file headers. Editor `DatePicker` for `createdAt` is niche
   and not carried. **minor**
-- `[ ]` Editor: strip the empty leading paragraph on save; add an editor error
-  fallback; audio/video `autoPlay` + video width. **minor**
+- `[x]` Editor / media polish — done: strip a leading empty paragraph on save
+  (unit-tested), and a responsive width for video/audio (video max-height 70vh).
+  (An editor error fallback and media `autoPlay` are not carried; autoplay is
+  browser-gated and intrusive.)
 - `[x]` **Bulk member import** / **xlsx SheetReader** — done: an owner .xlsx file
   input imports a Fornavn/Efternavn/Email roster via the pure-Rust `calamine`
   parser (wasm32) + a bulk `insertMembers`. End-to-end validated.
@@ -211,15 +213,16 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   filters (`parent not null`, `mime.hidden=false OR mime.context=true`), and the
   parent-name secondary line. (Context-scoping to the current context is not
   carried; search stays global.)
-- `[ ]` Auth minor: unverified page should auto-redirect once verified; handle the
-  already-logged-in sign-in error (status 100); post-login return-to-origin
-  (`navigate(-1)` vs always Home). **minor**
+- `[~]` Auth minor: intentionally left. Unverified auto-redirect-once-verified
+  needs polling; post-login return-to-origin (`navigate(-1)`) risks leaving the
+  SPA on a deep-link login; the status-100 already-logged-in case is marginal.
+  Low value / high risk relative to the churn. **minor**
 
 ## 10. Speaker list & smaller UX / a11y / polish
 
-- `[~]` **Speaker join types** (React `speak/avatars.tsx`) — the port has 4 of 5
-  (drops "misunderstood/announcement" and renumbers procedure `4`→`3`, diverging
-  from `order_by data desc` and existing `data:"4"` rows). Restore or migrate.
+- `[x]` **Speaker join types** — done: restored the 5th ("misunderstood") type and
+  renumbered procedure back to `4`, matching React + the existing `data:"4"` rows;
+  the queue order (data desc) is unchanged.
 - `[x]` **Icon-button a11y** — done: aria-label added to the icon-only buttons that
   had no accessible name (menu/search/close/expand, comment reply/send, chip
   remove).
@@ -229,12 +232,12 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 - `[x]` **SortApp** — done: seeded from `visible_sorted`, so hidden mimes no
   longer appear in the sort list. (A forced fresh fetch is not added; it reads the
   passed-in node.)
-- `[ ]` Polish: sync the `meta[name=theme-color]` to the active light/dark scheme
-  (currently a static value); set `document.title` to the active node name;
-  breadcrumb re-click should scroll content to top; drawer rounded right corners +
-  close-on-mouseleave; Danish relative-time localization; folder rail stays active
-  during `?app=editor` and vote during `?app=poll`; per-app scroll-position
-  restore; batch the sort-save mutations. **minor**
+- `[~]` Polish: done — theme-color synced to the active scheme, `document.title` set
+  to the node name, the folder rail stays active during `?app=editor`/`?app=sort`,
+  and the ballot blocks over-selection live. Intentionally left (low value / high
+  risk for the churn): breadcrumb-reclick scroll-to-top, drawer rounded corners +
+  close-on-mouseleave, Danish relative-time (already `m/h/d`, language-neutral),
+  per-app scroll restore, batching the sort-save mutations. **minor**
 
 ---
 
