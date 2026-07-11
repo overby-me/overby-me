@@ -70,8 +70,4 @@ impl Camera {
     pub fn on_mouse_up(&mut self) {
         self.is_dragging = false;
     }
-
-    pub fn on_wheel(&mut self, delta: f32) {
-        self.distance = (self.distance + delta * 0.5).clamp(50.0, 2000.0);
-    }
 }

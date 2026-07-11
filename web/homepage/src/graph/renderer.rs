@@ -248,7 +248,22 @@ impl Renderer {
         for (i, _, color_str) in halos {
             let color = parse_hex_color(color_str);
             let opacity = data.nodes[i].opacity.unwrap_or(0.4);
-            self.draw_sphere(gl, &view, &proj, simulation.positions[i], color, opacity);
+            // Category hubs get a larger bubble to hold the symbol + name label
+            // that is baked into their icon.
+            let scale = if data.nodes[i].hub {
+                HUB_HALO_SCALE
+            } else {
+                1.0
+            };
+            self.draw_sphere(
+                gl,
+                &view,
+                &proj,
+                simulation.positions[i],
+                color,
+                opacity,
+                scale,
+            );
         }
 
         gl.depth_mask(true);
@@ -353,7 +368,17 @@ impl Renderer {
         gl.disable_vertex_attrib_array(a_quad);
     }
 
-    fn draw_sphere(&self, gl: &GL, view: &Mat4, proj: &Mat4, pos: Vec3, color: Vec3, opacity: f32) {
+    #[allow(clippy::too_many_arguments)]
+    fn draw_sphere(
+        &self,
+        gl: &GL,
+        view: &Mat4,
+        proj: &Mat4,
+        pos: Vec3,
+        color: Vec3,
+        opacity: f32,
+        scale: f32,
+    ) {
         gl.use_program(Some(&self.sphere_program.program));
 
         // Bind sphere mesh
@@ -371,7 +396,7 @@ impl Renderer {
             Some(&self.sphere_mesh.index_buffer),
         );
 
-        let model = Mat4::from_translation(pos);
+        let model = Mat4::from_translation(pos) * Mat4::from_scale(Vec3::splat(scale));
         gl.uniform_matrix4fv_with_f32_array(
             self.sphere_program.get_uniform(gl, "u_model").as_ref(),
             false,
@@ -573,8 +598,14 @@ fn create_sphere_mesh(
     })
 }
 
+// Category hubs are drawn as bigger bubbles than platform leaves: their icon
+// carries a baked-in name label, and the halo is scaled to match.
+const HUB_HALO_SCALE: f32 = 1.5;
+
 fn node_size(node: &super::data::GraphNode) -> f32 {
-    if node.center {
+    // The center avatar and the category hubs are the big nodes; the hubs need
+    // the room for their baked-in name label.
+    if node.center || node.hub {
         40.0
     } else if node.color.is_some() {
         20.0

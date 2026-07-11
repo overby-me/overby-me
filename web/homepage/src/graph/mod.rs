@@ -87,11 +87,17 @@ pub fn Graph(data: GraphData) -> Element {
             let mut camera = Camera::new();
             let aspect = display_width as f32 / display_height as f32;
             camera.set_aspect(aspect);
-            camera.distance = fit_camera_distance(&data, aspect);
 
-            let simulation = Simulation::new(&data);
-            let particle_system = ParticleSystem::new(&data);
+            // A collapsible graph starts collapsed: only the center + hubs show.
+            let expanded = std::collections::HashSet::new();
+            let visible = filtered_graph(&data, &expanded);
+            let distance = fit_camera_distance(&visible, aspect);
+            camera.distance = distance;
 
+            let simulation = Simulation::new(&visible);
+            let particle_system = ParticleSystem::new(&visible);
+
+            // Load every icon up front so expanding a hub is instant.
             let tex_manager = TextureManager::new(gl);
             for node in &data.nodes {
                 tex_manager.load_icon(&node.icon);
@@ -103,7 +109,11 @@ pub fn Graph(data: GraphData) -> Element {
                 simulation,
                 particle_system,
                 textures: tex_manager.textures,
-                data,
+                data: visible,
+                full: data,
+                expanded,
+                target_distance: distance,
+                aspect,
                 canvas_width: display_width as f32,
                 canvas_height: display_height as f32,
                 dragging_node: None,
@@ -228,7 +238,7 @@ pub fn Graph(data: GraphData) -> Element {
                     tooltip_text.set(Some(node.desc.to_string()));
                     tooltip_x.set(sx);
                     tooltip_y.set(sy);
-                    cursor_pointer.set(node.url.is_some());
+                    cursor_pointer.set(node.url.is_some() || node.hub);
                 } else {
                     tooltip_text.set(None);
                     cursor_pointer.set(false);
@@ -244,12 +254,23 @@ pub fn Graph(data: GraphData) -> Element {
                 // Release the node and let the reheated layout absorb it.
                 gs.simulation.unpin(idx);
                 gs.simulation.set_alpha_target(0.0);
-                // A grab that never moved is a click/tap: follow the node's link.
-                if !gs.drag_moved
-                    && let Some(url) = &gs.data.nodes[idx].url
-                    && let Some(window) = web_sys::window()
-                {
-                    let _ = window.location().set_href(url);
+                // A grab that never moved is a click/tap.
+                if !gs.drag_moved {
+                    let node = &gs.data.nodes[idx];
+                    let is_hub = node.hub;
+                    let id = node.id.clone();
+                    let url = node.url.clone();
+                    if is_hub {
+                        // Toggle this category hub's leaves.
+                        if !gs.expanded.remove(&id) {
+                            gs.expanded.insert(id);
+                        }
+                        rebuild(&mut gs);
+                    } else if let Some(url) = url
+                        && let Some(window) = web_sys::window()
+                    {
+                        let _ = window.location().set_href(&url);
+                    }
                 }
             } else {
                 gs.camera.on_mouse_up();
@@ -274,7 +295,8 @@ pub fn Graph(data: GraphData) -> Element {
     let onwheel = move |evt: WheelEvent| {
         let dy = wheel_delta_y(&evt);
         if let Some(ref gs) = *state.read() {
-            gs.borrow_mut().camera.on_wheel(dy);
+            let mut gs = gs.borrow_mut();
+            gs.target_distance = (gs.target_distance + dy * 0.5).clamp(50.0, 2000.0);
         }
     };
 
@@ -316,7 +338,15 @@ struct GraphState {
     simulation: Simulation,
     particle_system: ParticleSystem,
     textures: Rc<RefCell<std::collections::HashMap<String, web_sys::WebGlTexture>>>,
-    data: Rc<GraphData>,
+    /// The currently visible subgraph (all nodes for the personal graph; center
+    /// + hubs + expanded hubs' leaves for a collapsible atproto graph).
+    data: GraphData,
+    /// The full graph, and which hub ids are currently expanded.
+    full: Rc<GraphData>,
+    expanded: std::collections::HashSet<String>,
+    /// Camera distance the render loop eases toward (refit on expand/collapse).
+    target_distance: f32,
+    aspect: f32,
     canvas_width: f32,
     canvas_height: f32,
     // Node-drag state: which node is grabbed, the screen-parallel plane it moves
@@ -327,6 +357,70 @@ struct GraphState {
     drag_moved: bool,
     press_x: f32,
     press_y: f32,
+}
+
+/// The hub id a leaf hangs off (the source of the link that targets it).
+fn leaf_parent(full: &GraphData, leaf_id: &str) -> Option<String> {
+    full.links
+        .iter()
+        .find(|l| l.target == leaf_id)
+        .map(|l| l.source.clone())
+}
+
+/// The subgraph currently visible: everything for a non-collapsible graph;
+/// otherwise the center, all hubs, and the leaves of expanded hubs only.
+fn filtered_graph(full: &GraphData, expanded: &std::collections::HashSet<String>) -> GraphData {
+    if !full.collapsible {
+        return full.clone();
+    }
+    let nodes: Vec<_> = full
+        .nodes
+        .iter()
+        .filter(|n| {
+            n.center || n.hub || leaf_parent(full, &n.id).is_none_or(|hub| expanded.contains(&hub))
+        })
+        .cloned()
+        .collect();
+    let visible: std::collections::HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    let links = full
+        .links
+        .iter()
+        .filter(|l| visible.contains(l.source.as_str()) && visible.contains(l.target.as_str()))
+        .cloned()
+        .collect();
+    GraphData {
+        nodes,
+        links,
+        circular_icons: full.circular_icons,
+        collapsible: full.collapsible,
+    }
+}
+
+/// Recompute the visible subgraph after an expand/collapse, seeding kept nodes at
+/// their current positions and newly-revealed leaves at their hub (so they spring
+/// outward), then reheat the layout and refit the camera.
+fn rebuild(gs: &mut GraphState) {
+    let mut positions = std::collections::HashMap::new();
+    for (i, n) in gs.data.nodes.iter().enumerate() {
+        positions.insert(n.id.clone(), gs.simulation.positions[i]);
+    }
+    let new_data = filtered_graph(&gs.full, &gs.expanded);
+    let mut seed = positions.clone();
+    for n in &new_data.nodes {
+        if !seed.contains_key(&n.id)
+            && let Some(hub) = leaf_parent(&gs.full, &n.id)
+            && let Some(&p) = positions.get(&hub)
+        {
+            seed.insert(n.id.clone(), p + glam::Vec3::new(0.1, 0.1, 0.1));
+        }
+    }
+    let mut simulation = Simulation::new(&new_data);
+    simulation.set_positions(&new_data, &seed);
+    simulation.set_alpha(0.7);
+    gs.particle_system = ParticleSystem::new(&new_data);
+    gs.target_distance = fit_camera_distance(&new_data, gs.aspect);
+    gs.simulation = simulation;
+    gs.data = new_data;
 }
 
 /// Pick a camera distance that frames the whole graph, whatever its size. A
@@ -364,6 +458,11 @@ fn start_animation_loop(state: Rc<RefCell<GraphState>>) {
             gs.simulation.tick();
             gs.particle_system.tick();
 
+            // Ease the camera toward its target distance (refit on expand/collapse
+            // and smooth for wheel zoom).
+            let target = gs.target_distance;
+            gs.camera.distance += (target - gs.camera.distance) * 0.12;
+
             let particle_pos = gs.particle_system.positions(&gs.simulation, &gs.data);
             let textures = gs.textures.borrow();
 
@@ -387,5 +486,111 @@ fn start_animation_loop(state: Rc<RefCell<GraphState>>) {
     if let Some(window) = web_sys::window() {
         let _ =
             window.request_animation_frame(g.borrow().as_ref().unwrap().as_ref().unchecked_ref());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use data::{GraphLink, GraphNode};
+
+    fn node(id: &str, center: bool, hub: bool) -> GraphNode {
+        GraphNode {
+            id: id.to_string(),
+            desc: id.to_string(),
+            icon: String::new(),
+            color: None,
+            opacity: None,
+            url: (!center && !hub).then(|| format!("https://{id}")),
+            center,
+            hub,
+        }
+    }
+
+    fn link(source: &str, target: &str) -> GraphLink {
+        GraphLink {
+            source: source.to_string(),
+            target: target.to_string(),
+        }
+    }
+
+    // A center node, two category hubs, and two leaves under each.
+    fn sample() -> GraphData {
+        GraphData {
+            nodes: vec![
+                node("me", true, false),
+                node("Social", false, true),
+                node("Build", false, true),
+                node("Bluesky", false, false),
+                node("PinkLeap", false, false),
+                node("Tangled", false, false),
+                node("Rocksky", false, false),
+            ],
+            links: vec![
+                link("me", "Social"),
+                link("me", "Build"),
+                link("Social", "Bluesky"),
+                link("Social", "PinkLeap"),
+                link("Build", "Tangled"),
+                link("Build", "Rocksky"),
+            ],
+            circular_icons: true,
+            collapsible: true,
+        }
+    }
+
+    fn ids(g: &GraphData) -> Vec<&str> {
+        g.nodes.iter().map(|n| n.id.as_str()).collect()
+    }
+
+    #[test]
+    fn collapsed_shows_only_center_and_hubs() {
+        let full = sample();
+        let g = filtered_graph(&full, &std::collections::HashSet::new());
+        assert_eq!(ids(&g), ["me", "Social", "Build"]);
+        // Only the center->hub links survive; no dangling links to hidden leaves.
+        assert_eq!(g.links.len(), 2);
+        assert!(
+            g.links
+                .iter()
+                .all(|l| l.target == "Social" || l.target == "Build")
+        );
+    }
+
+    #[test]
+    fn expanding_a_hub_reveals_only_its_leaves() {
+        let full = sample();
+        let expanded = std::collections::HashSet::from(["Social".to_string()]);
+        let g = filtered_graph(&full, &expanded);
+        assert_eq!(ids(&g), ["me", "Social", "Build", "Bluesky", "PinkLeap"]);
+        // The Social->leaf links appear; Build's leaves stay hidden.
+        assert!(g.links.iter().any(|l| l.target == "Bluesky"));
+        assert!(g.links.iter().all(|l| l.target != "Tangled"));
+    }
+
+    #[test]
+    fn expanding_all_hubs_matches_the_full_graph() {
+        let full = sample();
+        let expanded = std::collections::HashSet::from(["Social".to_string(), "Build".to_string()]);
+        let g = filtered_graph(&full, &expanded);
+        assert_eq!(ids(&g), ids(&full));
+        assert_eq!(g.links.len(), full.links.len());
+    }
+
+    #[test]
+    fn leaf_parent_finds_the_owning_hub() {
+        let full = sample();
+        assert_eq!(leaf_parent(&full, "Tangled").as_deref(), Some("Build"));
+        assert_eq!(leaf_parent(&full, "Bluesky").as_deref(), Some("Social"));
+        // The center has no incoming link.
+        assert_eq!(leaf_parent(&full, "me"), None);
+    }
+
+    #[test]
+    fn non_collapsible_graph_is_returned_whole() {
+        let personal = GraphData::personal();
+        let g = filtered_graph(&personal, &std::collections::HashSet::new());
+        assert_eq!(g.nodes.len(), personal.nodes.len());
+        assert_eq!(g.links.len(), personal.links.len());
     }
 }

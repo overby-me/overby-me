@@ -128,6 +128,26 @@ impl Simulation {
         self.fixed[index] = None;
     }
 
+    /// Seed node positions from a map keyed by node id (resetting velocity), so
+    /// the layout keeps continuity when the visible set changes (expand/collapse).
+    pub fn set_positions(
+        &mut self,
+        data: &GraphData,
+        positions: &std::collections::HashMap<String, Vec3>,
+    ) {
+        for (i, node) in data.nodes.iter().enumerate() {
+            if let Some(&p) = positions.get(&node.id) {
+                self.positions[i] = p;
+                self.velocities[i] = Vec3::ZERO;
+            }
+        }
+    }
+
+    /// Reheat the layout so it re-settles after the visible set changes.
+    pub fn set_alpha(&mut self, alpha: f32) {
+        self.alpha = alpha;
+    }
+
     pub fn tick(&mut self) {
         if !self.is_active() {
             return;

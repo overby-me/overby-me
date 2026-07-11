@@ -12,6 +12,9 @@ pub struct GraphNode {
     pub url: Option<String>,
     /// The large hub node the layout centers on (drawn bigger, easier to grab).
     pub center: bool,
+    /// A category hub: in a collapsible graph, tapping it expands/collapses the
+    /// platform leaves linked under it.
+    pub hub: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -30,6 +33,9 @@ pub struct GraphData {
     /// Clip icon sprites to a circle (used by the atproto graphs, whose badges
     /// and avatars are square textures). The personal graph leaves this off.
     pub circular_icons: bool,
+    /// Start collapsed (center + hubs only) and reveal a hub's leaves on tap.
+    /// Used by the atproto graphs; the personal graph shows everything at once.
+    pub collapsible: bool,
 }
 
 impl GraphData {
@@ -57,6 +63,7 @@ impl GraphData {
                 opacity,
                 url: url.map(str::to_string),
                 center,
+                hub: false,
             }
         }
         fn link(source: &str, target: &str) -> GraphLink {
@@ -334,6 +341,7 @@ impl GraphData {
             nodes,
             links,
             circular_icons: false,
+            collapsible: false,
         }
     }
 }
