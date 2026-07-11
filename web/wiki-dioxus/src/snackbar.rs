@@ -7,41 +7,57 @@ pub struct SnackbarMessage {
 }
 
 static SNACKBAR_COUNTER: GlobalSignal<u64> = Signal::global(|| 0);
-pub static SNACKBAR: GlobalSignal<Option<SnackbarMessage>> = Signal::global(|| None);
+/// The stack of visible snackbars (newest last), capped at [`MAX_SNACK`].
+pub static SNACKBAR: GlobalSignal<Vec<SnackbarMessage>> = Signal::global(Vec::new);
 
-/// Show a snackbar message that auto-dismisses after 3 seconds
+/// How many snackbars stack at once before the oldest is dropped (Notistack's
+/// `maxSnack`).
+const MAX_SNACK: usize = 3;
+
+/// Show a snackbar that auto-dismisses after 3 seconds. Stacks up to
+/// [`MAX_SNACK`] at once, and skips a message identical to the newest one still
+/// showing (Notistack's `preventDuplicate`).
 pub fn show_snackbar(text: &str) {
+    // preventDuplicate: don't queue the same text twice in a row.
+    if SNACKBAR.read().last().is_some_and(|m| m.text == text) {
+        return;
+    }
     let id = *SNACKBAR_COUNTER.read() + 1;
     *SNACKBAR_COUNTER.write() = id;
-    *SNACKBAR.write() = Some(SnackbarMessage {
-        text: text.to_string(),
-        id,
-    });
+    {
+        let mut q = SNACKBAR.write();
+        q.push(SnackbarMessage {
+            text: text.to_string(),
+            id,
+        });
+        // maxSnack: drop the oldest beyond the cap.
+        while q.len() > MAX_SNACK {
+            q.remove(0);
+        }
+    }
 
-    // Auto-dismiss after 3 seconds
+    // Auto-dismiss this specific message after 3 seconds.
     spawn(async move {
         gloo_timers::future::TimeoutFuture::new(3000).await;
-        let current = SNACKBAR.read().clone();
-        if let Some(msg) = &current {
-            if msg.id == id {
-                *SNACKBAR.write() = None;
-            }
-        }
+        SNACKBAR.write().retain(|m| m.id != id);
     });
 }
 
-/// Snackbar component — render at the root level
+/// Snackbar component — render at the root level. Renders the whole stack.
 #[component]
 pub fn Snackbar() -> Element {
-    let message = SNACKBAR.read().clone();
-
-    match message {
-        Some(msg) => {
-            rsx! {
+    let messages = SNACKBAR.read().clone();
+    if messages.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "snackbar-stack",
+            for msg in messages.iter() {
                 // role="status" + aria-live so assistive tech announces the
                 // message (it appears and auto-dismisses without focus moving).
                 div {
                     class: "snackbar",
+                    key: "{msg.id}",
                     role: "status",
                     aria_live: "polite",
                     aria_atomic: "true",
@@ -49,6 +65,5 @@ pub fn Snackbar() -> Element {
                 }
             }
         }
-        None => rsx! {},
     }
 }

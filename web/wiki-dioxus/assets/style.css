@@ -1129,11 +1129,24 @@ h6, .title-small {
 }
 
 /* Snackbar — M3: inverse-surface, extra-small corners, level-3 shadow. */
-.snackbar {
+/* Stack of snackbars, bottom-centre above the bottom bar (newest at the bottom).
+   On desktop the bar sits at the top-left of the content column, so bottom-centre
+   stays clear of the drawer/rail. */
+.snackbar-stack {
     position: fixed;
     bottom: 80px;
     left: 50%;
     transform: translateX(-50%);
+    z-index: 300;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    max-width: min(90vw, 480px);
+}
+
+.snackbar {
+    position: relative;
     background: var(--md-inverse-surface);
     color: var(--md-inverse-on-surface);
     padding: 14px 16px;
