@@ -108,9 +108,15 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   document/folder/**file** (with upload). (Free-text body for question/comment is
   handled in PositionApp/comments; a duplicate-name check is still absent, and it
   still does not read the node's `inserts` list.)
-- `[ ]` **Context creation + permission seeding** (`contextPerm`) — a new group/
-  event/context is created with a plain `insert_node` and gets no permission rows.
-  (Note: the port has no context-creation flow yet, so this is latent.) **major**
+- `[blocked]` **Context creation + permission seeding** (`contextPerm`) —
+  investigated end-to-end: the `nodes` insert `_check` on the **user** role denies
+  creating a `wiki/group`/`wiki/event` (verified live: user is denied, the admin
+  role succeeds), and the `contextPerm` template grants no group/event insert.
+  So context creation is an **admin-role backend operation**, not a regular-user
+  feature (which is why React also omits group/event from its add dialog). The
+  seeding mechanism (`create_context_node` + `seed_context_permissions`, with
+  `insertPermissions` validated live) is understood but can't be surfaced to
+  users without a backend permission change. Not shippable as a user feature.
 - `[x]` **File-node toolbar + sub-content** — done: a file page now has an owner
   delete (confirm, members-first) and a comment section under the viewer. (Edit /
   members-chips / publish on a file are not carried; the viewer already had
