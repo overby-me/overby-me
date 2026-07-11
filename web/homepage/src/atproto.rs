@@ -72,6 +72,8 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "equipment.rpg" => "rpg.avif",
         "link.woosh" => "woosh.avif",
         "com.vibe-coded" => "vibecoded.avif",
+        "place.atwork" => "atwork.avif",
+        "app.shadowsky" | "com.shadowsky" => "shadowsky.avif",
         _ => return None,
     })
 }

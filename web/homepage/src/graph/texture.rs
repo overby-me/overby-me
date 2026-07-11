@@ -57,6 +57,8 @@ pub fn icon_url(icon: &str) -> String {
         "rpg.avif" => asset!("/assets/icons/rpg.avif").to_string(),
         "woosh.avif" => asset!("/assets/icons/woosh.avif").to_string(),
         "vibecoded.avif" => asset!("/assets/icons/vibecoded.avif").to_string(),
+        "atwork.avif" => asset!("/assets/icons/atwork.avif").to_string(),
+        "shadowsky.avif" => asset!("/assets/icons/shadowsky.avif").to_string(),
         other => {
             log::warn!("Unknown icon: {other}");
             String::new()
