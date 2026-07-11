@@ -277,61 +277,50 @@ struct Curated {
     name: &'static str,
     /// Brand color for the badge disc.
     color: &'static str,
-    profile_url: String,
 }
 
-/// Hand-curated metadata for well-known apps: nice names, brand colors, and real
-/// profile links. Unknown apps fall back to derived values.
-fn curated(prefix: &str, handle: &str, did: &str) -> Option<Curated> {
-    let c = |name, color, profile_url| Curated {
-        name,
-        color,
-        profile_url,
-    };
+/// Hand-curated display metadata for well-known apps: nice names and brand
+/// colors. Unknown apps fall back to a derived name/color.
+fn curated(prefix: &str) -> Option<Curated> {
+    let c = |name, color| Curated { name, color };
     Some(match prefix {
-        "app.bsky" => c(
-            "Bluesky",
-            "#1185fe",
-            format!("https://bsky.app/profile/{handle}"),
-        ),
-        "sh.tangled" => c(
-            "Tangled",
-            "#5b4bff",
-            format!("https://tangled.org/@{handle}"),
-        ),
-        "app.rocksky" => c(
-            "Rocksky",
-            "#e0245e",
-            format!("https://rocksky.app/profile/{handle}"),
-        ),
-        "app.pinkleap" => c(
-            "PinkLeap",
-            "#ec4899",
-            format!("https://pinkleap.app/@{handle}"),
-        ),
-        "social.popfeed" => c(
-            "PopFeed",
-            "#e8590c",
-            format!("https://popfeed.social/profile/{did}"),
-        ),
-        "pub.leaflet" => c("Leaflet", "#0f9d58", "https://leaflet.pub".to_string()),
-        "fm.teal" => c("Teal.fm", "#0d9488", "https://teal.fm".to_string()),
-        "events.smokesignal" => c(
-            "Smoke Signal",
-            "#ea580c",
-            "https://smokesignal.events".to_string(),
-        ),
-        "place.stream" => c(
-            "Stream.place",
-            "#7c3aed",
-            "https://stream.place".to_string(),
-        ),
-        "id.sifa" => c("Sifa", "#2563eb", "https://sifa.id".to_string()),
+        "app.bsky" => c("Bluesky", "#1185fe"),
+        "sh.tangled" => c("Tangled", "#5b4bff"),
+        "app.rocksky" => c("Rocksky", "#e0245e"),
+        "app.pinkleap" => c("PinkLeap", "#ec4899"),
+        "social.popfeed" => c("PopFeed", "#e8590c"),
+        "pub.leaflet" => c("Leaflet", "#0f9d58"),
+        "fm.teal" => c("Teal.fm", "#0d9488"),
+        "events.smokesignal" => c("Smoke Signal", "#ea580c"),
+        "place.stream" => c("Stream.place", "#7c3aed"),
+        "id.sifa" => c("Sifa", "#2563eb"),
         // NSID reverses to semble.com (an unrelated healthcare site); the real
         // atproto app is semble.so.
-        "com.semble" => c("Semble", "#f97316", "https://semble.so".to_string()),
+        "com.semble" => c("Semble", "#f97316"),
         _ => return None,
     })
+}
+
+/// The public profile URL for this account on a given app. Where an app has a
+/// per-user profile page we link straight to it; otherwise we fall back to the
+/// app's homepage (`domain` is the app's reverse-DNS domain). Patterns were
+/// verified per app against overby.me's live profile pages — most key on the
+/// handle, PopFeed on the DID, and several apps (Leaflet, Smoke Signal, atwork,
+/// Flashes, Aetheros, Spark, Cosmik, …) have no per-user web page at all.
+fn profile_url(prefix: &str, domain: &str, handle: &str, did: &str) -> String {
+    match prefix {
+        "app.bsky" => format!("https://bsky.app/profile/{handle}"),
+        "app.rocksky" => format!("https://rocksky.app/profile/{handle}"),
+        "social.popfeed" => format!("https://popfeed.social/profile/{did}"),
+        "sh.tangled" => format!("https://tangled.org/{handle}"),
+        "dev.npmx" => format!("https://npmx.dev/profile/{handle}"),
+        "place.stream" => format!("https://stream.place/{handle}"),
+        "id.sifa" => format!("https://sifa.id/p/{handle}"),
+        "com.semble" => format!("https://semble.so/profile/{handle}"),
+        "blue.linkat" => format!("https://linkat.blue/{handle}"),
+        "app.pinkleap" => format!("https://pinkleap.app/@{handle}"),
+        _ => format!("https://{domain}"),
+    }
 }
 
 /// Percent-encode a string for use in a data URL (encode everything outside the
@@ -428,18 +417,15 @@ pub fn detect_platforms(collections: &[String], handle: &str, did: &str) -> Vec<
     let mut seen_names: Vec<String> = Vec::new();
     for prefix in &prefixes {
         let domain = reverse_domain(prefix);
-        let (name, color, profile_url) = match curated(prefix, handle, did) {
-            Some(c) => (c.name.to_string(), c.color.to_string(), c.profile_url),
+        let (name, color) = match curated(prefix) {
+            Some(c) => (c.name.to_string(), c.color.to_string()),
             None => {
                 // org label is the second segment (e.g. `sifa` in `id.sifa`).
                 let org = prefix.split('.').nth(1).unwrap_or(prefix);
-                (
-                    title_case(org),
-                    derived_color(&domain),
-                    format!("https://{domain}"),
-                )
+                (title_case(org), derived_color(&domain))
             }
         };
+        let profile_url = profile_url(prefix, &domain, handle, did);
         // Collapse apps that resolve to the same display name across TLDs
         // (e.g. `app.shadowsky` + `com.shadowsky`).
         let key = name.to_lowercase();
@@ -831,6 +817,48 @@ mod tests {
         assert_eq!(p.len(), 1);
         assert_eq!(p[0].icon, Icon::Bundled("bluesky.avif"));
         assert_eq!(p[0].profile_url, "https://bsky.app/profile/overby.me");
+    }
+
+    #[test]
+    fn profile_url_links_to_the_user_profile() {
+        let did = "did:plc:eukcx4amfqmhfrnkix7zwm34";
+        let p = |prefix, domain| profile_url(prefix, domain, "overby.me", did);
+        // Verified per app against overby.me's live profile pages.
+        assert_eq!(
+            p("app.bsky", "bsky.app"),
+            "https://bsky.app/profile/overby.me"
+        );
+        assert_eq!(
+            p("sh.tangled", "tangled.sh"),
+            "https://tangled.org/overby.me"
+        );
+        assert_eq!(
+            p("dev.npmx", "npmx.dev"),
+            "https://npmx.dev/profile/overby.me"
+        );
+        assert_eq!(
+            p("place.stream", "stream.place"),
+            "https://stream.place/overby.me"
+        );
+        assert_eq!(p("id.sifa", "sifa.id"), "https://sifa.id/p/overby.me");
+        assert_eq!(
+            p("com.semble", "semble.so"),
+            "https://semble.so/profile/overby.me"
+        );
+        assert_eq!(
+            p("blue.linkat", "linkat.blue"),
+            "https://linkat.blue/overby.me"
+        );
+        assert_eq!(
+            p("social.popfeed", "popfeed.social"),
+            "https://popfeed.social/profile/did:plc:eukcx4amfqmhfrnkix7zwm34"
+        );
+        // Apps with no per-user web page fall back to the homepage.
+        assert_eq!(p("pub.leaflet", "leaflet.pub"), "https://leaflet.pub");
+        assert_eq!(
+            p("computer.aetheros", "aetheros.computer"),
+            "https://aetheros.computer"
+        );
     }
 
     #[test]
