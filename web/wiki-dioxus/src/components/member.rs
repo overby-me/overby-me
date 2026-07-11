@@ -234,8 +234,8 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                     }
                     // Bulk-import a Fornavn/Efternavn/Email roster from an .xlsx
                     // (React InvitesFab). Each row with an email becomes an invite.
-                    div { class: "text-field mt-2",
-                        label { "{t(\"invite.importRoster\")}" }
+                    div { class: "mt-2",
+                        div { class: "file-upload-label", "{t(\"invite.importRoster\")}" }
                         input {
                             id: "roster-xlsx-input",
                             class: "file-upload-input",

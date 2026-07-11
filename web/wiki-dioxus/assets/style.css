@@ -551,12 +551,12 @@ a:hover {
     transform: translate(-50%, -50%);
     font-weight: 700;
     font-size: 10px;
-    /* On-primary (white) so the letter contrasts with the green avatar background
-       (its own compliant pair); a soft shadow keeps it legible over the white
-       folder-icon glyph it sits on. The old --md-primary green was 1:1 on the
-       green avatar. */
-    color: var(--md-on-primary, #fff);
-    text-shadow: 0 0 2px rgba(0, 0, 0, 0.55);
+    /* The folder glyph is drawn in the avatar's on-primary colour (white in
+       light mode, dark in dark mode). The primary-container "on" colour is its
+       natural counterpart, so the letter always contrasts with the glyph it sits
+       on: a dark letter on the white glyph, a light letter on the dark glyph. */
+    color: var(--md-on-primary-container, #3f0018);
+    text-shadow: none;
 }
 
 .avatar.small .folder-letter {
@@ -789,7 +789,16 @@ a.folder-item:focus-visible {
 
 /* Styled file upload: a dashed drop-zone control wrapping a hidden native
  * <input type=file>, so uploads match the Material look instead of the raw
- * browser "Choose file" widget. */
+ * browser "Choose file" widget. Deliberately NOT inside a `.text-field` (whose
+ * `label` is an absolutely-positioned floating label that would drag the picker
+ * out of flow). */
+.file-upload-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: var(--md-on-surface-variant);
+}
+
 .file-upload-input {
     display: none;
 }

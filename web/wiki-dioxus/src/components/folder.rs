@@ -448,8 +448,8 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                     }
                     // File picker (only for the `wiki/file` kind).
                     if is_file {
-                        div { class: "text-field mt-2",
-                            label { "{t(\"content.uploadFile\")}" }
+                        div { class: "mt-2",
+                            div { class: "file-upload-label", "{t(\"content.uploadFile\")}" }
                             // Styled picker: a dashed drop-zone wrapping the hidden
                             // native file input, so it matches the Material UI.
                             label { class: "file-upload",
