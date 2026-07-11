@@ -281,6 +281,32 @@ pub fn Layout() -> Element {
     }
 }
 
+/// Issue a search for `value` with the given scope (`scoped` = a context id to
+/// restrict to, or `None` for site-wide), applying the result only if it is
+/// still the latest request. Signals are `Copy`, so callers pass them by value.
+fn search_run(
+    value: String,
+    mut results: Signal<Vec<NodeFields>>,
+    mut seq: Signal<u32>,
+    token: Option<String>,
+    scoped: Option<String>,
+) {
+    if value.trim().is_empty() {
+        results.set(vec![]);
+        return;
+    }
+    let my = seq() + 1;
+    seq.set(my);
+    spawn(async move {
+        let nodes = graphql::search_nodes(token.as_deref(), &value, scoped.as_deref())
+            .await
+            .unwrap_or_default();
+        if seq() == my {
+            results.set(nodes);
+        }
+    });
+}
+
 /// Search bar with live GraphQL results
 #[component]
 fn SearchBar(
@@ -291,41 +317,63 @@ fn SearchBar(
     let session = use_session();
     let nav = use_navigator();
     let mut input = input;
-    let mut results = results;
     // Monotonic request id so out-of-order responses don't clobber newer ones
     // (typing fires a query per keystroke; the last issued must win, not the
-    // last to return).
-    let mut seq = use_signal(|| 0u32);
+    // last to return). `search_run` owns the writes, so these stay immutable here.
+    let seq = use_signal(|| 0u32);
     // Keyboard-highlighted result (arrow keys move it, Enter opens it).
     let mut selected = use_signal(|| 0usize);
 
+    // Resolve the current context (nearest group/event) so the search can be
+    // scoped to it. `in_context` toggles between context-only and site-wide.
+    let route = use_route::<Route>();
+    let segments = match &route {
+        Route::PathPage { segments, .. } => segments.clone(),
+        _ => Vec::new(),
+    };
+    let cp = context_path(&segments);
+    let ctx_token = session.read().access_token.clone();
+    let context = use_resource(use_reactive!(|(cp, ctx_token)| async move {
+        if cp.is_empty() {
+            return None;
+        }
+        graphql::resolve_path(ctx_token.as_deref(), &cp)
+            .await
+            .ok()
+            .flatten()
+            .map(|n| n.id.0)
+    }));
+    let has_context = context.read().clone().flatten().is_some();
+    let mut in_context = use_signal(|| false);
+
     rsx! {
-        div { style: "flex: 1; position: relative;",
+        div { style: "flex: 1; position: relative; display: flex; align-items: center; gap: 2px;",
+            if has_context {
+                button {
+                    class: "btn-icon",
+                    title: if in_context() { t("common.searchEverywhere") } else { t("common.searchInSection") },
+                    onclick: move |_| {
+                        let now = in_context();
+                        in_context.set(!now);
+                        let scoped = if !now { context.read().clone().flatten() } else { None };
+                        let token = session.read().access_token.clone();
+                        search_run(input.read().clone(), results, seq, token, scoped);
+                    },
+                    span { class: "material-icons", {if in_context() { "folder" } else { "public" }} }
+                }
+            }
             input {
                 class: "breadcrumbs",
-                style: "background: transparent; border: none; color: white; outline: none; font-size: 14px; width: 100%;",
+                style: "background: transparent; border: none; color: white; outline: none; font-size: 14px; flex: 1; min-width: 0;",
                 placeholder: "{t(\"common.search\")}",
                 value: "{input}",
                 oninput: move |evt| {
                     let value = evt.value();
                     input.set(value.clone());
                     selected.set(0);
-                    let my = *seq.read() + 1;
-                    seq.set(my);
-                    if value.trim().is_empty() {
-                        results.set(vec![]);
-                        return;
-                    }
+                    let scoped = if in_context() { context.read().clone().flatten() } else { None };
                     let token = session.read().access_token.clone();
-                    spawn(async move {
-                        let nodes = graphql::search_nodes(token.as_deref(), &value)
-                            .await
-                            .unwrap_or_default();
-                        // Only apply if this is still the latest query.
-                        if *seq.read() == my {
-                            results.set(nodes);
-                        }
-                    });
+                    search_run(value, results, seq, token, scoped);
                 },
                 onkeydown: move |evt| {
                     let len = results.read().len();
@@ -1214,7 +1262,7 @@ fn ContextItem(node: graphql::ContextNodeFields) -> Element {
                     }
                 });
             },
-            div { class: "avatar small secondary", "{abbr}" }
+            div { class: "avatar small secondary avatar-abbr", "{abbr}" }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{name}" }
             }
@@ -1263,13 +1311,16 @@ fn abbrev_context_name(name: &str) -> String {
         .map(|w| match w {
             "Hovedbestyrelsesmøde" => "HB".to_string(),
             "Landsmøde" => "LM".to_string(),
-            _ if upper_count(w) > 1 => w.to_string(),
+            // An acronym (e.g. "EU-"): keep only its uppercase letters, so
+            // trailing punctuation like a hyphen cannot break onto a new line.
+            _ if upper_count(w) > 1 => w.chars().filter(|c| c.is_uppercase()).collect(),
             _ => w.chars().next().unwrap().to_string(),
         })
         .collect();
 
     match words.len() {
-        1..=3 => words.concat(),
+        // Cap at three characters so the abbreviation fits the avatar circle.
+        1..=3 => words.concat().chars().take(3).collect(),
         _ => String::new(),
     }
 }

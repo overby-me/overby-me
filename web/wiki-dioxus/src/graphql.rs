@@ -1909,50 +1909,62 @@ pub async fn cast_vote(
 pub async fn search_nodes(
     access_token: Option<&str>,
     query: &str,
+    context_id: Option<&str>,
 ) -> Result<Vec<NodeFields>, String> {
     if query.is_empty() {
         return Ok(vec![]);
     }
 
-    let where_clause = NodesBoolExp {
-        and: Some(vec![
-            NodesBoolExp {
-                name: Some(StringComparisonExp {
-                    ilike: Some(format!("%{query}%")),
+    let mut filters = vec![
+        NodesBoolExp {
+            name: Some(StringComparisonExp {
+                ilike: Some(format!("%{query}%")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        // Exclude orphan/root nodes (no parent), matching React's search.
+        NodesBoolExp {
+            parent_id: Some(UuidComparisonExp {
+                eq: None,
+                is_null: Some(false),
+            }),
+            ..Default::default()
+        },
+        // Hide system/hidden mimes unless they are contexts (groups/events):
+        // `mime.hidden = false OR mime.context = true`.
+        NodesBoolExp {
+            or: Some(vec![
+                NodesBoolExp {
+                    mime: Some(MimesBoolExp {
+                        hidden: Some(BooleanComparisonExp { eq: Some(false) }),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
-            // Exclude orphan/root nodes (no parent), matching React's search.
-            NodesBoolExp {
-                parent_id: Some(UuidComparisonExp {
-                    eq: None,
-                    is_null: Some(false),
-                }),
-                ..Default::default()
-            },
-            // Hide system/hidden mimes unless they are contexts (groups/events):
-            // `mime.hidden = false OR mime.context = true`.
-            NodesBoolExp {
-                or: Some(vec![
-                    NodesBoolExp {
-                        mime: Some(MimesBoolExp {
-                            hidden: Some(BooleanComparisonExp { eq: Some(false) }),
-                            ..Default::default()
-                        }),
+                },
+                NodesBoolExp {
+                    mime: Some(MimesBoolExp {
+                        context: Some(BooleanComparisonExp { eq: Some(true) }),
                         ..Default::default()
-                    },
-                    NodesBoolExp {
-                        mime: Some(MimesBoolExp {
-                            context: Some(BooleanComparisonExp { eq: Some(true) }),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    },
-                ]),
-                ..Default::default()
-            },
-        ]),
+                    }),
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        },
+    ];
+    // Scope the search to a single context (group/event) when requested.
+    if let Some(ctx) = context_id {
+        filters.push(NodesBoolExp {
+            context_id: Some(UuidComparisonExp {
+                eq: Some(Uuid(ctx.to_string())),
+                is_null: None,
+            }),
+            ..Default::default()
+        });
+    }
+    let where_clause = NodesBoolExp {
+        and: Some(filters),
         ..Default::default()
     };
 
@@ -2063,7 +2075,7 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
     }
     let mut out: Vec<Author> = Vec::new();
     // Groups can author content.
-    if let Ok(nodes) = search_nodes(access_token, query).await {
+    if let Ok(nodes) = search_nodes(access_token, query, None).await {
         for n in nodes
             .into_iter()
             .filter(|n| n.mime_id.as_deref() == Some("wiki/group"))

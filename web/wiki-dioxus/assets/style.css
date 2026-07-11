@@ -384,9 +384,20 @@ a:hover {
     align-items: center;
     justify-content: center;
     font-size: 18px;
+    line-height: 1;
+    /* Labels/abbreviations must never wrap to a second line inside the circle. */
+    white-space: nowrap;
     color: var(--md-on-primary);
     background-color: var(--md-primary);
     flex-shrink: 0;
+}
+
+/* Context (group/event) name abbreviation: smaller so 2-3 letters fit the
+ * circle on one line (e.g. "EU", "KM", "HB"). */
+.avatar-abbr {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
 }
 
 .avatar.secondary {
@@ -1534,9 +1545,11 @@ h6, .title-small {
 }
 
 .folder-tile .list-item-primary {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    /* Keep long names (e.g. candidate names) inside the tile: fill its width and
+     * wrap instead of overflowing on a single nowrap line. */
+    width: 100%;
+    overflow-wrap: break-word;
+    hyphens: auto;
 }
 
 /* Theme toggle */
