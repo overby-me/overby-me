@@ -481,8 +481,9 @@ pub fn bridged_mastodon(handle: &str) -> Platform {
 // Some atproto apps store links to a user's presence *off* atproto: Sifa's
 // external accounts, Woosh/Linkat link boards, Lanyards affiliations, and plain
 // URLs written into a Bluesky bio. We harvest those (in [`crate::atproto_web`]),
-// then turn them into "Elsewhere" leaves here so the pipeline — dedup, filtering,
-// badge generation — stays pure and unit tested.
+// then turn them into leaves here — a known platform joins its matching category
+// hub (GitHub under Build, …), unknown hosts land in Elsewhere — so the pipeline
+// (categorize, dedup, filter, badge) stays pure and unit tested.
 
 /// How many external links to surface at most, so a huge link board can't bury
 /// the atproto graph.
@@ -528,6 +529,42 @@ fn external_icon(host: &str) -> Option<&'static str> {
     })
 }
 
+/// The category a well-known external host belongs in, so an off-atproto link
+/// joins the same hub as its kind (GitHub next to the dev tools, LinkedIn under
+/// Work, …). Unknown hosts fall back to `Elsewhere`, which is now only a home for
+/// genuinely-other links (personal sites, one-off platforms).
+fn external_category(host: &str) -> &'static str {
+    match host {
+        // Developer / code / packages.
+        "github.com" | "gitlab.com" | "codeberg.org" | "bitbucket.org" | "sr.ht"
+        | "sourcehut.org" | "crates.io" | "npmjs.com" => "Build",
+        // Professional / work.
+        "linkedin.com" | "xing.com" => "Work",
+        // Identity / verification.
+        "orcid.org" | "keyoxide.org" | "keybase.io" | "gravatar.com" => "Identity",
+        // Social & messaging.
+        "mastodon.social" | "twitter.com" | "x.com" | "threads.net" | "instagram.com"
+        | "facebook.com" | "tiktok.com" | "reddit.com" | "lemmy.world" | "matrix.to"
+        | "signal.me" | "signal.org" | "t.me" | "telegram.me" | "discord.gg" => "Social",
+        // Music / audio.
+        "soundcloud.com" | "bandcamp.com" | "spotify.com" | "open.spotify.com" | "last.fm"
+        | "music.apple.com" => "Listen",
+        // Video / streaming.
+        "youtube.com" | "youtu.be" | "twitch.tv" | "vimeo.com" => "Watch",
+        // Reading / reference.
+        "wikipedia.org" | "en.wikipedia.org" | "goodreads.com" => "Read",
+        // Writing / publishing.
+        "medium.com" | "substack.com" | "dev.to" => "Write",
+        // Photo sharing.
+        "flickr.com" | "500px.com" => "Moments",
+        // Games.
+        "steamcommunity.com" | "itch.io" => "Games",
+        // Events / community / location / food.
+        "happycow.net" | "meetup.com" | "eventbrite.com" => "Gather",
+        _ => EXTERNAL_CATEGORY,
+    }
+}
+
 /// Tidy a link label for display: collapse whitespace and cap the length so a
 /// verbose link-board title stays a legible node caption.
 fn clean_label(label: &str) -> String {
@@ -549,9 +586,10 @@ fn url_key(url: &str) -> String {
     rest.trim_end_matches('/').to_lowercase()
 }
 
-/// Build a single "Elsewhere" leaf from an external link. `label` is the
-/// aggregator's caption for it (Sifa account label, Linkat card text, …); when
-/// blank the host stands in. Returns `None` unless `url` is a real web link.
+/// Build a single leaf for an external link, in its matching category (Elsewhere
+/// for unknown hosts). `label` is the aggregator's caption for it (Sifa account
+/// label, Linkat card text, …); when blank the host stands in. Returns `None`
+/// unless `url` is a real web link.
 pub fn external_link_platform(url: &str, label: Option<&str>) -> Option<Platform> {
     let host = link_host(url)?;
     let name = label
@@ -563,20 +601,21 @@ pub fn external_link_platform(url: &str, label: Option<&str>) -> Option<Platform
         Some(file) => Icon::Bundled(file),
         None => Icon::Badge(badge_icon(&name, &derived_color(&host))),
     };
+    let category = external_category(&host);
     Some(Platform {
         name,
         domain: host,
         icon,
         profile_url: url.to_string(),
-        category: EXTERNAL_CATEGORY,
+        category,
     })
 }
 
 /// Turn raw `(url, label)` candidates harvested from link-aggregator records into
-/// deduped "Elsewhere" leaves: drop links to atproto nodes already shown, collapse
-/// duplicate URLs, keep every display name unique, and cap the count. Earlier
-/// candidates win, so callers should pass labelled (structured) sources before
-/// bare bio URLs.
+/// deduped external leaves (each in its matching category): drop links to atproto
+/// nodes already shown, collapse duplicate URLs, keep every display name unique,
+/// and cap the count. Earlier candidates win, so callers should pass labelled
+/// (structured) sources before bare bio URLs.
 pub fn external_platforms(
     candidates: &[(String, Option<String>)],
     detected: &[Platform],
@@ -1013,15 +1052,32 @@ mod tests {
         assert_eq!(gh.name, "GitHub");
         assert_eq!(gh.domain, "github.com");
         assert_eq!(gh.icon, Icon::Bundled("github.avif"));
-        assert_eq!(gh.category, "Elsewhere");
+        assert_eq!(gh.category, "Build"); // GitHub joins the dev hub, not Elsewhere.
         assert_eq!(gh.profile_url, "https://github.com/darobin/");
 
-        // Unknown host, no label -> host caption + generated badge.
+        // Known kind but no bundled logo: categorized, shown with a generated badge.
         let orcid = external_link_platform("https://orcid.org/0000-1", None).unwrap();
         assert_eq!(orcid.name, "orcid.org");
+        assert_eq!(orcid.category, "Identity");
         assert!(matches!(orcid.icon, Icon::Badge(_)));
 
+        // A genuinely unknown host stays in the Elsewhere catch-all.
+        let site = external_link_platform("https://example.com/", Some("Blog")).unwrap();
+        assert_eq!(site.category, "Elsewhere");
+
         assert!(external_link_platform("not a url", None).is_none());
+    }
+
+    #[test]
+    fn known_external_hosts_route_to_their_category() {
+        assert_eq!(external_category("github.com"), "Build");
+        assert_eq!(external_category("linkedin.com"), "Work");
+        assert_eq!(external_category("happycow.net"), "Gather");
+        assert_eq!(external_category("mastodon.social"), "Social");
+        assert_eq!(external_category("youtube.com"), "Watch");
+        assert_eq!(external_category("orcid.org"), "Identity");
+        // Unknown hosts remain in the catch-all.
+        assert_eq!(external_category("example.com"), "Elsewhere");
     }
 
     fn platform(name: &str, domain: &str, profile_url: &str) -> Platform {
@@ -1072,7 +1128,12 @@ mod tests {
         let ext = external_platforms(&candidates, &detected);
         let names: Vec<_> = ext.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["Blog", "GitHub", "ORCID"]);
-        assert!(ext.iter().all(|p| p.category == "Elsewhere"));
+        // Each known platform lands in its matching category; the unknown host
+        // (berjon.com) stays in Elsewhere.
+        let cat = |name: &str| ext.iter().find(|p| p.name == name).map(|p| p.category);
+        assert_eq!(cat("GitHub"), Some("Build"));
+        assert_eq!(cat("ORCID"), Some("Identity"));
+        assert_eq!(cat("Blog"), Some("Elsewhere"));
         assert!(
             !ext.iter()
                 .any(|p| p.domain == "bsky.app" || p.domain == "rocksky.app")
