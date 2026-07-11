@@ -101,6 +101,7 @@ fn AuthorField(authors: Signal<Vec<graphql::Author>>) -> Element {
                         button {
                             class: "chip-remove",
                             r#type: "button",
+                            aria_label: "{t(\"common.remove\")}",
                             onclick: move |_| {
                                 authors.write().remove(i);
                             },

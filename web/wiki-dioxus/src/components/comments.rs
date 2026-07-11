@@ -166,6 +166,7 @@ fn CommentThread(
                         if is_auth && can_comment {
                             button {
                                 class: "comment-action",
+                                aria_label: "{t(\"vote.reply\")}",
                                 onclick: move |_| {
                                     let v = replying();
                                     replying.set(!v);
@@ -277,6 +278,7 @@ fn CommentComposer(
             button {
                 class: "btn-icon comment-send",
                 r#type: "button",
+                aria_label: "{t(\"common.send\")}",
                 disabled: *posting.read(),
                 onclick: post,
                 span { class: "material-icons", "send" }

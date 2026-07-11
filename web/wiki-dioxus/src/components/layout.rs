@@ -213,6 +213,7 @@ pub fn Layout() -> Element {
                     // Menu button (mobile)
                     button {
                         class: "btn-icon mobile-only",
+                        aria_label: "{t(\"common.menu\")}",
                         onclick: move |_| {
                             open_drawer.set(true);
                         },
@@ -234,6 +235,7 @@ pub fn Layout() -> Element {
                         Breadcrumbs {}
                         button {
                             class: "btn-icon",
+                            aria_label: "{t(\"common.search\")}",
                             onclick: move |_| search_mode.set(true),
                             span { class: "material-icons", "search" }
                         }
@@ -256,6 +258,7 @@ pub fn Layout() -> Element {
                     div { class: "breadcrumbs", "{t(\"common.home\")}" }
                     button {
                         class: "btn-icon",
+                        aria_label: "{t(\"common.close\")}",
                         onclick: move |_| {
                             open_drawer.set(false);
                         },
@@ -387,6 +390,7 @@ fn SearchBar(
         }
         button {
             class: "btn-icon",
+            aria_label: "{t(\"common.close\")}",
             onclick: move |_| on_close.call(()),
             span { class: "material-icons", "close" }
         }
@@ -1036,6 +1040,7 @@ fn DrawerNodeItem(
                 button {
                     class: "btn-icon",
                     style: "margin-left: auto;",
+                    aria_label: "{t(\"common.expand\")}",
                     onclick: move |evt| {
                         evt.stop_propagation();
                         let now = *expanded.read();
