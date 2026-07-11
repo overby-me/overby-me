@@ -120,7 +120,13 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
 
     match mime_id {
         "wiki/folder" => rsx! { FolderApp { node: node.clone(), parent_path: path } },
-        "wiki/document" => rsx! { ContentApp { node: node.clone() } },
+        "wiki/document" => rsx! {
+            ContentApp { node: node.clone() }
+            super::comments::CommentSection {
+                node_id: node.id.0.clone(),
+                context_id: node.context_id.as_ref().map(|u| u.0.clone()),
+            }
+        },
         "wiki/file" => rsx! { FileApp { node: node.clone() } },
         "wiki/home" => rsx! { HomeApp {} },
         "wiki/group" | "wiki/event" => {
@@ -135,7 +141,13 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
         // A candidate reads as content (its photo is `data.image`, description is
         // the content); React hides members, which the port already omits here.
         "vote/candidate" => {
-            rsx! { ContentApp { node: node.clone() } }
+            rsx! {
+                ContentApp { node: node.clone() }
+                super::comments::CommentSection {
+                    node_id: node.id.0.clone(),
+                    context_id: node.context_id.as_ref().map(|u| u.0.clone()),
+                }
+            }
         }
         "vote/poll" => rsx! { PollApp { node: node.clone() } },
         "map/map" => rsx! { super::map::MapApp { node: node.clone() } },
@@ -145,28 +157,69 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
     }
 }
 
-/// A compact relative time ("5m", "3h", "2d") from an ISO timestamp. Shared by
-/// the comment thread and the content/file "created" subtitles.
+/// A localized relative-time sentence ("3 hours ago" / "for 3 timer siden") for
+/// an ISO timestamp, via the browser's `Intl.RelativeTimeFormat` in the current
+/// UI language. Mirrors the old wiki's date-fns `formatDistance`; the precise
+/// datetime is the tooltip (see [`full_datetime`]). Shared by the comment thread
+/// and the content/file "created" subtitles.
 pub fn relative_time(iso: &str) -> String {
     let then = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(iso)).get_time();
     if then.is_nan() {
         return String::new();
     }
     let secs = ((js_sys::Date::now() - then) / 1000.0).max(0.0);
-    // Localised compact unit suffixes (Danish uses "t" for timer/hours).
-    let (s, m, h, d) = match *crate::i18n::LANG.read() {
-        crate::i18n::Lang::Da => ("s", "m", "t", "d"),
-        crate::i18n::Lang::En => ("s", "m", "h", "d"),
-    };
-    if secs < 60.0 {
-        format!("{}{s}", secs as u64)
+    // Largest sensible unit; the value is negative because it is in the past
+    // (the sign `Intl.RelativeTimeFormat` expects).
+    let (value, unit) = if secs < 60.0 {
+        (-(secs as i64), "second")
     } else if secs < 3600.0 {
-        format!("{}{m}", (secs / 60.0) as u64)
+        (-((secs / 60.0) as i64), "minute")
     } else if secs < 86_400.0 {
-        format!("{}{h}", (secs / 3600.0) as u64)
+        (-((secs / 3600.0) as i64), "hour")
+    } else if secs < 2_592_000.0 {
+        (-((secs / 86_400.0) as i64), "day")
+    } else if secs < 31_536_000.0 {
+        (-((secs / 2_592_000.0) as i64), "month")
     } else {
-        format!("{}{d}", (secs / 86_400.0) as u64)
-    }
+        (-((secs / 31_536_000.0) as i64), "year")
+    };
+    intl_relative_format(value, unit, crate::i18n::current_locale())
+        // Fallback to a compact form if Intl.RelativeTimeFormat is unavailable.
+        .unwrap_or_else(|| format!("{}{}", -value, unit.chars().next().unwrap_or('s')))
+}
+
+/// `new Intl.RelativeTimeFormat(locale, {numeric:'auto'}).format(value, unit)`
+/// via reflection, so no extra wasm-bindgen binding is needed. Returns `None`
+/// when the API is unavailable.
+fn intl_relative_format(value: i64, unit: &str, locale: &str) -> Option<String> {
+    use wasm_bindgen::{JsCast, JsValue};
+    let intl = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("Intl")).ok()?;
+    let ctor: js_sys::Function =
+        js_sys::Reflect::get(&intl, &JsValue::from_str("RelativeTimeFormat"))
+            .ok()?
+            .dyn_into()
+            .ok()?;
+    let opts = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &opts,
+        &JsValue::from_str("numeric"),
+        &JsValue::from_str("auto"),
+    )
+    .ok()?;
+    let args = js_sys::Array::of2(&JsValue::from_str(locale), &opts);
+    let instance = js_sys::Reflect::construct(&ctor, &args).ok()?;
+    let format_fn: js_sys::Function = js_sys::Reflect::get(&instance, &JsValue::from_str("format"))
+        .ok()?
+        .dyn_into()
+        .ok()?;
+    format_fn
+        .call2(
+            &instance,
+            &JsValue::from_f64(value as f64),
+            &JsValue::from_str(unit),
+        )
+        .ok()?
+        .as_string()
 }
 
 /// The absolute, localised date/time for an ISO timestamp — used as the tooltip

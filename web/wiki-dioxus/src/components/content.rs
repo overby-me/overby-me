@@ -12,6 +12,9 @@ use super::ui::alert_dialog::{
     AlertDialogTitle,
 };
 
+/// The content card only (title, image, members, body). Comments are a separate
+/// [`super::comments::CommentSection`] composed by each caller, so composite
+/// views (policy/position) can place amendments/candidates above the thread.
 #[component]
 pub fn ContentApp(node: NodeWithChildren) -> Element {
     let session = use_session();
@@ -22,7 +25,6 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
         _ => vec![],
     };
     let node_id = node.id.0.clone();
-    let context_id = node.context_id.as_ref().map(|u| u.0.clone());
     let mut confirm_open = use_signal(|| false);
     let name = node.name.clone();
     let members = node.members.clone();
@@ -164,7 +166,6 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                 SlateRenderer { data: data.clone() }
             }
         }
-        super::comments::CommentSection { node_id: node_id.clone(), context_id: context_id.clone() }
     }
 }
 

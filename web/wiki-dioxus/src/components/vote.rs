@@ -137,8 +137,12 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         })
         .collect();
 
+    let node_id = node.id.0.clone();
+    let context_id = node.context_id.as_ref().map(|u| u.0.clone());
+
     rsx! {
-        // Main content
+        // Main content. The comment thread renders at the end, below the
+        // amendments and polls.
         ContentApp { node: node.clone() }
 
         // Owner-only: open a poll on this policy/change.
@@ -207,6 +211,9 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                 }
             }
         }
+
+        // Discussion thread for the policy/change, below its amendments/polls.
+        super::comments::CommentSection { node_id: node_id.clone(), context_id: context_id.clone() }
 
         // Other children (comments, questions)
         if !comments.is_empty() {
@@ -299,7 +306,8 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     };
 
     rsx! {
-        // Position text + edit / delete.
+        // Position text + edit / delete. The comment thread renders at the very
+        // end, below the candidate gallery.
         ContentApp { node: node.clone() }
         // Owner-only: open a poll whose options are the candidates.
         StartPollButton { node: node.clone(), path: path.clone() }
@@ -465,6 +473,9 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                 }
             }
         }
+
+        // Discussion thread for the position, below the candidate gallery.
+        super::comments::CommentSection { node_id: node_id.clone(), context_id: context_id.clone() }
     }
 }
 
