@@ -151,7 +151,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             }
             // Author chips (the document's members), mirroring MemberChips.
             if !members.is_empty() {
-                div { class: "chip-row", style: "padding: 0 16px 8px;",
+                div { class: "chip-row", style: "padding: 12px 16px 8px;",
                     for member in members.iter() {
                         super::widgets::Chip {
                             key: "{member.id.0}",
