@@ -65,4 +65,17 @@ disabled_rules = [
   # component::*` from their generated mod.rs; that glob re-export is their
   # standard shape, not an accidental surface.
   "rust_pub_use_glob_surface",
+
+  # ── GraphQL builder / port idioms ─────────────────────────────────────
+  # cynic InputObjects and `*_bool_exp` values are built field by field with
+  # `..Default::default()` (80+ sites), the idiomatic way to construct them,
+  # not a partial-init escape. A few GraphQL helpers take a plain bool that maps
+  # to the React app's own boolean prop or an inherent recursion marker
+  # (create_poll's `hidden` hide-result flag, deep_copy_node's `is_root`); a
+  # two-variant enum would only add ceremony. Ported functions also keep
+  # detailed "why" doc comments cross-referencing the React component they
+  # mirror, which is intentional and consistent across this port.
+  "rust_partial_init_escape",
+  "rust_public_bool_parameter_api",
+  "comment_style_tutorial",
 ]
