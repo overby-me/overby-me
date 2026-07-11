@@ -44,7 +44,6 @@ pub fn icon_url(icon: &str) -> String {
         // Bundled atproto app logos (pre-made circular badges).
         "leaflet.avif" => asset!("/assets/icons/leaflet.avif").to_string(),
         "smokesignal.avif" => asset!("/assets/icons/smokesignal.avif").to_string(),
-        "pinksky.avif" => asset!("/assets/icons/pinksky.avif").to_string(),
         "streamplace.avif" => asset!("/assets/icons/streamplace.avif").to_string(),
         "sifa.avif" => asset!("/assets/icons/sifa.avif").to_string(),
         "fitsky.avif" => asset!("/assets/icons/fitsky.avif").to_string(),

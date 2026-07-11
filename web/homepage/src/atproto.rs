@@ -56,7 +56,6 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "social.popfeed" => "popfeed.avif",
         "pub.leaflet" => "leaflet.avif",
         "events.smokesignal" => "smokesignal.avif",
-        "social.pinksky" => "pinksky.avif",
         "place.stream" => "streamplace.avif",
         "id.sifa" => "sifa.avif",
         "app.fitsky" => "fitsky.avif",
@@ -97,11 +96,13 @@ fn group_prefix(nsid: &str) -> Option<String> {
     Some(format!("{a}.{b}"))
 }
 
-/// Collapse prefixes that belong to the same app (e.g. Bluesky's chat lexicons
-/// live under `chat.bsky` but are still Bluesky).
+/// Collapse prefixes that belong to the same app: Bluesky's chat lexicons live
+/// under `chat.bsky`, and Pinksky was renamed to PinkLeap (`social.pinksky` is
+/// the old lexicon).
 fn canonical_prefix(prefix: &str) -> &str {
     match prefix {
         "chat.bsky" => "app.bsky",
+        "social.pinksky" => "app.pinkleap",
         other => other,
     }
 }
@@ -162,11 +163,6 @@ fn curated(prefix: &str, handle: &str, did: &str) -> Option<Curated> {
             "PopFeed",
             "#e8590c",
             format!("https://popfeed.social/profile/{did}"),
-        ),
-        "social.pinksky" => c(
-            "Pinksky",
-            "#f6339a",
-            format!("https://pinksky.social/profile/{handle}"),
         ),
         "pub.leaflet" => c("Leaflet", "#0f9d58", "https://leaflet.pub".to_string()),
         "fm.teal" => c("Teal.fm", "#0d9488", "https://teal.fm".to_string()),
@@ -375,7 +371,6 @@ mod tests {
             "Leaflet",
             "Teal.fm",
             "Smoke Signal",
-            "Pinksky",
             "Stream.place",
             "Sifa",
         ] {
@@ -384,6 +379,26 @@ mod tests {
                 "missing {expected} in {names:?}"
             );
         }
+        // Pinksky was renamed to PinkLeap; it must not appear as its own node.
+        assert!(
+            !names.contains(&"Pinksky".to_string()),
+            "Pinksky should merge into PinkLeap: {names:?}"
+        );
+    }
+
+    #[test]
+    fn merges_pinksky_into_pinkleap() {
+        // Old (social.pinksky) and new (app.pinkleap) lexicons -> one PinkLeap.
+        let p = detect_platforms(
+            &[
+                "social.pinksky.app.preference".to_string(),
+                "app.pinkleap.declaration".to_string(),
+            ],
+            "overby.me",
+            "did:plc:abc",
+        );
+        assert_eq!(names(&p), vec!["PinkLeap".to_string()]);
+        assert_eq!(p[0].icon, Icon::Bundled("pinkleap.avif"));
     }
 
     #[test]
