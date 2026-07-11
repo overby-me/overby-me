@@ -579,7 +579,10 @@ fn context_apps(route: &Route, is_auth: bool) -> Vec<(&'static str, String, Rout
                 segments: ctx_path.clone(),
                 app: None,
             },
-            current_app.is_none(),
+            // The editor / sort sub-apps operate on folder content, so the folder
+            // rail item stays highlighted while they are open.
+            current_app.is_none()
+                || matches!(current_app.as_deref(), Some("editor") | Some("sort")),
         ),
     ];
     if is_auth {

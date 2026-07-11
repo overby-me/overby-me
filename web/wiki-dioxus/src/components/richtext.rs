@@ -142,6 +142,36 @@ pub fn slate_to_html(content: &Value) -> String {
     }
 }
 
+/// Whether a Slate block is an empty paragraph (its only text is blank).
+fn is_empty_paragraph(block: &Value) -> bool {
+    block.get("type").and_then(|t| t.as_str()) == Some("paragraph")
+        && block
+            .get("children")
+            .and_then(|c| c.as_array())
+            .map(|ch| {
+                ch.iter().all(|leaf| {
+                    leaf.get("text")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("x")
+                        .is_empty()
+                })
+            })
+            .unwrap_or(false)
+}
+
+/// Drop a leading empty paragraph from a serialized content array (a common
+/// contenteditable artefact), unless it is the only block. Stops a document from
+/// gaining a blank first line on every save.
+pub fn strip_leading_empty_paragraph(content: Value) -> Value {
+    match content {
+        Value::Array(mut blocks) if blocks.len() > 1 && is_empty_paragraph(&blocks[0]) => {
+            blocks.remove(0);
+            Value::Array(blocks)
+        }
+        other => other,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // HTML DOM -> Slate (serialize on save)
 // ---------------------------------------------------------------------------
@@ -902,6 +932,27 @@ pub use dom_stub::{
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn strips_a_leading_blank_paragraph_but_keeps_a_sole_one() {
+        let empty = json!({"type": "paragraph", "children": [{"text": ""}]});
+        let para = json!({"type": "paragraph", "children": [{"text": "hi"}]});
+        // Leading blank before real content is dropped.
+        assert_eq!(
+            strip_leading_empty_paragraph(json!([empty, para])),
+            json!([{"type": "paragraph", "children": [{"text": "hi"}]}])
+        );
+        // A sole blank paragraph is kept (an empty document needs a block).
+        assert_eq!(
+            strip_leading_empty_paragraph(json!([empty])),
+            json!([{"type": "paragraph", "children": [{"text": ""}]}])
+        );
+        // A leading non-empty paragraph is untouched.
+        assert_eq!(
+            strip_leading_empty_paragraph(json!([para, para])),
+            json!([para, para])
+        );
+    }
 
     #[test]
     fn paragraph_and_heading_round_to_html() {

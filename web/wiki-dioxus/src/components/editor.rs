@@ -265,6 +265,8 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 let content_json = richtext::serialize_editor(EDITOR_ID).unwrap_or_else(
                     || serde_json::json!([{ "type": "paragraph", "children": [{"text": ""}] }]),
                 );
+                // Drop a stray blank first line the contenteditable may leave.
+                let content_json = richtext::strip_leading_empty_paragraph(content_json);
                 let mut data_obj = base_data;
                 data_obj.insert("content".to_string(), content_json);
                 let data = serde_json::Value::Object(data_obj);
