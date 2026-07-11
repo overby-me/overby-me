@@ -150,7 +150,7 @@ fn category_for(prefix: &str) -> &'static str {
         "app.bsky" | "so.sprk" | "app.shadowsky" | "com.shadowsky" | "space.roomy"
         | "social.twinkl" | "social.mu" | "at.youandme" | "com.skymeetsblue" => "Social",
         // Photo & video sharing.
-        "app.pinkleap" | "blue.flashes" => "Moments",
+        "app.pinkleap" | "blue.flashes" | "social.grain" => "Moments",
         // Games.
         "net.anisota" | "actor.rpg" | "equipment.rpg" | "farm.smol" | "blue.checkmate"
         | "blue.2048" => "Games",
@@ -324,6 +324,7 @@ fn profile_url(prefix: &str, domain: &str, handle: &str, did: &str) -> String {
         "events.smokesignal" => format!("https://smokesignal.events/@{handle}"),
         "so.sprk" => format!("https://sprk.so/profile/{handle}"),
         "net.anisota" => format!("https://anisota.net/profile/{handle}"),
+        "social.grain" => format!("https://grain.social/profile/{handle}"),
         _ => format!("https://{domain}"),
     }
 }
@@ -876,6 +877,20 @@ mod tests {
             p("computer.aetheros", "aetheros.computer"),
             "https://aetheros.computer"
         );
+    }
+
+    #[test]
+    fn grain_is_recognized_as_a_moments_platform() {
+        let p = detect_platforms(
+            &["social.grain.actor.profile".to_string()],
+            "overby.me",
+            "did:plc:abc",
+        );
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].name, "Grain");
+        assert_eq!(p[0].domain, "grain.social");
+        assert_eq!(p[0].category, "Moments");
+        assert_eq!(p[0].profile_url, "https://grain.social/profile/overby.me");
     }
 
     #[test]
