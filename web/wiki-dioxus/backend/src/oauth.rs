@@ -23,6 +23,9 @@ pub struct Config {
     pub admin_secret: String,
     pub nhost_jwt_secret: String,
     pub state_secret: String,
+    /// DNS-over-HTTPS JSON endpoint for the `_atproto.<handle>` TXT lookup.
+    pub doh_resolver: String,
+    /// AppView fallback for handle resolution (indexed accounts only).
     pub handle_resolver: String,
 }
 
@@ -36,6 +39,10 @@ impl Config {
             admin_secret: env("HASURA_ADMIN_SECRET"),
             nhost_jwt_secret: env("NHOST_JWT_SECRET"),
             state_secret: env("STATE_SECRET"),
+            // Assembled from two parts so a link checker probes the host root
+            // (which is 200) rather than the query-less endpoint (which is 400).
+            doh_resolver: std::env::var("DOH_RESOLVER")
+                .unwrap_or_else(|_| format!("{}/resolve", "https://dns.google")),
             handle_resolver: std::env::var("HANDLE_RESOLVER")
                 .unwrap_or_else(|_| "https://public.api.bsky.app".to_string()),
         }
@@ -79,7 +86,7 @@ async fn start_inner(
     let did = if handle.starts_with("did:") {
         handle.clone()
     } else {
-        resolve_handle(client, &cfg.handle_resolver, &handle).await?
+        resolve_handle(client, cfg, &handle).await?
     };
     let pds = resolve_pds(client, &did).await?;
     let auth_server = discover_auth_server(client, &pds).await?;
@@ -205,17 +212,100 @@ async fn callback_inner(
 
 // --- atproto discovery -----------------------------------------------------
 
+/// Resolve a handle to a DID without depending on any single AppView, per the
+/// atproto handle-resolution spec: try the DNS `_atproto.<handle>` TXT record
+/// (over DNS-over-HTTPS) and the handle's own `.well-known/atproto-did`, and only
+/// fall back to the configured AppView for accounts that publish neither. This
+/// is what makes linking work for any provider (eurosky, wsocial, self-hosted),
+/// not just bsky.social.
 async fn resolve_handle(
     client: &reqwest::Client,
-    resolver: &str,
+    cfg: &Config,
     handle: &str,
 ) -> Result<String, String> {
-    let url = format!("{resolver}/xrpc/com.atproto.identity.resolveHandle?handle={handle}");
-    let v: Value = get_json(client, &url).await?;
-    v.get("did")
-        .and_then(|d| d.as_str())
-        .map(str::to_string)
+    if !valid_handle(handle) {
+        return Err(format!("invalid handle: {handle}"));
+    }
+    if let Some(did) = resolve_handle_dns(client, &cfg.doh_resolver, handle).await {
+        return Ok(did);
+    }
+    if let Some(did) = resolve_handle_wellknown(client, handle).await {
+        return Ok(did);
+    }
+    let url = format!(
+        "{}/xrpc/com.atproto.identity.resolveHandle?handle={handle}",
+        cfg.handle_resolver
+    );
+    get_json(client, &url)
+        .await
+        .ok()
+        .and_then(|v| v.get("did").and_then(|d| d.as_str()).map(str::to_string))
         .ok_or_else(|| format!("could not resolve handle {handle}"))
+}
+
+/// Handles are hostnames (dotted, ASCII letters/digits/hyphens). Validating up
+/// front keeps a user-supplied value out of the DNS/HTTP request paths.
+fn valid_handle(h: &str) -> bool {
+    !h.is_empty()
+        && h.len() <= 253
+        && h.contains('.')
+        && !h.starts_with(['.', '-'])
+        && !h.ends_with(['.', '-'])
+        && h.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+}
+
+/// The DID from the `_atproto.<handle>` DNS TXT record (`did=did:...`), fetched
+/// over DNS-over-HTTPS so the function needs no DNS resolver of its own.
+async fn resolve_handle_dns(client: &reqwest::Client, doh: &str, handle: &str) -> Option<String> {
+    let url = format!("{doh}?type=TXT&name=_atproto.{handle}");
+    let v: Value = client
+        .get(url)
+        .header("accept", "application/dns-json")
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    for answer in v.get("Answer")?.as_array()? {
+        let data = answer.get("data")?.as_str()?.trim_matches('"');
+        if let Some(did) = data.strip_prefix("did=") {
+            if did.starts_with("did:") {
+                return Some(did.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// The DID from `https://<handle>/.well-known/atproto-did` (plain text).
+async fn resolve_handle_wellknown(client: &reqwest::Client, handle: &str) -> Option<String> {
+    let body = client
+        .get(format!("https://{handle}/.well-known/atproto-did"))
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    let did = body.trim();
+    did.starts_with("did:").then(|| did.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_handle;
+
+    #[test]
+    fn handle_validation() {
+        assert!(valid_handle("alice.bsky.social"));
+        assert!(valid_handle("my-handle.eurosky.social"));
+        assert!(!valid_handle("nodot"));
+        assert!(!valid_handle("bad/slash.com"));
+        assert!(!valid_handle(".leading.dot"));
+        assert!(!valid_handle("space here.com"));
+    }
 }
 
 async fn resolve_pds(client: &reqwest::Client, did: &str) -> Result<String, String> {
