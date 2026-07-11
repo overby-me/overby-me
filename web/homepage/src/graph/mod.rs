@@ -441,9 +441,11 @@ fn fit_camera_distance(data: &GraphData, aspect: f32) -> f32 {
         .map(|p| p.length())
         .fold(0.0_f32, f32::max);
 
+    // Pad the measured radius so the outermost node's bubble (up to ~24 units)
+    // isn't clipped, then frame it with headroom for a calmer, more zoomed-out view.
     let half_fov = Camera::new().fov * 0.5;
-    let fit = max_r / half_fov.tan() / aspect.min(1.0);
-    (fit * 1.6).clamp(120.0, 2000.0)
+    let fit = (max_r + 24.0) / half_fov.tan() / aspect.min(1.0);
+    (fit * 1.9).clamp(150.0, 2000.0)
 }
 
 type AnimationClosure = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
