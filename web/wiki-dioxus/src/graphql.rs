@@ -400,6 +400,8 @@ pub struct MembersBoolExp {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub accepted: Option<BooleanComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
+    pub active: Option<BooleanComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub email: Option<StringComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub node_id: Option<UuidComparisonExp>,
@@ -1715,6 +1717,52 @@ pub async fn poll_vote_count(access_token: Option<&str>, poll_id: &str) -> Resul
         ..Default::default()
     };
     count_nodes(access_token, where_clause).await
+}
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct MembersExistVariables {
+    pub where_clause: MembersBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "MembersExistVariables"
+)]
+pub struct MembersExistQuery {
+    #[arguments(where: $where_clause, limit: 1)]
+    pub members: Vec<MemberIdRef>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "members")]
+pub struct MemberIdRef {
+    pub id: Uuid,
+}
+
+/// Whether the user is an active member of a context — the port's approximation
+/// of React VoteApp's `canVote` (an active membership carrying the vote/vote
+/// insert permission), used for the voting-rights card.
+pub async fn is_active_member(access_token: Option<&str>, context_id: &str, user_id: &str) -> bool {
+    use cynic::QueryBuilder;
+    let where_clause = MembersBoolExp {
+        parent_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(context_id.to_string())),
+            is_null: None,
+        }),
+        node_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(user_id.to_string())),
+            is_null: None,
+        }),
+        active: Some(BooleanComparisonExp { eq: Some(true) }),
+        ..Default::default()
+    };
+    let op = MembersExistQuery::build(MembersExistVariables { where_clause });
+    execute(access_token, op)
+        .await
+        .map(|r| !r.members.is_empty())
+        .unwrap_or(false)
 }
 
 /// Cast a vote on a poll: insert a `vote/vote` child whose data is the array of
