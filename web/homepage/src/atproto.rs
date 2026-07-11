@@ -80,6 +80,12 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "at.marque" => "marque.avif",
         "blue.checkmate" => "checkmate.avif",
         "site.standard" => "standard.avif",
+        "blue.2048" => "2048.avif",
+        "blue.linkat" => "linkat.avif",
+        "com.skymeetsblue" => "skymeetsblue.avif",
+        // Known apps with no fetchable logo (dead/parked domain or banner-only
+        // og:image) — they fall back to a generated badge. Add here if a logo
+        // turns up: skytube, com.minomobi (mmopaint), xyz.atmomo, blue.protopro.
         _ => return None,
     })
 }
@@ -114,6 +120,8 @@ fn canonical_prefix(prefix: &str) -> &str {
     match prefix {
         "chat.bsky" => "app.bsky",
         "social.pinksky" => "app.pinkleap",
+        // The smol ecosystem spans several domains (games, life tools, quests).
+        "life.smol" | "quest.smol" => "farm.smol",
         other => other,
     }
 }
@@ -123,16 +131,17 @@ fn canonical_prefix(prefix: &str) -> &str {
 fn category_for(prefix: &str) -> &'static str {
     match prefix {
         // Social & messaging.
-        "app.bsky" | "app.pinkleap" | "so.sprk" | "app.shadowsky" | "com.shadowsky" => "Connect",
+        "app.bsky" | "app.pinkleap" | "so.sprk" | "app.shadowsky" | "com.shadowsky"
+        | "com.skymeetsblue" => "Connect",
         // Writing, code, publishing, tools.
         "pub.leaflet" | "sh.tangled" | "dev.npmx" | "com.vibe-coded" | "site.standard"
-        | "at.marque" | "com.minomobi" => "Create",
+        | "at.marque" | "com.minomobi" | "blue.protopro" => "Create",
         // Music, video, games, reading.
         "app.rocksky" | "fm.teal" | "place.stream" | "app.skytube" | "app.skyreader"
         | "social.popfeed" | "net.anisota" | "actor.rpg" | "equipment.rpg" | "farm.smol"
-        | "blue.checkmate" => "Immerse",
+        | "blue.checkmate" | "blue.2048" | "xyz.atmomo" => "Immerse",
         // Events, community, links.
-        "events.smokesignal" | "link.woosh" | "com.atprotofans" => "Gather",
+        "events.smokesignal" | "link.woosh" | "com.atprotofans" | "blue.linkat" => "Gather",
         // Profile, work, fitness, identity.
         "id.sifa" | "place.atwork" | "app.fitsky" | "computer.aetheros" | "blue.pronouns"
         | "app.sidetrail" => "Grow",
