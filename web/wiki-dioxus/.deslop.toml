@@ -87,4 +87,10 @@ disabled_rules = [
   # Query-string percent-decoding runs a couple of times per OAuth redirect, not
   # in any hot path, so a UTF-8 check there is fine.
   "rust_utf8_validate_hot_path",
+
+  # ── Dioxus signal writes in async loops ───────────────────────────────
+  # A `SIGNAL.write()` inside a coroutine's `while let Some(_) = rx.next().await`
+  # loop (the window-resize -> WindowSizeClass bridge) is a reactive signal
+  # write, not buffered file I/O; deslop's file-sink heuristic misreads `.write()`.
+  "rust_unbuffered_file_writes",
 ]

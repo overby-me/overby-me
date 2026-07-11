@@ -3802,6 +3802,7 @@ dependencies = [
  "dioxus",
  "dioxus-icons",
  "dioxus-primitives",
+ "futures-util",
  "gloo-timers",
  "js-sys",
  "log",

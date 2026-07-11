@@ -29,6 +29,28 @@ pub fn Chip(icon: Option<String>, label: String, title: Option<String>) -> Eleme
     }
 }
 
+/// M3 badge overlaying the top-trailing corner of a positioned parent: a small
+/// dot (`count` `None`/`0`) or a large numeric pill (`count > 0`, capped 999+).
+/// The parent must establish a positioning context (e.g. `position: relative`).
+#[component]
+pub fn Badge(count: Option<usize>) -> Element {
+    match count {
+        Some(n) if n > 0 => {
+            let label = if n > 999 {
+                "999+".to_string()
+            } else {
+                n.to_string()
+            };
+            rsx! {
+                span { class: "md-badge", "aria-label": "{label}", "{label}" }
+            }
+        }
+        _ => rsx! {
+            span { class: "md-badge md-badge-dot" }
+        },
+    }
+}
+
 /// A reusable Material Design 3 colour-swatch row: a label, preset swatches, and
 /// a trailing custom "any colour" chip ([`CustomColorSwatch`]) as the last circle.
 /// Emits the chosen `#rrggbb` hex through `on_change`; `value` is the active

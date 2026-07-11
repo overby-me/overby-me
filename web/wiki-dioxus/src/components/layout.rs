@@ -91,6 +91,9 @@ pub fn Layout() -> Element {
 
     let route = use_route::<Route>();
     let nav = use_navigator();
+    // Reactive M3 window size class (adaptive nav + panes). Called before the
+    // early returns below so the hook order stays stable across auth/screen pages.
+    let size_class = crate::window_size::use_window_size();
 
     // NHost password-reset emails link to `/?type=passwordReset&refreshToken=...`,
     // which the router renders as home. The token was stashed by
@@ -183,6 +186,7 @@ pub fn Layout() -> Element {
     rsx! {
         div {
             class: "app-shell",
+            "data-size-class": "{size_class.as_str()}",
             // Ctrl/Cmd+K opens search (a common shortcut). Catches keydowns that
             // bubble up from any focused element in the app.
             onkeydown: move |evt| {

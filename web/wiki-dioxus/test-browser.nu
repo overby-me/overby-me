@@ -376,6 +376,25 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     log-ok "login established a session"; $p = $p + 1
     sleep 3sec
 
+    # ── Adaptive WindowSizeClass reacts to resize (M3 nav foundation) ────
+    # The reactive size-class signal is written from a resize listener bridged
+    # through a coroutine; this proves the bridge works (no runtime panic) and the
+    # `data-size-class` attribute tracks the window width live.
+    wd-window-rect $session_id 1280 900
+    sleep 500ms
+    let sc_wide = (wd-execute $session_id 'var s=document.querySelector(".app-shell"); return s?s.getAttribute("data-size-class"):"none"')
+    wd-window-rect $session_id 460 900
+    sleep 700ms
+    let sc_narrow = (wd-execute $session_id 'var s=document.querySelector(".app-shell"); return s?s.getAttribute("data-size-class"):"none"')
+    wd-window-rect $session_id 1280 900
+    sleep 700ms
+    let sc_back = (wd-execute $session_id 'var s=document.querySelector(".app-shell"); return s?s.getAttribute("data-size-class"):"none"')
+    if ($sc_wide == "large") and ($sc_narrow == "compact") and ($sc_back == "large") {
+        log-ok $"window size class reacts to resize \(($sc_wide) -> ($sc_narrow) -> ($sc_back))"; $p = $p + 1
+    } else {
+        log-fail $"window size class did not track resize \(wide=($sc_wide) narrow=($sc_narrow) back=($sc_back))"; $fl = $fl + 1
+    }
+
     # ── Stale JWT recovery (the "returning to a tab" bug) ────────────────
     # Corrupt the stored access token's signature but keep its expiry in the
     # future, so the startup refresh does NOT fire. On reload the home data query

@@ -12,6 +12,9 @@ cynic = { version = "3", features = ["http-reqwest"] }
 dioxus = { version = "0.7.9" }
 dioxus-icons = { version = "0.1.0", default-features = false }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version = "0.0.1", default-features = false }
+# StreamExt for the use_coroutine bridge that feeds window-resize widths into the
+# adaptive WindowSizeClass signal from inside the Dioxus runtime.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
 log = "0.4"

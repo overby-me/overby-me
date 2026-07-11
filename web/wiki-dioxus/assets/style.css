@@ -127,6 +127,36 @@
 	opacity: var(--md-sys-state-pressed-opacity);
 }
 
+/* M3 Badge — a large numeric pill or a small 6dp dot, overlaying the top-trailing
+   corner of a positioned parent (error role by M3 spec). */
+.md-badge {
+	position: absolute;
+	top: -4px;
+	inset-inline-end: -4px;
+	box-sizing: border-box;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--md-sys-shape-corner-full);
+	background-color: var(--md-sys-color-error);
+	color: var(--md-sys-color-on-error);
+	font-size: var(--md-sys-typescale-label-small-size);
+	line-height: 1;
+	font-weight: 600;
+	pointer-events: none;
+}
+.md-badge-dot {
+	top: -2px;
+	inset-inline-end: -2px;
+	min-width: 6px;
+	width: 6px;
+	height: 6px;
+	padding: 0;
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    COLOR SYSTEM — keep contrast correct and consistent.
 

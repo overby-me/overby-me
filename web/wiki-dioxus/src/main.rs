@@ -20,6 +20,8 @@ pub mod snackbar;
 mod subscription;
 #[allow(dead_code)]
 mod theme;
+#[allow(dead_code)]
+mod window_size;
 
 use dioxus::prelude::*;
 use route::Route;
