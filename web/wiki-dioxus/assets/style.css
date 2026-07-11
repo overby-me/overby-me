@@ -312,7 +312,8 @@ a:hover {
 	width: 56px;
 	height: 32px;
 	border-radius: var(--md-sys-shape-corner-full);
-	transition: background-color var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+	transition: background-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
 }
 .nav-rail-item.active {
 	color: var(--md-on-surface);
@@ -392,7 +393,8 @@ a:hover {
 	width: 64px;
 	height: 32px;
 	border-radius: var(--md-sys-shape-corner-full);
-	transition: background-color var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+	transition: background-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
 }
 .nav-bar-item.active {
 	color: var(--md-on-surface);
@@ -411,13 +413,15 @@ a:hover {
 	opacity: 0;
 	visibility: hidden;
 	transition:
-		opacity var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard),
+		opacity var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-easing-standard),
 		visibility 0s linear var(--md-sys-motion-duration-medium2);
 }
 .nav-drawer-scrim.open {
 	opacity: 0.4;
 	visibility: visible;
-	transition: opacity var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard);
+	transition: opacity var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-easing-standard);
 }
 .nav-drawer {
 	position: fixed;
@@ -427,9 +431,11 @@ a:hover {
 	z-index: 201;
 	width: min(360px, 88vw);
 	background: var(--md-surface);
-	border-radius: 0 var(--md-sys-shape-corner-large) var(--md-sys-shape-corner-large) 0;
+	border-radius: 0 var(--md-sys-shape-corner-large)
+		var(--md-sys-shape-corner-large) 0;
 	transform: translateX(-100%);
-	transition: transform var(--md-sys-motion-duration-long1) var(--md-sys-motion-spring-spatial-default);
+	transition: transform var(--md-sys-motion-duration-long1)
+		var(--md-sys-motion-spring-spatial-default);
 	overflow-y: auto;
 	scrollbar-width: none;
 }
@@ -896,25 +902,37 @@ a:hover {
 	height: 56px;
 	border: none;
 	/* M3 FAB shape: large rounded rectangle, not a full circle. */
-	border-radius: 16px;
+	border-radius: var(--md-sys-shape-corner-large);
 	/* Magenta accent (tertiary) — the brand's second colour, paired with the
        green chrome (a FAB is the M3-idiomatic place for the accent). */
 	background: var(--md-tertiary);
 	color: var(--md-on-tertiary);
-	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+	box-shadow: var(--md-sys-elevation-3);
 	cursor: pointer;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	z-index: 120;
+	/* Expressive: spatial spring on the press/hover shape-morph, standard easing
+	   for the elevation. The FAB is the app's single focal create gesture. */
 	transition:
-		transform 0.15s ease,
-		box-shadow 0.15s ease;
+		transform var(--md-sys-motion-duration-medium1)
+		var(--md-sys-motion-spring-spatial-default),
+		border-radius var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default),
+		box-shadow var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard);
 }
 
 .fab:hover {
 	transform: scale(1.06);
-	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.36);
+	box-shadow: var(--md-sys-elevation-4);
+	/* Shape-morph toward the rounder extra-large corner on hover. */
+	border-radius: var(--md-sys-shape-corner-extra-large);
+}
+
+.fab:active {
+	transform: scale(0.97);
 }
 
 .fab .material-icons {
@@ -970,8 +988,16 @@ a:hover {
 		background-color var(--md-sys-motion-duration-short4)
 		var(--md-sys-motion-easing-standard),
 		box-shadow var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-easing-standard),
+		transform var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-spring-spatial-fast);
 	text-decoration: none;
+}
+
+/* Expressive: a small tactile press on every M3 button + icon button. */
+.btn:active,
+.btn-icon:active {
+	transform: scale(0.96);
 }
 
 /* Filled button (M3): primary fill; hover adds a level-1 shadow + an 8%
