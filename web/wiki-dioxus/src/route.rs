@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::components::{
     auth::{Login, Register, ResetPassword, SetPassword, Unverified},
-    home::HomeApp,
+    home::{EditWelcome, HomeApp},
     layout::Layout,
     loader::PathPage,
 };
@@ -13,6 +13,10 @@ pub enum Route {
     #[layout(Layout)]
     #[route("/")]
     HomeApp {},
+
+    // Owner-only editor for the root node's content (the welcome text).
+    #[route("/edit/welcome")]
+    EditWelcome {},
 
     #[route("/user/login")]
     Login {},

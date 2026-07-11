@@ -16,6 +16,31 @@ pub fn HomeApp() -> Element {
         .map(|u| u.display_name.clone())
         .unwrap_or_default();
 
+    // The welcome text is the root node's content, editable by its owner. It
+    // refetches after an edit (use_data_resource tracks the global data version).
+    let token = session.read().access_token.clone();
+    let root = crate::use_data_resource!(|(token)| async move {
+        graphql::query_root_node(token.as_deref())
+            .await
+            .ok()
+            .flatten()
+    });
+    let root_node = root.read().clone().flatten();
+    let can_edit = root_node
+        .as_ref()
+        .map(|n| n.is_owner.unwrap_or(false) || n.is_context_owner.unwrap_or(false))
+        .unwrap_or(false);
+    let welcome_data = root_node.as_ref().and_then(|n| n.data.clone()).map(|d| d.0);
+    let has_welcome = welcome_data
+        .as_ref()
+        .and_then(|d| d.get("content"))
+        .and_then(|c| c.as_array())
+        .is_some_and(|a| !a.is_empty());
+    let members: Vec<_> = root_node
+        .as_ref()
+        .map(|n| n.members.iter().filter(|m| !m.hidden).cloned().collect())
+        .unwrap_or_default();
+
     rsx! {
         div { class: "grid grid-3",
             // Main content column
@@ -24,12 +49,50 @@ pub fn HomeApp() -> Element {
                     div { class: "card-header",
                         div { class: "avatar", span { class: "material-icons", "waving_hand" } }
                         h3 { class: "headline-small", "{t(\"layout.welcomeTitle\")}" }
+                        div { class: "flex-grow" }
+                        // Owner-only: edit the welcome text (root node content).
+                        if can_edit {
+                            Link {
+                                to: Route::EditWelcome {},
+                                class: "btn-icon",
+                                title: "{t(\"mime.editor\")}",
+                                span { class: "material-icons", "edit" }
+                            }
+                        }
+                    }
+                    // Authors of the welcome (the root node's members).
+                    if !members.is_empty() {
+                        div { class: "chip-row", style: "padding: 12px 16px 0;",
+                            for member in members.iter() {
+                                super::widgets::Chip {
+                                    key: "{member.id.0}",
+                                    icon: super::loader::mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
+                                    label: member.label(),
+                                    title: t("member.author"),
+                                }
+                            }
+                        }
                     }
                     div { class: "card-content",
-                        if !is_auth {
+                        // Personalised greeting stays dynamic, above the welcome.
+                        if is_auth {
+                            p { class: "body-large mb-2",
+                                "{t_with(\"layout.greeting\", &[(\"name\", &display_name)])}"
+                            }
+                        }
+                        // The editable welcome: the root node's content, or the
+                        // original static copy until an owner writes one.
+                        if has_welcome {
+                            super::content::SlateRenderer { data: welcome_data.clone() }
+                        } else if is_auth {
+                            p { class: "body-large mb-1", "{t(\"layout.acceptInvitations\")}" }
+                            p { class: "body-medium", "{t(\"layout.noInvitationsHint\")}" }
+                        } else {
                             p { class: "body-large mb-1", "{t(\"layout.loginOrRegister\")}" }
                             p { class: "body-medium mb-2", "{t(\"layout.rememberEmail\")}" }
-                            div { class: "stack stack-h",
+                        }
+                        if !is_auth {
+                            div { class: "stack stack-h mt-2",
                                 Link {
                                     to: Route::Login {},
                                     class: "btn btn-outlined",
@@ -43,12 +106,6 @@ pub fn HomeApp() -> Element {
                                     " {t(\"auth.register\")}"
                                 }
                             }
-                        } else {
-                            p { class: "body-large mb-1",
-                                "{t_with(\"layout.greeting\", &[(\"name\", &display_name)])}"
-                            }
-                            p { class: "body-large mb-1", "{t(\"layout.acceptInvitations\")}" }
-                            p { class: "body-medium", "{t(\"layout.noInvitationsHint\")}" }
                         }
                     }
                 }
@@ -72,6 +129,46 @@ pub fn HomeApp() -> Element {
                 }
             }
         }
+    }
+}
+
+/// Owner-only editor for the root node's content (the welcome text). The normal
+/// `?app=editor` route can't reach the root (it has no URL path, so
+/// `resolve_path(&[])` is `None`), so this thin wrapper loads the root node and
+/// hands it to the shared [`EditorApp`].
+#[component]
+pub fn EditWelcome() -> Element {
+    let session = use_session();
+    let token = session.read().access_token.clone();
+    let root = crate::use_data_resource!(|(token)| async move {
+        graphql::query_root_node(token.as_deref())
+            .await
+            .ok()
+            .flatten()
+    });
+
+    let state = root.read().clone();
+    match state {
+        Some(Some(node)) => {
+            let can_edit = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
+            if can_edit {
+                rsx! {
+                    super::editor::EditorApp { node }
+                }
+            } else {
+                rsx! {
+                    div { class: "card",
+                        div { class: "card-content",
+                            p { class: "body-large", "{t(\"node.documentUnavailable\")}" }
+                        }
+                    }
+                }
+            }
+        }
+        Some(None) => rsx! {},
+        None => rsx! {
+            super::widgets::Spinner {}
+        },
     }
 }
 

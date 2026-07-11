@@ -1333,6 +1333,18 @@ async fn query_root_id(access_token: Option<&str>) -> Result<Option<String>, Str
     Ok(result.nodes.into_iter().next().map(|n| n.id.0))
 }
 
+/// The parent-less root node ("Hjem"), whose `data.content` backs the editable
+/// welcome page. `resolve_path(&[])` returns `None` (the root's key is not a path
+/// segment), so fetch it via the root id directly.
+pub async fn query_root_node(
+    access_token: Option<&str>,
+) -> Result<Option<NodeWithChildren>, String> {
+    let Some(root_id) = query_root_id(access_token).await? else {
+        return Ok(None);
+    };
+    query_node_by_id(access_token, &root_id).await
+}
+
 pub async fn resolve_path(
     access_token: Option<&str>,
     segments: &[String],

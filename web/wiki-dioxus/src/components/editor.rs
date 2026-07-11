@@ -284,10 +284,17 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         // Invalidate the cached node so the view we return to
                         // shows the saved content instead of the stale copy.
                         crate::session::bump_data_version();
-                        nav.push(Route::PathPage {
-                            segments: segments.clone(),
-                            app: None,
-                        });
+                        // Empty segments means the parent-less root node (its
+                        // content backs the welcome page), which lives at the
+                        // Home route rather than a `PathPage`.
+                        if segments.is_empty() {
+                            nav.push(Route::HomeApp {});
+                        } else {
+                            nav.push(Route::PathPage {
+                                segments: segments.clone(),
+                                app: None,
+                            });
+                        }
                     }
                     Ok(false) => show_snackbar(&t("error.somethingWentWrong")),
                     Err(e) => {
