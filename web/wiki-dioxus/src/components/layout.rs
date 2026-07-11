@@ -1089,7 +1089,15 @@ fn DrawerNodeItem(
 
     rsx! {
         div {
-            class: if selected { "list-item selected" } else { "list-item" },
+            // The selected node gets the full active indicator; its ancestors on
+            // the active path get a subtler tint (M3-style emphasis levels).
+            class: if selected {
+                "list-item selected"
+            } else if on_path {
+                "list-item ancestor"
+            } else {
+                "list-item"
+            },
             style: "cursor: pointer; {indent}",
             onclick: move |_| {
                 nav.push(Route::PathPage {

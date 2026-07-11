@@ -1014,6 +1014,20 @@ select:focus {
     font-weight: 600;
 }
 
+/* Ancestors of the selected node (its parents on the active path): a lower-
+ * emphasis version of the active indicator — a translucent container tint and a
+ * faded accent bar — so the path to the current node reads without competing
+ * with it (like the selected item, it keeps its tint over the hover state). */
+.list-item.ancestor {
+    background-color: color-mix(in srgb, var(--md-primary-container) 40%, transparent);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--md-primary) 35%, transparent);
+}
+
+.list-item.ancestor .list-item-primary {
+    color: var(--md-on-surface);
+    font-weight: 500;
+}
+
 .list-item-text {
     flex: 1;
     min-width: 0;
