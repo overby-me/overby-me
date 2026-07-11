@@ -1203,19 +1203,23 @@ a.folder-item:focus-visible {
 
 .text-field input {
 	width: 100%;
-	padding: 16px;
-	border: 1px solid var(--md-outline);
-	border-radius: 4px;
-	font-size: 16px;
+	padding: 15px;
+	/* M3 outlined text field: strong outline, small (8) corner, body-large text. */
+	border: 1px solid var(--md-outline-strong);
+	border-radius: var(--md-sys-shape-corner-small);
+	font-size: var(--md-sys-typescale-body-large-size);
+	line-height: var(--md-sys-typescale-body-large-line);
 	background: transparent;
 	color: var(--md-on-surface);
 	outline: none;
-	transition: border-color 0.2s;
+	transition: border-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
 }
 
 .text-field input:focus {
 	border-color: var(--md-primary);
-	border-width: 2px;
+	/* Inset ring reads as the M3 2px focus outline without shifting layout. */
+	box-shadow: inset 0 0 0 1px var(--md-primary);
 	padding: 15px;
 }
 
