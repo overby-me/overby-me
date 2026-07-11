@@ -51,6 +51,43 @@ pub fn Badge(count: Option<usize>) -> Element {
     }
 }
 
+/// A reusable Material Design 3 basic dialog: a scrim over a surface-container-
+/// high card (extra-large corners, level-3 elevation, spring rise-in) with an
+/// optional leading icon, a headline, the passed `children` as content, and an
+/// `actions` row. Dismisses on scrim click. Retires the ad-hoc
+/// `.modal-backdrop`/`.modal-card` markup across screens.
+#[component]
+pub fn Dialog(
+    open: Signal<bool>,
+    headline: String,
+    actions: Element,
+    icon: Option<String>,
+    children: Element,
+) -> Element {
+    if !open() {
+        return rsx! {};
+    }
+    rsx! {
+        div {
+            class: "m3-dialog-scrim",
+            role: "presentation",
+            onclick: move |_| open.set(false),
+            div {
+                class: "m3-dialog",
+                role: "dialog",
+                "aria-modal": "true",
+                onclick: move |e| e.stop_propagation(),
+                if let Some(icon) = icon {
+                    span { class: "m3-dialog-icon material-icons", "{icon}" }
+                }
+                h2 { class: "m3-dialog-headline", "{headline}" }
+                div { class: "m3-dialog-content", {children} }
+                div { class: "m3-dialog-actions", {actions} }
+            }
+        }
+    }
+}
+
 /// A reusable Material Design 3 colour-swatch row: a label, preset swatches, and
 /// a trailing custom "any colour" chip ([`CustomColorSwatch`]) as the last circle.
 /// Emits the chosen `#rrggbb` hex through `on_change`; `value` is the active

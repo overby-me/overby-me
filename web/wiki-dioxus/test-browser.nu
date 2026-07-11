@@ -946,13 +946,13 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     if $fab == "y" {
         wd-execute $session_id 'document.querySelector(".fab").click(); return 1' | ignore
         sleep 1sec
-        let modal = (wd-execute $session_id 'return document.querySelector(".modal-card")?"y":"n"')
+        let modal = (wd-execute $session_id 'return document.querySelector(".m3-dialog")?"y":"n"')
         # Cancel (outlined button) — never Add — so no content is created.
-        wd-execute $session_id 'var c=document.querySelector(".modal-card .btn-outlined"); if(c)c.click(); return 1' | ignore
+        wd-execute $session_id 'var c=document.querySelector(".m3-dialog .btn-outlined"); if(c)c.click(); return 1' | ignore
         if $modal == "y" {
-            log-ok "add-content FAB opens a modal"; $p = $p + 1
+            log-ok "add-content FAB opens the M3 dialog"; $p = $p + 1
         } else {
-            log-fail "add-content FAB did not open a modal"; $fl = $fl + 1
+            log-fail "add-content FAB did not open the dialog"; $fl = $fl + 1
         }
     } else {
         log-warn "no add-content FAB — skipping FAB check"

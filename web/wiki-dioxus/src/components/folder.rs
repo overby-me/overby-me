@@ -430,79 +430,75 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
             span { class: "material-icons", "add" }
         }
 
-        // Modal add-content form (click the backdrop or Cancel to dismiss).
-        if *open.read() {
-            div { class: "modal-backdrop", onclick: move |_| open.set(false),
-                div {
-                    class: "modal-card",
-                    onclick: move |e| e.stop_propagation(),
-                    h3 { class: "title-medium mb-2", "{t(\"content.addContent\")}" }
-                    div { class: "text-field",
-                        label { "{t(\"common.title\")}" }
+        // Add-content dialog (the reusable M3 widgets::Dialog).
+        super::widgets::Dialog {
+            open,
+            headline: t("content.addContent"),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: !can_submit,
+                    onclick: submit,
+                    "{t(\"common.add\")}"
+                }
+            },
+            div { class: "text-field",
+                label { "{t(\"common.title\")}" }
+                input {
+                    r#type: "text",
+                    maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
+                    value: "{title}",
+                    oninput: move |e| title.set(e.value()),
+                }
+            }
+            // File picker (only for the `wiki/file` kind).
+            if is_file {
+                div { class: "mt-2",
+                    div { class: "file-upload-label", "{t(\"content.uploadFile\")}" }
+                    // Styled picker: a dashed drop-zone wrapping the hidden
+                    // native file input, so it matches the Material UI.
+                    label { class: "file-upload",
                         input {
-                            r#type: "text",
-                            maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
-                            value: "{title}",
-                            oninput: move |e| title.set(e.value()),
+                            r#type: "file",
+                            class: "file-upload-input",
+                            onchange: on_pick_file,
                         }
-                    }
-                    // File picker (only for the `wiki/file` kind).
-                    if is_file {
-                        div { class: "mt-2",
-                            div { class: "file-upload-label", "{t(\"content.uploadFile\")}" }
-                            // Styled picker: a dashed drop-zone wrapping the hidden
-                            // native file input, so it matches the Material UI.
-                            label { class: "file-upload",
-                                input {
-                                    r#type: "file",
-                                    class: "file-upload-input",
-                                    onchange: on_pick_file,
-                                }
-                                span { class: "material-icons", "upload_file" }
-                                span { class: "file-upload-text",
-                                    if file_name.read().is_empty() {
-                                        "{t(\"content.chooseFile\")}"
-                                    } else {
-                                        "{file_name}"
-                                    }
-                                }
-                            }
-                            if *uploading.read() {
-                                div { class: "stack stack-h mt-1", style: "align-items: center; gap: 8px;",
-                                    div { class: "spinner" }
-                                    span { class: "body-small text-muted", "{t(\"content.uploadFile\")}\u{2026}" }
-                                }
-                            } else if file_id.read().is_some() {
-                                div { class: "file-upload-done",
-                                    span { class: "material-icons", "check_circle" }
-                                    span { "{file_name}" }
-                                }
+                        span { class: "material-icons", "upload_file" }
+                        span { class: "file-upload-text",
+                            if file_name.read().is_empty() {
+                                "{t(\"content.chooseFile\")}"
+                            } else {
+                                "{file_name}"
                             }
                         }
                     }
-                    div { class: "stack stack-h mt-2", style: "align-items: center; gap: 8px;",
-                        // TODO: migrate to the shadcn Select once its trigger shows
-                        // the option label (not the raw value) for value != label.
-                        select {
-                            value: "{kind}",
-                            onchange: move |e| kind.set(e.value()),
-                            option { value: "wiki/document", "{t(\"mime.document\")}" }
-                            option { value: "wiki/folder", "{t(\"mime.folder\")}" }
-                            option { value: "wiki/file", "{t(\"mime.file\")}" }
+                    if *uploading.read() {
+                        div { class: "stack stack-h mt-1", style: "align-items: center; gap: 8px;",
+                            div { class: "spinner" }
+                            span { class: "body-small text-muted", "{t(\"content.uploadFile\")}\u{2026}" }
                         }
-                        div { class: "flex-grow" }
-                        button {
-                            class: "btn btn-outlined",
-                            onclick: move |_| open.set(false),
-                            "{t(\"common.cancel\")}"
-                        }
-                        button {
-                            class: "btn btn-primary",
-                            disabled: !can_submit,
-                            onclick: submit,
-                            "{t(\"common.add\")}"
+                    } else if file_id.read().is_some() {
+                        div { class: "file-upload-done",
+                            span { class: "material-icons", "check_circle" }
+                            span { "{file_name}" }
                         }
                     }
+                }
+            }
+            div { class: "mt-2",
+                // TODO: migrate to the shadcn Select once its trigger shows the
+                // option label (not the raw value) for value != label.
+                select {
+                    value: "{kind}",
+                    onchange: move |e| kind.set(e.value()),
+                    option { value: "wiki/document", "{t(\"mime.document\")}" }
+                    option { value: "wiki/folder", "{t(\"mime.folder\")}" }
+                    option { value: "wiki/file", "{t(\"mime.file\")}" }
                 }
             }
         }
