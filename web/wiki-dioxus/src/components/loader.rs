@@ -153,14 +153,19 @@ pub fn relative_time(iso: &str) -> String {
         return String::new();
     }
     let secs = ((js_sys::Date::now() - then) / 1000.0).max(0.0);
+    // Localised compact unit suffixes (Danish uses "t" for timer/hours).
+    let (s, m, h, d) = match *crate::i18n::LANG.read() {
+        crate::i18n::Lang::Da => ("s", "m", "t", "d"),
+        crate::i18n::Lang::En => ("s", "m", "h", "d"),
+    };
     if secs < 60.0 {
-        format!("{}s", secs as u64)
+        format!("{}{s}", secs as u64)
     } else if secs < 3600.0 {
-        format!("{}m", (secs / 60.0) as u64)
+        format!("{}{m}", (secs / 60.0) as u64)
     } else if secs < 86_400.0 {
-        format!("{}h", (secs / 3600.0) as u64)
+        format!("{}{h}", (secs / 3600.0) as u64)
     } else {
-        format!("{}d", (secs / 86_400.0) as u64)
+        format!("{}{d}", (secs / 86_400.0) as u64)
     }
 }
 
@@ -171,7 +176,10 @@ pub fn full_datetime(iso: &str) -> String {
     if d.get_time().is_nan() {
         return String::new();
     }
-    String::from(&d.to_locale_string("da-DK", &wasm_bindgen::JsValue::UNDEFINED))
+    String::from(&d.to_locale_string(
+        crate::i18n::current_locale(),
+        &wasm_bindgen::JsValue::UNDEFINED,
+    ))
 }
 
 /// Mime type to a **Material Icons ligature name**, matching the reference React

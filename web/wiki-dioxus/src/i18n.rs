@@ -15,6 +15,21 @@ impl Lang {
             Lang::Da => "da",
         }
     }
+
+    /// BCP-47 locale for browser date/number formatting (`toLocaleString`).
+    /// English uses the European (24-hour, day-first) form to match this app's
+    /// Danish audience.
+    pub fn locale(&self) -> &'static str {
+        match self {
+            Lang::En => "en-GB",
+            Lang::Da => "da-DK",
+        }
+    }
+}
+
+/// The current UI language's locale for `toLocaleString`-style formatting.
+pub fn current_locale() -> &'static str {
+    LANG.read().locale()
 }
 
 pub static LANG: GlobalSignal<Lang> = Signal::global(|| Lang::En);
