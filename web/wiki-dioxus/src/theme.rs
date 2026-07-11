@@ -35,12 +35,33 @@ pub fn use_theme() -> Signal<ThemeMode> {
     THEME.signal()
 }
 
-/// Apply theme to the document element
+/// Apply theme to the document element, and sync the browser chrome colour
+/// (`<meta name="theme-color">`) to the active scheme's primary so the mobile
+/// address bar / status bar matches light vs dark (it was a static value).
 pub fn apply_theme(mode: &ThemeMode) {
-    if let Some(window) = web_sys::window() {
-        if let Some(doc) = window.document() {
-            if let Some(el) = doc.document_element() {
-                let _ = el.set_attribute("data-theme", mode.data_attr());
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(doc) = window.document() else {
+        return;
+    };
+    if let Some(el) = doc.document_element() {
+        let _ = el.set_attribute("data-theme", mode.data_attr());
+        // Read the now-active --md-primary and push it to the theme-color meta.
+        if let Ok(Some(style)) = window.get_computed_style(&el) {
+            let color = style
+                .get_property_value("--md-primary")
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if !color.is_empty() {
+                if let Some(meta) = doc
+                    .query_selector("meta[name=\"theme-color\"]")
+                    .ok()
+                    .flatten()
+                {
+                    let _ = meta.set_attribute("content", &color);
+                }
             }
         }
     }

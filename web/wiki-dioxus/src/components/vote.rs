@@ -847,7 +847,7 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                                                 } else {
                                                     CheckboxState::Unchecked
                                                 }),
-                                                on_checked_change: move |_| apply_toggle(selected, error, ri, false),
+                                                on_checked_change: move |_| apply_toggle(selected, error, ri, false, max_vote),
                                             }
                                             div { class: "list-item-text",
                                                 div { class: "list-item-primary", "{option}" }
@@ -921,6 +921,7 @@ fn apply_toggle(
     mut error: Signal<String>,
     idx: usize,
     single: bool,
+    max: usize,
 ) {
     let mut cur = selected.read().clone();
     if idx >= cur.len() {
@@ -930,6 +931,12 @@ fn apply_toggle(
         cur = vec![false; cur.len()];
         cur[idx] = true;
     } else {
+        // Block over-selection as it happens (not only at submit): refuse a new
+        // check once `max` options are already selected.
+        if !cur[idx] && cur.iter().filter(|&&b| b).count() >= max {
+            error.set(t_with("vote.selectAtMost", &[("count", &max.to_string())]));
+            return;
+        }
         cur[idx] = !cur[idx];
     }
     selected.set(cur);

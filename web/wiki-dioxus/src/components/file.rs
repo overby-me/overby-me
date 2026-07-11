@@ -165,9 +165,13 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                 } else if file_mime.starts_with("image/") {
                     super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
                 } else if file_mime.starts_with("video/") {
-                    video { controls: true, src: "{file_url}" }
+                    video {
+                        controls: true,
+                        style: "width: 100%; max-height: 70vh;",
+                        src: "{file_url}",
+                    }
                 } else if file_mime.starts_with("audio/") {
-                    audio { controls: true, src: "{file_url}" }
+                    audio { controls: true, style: "width: 100%;", src: "{file_url}" }
                 } else if file_mime == "application/pdf" {
                     iframe { src: "{file_url}", title: "{name}" }
                 } else if is_office_mime(file_mime) {

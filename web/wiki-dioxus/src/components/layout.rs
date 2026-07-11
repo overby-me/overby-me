@@ -120,6 +120,14 @@ pub fn Layout() -> Element {
                 .await
                 .unwrap_or_default();
             *CONTEXT_DEPTH.write() = graphql::deepest_context_depth(&crumbs);
+            // Reflect the current node in the browser tab title.
+            let title = match crumbs.last() {
+                Some(c) => format!("{} · RadikalWiki", c.name),
+                None => "RadikalWiki".to_string(),
+            };
+            if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                doc.set_title(&title);
+            }
             *NAV_CRUMBS.write() = crumbs;
         });
     }
