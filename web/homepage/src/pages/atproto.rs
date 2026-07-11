@@ -46,7 +46,7 @@ fn AtProtoGraph(target: String) -> Element {
         crate::atproto_web::resolve_graph(&target).await
     }));
 
-    match &*resolved.read() {
+    let body = match &*resolved.read() {
         None => rsx! {
             div { style: OVERLAY,
                 document::Style { {SPINNER_CSS} }
@@ -65,6 +65,14 @@ fn AtProtoGraph(target: String) -> Element {
                 HandleInput {}
             }
         },
+    };
+
+    rsx! {
+        // Title the tab after the handle being viewed. (Note: link-card crawlers
+        // like Bluesky's don't run the wasm, so this only affects the live tab,
+        // not static social previews.)
+        document::Title { "@{target}" }
+        {body}
     }
 }
 

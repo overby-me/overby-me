@@ -9,4 +9,8 @@ path = "src/handle.rs"
 [dependencies]
 axum = "0.8.6"
 http = "1.3.1"
-reqwest = "0.12.24"
+# rustls (with bundled CA roots) instead of native-tls, so the serverless build
+# needs no system openssl and https fetches work without host cert config.
+reqwest = { version = "0.12.24", default-features = false, features = [
+  "rustls-tls",
+] }
