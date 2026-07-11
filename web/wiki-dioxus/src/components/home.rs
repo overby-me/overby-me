@@ -115,9 +115,32 @@ fn RecentItem(node: graphql::ChildNodeFields) -> Element {
     let nav = use_navigator();
     let node_id = node.id.0.clone();
     let key = node.key.clone();
+
+    // Author (owner) name + initials for the social-style avatar.
+    let author = node
+        .owner
+        .as_ref()
+        .map(|o| o.display_name.clone())
+        .filter(|s| !s.is_empty());
+    let initials = author
+        .as_ref()
+        .map(|a| {
+            a.split_whitespace()
+                .filter_map(|w| w.chars().next())
+                .take(2)
+                .collect::<String>()
+                .to_uppercase()
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "?".to_string());
+    let created = node.created_at.as_ref().map(|t| t.0.clone());
+    let parent_name = node.parent.as_ref().map(|p| p.name.clone());
+    let mime = node.mime_id.clone().unwrap_or_default();
+    let data = node.data.as_ref().map(|d| d.0.clone());
+
     rsx! {
         div {
-            class: "list-item",
+            class: "recent-item",
             onclick: move |_| {
                 let node_id = node_id.clone();
                 let key = key.clone();
@@ -133,23 +156,33 @@ fn RecentItem(node: graphql::ChildNodeFields) -> Element {
                     nav.push(Route::PathPage { segments, app: None });
                 });
             },
-            div { class: "avatar small",
-                {super::loader::node_icon_el(node.mime_id.as_deref().unwrap_or(""), node.data.as_ref().map(|d| &d.0))}
-            }
-            div { class: "list-item-text",
-                div { class: "list-item-primary", "{node.name}" }
-                if let Some(parent) = node.parent.as_ref() {
-                    div { class: "list-item-secondary", "{parent.name}" }
+            // Author avatar (initials), like a social post header.
+            div { class: "avatar small recent-avatar", "{initials}" }
+            div { class: "recent-body",
+                // Who + when.
+                div { class: "recent-meta",
+                    if let Some(a) = author.as_ref() {
+                        span { class: "recent-author", "{a}" }
+                    }
+                    if let Some(iso) = created.as_ref() {
+                        if author.is_some() {
+                            span { class: "recent-sep", "\u{00b7}" }
+                        }
+                        span {
+                            class: "recent-time",
+                            title: "{super::loader::full_datetime(iso)}",
+                            "{super::loader::relative_time(iso)}"
+                        }
+                    }
                 }
-            }
-            // Trailing supporting text (MD3): how long ago it was added, with the
-            // precise timestamp on hover.
-            if let Some(ts) = node.created_at.as_ref() {
-                span {
-                    class: "list-item-trailing",
-                    title: "{super::loader::full_datetime(&ts.0)}",
-                    span { class: "material-icons", "schedule" }
-                    "{super::loader::relative_time(&ts.0)}"
+                // What.
+                div { class: "recent-title", "{node.name}" }
+                // Where (the content type + its context).
+                if let Some(parent) = parent_name.as_ref() {
+                    div { class: "recent-context",
+                        {super::loader::node_icon_el(&mime, data.as_ref())}
+                        span { "{parent}" }
+                    }
                 }
             }
         }
