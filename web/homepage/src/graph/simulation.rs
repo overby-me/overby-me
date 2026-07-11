@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use super::data::GraphData;
+use super::data::{GraphData, GraphNode};
 
 // Faithful port of d3-force-3d as configured by react-force-graph-3d, whose
 // defaults the reference homepage (web/homepage) relies on. The simulation runs
@@ -18,8 +18,27 @@ const VELOCITY_DECAY: f32 = 0.6;
 const CHARGE_STRENGTH: f32 = -30.0;
 const DISTANCE_MIN_SQ: f32 = 1.0;
 
-// forceLink defaults.
-const LINK_DISTANCE: f32 = 30.0;
+// forceLink target length. d3's default is a flat 30, but our nodes vary a lot
+// in size (big center + hub bubbles, small leaves), so we add each endpoint's
+// radius to a base gap: the rest length becomes LINK_GAP + r(source) + r(target).
+// This keeps a clear ring of space around the large center/hub nodes instead of
+// letting neighbours pile on top of them.
+const LINK_GAP: f32 = 16.0;
+
+/// Approximate on-screen radius of a node in world units, mirroring the
+/// renderer's node sizes (the center avatar and category hubs are big bubbles;
+/// platform leaves are small). Drives the size-aware link length above.
+fn node_radius(node: &GraphNode) -> f32 {
+    if node.hub {
+        24.0 // hub bubble incl. its enlarged halo
+    } else if node.center {
+        20.0
+    } else if node.color.is_some() {
+        10.0 // personal-graph category node
+    } else {
+        9.0 // platform leaf
+    }
+}
 
 // forceCenter default strength.
 const CENTER_STRENGTH: f32 = 1.0;
@@ -42,6 +61,8 @@ pub struct Simulation {
     link_target: Vec<usize>,
     link_strength: Vec<f32>,
     link_bias: Vec<f32>,
+    // Per-link rest length, size-aware (see LINK_GAP / node_radius).
+    link_distance: Vec<f32>,
     // Deterministic RNG for d3's `jiggle` (only used for coincident nodes).
     rng: u32,
 }
@@ -82,11 +103,15 @@ impl Simulation {
         }
         let mut link_strength = Vec::with_capacity(link_source.len());
         let mut link_bias = Vec::with_capacity(link_source.len());
+        let mut link_distance = Vec::with_capacity(link_source.len());
         for k in 0..link_source.len() {
-            let ds = degree[link_source[k]];
-            let dt = degree[link_target[k]];
+            let (s, t) = (link_source[k], link_target[k]);
+            let ds = degree[s];
+            let dt = degree[t];
             link_strength.push(1.0 / ds.min(dt) as f32);
             link_bias.push(ds as f32 / (ds + dt) as f32);
+            link_distance
+                .push(LINK_GAP + node_radius(&data.nodes[s]) + node_radius(&data.nodes[t]));
         }
 
         Self {
@@ -99,6 +124,7 @@ impl Simulation {
             link_target,
             link_strength,
             link_bias,
+            link_distance,
             rng: 0x9e37_79b9,
         }
     }
@@ -195,7 +221,7 @@ impl Simulation {
             }
 
             let len = d.length();
-            let scale = (len - LINK_DISTANCE) / len * alpha * self.link_strength[k];
+            let scale = (len - self.link_distance[k]) / len * alpha * self.link_strength[k];
             d *= scale;
 
             let b = self.link_bias[k];
