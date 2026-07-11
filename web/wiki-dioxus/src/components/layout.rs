@@ -769,6 +769,9 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                                 crate::nhost::sign_out();
                                 *SESSION.write() = Default::default();
                                 save_session(&Default::default());
+                                // Drop cached data so nothing from the old session
+                                // lingers (React clears the GraphQL cache here).
+                                crate::session::bump_data_version();
                                 nav.push(Route::HomeApp {});
                             },
                             span { class: "material-icons", "logout" }

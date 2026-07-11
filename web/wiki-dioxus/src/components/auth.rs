@@ -82,6 +82,9 @@ fn AuthForm(mode: AuthMode) -> Element {
                             };
                             save_session(&new_session);
                             *SESSION.write() = new_session;
+                            // Refetch everything for the new session so no data
+                            // from a previous one lingers (React clears its cache).
+                            crate::session::bump_data_version();
                             nav.push(Route::HomeApp {});
                         }
                         Err(err) => {

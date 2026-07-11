@@ -26,12 +26,14 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let is_owner = user_id.is_some() && node.owner_id.as_ref().map(|o| o.0.clone()) == user_id;
     let can_manage = is_owner || node.is_context_owner.unwrap_or(false);
 
-    let members: Vec<MemberFields> = node
+    let mut members: Vec<MemberFields> = node
         .members
         .iter()
         .filter(|m| can_manage || !m.hidden)
         .cloned()
         .collect();
+    // Order by display name (React's members_order_by.user), case-insensitively.
+    members.sort_by_key(|m| m.label().to_lowercase());
 
     // Edit dialog (name/email) and remove confirm, shared across the rows.
     let mut edit_id = use_signal(|| Option::<String>::None);
