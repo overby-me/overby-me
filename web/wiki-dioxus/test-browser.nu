@@ -376,6 +376,27 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     log-ok "login established a session"; $p = $p + 1
     sleep 3sec
 
+    # ── Stale JWT recovery (the "returning to a tab" bug) ────────────────
+    # Corrupt the stored access token's signature but keep its expiry in the
+    # future, so the startup refresh does NOT fire. On reload the home data query
+    # hits the bad token; the fix must refresh + retry so groups/events still load
+    # instead of surfacing a JWT error.
+    let jwt_corrupt = (wd-execute $session_id 'try { var s=JSON.parse(localStorage.getItem("wiki_session")); if(!s || !s.access_token) return "nosession"; s.access_token = s.access_token.slice(0,-6) + "AAAAAA"; localStorage.setItem("wiki_session", JSON.stringify(s)); return "ok"; } catch(e){ return "err:"+e; }')
+    if $jwt_corrupt != "ok" { log-warn $"could not stage JWT-recovery check: ($jwt_corrupt)" }
+    wd-navigate $session_id $"(base-url)/"
+    sleep 5sec
+    let jwt_items = (wd-execute $session_id 'return document.querySelectorAll(".drawer-inner .list-item").length')
+    let jwt_tail = (wd-execute $session_id 'try { var s=JSON.parse(localStorage.getItem("wiki_session")); return s.access_token.slice(-6); } catch(e){ return "err"; }')
+    let jwt_n = (try { $jwt_items | into int } catch { 0 })
+    if $jwt_corrupt == "ok" {
+        if ($jwt_n > 0) and ($jwt_tail != "AAAAAA") {
+            log-ok $"stale JWT recovered: token refreshed, ($jwt_n) groups/events loaded"; $p = $p + 1
+        } else {
+            log-fail $"stale JWT did not recover \(drawer items=($jwt_n), token tail=($jwt_tail))"; $fl = $fl + 1
+        }
+    }
+    sleep 1sec
+
     # The welcome card (the root node's content) renders for the authed user; its
     # title carries "RadikalWiki" in every locale. This also proves the catch-all
     # serves `/` (empty segments -> root node -> wiki/home -> HomeApp).

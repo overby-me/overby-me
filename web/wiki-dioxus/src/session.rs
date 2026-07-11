@@ -267,6 +267,31 @@ async fn refresh_access_token() -> RefreshOutcome {
     }
 }
 
+/// Ensure a fresh access token for retrying a request that failed with an expired
+/// JWT (e.g. a tab returning after its token lapsed while backgrounded). Refreshes
+/// now, or waits for a refresh already in flight, then returns the current access
+/// token. `None` when signed out or the refresh token itself is dead.
+pub async fn ensure_fresh_token() -> Option<String> {
+    use gloo_timers::future::TimeoutFuture;
+    match refresh_access_token().await {
+        RefreshOutcome::Renewed(_) | RefreshOutcome::Transient => {
+            SESSION.peek().access_token.clone()
+        }
+        RefreshOutcome::InFlight => {
+            // The background loop (or a sibling query) is already refreshing; wait
+            // for it to land rather than starting a second, racing refresh.
+            for _ in 0..50 {
+                TimeoutFuture::new(100).await;
+                if !REFRESHING.load(Ordering::SeqCst) {
+                    break;
+                }
+            }
+            SESSION.peek().access_token.clone()
+        }
+        RefreshOutcome::NoSession | RefreshOutcome::Expired => None,
+    }
+}
+
 /// Long-running refresh loop. Never returns; intended to be owned by a
 /// `use_future` in the root component so its `SESSION` writes run inside the
 /// Dioxus runtime.

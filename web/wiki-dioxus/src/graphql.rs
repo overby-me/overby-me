@@ -1214,9 +1214,15 @@ pub struct DeletedNode {
 
 // --- HTTP execution ---
 
-pub async fn execute<Q, V>(
+/// A Hasura error whose JWT is expired/invalid, so refreshing the token and
+/// retrying the request may recover (e.g. "Could not verify JWT: JWTExpired").
+fn is_jwt_error(msg: &str) -> bool {
+    msg.to_ascii_lowercase().contains("jwt")
+}
+
+async fn execute_once<Q, V>(
     access_token: Option<&str>,
-    operation: cynic::Operation<Q, V>,
+    operation: &cynic::Operation<Q, V>,
 ) -> Result<Q, String>
 where
     Q: serde::de::DeserializeOwned + 'static,
@@ -1230,7 +1236,7 @@ where
     }
 
     let resp = req
-        .json(&operation)
+        .json(operation)
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -1245,8 +1251,31 @@ where
     body.data.ok_or_else(|| "No data returned".to_string())
 }
 
-/// Execute a raw GraphQL query/mutation string (for operations not covered by cynic types)
-pub async fn execute_raw(
+pub async fn execute<Q, V>(
+    access_token: Option<&str>,
+    operation: cynic::Operation<Q, V>,
+) -> Result<Q, String>
+where
+    Q: serde::de::DeserializeOwned + 'static,
+    V: serde::Serialize,
+{
+    match execute_once(access_token, &operation).await {
+        Err(msg) if is_jwt_error(&msg) => {
+            // The token likely lapsed (e.g. the tab was backgrounded past expiry).
+            // Refresh once and retry with the new token before surfacing the error
+            // so a returning tab recovers instead of showing a JWT error.
+            match crate::session::ensure_fresh_token().await {
+                Some(fresh) if Some(fresh.as_str()) != access_token => {
+                    execute_once(Some(&fresh), &operation).await
+                }
+                _ => Err(msg),
+            }
+        }
+        other => other,
+    }
+}
+
+async fn execute_raw_once(
     access_token: Option<&str>,
     query: &str,
 ) -> Result<serde_json::Value, String> {
@@ -1267,6 +1296,23 @@ pub async fn execute_raw(
     }
 
     Ok(result.get("data").cloned().unwrap_or_default())
+}
+
+/// Execute a raw GraphQL query/mutation string (for operations not covered by
+/// cynic types), with the same JWT refresh-and-retry as [`execute`].
+pub async fn execute_raw(
+    access_token: Option<&str>,
+    query: &str,
+) -> Result<serde_json::Value, String> {
+    match execute_raw_once(access_token, query).await {
+        Err(msg) if is_jwt_error(&msg) => match crate::session::ensure_fresh_token().await {
+            Some(fresh) if Some(fresh.as_str()) != access_token => {
+                execute_raw_once(Some(&fresh), query).await
+            }
+            _ => Err(msg),
+        },
+        other => other,
+    }
 }
 
 // --- High-level query functions ---
@@ -2636,6 +2682,17 @@ pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_jwt_errors_for_refresh_retry() {
+        // Hasura's JWT failures all mention "JWT"; refresh + retry may recover.
+        assert!(is_jwt_error("Could not verify JWT: JWTExpired"));
+        assert!(is_jwt_error("Could not verify JWT: JWTInvalid signature"));
+        assert!(is_jwt_error(r#"[{"message":"invalid-jwt"}]"#));
+        // Unrelated errors must NOT trigger a pointless refresh + retry.
+        assert!(!is_jwt_error("permission denied on nodes"));
+        assert!(!is_jwt_error("No data returned"));
+    }
 
     /// The Hasura API rejects `null` for a comparison expression
     /// (`expected an object for type 'String_comparison_exp', but found null`),
