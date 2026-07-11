@@ -125,31 +125,31 @@ pub fn effective_accent() -> String {
         .unwrap_or_else(|| BRAND_ACCENT.to_string())
 }
 
-/// Whether the user has overridden either seed (so the UI can offer a reset).
-pub fn seeds_overridden() -> bool {
-    SEED_PRIMARY.read().is_some() || SEED_ACCENT.read().is_some()
-}
-
-/// Set the primary seed, re-skin, and persist.
+/// Set the primary seed, re-skin, and persist. Choosing the brand default clears
+/// the override, so selecting the first swatch restores the exact baked theme.
 pub fn set_primary_seed(hex: String) {
-    *SEED_PRIMARY.write() = Some(hex);
+    *SEED_PRIMARY.write() = brand_or_seed(&hex, BRAND_PRIMARY);
     apply_seeds();
     save_seeds();
 }
 
-/// Set the accent seed, re-skin, and persist.
+/// Set the accent seed, re-skin, and persist. Choosing the brand default clears
+/// the override.
 pub fn set_accent_seed(hex: String) {
-    *SEED_ACCENT.write() = Some(hex);
+    *SEED_ACCENT.write() = brand_or_seed(&hex, BRAND_ACCENT);
     apply_seeds();
     save_seeds();
 }
 
-/// Clear both overrides, reverting to the baked brand theme, and persist.
-pub fn reset_seeds() {
-    *SEED_PRIMARY.write() = None;
-    *SEED_ACCENT.write() = None;
-    apply_seeds();
-    save_seeds();
+/// `None` (use the baked default) when the pick equals the brand seed, else the
+/// pick. A runtime scheme can't reproduce the baked one byte-for-byte (that uses
+/// the legacy CorePalette engine), so a brand pick reverts rather than re-skins.
+fn brand_or_seed(hex: &str, brand: &str) -> Option<String> {
+    if hex.eq_ignore_ascii_case(brand) {
+        None
+    } else {
+        Some(hex.to_string())
+    }
 }
 
 /// Regenerate + inject the scheme from the current seeds, or clear the override

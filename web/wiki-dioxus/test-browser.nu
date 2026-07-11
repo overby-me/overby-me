@@ -411,13 +411,14 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     } else {
         log-fail $"color picker did not change the primary token \(click=($cp_click) before=($cp_before) after=($cp_after))"; $fl = $fl + 1
     }
-    let cp_reset = (wd-execute $session_id 'var r=document.querySelector(".menu-reset-colors"); if(r){r.click(); return "ok"} return "noreset"')
+    # Selecting the first (brand) swatch restores the default (no reset button).
+    let cp_reset = (wd-execute $session_id 'var p=document.querySelector(".menu-color-section .color-picker"); if(!p) return "nopicker"; var sw=p.querySelectorAll("button.color-swatch"); if(!sw.length) return "noswatch"; sw[0].click(); return "ok"')
     sleep 700ms
     let cp_reverted = (wd-execute $session_id 'return getComputedStyle(document.documentElement).getPropertyValue("--md-sys-color-primary").trim()')
     if $cp_reset == "ok" and ($cp_reverted == $cp_before) {
-        log-ok "color picker reset reverts to the brand primary"; $p = $p + 1
+        log-ok "selecting the first swatch restores the brand primary"; $p = $p + 1
     } else {
-        log-fail $"color picker reset did not revert \(reset=($cp_reset) expected=($cp_before) got=($cp_reverted))"; $fl = $fl + 1
+        log-fail $"first swatch did not restore the brand primary \(click=($cp_reset) expected=($cp_before) got=($cp_reverted))"; $fl = $fl + 1
     }
     # Close the menu via its toggle (it is open here) so the next test opens it
     # from a known-closed state. A programmatic body click does not dismiss it.

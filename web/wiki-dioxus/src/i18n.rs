@@ -212,8 +212,7 @@ const EN_JSON: &str = r#"{
         "themeColor": "Theme color",
         "primaryColor": "Primary",
         "accentColor": "Accent",
-        "customColor": "Custom color",
-        "resetColors": "Reset to default"
+        "customColor": "Custom color"
     },
     "error": {
         "somethingWentWrong": "Something went wrong!",
@@ -504,8 +503,7 @@ const DA_JSON: &str = r#"{
         "themeColor": "Temafarve",
         "primaryColor": "Primær",
         "accentColor": "Accent",
-        "customColor": "Egen farve",
-        "resetColors": "Nulstil til standard"
+        "customColor": "Egen farve"
     },
     "error": {
         "somethingWentWrong": "Noget gik galt!",

@@ -29,17 +29,16 @@ pub fn Chip(icon: Option<String>, label: String, title: Option<String>) -> Eleme
     }
 }
 
-/// A reusable Material Design 3 colour picker: a row of preset swatches plus a
-/// native custom-colour input. Emits the chosen `#rrggbb` hex through
-/// `on_change`; `value` is the active colour (it highlights a matching swatch).
-/// App-agnostic: every label is passed in, so it carries no theme/i18n knowledge.
+/// A reusable Material Design 3 colour-swatch row: a label plus preset swatches.
+/// Emits the chosen `#rrggbb` hex through `on_change`; `value` is the active
+/// colour (it highlights a matching swatch). Pair with [`CustomColorSwatch`] for
+/// freeform picks. App-agnostic: labels are passed in, no theme/i18n knowledge.
 #[component]
 pub fn ColorPicker(
     label: String,
     value: String,
     swatches: Vec<String>,
     on_change: EventHandler<String>,
-    custom_title: Option<String>,
 ) -> Element {
     rsx! {
         div { class: "color-picker",
@@ -64,18 +63,29 @@ pub fn ColorPicker(
                         }
                     }
                 }
-                // Custom colour via the native OS picker (the input fills the chip).
-                label {
-                    class: "color-swatch color-swatch-custom",
-                    title: custom_title.clone().unwrap_or_default(),
-                    span { class: "material-icons", "colorize" }
-                    input {
-                        r#type: "color",
-                        class: "color-input-native",
-                        value: "{value}",
-                        oninput: move |e| on_change.call(e.value()),
-                    }
-                }
+            }
+        }
+    }
+}
+
+/// The "any colour" chip: a rainbow swatch wrapping a native OS colour input.
+/// Emits the chosen `#rrggbb` through `on_change`. Pairs with [`ColorPicker`].
+#[component]
+pub fn CustomColorSwatch(
+    value: String,
+    on_change: EventHandler<String>,
+    title: Option<String>,
+) -> Element {
+    rsx! {
+        label {
+            class: "color-swatch color-swatch-custom",
+            title: title.clone().unwrap_or_default(),
+            span { class: "material-icons", "colorize" }
+            input {
+                r#type: "color",
+                class: "color-input-native",
+                value: "{value}",
+                oninput: move |e| on_change.call(e.value()),
             }
         }
     }

@@ -830,7 +830,6 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                         super::widgets::ColorPicker {
                             label: t("layout.primaryColor"),
                             value: crate::theme::effective_primary(),
-                            custom_title: t("layout.customColor"),
                             swatches: vec![
                                 crate::theme::BRAND_PRIMARY.to_string(),
                                 "#1565C0".to_string(),
@@ -844,7 +843,6 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                         super::widgets::ColorPicker {
                             label: t("layout.accentColor"),
                             value: crate::theme::effective_accent(),
-                            custom_title: t("layout.customColor"),
                             swatches: vec![
                                 crate::theme::BRAND_ACCENT.to_string(),
                                 "#7B1FA2".to_string(),
@@ -855,12 +853,19 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                             ],
                             on_change: move |hex: String| crate::theme::set_accent_seed(hex),
                         }
-                        if crate::theme::seeds_overridden() {
-                            button {
-                                class: "list-item menu-reset-colors",
-                                onclick: move |_| crate::theme::reset_seeds(),
-                                span { class: "material-icons", "restart_alt" }
-                                span { class: "switch-row-label", "{t(\"layout.resetColors\")}" }
+                        // Freeform custom colours on their own single row. Selecting
+                        // the first (brand) swatch above is the way back to default.
+                        div { class: "color-custom-row",
+                            span { class: "color-picker-label", "{t(\"layout.customColor\")}" }
+                            super::widgets::CustomColorSwatch {
+                                value: crate::theme::effective_primary(),
+                                title: t("layout.primaryColor"),
+                                on_change: move |hex: String| crate::theme::set_primary_seed(hex),
+                            }
+                            super::widgets::CustomColorSwatch {
+                                value: crate::theme::effective_accent(),
+                                title: t("layout.accentColor"),
+                                on_change: move |hex: String| crate::theme::set_accent_seed(hex),
                             }
                         }
                     }
