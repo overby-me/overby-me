@@ -380,6 +380,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # The reactive size-class signal is written from a resize listener bridged
     # through a coroutine; this proves the bridge works (no runtime panic) and the
     # `data-size-class` attribute tracks the window width live.
+    mkdir screenshots
     wd-window-rect $session_id 1280 900
     sleep 500ms
     let sc_wide = (wd-execute $session_id 'var s=document.querySelector(".app-shell"); return s?s.getAttribute("data-size-class"):"none"')
@@ -404,7 +405,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     if $jwt_corrupt != "ok" { log-warn $"could not stage JWT-recovery check: ($jwt_corrupt)" }
     wd-navigate $session_id $"(base-url)/"
     sleep 5sec
-    let jwt_items = (wd-execute $session_id 'return document.querySelectorAll(".drawer-inner .list-item").length')
+    let jwt_items = (wd-execute $session_id 'return document.querySelectorAll(".nav-rail-tree .list-item").length')
     let jwt_tail = (wd-execute $session_id 'try { var s=JSON.parse(localStorage.getItem("wiki_session")); return s.access_token.slice(-6); } catch(e){ return "err"; }')
     let jwt_n = (try { $jwt_items | into int } catch { 0 })
     if $jwt_corrupt == "ok" {
@@ -532,7 +533,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     }
 
     # Groups + events render as context items (avatar badges) in the drawer.
-    let r = (assert-count $session_id "drawer shows group/event items" ".drawer .avatar.secondary" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    let r = (assert-count $session_id "drawer shows group/event items" ".nav-rail-tree .avatar.secondary" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
 
     # ── In-context navigation (drawer node tree + app rail) ──────────────
     # Click the first context; the app should route into it, render a node
@@ -543,7 +544,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # are empty; blindly clicking the first avatar can land on an empty one and
     # make every downstream check fail spuriously. Click each context's list-item
     # (the avatar is a child span) until the view shows folder children.
-    let n_ctx_str = (wd-execute $session_id 'return String(document.querySelectorAll(".drawer .avatar.secondary").length)')
+    let n_ctx_str = (wd-execute $session_id 'return String(document.querySelectorAll(".nav-rail-tree .avatar.secondary").length)')
     let n_ctx = (try { $n_ctx_str | into int } catch { 0 })
     if $n_ctx == 0 {
         log-warn "no context to open — skipping in-context checks"
@@ -555,7 +556,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     while (not $navigated) and ($ci < $max_try) {
         # Build the click JS with plain-string concat: a $"..." interpolation
         # would try to evaluate the literal JS parens.
-        let click_js = ("var xs=document.querySelectorAll('.drawer .avatar.secondary'); var e=xs[" + ($ci | into string) + "]; if(e){e.closest('.list-item').click(); return 'clicked'} return 'none'")
+        let click_js = ("var xs=document.querySelectorAll('.nav-rail-tree .avatar.secondary'); var e=xs[" + ($ci | into string) + "]; if(e){e.closest('.list-item').click(); return 'clicked'} return 'none'")
         wd-execute $session_id $click_js | ignore
         mut moved = false
         for _ in 1..12 {
@@ -630,18 +631,18 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     }
     # The app rail only appears inside a context; its presence confirms the
     # in-context layout (and that its icons rendered).
-    let r = (assert-count $session_id "app rail shown in context" ".app-rail .btn-icon" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    let r = (assert-count $session_id "app rail shown in context" ".nav-rail-item" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     # The app rail sits to the LEFT of the side panel (rail | drawer | content).
-    let layout = (wd-execute $session_id 'var rl=document.querySelector(".app-rail"),dr=document.querySelector(".drawer-inner"); if(!rl||!dr) return "missing"; return JSON.stringify({rail:Math.round(rl.getBoundingClientRect().left), drawer:Math.round(dr.getBoundingClientRect().left)})')
-    let ok = (try { let j = ($layout | from json); ($j.rail < $j.drawer) and ($j.rail < 10) } catch { false })
+    let layout = (wd-execute $session_id 'var rl=document.querySelector(".nav-rail"),dr=document.querySelector(".nav-rail-tree"); if(!rl||!dr) return "missing"; return JSON.stringify({rail:Math.round(rl.getBoundingClientRect().left), drawer:Math.round(dr.getBoundingClientRect().left)})')
+    let ok = (try { let j = ($layout | from json); ($j.rail <= $j.drawer) and ($j.rail < 10) } catch { false })
     if $ok {
-        log-ok $"app rail is left of the drawer ($layout)"; $p = $p + 1
+        log-ok $"nav rail is at the leading edge, tree nested within ($layout)"; $p = $p + 1
     } else {
-        log-fail $"app rail not left of drawer: ($layout)"; $fl = $fl + 1
+        log-fail $"nav rail not at the leading edge: ($layout)"; $fl = $fl + 1
     }
     # The drawer must have swapped the home list for the node tree: the
     # "Groups" home heading is gone once inside a context.
-    let drawer_txt = (wd-execute $session_id 'return (document.querySelector(".drawer")||{innerText:""}).innerText')
+    let drawer_txt = (wd-execute $session_id 'return (document.querySelector(".nav-rail-tree")||{innerText:""}).innerText')
     if ($drawer_txt | describe) == "string" and (not ($drawer_txt | str contains "Groups")) {
         log-ok "drawer switched to node tree (home list gone)"; $p = $p + 1
     } else {
@@ -650,7 +651,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # The drawer's top entry switches from Home to the current context (old-wiki
     # behaviour); a mobile-only Home fallback stays in the DOM (desktop reaches
     # Home via the app rail).
-    let dsw = (wd-execute $session_id 'var d=document.querySelector(".drawer"); if(!d) return "nodrawer"; var mh=d.querySelector(".drawer-mobile-home")?1:0; var cn=d.querySelector(".drawer-context-bar .drawer-context-name"); return JSON.stringify({mobileHome:mh, contextText: cn?cn.innerText.trim():""})')
+    let dsw = (wd-execute $session_id 'var d=document.querySelector(".nav-rail-tree"); if(!d) return "nodrawer"; var mh=d.querySelector(".drawer-mobile-home")?1:0; var cn=d.querySelector(".drawer-context-bar .drawer-context-name"); return JSON.stringify({mobileHome:mh, contextText: cn?cn.innerText.trim():""})')
     if $dsw == "nodrawer" {
         log-warn "no drawer to check the context switch"
     } else {
@@ -661,17 +662,9 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             log-fail $"drawer context bar off: text='($m.contextText)', mobileHome=($m.mobileHome)"; $fl = $fl + 1
         }
     }
-    # The drawer context bar should look like the top panel: same height, and
-    # aligned to the same top (no gap above it).
-    let bars = (wd-execute $session_id 'var t=document.querySelector(".bottom-bar .bar"); var d=document.querySelector(".drawer-context-bar"); if(!t||!d) return "missing"; var tr=t.getBoundingClientRect(), dr=d.getBoundingClientRect(); return JSON.stringify({th:Math.round(tr.height), dh:Math.round(dr.height), tt:Math.round(tr.top), dt:Math.round(dr.top)})')
-    if $bars == "missing" {
-        log-warn "could not measure both bars"
-    } else {
-        let b = ($bars | from json)
-        let dh = (($b.th - $b.dh) | math abs)
-        let dt = (($b.tt - $b.dt) | math abs)
-        if ($dh <= 4) and ($dt <= 6) { log-ok $"drawer bar matches the top panel: h ($b.dh) vs ($b.th), top ($b.dt) vs ($b.tt)"; $p = $p + 1 } else { log-fail $"drawer bar differs from top panel: h ($b.dh) vs ($b.th), top ($b.dt) vs ($b.tt)"; $fl = $fl + 1 }
-    }
+    # (The old "drawer context bar aligns with the top panel" check is retired:
+    # in the M3 rail layout the tree + its context bar are nested inside the
+    # navigation rail, not a separate panel aligned to the top app bar.)
 
     # ── Navigate to a child node (regression: PathPage must re-resolve on a
     # client-side route change between two path pages, not show stale content).
@@ -691,7 +684,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             log-ok "navigating to a child node updates the view"; $p = $p + 1
             # The drawer tree highlights the current node in the path.
             sleep 1500ms
-            let sel = (wd-execute $session_id 'return document.querySelector(".drawer .list-item.selected, .drawer-inner .list-item.selected")?"y":"n"')
+            let sel = (wd-execute $session_id 'return document.querySelector(".nav-rail-tree .list-item.selected, .nav-rail-tree .list-item.selected")?"y":"n"')
             if $sel == "y" {
                 log-ok "drawer highlights the current node"; $p = $p + 1
             } else {
@@ -742,8 +735,8 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # click can land on an inner span the router doesn't intercept).
     let ctx_path = $sel_ctx
     wd-navigate $session_id $"(base-url)($ctx_path)"
-    if (wd-wait-for-element $session_id ".app-rail a" 15) {
-        let clicked_vote = (wd-execute $session_id 'var a=[...document.querySelectorAll(".app-rail a")].find(function(x){return (x.getAttribute("href")||"").includes("app=vote")}); if(a){a.click(); return "y"} return "n"')
+    if (wd-wait-for-element $session_id ".nav-rail a" 15) {
+        let clicked_vote = (wd-execute $session_id 'var a=[...document.querySelectorAll(".nav-rail a")].find(function(x){return (x.getAttribute("href")||"").includes("app=vote")}); if(a){a.click(); return "y"} return "n"')
         if $clicked_vote == "y" {
             mut switched = false
             for _ in 1..($timeout) {
@@ -763,12 +756,12 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             capture-shots $session_id "vote-app"
             # Speak app (if this context exposes it): capture it, then return to
             # the vote app so the downstream vote-app checks keep their state.
-            let has_speak = (wd-execute $session_id 'return document.querySelector(".app-rail a[href*=\"app=speak\"]")?"y":"n"')
+            let has_speak = (wd-execute $session_id 'return document.querySelector(".nav-rail a[href*=\"app=speak\"]")?"y":"n"')
             if $has_speak == "y" {
-                wd-execute $session_id 'var a=[...document.querySelectorAll(".app-rail a")].find(function(x){return (x.getAttribute("href")||"").includes("app=speak")}); if(a){a.click()}; return 1' | ignore
+                wd-execute $session_id 'var a=[...document.querySelectorAll(".nav-rail a")].find(function(x){return (x.getAttribute("href")||"").includes("app=speak")}); if(a){a.click()}; return 1' | ignore
                 sleep 800ms
                 capture-shots $session_id "speak-app"
-                wd-execute $session_id 'var a=[...document.querySelectorAll(".app-rail a")].find(function(x){return (x.getAttribute("href")||"").includes("app=vote")}); if(a){a.click()}; return 1' | ignore
+                wd-execute $session_id 'var a=[...document.querySelectorAll(".nav-rail a")].find(function(x){return (x.getAttribute("href")||"").includes("app=vote")}); if(a){a.click()}; return 1' | ignore
                 sleep 600ms
             }
             # The highlighted app must have readable contrast (icon vs its box):
@@ -778,7 +771,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             # the green-on-green regression), and the pill must be distinguishable
             # FROM the rail (colour DISTANCE, since a tonal pill differs from the
             # neutral rail by hue/chroma, not luminance).
-            let arc = (wd-execute $session_id 'function L(c){var a=c.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]} function P(s){var m=s.match(/[0-9.]+/g);return [+m[0],+m[1],+m[2]]} function R(x,y){var p=L(P(x)),q=L(P(y)),h=Math.max(p,q),l=Math.min(p,q);return (h+0.05)/(l+0.05)} function D(x,y){var a=P(x),b=P(y);return Math.round(Math.sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2])))} var el=document.querySelector(".app-rail .btn-icon.active"); if(!el) return "noactive"; var pill=el.querySelector(".app-rail-icon")||el; var ic=el.querySelector(".material-icons"); var pb=getComputedStyle(pill).backgroundColor; var icc=ic?getComputedStyle(ic).color:getComputedStyle(el).color; var rail=document.querySelector(".app-rail"); var rb=rail?getComputedStyle(rail).backgroundColor:"rgb(255,255,255)"; return JSON.stringify({readable:+R(pb,icc).toFixed(2), distinct:D(pb,rb)})')
+            let arc = (wd-execute $session_id 'function L(c){var a=c.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]} function P(s){var m=s.match(/[0-9.]+/g);return [+m[0],+m[1],+m[2]]} function R(x,y){var p=L(P(x)),q=L(P(y)),h=Math.max(p,q),l=Math.min(p,q);return (h+0.05)/(l+0.05)} function D(x,y){var a=P(x),b=P(y);return Math.round(Math.sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2])))} var el=document.querySelector(".nav-rail-item.active"); if(!el) return "noactive"; var pill=el.querySelector(".nav-rail-indicator")||el; var ic=el.querySelector(".material-icons"); var pb=getComputedStyle(pill).backgroundColor; var icc=ic?getComputedStyle(ic).color:getComputedStyle(el).color; var rail=document.querySelector(".nav-rail"); var rb=rail?getComputedStyle(rail).backgroundColor:"rgb(255,255,255)"; return JSON.stringify({readable:+R(pb,icc).toFixed(2), distinct:D(pb,rb)})')
             if $arc == "noactive" {
                 log-warn "no active app-rail item to contrast-check"
             } else {
@@ -791,7 +784,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             }
             # The open app is badged onto the current node's breadcrumb avatar.
             sleep 1sec
-            let badge = (wd-execute $session_id 'return document.querySelector(".bottom-bar .breadcrumbs .crumb-app-badge")?"y":"n"')
+            let badge = (wd-execute $session_id 'return document.querySelector(".top-app-bar .breadcrumbs .crumb-app-badge")?"y":"n"')
             if $badge == "y" {
                 log-ok "open app shows a breadcrumb badge"; $p = $p + 1
             } else {
@@ -799,7 +792,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             }
             # Only the ready apps (folder/speak/vote/member) are in the rail; the
             # rest (graph/social/...) are hidden until ready.
-            let rail = (wd-execute $session_id 'return JSON.stringify({vote:document.querySelector(".app-rail a[href*=\"app=vote\"]")?1:0, speak:document.querySelector(".app-rail a[href*=\"app=speak\"]")?1:0, member:document.querySelector(".app-rail a[href*=\"app=member\"]")?1:0, graph:document.querySelector(".app-rail a[href*=\"app=graph\"]")?1:0, social:document.querySelector(".app-rail a[href*=\"app=social\"]")?1:0})')
+            let rail = (wd-execute $session_id 'return JSON.stringify({vote:document.querySelector(".nav-rail a[href*=\"app=vote\"]")?1:0, speak:document.querySelector(".nav-rail a[href*=\"app=speak\"]")?1:0, member:document.querySelector(".nav-rail a[href*=\"app=member\"]")?1:0, graph:document.querySelector(".nav-rail a[href*=\"app=graph\"]")?1:0, social:document.querySelector(".nav-rail a[href*=\"app=social\"]")?1:0})')
             let ok = (try { let j = ($rail | from json); ($j.vote == 1) and ($j.speak == 1) and ($j.member == 1) and ($j.graph == 0) and ($j.social == 0) } catch { false })
             if $ok {
                 log-ok "app rail shows only the ready apps"; $p = $p + 1
@@ -818,8 +811,8 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     sleep 2sec
     # At a top-level context the trail begins with the context itself, so there
     # is no Home crumb (a breadcrumb link to "/").
-    let home_crumb = (wd-execute $session_id 'return document.querySelector(".bottom-bar .breadcrumbs a[href=\"/\"]")?"y":"n"')
-    let crumbs = (wd-execute $session_id 'return document.querySelectorAll(".bottom-bar .breadcrumbs .crumb").length')
+    let home_crumb = (wd-execute $session_id 'return document.querySelector(".top-app-bar .breadcrumbs a[href=\"/\"]")?"y":"n"')
+    let crumbs = (wd-execute $session_id 'return document.querySelectorAll(".top-app-bar .breadcrumbs .crumb").length')
     let ok = (try { ($home_crumb == "n") and (($crumbs | into int) >= 1) } catch { false })
     if $ok {
         log-ok $"breadcrumbs start at the context, no home crumb, crumbs=($crumbs)"; $p = $p + 1

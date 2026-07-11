@@ -223,24 +223,246 @@ a:hover {
 	text-decoration: underline;
 }
 
-/* Layout */
+/* ═══ Layout — adaptive M3 shell ═══
+   The navigation rail + top app bar are fixed to the leading / top edges; the
+   content pane is inset by their sizes per window-size class (data-size-class on
+   .app-shell). Depth is by TONE — nav surfaces use surface-container, not the
+   old green bar — with the active destination marked by a secondary-container
+   pill. Page scroll stays on the body so pull-to-refresh keeps working. */
 .app-shell {
-	display: flex;
 	min-height: 100vh;
 }
 
-.main-content {
-	flex: 1;
-	max-width: 1200px;
-	margin: 0 auto;
-	padding: 8px;
-	width: 100%;
+.content-pane {
+	padding: var(--md-sys-margin);
+	padding-top: calc(64px + var(--md-sys-spacing-2));
+	min-height: 100vh;
 }
 
-@media (min-width: 1200px) {
-	.main-content {
-		padding-top: 64px;
-	}
+/* ── Top app bar ─────────────────────────────────────────────────────── */
+.top-app-bar {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 50;
+	height: 64px;
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-2);
+	padding: 0 var(--md-sys-spacing-2);
+	background: var(--md-surface-container);
+	color: var(--md-on-surface);
+}
+.top-app-bar-headline {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+}
+
+/* ── Navigation rail (medium+) ───────────────────────────────────────── */
+.nav-rail {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	z-index: 60;
+	width: var(--md-sys-rail-width);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--md-sys-spacing-1);
+	padding: var(--md-sys-spacing-2) 0;
+	background: var(--md-surface-container);
+	overflow-y: auto;
+	scrollbar-width: none;
+}
+.nav-rail::-webkit-scrollbar {
+	display: none;
+}
+.nav-rail-header {
+	display: flex;
+	justify-content: center;
+	padding-bottom: var(--md-sys-spacing-1);
+}
+.nav-rail-destinations {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--md-sys-spacing-3);
+	width: 100%;
+}
+.nav-rail-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--md-sys-spacing-1);
+	text-decoration: none;
+	color: var(--md-on-surface-variant);
+	border-radius: var(--md-sys-shape-corner-large);
+	padding: 2px 0;
+	width: 100%;
+}
+.nav-rail-indicator {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 56px;
+	height: 32px;
+	border-radius: var(--md-sys-shape-corner-full);
+	transition: background-color var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+}
+.nav-rail-item.active {
+	color: var(--md-on-surface);
+}
+.nav-rail-item.active .nav-rail-indicator {
+	/* primary-container (green) reads as the active destination and stays
+	   distinct from the surface-container rail (secondary-container is too close
+	   to it in the green theme). */
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+}
+.nav-rail-label {
+	color: inherit;
+	text-align: center;
+}
+
+/* Expanded rail (large/xl): widens to host the tree inline. */
+.nav-rail.expanded {
+	width: var(--md-sys-rail-expanded);
+	align-items: stretch;
+	padding: var(--md-sys-spacing-2);
+	gap: var(--md-sys-spacing-2);
+}
+.nav-rail.expanded .nav-rail-destinations {
+	flex-direction: row;
+	flex-wrap: wrap;
+	justify-content: flex-start;
+	gap: var(--md-sys-spacing-2);
+}
+.nav-rail.expanded .nav-rail-item {
+	width: auto;
+	flex: 0 0 auto;
+	min-width: 72px;
+}
+.nav-rail-tree {
+	flex: 1;
+	overflow-y: auto;
+	scrollbar-width: none;
+	border-top: 1px solid var(--md-outline-variant);
+	padding-top: var(--md-sys-spacing-2);
+}
+.nav-rail-tree::-webkit-scrollbar {
+	display: none;
+}
+
+/* ── Bottom navigation bar (compact) ─────────────────────────────────── */
+.nav-bar {
+	position: fixed;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	z-index: 60;
+	height: 80px;
+	display: flex;
+	justify-content: space-around;
+	align-items: center;
+	padding: 0 var(--md-sys-spacing-2);
+	background: var(--md-surface-container);
+}
+.nav-bar-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--md-sys-spacing-1);
+	flex: 1;
+	max-width: 96px;
+	text-decoration: none;
+	color: var(--md-on-surface-variant);
+	border-radius: var(--md-sys-shape-corner-large);
+	padding: var(--md-sys-spacing-2) 0;
+}
+.nav-bar-indicator {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 64px;
+	height: 32px;
+	border-radius: var(--md-sys-shape-corner-full);
+	transition: background-color var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+}
+.nav-bar-item.active {
+	color: var(--md-on-surface);
+}
+.nav-bar-item.active .nav-bar-indicator {
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+}
+
+/* ── Modal navigation drawer (tree host on compact/medium) ───────────── */
+.nav-drawer-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 200;
+	background: var(--md-scrim);
+	opacity: 0;
+	visibility: hidden;
+	transition:
+		opacity var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard),
+		visibility 0s linear var(--md-sys-motion-duration-medium2);
+}
+.nav-drawer-scrim.open {
+	opacity: 0.4;
+	visibility: visible;
+	transition: opacity var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard);
+}
+.nav-drawer {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	z-index: 201;
+	width: min(360px, 88vw);
+	background: var(--md-surface);
+	border-radius: 0 var(--md-sys-shape-corner-large) var(--md-sys-shape-corner-large) 0;
+	transform: translateX(-100%);
+	transition: transform var(--md-sys-motion-duration-long1) var(--md-sys-motion-spring-spatial-default);
+	overflow-y: auto;
+	scrollbar-width: none;
+}
+.nav-drawer.open {
+	transform: translateX(0);
+}
+.nav-drawer::-webkit-scrollbar {
+	display: none;
+}
+.nav-drawer-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
+}
+
+/* ── Content / top-bar insets per window-size class ──────────────────── */
+.app-shell:not([data-size-class="compact"]) .content-pane {
+	margin-left: var(--md-sys-rail-width);
+}
+.app-shell:not([data-size-class="compact"]) .top-app-bar {
+	left: var(--md-sys-rail-width);
+}
+.app-shell[data-size-class="large"] .content-pane,
+.app-shell[data-size-class="extra-large"] .content-pane {
+	margin-left: var(--md-sys-rail-expanded);
+}
+.app-shell[data-size-class="large"] .top-app-bar,
+.app-shell[data-size-class="extra-large"] .top-app-bar {
+	left: var(--md-sys-rail-expanded);
+}
+.app-shell[data-size-class="compact"] .content-pane {
+	padding-bottom: calc(80px + var(--md-sys-margin));
 }
 
 /* Floating navigation bar — M3 primary container with a level-2 shadow (it
@@ -1647,7 +1869,8 @@ h6,
 	overflow: hidden;
 	white-space: nowrap;
 	opacity: 0;
-	color: #fff;
+	/* On the tonal top app bar (was white on the old green bar). */
+	color: var(--md-on-surface);
 	transition:
 		max-width 0.25s ease,
 		opacity 0.2s ease,

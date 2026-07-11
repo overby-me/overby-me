@@ -83,10 +83,10 @@ fn parse_reset_token(search: &str) -> Option<String> {
 
 #[component]
 pub fn Layout() -> Element {
-    let mut open_drawer = use_signal(|| false);
+    let open_drawer = use_signal(|| false);
     let mut search_mode = use_signal(|| false);
-    let mut search_input = use_signal(String::new);
-    let mut search_results = use_signal(Vec::<NodeFields>::new);
+    let search_input = use_signal(String::new);
+    let search_results = use_signal(Vec::<NodeFields>::new);
     let menu_open = use_signal(|| false);
 
     let route = use_route::<Route>();
@@ -198,89 +198,32 @@ pub fn Layout() -> Element {
             },
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
-            // Main content area
-            div { class: "main-content",
+
+            // Primary navigation (APP axis): a navigation rail on medium+ (which
+            // widens to host the groups/events tree inline on large/xl); a bottom
+            // navigation bar on compact (rendered after the content, below).
+            if !size_class.is_compact() {
+                NavigationRail { expanded: size_class.is_expanded_rail(), open_drawer }
+            }
+
+            // Top app bar spanning the content region.
+            TopAppBar { search_mode, search_input, search_results, open_drawer, menu_open }
+
+            // Content pane (the resolved ?app= view).
+            main { class: "content-pane",
                 Outlet::<Route> {}
-                // Bottom spacer so content scrolls clear of the fixed bar. It
-                // lives inside the content column (not the app-shell flex row),
-                // otherwise it sits beside the content and steals width on the
-                // right (#mobile-padding).
                 div { class: "bar-spacer" }
             }
 
-            // Desktop drawer (sidebar)
-            div { class: "drawer",
-                div { class: "drawer-inner",
-                    DrawerContent {}
-                }
-            }
-
-            // App rail (desktop only — right of drawer)
-            div { class: "app-rail",
-                AppRail {}
-            }
-
-            // Mobile app bar (phones only — the rail is hidden there, so this is
-            // how Speak/Vote/Members stay reachable).
-            MobileAppBar {}
-
-            // Bottom/top bar
-            div { class: "bottom-bar",
-                div { class: "bar",
-                    // Menu button (mobile)
-                    button {
-                        class: "btn-icon mobile-only",
-                        aria_label: "{t(\"common.menu\")}",
-                        onclick: move |_| {
-                            open_drawer.set(true);
-                        },
-                        span { class: "material-icons", "menu" }
-                    }
-
-                    // Search or breadcrumbs
-                    if *search_mode.read() {
-                        SearchBar {
-                            input: search_input,
-                            results: search_results,
-                            on_close: move |_| {
-                                search_mode.set(false);
-                                search_input.set(String::new());
-                                search_results.set(vec![]);
-                            },
-                        }
-                    } else {
-                        Breadcrumbs {}
-                        button {
-                            class: "btn-icon",
-                            aria_label: "{t(\"common.search\")}",
-                            onclick: move |_| search_mode.set(true),
-                            span { class: "material-icons", "search" }
-                        }
-                    }
-
-                    // User menu
-                    UserMenu { menu_open }
-                }
+            if size_class.is_compact() {
+                NavigationBar {}
             }
         }
 
-        // Mobile drawer overlay
-        div {
-            class: if *open_drawer.read() { "mobile-drawer" } else { "mobile-drawer hidden" },
-            div { style: "padding: 8px;",
-                div { class: "bar",
-                    div { class: "breadcrumbs", "{t(\"common.home\")}" }
-                    button {
-                        class: "btn-icon",
-                        aria_label: "{t(\"common.close\")}",
-                        onclick: move |_| {
-                            open_drawer.set(false);
-                        },
-                        span { class: "material-icons", "close" }
-                    }
-                }
-            }
-            DrawerContent {}
+        // Modal tree drawer (PLACE axis). On large/xl the expanded rail hosts the
+        // tree inline instead, so the modal drawer is not mounted there.
+        if !size_class.is_expanded_rail() {
+            NavigationDrawer { open: open_drawer }
         }
     }
 }
@@ -688,38 +631,66 @@ fn context_apps(route: &Route, is_auth: bool) -> Vec<(&'static str, String, Rout
     apps
 }
 
+/// Navigation rail (APP axis). Collapsed icon+label strip on medium/expanded; on
+/// large/xl it widens (`expanded`) to host the groups/events tree inline — the
+/// M3 2025 replacement for the permanent navigation drawer. One secondary-
+/// container pill tracks the active `?app=` destination. Retires `.app-rail` and
+/// the always-on `.drawer`.
 #[component]
-fn AppRail() -> Element {
+fn NavigationRail(expanded: bool, open_drawer: Signal<bool>) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     let route = use_route::<Route>();
     let apps = context_apps(&route, is_auth);
-
     let pending = PENDING_INVITES();
 
     rsx! {
-        for (mime_id , label , to , active) in apps.into_iter() {
-            Link {
-                to,
-                class: if active { "btn-icon active" } else { "btn-icon" },
-                style: "flex-direction: column; gap: 2px; width: 56px; height: 56px; position: relative;",
-                title: "{label}",
-                span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
-                if mime_id == "app/home" && pending > 0 {
-                    span { class: "nav-badge", "{pending}" }
+        nav { class: if expanded { "nav-rail expanded" } else { "nav-rail" },
+            // Header: a menu toggle opens the modal tree drawer while collapsed
+            // (the tree is hosted inline below once the rail is expanded).
+            if !expanded {
+                div { class: "nav-rail-header",
+                    button {
+                        class: "btn-icon state-layer",
+                        aria_label: t("common.menu"),
+                        onclick: move |_| open_drawer.set(true),
+                        span { class: "material-icons", "menu" }
+                    }
                 }
-                span { class: "app-rail-label", "{label}" }
+            }
+            div { class: "nav-rail-destinations",
+                for (mime_id , label , to , active) in apps.into_iter() {
+                    Link {
+                        key: "{mime_id}",
+                        to,
+                        class: if active { "nav-rail-item active state-layer" } else { "nav-rail-item state-layer" },
+                        title: "{label}",
+                        span { class: "nav-rail-indicator",
+                            span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
+                            if mime_id == "app/home" && pending > 0 {
+                                super::widgets::Badge { count: Some(pending) }
+                            }
+                        }
+                        span {
+                            class: if active { "nav-rail-label md-label-medium-emphasized" } else { "nav-rail-label md-label-medium" },
+                            "{label}"
+                        }
+                    }
+                }
+            }
+            if expanded {
+                div { class: "nav-rail-tree",
+                    DrawerContent {}
+                }
             }
         }
     }
 }
 
-/// Mobile app bar — the same context apps as the desktop rail, as a floating
-/// horizontal row (bottom-left, above the bottom bar). Without it the apps
-/// (Speak/Vote/Members) are unreachable on a phone, where the rail is hidden.
-/// Shown only under the rail's 1200px breakpoint (see `.mobile-app-bar` CSS).
+/// Bottom navigation bar (APP axis) on compact — the same context destinations as
+/// the rail, with the secondary-container pill indicator and the Home badge.
 #[component]
-fn MobileAppBar() -> Element {
+fn NavigationBar() -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     let route = use_route::<Route>();
@@ -727,23 +698,100 @@ fn MobileAppBar() -> Element {
     if apps.is_empty() {
         return rsx! {};
     }
-
     let pending = PENDING_INVITES();
 
     rsx! {
-        div { class: "mobile-app-bar",
+        nav { class: "nav-bar",
             for (mime_id , label , to , active) in apps.into_iter() {
                 Link {
+                    key: "{mime_id}",
                     to,
-                    class: if active { "btn-icon active" } else { "btn-icon" },
-                    style: "position: relative;",
+                    class: if active { "nav-bar-item active state-layer" } else { "nav-bar-item state-layer" },
                     title: "{label}",
                     aria_label: "{label}",
-                    span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
-                    if mime_id == "app/home" && pending > 0 {
-                        span { class: "nav-badge", "{pending}" }
+                    span { class: "nav-bar-indicator",
+                        span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
+                        if mime_id == "app/home" && pending > 0 {
+                            super::widgets::Badge { count: Some(pending) }
+                        }
                     }
+                    span { class: "nav-bar-label md-label-medium", "{label}" }
                 }
+            }
+        }
+    }
+}
+
+/// Modal navigation drawer hosting the groups/events tree (PLACE axis) on
+/// compact/medium/expanded. Scrim + spring slide; auto-closes on navigation
+/// (any click inside the tree bubbles to the wrapper), fixing the old
+/// manual-close bug.
+#[component]
+fn NavigationDrawer(open: Signal<bool>) -> Element {
+    rsx! {
+        div {
+            class: if open() { "nav-drawer-scrim open" } else { "nav-drawer-scrim" },
+            onclick: move |_| open.set(false),
+        }
+        aside { class: if open() { "nav-drawer open" } else { "nav-drawer" },
+            div { class: "nav-drawer-header",
+                span { class: "md-title-medium", {t("common.home")} }
+                button {
+                    class: "btn-icon state-layer",
+                    aria_label: t("common.close"),
+                    onclick: move |_| open.set(false),
+                    span { class: "material-icons", "close" }
+                }
+            }
+            div { onclick: move |_| open.set(false),
+                DrawerContent {}
+            }
+        }
+    }
+}
+
+/// M3 top app bar over the content region: a leading menu button (compact, opens
+/// the tree drawer), the breadcrumb trail as the headline, and trailing search +
+/// user menu. The docked search bar expands in place.
+#[component]
+fn TopAppBar(
+    search_mode: Signal<bool>,
+    search_input: Signal<String>,
+    search_results: Signal<Vec<NodeFields>>,
+    open_drawer: Signal<bool>,
+    menu_open: Signal<bool>,
+) -> Element {
+    let size = crate::window_size::WINDOW_SIZE();
+
+    rsx! {
+        header { class: "top-app-bar",
+            if size.is_compact() {
+                button {
+                    class: "btn-icon state-layer",
+                    aria_label: t("common.menu"),
+                    onclick: move |_| open_drawer.set(true),
+                    span { class: "material-icons", "menu" }
+                }
+            }
+            if *search_mode.read() {
+                SearchBar {
+                    input: search_input,
+                    results: search_results,
+                    on_close: move |_| {
+                        search_mode.set(false);
+                        search_input.set(String::new());
+                        search_results.set(vec![]);
+                    },
+                }
+            } else {
+                div { class: "top-app-bar-headline", Breadcrumbs {} }
+                button {
+                    class: "btn-icon state-layer",
+                    aria_label: t("common.search"),
+                    onclick: move |_| search_mode.set(true),
+                    span { class: "material-icons", "search" }
+                }
+                UserMenu { menu_open }
             }
         }
     }
