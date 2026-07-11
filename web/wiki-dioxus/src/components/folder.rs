@@ -450,9 +450,22 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                     if is_file {
                         div { class: "text-field mt-2",
                             label { "{t(\"content.uploadFile\")}" }
-                            input {
-                                r#type: "file",
-                                onchange: on_pick_file,
+                            // Styled picker: a dashed drop-zone wrapping the hidden
+                            // native file input, so it matches the Material UI.
+                            label { class: "file-upload",
+                                input {
+                                    r#type: "file",
+                                    class: "file-upload-input",
+                                    onchange: on_pick_file,
+                                }
+                                span { class: "material-icons", "upload_file" }
+                                span { class: "file-upload-text",
+                                    if file_name.read().is_empty() {
+                                        "{t(\"content.chooseFile\")}"
+                                    } else {
+                                        "{file_name}"
+                                    }
+                                }
                             }
                             if *uploading.read() {
                                 div { class: "stack stack-h mt-1", style: "align-items: center; gap: 8px;",
@@ -460,7 +473,10 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                                     span { class: "body-small text-muted", "{t(\"content.uploadFile\")}\u{2026}" }
                                 }
                             } else if file_id.read().is_some() {
-                                span { class: "body-small text-muted", "\u{2713} {file_name}" }
+                                div { class: "file-upload-done",
+                                    span { class: "material-icons", "check_circle" }
+                                    span { "{file_name}" }
+                                }
                             }
                         }
                     }

@@ -1319,8 +1319,9 @@ fn abbrev_context_name(name: &str) -> String {
         .collect();
 
     match words.len() {
-        // Cap at three characters so the abbreviation fits the avatar circle.
-        1..=3 => words.concat().chars().take(3).collect(),
+        // Two characters sit comfortably in the avatar circle (e.g. "EU", "KM",
+        // "HB"); more than that reads as crammed.
+        1..=3 => words.concat().chars().take(2).collect(),
         _ => String::new(),
     }
 }

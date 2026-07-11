@@ -182,6 +182,7 @@ const EN_JSON: &str = r#"{
         "addAtLeastOneAuthor": "Add at least 1 author",
         "uploadImage": "Upload Image",
         "uploadFile": "Upload File",
+        "chooseFile": "Choose a file",
         "contentNameExists": "Content with this name already exists",
         "imageAlt": "Content image",
         "tableOfContents": "Table of contents"
@@ -470,6 +471,8 @@ const DA_JSON: &str = r#"{
         "addAuthor": "Tilf\u00f8j forfatter",
         "addAtLeastOneAuthor": "Tilf\u00f8j mindst 1 forfatter",
         "imageAlt": "Indholdsbillede",
+        "uploadFile": "Upload fil",
+        "chooseFile": "Vælg en fil",
         "tableOfContents": "Indholdsfortegnelse"
     },
     "layout": {

@@ -142,6 +142,16 @@ fn RecentItem(node: graphql::ChildNodeFields) -> Element {
                     div { class: "list-item-secondary", "{parent.name}" }
                 }
             }
+            // Trailing supporting text (MD3): how long ago it was added, with the
+            // precise timestamp on hover.
+            if let Some(ts) = node.created_at.as_ref() {
+                span {
+                    class: "list-item-trailing",
+                    title: "{super::loader::full_datetime(&ts.0)}",
+                    span { class: "material-icons", "schedule" }
+                    "{super::loader::relative_time(&ts.0)}"
+                }
+            }
         }
     }
 }

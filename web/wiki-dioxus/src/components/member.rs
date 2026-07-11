@@ -237,6 +237,8 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                     div { class: "text-field mt-2",
                         label { "{t(\"invite.importRoster\")}" }
                         input {
+                            id: "roster-xlsx-input",
+                            class: "file-upload-input",
                             r#type: "file",
                             accept: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             onchange: {
@@ -272,6 +274,10 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                     });
                                 }
                             },
+                        }
+                        label { r#for: "roster-xlsx-input", class: "file-upload",
+                            span { class: "material-icons", "table_view" }
+                            span { class: "file-upload-text", "{t(\"content.chooseFile\")}" }
                         }
                     }
                 }
