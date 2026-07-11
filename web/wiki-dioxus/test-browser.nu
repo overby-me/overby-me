@@ -397,6 +397,33 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     let back_home = (wd-execute $session_id 'return [...document.querySelectorAll(".material-icons")].some(function(e){return e.textContent.trim()==="waving_hand"})?"y":"n"')
     if $back_home == "y" { log-ok "navigating back to / shows the welcome"; $p = $p + 1 } else { log-fail "/ did not show the welcome after the editor"; $fl = $fl + 1 }
 
+    # ── Theme colour picker: pick a primary seed, the app re-skins ──────
+    # Open the user menu, pick a non-active primary swatch, and assert the live
+    # --md-sys-color-primary token changes; then Reset reverts it to the brand.
+    wd-execute $session_id 'var b=document.querySelector(".user-menu > button"); if(b) b.click(); return "ok"' | ignore
+    sleep 600ms
+    let cp_before = (wd-execute $session_id 'return getComputedStyle(document.documentElement).getPropertyValue("--md-sys-color-primary").trim()')
+    let cp_click = (wd-execute $session_id 'var p=document.querySelector(".menu-color-section .color-picker"); if(!p) return "nopicker"; var sw=p.querySelectorAll("button.color-swatch"); if(sw.length<2) return "noswatch"; (sw[1].classList.contains("active")?sw[2]:sw[1]).click(); return "ok"')
+    sleep 800ms
+    let cp_after = (wd-execute $session_id 'return getComputedStyle(document.documentElement).getPropertyValue("--md-sys-color-primary").trim()')
+    if $cp_click == "ok" and ($cp_before != $cp_after) and ($cp_after | is-not-empty) {
+        log-ok $"color picker re-skins the app \(--md-sys-color-primary ($cp_before) -> ($cp_after))"; $p = $p + 1
+    } else {
+        log-fail $"color picker did not change the primary token \(click=($cp_click) before=($cp_before) after=($cp_after))"; $fl = $fl + 1
+    }
+    let cp_reset = (wd-execute $session_id 'var r=document.querySelector(".menu-reset-colors"); if(r){r.click(); return "ok"} return "noreset"')
+    sleep 700ms
+    let cp_reverted = (wd-execute $session_id 'return getComputedStyle(document.documentElement).getPropertyValue("--md-sys-color-primary").trim()')
+    if $cp_reset == "ok" and ($cp_reverted == $cp_before) {
+        log-ok "color picker reset reverts to the brand primary"; $p = $p + 1
+    } else {
+        log-fail $"color picker reset did not revert \(reset=($cp_reset) expected=($cp_before) got=($cp_reverted))"; $fl = $fl + 1
+    }
+    # Close the menu via its toggle (it is open here) so the next test opens it
+    # from a known-closed state. A programmatic body click does not dismiss it.
+    wd-execute $session_id 'var b=document.querySelector(".user-menu > button"); if(b) b.click(); return "ok"' | ignore
+    sleep 400ms
+
     # User menu: clicking the avatar opens a dropdown that stays fully within the
     # viewport, and the trigger has no stray border (regression: the primitive
     # drew a rounded square and positioned the popup off-screen).

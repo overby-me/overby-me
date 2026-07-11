@@ -822,6 +822,48 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                             },
                         }
                     }
+                    // Theme colours: pick the M3 primary + accent seeds. Changing
+                    // either regenerates the tonal scheme and re-skins the whole
+                    // app at runtime (see crate::theme::apply_seeds).
+                    div { class: "menu-color-section",
+                        span { class: "menu-color-title", "{t(\"layout.themeColor\")}" }
+                        super::widgets::ColorPicker {
+                            label: t("layout.primaryColor"),
+                            value: crate::theme::effective_primary(),
+                            custom_title: t("layout.customColor"),
+                            swatches: vec![
+                                crate::theme::BRAND_PRIMARY.to_string(),
+                                "#1565C0".to_string(),
+                                "#6750A4".to_string(),
+                                "#00796B".to_string(),
+                                "#C62828".to_string(),
+                                "#EF6C00".to_string(),
+                            ],
+                            on_change: move |hex: String| crate::theme::set_primary_seed(hex),
+                        }
+                        super::widgets::ColorPicker {
+                            label: t("layout.accentColor"),
+                            value: crate::theme::effective_accent(),
+                            custom_title: t("layout.customColor"),
+                            swatches: vec![
+                                crate::theme::BRAND_ACCENT.to_string(),
+                                "#7B1FA2".to_string(),
+                                "#0097A7".to_string(),
+                                "#F9A825".to_string(),
+                                "#2E7D32".to_string(),
+                                "#5D4037".to_string(),
+                            ],
+                            on_change: move |hex: String| crate::theme::set_accent_seed(hex),
+                        }
+                        if crate::theme::seeds_overridden() {
+                            button {
+                                class: "list-item menu-reset-colors",
+                                onclick: move |_| crate::theme::reset_seeds(),
+                                span { class: "material-icons", "restart_alt" }
+                                span { class: "switch-row-label", "{t(\"layout.resetColors\")}" }
+                            }
+                        }
+                    }
                     // Language toggle
                     button {
                         class: "list-item",

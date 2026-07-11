@@ -1005,6 +1005,105 @@ select:focus {
     min-width: 0;
 }
 
+/* Theme-colour picker in the user menu (the reusable ColorPicker widget). */
+.menu-color-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 16px 6px;
+}
+
+.menu-color-title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--md-on-surface-variant);
+}
+
+.color-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.color-picker-label {
+    font-size: 0.8rem;
+    color: var(--md-on-surface-variant);
+}
+
+.color-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.color-swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    padding: 0;
+    cursor: pointer;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* Subtle ring so light swatches read against the menu surface. */
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+    transition: transform 120ms ease, border-color 120ms ease;
+}
+
+.color-swatch:hover {
+    transform: scale(1.12);
+}
+
+.color-swatch.active {
+    border-color: var(--md-on-surface);
+}
+
+.color-swatch .material-icons {
+    font-size: 15px;
+    color: #fff;
+    /* A dark halo keeps the check visible on light swatches too. */
+    text-shadow: 0 0 2px rgb(0 0 0 / 55%);
+}
+
+/* The "any colour" chip: a rainbow that opens the native OS picker. */
+.color-swatch-custom {
+    background: conic-gradient(
+        from 0deg,
+        #f44336,
+        #ff9800,
+        #ffeb3b,
+        #4caf50,
+        #2196f3,
+        #9c27b0,
+        #f44336
+    );
+    overflow: hidden;
+}
+
+.color-swatch-custom .material-icons {
+    text-shadow: 0 0 3px rgb(0 0 0 / 70%);
+}
+
+.color-input-native {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+}
+
+.menu-reset-colors {
+    gap: 8px;
+    color: var(--md-on-surface-variant);
+    font-size: 0.85rem;
+}
+
 .list-item.selected {
     background-color: var(--md-primary-container);
     /* Left accent bar marking the current node in the tree. */

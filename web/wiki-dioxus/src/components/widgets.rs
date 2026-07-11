@@ -29,6 +29,58 @@ pub fn Chip(icon: Option<String>, label: String, title: Option<String>) -> Eleme
     }
 }
 
+/// A reusable Material Design 3 colour picker: a row of preset swatches plus a
+/// native custom-colour input. Emits the chosen `#rrggbb` hex through
+/// `on_change`; `value` is the active colour (it highlights a matching swatch).
+/// App-agnostic: every label is passed in, so it carries no theme/i18n knowledge.
+#[component]
+pub fn ColorPicker(
+    label: String,
+    value: String,
+    swatches: Vec<String>,
+    on_change: EventHandler<String>,
+    custom_title: Option<String>,
+) -> Element {
+    rsx! {
+        div { class: "color-picker",
+            span { class: "color-picker-label", "{label}" }
+            div { class: "color-swatches",
+                for swatch in swatches.iter().cloned() {
+                    {
+                        let is_active = swatch.eq_ignore_ascii_case(&value);
+                        let picked = swatch.clone();
+                        rsx! {
+                            button {
+                                key: "{swatch}",
+                                r#type: "button",
+                                class: if is_active { "color-swatch active" } else { "color-swatch" },
+                                style: "background-color: {swatch};",
+                                title: "{swatch}",
+                                onclick: move |_| on_change.call(picked.clone()),
+                                if is_active {
+                                    span { class: "material-icons", "check" }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Custom colour via the native OS picker (the input fills the chip).
+                label {
+                    class: "color-swatch color-swatch-custom",
+                    title: custom_title.clone().unwrap_or_default(),
+                    span { class: "material-icons", "colorize" }
+                    input {
+                        r#type: "color",
+                        class: "color-input-native",
+                        value: "{value}",
+                        oninput: move |e| on_change.call(e.value()),
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// An image that opens full-screen on click (#114). Click the overlay (or press
 /// its close affordance) to dismiss. Keeps its own open/closed state.
 #[component]

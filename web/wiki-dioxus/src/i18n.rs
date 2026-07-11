@@ -208,7 +208,12 @@ const EN_JSON: &str = r#"{
         "light": "Light",
         "userMenu": "User menu",
         "newestContent": "Newest content",
-        "darkMode": "Dark mode"
+        "darkMode": "Dark mode",
+        "themeColor": "Theme color",
+        "primaryColor": "Primary",
+        "accentColor": "Accent",
+        "customColor": "Custom color",
+        "resetColors": "Reset to default"
     },
     "error": {
         "somethingWentWrong": "Something went wrong!",
@@ -495,7 +500,12 @@ const DA_JSON: &str = r#"{
         "light": "Lys",
         "userMenu": "Brugermenu",
         "newestContent": "Nyeste indhold",
-        "darkMode": "Mørk tilstand"
+        "darkMode": "Mørk tilstand",
+        "themeColor": "Temafarve",
+        "primaryColor": "Primær",
+        "accentColor": "Accent",
+        "customColor": "Egen farve",
+        "resetColors": "Nulstil til standard"
     },
     "error": {
         "somethingWentWrong": "Noget gik galt!",

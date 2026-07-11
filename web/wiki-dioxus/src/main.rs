@@ -127,6 +127,8 @@ fn App() -> Element {
         // Load the persisted theme, then apply it to the document element.
         theme::load_theme();
         theme::apply_theme(&theme::THEME.read());
+        // Load any user-picked M3 seed colours and inject the override scheme.
+        theme::load_seeds();
 
         // Nudge the token-refresh loop whenever the tab becomes visible again:
         // a backgrounded tab throttles timers, so the access token can lapse
