@@ -95,12 +95,13 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "coop.hypha" => "hypha.avif",
         "app.lanyards" => "lanyards.avif",
         "com.semble" => "semble.avif",
+        "blue.flashes" => "flashes.avif",
         // Known apps with no fetchable logo (dead/parked/unreachable domain,
         // Cloudflare-locked, banner-only og:image, or same-name GitHub is an
         // unrelated person) — they fall back to a generated badge. Add here if a
         // logo turns up: skytube, com.minomobi (mmopaint), xyz.atmomo,
         // blue.protopro, my.skylights, app.loghz, africa.kandake, ing.dasl,
-        // space.polypod.
+        // space.polypod, club.feeed.
         _ => return None,
     })
 }
@@ -147,9 +148,8 @@ fn category_for(prefix: &str) -> &'static str {
     match prefix {
         // Social & messaging.
         "app.bsky" | "app.pinkleap" | "so.sprk" | "app.shadowsky" | "com.shadowsky"
-        | "com.skymeetsblue" | "at.youandme" | "social.twinkl" | "space.roomy" | "social.mu" => {
-            "Connect"
-        }
+        | "com.skymeetsblue" | "at.youandme" | "social.twinkl" | "space.roomy" | "social.mu"
+        | "blue.flashes" => "Connect",
         // Writing, code, publishing, tools.
         "pub.leaflet" | "sh.tangled" | "dev.npmx" | "com.vibe-coded" | "site.standard"
         | "at.marque" | "com.minomobi" | "blue.protopro" | "blog.pckt" | "pub.chive"
@@ -158,7 +158,7 @@ fn category_for(prefix: &str) -> &'static str {
         "app.rocksky" | "fm.teal" | "place.stream" | "app.skytube" | "app.skyreader"
         | "social.popfeed" | "net.anisota" | "actor.rpg" | "equipment.rpg" | "farm.smol"
         | "blue.checkmate" | "blue.2048" | "xyz.atmomo" | "network.cosmik" | "africa.kandake"
-        | "com.semble" | "my.skylights" => "Immerse",
+        | "com.semble" | "my.skylights" | "club.feeed" => "Immerse",
         // Events, community, links.
         "events.smokesignal" | "link.woosh" | "com.atprotofans" | "blue.linkat"
         | "org.atmosphereconf" => "Gather",

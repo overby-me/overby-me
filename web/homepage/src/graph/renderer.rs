@@ -167,7 +167,7 @@ impl Renderer {
         let quad_index_buffer = create_buffer(&gl, GL::ELEMENT_ARRAY_BUFFER, &quad_indices)?;
 
         // Create sphere geometry
-        let sphere_mesh = create_sphere_mesh(&gl, 15.0, 16, 12)?;
+        let sphere_mesh = create_sphere_mesh(&gl, 15.0, 48, 32)?;
 
         // Create line buffer (dynamic, will be updated each frame)
         let line_buffer = gl.create_buffer().ok_or("failed to create line buffer")?;
