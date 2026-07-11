@@ -1916,6 +1916,48 @@ h6,
 	overflow-x: auto;
 }
 
+/* Document headings map to the M3 type scale (was default browser sizing), so
+   rendered content reads on the same hierarchy as the rest of the app. */
+.slate-content h1 {
+	font-size: var(--md-sys-typescale-headline-medium-size);
+	line-height: var(--md-sys-typescale-headline-medium-line);
+	font-weight: 500;
+	margin: 1.5rem 0 0.75rem;
+}
+.slate-content h2 {
+	font-size: var(--md-sys-typescale-headline-small-size);
+	line-height: var(--md-sys-typescale-headline-small-line);
+	font-weight: 500;
+	margin: 1.25rem 0 0.5rem;
+}
+.slate-content h3 {
+	font-size: var(--md-sys-typescale-title-large-size);
+	line-height: var(--md-sys-typescale-title-large-line);
+	font-weight: 500;
+	margin: 1rem 0 0.5rem;
+}
+.slate-content h4 {
+	font-size: var(--md-sys-typescale-title-medium-size);
+	line-height: var(--md-sys-typescale-title-medium-line);
+	font-weight: 500;
+	margin: 0.75rem 0 0.25rem;
+}
+.slate-content h5 {
+	font-size: var(--md-sys-typescale-title-small-size);
+	line-height: var(--md-sys-typescale-title-small-line);
+	font-weight: 500;
+	margin: 0.5rem 0 0.25rem;
+}
+.slate-content h6 {
+	font-size: var(--md-sys-typescale-label-large-size);
+	line-height: var(--md-sys-typescale-label-large-line);
+	font-weight: 600;
+	letter-spacing: var(--md-sys-typescale-label-large-tracking);
+	text-transform: uppercase;
+	margin: 0.5rem 0 0.25rem;
+	color: var(--md-on-surface-variant);
+}
+
 /* Soft line breaks (#92): a "\n" text leaf inside a paragraph must render as a
  * line break rather than collapse to a space. Preserve newlines but keep wrap. */
 .slate-content p {
