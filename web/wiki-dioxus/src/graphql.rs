@@ -1657,6 +1657,66 @@ pub async fn query_poll_votes(
         .collect())
 }
 
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "NodesWhereVariables"
+)]
+pub struct NodesCountQuery {
+    #[arguments(where: $where_clause)]
+    pub nodes_aggregate: NodesAggregate,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "nodes_aggregate"
+)]
+pub struct NodesAggregate {
+    pub aggregate: Option<NodesAggregateFields>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "nodes_aggregate_fields"
+)]
+pub struct NodesAggregateFields {
+    pub count: i32,
+}
+
+/// Count the nodes matching a filter via `nodes_aggregate` (the §1 aggregate the
+/// poll-list vote badge and other counts build on).
+pub async fn count_nodes(
+    access_token: Option<&str>,
+    where_clause: NodesBoolExp,
+) -> Result<usize, String> {
+    use cynic::QueryBuilder;
+    let op = NodesCountQuery::build(NodesWhereVariables { where_clause });
+    let r = execute(access_token, op).await?;
+    Ok(r.nodes_aggregate
+        .aggregate
+        .map(|a| a.count.max(0) as usize)
+        .unwrap_or(0))
+}
+
+/// The number of votes cast on a poll (its visible `vote/vote` children).
+pub async fn poll_vote_count(access_token: Option<&str>, poll_id: &str) -> Result<usize, String> {
+    let where_clause = NodesBoolExp {
+        parent_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(poll_id.to_string())),
+            is_null: None,
+        }),
+        mime_id: Some(StringComparisonExp {
+            eq: Some("vote/vote".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    count_nodes(access_token, where_clause).await
+}
+
 /// Cast a vote on a poll: insert a `vote/vote` child whose data is the array of
 /// selected option indices (matching the React VoteApp).
 pub async fn cast_vote(

@@ -166,6 +166,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     div { class: "list-item-text",
                                         div { class: "list-item-primary", "{poll.name}" }
                                     }
+                                    PollVoteBadge { poll_id: poll.id.0.clone() }
                                 }
                             }
                         }
@@ -423,6 +424,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     div { class: "list-item-text",
                                         div { class: "list-item-primary", "{poll.name}" }
                                     }
+                                    PollVoteBadge { poll_id: poll.id.0.clone() }
                                 }
                             }
                         }
@@ -525,6 +527,25 @@ fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// A small vote-count badge for a poll row: the number of `vote/vote` children
+/// the viewer can see, fetched via the nodes aggregate.
+#[component]
+fn PollVoteBadge(poll_id: String) -> Element {
+    let session = use_session();
+    let token = session.read().access_token.clone();
+    let count = crate::use_data_resource!(|(poll_id, token)| async move {
+        graphql::poll_vote_count(token.as_deref(), &poll_id)
+            .await
+            .unwrap_or(0)
+    });
+    let n = (*count.read()).unwrap_or(0);
+    rsx! {
+        if n > 0 {
+            span { class: "count-badge", title: "{t(\"vote.voteCount\")}", "{n}" }
         }
     }
 }
