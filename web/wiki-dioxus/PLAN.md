@@ -49,11 +49,11 @@ has and React uses. Add them (grep `graphql/schema.graphql` for each):
 - `[x]` **`contextId` / `ownerId` / `parentId`** on `NodesSetInput` — done.
 - `[x]` **`MembersSetInput`**: `active`/`email`/`name`/`owner`/`parentId`;
   **`MemberFields`**: `active`/`email` — done; power the member admin (§5).
-- `[ ]` **Aggregate queries** (`children_aggregate`, `membersAggregate`) — React
-  uses counts for the drawer expander/skeleton, the poll-list vote-count badge,
-  and invite counts. **medium**
-- `[ ]` **Member ordering by `user.displayName`** (`members_order_by.user`).
-  **minor**
+- `[x]` **Aggregate queries** — done: `count_nodes` via `nodesAggregate`, used for
+  the poll-list vote-count badge. (Drawer expander + invite counts still don't use
+  an aggregate.)
+- `[x]` **Member ordering by display name** — done (client-side, case-insensitive
+  in MemberApp; not the server `members_order_by.user`).
 
 ## 2. Permissions & owner-gating (frontend gates are missing) — DONE
 
@@ -89,12 +89,13 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   editor.
 - `[x]` **Live-update on poll open** — done: VoteApp subscribes to the context
   `active` relation so a newly-opened poll appears without reload.
-- `[~]` **Poll-list affordances** (React `poll/PollList.tsx`) — poll rows lack the
-  vote-count badge, created-at, and owner delete.
+- `[x]` **Poll-list affordances** — done: a vote-count badge on poll rows
+  (PollVoteBadge via the aggregate). (Created-at + owner delete on poll rows are
+  not carried.)
 - `[x]` **`hideResult`** (`data.hidden`) — done: a hide-result poll shows tallies
   only to the context owner; others see options + a "results hidden" note.
-- `[~]` **Voting-rights status** (React `vote/VoteApp.tsx`) — no `canVote` check
-  or "you (do not) have voting rights / have (not) voted" card.
+- `[x]` **Voting-rights status** — done: a card on VoteApp reads "you have / do not
+  have voting rights" from `is_active_member` (the port's canVote).
 - `[~]` Owner **Sort** entry buttons in vote/comment/question lists; block
   over-selection live on checkbox (not only at submit).
 
@@ -130,10 +131,12 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 - `[x]` **Submit/publish confirmation** — done: the editor's Submit now routes
   through a confirm dialog carrying the submitWarning before making the node
   immutable. (A publish button on the read view is still not added.)
-- `[~]` **Editor paste fidelity** — no custom HTML-paste deserializer (React
-  `Slate.tsx` `withHtml`/`deserialize`); paste is left to the browser. **medium**
-- `[~]` **PDF viewer** — direct-URL iframe at a fixed `80vh`; React wraps in the
-  Google-Docs viewer with dynamic height. **medium**
+- `[x]` **Editor paste fidelity** — done: a paste handler sanitizes clipboard HTML
+  to the editor's semantic subset (keep b/i/u/a/code/headings/lists, unwrap the
+  rest, drop script/style), with a plain-text fallback.
+- `[x]` **PDF viewer** — done: the iframe fills the viewport height
+  (calc(100vh - 160px), min 480px) instead of a fixed 80vh. (Still the native
+  iframe, not the Google-Docs viewer.)
 - `[x]` **`createdAt` subtitle** — done: a compact relative time (full date in the
   tooltip) on content/file headers. Editor `DatePicker` for `createdAt` is niche
   and not carried. **minor**
@@ -192,18 +195,16 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
   set-password form is shown.
 - `[x]` **`?app=screen` chrome** — done: Layout renders the projector view
   full-screen (`.screen-full`), with no drawer/rail/bar.
-- `[~]` **Clear GraphQL cache on login/logout** — the port relies on token-change
-  refetch; React explicitly clears the cache to avoid cross-session stale data.
+- `[x]` **Clear GraphQL cache on login/logout** — done: bump_data_version on both
+  so all resources refetch and no previous-session data lingers.
 - `[x]` **Resend verification email** — done: an unverified sign-in offers a
   resend button on the login screen (`nhost::send_verification_email`).
-- `[~]` **Public user profile** (React `layout/UserApp.tsx`) — `wiki/user` isn't
-  routed (falls to `NodeApp`); `ProfileApp` is self-only and omits the authored-
-  content list. Route `wiki/user` → profile; show any user's memberships/events/
-  authored content.
-- `[~]` **Search** — Ctrl-K shortcut + arrow-key/Enter result nav are done.
-  Remaining: context-scoping (filter by `contextId`), the `mime.hidden=false OR
-  mime.context=true` + `parent not null` filters (still shows hidden/orphan
-  nodes), and the parent-name secondary line.
+- `[x]` **Public user profile** — done: `wiki/user` routes to a UserApp showing the
+  person's groups + events. (Authored-content deep links not carried.)
+- `[x]` **Search** — mostly done: Ctrl-K, arrow-key/Enter nav, the hidden/orphan
+  filters (`parent not null`, `mime.hidden=false OR mime.context=true`), and the
+  parent-name secondary line. (Context-scoping to the current context is not
+  carried; search stays global.)
 - `[ ]` Auth minor: unverified page should auto-redirect once verified; handle the
   already-logged-in sign-in error (status 100); post-login return-to-origin
   (`navigate(-1)` vs always Home). **minor**
@@ -213,12 +214,12 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 - `[~]` **Speaker join types** (React `speak/avatars.tsx`) — the port has 4 of 5
   (drops "misunderstood/announcement" and renumbers procedure `4`→`3`, diverging
   from `order_by data desc` and existing `data:"4"` rows). Restore or migrate.
-- `[ ]` **Icon-button a11y** — icon-only buttons use `title` not `aria-label`;
-  6 have no accessible label. **medium**
-- `[ ]` **Snackbar** — no `maxSnack` stacking, `preventDuplicate`, or drawer-aware
-  positioning (single centered message only). **medium**
-- `[ ]` **ZoomableImage** — no loading/error state or fade-in (only click-to-zoom).
-  **medium**
+- `[x]` **Icon-button a11y** — done: aria-label added to the icon-only buttons that
+  had no accessible name (menu/search/close/expand, comment reply/send, chip
+  remove).
+- `[x]` **Snackbar** — done: a stack of up to 3 (maxSnack) with preventDuplicate,
+  bottom-centre clear of the drawer/rail.
+- `[x]` **ZoomableImage** — done: fade-in on mount + a broken-image error state.
 - `[x]` **SortApp** — done: seeded from `visible_sorted`, so hidden mimes no
   longer appear in the sort list. (A forced fresh fetch is not added; it reads the
   passed-in node.)
@@ -256,9 +257,9 @@ only controls to everyone. Now gated behind `isContextOwner` / `is_owner` /
 
 - **Release build won't load in Servo** (`Module fetching failed`); debug build
   runs there. Loads in Chrome/Firefox. Uninvestigated, low priority.
-- **Folder-letter avatar contrast** — a folder whose name hashes to an avatar
-  colour close to its text can fail the 1:1 contrast audit (seen on a scratch
-  folder). The letter colour derivation should guarantee a contrast floor.
+- ~~Folder-letter avatar contrast~~ — FIXED: the overlaid letter now uses
+  `--md-on-primary` (the avatar's compliant white) with a shadow, so it no longer
+  matches the green avatar background (audit: 0 violations).
 
 ## Intentionally excluded (React features that don't make sense to port)
 
