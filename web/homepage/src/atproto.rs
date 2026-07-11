@@ -73,7 +73,7 @@ fn bundled_icon(prefix: &str) -> Option<&'static str> {
         "link.woosh" => "woosh.avif",
         "com.vibe-coded" => "vibecoded.avif",
         "place.atwork" => "atwork.avif",
-        "app.shadowsky" | "com.shadowsky" => "shadowsky.avif",
+        "com.shadowsky" => "shadowsky.avif",
         "blue.pronouns" => "pronouns.avif",
         "farm.smol" => "smol.avif",
         "app.sidetrail" => "sidetrail.avif",
@@ -138,6 +138,9 @@ fn canonical_prefix(prefix: &str) -> &str {
         "social.pinksky" => "app.pinkleap",
         // The smol ecosystem spans several domains (games, life tools, quests).
         "life.smol" | "quest.smol" => "farm.smol",
+        // Shadowsky moved to shadowsky.com; `com.shadowsky` is the current
+        // lexicon, `app.shadowsky` the old one (dead shadowsky.app domain).
+        "app.shadowsky" => "com.shadowsky",
         other => other,
     }
 }
@@ -147,8 +150,8 @@ fn canonical_prefix(prefix: &str) -> &str {
 fn category_for(prefix: &str) -> &'static str {
     match prefix {
         // Social & messaging.
-        "app.bsky" | "so.sprk" | "app.shadowsky" | "com.shadowsky" | "space.roomy"
-        | "social.twinkl" | "social.mu" | "at.youandme" | "com.skymeetsblue" => "Social",
+        "app.bsky" | "so.sprk" | "com.shadowsky" | "space.roomy" | "social.twinkl"
+        | "social.mu" | "at.youandme" | "com.skymeetsblue" => "Social",
         // Photo & video sharing.
         "app.pinkleap" | "blue.flashes" | "social.grain" => "Moments",
         // Games.
@@ -891,6 +894,25 @@ mod tests {
         assert_eq!(p[0].domain, "grain.social");
         assert_eq!(p[0].category, "Moments");
         assert_eq!(p[0].profile_url, "https://grain.social/profile/overby.me");
+    }
+
+    #[test]
+    fn shadowsky_uses_the_current_com_domain() {
+        // The old app.shadowsky lexicon (dead shadowsky.app) canonicalizes into
+        // com.shadowsky, so the single node lands on the current shadowsky.com.
+        let p = detect_platforms(
+            &[
+                "app.shadowsky.preferences".to_string(),
+                "com.shadowsky.preferences".to_string(),
+            ],
+            "overby.me",
+            "did:plc:abc",
+        );
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].name, "Shadowsky");
+        assert_eq!(p[0].domain, "shadowsky.com");
+        assert_eq!(p[0].profile_url, "https://shadowsky.com");
+        assert_eq!(p[0].icon, Icon::Bundled("shadowsky.avif"));
     }
 
     #[test]
