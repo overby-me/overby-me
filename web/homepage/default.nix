@@ -65,6 +65,10 @@
       installPhase = ''
         runHook preInstall
         cp -r target/dx/homepage/release/web/public $out
+        # dx drops files from assets/ it doesn't recognize, so the host's
+        # `_redirects` (SPA fallback `/* /index.html 200` + matrix well-knowns)
+        # never reaches the bundle. Copy it to the served root ourselves.
+        cp assets/_redirects $out/_redirects
         runHook postInstall
       '';
 
