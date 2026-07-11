@@ -1343,18 +1343,42 @@ select:focus {
 }
 
 .list-item {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: 12px;
 	padding: 8px 16px;
 	cursor: pointer;
-	transition: background-color 0.15s;
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-medium);
 	margin: 2px 8px;
 }
 
-.list-item:hover {
-	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+/* M3 state layer (hover 8% / focus 10% / pressed 10% of the on-surface colour),
+   replacing the ad-hoc color-mix hover. The overlay paints behind the row's
+   content (avatar, text), so they stay legible. */
+.list-item::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background-color: var(--md-on-surface);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+.list-item:hover::before {
+	opacity: var(--md-sys-state-hover-opacity);
+}
+.list-item:focus-visible::before {
+	opacity: var(--md-sys-state-focus-opacity);
+}
+.list-item:active::before {
+	opacity: var(--md-sys-state-pressed-opacity);
+}
+/* Selected rows tint with their own on-colour so the layer reads correctly. */
+.list-item.selected::before {
+	background-color: var(--md-on-primary-container);
 }
 
 /* Dark-mode toggle row in the user menu: the label fills the row so the
