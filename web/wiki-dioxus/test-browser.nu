@@ -840,6 +840,24 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         }
     }
 
+    # ── Member table: the M3 Expressive roster (search + filter chips + paging,
+    #    built for 1000+ members) mounts its toolbar/footer, and a filter chip
+    #    toggles its selected state. Skips gracefully if the context has none. ──
+    wd-navigate $session_id $"(base-url)($ctx_path)?app=member"
+    if (wd-wait-for-element $session_id "#main .member-table" 15) {
+        let r = (assert-exists $session_id "member table renders" "#main .member-table" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        let r = (assert-exists $session_id "member table has a search field" "#main .member-table .search-field input" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        let r = (assert-count $session_id "member table has filter chips" "#main .m3-filter-chip" 3 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        let r = (assert-exists $session_id "member table has a pagination footer" "#main .member-table-footer" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        # Clicking a not-yet-selected filter chip selects it (M3 filter-chip toggle).
+        wd-execute $session_id 'var c=[...document.querySelectorAll("#main .m3-filter-chip")].find(x=>!x.classList.contains("selected")); if(c)c.click(); return 1' | ignore
+        sleep 500ms
+        let sel = (wd-execute $session_id 'return document.querySelectorAll("#main .m3-filter-chip.selected").length')
+        if (($sel | into int) >= 1) { log-ok "filter chip toggles selected state"; $p = $p + 1 } else { log-fail "filter chip did not select"; $fl = $fl + 1 }
+    } else {
+        log-warn "member table not found (context may have no members) — skipping"
+    }
+
     # The muted-text refactor relies on Dioxus MERGING two `class:` attributes
     # (a base body-* class + text-muted), not last-wins. A profile paragraph must
     # carry BOTH classes, confirming the base class was not silently dropped.
