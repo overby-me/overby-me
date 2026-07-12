@@ -1583,18 +1583,15 @@ select:focus {
 	gap: 4px;
 }
 
-/* M3 adaptive supporting-pane / list-detail scaffold (widgets::SupportingPane-
-   Layout): one column on compact/medium, ~2:1 side-by-side on large+. */
+/* M3 supporting-pane scaffold (widgets::SupportingPaneLayout): the primary pane
+   then the supporting pane, stacked in one column. A side-by-side split is too
+   cramped inside the A4-capped body, so the supporting content simply follows
+   the primary. */
 .m3-supporting-pane {
 	display: grid;
 	grid-template-columns: 1fr;
 	gap: var(--md-sys-pane-spacer);
 	align-items: start;
-}
-@media (min-width: 1200px) {
-	.m3-supporting-pane {
-		grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-	}
 }
 .m3-pane-primary,
 .m3-pane-supporting {
@@ -2231,14 +2228,10 @@ h6,
 	}
 }
 
+/* Single column: within the A4-capped body a 2:1 split is too cramped, so cards
+   stack in one column (the sidebar content follows the main column). */
 .grid-3 {
 	grid-template-columns: 1fr;
-}
-
-@media (min-width: 900px) {
-	.grid-3 {
-		grid-template-columns: 2fr 1fr;
-	}
 }
 
 /* Stack */

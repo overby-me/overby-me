@@ -94,51 +94,9 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
 
     rsx! {
         super::widgets::SupportingPaneLayout {
-            // Primary pane: the file itself (the focus).
+            // Primary pane: the file's identity header above the file itself, so the
+            // title / date / tools sit atop the content rather than below it.
             primary: rsx! {
-                div { class: "card",
-                    div { class: "file-viewer",
-                        if file_url.is_empty() {
-                            p { class: "body-medium", "{t(\"common.noContent\")}" }
-                        } else if file_mime.starts_with("image/") {
-                            super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
-                        } else if file_mime.starts_with("video/") {
-                            video {
-                                controls: true,
-                                style: "width: 100%; max-height: 70vh;",
-                                src: "{file_url}",
-                            }
-                        } else if file_mime.starts_with("audio/") {
-                            audio { controls: true, style: "width: 100%;", src: "{file_url}" }
-                        } else if file_mime == "application/pdf" {
-                            iframe { src: "{file_url}", title: "{name}" }
-                        } else if is_office_mime(file_mime) {
-                            // Preview Word/Excel/PowerPoint via Microsoft's hosted
-                            // viewer, which fetches the file URL server-side (mirrors
-                            // the old wiki). The whole tokenised URL is percent-encoded.
-                            {
-                                let encoded = String::from(&js_sys::encode_uri_component(&file_url));
-                                rsx! {
-                                    iframe {
-                                        src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
-                                        title: "{name}",
-                                    }
-                                }
-                            }
-                        } else {
-                            a {
-                                href: "{file_url}",
-                                target: "_blank",
-                                class: "btn btn-outlined",
-                                span { class: "material-icons", "download" }
-                                " {t(\"common.download\")}"
-                            }
-                        }
-                    }
-                }
-            },
-            // Supporting pane: metadata, owner actions, and the discussion.
-            supporting: rsx! {
                 div { class: "card",
                     div { class: "card-header",
                         div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
@@ -155,7 +113,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                             }
                         }
                         div { class: "flex-grow" }
-                        // File actions moved into the M3 tools sheet.
+                        // File actions in the M3 tools sheet.
                         if !file_url.is_empty() || (can_manage && !segments.is_empty()) {
                             super::widgets::ToolSheet {
                                 title: t("common.tools"),
@@ -212,7 +170,48 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                             }
                         }
                     }
+                    div { class: "file-viewer",
+                        if file_url.is_empty() {
+                            p { class: "body-medium", "{t(\"common.noContent\")}" }
+                        } else if file_mime.starts_with("image/") {
+                            super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
+                        } else if file_mime.starts_with("video/") {
+                            video {
+                                controls: true,
+                                style: "width: 100%; max-height: 70vh;",
+                                src: "{file_url}",
+                            }
+                        } else if file_mime.starts_with("audio/") {
+                            audio { controls: true, style: "width: 100%;", src: "{file_url}" }
+                        } else if file_mime == "application/pdf" {
+                            iframe { src: "{file_url}", title: "{name}" }
+                        } else if is_office_mime(file_mime) {
+                            // Preview Word/Excel/PowerPoint via Microsoft's hosted
+                            // viewer, which fetches the file URL server-side (mirrors
+                            // the old wiki). The whole tokenised URL is percent-encoded.
+                            {
+                                let encoded = String::from(&js_sys::encode_uri_component(&file_url));
+                                rsx! {
+                                    iframe {
+                                        src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
+                                        title: "{name}",
+                                    }
+                                }
+                            }
+                        } else {
+                            a {
+                                href: "{file_url}",
+                                target: "_blank",
+                                class: "btn btn-outlined",
+                                span { class: "material-icons", "download" }
+                                " {t(\"common.download\")}"
+                            }
+                        }
+                    }
                 }
+            },
+            // Supporting pane: the discussion.
+            supporting: rsx! {
                 super::comments::CommentSection {
                     node_id: node_id.clone(),
                     context_id: context_id.clone(),
