@@ -145,8 +145,24 @@
 	color: var(--md-sys-color-on-error);
 	font-size: var(--md-sys-typescale-label-small-size);
 	line-height: 1;
-	font-weight: 600;
+	font-weight: 700;
 	pointer-events: none;
+	/* EXPERIMENT (expressive badge): an M3 cutout ring in the surface colour plus
+	   a springy pop-in when it appears. */
+	box-shadow: 0 0 0 2px var(--md-surface-container);
+	animation: md-badge-pop var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
+}
+@keyframes md-badge-pop {
+	0% {
+		transform: scale(0);
+	}
+	60% {
+		transform: scale(1.25);
+	}
+	100% {
+		transform: scale(1);
+	}
 }
 .md-badge-dot {
 	top: -2px;
