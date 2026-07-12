@@ -27,6 +27,14 @@ fn pointer_client_xy(evt: &PointerEvent) -> (f32, f32) {
     (coords.x as f32, coords.y as f32)
 }
 
+/// Screen-space distance between the first two active pointers. Callers must
+/// ensure at least two pointers are present.
+fn pinch_distance(pointers: &[(i32, f32, f32)]) -> f32 {
+    let a = pointers[0];
+    let b = pointers[1];
+    (a.1 - b.1).hypot(a.2 - b.2)
+}
+
 fn wheel_delta_y(evt: &web_sys::WheelEvent) -> f32 {
     let dy = evt.delta_y() as f32;
     match evt.delta_mode() {
@@ -126,6 +134,8 @@ pub fn Graph(data: GraphData) -> Element {
                 drag_moved: false,
                 press_x: 0.0,
                 press_y: 0.0,
+                active_pointers: Vec::new(),
+                pinch_prev_dist: None,
             }));
 
             state.set(Some(Rc::clone(&gs)));
@@ -162,8 +172,23 @@ pub fn Graph(data: GraphData) -> Element {
 
     let onpointerdown = move |evt: PointerEvent| {
         let (x, y) = pointer_client_xy(&evt);
+        let id = evt.data().pointer_id();
         if let Some(ref gs) = *state.read() {
             let mut gs = gs.borrow_mut();
+
+            // Track this pointer. A second simultaneous finger starts a pinch:
+            // cancel any single-pointer grab/orbit and record the finger gap.
+            gs.active_pointers.retain(|p| p.0 != id);
+            gs.active_pointers.push((id, x, y));
+            if gs.active_pointers.len() >= 2 {
+                if let Some(idx) = gs.dragging_node.take() {
+                    gs.simulation.unpin(idx);
+                    gs.simulation.set_alpha_target(0.0);
+                }
+                gs.camera.on_mouse_up();
+                gs.pinch_prev_dist = Some(pinch_distance(&gs.active_pointers));
+                return;
+            }
 
             // Grab a node if one is under the cursor; otherwise orbit the camera.
             let view = gs.camera.view_matrix();
@@ -199,8 +224,32 @@ pub fn Graph(data: GraphData) -> Element {
     let onpointermove = {
         move |evt: PointerEvent| {
             let (x, y) = pointer_client_xy(&evt);
+            let id = evt.data().pointer_id();
             if let Some(ref gs) = *state.read() {
                 let mut gs_mut = gs.borrow_mut();
+
+                // Keep this pointer's tracked position current.
+                for p in gs_mut.active_pointers.iter_mut() {
+                    if p.0 == id {
+                        p.1 = x;
+                        p.2 = y;
+                    }
+                }
+
+                // Two fingers down: pinch-zoom by the change in their gap.
+                if gs_mut.active_pointers.len() >= 2 {
+                    let dist = pinch_distance(&gs_mut.active_pointers);
+                    if let Some(prev) = gs_mut.pinch_prev_dist
+                        && prev > 0.0
+                        && dist > 0.0
+                    {
+                        // Fingers apart (gap grows) -> zoom in (distance shrinks).
+                        gs_mut.target_distance =
+                            (gs_mut.target_distance * prev / dist).clamp(50.0, 2000.0);
+                    }
+                    gs_mut.pinch_prev_dist = Some(dist);
+                    return;
+                }
 
                 // If a node is grabbed, drag it in the plane facing the camera
                 // that passes through its grab position (constant depth).
@@ -277,9 +326,26 @@ pub fn Graph(data: GraphData) -> Element {
         }
     };
 
-    let onpointerup = move |_evt: PointerEvent| {
+    let onpointerup = move |evt: PointerEvent| {
+        let ptr_id = evt.data().pointer_id();
         if let Some(ref gs) = *state.read() {
             let mut gs = gs.borrow_mut();
+            gs.active_pointers.retain(|p| p.0 != ptr_id);
+
+            // Still two or more fingers: keep pinching (re-baseline the gap).
+            if gs.active_pointers.len() >= 2 {
+                gs.pinch_prev_dist = Some(pinch_distance(&gs.active_pointers));
+                return;
+            }
+            // A pinch just ended: resume orbit from a remaining finger (if any),
+            // and never treat the lift as a click.
+            if gs.pinch_prev_dist.take().is_some() {
+                if let Some(&(_, rx, ry)) = gs.active_pointers.first() {
+                    gs.camera.on_mouse_down(rx, ry);
+                }
+                return;
+            }
+
             if let Some(idx) = gs.dragging_node.take() {
                 // Release the node and let the reheated layout absorb it.
                 gs.simulation.unpin(idx);
@@ -310,9 +376,23 @@ pub fn Graph(data: GraphData) -> Element {
 
     // A cancelled pointer (e.g. the browser reclaims a touch gesture) releases
     // whatever was grabbed without treating it as a click.
-    let onpointercancel = move |_evt: PointerEvent| {
+    let onpointercancel = move |evt: PointerEvent| {
+        let ptr_id = evt.data().pointer_id();
         if let Some(ref gs) = *state.read() {
             let mut gs = gs.borrow_mut();
+            gs.active_pointers.retain(|p| p.0 != ptr_id);
+
+            if gs.active_pointers.len() >= 2 {
+                gs.pinch_prev_dist = Some(pinch_distance(&gs.active_pointers));
+                return;
+            }
+            if gs.pinch_prev_dist.take().is_some() {
+                if let Some(&(_, rx, ry)) = gs.active_pointers.first() {
+                    gs.camera.on_mouse_down(rx, ry);
+                }
+                return;
+            }
+
             if let Some(idx) = gs.dragging_node.take() {
                 gs.simulation.unpin(idx);
                 gs.simulation.set_alpha_target(0.0);
@@ -378,6 +458,11 @@ struct GraphState {
     drag_moved: bool,
     press_x: f32,
     press_y: f32,
+    // Multi-touch pinch-zoom: every currently-down pointer (id, x, y) plus the
+    // finger gap from the previous pinch frame. Two pointers down means pinch,
+    // not orbit or node-drag.
+    active_pointers: Vec<(i32, f32, f32)>,
+    pinch_prev_dist: Option<f32>,
 }
 
 /// The hub id a leaf hangs off (the source of the link that targets it).
