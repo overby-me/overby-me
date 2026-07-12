@@ -82,28 +82,30 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                             }
                         }
                         div { class: "flex-grow" }
-                        // Export the participant roster as CSV (owner action, #41).
+                        // Roster actions in the M3 tools sheet (CSV export, #41).
                         if can_manage && !members.is_empty() {
-                            button {
-                                class: "btn-icon",
-                                title: "{t(\"member.export\")}",
-                                aria_label: "{t(\"member.export\")}",
-                                onclick: {
-                                    let members = members.clone();
-                                    let fname = name.clone();
-                                    move |_| {
-                                        let mut csv = String::from("Name,Email\n");
-                                        for m in &members {
-                                            csv.push_str(&csv_field(&m.label()));
-                                            csv.push(',');
-                                            csv.push_str(&csv_field(m.email.as_deref().unwrap_or("")));
-                                            csv.push('\n');
+                            super::widgets::ToolSheet {
+                                title: t("common.tools"),
+                                button {
+                                    class: "sheet-action",
+                                    onclick: {
+                                        let members = members.clone();
+                                        let fname = name.clone();
+                                        move |_| {
+                                            let mut csv = String::from("Name,Email\n");
+                                            for m in &members {
+                                                csv.push_str(&csv_field(&m.label()));
+                                                csv.push(',');
+                                                csv.push_str(&csv_field(m.email.as_deref().unwrap_or("")));
+                                                csv.push('\n');
+                                            }
+                                            let file = format!("{}-participants.csv", crate::export::sanitize_filename(&fname));
+                                            crate::export::download_bytes(&file, "text/csv;charset=utf-8", csv.as_bytes());
                                         }
-                                        let file = format!("{}-participants.csv", crate::export::sanitize_filename(&fname));
-                                        crate::export::download_bytes(&file, "text/csv;charset=utf-8", csv.as_bytes());
-                                    }
-                                },
-                                span { class: "material-icons", "download" }
+                                    },
+                                    span { class: "material-icons", "download" }
+                                    "{t(\"member.export\")}"
+                                }
                             }
                         }
                     }

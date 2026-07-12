@@ -766,7 +766,25 @@ fn AppSwitcher(apps: Vec<(&'static str, String, Route, bool)>) -> Element {
         aside {
             class: if open() { "tool-sheet open" } else { "tool-sheet" },
             role: "dialog",
+            "aria-modal": "true",
             "aria-label": t("common.apps"),
+            tabindex: "-1",
+            onkeydown: move |e| {
+                if e.key() == Key::Escape {
+                    open.set(false);
+                }
+            },
+            if open() {
+                div {
+                    class: "sheet-focus-sentinel",
+                    tabindex: "-1",
+                    onmounted: move |e| {
+                        spawn(async move {
+                            let _ = e.set_focus(true).await;
+                        });
+                    },
+                }
+            }
             div { class: "tool-sheet-header",
                 div { class: "sheet-handle" }
                 h3 { class: "title-medium", "{t(\"common.apps\")}" }

@@ -708,18 +708,24 @@ a:hover {
 	box-shadow: var(--md-sys-elevation-1);
 	overflow: hidden;
 	margin-bottom: 12px;
-	animation: m3-enter var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-emphasized-decelerate) both;
+	/* Deliberately NO entrance animation. A transform/opacity animation turns the
+	   card into a stacking context + containing block (Firefox keeps it for the
+	   whole fill duration), which anchors and caps `position: fixed` descendants —
+	   the FAB, tool sheets, dialogs and their scrims render inside cards, so cards
+	   must stay transparent to them. */
 }
 
+/* Opacity-only entrance (no transform). A transform anywhere in this animation —
+   even only in the `from` frame — makes Firefox treat every .card as a containing
+   block for the whole fill duration, which breaks `position: fixed` descendants
+   (the FAB, tool sheets, dialogs, scrims) by anchoring them to the card instead
+   of the viewport. Fading in without a slide keeps cards transform-free. */
 @keyframes m3-enter {
 	from {
 		opacity: 0;
-		transform: translateY(6px);
 	}
 	to {
 		opacity: 1;
-		transform: translateY(0);
 	}
 }
 
@@ -1872,7 +1878,10 @@ select:focus {
 .sheet-scrim {
 	position: fixed;
 	inset: 0;
-	z-index: 79;
+	/* Above the FAB (120), both bottom bars, and the modal tree drawer (201) so an
+	   open sheet + scrim cover all chrome (fixes the bars painting over the mobile
+	   bottom sheet and the header hiding under the top app bar on desktop). */
+	z-index: 249;
 	background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
 	opacity: 0;
 	pointer-events: none;
@@ -1885,7 +1894,7 @@ select:focus {
 }
 .tool-sheet {
 	position: fixed;
-	z-index: 80;
+	z-index: 250;
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
@@ -1925,6 +1934,15 @@ select:focus {
 	.tool-sheet.open {
 		transform: translateX(0);
 	}
+}
+/* Off-screen element that grabs focus when a sheet/dialog opens (a11y). */
+.sheet-focus-sentinel {
+	position: absolute;
+	width: 0;
+	height: 0;
+	padding: 0;
+	overflow: hidden;
+	outline: none;
 }
 .tool-sheet-header {
 	position: relative;

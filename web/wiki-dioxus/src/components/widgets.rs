@@ -173,7 +173,27 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
         aside {
             class: if open() { "tool-sheet open" } else { "tool-sheet" },
             role: "dialog",
+            "aria-modal": "true",
             "aria-label": "{title}",
+            tabindex: "-1",
+            onkeydown: move |e| {
+                if e.key() == Key::Escape {
+                    open.set(false);
+                }
+            },
+            // Focus sentinel: mounts when the sheet opens and pulls focus into it
+            // so Escape works and keyboard users land inside the sheet.
+            if open() {
+                div {
+                    class: "sheet-focus-sentinel",
+                    tabindex: "-1",
+                    onmounted: move |e| {
+                        spawn(async move {
+                            let _ = e.set_focus(true).await;
+                        });
+                    },
+                }
+            }
             div { class: "tool-sheet-header",
                 div { class: "sheet-handle" }
                 h3 { class: "title-medium", "{title}" }
@@ -220,7 +240,23 @@ pub fn Dialog(
                 class: "m3-dialog",
                 role: "dialog",
                 "aria-modal": "true",
+                tabindex: "-1",
+                onkeydown: move |e| {
+                    if e.key() == Key::Escape {
+                        on_dismiss.call(());
+                    }
+                },
                 onclick: move |e| e.stop_propagation(),
+                // Pull focus into the dialog on open (it mounts only when open).
+                div {
+                    class: "sheet-focus-sentinel",
+                    tabindex: "-1",
+                    onmounted: move |e| {
+                        spawn(async move {
+                            let _ = e.set_focus(true).await;
+                        });
+                    },
+                }
                 if let Some(icon) = icon {
                     span { class: "m3-dialog-icon material-icons", "{icon}" }
                 }

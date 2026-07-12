@@ -854,6 +854,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         sleep 500ms
         let sel = (wd-execute $session_id 'return document.querySelectorAll("#main .m3-filter-chip.selected").length')
         if (($sel | into int) >= 1) { log-ok "filter chip toggles selected state"; $p = $p + 1 } else { log-fail "filter chip did not select"; $fl = $fl + 1 }
+        capture-shots $session_id "member"
     } else {
         log-warn "member table not found (context may have no members) — skipping"
     }
@@ -980,6 +981,21 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     wd-navigate $session_id $"(base-url)($ctx_path)"
     sleep 1sec
     # Open the tools sheet (the "tune" trigger in the folder card header).
+    wd-execute $session_id 'var t=[...document.querySelectorAll("#main .card-header .btn-icon")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent=="tune"}); if(t)t.click(); return 1' | ignore
+    sleep 500ms
+    # Screenshot the open sheet (side sheet on desktop, bottom sheet on mobile).
+    capture-shots $session_id "toolsheet"
+    # The sheet must anchor to the VIEWPORT edge, not float inside a card — a
+    # regression guard for the transform-containing-block bug (fixed cards).
+    let sheet_pos = (wd-execute $session_id 'var s=document.querySelector(".tool-sheet.open"); if(!s) return "noopen"; var r=s.getBoundingClientRect(); return JSON.stringify({right:Math.round(window.innerWidth-r.right), bottom:Math.round(window.innerHeight-r.bottom)})')
+    let ok = (try { let j = ($sheet_pos | from json); ($j.right <= 2) and ($j.bottom <= 2) } catch { false })
+    if $ok { log-ok $"tool sheet anchored to the viewport edge ($sheet_pos)"; $p = $p + 1 } else { log-fail $"tool sheet not at viewport edge: ($sheet_pos)"; $fl = $fl + 1 }
+    # Escape closes the sheet (a11y: focus lands inside on open, Esc dismisses).
+    wd-execute $session_id 'var a=document.activeElement||document.querySelector(".tool-sheet.open"); if(a){a.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))}; return 1' | ignore
+    sleep 500ms
+    let closed = (wd-execute $session_id 'return document.querySelector(".tool-sheet.open")?"open":"closed"')
+    if $closed == "closed" { log-ok "Escape closes the tool sheet"; $p = $p + 1 } else { log-fail "Escape did not close the tool sheet"; $fl = $fl + 1 }
+    # Re-open the sheet for the export check.
     wd-execute $session_id 'var t=[...document.querySelectorAll("#main .card-header .btn-icon")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent=="tune"}); if(t)t.click(); return 1' | ignore
     sleep 500ms
     let exp = (wd-execute $session_id 'var b=[...document.querySelectorAll(".tool-sheet .sheet-action")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent=="download"}); if(b){b.click(); return "y"} return "n"')
