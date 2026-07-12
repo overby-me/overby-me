@@ -548,7 +548,7 @@
 | ✅ | Repository Secrets | [Ragenix 🦀❄️](https://github.com/yaxitech/ragenix) | | 🆗 | [Agenix 🐹❄️](https://github.com/ryantm/agenix) |
 | 🚧 | Developer Secrets | | [SecretSpec 🦀](https://github.com/cachix/secretspec) | 🆗 | |
 | ✅ | Deployment | [Colmena 🦀️❄️](https://github.com/zhaofengli/colmena) | [Navi 🦀❄️](https://github.com/cafkafk/navi) | 🆗 | |
-| ✅ | Developer Environment | [devShells ❄️](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) + [git-hooks.nix ❄️](https://github.com/cachix/git-hooks.nix) | [Devenv 🦀️❄️](https://github.com/cachix/devenv), [Organist ❄️](https://github.com/nickel-lang/organist) | 🆗 | |
+| ✅ | Developer Environment | [devShells ❄️](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) + [git-hooks.nix ❄️](https://github.com/cachix/git-hooks.nix) | [Organist ❄️](https://github.com/nickel-lang/organist) | 🆗 | [Devenv 🦀️❄️](https://github.com/cachix/devenv) |
 | 🚧 | Project Organization | [Flakelight ❄️](https://github.com/nix-community/flakelight) | [Nix-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nickel/workspace) | 🆗 | [Flake-parts ❄️](https://github.com/hercules-ci/flake-parts) |
 | ✅ | File Locator | [Nix-index 🦀](https://github.com/nix-community/nix-index), [Comma 🦀](https://github.com/nix-community/comma) | | 🆗 | |
 | ✅ | Rust Integration | [Crate2nix 🦀❄️](https://github.com/nix-community/crate2nix) | | 🆗 | [Crane ❄️](https://github.com/ipetkov/crane) |
@@ -797,7 +797,7 @@
 | ✅ | List Processes | [Procs 🦀](https://github.com/dalance/procs) | | [Uutils Procps 🦀](https://github.com/uutils/procps) | [Ps 💣](https://gitlab.com/procps-ng/procps) |
 | ✅ | Process Monitor | [Bottom 🦀](https://github.com/ClementTsang/bottom) | | [Uutils Procps 🦀](https://github.com/uutils/procps) | [Top 💣](https://gitlab.com/procps-ng/procps) |
 | ✅ | Parallel Processing | [Rust Parallel 🦀](https://github.com/aaronriekenberg/rust-parallel) | | 🆗 | [GNU Parallel 💣](https://en.wikipedia.org/wiki/GNU_parallel) |
-| ✅ | Process Orchestrator | [Devenv Process Manager 🦀❄️](https://github.com/cachix/devenv/tree/main/devenv-processes) | | 🆗 | [Process Compose 🐹](https://github.com/F1bonacc1/process-compose), [Docker Compose 🐹](https://github.com/docker/compose) |
+| 🚧 | Process Orchestrator | | | 🆗 | [Devenv Process Manager 🦀❄️](https://github.com/cachix/devenv/tree/main/devenv-processes), [Process Compose 🐹](https://github.com/F1bonacc1/process-compose), [Docker Compose 🐹](https://github.com/docker/compose) |
 | ✅ | Terminal Workspace | [Zellij 🦀](https://github.com/zellij-org/zellij) | | 🆗 | [Tmux 💣](https://github.com/tmux/tmux) |
 
 #### System Utilities
