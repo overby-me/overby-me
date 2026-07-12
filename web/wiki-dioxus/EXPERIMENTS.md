@@ -95,6 +95,9 @@ These change behaviour / add capability rather than only looks:
   compact tightens card / list / folder-row spacing.
 - **Bottom-sheet drag handle** — an M3 drag handle on the compact tools bottom
   sheet (mostly cosmetic, but signals the swipe affordance).
+- **TOC scroll-spy** — highlights the table-of-contents entry for the section
+  currently at the top of the viewport as you scroll a document. Completes the
+  long-document reading set (typography + progress bar + back-to-top + spy).
 
 ## Notes / follow-ups
 
