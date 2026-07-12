@@ -257,10 +257,23 @@ a:hover {
 	height: 64px;
 	display: flex;
 	align-items: center;
-	gap: var(--md-sys-spacing-2);
+	/* Centre the capped inner so, on wide screens, the search bar lines up with
+	   the reading column (which is also capped + centred in the content pane). */
+	justify-content: center;
 	padding: 0 var(--md-sys-spacing-2);
 	background: var(--md-surface-container);
 	color: var(--md-on-surface);
+}
+/* Cap the bar content at the same reading-column width as the content, and let
+   justify-content on the bar centre it. flex-grow fills up to the cap, then the
+   leftover space is split evenly, matching the content column's centring. */
+.top-app-bar-inner {
+	flex: 1 1 auto;
+	min-width: 0;
+	max-width: var(--md-sys-body-max);
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-2);
 }
 .top-app-bar-headline {
 	flex: 1;
@@ -599,6 +612,14 @@ a:hover {
 .app-shell[data-tools-docked="true"] .content-pane {
 	padding-right: calc(var(--md-sys-tools-width) + var(--md-sys-margin));
 	transition: padding-right var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
+}
+/* Mirror the content pane's gutter on the app bar so its centred inner keeps
+   lining up with the content column once the tools sheet docks. */
+.app-shell[data-tools-docked="true"] .top-app-bar {
+	padding-left: var(--md-sys-margin);
+	padding-right: calc(var(--md-sys-tools-width) + var(--md-sys-margin));
+	transition: padding var(--md-sys-motion-duration-medium2)
 		var(--md-sys-motion-spring-spatial-default);
 }
 .app-shell[data-tools-docked="true"] .fab {

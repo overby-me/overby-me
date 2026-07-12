@@ -954,36 +954,40 @@ fn TopAppBar(
 
     rsx! {
         header { class: "top-app-bar",
-            if *search_mode.read() {
-                SearchBar {
-                    input: search_input,
-                    results: search_results,
-                    on_close: move |_| {
-                        search_mode.set(false);
-                        search_input.set(String::new());
-                        search_results.set(vec![]);
-                    },
-                }
-            } else {
-                // M3 Expressive docked search: a rounded container carrying the
-                // breadcrumb trail. On compact the drawer button is integrated as the
-                // leading affordance; the search button trails on the right and opens
-                // full search. The crumbs stay tappable for up-navigation.
-                div { class: "expressive-search",
-                    if size.is_compact() {
+            // Cap the bar content at the reading-column width and centre it so the
+            // search bar and breadcrumbs line up with the content column below.
+            div { class: "top-app-bar-inner",
+                if *search_mode.read() {
+                    SearchBar {
+                        input: search_input,
+                        results: search_results,
+                        on_close: move |_| {
+                            search_mode.set(false);
+                            search_input.set(String::new());
+                            search_results.set(vec![]);
+                        },
+                    }
+                } else {
+                    // M3 Expressive docked search: a rounded container carrying the
+                    // breadcrumb trail. On compact the drawer button is integrated as
+                    // the leading affordance; the search button trails on the right and
+                    // opens full search. The crumbs stay tappable for up-navigation.
+                    div { class: "expressive-search",
+                        if size.is_compact() {
+                            button {
+                                class: "expressive-search-btn state-layer",
+                                aria_label: t("common.menu"),
+                                onclick: move |_| open_drawer.set(true),
+                                span { class: "material-icons", "menu" }
+                            }
+                        }
+                        div { class: "expressive-search-crumbs", Breadcrumbs {} }
                         button {
                             class: "expressive-search-btn state-layer",
-                            aria_label: t("common.menu"),
-                            onclick: move |_| open_drawer.set(true),
-                            span { class: "material-icons", "menu" }
+                            aria_label: t("common.search"),
+                            onclick: move |_| search_mode.set(true),
+                            span { class: "material-icons", "search" }
                         }
-                    }
-                    div { class: "expressive-search-crumbs", Breadcrumbs {} }
-                    button {
-                        class: "expressive-search-btn state-layer",
-                        aria_label: t("common.search"),
-                        onclick: move |_| search_mode.set(true),
-                        span { class: "material-icons", "search" }
                     }
                 }
             }
