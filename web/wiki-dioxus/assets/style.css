@@ -2614,9 +2614,13 @@ h6,
 }
 
 /* Content (Slate document renderer) */
+/* EXPERIMENT (expressive reading): long-form content gets a slightly larger,
+   airier measure than UI chrome for comfortable reading. */
 .slate-content {
-	padding: 16px;
-	font-size: inherit;
+	padding: 8px 20px 20px;
+	font-size: 1.05rem;
+	line-height: 1.7;
+	color: var(--md-on-surface);
 	overflow-x: auto;
 }
 
@@ -2671,6 +2675,37 @@ h6,
 	   document <html lang> set (see i18n::apply_lang). */
 	hyphens: auto;
 	overflow-wrap: break-word;
+	margin: 0 0 1rem;
+}
+
+/* Expressive section headings: heavier, tighter, with a short green-to-magenta
+   underline mark that gives each section a bold anchor. */
+.slate-content h2,
+.slate-content h3 {
+	font-weight: 700;
+	letter-spacing: -0.01em;
+}
+.slate-content h2::after,
+.slate-content h3::after {
+	content: "";
+	display: block;
+	width: 2.5rem;
+	height: 3px;
+	margin-top: 6px;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: linear-gradient(90deg, var(--md-primary), var(--md-tertiary));
+}
+
+/* Expressive links inside content: a primary underline that fills in on hover. */
+.slate-content a {
+	color: var(--md-primary);
+	text-decoration-color: color-mix(in srgb, var(--md-primary) 40%, transparent);
+	text-underline-offset: 2px;
+	transition: text-decoration-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+.slate-content a:hover {
+	text-decoration-color: var(--md-primary);
 }
 
 /* Table of contents (#117): a boxed list of heading anchors above the content. */
@@ -2712,10 +2747,14 @@ h6,
 }
 
 .slate-content blockquote {
-	border-left: 3px solid var(--md-outline);
-	padding-left: 16px;
-	margin: 8px 0;
+	border-left: 4px solid var(--md-tertiary);
+	padding: 10px 16px;
+	margin: 1rem 0;
 	color: var(--md-on-surface-variant);
+	background: color-mix(in srgb, var(--md-tertiary) 7%, transparent);
+	border-radius: 0 var(--md-sys-shape-corner-medium)
+		var(--md-sys-shape-corner-medium) 0;
+	font-style: italic;
 }
 
 .slate-content pre {
