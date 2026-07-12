@@ -30,10 +30,17 @@ pub fn UserApp(node: NodeWithChildren) -> Element {
     let contexts = memberships.read().clone().unwrap_or_default();
 
     rsx! {
+        // EXPERIMENT (profile hero): a bold identity header with a large tonal
+        // avatar and a membership-count chip.
         div { class: "card",
-            div { class: "card-header",
-                div { class: "avatar", {icon_el("wiki/user")} }
-                h3 { class: "title-medium", "{name}" }
+            div { class: "profile-hero",
+                div { class: "profile-hero-avatar", {icon_el("wiki/user")} }
+                div {
+                    h3 { class: "profile-hero-name", "{name}" }
+                    if !contexts.is_empty() {
+                        span { class: "count-badge", "{contexts.len()} · {t(\"profile.memberships\")}" }
+                    }
+                }
             }
         }
         div { class: "card mt-1",

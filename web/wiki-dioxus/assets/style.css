@@ -880,6 +880,39 @@ a:hover {
 	font-size: 15px;
 }
 
+/* EXPERIMENT (profile hero): a bold identity header with a large tonal avatar. */
+.profile-hero {
+	display: flex;
+	align-items: center;
+	gap: 18px;
+	padding: 28px 24px;
+	background: linear-gradient(
+		135deg,
+		color-mix(in srgb, var(--md-primary) 20%, transparent),
+		color-mix(in srgb, var(--md-tertiary) 15%, transparent)
+	);
+}
+.profile-hero-avatar {
+	flex: 0 0 auto;
+	width: 88px;
+	height: 88px;
+	display: grid;
+	place-items: center;
+	border-radius: var(--md-sys-shape-corner-extra-large);
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+	box-shadow: var(--md-sys-elevation-2);
+}
+.profile-hero-avatar .material-icons {
+	font-size: 44px;
+}
+.profile-hero-name {
+	margin: 0 0 8px;
+	font-size: var(--md-sys-typescale-headline-medium-size);
+	line-height: var(--md-sys-typescale-headline-medium-line);
+	font-weight: 700;
+}
+
 /* EXPERIMENT (framed viewport): an expressive rounded tonal frame around embedded
    map/graph media, so the viewport reads as a deliberate stage. */
 .viewport-frame {
