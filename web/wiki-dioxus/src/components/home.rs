@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
-use crate::graphql::{self, InvitationFields};
-use crate::i18n::{t, t_with};
+use crate::graphql;
+use crate::i18n::t;
 use crate::route::Route;
 use crate::session::use_session;
 
@@ -34,6 +34,13 @@ pub fn HomeApp() -> Element {
         .as_ref()
         .map(|n| n.members.iter().filter(|m| !m.hidden).cloned().collect())
         .unwrap_or_default();
+    // The header title is the home (root) node's own name, falling back to the
+    // default welcome string until the node has a name.
+    let title = root_node
+        .as_ref()
+        .map(|n| n.name.clone())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| t("layout.welcomeTitle"));
 
     rsx! {
         div { class: "grid grid-3",
@@ -42,7 +49,7 @@ pub fn HomeApp() -> Element {
                 div { class: "card",
                     div { class: "card-header",
                         div { class: "avatar", span { class: "material-icons", "waving_hand" } }
-                        h3 { class: "headline-small", "{t(\"layout.welcomeTitle\")}" }
+                        h3 { class: "headline-small", "{title}" }
                         div { class: "flex-grow" }
                         // Owner-only: edit the welcome text (root node content).
                         if can_edit {
@@ -104,16 +111,11 @@ pub fn HomeApp() -> Element {
                         crate::components::layout::HomeList {}
                     }
                 }
-                // Newest content across the user's contexts (#34).
+                // Newest content across the user's contexts (#34). Pending group /
+                // event invitations now appear inline in the groups/events lists
+                // (HomeList), so there is no separate invitations card.
                 if is_auth {
                     RecentContents {}
-                }
-            }
-
-            // Sidebar column (invitations, etc.)
-            if is_auth {
-                div {
-                    InvitesUserList {}
                 }
             }
         }
@@ -229,164 +231,6 @@ fn RecentItem(node: graphql::ChildNodeFields) -> Element {
                         span { "{parent}" }
                     }
                 }
-            }
-        }
-    }
-}
-
-/// The user's pending group/event invitations, with accept / decline — mirrors
-/// the React `InvitesUserList`.
-#[component]
-fn InvitesUserList() -> Element {
-    let session = use_session();
-    let user_id = session.read().user.as_ref().map(|u| u.id.clone());
-    let email = session
-        .read()
-        .user
-        .as_ref()
-        .map(|u| u.email.clone())
-        .unwrap_or_default();
-    let access_token = session.read().access_token.clone();
-
-    let refresh = use_signal(|| 0u32);
-
-    // Live invitations: any change to this user's memberships re-runs the query.
-    let sub_uid = user_id
-        .clone()
-        .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".to_string());
-    crate::subscription::use_live(
-        format!(
-            "subscription {{ members(where: {{ nodeId: {{ _eq: \"{sub_uid}\" }} }}) {{ id }} }}"
-        ),
-        refresh,
-    );
-
-    let invites = crate::use_data_resource!(move || {
-        let token = access_token.clone();
-        let user_id = user_id.clone();
-        let email = email.clone();
-        let _ = refresh.read();
-        async move {
-            let Some(user_id) = user_id else {
-                return Vec::new();
-            };
-            graphql::query_invitations(token.as_deref(), &user_id, &email)
-                .await
-                .unwrap_or_default()
-        }
-    });
-
-    let list = invites.read().clone();
-
-    rsx! {
-        div { class: "card",
-            div { class: "card-header",
-                div { class: "avatar", span { class: "material-icons", "mail" } }
-                h3 { class: "title-medium", "{t(\"invite.invitations\")}" }
-            }
-            {match list {
-                None => rsx! {
-                    div { class: "card-content",
-                        p { class: "body-medium", class: "text-muted", "\u{2026}" }
-                    }
-                },
-                Some(items) if items.is_empty() => rsx! {
-                    div { class: "card-content",
-                        p { class: "body-medium", class: "text-muted", "{t(\"invite.noInvitations\")}" }
-                    }
-                },
-                Some(items) => rsx! {
-                    div { class: "list",
-                        for invite in items.iter() {
-                            InviteItem { key: "{invite.id.0}", invite: invite.clone(), refresh }
-                        }
-                    }
-                },
-            }}
-        }
-    }
-}
-
-#[component]
-fn InviteItem(invite: InvitationFields, refresh: Signal<u32>) -> Element {
-    let session = use_session();
-    let mut refresh = refresh;
-    let name = invite
-        .parent
-        .as_ref()
-        .map(|p| p.name.clone())
-        .unwrap_or_default();
-    let mime_id = invite
-        .parent
-        .as_ref()
-        .and_then(|p| p.mime_id.clone())
-        .unwrap_or_default();
-    let member_id = invite.id.0.clone();
-
-    let accept = {
-        let member_id = member_id.clone();
-        let parent_id = invite.parent.as_ref().map(|p| p.id.0.clone());
-        move |_| {
-            let token = session.read().access_token.clone();
-            let uid = session.read().user.as_ref().map(|u| u.id.clone());
-            let member_id = member_id.clone();
-            let parent_id = parent_id.clone();
-            spawn(async move {
-                if let Some(uid) = uid {
-                    // Accept by binding the invite to the user. If that fails —
-                    // typically the (parentId, nodeId) unique constraint because
-                    // the user already has a membership for this context — accept
-                    // that existing row instead, then drop the duplicate invite.
-                    // Ordering it this way never destroys the invite on a
-                    // transient failure (safer than React's delete-then-accept).
-                    let accepted = graphql::accept_invitation(token.as_deref(), &member_id, &uid)
-                        .await
-                        .unwrap_or(false);
-                    if !accepted {
-                        if let Some(pid) = parent_id {
-                            if graphql::accept_existing_member(token.as_deref(), &pid, &uid)
-                                .await
-                                .unwrap_or(false)
-                            {
-                                let _ =
-                                    graphql::decline_invitation(token.as_deref(), &member_id).await;
-                            }
-                        }
-                    }
-                    refresh += 1;
-                }
-            });
-        }
-    };
-    let decline = {
-        let member_id = member_id.clone();
-        move |_| {
-            let token = session.read().access_token.clone();
-            let member_id = member_id.clone();
-            spawn(async move {
-                let _ = graphql::decline_invitation(token.as_deref(), &member_id).await;
-                refresh += 1;
-            });
-        }
-    };
-
-    rsx! {
-        div { class: "list-item",
-            div { class: "avatar small secondary", {super::loader::icon_el(&mime_id)} }
-            div { class: "list-item-text",
-                div { class: "list-item-primary", "{name}" }
-            }
-            button {
-                class: "btn-icon",
-                title: "{t_with(\"invite.acceptInvitation\", &[(\"name\", &name)])}",
-                onclick: accept,
-                span { class: "material-icons", "add" }
-            }
-            button {
-                class: "btn-icon",
-                title: "{t(\"common.delete\")}",
-                onclick: decline,
-                span { class: "material-icons", "close" }
             }
         }
     }

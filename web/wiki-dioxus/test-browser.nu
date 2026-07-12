@@ -296,7 +296,10 @@ def test-shell [session_id: string, timeout: int, passed: int, failed: int]: not
     sleep 300ms
 
     let r = (assert-exists $session_id "app shell mounts" "#main .app-shell" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
-    let r = (assert-contains $session_id "welcome card shown" "#main .headline-small" "RadikalWiki" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    # The welcome card's title is the home (root) node's name; unauthenticated it
+    # falls back to the default. Assert a non-empty title renders (data-driven).
+    let wtitle = (wd-execute $session_id 'var h=document.querySelector("#main .headline-small"); return h?h.innerText.trim():""')
+    if ($wtitle | is-not-empty) { log-ok "welcome card shows a title"; $p = $p + 1 } else { log-fail "welcome card title missing"; $fl = $fl + 1 }
     let r = (assert-exists $session_id "log in link present" '#main a[href="/user/login"]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (assert-exists $session_id "register link present" '#main a[href="/user/register"]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (check-contrast-selftest $session_id $p $fl); $p = $r.passed; $fl = $r.failed
@@ -417,10 +420,11 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     }
     sleep 1sec
 
-    # The welcome card (the root node's content) renders for the authed user; its
-    # title carries "RadikalWiki" in every locale. This also proves the catch-all
-    # serves `/` (empty segments -> root node -> wiki/home -> HomeApp).
-    let r = (assert-contains $session_id "home shows the welcome card" "#main" "RadikalWiki" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    # The welcome card renders for the authed user with the home (root) node's name
+    # as its title. This also proves the catch-all serves `/` (empty segments ->
+    # root node -> wiki/home -> HomeApp).
+    let htitle = (wd-execute $session_id 'var h=document.querySelector("#main .card .headline-small"); return h?h.innerText.trim():""')
+    if ($htitle | is-not-empty) { log-ok "home welcome card renders with a title" ; $p = $p + 1 } else { log-fail "home welcome card title missing" ; $fl = $fl + 1 }
     let r = (check-contrast $session_id "home (authenticated)" $p $fl); $p = $r.passed; $fl = $r.failed
     capture-shots $session_id "home"
 
@@ -982,12 +986,24 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         let r = (assert-exists $session_id "member table has a search field" "#main .paginated-table .search-field input" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
         let r = (assert-count $session_id "member table has filter chips" "#main .m3-filter-chip" 3 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
         let r = (assert-exists $session_id "member table has a pagination footer" "#main .paginated-table-footer" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        # Rows must actually load with a non-zero total (regression guard: the count
+        # query used a non-existent members_aggregate, whose validation error
+        # emptied the whole page).
+        let mstats = (wd-execute $session_id 'var rows=document.querySelectorAll("#main .m3-data-table tbody tr").length; var c=document.querySelector("#main .paginated-count"); var m=c?(c.innerText.match(/(\d+)\s*$/)||[])[1]:null; return JSON.stringify({rows: rows, total: m?parseInt(m):0})')
+        let ms = ($mstats | from json)
+        if ($ms.rows > 0) and ($ms.total > 0) {
+            log-ok $"member table loaded ($ms.rows) rows, total ($ms.total)"; $p = $p + 1
+        } else {
+            log-fail $"member table fetched no members: ($mstats)"; $fl = $fl + 1
+        }
+        # Screenshot the populated table (default "all" filter) BEFORE the filter
+        # toggle below narrows it (the test group's members aren't owners).
+        capture-shots $session_id "member"
         # Clicking a not-yet-selected filter chip selects it (M3 filter-chip toggle).
         wd-execute $session_id 'var c=[...document.querySelectorAll("#main .m3-filter-chip")].find(x=>!x.classList.contains("selected")); if(c)c.click(); return 1' | ignore
         sleep 500ms
         let sel = (wd-execute $session_id 'return document.querySelectorAll("#main .m3-filter-chip.selected").length')
         if (($sel | into int) >= 1) { log-ok "filter chip toggles selected state"; $p = $p + 1 } else { log-fail "filter chip did not select"; $fl = $fl + 1 }
-        capture-shots $session_id "member"
     } else {
         log-warn "member table not found (context may have no members) — skipping"
     }
@@ -1310,6 +1326,16 @@ def test-components [session_id: string, passed: int, failed: int] {
         wd-execute $session_id 'var l=document.getElementById("__ctest_lb"); if(l)l.remove(); return 1' | ignore
     }
     wd-execute $session_id 'var b=document.getElementById("__ctest_img"); if(b)b.remove(); return 1' | ignore
+
+    # Inline invitation in the groups list (accept / reject) — screenshot for review
+    # (the test account has no pending invites, so inject the exact markup).
+    if (($env | get -o WIKI_SHOTS | default "") == "1") {
+        let dir = ($env | get -o WIKI_SHOTS_DIR | default "screenshots")
+        wd-execute $session_id 'var card=document.createElement("div"); card.className="card"; card.id="__ctest_invite"; card.style.cssText="position:fixed;top:80px;left:16px;width:360px;z-index:2000"; var h=document.createElement("div"); h.className="card-header"; var ht=document.createElement("h3"); ht.className="title-medium"; ht.textContent="Groups"; h.appendChild(ht); card.appendChild(h); var list=document.createElement("div"); list.className="list"; function mk(nm,invited){var it=document.createElement("div"); it.className="list-item"; var av=document.createElement("div"); av.className="avatar small secondary"; var ai=document.createElement("span"); ai.className="material-icons"; ai.textContent="group"; av.appendChild(ai); it.appendChild(av); var tx=document.createElement("div"); tx.className="list-item-text"; var p1=document.createElement("div"); p1.className="list-item-primary"; p1.textContent=nm; tx.appendChild(p1); if(invited){var p2=document.createElement("div"); p2.className="list-item-secondary"; p2.textContent="Invited"; tx.appendChild(p2);} it.appendChild(tx); if(invited){var b1=document.createElement("button"); b1.className="btn-icon add-action state-layer"; var i1=document.createElement("span"); i1.className="material-icons"; i1.textContent="check"; b1.appendChild(i1); it.appendChild(b1); var b2=document.createElement("button"); b2.className="btn-icon state-layer"; var i2=document.createElement("span"); i2.className="material-icons"; i2.textContent="close"; b2.appendChild(i2); it.appendChild(b2);} return it;} list.appendChild(mk("Klimaudvalget",true)); list.appendChild(mk("Test",false)); list.appendChild(mk("Blog",false)); card.appendChild(list); document.body.appendChild(card); return 1' | ignore
+        sleep 300ms
+        wd-screenshot $session_id ($dir | path join "invited-item.png")
+        wd-execute $session_id 'var c=document.getElementById("__ctest_invite"); if(c)c.remove(); return 1' | ignore
+    }
 
     { passed: $p, failed: $fl }
 }

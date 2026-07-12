@@ -1,8 +1,12 @@
 use dioxus::prelude::*;
 
+use super::ui::alert_dialog::{
+    AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
+    AlertDialogTitle,
+};
 use super::ui::switch::Switch;
 use crate::graphql::{self, NodeFields};
-use crate::i18n::{t, Lang, LANG};
+use crate::i18n::{t, t_with, Lang, LANG};
 use crate::route::Route;
 use crate::session::{save_session, use_session, SESSION};
 use crate::theme::{apply_theme, use_theme, ThemeMode, THEME};
@@ -1430,17 +1434,26 @@ fn DrawerNodeItem(
     }
 }
 
-/// The result of loading the user's contexts: (groups, events).
+/// The result of loading the user's contexts: (groups, events, pending invites).
 type ContextLists = (
     Vec<graphql::ContextNodeFields>,
     Vec<graphql::ContextNodeFields>,
+    Vec<graphql::InvitationFields>,
 );
 
-/// HomeList — shows the user's groups and events, loaded from GraphQL.
+/// HomeList — shows the user's groups and events, loaded from GraphQL. Pending
+/// invitations appear inline at the top of the matching list (group or event),
+/// each with accept / reject actions.
 #[component]
 pub fn HomeList() -> Element {
     let session = use_session();
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
+    let email = session
+        .read()
+        .user
+        .as_ref()
+        .map(|u| u.email.clone())
+        .unwrap_or_default();
     let access_token = session.read().access_token.clone();
 
     // Live home list: accepting an invitation or a membership change re-fetches
@@ -1459,19 +1472,37 @@ pub fn HomeList() -> Element {
     let contexts = crate::use_data_resource!(move || {
         let token = access_token.clone();
         let user_id = user_id.clone();
+        let email = email.clone();
         let _ = refresh.read();
         async move {
             let Some(user_id) = user_id else {
-                return Ok::<ContextLists, String>((Vec::new(), Vec::new()));
+                return Ok::<ContextLists, String>((Vec::new(), Vec::new(), Vec::new()));
             };
             let groups = graphql::query_contexts(token.as_deref(), &user_id, "wiki/group").await?;
             let events = graphql::query_contexts(token.as_deref(), &user_id, "wiki/event").await?;
-            Ok((groups, events))
+            let invites = graphql::query_invitations(token.as_deref(), &user_id, &email)
+                .await
+                .unwrap_or_default();
+            Ok((groups, events, invites))
         }
     });
 
     let state = contexts.read().clone();
     let hint_style = "padding: 4px 16px;";
+    // Pending invitations, split into the list they belong to (group vs event) so
+    // each shows inline at the top of that list.
+    let invited_by_mime = |mime: &str| -> Vec<graphql::InvitationFields> {
+        match &state {
+            Some(Ok((_, _, invites))) => invites
+                .iter()
+                .filter(|i| i.parent.as_ref().and_then(|p| p.mime_id.as_deref()) == Some(mime))
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    let invited_groups = invited_by_mime("wiki/group");
+    let invited_events = invited_by_mime("wiki/event");
 
     rsx! {
         div { style: "margin-top: 16px;",
@@ -1486,11 +1517,15 @@ pub fn HomeList() -> Element {
                 Some(Err(e)) => rsx! {
                     p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
                 },
-                Some(Ok((groups, _))) if groups.is_empty() => rsx! {
+                Some(Ok((groups, _, _))) if groups.is_empty() && invited_groups.is_empty() => rsx! {
                     p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noGroups\")}" }
                 },
-                Some(Ok((groups, _))) => rsx! {
+                Some(Ok((groups, _, _))) => rsx! {
                     div { class: "list",
+                        // Invitations first — they need action.
+                        for inv in invited_groups.iter() {
+                            InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
+                        }
                         for node in groups.iter() {
                             ContextItem { key: "{node.id.0}", node: node.clone() }
                         }
@@ -1509,10 +1544,18 @@ pub fn HomeList() -> Element {
                 Some(Err(e)) => rsx! {
                     p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
                 },
-                Some(Ok((_, events))) if events.is_empty() => rsx! {
+                Some(Ok((_, events, _))) if events.is_empty() && invited_events.is_empty() => rsx! {
                     p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noEvents\")}" }
                 },
-                Some(Ok((_, events))) => rsx! {
+                Some(Ok((_, events, _))) => rsx! {
+                    // Invited events first (no year bucket — they need action).
+                    if !invited_events.is_empty() {
+                        div { class: "list",
+                            for inv in invited_events.iter() {
+                                InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
+                            }
+                        }
+                    }
                     for (year , items) in group_by_year(events) {
                         div { key: "{year}",
                             p { class: "label-medium",
@@ -1559,6 +1602,105 @@ fn ContextItem(node: graphql::ContextNodeFields) -> Element {
             div { class: "avatar small secondary avatar-abbr", "{abbr}" }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{name}" }
+            }
+        }
+    }
+}
+
+/// A pending invitation shown inline in the groups/events list: accept (join) or
+/// reject it. Rejecting asks for confirmation first. The accept flow mirrors the
+/// old invites card — bind the invite to the user, or (on the unique-constraint
+/// conflict when a membership already exists) accept that row and drop the
+/// duplicate invite.
+#[component]
+fn InvitedContextItem(invite: graphql::InvitationFields) -> Element {
+    let session = use_session();
+    let mut confirm_open = use_signal(|| false);
+    let name = invite
+        .parent
+        .as_ref()
+        .map(|p| p.name.clone())
+        .unwrap_or_default();
+    let mime_id = invite
+        .parent
+        .as_ref()
+        .and_then(|p| p.mime_id.clone())
+        .unwrap_or_default();
+    let member_id = invite.id.0.clone();
+
+    let accept = {
+        let member_id = member_id.clone();
+        let parent_id = invite.parent.as_ref().map(|p| p.id.0.clone());
+        move |_| {
+            let token = session.read().access_token.clone();
+            let uid = session.read().user.as_ref().map(|u| u.id.clone());
+            let member_id = member_id.clone();
+            let parent_id = parent_id.clone();
+            spawn(async move {
+                if let Some(uid) = uid {
+                    let accepted = graphql::accept_invitation(token.as_deref(), &member_id, &uid)
+                        .await
+                        .unwrap_or(false);
+                    if !accepted {
+                        if let Some(pid) = parent_id {
+                            if graphql::accept_existing_member(token.as_deref(), &pid, &uid)
+                                .await
+                                .unwrap_or(false)
+                            {
+                                let _ =
+                                    graphql::decline_invitation(token.as_deref(), &member_id).await;
+                            }
+                        }
+                    }
+                    crate::session::bump_data_version();
+                }
+            });
+        }
+    };
+    let reject = {
+        let member_id = member_id.clone();
+        move |_| {
+            let token = session.read().access_token.clone();
+            let member_id = member_id.clone();
+            confirm_open.set(false);
+            spawn(async move {
+                let _ = graphql::decline_invitation(token.as_deref(), &member_id).await;
+                crate::session::bump_data_version();
+            });
+        }
+    };
+
+    rsx! {
+        div { class: "list-item",
+            div { class: "avatar small secondary", {super::loader::icon_el(&mime_id)} }
+            div { class: "list-item-text",
+                div { class: "list-item-primary", "{name}" }
+                div { class: "list-item-secondary", "{t(\"invite.invited\")}" }
+            }
+            button {
+                class: "btn-icon add-action state-layer",
+                title: "{t_with(\"invite.acceptInvitation\", &[(\"name\", &name)])}",
+                aria_label: "{t_with(\"invite.acceptInvitation\", &[(\"name\", &name)])}",
+                onclick: accept,
+                span { class: "material-icons", "check" }
+            }
+            button {
+                class: "btn-icon state-layer",
+                title: "{t(\"invite.declineInvitation\")}",
+                aria_label: "{t(\"invite.declineInvitation\")}",
+                onclick: move |_| confirm_open.set(true),
+                span { class: "material-icons", "close" }
+            }
+        }
+        // Confirm before rejecting an invitation.
+        AlertDialog {
+            open: Some(confirm_open()),
+            on_open_change: move |v| confirm_open.set(v),
+            AlertDialogTitle { "{t(\"invite.confirmReject\")}" }
+            AlertDialogDescription { "{name}" }
+            AlertDialogActions {
+                AlertDialogCancel { "{t(\"common.cancel\")}" }
+                AlertDialogAction { on_click: reject, "{t(\"invite.reject\")}" }
             }
         }
     }
