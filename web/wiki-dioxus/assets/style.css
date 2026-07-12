@@ -2361,6 +2361,14 @@ h6,
 	position: relative;
 }
 
+/* The open-app crumb is a different axis (a view of the node, not a path step),
+   so its avatar carries the accent (tertiary/magenta) instead of the green
+   node/path colour — the same accent the app's create actions use. */
+.crumb.app-crumb .crumb-avatar {
+	background-color: var(--md-tertiary);
+	color: var(--md-on-tertiary);
+}
+
 .crumb-name {
 	max-width: 0;
 	overflow: hidden;
@@ -2374,7 +2382,11 @@ h6,
 		margin 0.25s ease;
 }
 
-.crumb-name.open {
+/* The deepest crumb's name is shown by default (.open); hovering ANY crumb
+   reveals its name too. Pure CSS `:hover` (no JS reactivity) so it works reliably
+   in every browser. */
+.crumb-name.open,
+.crumb:hover .crumb-name {
 	max-width: 260px;
 	opacity: 1;
 	margin: 0 8px 0 4px;
@@ -2383,6 +2395,17 @@ h6,
 	font-size: var(--md-sys-typescale-title-medium-size);
 	font-weight: 600;
 	letter-spacing: var(--md-sys-typescale-title-medium-tracking);
+}
+
+/* While a crumb is hovered, collapse the default-open one (unless it is the one
+   being hovered) so only a single name shows at a time — the old JS behaviour,
+   now in CSS via :has(). */
+.breadcrumbs:has(.crumb:hover) .crumb:not(:hover) .crumb-name {
+	max-width: 0;
+	opacity: 0;
+	margin: 0;
+	font-size: 14px;
+	font-weight: normal;
 }
 
 /* Content (Slate document renderer) */

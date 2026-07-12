@@ -492,8 +492,6 @@ fn Breadcrumbs() -> Element {
     let depth = CONTEXT_DEPTH();
     let total = segments.len();
 
-    let mut hovered = use_signal(|| None::<usize>);
-
     // Begin at the context (deepest group/event). With no context in the path
     // (e.g. the home route) fall back to showing Home plus the full path.
     let (show_home, start) = if depth >= 1 {
@@ -503,7 +501,9 @@ fn Breadcrumbs() -> Element {
     };
 
     // The deepest crumb is open (its name shown) by default: the app view when one
-    // is open — that is the current location — otherwise the last path node.
+    // is open — that is the current location — otherwise the last path node. Hover
+    // to reveal any other crumb's name is done in pure CSS (`.crumb:hover`), so it
+    // works in every browser without a JS reactivity round-trip.
     let last_id = if app.is_some() {
         total + 1
     } else if total > 0 {
@@ -511,25 +511,17 @@ fn Breadcrumbs() -> Element {
     } else {
         0
     };
-    let hov = *hovered.read();
-    let is_open = move |c: usize| match hov {
-        Some(h) => h == c,
-        None => c == last_id,
-    };
 
     rsx! {
         div {
             class: "breadcrumbs",
-            onmouseleave: move |_| hovered.set(None),
             if show_home {
                 BreadcrumbCrumb {
                     to: Route::Home { app: None },
                     mime: "app/home".to_string(),
                     name: t("common.home"),
                     ordinal: None,
-                    open: is_open(0),
-                    crumb_id: 0,
-                    hovered,
+                    open: last_id == 0,
                 }
             }
             for i in start..total {
@@ -555,9 +547,7 @@ fn Breadcrumbs() -> Element {
                             mime,
                             name,
                             ordinal,
-                            open: is_open(i + 1),
-                            crumb_id: i + 1,
-                            hovered,
+                            open: last_id == i + 1,
                         }
                     }
                 }
@@ -570,9 +560,8 @@ fn Breadcrumbs() -> Element {
                     mime: format!("app/{a}"),
                     name: app_crumb_label(&a),
                     ordinal: None,
-                    open: is_open(total + 1),
-                    crumb_id: total + 1,
-                    hovered,
+                    open: last_id == total + 1,
+                    app_crumb: true,
                 }
             }
         }
@@ -602,15 +591,17 @@ fn BreadcrumbCrumb(
     mime: String,
     name: String,
     ordinal: Option<usize>,
+    /// Whether this is the deepest (current) crumb, whose name is shown by default;
+    /// every other crumb reveals its name on hover via CSS (`.crumb:hover`).
     open: bool,
-    crumb_id: usize,
-    hovered: Signal<Option<usize>>,
+    /// The open-app crumb: a different axis (a view of the node, not a path step),
+    /// so it is tinted with the accent instead of the node/path colour.
+    #[props(default)]
+    app_crumb: bool,
 ) -> Element {
-    let mut hovered = hovered;
     rsx! {
         div {
-            class: "crumb",
-            onmouseenter: move |_| hovered.set(Some(crumb_id)),
+            class: if app_crumb { "crumb app-crumb" } else { "crumb" },
             // Clicking a crumb (navigating to an ancestor, or re-clicking the
             // current node) scrolls the content back to the top.
             onclick: move |_| {

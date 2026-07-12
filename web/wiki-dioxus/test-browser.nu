@@ -900,6 +900,29 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             } else {
                 log-fail $"app not represented as a trailing crumb: ($crumbapp)"; $fl = $fl + 1
             }
+            # Hovering a collapsed crumb reveals its name. This is now pure CSS
+            # (`.crumb:hover`), so it only responds to a REAL pointer position — a
+            # synthetic mouseenter would not trigger :hover. Use WebDriver Actions to
+            # actually move the mouse onto the first (collapsed) crumb and assert its
+            # name expands (computed max-width goes from 0 to non-zero).
+            let nm_before = (wd-execute $session_id 'var c=document.querySelector(".top-app-bar .breadcrumbs .crumb"); var nm=c?c.querySelector(".crumb-name"):null; return nm?getComputedStyle(nm).maxWidth:"none"')
+            let crumb_eid = (wd-find $session_id ".top-app-bar .breadcrumbs .crumb")
+            if ($crumb_eid | is-not-empty) {
+                let acts = ({ actions: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerMove", duration: 50, origin: "viewport", x: 3, y: 3 }, { type: "pointerMove", duration: 120, origin: { "element-6066-11e4-a52e-4f735466cecf": $crumb_eid }, x: 2, y: 2 }] }] } | to json)
+                wd-post $"/session/($session_id)/actions" $acts | ignore
+                sleep 500ms
+                let nm_after = (wd-execute $session_id 'var c=document.querySelector(".top-app-bar .breadcrumbs .crumb"); var nm=c?c.querySelector(".crumb-name"):null; return nm?getComputedStyle(nm).maxWidth:"none"')
+                let w_before = (try { $nm_before | str replace "px" "" | into float } catch { -1.0 })
+                let w_after = (try { $nm_after | str replace "px" "" | into float } catch { -1.0 })
+                if ($w_before == 0.0) and ($w_after > 0.0) {
+                    log-ok $"real pointer hover expands the crumb name, max-width ($nm_before)->($nm_after)"; $p = $p + 1
+                } else {
+                    log-fail $"crumb hover-expand broken: before=($nm_before) after=($nm_after)"; $fl = $fl + 1
+                }
+                # Move the pointer away so later tests aren't left hovering.
+                wd-post $"/session/($session_id)/actions" ({ actions: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerMove", duration: 30, origin: "viewport", x: 3, y: 400 }] }] } | to json) | ignore
+                sleep 200ms
+            }
             # Only the ready apps (folder/speak/vote/member) are in the rail; the
             # rest (graph/social/...) are hidden until ready.
             let rail = (wd-execute $session_id 'return JSON.stringify({vote:document.querySelector(".nav-rail a[href*=\"app=vote\"]")?1:0, speak:document.querySelector(".nav-rail a[href*=\"app=speak\"]")?1:0, member:document.querySelector(".nav-rail a[href*=\"app=member\"]")?1:0, graph:document.querySelector(".nav-rail a[href*=\"app=graph\"]")?1:0, social:document.querySelector(".nav-rail a[href*=\"app=social\"]")?1:0})')
