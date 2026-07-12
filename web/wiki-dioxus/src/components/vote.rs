@@ -833,7 +833,10 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                                             let ri = *ri;
                                             let option = opts[ri].clone();
                                             rsx! {
-                                                div { class: "list-item", key: "{ri}", style: "gap: 8px;",
+                                                div {
+                                                    class: if selected.read().get(ri).copied().unwrap_or(false) { "list-item ballot-option selected" } else { "list-item ballot-option" },
+                                                    key: "{ri}",
+                                                    style: "gap: 8px;",
                                                     RadioItem { value: "{ri}", index: dp }
                                                     div { class: "list-item-text",
                                                         div { class: "list-item-primary", "{option}" }
@@ -852,7 +855,10 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                                     let ri = *ri;
                                     let option = opts[ri].clone();
                                     rsx! {
-                                        div { class: "list-item", key: "{ri}", style: "gap: 8px;",
+                                        div {
+                                            class: if selected.read().get(ri).copied().unwrap_or(false) { "list-item ballot-option selected" } else { "list-item ballot-option" },
+                                            key: "{ri}",
+                                            style: "gap: 8px;",
                                             Checkbox {
                                                 checked: Some(if selected.read().get(ri).copied().unwrap_or(false) {
                                                     CheckboxState::Checked

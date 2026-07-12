@@ -2247,19 +2247,60 @@ select:focus {
 /* Poll result bars */
 /* M3 linear progress (poll / vote / admin result bars): full-round track on the
    highest container tone, primary indicator, spring fill. */
+/* EXPERIMENT (expressive result bars): taller track, a green-primary to
+   magenta-tertiary tonal gradient (the brand's two axes), and a spring grow-in. */
 .vote-bar {
-	height: 8px;
+	height: 12px;
 	border-radius: var(--md-sys-shape-corner-full);
 	background: var(--md-surface-container-highest);
 	overflow: hidden;
-	margin: 4px 0;
+	margin: 6px 0;
 }
 .vote-bar-fill {
 	height: 100%;
 	border-radius: var(--md-sys-shape-corner-full);
-	background: var(--md-primary);
+	background: linear-gradient(90deg, var(--md-primary), var(--md-tertiary));
 	transition: width var(--md-sys-motion-duration-long1)
 		var(--md-sys-motion-spring-spatial-default);
+	transform-origin: left center;
+	animation: vote-bar-grow var(--md-sys-motion-duration-long2)
+		var(--md-sys-motion-spring-spatial-default) both;
+}
+@keyframes vote-bar-grow {
+	from {
+		transform: scaleX(0);
+	}
+	to {
+		transform: scaleX(1);
+	}
+}
+
+/* EXPERIMENT (tactile ballot): each open-poll option reads as a bordered card
+   that fills with primary-container when selected — a clearer, more tactile
+   choice than a bare list row. (Interaction stays on the radio/checkbox.) */
+.ballot-option {
+	border: 2px solid var(--md-outline-variant);
+	border-radius: var(--md-sys-shape-corner-large);
+	padding: 12px 14px;
+	margin-bottom: 8px;
+	background: var(--md-surface-container-low);
+	transition:
+		border-color var(--md-sys-motion-duration-short4)
+			var(--md-sys-motion-easing-standard),
+		background-color var(--md-sys-motion-duration-short4)
+			var(--md-sys-motion-easing-standard),
+		box-shadow var(--md-sys-motion-duration-short4)
+			var(--md-sys-motion-easing-standard);
+}
+.ballot-option:hover {
+	border-color: var(--md-outline);
+	box-shadow: var(--md-sys-elevation-1);
+}
+.ballot-option.selected {
+	border-color: var(--md-primary);
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+	box-shadow: var(--md-sys-elevation-2);
 }
 
 /* Typography */
