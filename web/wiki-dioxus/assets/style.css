@@ -1643,6 +1643,16 @@ select:focus {
 	min-width: 0;
 }
 
+/* Reset the anchor styling when a Link wraps a ListItem (row navigates). */
+.list-link {
+	display: block;
+	text-decoration: none;
+	color: inherit;
+}
+.list-link:hover {
+	text-decoration: none;
+}
+
 /* Member / author chips */
 .chip-row {
 	display: flex;

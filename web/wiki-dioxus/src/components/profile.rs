@@ -50,10 +50,12 @@ pub fn UserApp(node: NodeWithChildren) -> Element {
                         Link {
                             key: "{ctx.id.0}",
                             to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
-                            class: "folder-item",
-                            div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{ctx.name}" }
+                            class: "list-link",
+                            super::widgets::ListItem {
+                                headline: ctx.name.clone(),
+                                leading: rsx! {
+                                    div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
+                                },
                             }
                         }
                     }
@@ -141,10 +143,12 @@ pub fn ProfileApp() -> Element {
                         Link {
                             key: "{ctx.id.0}",
                             to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
-                            class: "folder-item",
-                            div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{ctx.name}" }
+                            class: "list-link",
+                            super::widgets::ListItem {
+                                headline: ctx.name.clone(),
+                                leading: rsx! {
+                                    div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
+                                },
                             }
                         }
                     }
