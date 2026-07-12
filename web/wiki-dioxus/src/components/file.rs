@@ -93,116 +93,124 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     };
 
     rsx! {
-        div { class: "card",
-            div { class: "card-header",
-                div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
-                div {
-                    h3 { class: "title-medium", "{name}" }
-                    if let Some(iso) = created.as_ref() {
-                        p {
-                            class: "body-small",
-                            class: "text-muted",
-                            title: "{super::loader::full_datetime(iso)}",
-                            span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
-                            " {super::loader::relative_time(iso)}"
-                        }
-                    }
-                }
-                div { class: "flex-grow" }
-                // Download the raw file (any previewable type), not just view it.
-                if !file_url.is_empty() {
-                    a {
-                        href: "{file_url}",
-                        target: "_blank",
-                        download: "{name}",
-                        class: "btn-icon",
-                        title: "{t(\"common.download\")}",
-                        span { class: "material-icons", "download" }
-                    }
-                }
-                // Delete the file (owner-only), removing member rows first.
-                if can_manage && !segments.is_empty() {
-                    button {
-                        class: "btn-icon",
-                        title: "{t(\"common.delete\")}",
-                        onclick: move |_| confirm_open.set(true),
-                        span { class: "material-icons", "delete" }
-                    }
-                    AlertDialog {
-                        open: Some(confirm_open()),
-                        on_open_change: move |v| confirm_open.set(v),
-                        AlertDialogTitle { "{t(\"content.confirmDelete\")}" }
-                        AlertDialogDescription { "{name}" }
-                        AlertDialogActions {
-                            AlertDialogCancel { "{t(\"common.cancel\")}" }
-                            AlertDialogAction {
-                                on_click: {
-                                    let node_id = node_id.clone();
-                                    let parent = segments[..segments.len() - 1].to_vec();
-                                    move |_| {
-                                        let token = session.read().access_token.clone();
-                                        let node_id = node_id.clone();
-                                        let parent = parent.clone();
-                                        confirm_open.set(false);
-                                        spawn(async move {
-                                            let _ = graphql::delete_node_members(token.as_deref(), &node_id).await;
-                                            if graphql::delete_node(token.as_deref(), &node_id).await.unwrap_or(false) {
-                                                crate::session::bump_data_version();
-                                                nav.push(Route::PathPage { segments: parent, app: None });
-                                            }
-                                        });
+        super::widgets::SupportingPaneLayout {
+            // Primary pane: the file itself (the focus).
+            primary: rsx! {
+                div { class: "card",
+                    div { class: "file-viewer",
+                        if file_url.is_empty() {
+                            p { class: "body-medium", "{t(\"common.noContent\")}" }
+                        } else if file_mime.starts_with("image/") {
+                            super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
+                        } else if file_mime.starts_with("video/") {
+                            video {
+                                controls: true,
+                                style: "width: 100%; max-height: 70vh;",
+                                src: "{file_url}",
+                            }
+                        } else if file_mime.starts_with("audio/") {
+                            audio { controls: true, style: "width: 100%;", src: "{file_url}" }
+                        } else if file_mime == "application/pdf" {
+                            iframe { src: "{file_url}", title: "{name}" }
+                        } else if is_office_mime(file_mime) {
+                            // Preview Word/Excel/PowerPoint via Microsoft's hosted
+                            // viewer, which fetches the file URL server-side (mirrors
+                            // the old wiki). The whole tokenised URL is percent-encoded.
+                            {
+                                let encoded = String::from(&js_sys::encode_uri_component(&file_url));
+                                rsx! {
+                                    iframe {
+                                        src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
+                                        title: "{name}",
                                     }
-                                },
-                                "{t(\"common.delete\")}"
+                                }
+                            }
+                        } else {
+                            a {
+                                href: "{file_url}",
+                                target: "_blank",
+                                class: "btn btn-outlined",
+                                span { class: "material-icons", "download" }
+                                " {t(\"common.download\")}"
                             }
                         }
                     }
                 }
-            }
-            div { class: "file-viewer",
-                if file_url.is_empty() {
-                    p { class: "body-medium", "No file attached" }
-                } else if file_mime.starts_with("image/") {
-                    super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
-                } else if file_mime.starts_with("video/") {
-                    video {
-                        controls: true,
-                        style: "width: 100%; max-height: 70vh;",
-                        src: "{file_url}",
-                    }
-                } else if file_mime.starts_with("audio/") {
-                    audio { controls: true, style: "width: 100%;", src: "{file_url}" }
-                } else if file_mime == "application/pdf" {
-                    iframe { src: "{file_url}", title: "{name}" }
-                } else if is_office_mime(file_mime) {
-                    // Preview Word/Excel/PowerPoint via Microsoft's hosted viewer,
-                    // which fetches the file URL server-side (mirrors the old wiki).
-                    // The whole tokenised URL is percent-encoded into `src`.
-                    {
-                        let encoded = String::from(&js_sys::encode_uri_component(&file_url));
-                        rsx! {
-                            iframe {
-                                src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
-                                title: "{name}",
+            },
+            // Supporting pane: metadata, owner actions, and the discussion.
+            supporting: rsx! {
+                div { class: "card",
+                    div { class: "card-header",
+                        div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
+                        div {
+                            h3 { class: "title-medium", "{name}" }
+                            if let Some(iso) = created.as_ref() {
+                                p {
+                                    class: "body-small",
+                                    class: "text-muted",
+                                    title: "{super::loader::full_datetime(iso)}",
+                                    span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
+                                    " {super::loader::relative_time(iso)}"
+                                }
+                            }
+                        }
+                        div { class: "flex-grow" }
+                        // Download the raw file (any previewable type), not just view it.
+                        if !file_url.is_empty() {
+                            a {
+                                href: "{file_url}",
+                                target: "_blank",
+                                download: "{name}",
+                                class: "btn-icon",
+                                title: "{t(\"common.download\")}",
+                                span { class: "material-icons", "download" }
+                            }
+                        }
+                        // Delete the file (owner-only), removing member rows first.
+                        if can_manage && !segments.is_empty() {
+                            button {
+                                class: "btn-icon",
+                                title: "{t(\"common.delete\")}",
+                                onclick: move |_| confirm_open.set(true),
+                                span { class: "material-icons", "delete" }
+                            }
+                            AlertDialog {
+                                open: Some(confirm_open()),
+                                on_open_change: move |v| confirm_open.set(v),
+                                AlertDialogTitle { "{t(\"content.confirmDelete\")}" }
+                                AlertDialogDescription { "{name}" }
+                                AlertDialogActions {
+                                    AlertDialogCancel { "{t(\"common.cancel\")}" }
+                                    AlertDialogAction {
+                                        on_click: {
+                                            let node_id = node_id.clone();
+                                            let parent = segments[..segments.len() - 1].to_vec();
+                                            move |_| {
+                                                let token = session.read().access_token.clone();
+                                                let node_id = node_id.clone();
+                                                let parent = parent.clone();
+                                                confirm_open.set(false);
+                                                spawn(async move {
+                                                    let _ = graphql::delete_node_members(token.as_deref(), &node_id).await;
+                                                    if graphql::delete_node(token.as_deref(), &node_id).await.unwrap_or(false) {
+                                                        crate::session::bump_data_version();
+                                                        nav.push(Route::PathPage { segments: parent, app: None });
+                                                    }
+                                                });
+                                            }
+                                        },
+                                        "{t(\"common.delete\")}"
+                                    }
+                                }
                             }
                         }
                     }
-                } else {
-                    a {
-                        href: "{file_url}",
-                        target: "_blank",
-                        class: "btn btn-outlined",
-                        span { class: "material-icons", "download" }
-                        " Download {name}"
-                    }
                 }
-            }
-        }
-        // A file can be discussed too (React FileApp carries a discussion below
-        // the viewer).
-        super::comments::CommentSection {
-            node_id: node_id.clone(),
-            context_id: context_id.clone(),
+                super::comments::CommentSection {
+                    node_id: node_id.clone(),
+                    context_id: context_id.clone(),
+                }
+            },
         }
     }
 }
