@@ -90,6 +90,11 @@ These change behaviour / add capability rather than only looks:
   keyed on the path so switching apps in place keeps your scroll position.
 - **Skeleton content loading** — a content-shaped shimmer placeholder while a node
   loads, instead of a bare spinner.
+- **Density toggle** — a compact/comfortable UI-density preference in the account
+  menu, persisted to localStorage and reflected as `data-density` on the shell;
+  compact tightens card / list / folder-row spacing.
+- **Bottom-sheet drag handle** — an M3 drag handle on the compact tools bottom
+  sheet (mostly cosmetic, but signals the swipe affordance).
 
 ## Notes / follow-ups
 
