@@ -1004,6 +1004,22 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         sleep 500ms
         let sel = (wd-execute $session_id 'return document.querySelectorAll("#main .m3-filter-chip.selected").length')
         if (($sel | into int) >= 1) { log-ok "filter chip toggles selected state"; $p = $p + 1 } else { log-fail "filter chip did not select"; $fl = $fl + 1 }
+        # Remove-member confirm dialog must actually open (non-destructive: we Cancel,
+        # never Delete a real member). Reset to "all" first so there are rows.
+        wd-execute $session_id 'var a=[...document.querySelectorAll("#main .m3-filter-chip")].find(x=>x.textContent.trim().toLowerCase().startsWith("all")); if(a)a.click(); return 1' | ignore
+        sleep 700ms
+        wd-execute $session_id 'var b=[...document.querySelectorAll("#main .m3-data-table tbody tr button")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent.trim()=="person_remove"}); if(b)b.click(); return 1' | ignore
+        sleep 600ms
+        let dlg = (wd-execute $session_id 'var d=document.querySelector(".m3-dialog"); var act=document.querySelector(".m3-dialog-actions .btn-primary")?1:0; return JSON.stringify({dialog: d?1:0, action: act})')
+        let dj = ($dlg | from json)
+        if ($dj.dialog == 1) and ($dj.action == 1) {
+            log-ok "member remove opens the confirm dialog"; $p = $p + 1
+        } else {
+            log-fail $"member remove dialog did not open: ($dlg)"; $fl = $fl + 1
+        }
+        # Cancel — never delete a real member in the harness.
+        wd-execute $session_id 'var c=document.querySelector(".m3-dialog-actions .btn-outlined"); if(c)c.click(); return 1' | ignore
+        sleep 300ms
     } else {
         log-warn "member table not found (context may have no members) — skipping"
     }

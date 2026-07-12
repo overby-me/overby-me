@@ -5,11 +5,6 @@ use crate::i18n::{t, t_with};
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
-use super::ui::alert_dialog::{
-    AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
-    AlertDialogTitle,
-};
-
 /// MemberApp — member roster + invitation management. Owners (direct or context)
 /// get the full MembersDataGrid admin: hide/unhide, promote/demote, (de)activate,
 /// edit name/email, and remove a member.
@@ -380,24 +375,22 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
             }
         }
 
-        // Remove member confirm.
-        AlertDialog {
-            open: Some(remove_target.read().is_some()),
-            on_open_change: move |v: bool| {
-                if !v {
-                    remove_target.set(None);
+        // Remove member confirm. Uses the custom Dialog (plain `bool` open): the
+        // primitives AlertDialog's controlled `open` prop never opened here.
+        super::widgets::Dialog {
+            open: remove_target.read().is_some(),
+            on_dismiss: move |_| remove_target.set(None),
+            headline: t("member.confirmRemove"),
+            icon: "person_remove".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| remove_target.set(None),
+                    "{t(\"common.cancel\")}"
                 }
-            },
-            AlertDialogTitle { "{t(\"member.confirmRemove\")}" }
-            AlertDialogDescription {
-                if let Some((_, label)) = remove_target.read().clone() {
-                    "{label}"
-                }
-            }
-            AlertDialogActions {
-                AlertDialogCancel { "{t(\"common.cancel\")}" }
-                AlertDialogAction {
-                    on_click: move |_| {
+                button {
+                    class: "btn btn-primary",
+                    onclick: move |_| {
                         let Some((id, _)) = remove_target.read().clone() else {
                             return;
                         };
@@ -412,6 +405,9 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                     },
                     "{t(\"common.delete\")}"
                 }
+            },
+            if let Some((_, label)) = remove_target.read().clone() {
+                p { class: "body-medium", "{label}" }
             }
         }
     }
