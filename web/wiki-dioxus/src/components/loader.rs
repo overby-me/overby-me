@@ -644,14 +644,16 @@ fn NodeNotFound() -> Element {
 
     rsx! {
         div { class: "card",
-            div { class: "card-header",
-                div { class: "avatar", span { class: "material-icons", "warning" } }
-                h3 { class: "headline-small", "{t(\"node.documentUnavailable\")}" }
-            }
-            div { class: "card-content",
-                p { class: "body-large mb-1", "{t(\"node.notFoundOrNoAccess\")}" }
+            // EXPERIMENT (expressive empty state): a centred "void portal" — a big
+            // floating, morphing tonal orb holding the icon, a bold title, actions.
+            div { class: "empty-state",
+                div { class: "empty-state-orb",
+                    span { class: "material-icons", "search_off" }
+                }
+                h3 { class: "empty-state-title", "{t(\"node.documentUnavailable\")}" }
+                p { class: "empty-state-body", "{t(\"node.notFoundOrNoAccess\")}" }
                 if !is_auth {
-                    p { class: "body-large mb-2", "{t(\"node.maybeLoginForAccess\")}" }
+                    p { class: "empty-state-body", "{t(\"node.maybeLoginForAccess\")}" }
                     Link {
                         to: Route::Login {},
                         class: "btn btn-primary",

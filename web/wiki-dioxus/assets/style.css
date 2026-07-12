@@ -2524,6 +2524,67 @@ h6,
 	padding: 32px;
 }
 
+/* EXPERIMENT (expressive empty state): a centred "void portal" for not-found /
+   empty screens — a big floating, morphing tonal orb, bold title, helpful body. */
+.empty-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	gap: 12px;
+	padding: 48px 24px;
+}
+.empty-state-orb {
+	width: 120px;
+	height: 120px;
+	display: grid;
+	place-items: center;
+	border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
+	background: radial-gradient(
+		circle at 35% 30%,
+		var(--md-primary-container),
+		var(--md-tertiary-container)
+	);
+	color: var(--md-on-primary-container);
+	box-shadow: var(--md-sys-elevation-2);
+	margin-bottom: 8px;
+	animation:
+		empty-orb-float 5s ease-in-out infinite,
+		empty-orb-morph 8s ease-in-out infinite;
+}
+.empty-state-orb .material-icons {
+	font-size: 52px;
+}
+@keyframes empty-orb-float {
+	0%,
+	100% {
+		transform: translateY(0);
+	}
+	50% {
+		transform: translateY(-10px);
+	}
+}
+@keyframes empty-orb-morph {
+	0%,
+	100% {
+		border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
+	}
+	50% {
+		border-radius: 62% 38% 42% 58% / 54% 62% 38% 46%;
+	}
+}
+.empty-state-title {
+	font-size: var(--md-sys-typescale-headline-small-size);
+	line-height: var(--md-sys-typescale-headline-small-line);
+	font-weight: 700;
+	margin: 0;
+}
+.empty-state-body {
+	color: var(--md-on-surface-variant);
+	max-width: 34ch;
+	margin: 0;
+}
+
 /* Breadcrumbs */
 .breadcrumbs {
 	display: flex;
