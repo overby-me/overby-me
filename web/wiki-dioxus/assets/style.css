@@ -247,6 +247,31 @@ a:hover {
 	margin-inline: auto;
 }
 
+/* EXPERIMENT (tonal scrollbars): slim, theme-tinted scrollbars app-wide. Elements
+   that opt out with `scrollbar-width: none` (breadcrumbs, carousel) still win by
+   specificity, so they stay hidden. */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--md-outline-variant) transparent;
+}
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+::-webkit-scrollbar-thumb {
+	background: var(--md-outline-variant);
+	border-radius: var(--md-sys-shape-corner-full);
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--md-outline);
+	background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
 /* ── Top app bar ─────────────────────────────────────────────────────── */
 .top-app-bar {
 	position: fixed;
