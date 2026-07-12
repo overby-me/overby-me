@@ -3157,23 +3157,30 @@ h6,
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	gap: 20px;
 }
-/* Current speaker = the focal civic card (overrides the in-app green). */
+/* Current speaker = the focal civic card. EXPERIMENT: a bold gradient stage with
+   a glowing avatar and a display-scale name, for room-distance presence. */
 .speak-projector .speak-current {
-	background: var(--md-tertiary-container);
+	background: linear-gradient(
+		135deg,
+		var(--md-tertiary-container),
+		color-mix(in srgb, var(--md-primary) 22%, var(--md-tertiary-container))
+	);
 	color: var(--md-on-tertiary-container);
 	border-left: none;
+	box-shadow: var(--md-sys-elevation-3);
 }
 .speak-projector .speak-current .avatar {
 	background: var(--md-tertiary);
 	color: var(--md-on-tertiary);
-	width: 56px;
-	height: 56px;
-	font-size: 1.5rem;
+	width: 72px;
+	height: 72px;
+	font-size: 1.8rem;
+	box-shadow: 0 0 0 6px color-mix(in srgb, var(--md-tertiary) 22%, transparent);
 }
 .speak-projector .speak-current .list-item-primary {
-	font-size: var(--md-sys-typescale-display-small-size);
-	line-height: var(--md-sys-typescale-display-small-line);
-	font-weight: 600;
+	font-size: var(--md-sys-typescale-display-medium-size);
+	line-height: var(--md-sys-typescale-display-medium-line);
+	font-weight: 700;
 }
 .speak-projector .speak-current .list-item-secondary {
 	font-size: var(--md-sys-typescale-title-large-size);
