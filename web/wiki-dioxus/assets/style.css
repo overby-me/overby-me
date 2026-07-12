@@ -388,22 +388,32 @@ a:hover {
 	height: 32px;
 	flex: 0 0 auto;
 	border-radius: var(--md-sys-shape-corner-full);
+	/* Spring the shape/size on activation; standard-ease the colour + glow. */
 	transition:
+		width var(--md-sys-motion-duration-medium1)
+			var(--md-sys-motion-spring-spatial-default),
+		height var(--md-sys-motion-duration-medium1)
+			var(--md-sys-motion-spring-spatial-default),
+		border-radius var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default),
 		background-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard),
-		transform var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-spring-spatial-default);
+			var(--md-sys-motion-easing-standard),
+		box-shadow var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-easing-standard);
 }
 .nav-rail-item.active {
 	color: var(--md-on-surface);
 }
 .nav-rail-item.active .nav-rail-indicator {
-	/* primary-container (green) reads as the active destination and stays
-	   distinct from the surface-container rail (secondary-container is too close
-	   to it in the green theme). M3 Expressive: a subtle springy pop on activate. */
+	/* EXPERIMENT (morphing pill): the active indicator grows and morphs from a
+	   full pill toward a rounded square, in primary-container with a soft primary
+	   glow — a bolder, more spatial active cue than a simple scale pop. */
+	width: 64px;
+	height: 40px;
 	background: var(--md-primary-container);
 	color: var(--md-on-primary-container);
-	transform: scale(1.06);
+	border-radius: var(--md-sys-shape-corner-large-increased);
+	box-shadow: 0 0 14px 0 color-mix(in srgb, var(--md-primary) 30%, transparent);
 }
 .nav-rail-label {
 	color: inherit;
