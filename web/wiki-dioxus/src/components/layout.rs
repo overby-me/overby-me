@@ -954,14 +954,6 @@ fn TopAppBar(
 
     rsx! {
         header { class: "top-app-bar",
-            if size.is_compact() {
-                button {
-                    class: "btn-icon state-layer",
-                    aria_label: t("common.menu"),
-                    onclick: move |_| open_drawer.set(true),
-                    span { class: "material-icons", "menu" }
-                }
-            }
             if *search_mode.read() {
                 SearchBar {
                     input: search_input,
@@ -973,17 +965,26 @@ fn TopAppBar(
                     },
                 }
             } else {
-                // M3 Expressive docked search: a rounded container holding the
-                // breadcrumb trail behind a leading search affordance. Tapping the
-                // icon opens full search; the crumbs stay tappable for up-navigation.
+                // M3 Expressive docked search: a rounded container carrying the
+                // breadcrumb trail. On compact the drawer button is integrated as the
+                // leading affordance; the search button trails on the right and opens
+                // full search. The crumbs stay tappable for up-navigation.
                 div { class: "expressive-search",
+                    if size.is_compact() {
+                        button {
+                            class: "expressive-search-btn state-layer",
+                            aria_label: t("common.menu"),
+                            onclick: move |_| open_drawer.set(true),
+                            span { class: "material-icons", "menu" }
+                        }
+                    }
+                    div { class: "expressive-search-crumbs", Breadcrumbs {} }
                     button {
                         class: "expressive-search-btn state-layer",
                         aria_label: t("common.search"),
                         onclick: move |_| search_mode.set(true),
                         span { class: "material-icons", "search" }
                     }
-                    div { class: "expressive-search-crumbs", Breadcrumbs {} }
                 }
             }
         }

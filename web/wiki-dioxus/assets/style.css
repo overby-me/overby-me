@@ -278,7 +278,7 @@ a:hover {
 	align-items: center;
 	gap: 2px;
 	height: 48px;
-	padding: 0 6px 0 2px;
+	padding: 0 4px;
 	background: var(--md-surface-container-high);
 	border-radius: var(--md-sys-shape-corner-full);
 }
@@ -302,6 +302,11 @@ a:hover {
 	align-items: center;
 	overflow-x: auto;
 	scrollbar-width: none;
+}
+/* With no leading button before them (medium+), the crumbs sit flush against the
+   rounded container edge, so give them some breathing room there. */
+.expressive-search-crumbs:first-child {
+	padding-left: 10px;
 }
 .expressive-search-crumbs::-webkit-scrollbar {
 	display: none;
