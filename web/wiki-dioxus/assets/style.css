@@ -3284,6 +3284,16 @@ h6,
 	color: var(--md-primary);
 	font-weight: 700;
 }
+/* EXPERIMENT (functional): when a heading is jumped to from the TOC, offset it so
+   it lands below the fixed top bar instead of hiding underneath it. */
+.slate-content h1[id],
+.slate-content h2[id],
+.slate-content h3[id],
+.slate-content h4[id],
+.slate-content h5[id],
+.slate-content h6[id] {
+	scroll-margin-top: 80px;
+}
 
 /* EXPERIMENT (functional: print). A clean printout of the current page: hide all
    chrome and floating affordances, drop the surfaces to plain bordered blocks,
