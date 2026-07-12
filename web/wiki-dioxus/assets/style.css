@@ -299,7 +299,11 @@ a:hover {
 	display: none;
 }
 
-/* ── Navigation rail (medium+) ───────────────────────────────────────── */
+/* ── Navigation rail (medium+): M3 expandable rail ───────────────────────
+   Collapsed it's an icon rail; expanded it widens in place to icon+label rows
+   plus the groups/events tree — replacing the standalone tree pane and the
+   medium modal drawer. Persistent (pushes content) on large/xl; a modal overlay
+   (with a scrim) on medium. */
 .nav-rail {
 	position: fixed;
 	top: 0;
@@ -315,6 +319,8 @@ a:hover {
 	background: var(--md-surface-container);
 	overflow-y: auto;
 	scrollbar-width: none;
+	transition: width var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
 }
 .nav-rail::-webkit-scrollbar {
 	display: none;
@@ -323,6 +329,7 @@ a:hover {
 	display: flex;
 	justify-content: center;
 	padding-bottom: var(--md-sys-spacing-1);
+	width: 100%;
 }
 .nav-rail-destinations {
 	display: flex;
@@ -353,6 +360,7 @@ a:hover {
 	justify-content: center;
 	width: 56px;
 	height: 32px;
+	flex: 0 0 auto;
 	border-radius: var(--md-sys-shape-corner-full);
 	transition:
 		background-color var(--md-sys-motion-duration-short3)
@@ -376,30 +384,81 @@ a:hover {
 	text-align: center;
 }
 
-/* Permanent tree pane (large/xl): the groups/events tree in its own surface
-   beside the rail, so the rail stays a clean 88dp app strip. Fills the strip
-   between the rail (left) and the top-app-bar / content (right). */
-.nav-tree-pane {
-	position: fixed;
-	top: 0;
-	bottom: 0;
-	left: var(--md-sys-rail-width);
-	width: calc(var(--md-sys-rail-expanded) - var(--md-sys-rail-width));
-	z-index: 55;
-	background: var(--md-surface-container-low);
-	overflow-y: auto;
-	scrollbar-width: none;
+/* Expanded rail: wider and left-aligned; destinations become icon + label rows,
+   and the tree fills the space below them. */
+.nav-rail.expanded {
+	width: var(--md-sys-rail-expanded);
+	align-items: stretch;
 	padding: var(--md-sys-spacing-2);
+	gap: var(--md-sys-spacing-2);
+	box-shadow: var(--md-sys-elevation-1);
 }
-.nav-tree-pane::-webkit-scrollbar {
-	display: none;
+.nav-rail.expanded .nav-rail-header {
+	justify-content: flex-start;
+}
+.nav-rail.expanded .nav-rail-destinations {
+	flex: 0 0 auto;
+	justify-content: flex-start;
+	gap: var(--md-sys-spacing-1);
+}
+.nav-rail.expanded .nav-rail-item {
+	flex-direction: row;
+	justify-content: flex-start;
+	gap: var(--md-sys-spacing-3);
+	padding: 4px 8px;
+}
+.nav-rail.expanded .nav-rail-item.active {
+	/* The whole row shows selection; the pill indicator loses its own fill.
+	   primary-container (green) — not secondary — so it stays clearly distinct
+	   from the neutral rail (this scheme's secondary-container is too low-chroma). */
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+}
+.nav-rail.expanded .nav-rail-item .nav-rail-indicator {
+	width: 40px;
+	height: 40px;
+}
+.nav-rail.expanded .nav-rail-item.active .nav-rail-indicator {
+	background: transparent;
+	color: inherit;
+	transform: none;
+}
+.nav-rail.expanded .nav-rail-label {
+	flex: 1;
+	text-align: left;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.nav-rail.expanded .nav-rail-tree {
+	flex: 1;
+	border-top: 1px solid var(--md-outline-variant);
+	padding-top: var(--md-sys-spacing-2);
+	margin-top: var(--md-sys-spacing-1);
 }
 .nav-rail-tree {
+	width: 100%;
 	overflow-y: auto;
 	scrollbar-width: none;
 }
 .nav-rail-tree::-webkit-scrollbar {
 	display: none;
+}
+
+/* Scrim behind the modal (overlay) expanded rail on medium widths. */
+.nav-rail-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 58;
+	background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard);
+}
+.nav-rail-scrim.open {
+	opacity: 1;
+	pointer-events: auto;
 }
 
 /* ── Bottom navigation bar (compact) ─────────────────────────────────── */
@@ -498,16 +557,23 @@ a:hover {
 /* ── Content / top-bar insets per window-size class ──────────────────── */
 .app-shell:not([data-size-class="compact"]) .content-pane {
 	margin-left: var(--md-sys-rail-width);
+	transition: margin-left var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
 }
 .app-shell:not([data-size-class="compact"]) .top-app-bar {
 	left: var(--md-sys-rail-width);
+	transition: left var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
 }
-.app-shell[data-size-class="large"] .content-pane,
-.app-shell[data-size-class="extra-large"] .content-pane {
+/* The persistent expanded rail (large/xl) pushes the content across; on medium
+   the expanded rail is a modal overlay, so content is NOT pushed (stays inset by
+   the collapsed rail width). */
+.app-shell[data-rail-expanded="true"][data-size-class="large"] .content-pane,
+.app-shell[data-rail-expanded="true"][data-size-class="extra-large"] .content-pane {
 	margin-left: var(--md-sys-rail-expanded);
 }
-.app-shell[data-size-class="large"] .top-app-bar,
-.app-shell[data-size-class="extra-large"] .top-app-bar {
+.app-shell[data-rail-expanded="true"][data-size-class="large"] .top-app-bar,
+.app-shell[data-rail-expanded="true"][data-size-class="extra-large"] .top-app-bar {
 	left: var(--md-sys-rail-expanded);
 }
 /* Compact: the search/breadcrumb app bar moves to the BOTTOM (thumb reach, like

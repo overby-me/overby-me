@@ -95,6 +95,16 @@ pub fn Layout() -> Element {
     // early returns below so the hook order stays stable across auth/screen pages.
     let size_class = crate::window_size::use_window_size();
 
+    // Expandable navigation rail (M3's replacement for a persistent nav drawer): a
+    // collapsed icon rail that expands in place to labelled rows + the groups/events
+    // tree. It's ALWAYS expanded on large/xl (persistent, pushes the content) and
+    // toggleable on medium/expanded widths, where it opens as a modal overlay (with
+    // a scrim). `user_expanded` is the medium toggle.
+    let mut user_expanded = use_signal(|| false);
+    let is_large_rail = size_class.is_expanded_rail();
+    let rail_expanded = is_large_rail || user_expanded();
+    let modal_rail = user_expanded() && !is_large_rail && !size_class.is_compact();
+
     // NHost password-reset emails link to `/?type=passwordReset&refreshToken=...`,
     // which the router renders as home. The token was stashed by
     // `capture_reset_token` in `main` (before the router dropped the query); act
@@ -187,6 +197,7 @@ pub fn Layout() -> Element {
         div {
             class: "app-shell",
             "data-size-class": "{size_class.as_str()}",
+            "data-rail-expanded": if rail_expanded { "true" } else { "false" },
             // Ctrl/Cmd+K opens search (a common shortcut). Catches keydowns that
             // bubble up from any focused element in the app.
             onkeydown: move |evt| {
@@ -199,19 +210,29 @@ pub fn Layout() -> Element {
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
 
-            // Primary navigation (APP axis): a clean vertical M3 navigation rail on
-            // medium+ (88dp, never widened); a bottom navigation bar on compact
-            // (rendered after the content, below).
+            // Primary navigation (APP + PLACE axes) on medium+: the M3 expandable
+            // navigation rail. Collapsed it's an icon rail; expanded it shows the app
+            // destinations as rows plus the groups/events tree — replacing the old
+            // permanent tree pane and the medium modal drawer. A bottom bar carries
+            // the apps on compact (rendered after the content, below).
             if !size_class.is_compact() {
-                NavigationRail { expanded: size_class.is_expanded_rail(), open_drawer }
+                NavigationRail {
+                    expanded: rail_expanded,
+                    modal: modal_rail,
+                    show_toggle: !is_large_rail,
+                    on_toggle: move |_| {
+                        let v = !user_expanded();
+                        user_expanded.set(v);
+                    },
+                }
             }
 
-            // PLACE axis on large/xl: a permanent groups/events tree pane beside the
-            // rail (the rail stays a clean app strip; the tree is no longer crammed
-            // into it). On smaller sizes the tree is the modal drawer (below).
-            if size_class.is_expanded_rail() {
-                aside { class: "nav-tree-pane",
-                    div { class: "nav-rail-tree", DrawerContent {} }
+            // Scrim behind the rail when it opens as a modal overlay (medium widths).
+            if modal_rail {
+                div {
+                    class: "nav-rail-scrim open",
+                    role: "presentation",
+                    onclick: move |_| user_expanded.set(false),
                 }
             }
 
@@ -229,9 +250,9 @@ pub fn Layout() -> Element {
             }
         }
 
-        // Modal tree drawer (PLACE axis). On large/xl the expanded rail hosts the
-        // tree inline instead, so the modal drawer is not mounted there.
-        if !size_class.is_expanded_rail() {
+        // Compact keeps a modal navigation drawer for the tree (M3 uses a modal
+        // drawer on phones); medium+ uses the expandable rail above.
+        if size_class.is_compact() {
             NavigationDrawer { open: open_drawer }
         }
     }
@@ -646,7 +667,12 @@ fn context_apps(route: &Route, is_auth: bool) -> Vec<(&'static str, String, Rout
 /// container pill tracks the active `?app=` destination. Retires `.app-rail` and
 /// the always-on `.drawer`.
 #[component]
-fn NavigationRail(expanded: bool, open_drawer: Signal<bool>) -> Element {
+fn NavigationRail(
+    expanded: bool,
+    modal: bool,
+    show_toggle: bool,
+    on_toggle: EventHandler<()>,
+) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     let route = use_route::<Route>();
@@ -654,22 +680,24 @@ fn NavigationRail(expanded: bool, open_drawer: Signal<bool>) -> Element {
     let pending = PENDING_INVITES();
 
     rsx! {
-        nav { class: "nav-rail",
-            // M3 rail header: a menu button opens the modal tree drawer on medium
-            // (where the tree is modal). On large/xl the tree is a permanent pane
-            // beside the rail, so the menu button is omitted there.
-            if !expanded {
+        nav { class: if expanded { "nav-rail expanded" } else { "nav-rail" },
+            // Header: the menu button toggles collapsed <-> expanded. Shown on
+            // medium/expanded widths; large/xl is always expanded, so it is hidden.
+            if show_toggle {
                 div { class: "nav-rail-header",
                     button {
                         class: "btn-icon state-layer",
                         aria_label: t("common.menu"),
-                        onclick: move |_| open_drawer.set(true),
-                        span { class: "material-icons", "menu" }
+                        "aria-expanded": if expanded { "true" } else { "false" },
+                        onclick: move |_| on_toggle.call(()),
+                        span { class: "material-icons",
+                            if expanded { "menu_open" } else { "menu" }
+                        }
                     }
                 }
             }
-            // Destinations are grouped and vertically centred in the rail (M3
-            // navigation-rail guidelines), not crammed into the top-left corner.
+            // App destinations. Collapsed: icon-over-label columns. Expanded:
+            // icon + label rows (see .nav-rail.expanded in CSS).
             div { class: "nav-rail-destinations",
                 for (mime_id , label , to , active) in apps.into_iter() {
                     Link {
@@ -688,6 +716,20 @@ fn NavigationRail(expanded: bool, open_drawer: Signal<bool>) -> Element {
                             "{label}"
                         }
                     }
+                }
+            }
+            // Expanded: the groups/events tree (PLACE axis) below the destinations.
+            // When the rail is a modal overlay (medium), a click inside collapses it
+            // after navigating.
+            if expanded {
+                div {
+                    class: "nav-rail-tree",
+                    onclick: move |_| {
+                        if modal {
+                            on_toggle.call(());
+                        }
+                    },
+                    DrawerContent {}
                 }
             }
         }
