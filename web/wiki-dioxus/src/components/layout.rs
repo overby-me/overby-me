@@ -85,6 +85,8 @@ fn parse_reset_token(search: &str) -> Option<String> {
 pub fn Layout() -> Element {
     let open_drawer = use_signal(|| false);
     let mut search_mode = use_signal(|| false);
+    // EXPERIMENT (functional): a keyboard-shortcuts help overlay, opened with "?".
+    let mut shortcuts_open = use_signal(|| false);
     let search_input = use_signal(String::new);
     let search_results = use_signal(Vec::<NodeFields>::new);
 
@@ -223,32 +225,71 @@ pub fn Layout() -> Element {
             // bubble up from any focused element in the app.
             onkeydown: move |evt| {
                 let m = evt.modifiers();
+                // Whether focus is in a text field / the editor — bare-key shortcuts
+                // must not fire while typing.
+                let typing = web_sys::window()
+                    .and_then(|w| w.document())
+                    .and_then(|d| d.active_element())
+                    .map(|e| {
+                        let tag = e.tag_name().to_lowercase();
+                        tag == "input" || tag == "textarea" || e.has_attribute("contenteditable")
+                    })
+                    .unwrap_or(false);
                 if (m.ctrl() || m.meta()) && evt.key() == Key::Character("k".to_string()) {
                     search_mode.set(true);
                     evt.prevent_default();
-                } else if evt.key() == Key::Character("/".to_string()) && !m.ctrl() && !m.meta() {
-                    // EXPERIMENT (functional): bare "/" opens search too (a common
-                    // shortcut), but not while typing in a field or the editor.
-                    let typing = web_sys::window()
-                        .and_then(|w| w.document())
-                        .and_then(|d| d.active_element())
-                        .map(|e| {
-                            let tag = e.tag_name().to_lowercase();
-                            tag == "input"
-                                || tag == "textarea"
-                                || e.has_attribute("contenteditable")
-                        })
-                        .unwrap_or(false);
-                    if !typing {
-                        search_mode.set(true);
-                        evt.prevent_default();
-                    }
+                } else if !typing && !m.ctrl() && !m.meta()
+                    && evt.key() == Key::Character("/".to_string())
+                {
+                    // EXPERIMENT (functional): bare "/" opens search too.
+                    search_mode.set(true);
+                    evt.prevent_default();
+                } else if !typing && evt.key() == Key::Character("?".to_string()) {
+                    // EXPERIMENT (functional): "?" opens the keyboard-shortcuts help.
+                    shortcuts_open.set(true);
+                    evt.prevent_default();
                 }
             },
             // EXPERIMENT (functional a11y): a skip link — the first focusable
             // element, visually hidden until focused — jumps keyboard users past
             // the chrome straight to the content.
             a { class: "skip-link", href: "#main-content", "{t(\"common.skipToContent\")}" }
+
+            // EXPERIMENT (functional): keyboard-shortcuts help overlay (opened with ?).
+            super::widgets::Dialog {
+                open: shortcuts_open(),
+                on_dismiss: move |_| shortcuts_open.set(false),
+                headline: t("common.keyboardShortcuts"),
+                icon: "keyboard".to_string(),
+                actions: rsx! {
+                    button {
+                        class: "btn btn-primary",
+                        onclick: move |_| shortcuts_open.set(false),
+                        "{t(\"common.close\")}"
+                    }
+                },
+                div { class: "shortcut-list",
+                    div { class: "shortcut-row",
+                        span { class: "shortcut-keys",
+                            span { class: "kbd", "Ctrl" }
+                            span { class: "kbd", "K" }
+                        }
+                        span { "{t(\"common.search\")}" }
+                    }
+                    div { class: "shortcut-row",
+                        span { class: "shortcut-keys", span { class: "kbd", "/" } }
+                        span { "{t(\"common.search\")}" }
+                    }
+                    div { class: "shortcut-row",
+                        span { class: "shortcut-keys", span { class: "kbd", "?" } }
+                        span { "{t(\"common.shortcutHelp\")}" }
+                    }
+                    div { class: "shortcut-row",
+                        span { class: "shortcut-keys", span { class: "kbd", "Esc" } }
+                        span { "{t(\"common.close\")}" }
+                    }
+                }
+            }
 
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
