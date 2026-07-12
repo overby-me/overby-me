@@ -175,8 +175,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                     rsx! {
                                         button {
                                             key: "{u.node_id.clone().unwrap_or_default()}",
-                                            class: "folder-item",
-                                            style: "width: 100%; text-align: left; background: none; border: none; cursor: pointer;",
+                                            class: "list-item list-button",
                                             onclick: move |_| {
                                                 let Some(nid) = nid.clone() else {
                                                     return;
@@ -367,6 +366,18 @@ fn MemberRow(
     let active = member.active;
     let hidden = member.hidden;
 
+    // M3 status chip (icon + label) summarising the membership state, replacing a
+    // bare text line: hidden > owner > active > pending-invitation.
+    let (status_icon, status_label) = if member.hidden {
+        ("visibility_off", t("member.hidden"))
+    } else if member.owner {
+        ("star", t("member.owner"))
+    } else if member.accepted {
+        ("check_circle", t("member.active"))
+    } else {
+        ("mail", t("invite.invitations"))
+    };
+
     rsx! {
         div {
             class: "list-item",
@@ -375,16 +386,7 @@ fn MemberRow(
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{member.label()}" }
                 div { class: "list-item-secondary",
-                    if member.hidden {
-                        span { class: "material-icons", style: "font-size: 14px; vertical-align: middle;", "visibility_off" }
-                        " {t(\"member.hidden\")}"
-                    } else if member.owner {
-                        "{t(\"member.owner\")}"
-                    } else if member.accepted {
-                        "{t(\"member.active\")}"
-                    } else {
-                        "{t(\"invite.invitations\")}"
-                    }
+                    super::widgets::Chip { icon: status_icon.to_string(), label: status_label }
                 }
             }
             if can_manage {

@@ -1669,6 +1669,17 @@ select:focus {
 	text-decoration: none;
 }
 
+/* A <button> that should render as a full-width list row (e.g. an invite
+   autocomplete match): strip the native chrome and inherit the list typography. */
+.list-button {
+	width: 100%;
+	text-align: left;
+	background: none;
+	border: none;
+	font: inherit;
+	cursor: pointer;
+}
+
 /* M3 segmented button (widgets::SegmentedButton): a connected outlined row; the
    selected segment fills with secondary-container. */
 .m3-segmented {
