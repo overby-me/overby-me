@@ -171,6 +171,9 @@
     ```
   '';
 
+  # Play a freedesktop sound-theme event via PipeWire (pw-play).
+  playSound = file: "${pkgs.pipewire}/bin/pw-play ${pkgs.sound-theme-freedesktop}/share/sounds/freedesktop/stereo/${file}";
+
   claudeSettingsJson = (pkgs.formats.json {}).generate "claude-settings.json" {
     hooks = {
       PreToolUse = [
@@ -192,6 +195,10 @@
               type = "command";
               command = "${pkgs.libnotify}/bin/notify-send 'Claude Code' 'Waiting for your input'";
             }
+            {
+              type = "command";
+              command = playSound "message.oga";
+            }
           ];
         }
       ];
@@ -202,6 +209,10 @@
             {
               type = "command";
               command = "${pkgs.libnotify}/bin/notify-send 'Claude Code' 'Task completed'";
+            }
+            {
+              type = "command";
+              command = playSound "complete.oga";
             }
           ];
         }
