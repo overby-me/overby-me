@@ -302,6 +302,11 @@ html {
 	outline-offset: 2px;
 }
 
+/* EXPERIMENT (polish): branded text selection instead of the browser default. */
+::selection {
+	background: color-mix(in srgb, var(--md-primary) 28%, transparent);
+}
+
 /* EXPERIMENT (functional a11y: skip link): off-screen until focused, then a real
    pill button at the top-left that jumps keyboard users to the content. */
 .skip-link {
