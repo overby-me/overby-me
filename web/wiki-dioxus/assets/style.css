@@ -2056,6 +2056,25 @@ select:focus {
 	display: flex;
 	align-items: center;
 	gap: 2px;
+	/* EXPERIMENT (expressive roster): actions rest quiet and fade in on row hover. */
+	opacity: 0.4;
+	transition: opacity var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+.paginated-table tbody tr {
+	transition: background-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+.paginated-table tbody tr:hover {
+	background: color-mix(in srgb, var(--md-primary) 6%, transparent);
+}
+.paginated-table tbody tr:hover .member-row-actions {
+	opacity: 1;
+}
+/* Tonal roster avatars (secondary-container) for a warmer people list. */
+.m3-cell-icon .avatar.small {
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
 }
 .paginated-table-footer {
 	display: flex;
