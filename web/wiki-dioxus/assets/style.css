@@ -1087,7 +1087,9 @@ a:hover {
 		box-shadow var(--md-sys-motion-duration-short4)
 		var(--md-sys-motion-easing-standard),
 		transform var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-spring-spatial-fast);
+		var(--md-sys-motion-spring-spatial-fast),
+		border-radius var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
 	text-decoration: none;
 }
 
@@ -1143,6 +1145,32 @@ a:hover {
 	color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
 	box-shadow: none;
 	cursor: not-allowed;
+}
+
+/* EXPERIMENT (button morph): filled buttons lift on hover and squish to a squarer
+   corner on press — the M3 2025 expressive button feel. Plus a tonal variant. */
+.btn-primary:hover,
+.btn-secondary:hover {
+	transform: scale(1.02);
+}
+.btn-primary:active,
+.btn-secondary:active,
+.btn-cast:active {
+	border-radius: var(--md-sys-shape-corner-large);
+}
+.btn-tonal {
+	background-color: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+	border-radius: var(--md-sys-shape-corner-large);
+}
+.btn-tonal:hover {
+	background-color: color-mix(
+		in srgb,
+		var(--md-on-secondary-container) 8%,
+		var(--md-secondary-container)
+	);
+	box-shadow: var(--md-sys-elevation-1);
+	transform: scale(1.02);
 }
 
 .btn-secondary {
