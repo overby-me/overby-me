@@ -1783,17 +1783,21 @@ select:focus {
 }
 
 /* Poll result bars */
+/* M3 linear progress (poll / vote / admin result bars): full-round track on the
+   highest container tone, primary indicator, spring fill. */
 .vote-bar {
-	height: 6px;
-	border-radius: 3px;
-	background: var(--md-surface-variant, #e7e0ec);
+	height: 8px;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-surface-container-highest);
 	overflow: hidden;
 	margin: 4px 0;
 }
 .vote-bar-fill {
 	height: 100%;
-	background: var(--md-primary, #6750a4);
-	transition: width 0.3s ease;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-primary);
+	transition: width var(--md-sys-motion-duration-long1)
+		var(--md-sys-motion-spring-spatial-default);
 }
 
 /* Typography */
