@@ -1244,14 +1244,19 @@ a.folder-item:focus-visible {
 	align-items: center;
 	gap: 10px;
 	padding: 14px 16px;
-	border: 1.5px dashed var(--md-outline);
-	border-radius: var(--md-sys-shape-corner-medium, 12px);
-	background: var(--md-surface-variant);
+	border: 1.5px dashed var(--md-outline-strong);
+	border-radius: var(--md-sys-shape-corner-medium);
+	background: var(--md-surface-container-highest);
 	color: var(--md-on-surface-variant);
 	cursor: pointer;
 	transition:
-		border-color 0.2s,
-		background-color 0.2s;
+		border-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard),
+		background-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+.file-upload:hover {
+	border-color: var(--md-primary);
 }
 
 .file-upload:hover {
@@ -2156,12 +2161,10 @@ h6,
 @keyframes speak-getready-pulse {
 	0%,
 	100% {
-		box-shadow: 0 0 0 0
-			color-mix(in srgb, var(--md-tertiary) 45%, transparent);
+		box-shadow: 0 0 0 0 color-mix(in srgb, var(--md-tertiary) 45%, transparent);
 	}
 	50% {
-		box-shadow: 0 0 0 6px
-			color-mix(in srgb, var(--md-tertiary) 0%, transparent);
+		box-shadow: 0 0 0 6px color-mix(in srgb, var(--md-tertiary) 0%, transparent);
 	}
 }
 
