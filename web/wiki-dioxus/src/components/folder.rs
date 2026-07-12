@@ -227,7 +227,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 div { class: "avatar small",
                     span { class: "material-icons", "folder_open" }
                 }
-                h3 { class: "title-medium", "{t(\"common.items\")}" }
+                h3 { class: "title-medium", "{t(\"mime.folder\")}" }
                 div { class: "flex-grow" }
                 // Toggle list/grid layout (#125).
                 if count > 1 {
