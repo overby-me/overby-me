@@ -836,7 +836,16 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                                                 div {
                                                     class: if selected.read().get(ri).copied().unwrap_or(false) { "list-item ballot-option selected" } else { "list-item ballot-option" },
                                                     key: "{ri}",
-                                                    style: "gap: 8px;",
+                                                    style: "gap: 8px; cursor: pointer;",
+                                                    // EXPERIMENT (functional): the whole option card selects, not
+                                                    // just the small radio. Idempotent with the RadioItem for
+                                                    // single-choice, so clicking either works.
+                                                    onclick: move |_| {
+                                                        let mut cur = vec![false; len];
+                                                        cur[ri] = true;
+                                                        selected.set(cur);
+                                                        error.set(String::new());
+                                                    },
                                                     RadioItem { value: "{ri}", index: dp }
                                                     div { class: "list-item-text",
                                                         div { class: "list-item-primary", "{option}" }
