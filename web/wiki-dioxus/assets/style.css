@@ -2377,6 +2377,25 @@ select:focus {
 	padding: 16px;
 	border-bottom: 1px solid var(--md-outline-variant);
 }
+/* EXPERIMENT (M3 bottom-sheet handle): a drag-handle pill on the compact bottom
+   sheet (not the medium side sheet or the docked pane). */
+@media (max-width: 599px) {
+	.tool-sheet:not(.docked)::before {
+		content: "";
+		position: absolute;
+		top: 8px;
+		left: 50%;
+		transform: translateX(-50%);
+		width: 36px;
+		height: 4px;
+		border-radius: var(--md-sys-shape-corner-full);
+		background: var(--md-outline-variant);
+		z-index: 2;
+	}
+	.tool-sheet:not(.docked) .tool-sheet-header {
+		padding-top: 24px;
+	}
+}
 .tool-sheet-header h3 {
 	flex: 1;
 	margin: 0;
