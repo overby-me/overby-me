@@ -294,6 +294,14 @@ html {
 	scroll-behavior: smooth;
 }
 
+/* EXPERIMENT (functional a11y: focus baseline): a consistent keyboard-focus ring
+   for any interactive element that lacks its own, so tab-navigation is always
+   visible. Element-specific :focus-visible rules (higher specificity) still win. */
+:focus-visible {
+	outline: 2px solid var(--md-primary);
+	outline-offset: 2px;
+}
+
 /* EXPERIMENT (functional a11y: skip link): off-screen until focused, then a real
    pill button at the top-left that jumps keyboard users to the content. */
 .skip-link {
