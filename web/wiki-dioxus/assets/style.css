@@ -2485,6 +2485,11 @@ select:focus {
 .sheet-action.danger .material-icons {
 	color: var(--md-error);
 }
+/* EXPERIMENT (clarity): destructive actions get an error-tinted hover so they read
+   clearly as dangerous before you commit. */
+.sheet-action.danger:hover {
+	background: color-mix(in srgb, var(--md-error) 11%, transparent);
+}
 .sheet-action:disabled {
 	opacity: var(--md-sys-state-disabled-opacity, 0.38);
 	cursor: default;
