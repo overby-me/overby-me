@@ -859,6 +859,18 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "member table not found (context may have no members) — skipping"
     }
 
+    # ── Mobile shell (390px): the search/breadcrumb bar sits at the BOTTOM (thumb
+    #    reach) as an Expressive search pill, above the app navigation bar. ──
+    wd-window-rect $session_id 390 844
+    sleep 500ms
+    wd-navigate $session_id $"(base-url)($ctx_path)"
+    sleep 1sec
+    let mob = (wd-execute $session_id 'var bar=document.querySelector(".top-app-bar"); if(!bar) return "nobar"; var r=bar.getBoundingClientRect(); var pill=document.querySelector(".top-app-bar .expressive-search")?1:0; var nav=document.querySelectorAll(".nav-bar .nav-bar-item").length; return JSON.stringify({barTop:Math.round(r.top), vh:window.innerHeight, pill:pill, navItems:nav})')
+    let ok = (try { let j = ($mob | from json); ($j.barTop > ($j.vh / 2)) and ($j.pill == 1) and ($j.navItems >= 1) } catch { false })
+    if $ok { log-ok $"mobile: search bar at bottom, expressive pill, nav bar ($mob)"; $p = $p + 1 } else { log-fail $"mobile shell layout off: ($mob)"; $fl = $fl + 1 }
+    wd-window-rect $session_id 1280 900
+    sleep 400ms
+
     # The muted-text refactor relies on Dioxus MERGING two `class:` attributes
     # (a base body-* class + text-muted), not last-wins. A profile paragraph must
     # carry BOTH classes, confirming the base class was not silently dropped.
