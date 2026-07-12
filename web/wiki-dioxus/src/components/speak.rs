@@ -198,18 +198,23 @@ fn SpeakList(
                 }
             } else {
                 div { class: "list",
-                    for (i , speaker) in speakers.iter().enumerate() {
+                    // On the projector (screen) the room only needs the current
+                    // speaker and the single next one, who is asked to get ready;
+                    // the full queue stays in the interactive SpeakApp/admin view.
+                    for (i , speaker) in speakers.iter().enumerate().take(if screen { 2 } else { usize::MAX }) {
                         {
                             let speaker_id = speaker.id.0.clone();
                             let name = speaker.name.clone();
                             let (type_icon , type_key) = speak_type_meta(speaker_type(speaker));
                             let secondary = match i {
                                 0 => t("speak.speakingNow"),
+                                1 if screen => t("speak.getReady"),
                                 1 => t("speak.next"),
                                 _ => t(type_key),
                             };
                             let row_class = match i {
                                 0 => "list-item speak-current",
+                                1 if screen => "list-item speak-next speak-getready",
                                 1 => "list-item speak-next",
                                 _ => "list-item",
                             };

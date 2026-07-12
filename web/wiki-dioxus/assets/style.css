@@ -2144,6 +2144,27 @@ h6,
 	border-radius: 8px;
 }
 
+/* On-deck speaker on the projector: the civic-magenta accent + a gentle pulse so
+   the next speaker knows to get ready at a glance (pulse is neutralised under
+   prefers-reduced-motion by the global rule). */
+.speak-getready {
+	border-left: 4px solid var(--md-tertiary);
+	background: var(--md-tertiary-container);
+	color: var(--md-on-tertiary-container);
+	animation: speak-getready-pulse 1.6s ease-in-out infinite;
+}
+@keyframes speak-getready-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 0 0
+			color-mix(in srgb, var(--md-tertiary) 45%, transparent);
+	}
+	50% {
+		box-shadow: 0 0 0 6px
+			color-mix(in srgb, var(--md-tertiary) 0%, transparent);
+	}
+}
+
 /* Speaking-time countdown pill in the list header. */
 .chip-timer {
 	background: var(--md-primary);
