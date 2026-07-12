@@ -1122,6 +1122,7 @@ a:hover {
 	align-items: center;
 	justify-content: center;
 	padding: 16px;
+	backdrop-filter: blur(2px);
 	animation: m3-dialog-fade var(--md-sys-motion-duration-medium2)
 		var(--md-sys-motion-easing-standard);
 }
@@ -1136,12 +1137,17 @@ a:hover {
 	animation: m3-dialog-rise var(--md-sys-motion-duration-long1)
 		var(--md-sys-motion-spring-spatial-default);
 }
+/* EXPERIMENT (expressive dialog): the icon becomes a tonal circular badge. */
 .m3-dialog-icon {
-	display: block;
-	width: 100%;
-	text-align: center;
-	color: var(--md-secondary);
-	margin-bottom: 16px;
+	display: grid;
+	place-items: center;
+	width: 56px;
+	height: 56px;
+	margin: 0 auto 16px;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+	font-size: 28px;
 }
 .m3-dialog-headline {
 	font-size: var(--md-sys-typescale-headline-small-size);
@@ -1171,11 +1177,11 @@ a:hover {
 @keyframes m3-dialog-rise {
 	from {
 		opacity: 0;
-		transform: scale(0.85);
+		transform: translateY(24px) scale(0.9);
 	}
 	to {
 		opacity: 1;
-		transform: scale(1);
+		transform: translateY(0) scale(1);
 	}
 }
 
