@@ -719,8 +719,11 @@ html {
 	z-index: 201;
 	width: min(360px, 88vw);
 	background: var(--md-surface);
-	border-radius: 0 var(--md-sys-shape-corner-large)
-		var(--md-sys-shape-corner-large) 0;
+	/* EXPERIMENT: a modal drawer is an elevated surface — give it a shadow and a
+	   bolder trailing corner so it clearly floats over the scrim. */
+	border-radius: 0 var(--md-sys-shape-corner-extra-large)
+		var(--md-sys-shape-corner-extra-large) 0;
+	box-shadow: var(--md-sys-elevation-2);
 	transform: translateX(-100%);
 	transition: transform var(--md-sys-motion-duration-long1)
 		var(--md-sys-motion-spring-spatial-default);
