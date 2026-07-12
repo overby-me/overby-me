@@ -566,7 +566,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         }
         if $moved {
             sleep 1500ms
-            let populated = (wd-execute $session_id 'return document.querySelector("#main .folder-item")?"y":"n"')
+            let populated = (wd-execute $session_id 'return document.querySelector("#main .folder-tile, #main .list-link")?"y":"n"')
             if $populated == "y" {
                 $navigated = true
             } else {
@@ -596,7 +596,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # count GraphQL calls, over-scroll up, and expect fresh calls to fire (the
     # generalized use_data_resource! makes every view refetch on the bump).
     let path_b = (wd-execute $session_id 'return location.pathname')
-    let items_b = (wd-execute $session_id 'return String(document.querySelectorAll("#main .folder-item, #main .card").length)')
+    let items_b = (wd-execute $session_id 'return String(document.querySelectorAll("#main .folder-tile, #main .list-link, #main .card").length)')
     wd-execute $session_id "if(!window.__gqlHooked){window.__gqlHooked=1; var of=window.fetch; window.fetch=function(){try{var u=arguments[0]; var s=(typeof u=='string')?u:((u&&u.url)||''); if(s.indexOf('graphql')>=0){window.__gql=(window.__gql||0)+1;}}catch(e){} return of.apply(this,arguments);};} return 'ok'" | ignore
     sleep 400ms
     wd-execute $session_id "window.__gql=0; window.scrollTo(0,0); var e=new WheelEvent('wheel',{deltaY:-300,bubbles:true,cancelable:true}); window.dispatchEvent(e); return 1" | ignore
@@ -614,11 +614,11 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     mut settled = false
     for _ in 1..20 {
         sleep 200ms
-        let now = (wd-execute $session_id 'return String(document.querySelectorAll("#main .folder-item, #main .card").length)')
+        let now = (wd-execute $session_id 'return String(document.querySelectorAll("#main .folder-tile, #main .list-link, #main .card").length)')
         if ((try { $now | into int } catch { 0 }) > 0) { $settled = true; break }
     }
     let path_a = (wd-execute $session_id 'return location.pathname')
-    let items_a = (wd-execute $session_id 'return String(document.querySelectorAll("#main .folder-item, #main .card").length)')
+    let items_a = (wd-execute $session_id 'return String(document.querySelectorAll("#main .folder-tile, #main .list-link, #main .card").length)')
     log-info $"PTR diag: path ($path_b) to ($path_a); items ($items_b) to ($items_a); refetched=($refetched) settled=($settled)"
     if $refetched and $settled and ($path_a == $path_b) { log-ok "pull-to-refresh refetches data and keeps the view"; $p = $p + 1 } else { log-fail "pull-to-refresh disrupted the view"; $fl = $fl + 1 }
     # Draft (not-submitted, mutable) nodes show a lock badge on their avatar.
@@ -670,7 +670,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # client-side route change between two path pages, not show stale content).
     let path_before = (wd-execute $session_id 'return location.pathname')
     let main_before = (wd-execute $session_id 'return (document.getElementById("main")||{innerText:""}).innerText')
-    let clicked = (wd-execute $session_id 'var e=document.querySelector("#main .folder-item"); if(e){e.click(); return "y"} return "n"')
+    let clicked = (wd-execute $session_id 'var e=document.querySelector("#main .folder-tile, #main .list-link"); if(e){e.click(); return "y"} return "n"')
     if $clicked == "y" {
         mut deeper = false
         for _ in 1..($timeout) {
@@ -1044,7 +1044,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # Open a child node's editor; a content node shows the author autocomplete.
     wd-navigate $session_id $"(base-url)($ctx_path)"
     sleep 1sec
-    let clicked = (wd-execute $session_id 'var e=document.querySelector("#main .folder-item"); if(e){e.click(); return "y"} return "n"')
+    let clicked = (wd-execute $session_id 'var e=document.querySelector("#main .folder-tile, #main .list-link"); if(e){e.click(); return "y"} return "n"')
     if $clicked == "y" {
         sleep 2sec
         let child_path = (wd-execute $session_id 'return location.pathname')

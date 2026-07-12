@@ -524,40 +524,56 @@ fn FolderItem(
     let mut full_path = parent_path.clone();
     full_path.push(node.key.clone());
 
+    let avatar = rsx! {
+        super::loader::NodeAvatar {
+            mime: super::loader::node_icon_mime_id(mime_id, node.data.as_ref().map(|d| &d.0)),
+            name: name.to_string(),
+            ordinal,
+            mutable: is_mutable,
+            small: true,
+        }
+    };
+    // Owner copy-toggle: add/remove this node from the paste clipboard without
+    // navigating (stop the click reaching the Link/anchor).
+    let copy_btn = rsx! {
+        if selectable {
+            button {
+                class: "btn-icon",
+                style: "margin-left: auto;",
+                title: "{t(\"folder.copy\")}",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    e.prevent_default();
+                    let mut sel = SELECTED.write();
+                    if let Some(pos) = sel.iter().position(|x| x == &node_id) {
+                        sel.remove(pos);
+                    } else {
+                        sel.push(node_id.clone());
+                    }
+                },
+                span { class: "material-icons",
+                    if is_selected { "check_box" } else { "content_copy" }
+                }
+            }
+        }
+    };
+
     rsx! {
         Link {
             to: Route::PathPage { segments: full_path, app: None },
-            class: if grid { "folder-tile" } else { "folder-item" },
-            super::loader::NodeAvatar {
-                mime: super::loader::node_icon_mime_id(mime_id, node.data.as_ref().map(|d| &d.0)),
-                name: name.to_string(),
-                ordinal,
-                mutable: is_mutable,
-                small: true,
-            }
-            div { class: "list-item-text",
-                div { class: "list-item-primary", "{name}" }
-            }
-            // Owner copy-toggle: add/remove this node from the paste clipboard
-            // without navigating (stop the click reaching the Link/anchor).
-            if selectable {
-                button {
-                    class: "btn-icon",
-                    style: "margin-left: auto;",
-                    title: "{t(\"folder.copy\")}",
-                    onclick: move |e| {
-                        e.stop_propagation();
-                        e.prevent_default();
-                        let mut sel = SELECTED.write();
-                        if let Some(pos) = sel.iter().position(|x| x == &node_id) {
-                            sel.remove(pos);
-                        } else {
-                            sel.push(node_id.clone());
-                        }
-                    },
-                    span { class: "material-icons",
-                        if is_selected { "check_box" } else { "content_copy" }
-                    }
+            class: if grid { "folder-tile" } else { "list-link" },
+            if grid {
+                {avatar}
+                div { class: "list-item-text",
+                    div { class: "list-item-primary", "{name}" }
+                }
+                {copy_btn}
+            } else {
+                super::widgets::ListItem {
+                    headline: name.to_string(),
+                    selected: is_selected,
+                    leading: avatar,
+                    trailing: copy_btn,
                 }
             }
         }
