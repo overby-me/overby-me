@@ -246,6 +246,7 @@ const EN_JSON: &str = r#"{
         "noAmendments": "No amendments",
         "noComments": "No comments yet",
         "noQuestions": "No questions",
+        "noAmendments": "No amendments yet",
         "amendments": "Amendments",
         "questions": "Questions",
         "candidates": "Candidates",

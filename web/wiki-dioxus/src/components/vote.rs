@@ -148,13 +148,21 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         // Owner-only: open a poll on this policy/change.
         StartPollButton { node: node.clone(), path: path.clone() }
 
-        // Amendments
-        if !amendments.is_empty() {
-            div { class: "card mt-1",
-                div { class: "card-header",
-                    div { class: "avatar", {icon_el("vote/change")} }
-                    h3 { class: "title-medium", "{t(\"vote.amendments\")}" }
+        // Amendments — always shown so its create action (in the header) has a
+        // home; the body shows an empty state until the first amendment lands.
+        div { class: "card mt-1",
+            div { class: "card-header",
+                div { class: "avatar", {icon_el("vote/change")} }
+                h3 { class: "title-medium", "{t(\"vote.amendments\")}" }
+                div { class: "flex-grow" }
+                // Propose a new amendment (redirects to its editor).
+                AddChangeButton { node: node.clone(), path: path.clone() }
+            }
+            if amendments.is_empty() {
+                div { class: "card-content",
+                    p { class: "body-medium", class: "text-muted", "{t(\"vote.noAmendments\")}" }
                 }
+            } else {
                 div { class: "list",
                     for (n , item) in amendments.iter().enumerate() {
                         {
@@ -178,9 +186,6 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                 }
             }
         }
-
-        // Propose a new amendment (redirects to its editor).
-        AddChangeButton { node: node.clone(), path: path.clone() }
 
         // Polls
         if !polls.is_empty() {
@@ -536,10 +541,11 @@ fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Element {
 
     rsx! {
         button {
-            class: "btn btn-outlined mt-1",
+            class: "btn-icon add-action state-layer",
+            title: "{t(\"vote.newAmendment\")}",
+            aria_label: "{t(\"vote.newAmendment\")}",
             onclick: move |_| open.set(true),
             span { class: "material-icons", "add" }
-            " {t(\"vote.newAmendment\")}"
         }
         super::widgets::Dialog {
             open: open(),
@@ -1017,7 +1023,7 @@ fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Element {
                 h3 { class: "title-medium", "{t(\"poll.newPoll\")}" }
                 div { class: "flex-grow" }
                 button {
-                    class: "btn-icon",
+                    class: "btn-icon add-action state-layer",
                     aria_label: "{t(\"poll.newPoll\")}",
                     title: "{t(\"poll.newPoll\")}",
                     onclick: move |_| open.set(true),

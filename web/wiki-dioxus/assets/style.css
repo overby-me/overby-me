@@ -1093,6 +1093,42 @@ a:hover {
 	background-color: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
 }
 
+/* M3 Expressive "create" action folded into a card header: a filled-tonal icon
+   button in the accent (tertiary) family — the same create gesture the FAB used,
+   now anchored to the section it adds to. A rounded square that morphs toward a
+   circle and lifts on hover (Expressive shape motion), so it reads as the focal
+   action of its header without shouting like a full-colour FAB. */
+.btn-icon.add-action {
+	background-color: var(--md-tertiary-container);
+	color: var(--md-on-tertiary-container);
+	border-radius: var(--md-sys-shape-corner-large);
+	transition:
+		background-color var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard),
+		border-radius var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default),
+		box-shadow var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard),
+		transform var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-spring-spatial-fast);
+}
+.btn-icon.add-action:hover {
+	background-color: color-mix(
+		in srgb,
+		var(--md-on-tertiary-container) 8%,
+		var(--md-tertiary-container)
+	);
+	border-radius: var(--md-sys-shape-corner-full);
+	box-shadow: var(--md-sys-elevation-1);
+}
+.btn-icon.add-action:active {
+	background-color: color-mix(
+		in srgb,
+		var(--md-on-tertiary-container) 10%,
+		var(--md-tertiary-container)
+	);
+}
+
 .btn-full {
 	width: 100%;
 }

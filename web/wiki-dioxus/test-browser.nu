@@ -662,6 +662,35 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     wd-window-rect $session_id 1280 900
     sleep 400ms
 
+    # Compact: the FAB is the tools-sheet trigger (not add-content). It carries the
+    # "tune" icon and opens the bottom sheet; the desktop header keeps a non-FAB
+    # trigger. Guards the FAB-repurposing change.
+    wd-window-rect $session_id 390 844
+    sleep 600ms
+    let fabt = (wd-execute $session_id 'var f=document.querySelector(".fab"); if(!f) return "nofab"; var m=f.querySelector(".material-icons"); return m?m.textContent.trim():""')
+    if $fabt == "nofab" {
+        log-warn "no tools FAB on compact — skipping FAB tools check"
+    } else if $fabt == "tune" {
+        wd-execute $session_id 'document.querySelector(".fab").click(); return 1' | ignore
+        sleep 600ms
+        let opened = (wd-execute $session_id 'return document.querySelector(".tool-sheet.open")?"y":"n"')
+        if $opened == "y" {
+            log-ok "compact FAB opens the tools sheet"; $p = $p + 1
+        } else {
+            log-fail "compact FAB did not open the tools sheet"; $fl = $fl + 1
+        }
+        if (($env | get -o WIKI_SHOTS | default "") == "1") {
+            let dir = ($env | get -o WIKI_SHOTS_DIR | default "screenshots")
+            wd-screenshot $session_id ($dir | path join "mobile-tools-fab.png")
+        }
+        wd-execute $session_id 'var s=document.querySelector(".sheet-scrim.open"); if(s)s.click(); return 1' | ignore
+        sleep 400ms
+    } else {
+        log-fail $"compact FAB has the wrong icon: ($fabt)"; $fl = $fl + 1
+    }
+    wd-window-rect $session_id 1280 900
+    sleep 400ms
+
     # Pull-to-refresh must actually REFETCH data, not just animate. Hook fetch to
     # count GraphQL calls, over-scroll up, and expect fresh calls to fire (the
     # generalized use_data_resource! makes every view refetch on the bump).
@@ -1040,23 +1069,25 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         log-warn "sort app save button not found — skipping redirect check"
     }
 
-    # ── The add-content FAB opens a modal (does not add anything) ────────────
+    # ── The add-content button (in the Items card header) opens a modal ──────
+    # On desktop the create action is an in-header .add-action icon button (the FAB
+    # is repurposed as the tools-sheet trigger on compact), not a floating FAB.
     wd-navigate $session_id $"(base-url)($ctx_path)"
     sleep 1sec
-    let fab = (wd-execute $session_id 'return document.querySelector(".fab")?"y":"n"')
-    if $fab == "y" {
-        wd-execute $session_id 'document.querySelector(".fab").click(); return 1' | ignore
+    let addbtn = (wd-execute $session_id 'return document.querySelector("#main .card-header .btn-icon.add-action")?"y":"n"')
+    if $addbtn == "y" {
+        wd-execute $session_id 'document.querySelector("#main .card-header .btn-icon.add-action").click(); return 1' | ignore
         sleep 1sec
         let modal = (wd-execute $session_id 'return document.querySelector(".m3-dialog")?"y":"n"')
         # Cancel (outlined button) — never Add — so no content is created.
         wd-execute $session_id 'var c=document.querySelector(".m3-dialog .btn-outlined"); if(c)c.click(); return 1' | ignore
         if $modal == "y" {
-            log-ok "add-content FAB opens the M3 dialog"; $p = $p + 1
+            log-ok "in-header add-action opens the M3 dialog"; $p = $p + 1
         } else {
-            log-fail "add-content FAB did not open the dialog"; $fl = $fl + 1
+            log-fail "in-header add-action did not open the dialog"; $fl = $fl + 1
         }
     } else {
-        log-warn "no add-content FAB — skipping FAB check"
+        log-warn "no in-header add-action — skipping add-content check"
     }
 
     # ── Recursive folder export (.odt), now inside the M3 tools sheet ────────

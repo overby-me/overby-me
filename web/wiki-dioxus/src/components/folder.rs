@@ -228,10 +228,6 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                     span { class: "material-icons", "folder_open" }
                 }
                 h3 { class: "title-medium", "{t(\"common.items\")}" }
-                // Child count (#143).
-                if count > 0 {
-                    span { class: "count-badge", title: "{t(\"common.items\")}", "{count}" }
-                }
                 div { class: "flex-grow" }
                 // Toggle list/grid layout (#125).
                 if count > 1 {
@@ -246,6 +242,15 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                             grid.set(g);
                             write_grid_pref(g);
                         },
+                    }
+                }
+                // Create a document or subfolder here — the add action lives in this
+                // section's header (only when the folder accepts children; the
+                // backend permissions gate which mimes).
+                if is_auth && attachable {
+                    FolderAdd {
+                        parent_id: node.id.0.clone(),
+                        context_id: node.context_id.clone().map(|c| c.0),
                     }
                 }
             }
@@ -289,14 +294,6 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                         }
                     }
                 }
-            }
-        }
-        // Create a document or subfolder here — only when the folder accepts
-        // children (`attachable`); the backend permissions gate what mimes.
-        if is_auth && attachable {
-            FolderAdd {
-                parent_id: node.id.0.clone(),
-                context_id: node.context_id.clone().map(|c| c.0),
             }
         }
 
@@ -440,9 +437,10 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
     };
 
     rsx! {
-        // The floating action button.
+        // The create action, anchored in the Items card header (M3 Expressive
+        // filled-tonal icon button) rather than a floating FAB.
         button {
-            class: "fab",
+            class: "btn-icon add-action state-layer",
             title: "{t(\"content.addContent\")}",
             "aria-label": "{t(\"content.addContent\")}",
             onclick: move |_| open.set(true),
