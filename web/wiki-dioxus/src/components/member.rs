@@ -108,7 +108,8 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                         }
                     }
 
-                    // Member list (the node's actual memberships, not its children).
+                    // Member roster: a searchable, filterable, paginated M3
+                    // Expressive table (handles 1000+ members client-side).
                     if members.is_empty() {
                         div { class: "card-content",
                             p { class: "body-medium",
@@ -117,22 +118,17 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                             }
                         }
                     } else {
-                        div { class: "list",
-                            for member in members.iter() {
-                                MemberRow {
-                                    key: "{member.id.0}",
-                                    member: member.clone(),
-                                    can_manage,
-                                    on_edit: move |m: MemberFields| {
-                                        edit_name.set(m.name.clone().unwrap_or_default());
-                                        edit_email.set(m.email.clone().unwrap_or_default());
-                                        edit_id.set(Some(m.id.0.clone()));
-                                    },
-                                    on_remove: move |m: MemberFields| {
-                                        remove_target.set(Some((m.id.0.clone(), m.label())));
-                                    },
-                                }
-                            }
+                        MemberTable {
+                            members: members.clone(),
+                            can_manage,
+                            on_edit: move |m: MemberFields| {
+                                edit_name.set(m.name.clone().unwrap_or_default());
+                                edit_email.set(m.email.clone().unwrap_or_default());
+                                edit_id.set(Some(m.id.0.clone()));
+                            },
+                            on_remove: move |m: MemberFields| {
+                                remove_target.set(Some((m.id.0.clone(), m.label())));
+                            },
                         }
                     }
                 }
@@ -358,10 +354,171 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     }
 }
 
-/// One roster row: identity + status, and (for owners) the admin controls that
-/// toggle hidden/owner/active in place and raise edit / remove to the parent.
+/// The single-select roster filter (a row of M3 filter chips).
+#[derive(Clone, Copy, PartialEq)]
+enum MemberFilter {
+    All,
+    Owners,
+    Active,
+    Invited,
+    Hidden,
+}
+
+/// The M3 status chip (icon + label) for a member's state: hidden > owner >
+/// active > pending-invitation.
+fn member_status(m: &MemberFields) -> (&'static str, String) {
+    if m.hidden {
+        ("visibility_off", t("member.hidden"))
+    } else if m.owner {
+        ("star", t("member.owner"))
+    } else if m.accepted {
+        ("check_circle", t("member.active"))
+    } else {
+        ("mail", t("invite.invitations"))
+    }
+}
+
+/// A searchable, filterable, paginated M3 Expressive member table. Search (name
+/// or email), filter chips and paging all run client-side over the loaded roster,
+/// so it stays responsive with 1000+ members. Page size is fixed at 25.
 #[component]
-fn MemberRow(
+fn MemberTable(
+    members: Vec<MemberFields>,
+    can_manage: bool,
+    on_edit: EventHandler<MemberFields>,
+    on_remove: EventHandler<MemberFields>,
+) -> Element {
+    const PAGE_SIZE: usize = 25;
+    let mut search = use_signal(String::new);
+    let mut filter = use_signal(|| MemberFilter::All);
+    let mut page = use_signal(|| 0usize);
+
+    let q = search.read().trim().to_lowercase();
+    let active_filter = *filter.read();
+    let filtered: Vec<MemberFields> = members
+        .iter()
+        .filter(|m| {
+            let pass = match active_filter {
+                MemberFilter::All => true,
+                MemberFilter::Owners => m.owner,
+                MemberFilter::Active => m.active,
+                MemberFilter::Invited => !m.accepted && !m.hidden,
+                MemberFilter::Hidden => m.hidden,
+            };
+            pass && (q.is_empty()
+                || m.label().to_lowercase().contains(&q)
+                || m.email.as_deref().unwrap_or("").to_lowercase().contains(&q))
+        })
+        .cloned()
+        .collect();
+
+    let total = filtered.len();
+    let page_count = total.div_ceil(PAGE_SIZE).max(1);
+    let cur = (*page.read()).min(page_count - 1);
+    let start = cur * PAGE_SIZE;
+    let end = (start + PAGE_SIZE).min(total);
+    let first = if total == 0 { 0 } else { start + 1 };
+    let page_slice = filtered[start..end].to_vec();
+
+    let filters = [
+        (MemberFilter::All, t("member.filterAll")),
+        (MemberFilter::Owners, t("member.owner")),
+        (MemberFilter::Active, t("member.active")),
+        (MemberFilter::Invited, t("invite.invitations")),
+        (MemberFilter::Hidden, t("member.hidden")),
+    ];
+
+    let mut columns = vec![t("member.name"), t("member.email"), t("member.status")];
+    if can_manage {
+        columns.push(t("member.actions"));
+    }
+
+    rsx! {
+        div { class: "member-table",
+            // Search + filter toolbar.
+            div { class: "member-table-toolbar",
+                label { class: "search-field",
+                    span { class: "material-icons", "search" }
+                    input {
+                        r#type: "text",
+                        placeholder: "{t(\"member.search\")}",
+                        value: "{search}",
+                        oninput: move |e| {
+                            search.set(e.value());
+                            page.set(0);
+                        },
+                    }
+                }
+                div { class: "filter-chips", role: "group",
+                    for (kind , label) in filters {
+                        {
+                            let selected = active_filter == kind;
+                            rsx! {
+                                button {
+                                    key: "{label}",
+                                    r#type: "button",
+                                    class: if selected { "m3-filter-chip selected" } else { "m3-filter-chip" },
+                                    "aria-pressed": if selected { "true" } else { "false" },
+                                    onclick: move |_| {
+                                        filter.set(kind);
+                                        page.set(0);
+                                    },
+                                    if selected {
+                                        span { class: "material-icons", "check" }
+                                    }
+                                    "{label}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // The table itself.
+            super::widgets::DataTable {
+                columns,
+                for m in page_slice.iter() {
+                    MemberTableRow {
+                        key: "{m.id.0}",
+                        member: m.clone(),
+                        can_manage,
+                        on_edit: move |mm: MemberFields| on_edit.call(mm),
+                        on_remove: move |mm: MemberFields| on_remove.call(mm),
+                    }
+                }
+            }
+
+            // Pagination footer: "1-25 / 1043" plus prev/next.
+            div { class: "member-table-footer",
+                span { class: "member-count body-medium", "{first}-{end} / {total}" }
+                div { class: "pagination-controls",
+                    button {
+                        class: "btn-icon",
+                        disabled: cur == 0,
+                        title: "{t(\"common.previous\")}",
+                        aria_label: "{t(\"common.previous\")}",
+                        onclick: move |_| page.set(cur.saturating_sub(1)),
+                        span { class: "material-icons", "chevron_left" }
+                    }
+                    span { class: "body-medium page-indicator", "{cur + 1} / {page_count}" }
+                    button {
+                        class: "btn-icon",
+                        disabled: cur + 1 >= page_count,
+                        title: "{t(\"common.next\")}",
+                        aria_label: "{t(\"common.next\")}",
+                        onclick: move |_| page.set((cur + 1).min(page_count - 1)),
+                        span { class: "material-icons", "chevron_right" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One member table row (`<tr>`): identity, email, status chip, and — for owners
+/// — the inline admin controls (promote/activate/hide/edit/remove).
+#[component]
+fn MemberTableRow(
     member: MemberFields,
     can_manage: bool,
     on_edit: EventHandler<MemberFields>,
@@ -372,94 +529,88 @@ fn MemberRow(
     let owner = member.owner;
     let active = member.active;
     let hidden = member.hidden;
-
-    // M3 status chip (icon + label) summarising the membership state, replacing a
-    // bare text line: hidden > owner > active > pending-invitation.
-    let (status_icon, status_label) = if member.hidden {
-        ("visibility_off", t("member.hidden"))
-    } else if member.owner {
-        ("star", t("member.owner"))
-    } else if member.accepted {
-        ("check_circle", t("member.active"))
-    } else {
-        ("mail", t("invite.invitations"))
-    };
+    let (status_icon, status_label) = member_status(&member);
 
     rsx! {
-        div {
-            class: "list-item",
-            style: if member.hidden { "opacity: 0.55;" } else { "" },
-            div { class: "avatar small", span { class: "material-icons", "person" } }
-            div { class: "list-item-text",
-                div { class: "list-item-primary", "{member.label()}" }
-                div { class: "list-item-secondary",
-                    super::widgets::Chip { icon: status_icon.to_string(), label: status_label }
+        tr { class: if hidden { "member-row-hidden" } else { "" },
+            td {
+                span { class: "m3-cell-icon",
+                    div { class: "avatar small", span { class: "material-icons", "person" } }
+                    span { "{member.label()}" }
                 }
             }
+            td { class: "member-email-cell", "{member.email.clone().unwrap_or_default()}" }
+            td {
+                super::widgets::Chip { icon: status_icon.to_string(), label: status_label }
+            }
             if can_manage {
-                // Promote / demote owner.
-                button {
-                    class: "btn-icon",
-                    title: if owner { "{t(\"member.demote\")}" } else { "{t(\"member.promote\")}" },
-                    onclick: {
-                        let mid = mid.clone();
-                        move |_| apply_member_update(
-                            session.read().access_token.clone(),
-                            mid.clone(),
-                            MembersSetInput { owner: Some(!owner), ..Default::default() },
-                        )
-                    },
-                    span { class: "material-icons", if owner { "star" } else { "star_outline" } }
-                }
-                // Mark active / inactive (attendance).
-                button {
-                    class: "btn-icon",
-                    title: if active { "{t(\"member.deactivate\")}" } else { "{t(\"member.activate\")}" },
-                    onclick: {
-                        let mid = mid.clone();
-                        move |_| apply_member_update(
-                            session.read().access_token.clone(),
-                            mid.clone(),
-                            MembersSetInput { active: Some(!active), ..Default::default() },
-                        )
-                    },
-                    span { class: "material-icons",
-                        if active { "check_circle" } else { "radio_button_unchecked" }
+                td {
+                    div { class: "member-row-actions",
+                        // Promote / demote owner.
+                        button {
+                            class: "btn-icon",
+                            title: if owner { "{t(\"member.demote\")}" } else { "{t(\"member.promote\")}" },
+                            onclick: {
+                                let mid = mid.clone();
+                                move |_| apply_member_update(
+                                    session.read().access_token.clone(),
+                                    mid.clone(),
+                                    MembersSetInput { owner: Some(!owner), ..Default::default() },
+                                )
+                            },
+                            span { class: "material-icons", if owner { "star" } else { "star_outline" } }
+                        }
+                        // Mark active / inactive (attendance).
+                        button {
+                            class: "btn-icon",
+                            title: if active { "{t(\"member.deactivate\")}" } else { "{t(\"member.activate\")}" },
+                            onclick: {
+                                let mid = mid.clone();
+                                move |_| apply_member_update(
+                                    session.read().access_token.clone(),
+                                    mid.clone(),
+                                    MembersSetInput { active: Some(!active), ..Default::default() },
+                                )
+                            },
+                            span { class: "material-icons",
+                                if active { "check_circle" } else { "radio_button_unchecked" }
+                            }
+                        }
+                        // Hide / show within the context (#51).
+                        button {
+                            class: "btn-icon",
+                            title: if hidden { "{t(\"member.show\")}" } else { "{t(\"member.hide\")}" },
+                            onclick: {
+                                let mid = mid.clone();
+                                move |_| apply_member_update(
+                                    session.read().access_token.clone(),
+                                    mid.clone(),
+                                    MembersSetInput { hidden: Some(!hidden), ..Default::default() },
+                                )
+                            },
+                            span { class: "material-icons", if hidden { "visibility" } else { "visibility_off" } }
+                        }
+                        // Edit name / email.
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"member.edit\")}",
+                            onclick: {
+                                let member = member.clone();
+                                move |_| on_edit.call(member.clone())
+                            },
+                            span { class: "material-icons", "edit" }
+                        }
+                        // Remove from the context.
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"member.remove\")}",
+                            onclick: {
+                                let member = member.clone();
+                                move |_| on_remove.call(member.clone())
+                            },
+                            span { class: "material-icons", "person_remove" }
+                        }
                     }
-                }
-                // Hide / show within the context (#51).
-                button {
-                    class: "btn-icon",
-                    title: if hidden { "{t(\"member.show\")}" } else { "{t(\"member.hide\")}" },
-                    onclick: {
-                        let mid = mid.clone();
-                        move |_| apply_member_update(
-                            session.read().access_token.clone(),
-                            mid.clone(),
-                            MembersSetInput { hidden: Some(!hidden), ..Default::default() },
-                        )
-                    },
-                    span { class: "material-icons", if hidden { "visibility" } else { "visibility_off" } }
-                }
-                // Edit name / email.
-                button {
-                    class: "btn-icon",
-                    title: "{t(\"member.edit\")}",
-                    onclick: {
-                        let member = member.clone();
-                        move |_| on_edit.call(member.clone())
-                    },
-                    span { class: "material-icons", "edit" }
-                }
-                // Remove from the context.
-                button {
-                    class: "btn-icon",
-                    title: "{t(\"member.remove\")}",
-                    onclick: {
-                        let member = member.clone();
-                        move |_| on_remove.call(member.clone())
-                    },
-                    span { class: "material-icons", "person_remove" }
                 }
             }
         }

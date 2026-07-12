@@ -114,6 +114,8 @@ const EN_JSON: &str = r#"{
         "delete": "Delete",
         "edit": "Edit",
         "save": "Save",
+        "previous": "Previous",
+        "next": "Next",
         "search": "Search",
         "searchInSection": "Search in this section",
         "searchEverywhere": "Search everywhere",
@@ -355,7 +357,10 @@ const EN_JSON: &str = r#"{
         "remove": "Remove member",
         "edit": "Edit member",
         "confirmRemove": "Remove this member?",
-        "export": "Export participants (CSV)"
+        "export": "Export participants (CSV)",
+        "status": "Status",
+        "filterAll": "All",
+        "search": "Search members"
     },
     "mime": {
         "group": "Group",
@@ -423,6 +428,8 @@ const DA_JSON: &str = r#"{
         "delete": "Slet",
         "edit": "Rediger",
         "save": "Gem",
+        "previous": "Forrige",
+        "next": "N\u00e6ste",
         "search": "S\u00f8g",
         "searchInSection": "S\u00f8g i denne sektion",
         "searchEverywhere": "S\u00f8g overalt",
@@ -660,7 +667,10 @@ const DA_JSON: &str = r#"{
         "remove": "Fjern medlem",
         "edit": "Rediger medlem",
         "confirmRemove": "Fjern dette medlem?",
-        "export": "Eksportér deltagere (CSV)"
+        "export": "Eksportér deltagere (CSV)",
+        "status": "Status",
+        "filterAll": "Alle",
+        "search": "Søg medlemmer"
     },
     "mime": {
         "group": "Gruppe",
