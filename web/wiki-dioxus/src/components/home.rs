@@ -42,14 +42,34 @@ pub fn HomeApp() -> Element {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| t("layout.welcomeTitle"));
 
+    // EXPERIMENT (home hero): a time-aware greeting above the title, from the
+    // browser's local hour, with an animated waving hand in a tonal hero header.
+    let greeting_key = {
+        let hour = js_sys::Date::new_0().get_hours();
+        if hour < 5 {
+            "layout.greetNight"
+        } else if hour < 12 {
+            "layout.greetMorning"
+        } else if hour < 18 {
+            "layout.greetAfternoon"
+        } else {
+            "layout.greetEvening"
+        }
+    };
+
     rsx! {
         div { class: "grid grid-3",
             // Main content column
             div {
-                div { class: "card",
-                    div { class: "card-header",
-                        div { class: "avatar", span { class: "material-icons", "waving_hand" } }
-                        h3 { class: "headline-small", "{title}" }
+                div { class: "card home-hero",
+                    div { class: "home-hero-head",
+                        div { class: "home-hero-icon",
+                            span { class: "material-icons", "waving_hand" }
+                        }
+                        div { class: "home-hero-text",
+                            p { class: "home-hero-greeting", "{t(greeting_key)}" }
+                            h3 { class: "home-hero-title", "{title}" }
+                        }
                         div { class: "flex-grow" }
                         // Owner-only: edit the welcome text (root node content).
                         if can_edit {

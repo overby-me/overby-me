@@ -205,6 +205,10 @@ const EN_JSON: &str = r#"{
     },
     "layout": {
         "welcomeTitle": "Welcome to RadikalWiki",
+        "greetMorning": "Good morning",
+        "greetAfternoon": "Good afternoon",
+        "greetEvening": "Good evening",
+        "greetNight": "Still up?",
         "loginOrRegister": "Log in or register.",
         "rememberEmail": "Remember to use the email you registered with at RU.",
         "greeting": "Hello {{name}}!",
@@ -524,6 +528,10 @@ const DA_JSON: &str = r#"{
     },
     "layout": {
         "welcomeTitle": "Velkommen til RadikalWiki",
+        "greetMorning": "Godmorgen",
+        "greetAfternoon": "God eftermiddag",
+        "greetEvening": "Godaften",
+        "greetNight": "Stadig oppe?",
         "loginOrRegister": "Log ind eller registrer dig.",
         "rememberEmail": "Husk at bruge den email du er registreret med i RU.",
         "greeting": "Hej {{name}}!",

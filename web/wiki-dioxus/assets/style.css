@@ -826,6 +826,68 @@ a:hover {
 	font-size: 15px;
 }
 
+/* EXPERIMENT (home hero): a bold tonal greeting header with an animated wave. */
+.home-hero-head {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 28px 24px 20px;
+	background: linear-gradient(
+		135deg,
+		color-mix(in srgb, var(--md-primary) 22%, transparent),
+		color-mix(in srgb, var(--md-tertiary) 18%, transparent)
+	);
+}
+.home-hero-icon {
+	flex: 0 0 auto;
+	width: 64px;
+	height: 64px;
+	display: grid;
+	place-items: center;
+	border-radius: var(--md-sys-shape-corner-large);
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+	box-shadow: var(--md-sys-elevation-1);
+}
+.home-hero-icon .material-icons {
+	font-size: 34px;
+	transform-origin: 70% 70%;
+	animation: home-wave 2.6s ease-in-out infinite;
+}
+@keyframes home-wave {
+	0%,
+	65%,
+	100% {
+		transform: rotate(0deg);
+	}
+	70% {
+		transform: rotate(14deg);
+	}
+	78% {
+		transform: rotate(-8deg);
+	}
+	86% {
+		transform: rotate(12deg);
+	}
+	94% {
+		transform: rotate(-4deg);
+	}
+}
+.home-hero-greeting {
+	margin: 0;
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-label-large-size);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+}
+.home-hero-title {
+	margin: 2px 0 0;
+	font-size: var(--md-sys-typescale-headline-medium-size);
+	line-height: var(--md-sys-typescale-headline-medium-line);
+	font-weight: 700;
+}
+
 /* M3 Expressive: card/app titles carry emphasized (heavier, tighter) type so each
    surface has a clear focal heading. */
 .card-header h3 {
