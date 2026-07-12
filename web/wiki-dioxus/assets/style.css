@@ -614,13 +614,16 @@ a:hover {
 	transition: padding-right var(--md-sys-motion-duration-medium2)
 		var(--md-sys-motion-spring-spatial-default);
 }
-/* Mirror the content pane's gutter on the app bar so its centred inner keeps
-   lining up with the content column once the tools sheet docks. */
+/* End the app bar at the docked tools sheet's left edge so the full-height sheet
+   owns the top-right corner. The bar keeps its symmetric padding, so its centred
+   inner still lines up with the content column (which reserves the same gutter). */
 .app-shell[data-tools-docked="true"] .top-app-bar {
-	padding-left: var(--md-sys-margin);
-	padding-right: calc(var(--md-sys-tools-width) + var(--md-sys-margin));
-	transition: padding var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-spring-spatial-default);
+	right: var(--md-sys-tools-width);
+	transition:
+		left var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default),
+		right var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default);
 }
 .app-shell[data-tools-docked="true"] .fab {
 	right: calc(var(--md-sys-tools-width) + 24px);
@@ -1888,12 +1891,12 @@ select:focus {
 		transform: translateX(0);
 	}
 }
-/* Docked (permanent) tools side sheet on extra-large screens: a standing pane on
-   the right edge, below the top app bar — no scrim, no transform, no trigger. The
-   content pane reserves room for it (see data-tools-docked below), so it never
-   overlaps content. */
+/* Docked (permanent) tools side sheet on extra-large screens: a full-height
+   standing pane on the right edge (no scrim, no transform, no trigger). The app
+   bar ends at its left edge and the content pane reserves room for it (see
+   data-tools-docked below), so it never overlaps either. */
 .tool-sheet.docked {
-	top: 64px;
+	top: 0;
 	bottom: 0;
 	right: 0;
 	left: auto;
