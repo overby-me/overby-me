@@ -2521,6 +2521,36 @@ h6,
 	flex: 0 0 auto;
 	display: inline-flex;
 	align-items: center;
+	padding: 2px 4px;
+	border-radius: var(--md-sys-shape-corner-full);
+	/* EXPERIMENT (spatial crumb rail): each crumb is a quiet tonal pill that
+	   springs up on hover; the current location stays filled. Transform is safe
+	   here — crumbs hold no position:fixed descendants. */
+	transition:
+		background-color var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-easing-standard),
+		box-shadow var(--md-sys-motion-duration-short4)
+			var(--md-sys-motion-easing-standard),
+		transform var(--md-sys-motion-duration-medium1)
+			var(--md-sys-motion-spring-spatial-fast);
+}
+.crumb:hover {
+	background: var(--md-surface-container-highest);
+	box-shadow: var(--md-sys-elevation-1);
+	transform: translateY(-2px);
+}
+.crumb:has(.crumb-name.open) {
+	background: var(--md-surface-container-high);
+}
+.crumb.app-crumb {
+	background: var(--md-tertiary-container);
+}
+.crumb.app-crumb:hover {
+	background: color-mix(
+		in srgb,
+		var(--md-on-tertiary-container) 8%,
+		var(--md-tertiary-container)
+	);
 }
 
 .crumb-link {
