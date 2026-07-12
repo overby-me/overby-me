@@ -652,7 +652,8 @@ a:hover {
    emphasized-decelerate entrance) so page/list changes feel motionful. */
 .card {
 	background: var(--md-surface-container-low);
-	border-radius: var(--md-sys-shape-corner-medium);
+	/* M3 Expressive: larger corner radius for a softer, more expressive surface. */
+	border-radius: var(--md-sys-shape-corner-large);
 	box-shadow: var(--md-sys-elevation-1);
 	overflow: hidden;
 	margin-bottom: 12px;
@@ -698,6 +699,13 @@ a:hover {
 	padding: 16px;
 	gap: 12px;
 	border-bottom: 1px solid var(--md-outline-variant);
+}
+
+/* M3 Expressive: card/app titles carry emphasized (heavier, tighter) type so each
+   surface has a clear focal heading. */
+.card-header h3 {
+	font-weight: 600;
+	letter-spacing: 0;
 }
 
 .card-content {
@@ -2663,14 +2671,22 @@ h6,
 	gap: 8px;
 	padding: 16px 10px;
 	border: 1px solid var(--md-outline-variant);
-	border-radius: var(--md-sys-shape-corner-medium);
+	/* M3 Expressive: larger corners + a springy hover-lift. */
+	border-radius: var(--md-sys-shape-corner-large);
 	cursor: pointer;
-	transition: background-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+	transition:
+		background-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard),
+		box-shadow var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard),
+		transform var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-spring-spatial-fast);
 }
 
 .folder-tile:hover {
 	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+	box-shadow: var(--md-sys-elevation-2);
+	transform: translateY(-2px);
 }
 
 .folder-tile .list-item-text {
