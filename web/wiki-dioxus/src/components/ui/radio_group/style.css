@@ -16,17 +16,27 @@
   gap: .75rem;
 }
 
+/* EXPERIMENT (M3 radio): a larger outlined ring with a tactile press, matching the
+   M3 checkbox / switch. */
 .dx-radio-item::before {
   display: block;
-  width: 1rem;
-  height: 1rem;
+  width: 1.25rem;
+  height: 1.25rem;
   box-sizing: border-box;
   border-radius: 1.5rem;
-  background: var(--light, var(--primary-color)) var(--dark, var(--primary-color-3));
-  box-shadow: 0 0 0 1px var(--light, var(--primary-color-6))
-    var(--dark, var(--primary-color-7));
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--md-sys-color-outline);
   content: "";
   cursor: pointer;
+  transition:
+    box-shadow 160ms ease,
+    border 200ms var(--md-sys-motion-spring-spatial-fast, ease),
+    background-color 160ms ease,
+    transform 200ms var(--md-sys-motion-spring-spatial-fast, ease);
+}
+
+.dx-radio-item:active::before {
+  transform: scale(0.9);
 }
 
 .dx-radio-item:focus-visible {
@@ -39,9 +49,9 @@
 
 .dx-radio-item[data-state="checked"]::before {
   /* M3 selected radio: green outer ring, surface gap, green centre dot. */
-  border: 0.25rem solid var(--md-sys-color-surface);
+  border: 0.35rem solid var(--md-sys-color-surface);
   background: var(--md-sys-color-primary);
-  box-shadow: 0 0 0 1px var(--md-sys-color-primary);
+  box-shadow: 0 0 0 2px var(--md-sys-color-primary);
 }
 
 .dx-radio-item:disabled {
