@@ -3251,6 +3251,44 @@ h6,
 	font-weight: 700;
 }
 
+/* EXPERIMENT (functional: print). A clean printout of the current page: hide all
+   chrome and floating affordances, drop the surfaces to plain bordered blocks,
+   and let the content flow full-width. Useful for printing an agenda / document. */
+@media print {
+	.top-app-bar,
+	.nav-rail,
+	.nav-bar,
+	.compact-dock,
+	.fab,
+	.back-to-top,
+	.reading-progress,
+	.tool-sheet,
+	.skip-link,
+	.nav-drawer,
+	.drawer-content,
+	.spinner-overlay,
+	.sheet-scrim {
+		display: none !important;
+	}
+	.content-pane {
+		margin: 0 !important;
+		padding: 0 !important;
+	}
+	.card {
+		box-shadow: none !important;
+		border: 1px solid #ccc;
+		break-inside: avoid;
+		margin-bottom: 12px;
+	}
+	.card::before {
+		display: none !important;
+	}
+	.slate-content {
+		font-size: 12pt;
+		color: #000;
+	}
+}
+
 .toc-l2 {
 	padding-left: 16px;
 }
