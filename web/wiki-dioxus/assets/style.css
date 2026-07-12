@@ -1359,6 +1359,13 @@ html {
 
 .fab .material-icons {
 	font-size: 26px;
+	/* EXPERIMENT: the tools "tune" icon spins a quarter-turn on hover — a small
+	   playful cue that the FAB opens a settings/tools surface. */
+	transition: transform var(--md-sys-motion-duration-medium1)
+		var(--md-sys-motion-spring-spatial-default);
+}
+.fab:hover .material-icons {
+	transform: rotate(90deg);
 }
 
 /* On large screens the bar is at the top, so the bottom-right is free. */
