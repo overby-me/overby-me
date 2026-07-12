@@ -597,7 +597,7 @@ a:hover {
 /* Compact: M3 discourages wrapping a whole screen in one card. Flatten cards to
    edge-to-edge sections — square edges, no floating shadow — so the redundant
    outer inset is gone; the card's own 16px padding stays as the single text
-   inset, and the inter-card gap + header divider carry the structure. */
+   inset, and the inter-card gap + the emphasized header type carry the structure. */
 .app-shell[data-size-class="compact"] .card {
 	border-radius: 0;
 	box-shadow: none;
@@ -693,7 +693,6 @@ a:hover {
 	align-items: center;
 	padding: 16px;
 	gap: 12px;
-	border-bottom: 1px solid var(--md-outline-variant);
 }
 
 /* M3 Expressive: card/app titles carry emphasized (heavier, tighter) type so each
