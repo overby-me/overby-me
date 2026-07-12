@@ -69,218 +69,225 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     };
 
     rsx! {
-        div { class: "card",
-            div { class: "card-header",
-                div { class: "avatar", span { class: "material-icons", "group" } }
-                div {
-                    h3 { class: "title-medium", "{name}" }
-                    p { class: "body-medium",
-                        class: "text-muted",
-                        "{t(\"common.members\")}"
-                    }
-                }
-                div { class: "flex-grow" }
-                // Export the participant roster as CSV (owner action, #41).
-                if can_manage && !members.is_empty() {
-                    button {
-                        class: "btn-icon",
-                        title: "{t(\"member.export\")}",
-                        aria_label: "{t(\"member.export\")}",
-                        onclick: {
-                            let members = members.clone();
-                            let fname = name.clone();
-                            move |_| {
-                                let mut csv = String::from("Name,Email\n");
-                                for m in &members {
-                                    csv.push_str(&csv_field(&m.label()));
-                                    csv.push(',');
-                                    csv.push_str(&csv_field(m.email.as_deref().unwrap_or("")));
-                                    csv.push('\n');
-                                }
-                                let file = format!("{}-participants.csv", crate::export::sanitize_filename(&fname));
-                                crate::export::download_bytes(&file, "text/csv;charset=utf-8", csv.as_bytes());
+        super::widgets::SupportingPaneLayout {
+            primary: rsx! {
+                div { class: "card",
+                    div { class: "card-header",
+                        div { class: "avatar", span { class: "material-icons", "group" } }
+                        div {
+                            h3 { class: "title-medium", "{name}" }
+                            p { class: "body-medium",
+                                class: "text-muted",
+                                "{t(\"common.members\")}"
                             }
-                        },
-                        span { class: "material-icons", "download" }
-                    }
-                }
-            }
-
-            // Member list (the node's actual memberships, not its children).
-            if members.is_empty() {
-                div { class: "card-content",
-                    p { class: "body-medium",
-                        class: "text-muted",
-                        "{t(\"common.noContent\")}"
-                    }
-                }
-            } else {
-                div { class: "list",
-                    for member in members.iter() {
-                        MemberRow {
-                            key: "{member.id.0}",
-                            member: member.clone(),
-                            can_manage,
-                            on_edit: move |m: MemberFields| {
-                                edit_name.set(m.name.clone().unwrap_or_default());
-                                edit_email.set(m.email.clone().unwrap_or_default());
-                                edit_id.set(Some(m.id.0.clone()));
-                            },
-                            on_remove: move |m: MemberFields| {
-                                remove_target.set(Some((m.id.0.clone(), m.label())));
-                            },
                         }
-                    }
-                }
-            }
-
-            // Invite input (owner action, mirroring React InvitesFab).
-            if can_manage {
-                div { class: "card-content",
-                    div { class: "text-field",
-                        label { "{t(\"invite.nameOrEmail\")}" }
-                        input {
-                            r#type: "text",
-                            placeholder: "{t(\"invite.nameOrEmail\")}",
-                            value: "{invite_input}",
-                            oninput: move |evt| {
-                                let q = evt.value();
-                                invite_input.set(q.clone());
-                                // Autocomplete known users by name; an email (with
-                                // '@') falls through to the email-invite button.
-                                if q.trim().is_empty() || q.contains('@') {
-                                    user_matches.set(vec![]);
-                                    return;
-                                }
-                                let token = session.read().access_token.clone();
-                                let seq = *search_seq.read() + 1;
-                                search_seq.set(seq);
-                                spawn(async move {
-                                    let results = graphql::search_users(token.as_deref(), &q).await;
-                                    if *search_seq.read() == seq {
-                                        user_matches.set(results);
+                        div { class: "flex-grow" }
+                        // Export the participant roster as CSV (owner action, #41).
+                        if can_manage && !members.is_empty() {
+                            button {
+                                class: "btn-icon",
+                                title: "{t(\"member.export\")}",
+                                aria_label: "{t(\"member.export\")}",
+                                onclick: {
+                                    let members = members.clone();
+                                    let fname = name.clone();
+                                    move |_| {
+                                        let mut csv = String::from("Name,Email\n");
+                                        for m in &members {
+                                            csv.push_str(&csv_field(&m.label()));
+                                            csv.push(',');
+                                            csv.push_str(&csv_field(m.email.as_deref().unwrap_or("")));
+                                            csv.push('\n');
+                                        }
+                                        let file = format!("{}-participants.csv", crate::export::sanitize_filename(&fname));
+                                        crate::export::download_bytes(&file, "text/csv;charset=utf-8", csv.as_bytes());
                                     }
-                                });
-                            },
+                                },
+                                span { class: "material-icons", "download" }
+                            }
                         }
                     }
-                    // Matching users — click to invite by node id (binds the user).
-                    if !user_matches.read().is_empty() {
+
+                    // Member list (the node's actual memberships, not its children).
+                    if members.is_empty() {
+                        div { class: "card-content",
+                            p { class: "body-medium",
+                                class: "text-muted",
+                                "{t(\"common.noContent\")}"
+                            }
+                        }
+                    } else {
                         div { class: "list",
-                            for u in user_matches.read().iter() {
-                                {
-                                    let uname = u.name.clone();
-                                    let nid = u.node_id.clone();
-                                    let parent = node_id.clone();
-                                    rsx! {
-                                        button {
-                                            key: "{u.node_id.clone().unwrap_or_default()}",
-                                            class: "list-item list-button",
-                                            onclick: move |_| {
-                                                let Some(nid) = nid.clone() else {
+                            for member in members.iter() {
+                                MemberRow {
+                                    key: "{member.id.0}",
+                                    member: member.clone(),
+                                    can_manage,
+                                    on_edit: move |m: MemberFields| {
+                                        edit_name.set(m.name.clone().unwrap_or_default());
+                                        edit_email.set(m.email.clone().unwrap_or_default());
+                                        edit_id.set(Some(m.id.0.clone()));
+                                    },
+                                    on_remove: move |m: MemberFields| {
+                                        remove_target.set(Some((m.id.0.clone(), m.label())));
+                                    },
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            supporting: rsx! {
+                // Invite input (owner action, mirroring React InvitesFab).
+                if can_manage {
+                    div { class: "card",
+                        div { class: "card-content",
+                            div { class: "text-field",
+                                label { "{t(\"invite.nameOrEmail\")}" }
+                                input {
+                                    r#type: "text",
+                                    placeholder: "{t(\"invite.nameOrEmail\")}",
+                                    value: "{invite_input}",
+                                    oninput: move |evt| {
+                                        let q = evt.value();
+                                        invite_input.set(q.clone());
+                                        // Autocomplete known users by name; an email (with
+                                        // '@') falls through to the email-invite button.
+                                        if q.trim().is_empty() || q.contains('@') {
+                                            user_matches.set(vec![]);
+                                            return;
+                                        }
+                                        let token = session.read().access_token.clone();
+                                        let seq = *search_seq.read() + 1;
+                                        search_seq.set(seq);
+                                        spawn(async move {
+                                            let results = graphql::search_users(token.as_deref(), &q).await;
+                                            if *search_seq.read() == seq {
+                                                user_matches.set(results);
+                                            }
+                                        });
+                                    },
+                                }
+                            }
+                            // Matching users — click to invite by node id (binds the user).
+                            if !user_matches.read().is_empty() {
+                                div { class: "list",
+                                    for u in user_matches.read().iter() {
+                                        {
+                                            let uname = u.name.clone();
+                                            let nid = u.node_id.clone();
+                                            let parent = node_id.clone();
+                                            rsx! {
+                                                button {
+                                                    key: "{u.node_id.clone().unwrap_or_default()}",
+                                                    class: "list-item list-button",
+                                                    onclick: move |_| {
+                                                        let Some(nid) = nid.clone() else {
+                                                            return;
+                                                        };
+                                                        let token = session.read().access_token.clone();
+                                                        let parent = parent.clone();
+                                                        let uname = uname.clone();
+                                                        invite_input.set(String::new());
+                                                        user_matches.set(vec![]);
+                                                        spawn(async move {
+                                                            match graphql::invite_member_by_node(token.as_deref(), &parent, &nid, &uname).await {
+                                                                Ok(true) => {
+                                                                    show_snackbar(&t("invite.invite"));
+                                                                    crate::session::bump_data_version();
+                                                                }
+                                                                _ => show_snackbar(&t("error.somethingWentWrong")),
+                                                            }
+                                                        });
+                                                    },
+                                                    div { class: "avatar small", span { class: "material-icons", "person" } }
+                                                    div { class: "list-item-text",
+                                                        div { class: "list-item-primary", "{u.name}" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            button {
+                                class: "btn btn-primary mt-1",
+                                disabled: invite_input.read().is_empty(),
+                                onclick: {
+                                    let node_id = node_id.clone();
+                                    move |_| {
+                                        let email = invite_input.read().trim().to_string();
+                                        if email.is_empty() {
+                                            return;
+                                        }
+                                        let token = session.read().access_token.clone();
+                                        let node_id = node_id.clone();
+                                        invite_input.set(String::new());
+                                        spawn(async move {
+                                            match graphql::invite_member(token.as_deref(), &node_id, &email).await {
+                                                Ok(true) => {
+                                                    show_snackbar(&t("invite.invite"));
+                                                    crate::session::bump_data_version();
+                                                }
+                                                _ => show_snackbar(&t("error.somethingWentWrong")),
+                                            }
+                                        });
+                                    }
+                                },
+                                "{t(\"invite.invite\")}"
+                            }
+                            // Bulk-import a Fornavn/Efternavn/Email roster from an .xlsx
+                            // (React InvitesFab). Each row with an email becomes an invite.
+                            div { class: "mt-2",
+                                div { class: "file-upload-label", "{t(\"invite.importRoster\")}" }
+                                input {
+                                    id: "roster-xlsx-input",
+                                    class: "file-upload-input",
+                                    r#type: "file",
+                                    accept: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    onchange: {
+                                        let node_id = node_id.clone();
+                                        move |evt: FormEvent| {
+                                            let files = evt.files();
+                                            let Some(fd) = files.into_iter().next() else {
+                                                return;
+                                            };
+                                            let token = session.read().access_token.clone();
+                                            let node_id = node_id.clone();
+                                            spawn(async move {
+                                                let Ok(bytes) = fd.read_bytes().await else {
+                                                    show_snackbar(&t("error.somethingWentWrong"));
                                                     return;
                                                 };
-                                                let token = session.read().access_token.clone();
-                                                let parent = parent.clone();
-                                                let uname = uname.clone();
-                                                invite_input.set(String::new());
-                                                user_matches.set(vec![]);
-                                                spawn(async move {
-                                                    match graphql::invite_member_by_node(token.as_deref(), &parent, &nid, &uname).await {
-                                                        Ok(true) => {
-                                                            show_snackbar(&t("invite.invite"));
-                                                            crate::session::bump_data_version();
-                                                        }
-                                                        _ => show_snackbar(&t("error.somethingWentWrong")),
+                                                let roster: Vec<(String, String)> =
+                                                    crate::roster::parse_member_roster(bytes.to_vec())
+                                                        .into_iter()
+                                                        .map(|e| (e.name, e.email))
+                                                        .collect();
+                                                if roster.is_empty() {
+                                                    show_snackbar(&t("invite.noRosterRows"));
+                                                    return;
+                                                }
+                                                match graphql::invite_members(token.as_deref(), &node_id, &roster).await {
+                                                    Ok(n) if n > 0 => {
+                                                        show_snackbar(&t_with("invite.imported", &[("count", &n.to_string())]));
+                                                        crate::session::bump_data_version();
                                                     }
-                                                });
-                                            },
-                                            div { class: "avatar small", span { class: "material-icons", "person" } }
-                                            div { class: "list-item-text",
-                                                div { class: "list-item-primary", "{u.name}" }
-                                            }
+                                                    _ => show_snackbar(&t("error.somethingWentWrong")),
+                                                }
+                                            });
                                         }
-                                    }
+                                    },
+                                }
+                                label { r#for: "roster-xlsx-input", class: "file-upload",
+                                    span { class: "material-icons", "table_view" }
+                                    span { class: "file-upload-text", "{t(\"content.chooseFile\")}" }
                                 }
                             }
-                        }
-                    }
-                    button {
-                        class: "btn btn-primary mt-1",
-                        disabled: invite_input.read().is_empty(),
-                        onclick: {
-                            let node_id = node_id.clone();
-                            move |_| {
-                                let email = invite_input.read().trim().to_string();
-                                if email.is_empty() {
-                                    return;
-                                }
-                                let token = session.read().access_token.clone();
-                                let node_id = node_id.clone();
-                                invite_input.set(String::new());
-                                spawn(async move {
-                                    match graphql::invite_member(token.as_deref(), &node_id, &email).await {
-                                        Ok(true) => {
-                                            show_snackbar(&t("invite.invite"));
-                                            crate::session::bump_data_version();
-                                        }
-                                        _ => show_snackbar(&t("error.somethingWentWrong")),
-                                    }
-                                });
-                            }
-                        },
-                        "{t(\"invite.invite\")}"
-                    }
-                    // Bulk-import a Fornavn/Efternavn/Email roster from an .xlsx
-                    // (React InvitesFab). Each row with an email becomes an invite.
-                    div { class: "mt-2",
-                        div { class: "file-upload-label", "{t(\"invite.importRoster\")}" }
-                        input {
-                            id: "roster-xlsx-input",
-                            class: "file-upload-input",
-                            r#type: "file",
-                            accept: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            onchange: {
-                                let node_id = node_id.clone();
-                                move |evt: FormEvent| {
-                                    let files = evt.files();
-                                    let Some(fd) = files.into_iter().next() else {
-                                        return;
-                                    };
-                                    let token = session.read().access_token.clone();
-                                    let node_id = node_id.clone();
-                                    spawn(async move {
-                                        let Ok(bytes) = fd.read_bytes().await else {
-                                            show_snackbar(&t("error.somethingWentWrong"));
-                                            return;
-                                        };
-                                        let roster: Vec<(String, String)> =
-                                            crate::roster::parse_member_roster(bytes.to_vec())
-                                                .into_iter()
-                                                .map(|e| (e.name, e.email))
-                                                .collect();
-                                        if roster.is_empty() {
-                                            show_snackbar(&t("invite.noRosterRows"));
-                                            return;
-                                        }
-                                        match graphql::invite_members(token.as_deref(), &node_id, &roster).await {
-                                            Ok(n) if n > 0 => {
-                                                show_snackbar(&t_with("invite.imported", &[("count", &n.to_string())]));
-                                                crate::session::bump_data_version();
-                                            }
-                                            _ => show_snackbar(&t("error.somethingWentWrong")),
-                                        }
-                                    });
-                                }
-                            },
-                        }
-                        label { r#for: "roster-xlsx-input", class: "file-upload",
-                            span { class: "material-icons", "table_view" }
-                            span { class: "file-upload-text", "{t(\"content.chooseFile\")}" }
                         }
                     }
                 }
-            }
+            },
         }
 
         // Edit member (name / email) dialog.
