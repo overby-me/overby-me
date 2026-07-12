@@ -7,10 +7,6 @@ use crate::route::Route;
 use crate::session::use_session;
 
 use super::loader::node_icon_el;
-use super::ui::alert_dialog::{
-    AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
-    AlertDialogTitle,
-};
 
 /// Office document mimes (legacy + OpenXML) previewable via the MS Office viewer:
 /// Word, Excel and PowerPoint.
@@ -139,15 +135,20 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         }
                         // Delete confirm dialog (owner-only).
                         if can_manage && !segments.is_empty() {
-                            AlertDialog {
-                                open: Some(confirm_open()),
-                                on_open_change: move |v| confirm_open.set(v),
-                                AlertDialogTitle { "{t(\"content.confirmDelete\")}" }
-                                AlertDialogDescription { "{name}" }
-                                AlertDialogActions {
-                                    AlertDialogCancel { "{t(\"common.cancel\")}" }
-                                    AlertDialogAction {
-                                        on_click: {
+                            super::widgets::Dialog {
+                                open: confirm_open(),
+                                on_dismiss: move |_| confirm_open.set(false),
+                                headline: t("content.confirmDelete"),
+                                icon: "delete".to_string(),
+                                actions: rsx! {
+                                    button {
+                                        class: "btn btn-outlined",
+                                        onclick: move |_| confirm_open.set(false),
+                                        "{t(\"common.cancel\")}"
+                                    }
+                                    button {
+                                        class: "btn btn-primary",
+                                        onclick: {
                                             let node_id = node_id.clone();
                                             let parent = segments[..segments.len() - 1].to_vec();
                                             move |_| {
@@ -166,7 +167,8 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                         },
                                         "{t(\"common.delete\")}"
                                     }
-                                }
+                                },
+                                p { class: "body-medium", "{name}" }
                             }
                         }
                     }

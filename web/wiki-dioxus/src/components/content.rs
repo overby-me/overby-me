@@ -7,10 +7,6 @@ use crate::route::Route;
 use crate::session::use_session;
 
 use super::loader::{icon_el, mime_icon};
-use super::ui::alert_dialog::{
-    AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
-    AlertDialogTitle,
-};
 
 /// The content card only (title, image, members, body). Comments are a separate
 /// [`super::comments::CommentSection`] composed by each caller, so composite
@@ -106,16 +102,23 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     }
                 }
                 if can_manage && !segments.is_empty() {
-                    // Delete via an accessible modal confirm dialog.
-                    AlertDialog {
-                        open: Some(confirm_open()),
-                        on_open_change: move |v| confirm_open.set(v),
-                        AlertDialogTitle { "{t(\"content.confirmDelete\")}" }
-                        AlertDialogDescription { "{name}" }
-                        AlertDialogActions {
-                            AlertDialogCancel { "{t(\"common.cancel\")}" }
-                            AlertDialogAction {
-                                on_click: {
+                    // Delete via an accessible modal confirm dialog (the custom
+                    // Dialog; the primitives AlertDialog's controlled open never
+                    // opened).
+                    super::widgets::Dialog {
+                        open: confirm_open(),
+                        on_dismiss: move |_| confirm_open.set(false),
+                        headline: t("content.confirmDelete"),
+                        icon: "delete".to_string(),
+                        actions: rsx! {
+                            button {
+                                class: "btn btn-outlined",
+                                onclick: move |_| confirm_open.set(false),
+                                "{t(\"common.cancel\")}"
+                            }
+                            button {
+                                class: "btn btn-primary",
+                                onclick: {
                                     let node_id = node_id.clone();
                                     let parent = segments[..segments.len() - 1].to_vec();
                                     move |_| {
@@ -147,7 +150,8 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                 },
                                 "{t(\"common.delete\")}"
                             }
-                        }
+                        },
+                        p { class: "body-medium", "{name}" }
                     }
                 }
             }

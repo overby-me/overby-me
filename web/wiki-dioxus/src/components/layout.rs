@@ -1,9 +1,5 @@
 use dioxus::prelude::*;
 
-use super::ui::alert_dialog::{
-    AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
-    AlertDialogTitle,
-};
 use super::ui::switch::Switch;
 use crate::graphql::{self, NodeFields};
 use crate::i18n::{t, t_with, Lang, LANG};
@@ -1692,16 +1688,22 @@ fn InvitedContextItem(invite: graphql::InvitationFields) -> Element {
                 span { class: "material-icons", "close" }
             }
         }
-        // Confirm before rejecting an invitation.
-        AlertDialog {
-            open: Some(confirm_open()),
-            on_open_change: move |v| confirm_open.set(v),
-            AlertDialogTitle { "{t(\"invite.confirmReject\")}" }
-            AlertDialogDescription { "{name}" }
-            AlertDialogActions {
-                AlertDialogCancel { "{t(\"common.cancel\")}" }
-                AlertDialogAction { on_click: reject, "{t(\"invite.reject\")}" }
-            }
+        // Confirm before rejecting an invitation (custom Dialog; the primitives
+        // AlertDialog's controlled open never opened).
+        super::widgets::Dialog {
+            open: confirm_open(),
+            on_dismiss: move |_| confirm_open.set(false),
+            headline: t("invite.confirmReject"),
+            icon: "close".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| confirm_open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button { class: "btn btn-primary", onclick: reject, "{t(\"invite.reject\")}" }
+            },
+            p { class: "body-medium", "{name}" }
         }
     }
 }

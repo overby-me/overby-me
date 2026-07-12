@@ -1,10 +1,6 @@
 use dioxus::prelude::*;
 
 use crate::components::richtext;
-use crate::components::ui::alert_dialog::{
-    AlertDialog, AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogDescription,
-    AlertDialogTitle,
-};
 use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::t;
 use crate::route::Route;
@@ -362,15 +358,20 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                 span { class: "material-icons", "publish" }
                                 " {t(\"content.submit\")}"
                             }
-                            AlertDialog {
-                                open: Some(confirm_submit()),
-                                on_open_change: move |v| confirm_submit.set(v),
-                                AlertDialogTitle { "{t(\"content.submit\")}" }
-                                AlertDialogDescription { "{t(\"content.submitWarning\")}" }
-                                AlertDialogActions {
-                                    AlertDialogCancel { "{t(\"common.cancel\")}" }
-                                    AlertDialogAction {
-                                        on_click: {
+                            super::widgets::Dialog {
+                                open: confirm_submit(),
+                                on_dismiss: move |_| confirm_submit.set(false),
+                                headline: t("content.submit"),
+                                icon: "publish".to_string(),
+                                actions: rsx! {
+                                    button {
+                                        class: "btn btn-outlined",
+                                        onclick: move |_| confirm_submit.set(false),
+                                        "{t(\"common.cancel\")}"
+                                    }
+                                    button {
+                                        class: "btn btn-primary",
+                                        onclick: {
                                             let save = handle_save.clone();
                                             move |_| {
                                                 confirm_submit.set(false);
@@ -379,7 +380,8 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                         },
                                         "{t(\"content.submit\")}"
                                     }
-                                }
+                                },
+                                p { class: "body-medium", "{t(\"content.submitWarning\")}" }
                             }
                         }
                         if *saving.read() {
