@@ -84,6 +84,12 @@ These change behaviour / add capability rather than only looks:
   `Clipboard` feature).
 - **Skip-to-content link** — an a11y skip link (first focusable element, hidden
   until focused) that jumps keyboard users to `#main-content`.
+- **`/` search shortcut** — bare `/` opens search (alongside Ctrl+K), suppressed
+  while typing in a field or the editor.
+- **Scroll-to-top on navigation** — moving to a different node returns to the top,
+  keyed on the path so switching apps in place keeps your scroll position.
+- **Skeleton content loading** — a content-shaped shimmer placeholder while a node
+  loads, instead of a bare spinner.
 
 ## Notes / follow-ups
 
