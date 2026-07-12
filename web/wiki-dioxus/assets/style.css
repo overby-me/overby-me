@@ -946,31 +946,8 @@ a:hover {
 	}
 }
 
-/* Modal overlay + card (add-content dialog). */
-.modal-backdrop {
-	position: fixed;
-	inset: 0;
-	z-index: 300;
-	/* M3 scrim. */
-	background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	padding: 16px;
-}
-
-/* M3 dialog: surface-container-high tone, extra-large corners, level-3 shadow. */
-.modal-card {
-	background: var(--md-surface-container-high);
-	border-radius: var(--md-sys-shape-corner-extra-large);
-	padding: 24px;
-	width: 100%;
-	max-width: 420px;
-	box-shadow: var(--md-sys-elevation-3);
-}
-
-/* M3 basic Dialog (the reusable widgets::Dialog) — scrim + surface-container-high
-   card, spring rise-in. Supersedes .modal-backdrop/.modal-card. */
+/* M3 basic Dialog (the reusable widgets::Dialog): scrim + surface-container-high
+   card, spring rise-in. Every screen's dialog now flows through this widget. */
 .m3-dialog-scrim {
 	position: fixed;
 	inset: 0;

@@ -1025,112 +1025,107 @@ fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Element {
                 }
             }
         }
-        if open() {
-            div { class: "modal-backdrop", onclick: move |_| open.set(false),
-                div {
-                    class: "modal-card",
-                    onclick: move |e| e.stop_propagation(),
-                    h3 { class: "title-large", style: "margin-bottom: 12px;", "{t(\"poll.newPoll\")}" }
-                    if is_position && opt_count > 2 {
-                        div { class: "body-medium", style: "margin-bottom: 4px;",
-                            "{range_label}: {min_vote} to {max_vote}"
-                        }
-                        input {
-                            r#type: "range",
-                            min: "1",
-                            max: "{max_range}",
-                            value: "{min_vote}",
-                            style: "width: 100%;",
-                            oninput: move |e| {
-                                let v: usize = e.value().parse().unwrap_or(1);
-                                min_vote.set(v);
-                                if max_vote() < v {
-                                    max_vote.set(v);
+        super::widgets::Dialog {
+            open: open(),
+            on_dismiss: move |_| open.set(false),
+            headline: t("poll.newPoll"),
+            icon: "ballot".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-text",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    onclick: {
+                        let node_id = node_id.clone();
+                        let context_id = context_id.clone();
+                        let name = name.clone();
+                        let options = options.clone();
+                        let path = path.clone();
+                        move |_| {
+                            let token = session.read().access_token.clone();
+                            let Some(context_id) = context_id.clone() else {
+                                return;
+                            };
+                            let parent_id = node_id.clone();
+                            let name = name.clone();
+                            let options = options.clone();
+                            let hidden = hidden();
+                            let mn = min_vote();
+                            let mx = max_vote().max(mn);
+                            let mut poll_path = path.clone();
+                            spawn(async move {
+                                let key = format!("poll{}", js_sys::Date::now() as u64);
+                                match graphql::create_poll(
+                                    token.as_deref(),
+                                    &parent_id,
+                                    &context_id,
+                                    &name,
+                                    &key,
+                                    &options,
+                                    mn,
+                                    mx,
+                                    hidden,
+                                )
+                                .await
+                                {
+                                    Ok(inserted) => {
+                                        crate::session::bump_data_version();
+                                        open.set(false);
+                                        poll_path.push(inserted.key);
+                                        nav.push(Route::PathPage {
+                                            segments: poll_path,
+                                            app: None,
+                                        });
+                                    }
+                                    Err(e) => {
+                                        open.set(false);
+                                        show_snackbar(&e);
+                                    }
                                 }
-                            },
+                            });
                         }
-                        input {
-                            r#type: "range",
-                            min: "1",
-                            max: "{max_range}",
-                            value: "{max_vote}",
-                            style: "width: 100%; margin-bottom: 8px;",
-                            oninput: move |e| {
-                                let v: usize = e.value().parse().unwrap_or(1);
-                                max_vote.set(v.max(min_vote()));
-                            },
+                    },
+                    "{t(\"poll.start\")}"
+                }
+            },
+            if is_position && opt_count > 2 {
+                div { class: "body-medium", style: "margin-bottom: 4px;",
+                    "{range_label}: {min_vote} to {max_vote}"
+                }
+                input {
+                    r#type: "range",
+                    min: "1",
+                    max: "{max_range}",
+                    value: "{min_vote}",
+                    style: "width: 100%;",
+                    oninput: move |e| {
+                        let v: usize = e.value().parse().unwrap_or(1);
+                        min_vote.set(v);
+                        if max_vote() < v {
+                            max_vote.set(v);
                         }
-                    }
-                    div { class: "list-item switch-row",
-                        span { class: "switch-row-label", "{t(\"poll.hideResult\")}" }
-                        Switch {
-                            checked: Some(hidden()),
-                            on_checked_change: move |v: bool| hidden.set(v),
-                        }
-                    }
-                    div {
-                        class: "stack stack-h",
-                        style: "justify-content: flex-end; gap: 8px; margin-top: 12px;",
-                        button {
-                            class: "btn btn-text",
-                            onclick: move |_| open.set(false),
-                            "{t(\"common.cancel\")}"
-                        }
-                        button {
-                            class: "btn btn-primary",
-                            onclick: {
-                                let node_id = node_id.clone();
-                                let context_id = context_id.clone();
-                                let name = name.clone();
-                                let options = options.clone();
-                                let path = path.clone();
-                                move |_| {
-                                    let token = session.read().access_token.clone();
-                                    let Some(context_id) = context_id.clone() else {
-                                        return;
-                                    };
-                                    let parent_id = node_id.clone();
-                                    let name = name.clone();
-                                    let options = options.clone();
-                                    let hidden = hidden();
-                                    let mn = min_vote();
-                                    let mx = max_vote().max(mn);
-                                    let mut poll_path = path.clone();
-                                    spawn(async move {
-                                        let key = format!("poll{}", js_sys::Date::now() as u64);
-                                        match graphql::create_poll(
-                                            token.as_deref(),
-                                            &parent_id,
-                                            &context_id,
-                                            &name,
-                                            &key,
-                                            &options,
-                                            mn,
-                                            mx,
-                                            hidden,
-                                        )
-                                        .await
-                                        {
-                                            Ok(inserted) => {
-                                                crate::session::bump_data_version();
-                                                open.set(false);
-                                                poll_path.push(inserted.key);
-                                                nav.push(Route::PathPage {
-                                                    segments: poll_path,
-                                                    app: None,
-                                                });
-                                            }
-                                            Err(e) => {
-                                                open.set(false);
-                                                show_snackbar(&e);
-                                            }
-                                        }
-                                    });
-                                }
-                            },
-                            "{t(\"poll.start\")}"
-                        }
-                    }
+                    },
+                }
+                input {
+                    r#type: "range",
+                    min: "1",
+                    max: "{max_range}",
+                    value: "{max_vote}",
+                    style: "width: 100%; margin-bottom: 8px;",
+                    oninput: move |e| {
+                        let v: usize = e.value().parse().unwrap_or(1);
+                        max_vote.set(v.max(min_vote()));
+                    },
+                }
+            }
+            div { class: "list-item switch-row",
+                span { class: "switch-row-label", "{t(\"poll.hideResult\")}" }
+                Switch {
+                    checked: Some(hidden()),
+                    on_checked_change: move |v: bool| hidden.set(v),
                 }
             }
         }
