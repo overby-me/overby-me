@@ -3550,6 +3550,9 @@ h6,
 	width: auto;
 	height: auto;
 	border-radius: var(--md-sys-shape-corner-large, 16px);
+	/* EXPERIMENT (functional): a tonal placeholder shows in the image box while it
+	   loads, instead of empty space; the loaded image paints over it. */
+	background: var(--md-surface-container-high);
 	/* Fade in on mount so images don't pop in abruptly. */
 	animation: image-fade-in var(--md-sys-motion-duration-medium2, 300ms)
 		var(--md-sys-motion-easing-standard, ease);
