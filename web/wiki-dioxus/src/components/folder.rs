@@ -119,104 +119,114 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                         },
                     }
                 }
-                // Export the folder and everything nested under it to an .odt.
-                if is_auth && count > 0 {
-                    button {
-                        class: "btn-icon",
-                        title: "{t(\"folder.export\")}",
-                        onclick: {
-                            let id = node.id.0.clone();
-                            let fname = name.to_string();
-                            move |_| {
-                                let token = session.read().access_token.clone();
-                                let id = id.clone();
-                                let fname = fname.clone();
-                                spawn(async move {
-                                    crate::export::export_tree(token, id, fname).await;
-                                });
-                            }
-                        },
-                        span { class: "material-icons", "download" }
-                    }
-                }
-                // Reorder children (the sort app) — only worth showing when there
-                // is more than one child and the user can act on it.
-                if is_context_owner && count > 1 && !parent_path.is_empty() {
-                    Link {
-                        to: Route::PathPage {
-                            segments: parent_path.clone(),
-                            app: Some("sort".to_string()),
-                        },
-                        class: "btn-icon",
-                        title: "{t(\"mime.sort\")}",
-                        {icon_el("app/sort")}
-                    }
-                }
-                // Lock / unlock adding children (the `attachable` flag). Owner-only.
-                if is_context_owner {
-                    button {
-                        class: "btn-icon",
-                        title: if attachable { "{t(\"folder.lock\")}" } else { "{t(\"folder.unlock\")}" },
-                        onclick: {
-                            let id = node.id.0.clone();
-                            move |_| {
-                                let token = session.read().access_token.clone();
-                                let id = id.clone();
-                                spawn(async move {
-                                    let _ = graphql::update_node(
-                                        token.as_deref(),
-                                        &id,
-                                        graphql::NodesSetInput {
-                                            attachable: Some(!attachable),
-                                            ..Default::default()
-                                        },
-                                    )
-                                    .await;
-                                    crate::session::bump_data_version();
-                                });
-                            }
-                        },
-                        span { class: "material-icons",
-                            if attachable { "lock_open" } else { "lock" }
-                        }
-                    }
-                }
-                // Paste the clipboard selection here (deep-copy). Owner-only, and
-                // only when something is selected to paste.
-                if is_context_owner && !SELECTED.read().is_empty() {
-                    button {
-                        class: "btn-icon",
-                        title: "{t(\"folder.paste\")} ({SELECTED.read().len()})",
-                        onclick: {
-                            let target = node.id.0.clone();
-                            let ctx = node.context_id.clone().map(|c| c.0);
-                            move |_| {
-                                let token = session.read().access_token.clone();
-                                let target = target.clone();
-                                let ctx = ctx.clone();
-                                spawn(async move {
-                                    let ids = SELECTED.read().clone();
-                                    for id in ids {
-                                        // Never paste a folder into itself or its
-                                        // own subtree (would recurse forever).
-                                        if graphql::is_descendant_of(token.as_deref(), &target, &id).await {
-                                            continue;
-                                        }
-                                        let _ = graphql::deep_copy_node(
-                                            token.clone(),
-                                            id,
-                                            target.clone(),
-                                            ctx.clone(),
-                                            true,
-                                        )
-                                        .await;
+                // Secondary/admin folder actions live in the M3 tools sheet
+                // (bottom sheet on mobile, right side sheet on desktop).
+                if (is_auth && count > 0) || is_context_owner {
+                    super::widgets::ToolSheet {
+                        title: t("common.tools"),
+                        // Export the folder and everything nested under it to an .odt.
+                        if is_auth && count > 0 {
+                            button {
+                                class: "sheet-action",
+                                onclick: {
+                                    let id = node.id.0.clone();
+                                    let fname = name.to_string();
+                                    move |_| {
+                                        let token = session.read().access_token.clone();
+                                        let id = id.clone();
+                                        let fname = fname.clone();
+                                        spawn(async move {
+                                            crate::export::export_tree(token, id, fname).await;
+                                        });
                                     }
-                                    *SELECTED.write() = vec![];
-                                    crate::session::bump_data_version();
-                                });
+                                },
+                                span { class: "material-icons", "download" }
+                                "{t(\"folder.export\")}"
                             }
-                        },
-                        span { class: "material-icons", "content_paste" }
+                        }
+                        // Reorder children (the sort app), for owners with >1 child.
+                        if is_context_owner && count > 1 && !parent_path.is_empty() {
+                            Link {
+                                to: Route::PathPage {
+                                    segments: parent_path.clone(),
+                                    app: Some("sort".to_string()),
+                                },
+                                class: "sheet-action",
+                                {icon_el("app/sort")}
+                                "{t(\"mime.sort\")}"
+                            }
+                        }
+                        // Lock / unlock adding children (the attachable flag).
+                        if is_context_owner {
+                            button {
+                                class: "sheet-action",
+                                onclick: {
+                                    let id = node.id.0.clone();
+                                    move |_| {
+                                        let token = session.read().access_token.clone();
+                                        let id = id.clone();
+                                        spawn(async move {
+                                            let _ = graphql::update_node(
+                                                token.as_deref(),
+                                                &id,
+                                                graphql::NodesSetInput {
+                                                    attachable: Some(!attachable),
+                                                    ..Default::default()
+                                                },
+                                            )
+                                            .await;
+                                            crate::session::bump_data_version();
+                                        });
+                                    }
+                                },
+                                span { class: "material-icons",
+                                    if attachable { "lock_open" } else { "lock" }
+                                }
+                                if attachable {
+                                    "{t(\"folder.lock\")}"
+                                } else {
+                                    "{t(\"folder.unlock\")}"
+                                }
+                            }
+                        }
+                        // Paste the clipboard selection here (deep-copy), for owners
+                        // when something is selected.
+                        if is_context_owner && !SELECTED.read().is_empty() {
+                            button {
+                                class: "sheet-action",
+                                onclick: {
+                                    let target = node.id.0.clone();
+                                    let ctx = node.context_id.clone().map(|c| c.0);
+                                    move |_| {
+                                        let token = session.read().access_token.clone();
+                                        let target = target.clone();
+                                        let ctx = ctx.clone();
+                                        spawn(async move {
+                                            let ids = SELECTED.read().clone();
+                                            for id in ids {
+                                                // Never paste a folder into itself or
+                                                // its own subtree (would recurse).
+                                                if graphql::is_descendant_of(token.as_deref(), &target, &id).await {
+                                                    continue;
+                                                }
+                                                let _ = graphql::deep_copy_node(
+                                                    token.clone(),
+                                                    id,
+                                                    target.clone(),
+                                                    ctx.clone(),
+                                                    true,
+                                                )
+                                                .await;
+                                            }
+                                            *SELECTED.write() = vec![];
+                                            crate::session::bump_data_version();
+                                        });
+                                    }
+                                },
+                                span { class: "material-icons", "content_paste" }
+                                "{t(\"folder.paste\")} ({SELECTED.read().len()})"
+                            }
+                        }
                     }
                 }
             }
