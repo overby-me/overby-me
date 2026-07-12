@@ -335,10 +335,11 @@ a:hover {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	justify-content: center;
-	/* Take the space below the header and centre the destinations vertically
-	   (M3 navigation-rail guidelines) instead of stacking them at the top. */
-	flex: 1;
+	/* Top-aligned (below the header) in BOTH collapsed and expanded states, so
+	   expanding widens the rail and reveals labels in place instead of the items
+	   jumping from a vertical-centre to the top. */
+	justify-content: flex-start;
+	flex: 0 0 auto;
 	gap: var(--md-sys-spacing-3);
 	width: 100%;
 }
@@ -397,8 +398,6 @@ a:hover {
 	justify-content: flex-start;
 }
 .nav-rail.expanded .nav-rail-destinations {
-	flex: 0 0 auto;
-	justify-content: flex-start;
 	gap: var(--md-sys-spacing-1);
 }
 .nav-rail.expanded .nav-rail-item {

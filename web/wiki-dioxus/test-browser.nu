@@ -592,6 +592,21 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     let r = (check-contrast $session_id "context view (drawer + app rail + bar)" $p $fl); $p = $r.passed; $fl = $r.failed
     capture-shots $session_id "context"
 
+    # Medium-width expandable rail: capture collapsed then (menu-toggled) expanded,
+    # so the rail-expansion motion can be reviewed.
+    if (($env | get -o WIKI_SHOTS | default "") == "1") {
+        let dir = ($env | get -o WIKI_SHOTS_DIR | default "screenshots")
+        wd-window-rect $session_id 980 900
+        sleep 700ms
+        wd-screenshot $session_id ($dir | path join "rail-med-collapsed.png")
+        wd-execute $session_id 'var b=document.querySelector(".nav-rail-header .btn-icon"); if(b)b.click(); return 1' | ignore
+        sleep 800ms
+        wd-screenshot $session_id ($dir | path join "rail-med-expanded.png")
+        wd-execute $session_id 'var b=document.querySelector(".nav-rail-header .btn-icon"); if(b)b.click(); return 1' | ignore
+        wd-window-rect $session_id 1280 900
+        sleep 400ms
+    }
+
     # Pull-to-refresh must actually REFETCH data, not just animate. Hook fetch to
     # count GraphQL calls, over-scroll up, and expect fresh calls to fire (the
     # generalized use_data_resource! makes every view refetch on the bump).
