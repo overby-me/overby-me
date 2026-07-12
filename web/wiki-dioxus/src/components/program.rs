@@ -43,22 +43,20 @@ pub fn ProgramApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     key: "{item.id.0}",
                                     to: Route::PathPage { segments: full, app: None },
                                     class: "program-item",
-                                    div { class: "program-index", "{i + 1}" }
+                                    // Leading agenda time column (empty keeps the rail aligned).
+                                    div { class: "program-time",
+                                        if let Some(t) = time {
+                                            "{t}"
+                                        }
+                                    }
+                                    // The connected rail: a numbered dot over a vertical line.
+                                    div { class: "program-marker",
+                                        div { class: "program-dot", "{i + 1}" }
+                                    }
                                     div { class: "program-body",
                                         div { class: "list-item-primary",
-                                            span {
-                                                class: "material-icons",
-                                                style: "vertical-align: middle; font-size: 18px; margin-right: 6px;",
-                                                "{icon}"
-                                            }
+                                            span { class: "material-icons program-item-icon", "{icon}" }
                                             "{item.name}"
-                                        }
-                                        if let Some(t) = time {
-                                            div {
-                                                class: "list-item-secondary",
-                                                class: "text-muted",
-                                                "{t}"
-                                            }
                                         }
                                     }
                                 }
