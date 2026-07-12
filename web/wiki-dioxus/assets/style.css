@@ -3451,6 +3451,13 @@ h6,
 	padding-left: 24px;
 	margin: 8px 0;
 }
+/* EXPERIMENT (reading): airier list items and magenta-tinted markers. */
+.slate-content li {
+	margin: 0.35em 0;
+}
+.slate-content li::marker {
+	color: var(--md-tertiary);
+}
 
 .slate-content img {
 	max-width: 100%;
