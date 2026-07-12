@@ -209,6 +209,23 @@ pub fn Layout() -> Element {
                 if (m.ctrl() || m.meta()) && evt.key() == Key::Character("k".to_string()) {
                     search_mode.set(true);
                     evt.prevent_default();
+                } else if evt.key() == Key::Character("/".to_string()) && !m.ctrl() && !m.meta() {
+                    // EXPERIMENT (functional): bare "/" opens search too (a common
+                    // shortcut), but not while typing in a field or the editor.
+                    let typing = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|d| d.active_element())
+                        .map(|e| {
+                            let tag = e.tag_name().to_lowercase();
+                            tag == "input"
+                                || tag == "textarea"
+                                || e.has_attribute("contenteditable")
+                        })
+                        .unwrap_or(false);
+                    if !typing {
+                        search_mode.set(true);
+                        evt.prevent_default();
+                    }
                 }
             },
             // EXPERIMENT (functional a11y): a skip link — the first focusable
