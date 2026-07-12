@@ -2625,18 +2625,21 @@ h6,
 	max-width: min(90vw, 480px);
 }
 
+/* EXPERIMENT (expressive snackbar): a tonal surface with a primary accent spine
+   (the card accent language) and a spring entrance, replacing the dark toast. */
 .snackbar {
 	position: relative;
-	background: var(--md-inverse-surface);
-	color: var(--md-inverse-on-surface);
-	padding: 14px 16px;
-	border-radius: var(--md-sys-shape-corner-extra-small);
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
+	padding: 14px 18px;
+	border-radius: var(--md-sys-shape-corner-large);
 	z-index: 300;
 	box-shadow: var(--md-sys-elevation-3);
+	border-left: 4px solid var(--md-primary);
 	font-size: var(--md-sys-typescale-body-medium-size);
 	line-height: var(--md-sys-typescale-body-medium-line);
 	animation: snackbar-in var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-easing-emphasized-decelerate);
+		var(--md-sys-motion-spring-spatial-default);
 }
 
 @keyframes snackbar-in {
