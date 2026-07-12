@@ -69,6 +69,22 @@ retints; several experiments build on it.
 - **Bolder projector stage** — the current speaker becomes a gradient stage card
   with a glowing avatar and a display-scale name.
 
+## Functional experiments (not just aesthetic)
+
+These change behaviour / add capability rather than only looks:
+
+- **Unified bottom dock (compact)** — merges two bottom bars into one, reclaiming
+  vertical space (also listed above; it is as much layout as looks).
+- **Back-to-top button** — a scroll-aware button that returns to the top of long
+  pages; adds app-wide smooth scrolling (also smooths TOC anchor jumps).
+- **Reading progress bar** — a thin top bar showing scroll progress through the
+  page, sharing the back-to-top scroll listener.
+- **Copy-link action** — a "Copy link" item in the document tools sheet copies the
+  page URL to the clipboard and confirms with a snackbar (adds the web-sys
+  `Clipboard` feature).
+- **Skip-to-content link** — an a11y skip link (first focusable element, hidden
+  until focused) that jumps keyboard users to `#main-content`.
+
 ## Notes / follow-ups
 
 - The graph SVG could get the same `.viewport-frame` as the map (left out to avoid
