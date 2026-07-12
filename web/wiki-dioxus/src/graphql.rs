@@ -960,6 +960,112 @@ pub async fn invite_members(
         .unwrap_or(0))
 }
 
+/// A server-side page filter for a node's members: each `Option<bool>` narrows the
+/// query when `Some`, plus a free-text `search` matched case-insensitively against
+/// name or email. Plain data so the UI never has to touch GraphQL.
+#[derive(Default, Clone, PartialEq)]
+pub struct MemberPageFilter {
+    pub owner: Option<bool>,
+    pub active: Option<bool>,
+    pub accepted: Option<bool>,
+    pub hidden: Option<bool>,
+    pub search: String,
+}
+
+/// Fetch one page of a node's members from Hasura with server-side filtering,
+/// search and pagination (`limit`/`offset`), plus the total count for the same
+/// predicate — so the roster scales to thousands without loading them all.
+/// Returns `(page rows, total matching)`.
+pub async fn query_members_page(
+    access_token: Option<&str>,
+    parent_id: &str,
+    filter: &MemberPageFilter,
+    limit: usize,
+    offset: usize,
+) -> Result<(Vec<MemberFields>, usize), String> {
+    let where_clause = members_where(parent_id, filter);
+    let query = format!(
+        "query {{ \
+           members(where: {w}, order_by: {{ name: asc }}, limit: {limit}, offset: {offset}) {{ \
+             id name email accepted active owner hidden nodeId \
+             user {{ displayName }} node {{ mimeId }} \
+           }} \
+           members_aggregate(where: {w}) {{ aggregate {{ count }} }} \
+         }}",
+        w = where_clause,
+    );
+    let data = execute_raw(access_token, &query).await?;
+    let rows = data
+        .get("members")
+        .and_then(|m| m.as_array())
+        .map(|arr| arr.iter().filter_map(parse_member_row).collect())
+        .unwrap_or_default();
+    let total = data
+        .get("members_aggregate")
+        .and_then(|a| a.get("aggregate"))
+        .and_then(|a| a.get("count"))
+        .and_then(|c| c.as_u64())
+        .unwrap_or(0) as usize;
+    Ok((rows, total))
+}
+
+/// Build the Hasura `where` object (as GraphQL literal text) for a member page.
+fn members_where(parent_id: &str, f: &MemberPageFilter) -> String {
+    let mut parts = vec![format!(
+        "parentId: {{ _eq: \"{}\" }}",
+        gql_escape(parent_id)
+    )];
+    for (col, val) in [
+        ("owner", f.owner),
+        ("active", f.active),
+        ("accepted", f.accepted),
+        ("hidden", f.hidden),
+    ] {
+        if let Some(v) = val {
+            parts.push(format!("{col}: {{ _eq: {v} }}"));
+        }
+    }
+    let q = f.search.trim();
+    if !q.is_empty() {
+        let pat = format!("%{}%", gql_escape(q));
+        parts.push(format!(
+            "_or: [{{ name: {{ _ilike: \"{pat}\" }} }}, {{ email: {{ _ilike: \"{pat}\" }} }}]"
+        ));
+    }
+    format!("{{ {} }}", parts.join(", "))
+}
+
+/// Escape a value for embedding inside a GraphQL double-quoted string literal.
+fn gql_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Parse one raw `members` JSON row into a [`MemberFields`].
+fn parse_member_row(v: &serde_json::Value) -> Option<MemberFields> {
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
+    let b = |k: &str| v.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
+    Some(MemberFields {
+        id: Uuid(v.get("id")?.as_str()?.to_string()),
+        name: s("name"),
+        email: s("email"),
+        accepted: b("accepted"),
+        active: b("active"),
+        owner: b("owner"),
+        hidden: b("hidden"),
+        node_id: s("nodeId").map(Uuid),
+        user: v
+            .get("user")
+            .and_then(|u| u.get("displayName"))
+            .and_then(|d| d.as_str())
+            .map(|s| UserRef {
+                display_name: s.to_string(),
+            }),
+        node: v.get("node").map(|n| MemberNodeRef {
+            mime_id: n.get("mimeId").and_then(|m| m.as_str()).map(String::from),
+        }),
+    })
+}
+
 /// Invite someone to a context by email (a pending membership they accept from
 /// their home screen). Mirrors the React invite: email set, no node id yet.
 pub async fn invite_member(

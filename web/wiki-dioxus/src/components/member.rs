@@ -26,14 +26,52 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let is_owner = user_id.is_some() && node.owner_id.as_ref().map(|o| o.0.clone()) == user_id;
     let can_manage = is_owner || node.is_context_owner.unwrap_or(false);
 
-    let mut members: Vec<MemberFields> = node
-        .members
-        .iter()
-        .filter(|m| can_manage || !m.hidden)
-        .cloned()
-        .collect();
-    // Order by display name (React's members_order_by.user), case-insensitively.
-    members.sort_by_key(|m| m.label().to_lowercase());
+    // Roster paging: a search box + a single-select filter + a page, all resolved
+    // SERVER-SIDE (Hasura limit/offset/where + an aggregate count) so the roster
+    // scales past thousands of members without loading them all.
+    const PAGE_SIZE: usize = 25;
+    let search = use_signal(String::new);
+    let filter = use_signal(|| "all".to_string());
+    let page = use_signal(|| 0usize);
+
+    let member_filter = {
+        let mut mf = graphql::MemberPageFilter {
+            search: search.read().clone(),
+            ..Default::default()
+        };
+        match filter.read().as_str() {
+            "owners" => mf.owner = Some(true),
+            "active" => mf.active = Some(true),
+            "invited" => {
+                mf.accepted = Some(false);
+                mf.hidden = Some(false);
+            }
+            "hidden" => mf.hidden = Some(true),
+            _ => {}
+        }
+        // Non-managers never see hidden members.
+        if !can_manage && mf.hidden.is_none() {
+            mf.hidden = Some(false);
+        }
+        mf
+    };
+
+    let token = session.read().access_token.clone();
+    let cur_page = *page.read();
+    let node_key = node_id.clone();
+    let roster =
+        crate::use_data_resource!(|(node_key, member_filter, cur_page, token)| async move {
+            graphql::query_members_page(
+                token.as_deref(),
+                &node_key,
+                &member_filter,
+                PAGE_SIZE,
+                cur_page * PAGE_SIZE,
+            )
+            .await
+            .unwrap_or_default()
+        });
+    let (rows, total) = roster.read().clone().unwrap_or_default();
 
     // Edit dialog (name/email) and remove confirm, shared across the rows.
     let mut edit_id = use_signal(|| Option::<String>::None);
@@ -83,24 +121,40 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                         }
                         div { class: "flex-grow" }
                         // Roster actions in the M3 tools sheet (CSV export, #41).
-                        if can_manage && !members.is_empty() {
+                        // Export pulls the FULL roster server-side (the table itself
+                        // only holds one page).
+                        if can_manage {
                             super::widgets::ToolSheet {
                                 title: t("common.tools"),
                                 button {
                                     class: "sheet-action",
                                     onclick: {
-                                        let members = members.clone();
                                         let fname = name.clone();
+                                        let export_id = node_id.clone();
                                         move |_| {
-                                            let mut csv = String::from("Name,Email\n");
-                                            for m in &members {
-                                                csv.push_str(&csv_field(&m.label()));
-                                                csv.push(',');
-                                                csv.push_str(&csv_field(m.email.as_deref().unwrap_or("")));
-                                                csv.push('\n');
-                                            }
-                                            let file = format!("{}-participants.csv", crate::export::sanitize_filename(&fname));
-                                            crate::export::download_bytes(&file, "text/csv;charset=utf-8", csv.as_bytes());
+                                            let token = session.read().access_token.clone();
+                                            let fname = fname.clone();
+                                            let export_id = export_id.clone();
+                                            spawn(async move {
+                                                let (all, _) = graphql::query_members_page(
+                                                    token.as_deref(),
+                                                    &export_id,
+                                                    &graphql::MemberPageFilter::default(),
+                                                    100_000,
+                                                    0,
+                                                )
+                                                .await
+                                                .unwrap_or_default();
+                                                let mut csv = String::from("Name,Email\n");
+                                                for m in &all {
+                                                    csv.push_str(&csv_field(&m.label()));
+                                                    csv.push(',');
+                                                    csv.push_str(&csv_field(m.email.as_deref().unwrap_or("")));
+                                                    csv.push('\n');
+                                                }
+                                                let file = format!("{}-participants.csv", crate::export::sanitize_filename(&fname));
+                                                crate::export::download_bytes(&file, "text/csv;charset=utf-8", csv.as_bytes());
+                                            });
                                         }
                                     },
                                     span { class: "material-icons", "download" }
@@ -110,27 +164,34 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                         }
                     }
 
-                    // Member roster: a searchable, filterable, paginated M3
-                    // Expressive table (handles 1000+ members client-side).
-                    if members.is_empty() {
-                        div { class: "card-content",
-                            p { class: "body-medium",
-                                class: "text-muted",
-                                "{t(\"common.noContent\")}"
+                    // Member roster: a SERVER-paginated, searchable, filterable
+                    // table (scales to thousands via Hasura limit/offset/where),
+                    // rendered through the reusable widgets::PaginatedTable.
+                    super::widgets::PaginatedTable {
+                        columns: member_columns(can_manage),
+                        filters: member_filters(can_manage),
+                        search,
+                        filter,
+                        page,
+                        page_size: PAGE_SIZE,
+                        total,
+                        search_placeholder: t("member.search"),
+                        prev_label: t("common.previous"),
+                        next_label: t("common.next"),
+                        for m in rows.iter() {
+                            MemberTableRow {
+                                key: "{m.id.0}",
+                                member: m.clone(),
+                                can_manage,
+                                on_edit: move |mm: MemberFields| {
+                                    edit_name.set(mm.name.clone().unwrap_or_default());
+                                    edit_email.set(mm.email.clone().unwrap_or_default());
+                                    edit_id.set(Some(mm.id.0.clone()));
+                                },
+                                on_remove: move |mm: MemberFields| {
+                                    remove_target.set(Some((mm.id.0.clone(), mm.label())));
+                                },
                             }
-                        }
-                    } else {
-                        MemberTable {
-                            members: members.clone(),
-                            can_manage,
-                            on_edit: move |m: MemberFields| {
-                                edit_name.set(m.name.clone().unwrap_or_default());
-                                edit_email.set(m.email.clone().unwrap_or_default());
-                                edit_id.set(Some(m.id.0.clone()));
-                            },
-                            on_remove: move |m: MemberFields| {
-                                remove_target.set(Some((m.id.0.clone(), m.label())));
-                            },
                         }
                     }
                 }
@@ -356,14 +417,28 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     }
 }
 
-/// The single-select roster filter (a row of M3 filter chips).
-#[derive(Clone, Copy, PartialEq)]
-enum MemberFilter {
-    All,
-    Owners,
-    Active,
-    Invited,
-    Hidden,
+/// The roster table's columns (adds an Actions column for managers).
+fn member_columns(can_manage: bool) -> Vec<String> {
+    let mut c = vec![t("member.name"), t("member.email"), t("member.status")];
+    if can_manage {
+        c.push(t("member.actions"));
+    }
+    c
+}
+
+/// The roster filter chips as `(value, label)` (Hidden only for managers). The
+/// values map to the server-side predicate built in `MemberApp`.
+fn member_filters(can_manage: bool) -> Vec<(String, String)> {
+    let mut f = vec![
+        ("all".to_string(), t("member.filterAll")),
+        ("owners".to_string(), t("member.owner")),
+        ("active".to_string(), t("member.active")),
+        ("invited".to_string(), t("invite.invitations")),
+    ];
+    if can_manage {
+        f.push(("hidden".to_string(), t("member.hidden")));
+    }
+    f
 }
 
 /// The M3 status chip (icon + label) for a member's state: hidden > owner >
@@ -377,143 +452,6 @@ fn member_status(m: &MemberFields) -> (&'static str, String) {
         ("check_circle", t("member.active"))
     } else {
         ("mail", t("invite.invitations"))
-    }
-}
-
-/// A searchable, filterable, paginated M3 Expressive member table. Search (name
-/// or email), filter chips and paging all run client-side over the loaded roster,
-/// so it stays responsive with 1000+ members. Page size is fixed at 25.
-#[component]
-fn MemberTable(
-    members: Vec<MemberFields>,
-    can_manage: bool,
-    on_edit: EventHandler<MemberFields>,
-    on_remove: EventHandler<MemberFields>,
-) -> Element {
-    const PAGE_SIZE: usize = 25;
-    let mut search = use_signal(String::new);
-    let mut filter = use_signal(|| MemberFilter::All);
-    let mut page = use_signal(|| 0usize);
-
-    let q = search.read().trim().to_lowercase();
-    let active_filter = *filter.read();
-    let filtered: Vec<MemberFields> = members
-        .iter()
-        .filter(|m| {
-            let pass = match active_filter {
-                MemberFilter::All => true,
-                MemberFilter::Owners => m.owner,
-                MemberFilter::Active => m.active,
-                MemberFilter::Invited => !m.accepted && !m.hidden,
-                MemberFilter::Hidden => m.hidden,
-            };
-            pass && (q.is_empty()
-                || m.label().to_lowercase().contains(&q)
-                || m.email.as_deref().unwrap_or("").to_lowercase().contains(&q))
-        })
-        .cloned()
-        .collect();
-
-    let total = filtered.len();
-    let page_count = total.div_ceil(PAGE_SIZE).max(1);
-    let cur = (*page.read()).min(page_count - 1);
-    let start = cur * PAGE_SIZE;
-    let end = (start + PAGE_SIZE).min(total);
-    let first = if total == 0 { 0 } else { start + 1 };
-    let page_slice = filtered[start..end].to_vec();
-
-    let filters = [
-        (MemberFilter::All, t("member.filterAll")),
-        (MemberFilter::Owners, t("member.owner")),
-        (MemberFilter::Active, t("member.active")),
-        (MemberFilter::Invited, t("invite.invitations")),
-        (MemberFilter::Hidden, t("member.hidden")),
-    ];
-
-    let mut columns = vec![t("member.name"), t("member.email"), t("member.status")];
-    if can_manage {
-        columns.push(t("member.actions"));
-    }
-
-    rsx! {
-        div { class: "member-table",
-            // Search + filter toolbar.
-            div { class: "member-table-toolbar",
-                label { class: "search-field",
-                    span { class: "material-icons", "search" }
-                    input {
-                        r#type: "text",
-                        placeholder: "{t(\"member.search\")}",
-                        value: "{search}",
-                        oninput: move |e| {
-                            search.set(e.value());
-                            page.set(0);
-                        },
-                    }
-                }
-                div { class: "filter-chips", role: "group",
-                    for (kind , label) in filters {
-                        {
-                            let selected = active_filter == kind;
-                            rsx! {
-                                button {
-                                    key: "{label}",
-                                    r#type: "button",
-                                    class: if selected { "m3-filter-chip selected" } else { "m3-filter-chip" },
-                                    "aria-pressed": if selected { "true" } else { "false" },
-                                    onclick: move |_| {
-                                        filter.set(kind);
-                                        page.set(0);
-                                    },
-                                    if selected {
-                                        span { class: "material-icons", "check" }
-                                    }
-                                    "{label}"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // The table itself.
-            super::widgets::DataTable {
-                columns,
-                for m in page_slice.iter() {
-                    MemberTableRow {
-                        key: "{m.id.0}",
-                        member: m.clone(),
-                        can_manage,
-                        on_edit: move |mm: MemberFields| on_edit.call(mm),
-                        on_remove: move |mm: MemberFields| on_remove.call(mm),
-                    }
-                }
-            }
-
-            // Pagination footer: "1-25 / 1043" plus prev/next.
-            div { class: "member-table-footer",
-                span { class: "member-count body-medium", "{first}-{end} / {total}" }
-                div { class: "pagination-controls",
-                    button {
-                        class: "btn-icon",
-                        disabled: cur == 0,
-                        title: "{t(\"common.previous\")}",
-                        aria_label: "{t(\"common.previous\")}",
-                        onclick: move |_| page.set(cur.saturating_sub(1)),
-                        span { class: "material-icons", "chevron_left" }
-                    }
-                    span { class: "body-medium page-indicator", "{cur + 1} / {page_count}" }
-                    button {
-                        class: "btn-icon",
-                        disabled: cur + 1 >= page_count,
-                        title: "{t(\"common.next\")}",
-                        aria_label: "{t(\"common.next\")}",
-                        onclick: move |_| page.set((cur + 1).min(page_count - 1)),
-                        span { class: "material-icons", "chevron_right" }
-                    }
-                }
-            }
-        }
     }
 }
 

@@ -1766,11 +1766,11 @@ select:focus {
 
 /* M3 Expressive member table (member::MemberTable): search + filter-chip toolbar,
    a paginated DataTable, and a range/prev-next footer. */
-.member-table {
+.paginated-table {
 	display: flex;
 	flex-direction: column;
 }
-.member-table-toolbar {
+.paginated-table-toolbar {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
@@ -1849,7 +1849,7 @@ select:focus {
 	align-items: center;
 	gap: 2px;
 }
-.member-table-footer {
+.paginated-table-footer {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -1857,7 +1857,7 @@ select:focus {
 	padding: 12px 16px;
 	border-top: 1px solid var(--md-outline-variant);
 }
-.member-count {
+.paginated-count {
 	color: var(--md-on-surface-variant);
 	font-variant-numeric: tabular-nums;
 }

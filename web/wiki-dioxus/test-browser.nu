@@ -844,11 +844,11 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     #    built for 1000+ members) mounts its toolbar/footer, and a filter chip
     #    toggles its selected state. Skips gracefully if the context has none. ──
     wd-navigate $session_id $"(base-url)($ctx_path)?app=member"
-    if (wd-wait-for-element $session_id "#main .member-table" 15) {
-        let r = (assert-exists $session_id "member table renders" "#main .member-table" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
-        let r = (assert-exists $session_id "member table has a search field" "#main .member-table .search-field input" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    if (wd-wait-for-element $session_id "#main .paginated-table" 15) {
+        let r = (assert-exists $session_id "member table renders" "#main .paginated-table" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        let r = (assert-exists $session_id "member table has a search field" "#main .paginated-table .search-field input" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
         let r = (assert-count $session_id "member table has filter chips" "#main .m3-filter-chip" 3 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
-        let r = (assert-exists $session_id "member table has a pagination footer" "#main .member-table-footer" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        let r = (assert-exists $session_id "member table has a pagination footer" "#main .paginated-table-footer" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
         # Clicking a not-yet-selected filter chip selects it (M3 filter-chip toggle).
         wd-execute $session_id 'var c=[...document.querySelectorAll("#main .m3-filter-chip")].find(x=>!x.classList.contains("selected")); if(c)c.click(); return 1' | ignore
         sleep 500ms
