@@ -912,6 +912,12 @@ a:hover {
 		bottom: 24px;
 	}
 }
+/* Compact: the search/breadcrumb bar is docked at the bottom (bottom: 80px, 64px
+   tall), so the default 88px would put the FAB on top of it. Lift the FAB clear
+   of the bar (its top edge sits at 80 + 64px) with a small gap above. */
+.app-shell[data-size-class="compact"] .fab {
+	bottom: calc(80px + 64px + 16px);
+}
 
 /* M3 basic Dialog (the reusable widgets::Dialog): scrim + surface-container-high
    card, spring rise-in. Every screen's dialog now flows through this widget. */
