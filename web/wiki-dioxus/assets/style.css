@@ -707,17 +707,45 @@ a:hover {
    level-1 tonal shadow, no outline. Content fades + rises in on mount (an M3
    emphasized-decelerate entrance) so page/list changes feel motionful. */
 .card {
+	/* EXPERIMENT (card-system v2): expressive tonal card with an accent spine.
+	   `position: relative` is SAFE for fixed descendants (only transform/filter/
+	   will-change/contain establish a containing block for position:fixed), so the
+	   FAB / tool sheets / dialogs that render inside cards stay viewport-anchored. */
+	position: relative;
 	background: var(--md-surface-container-low);
-	/* M3 Expressive: larger corner radius for a softer, more expressive surface. */
-	border-radius: var(--md-sys-shape-corner-large);
+	/* Accent colour for the leading spine + header wash; retinted per card below. */
+	--card-accent: var(--md-primary);
+	/* M3 Expressive: extra-large corner radius for a softer, bolder surface. */
+	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-1);
 	overflow: hidden;
-	margin-bottom: 12px;
-	/* Deliberately NO entrance animation. A transform/opacity animation turns the
-	   card into a stacking context + containing block (Firefox keeps it for the
-	   whole fill duration), which anchors and caps `position: fixed` descendants —
-	   the FAB, tool sheets, dialogs and their scrims render inside cards, so cards
-	   must stay transparent to them. */
+	margin-bottom: 16px;
+	/* Only shadow/border-radius transition — NEVER transform/opacity on the card
+	   (that would trap the fixed FAB, tool sheets, dialogs and their scrims). */
+	transition: box-shadow var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard);
+}
+/* Expressive accent spine down the leading edge, keyed to --card-accent and
+   clipped by the card's rounding. A soft top-to-bottom fade keeps it from reading
+   as a hard rule. It widens on hover for a tactile response. */
+.card::before {
+	content: "";
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 4px;
+	background: linear-gradient(
+		to bottom,
+		var(--card-accent),
+		color-mix(in srgb, var(--card-accent) 55%, transparent)
+	);
+	transition: width var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
+}
+.card:hover {
+	box-shadow: var(--md-sys-elevation-3);
+}
+.card:hover::before {
+	width: 7px;
 }
 
 /* M3 accessibility: honour a reduced-motion preference — drop the entrance and
@@ -744,8 +772,25 @@ a:hover {
 .card-header {
 	display: flex;
 	align-items: center;
-	padding: 16px;
-	gap: 12px;
+	padding: 18px 20px 14px;
+	gap: 14px;
+	/* Faint accent wash: tints the identity zone from the accent, fading into the
+	   body — a soft brow instead of a hard divider. */
+	background: linear-gradient(
+		to bottom,
+		color-mix(in srgb, var(--card-accent) 10%, transparent),
+		transparent
+	);
+}
+/* Per-card accent retints (apply from RSX, e.g. vote → tertiary). */
+.card.accent-tertiary {
+	--card-accent: var(--md-tertiary);
+}
+.card.accent-secondary {
+	--card-accent: var(--md-secondary);
+}
+.card.accent-error {
+	--card-accent: var(--md-error);
 }
 
 /* M3 Expressive: card/app titles carry emphasized (heavier, tighter) type so each
