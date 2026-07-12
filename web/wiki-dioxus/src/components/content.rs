@@ -315,7 +315,11 @@ fn SlateBlock(block: serde_json::Value, index: usize) -> Element {
         }
         "heading-six" | "h6" => rsx! { h6 { id: "{hid}", style: "{astyle}", {rendered_children} } },
         "block-quote" => rsx! { blockquote { style: "{astyle}", {rendered_children} } },
-        "block-pre" | "code" => rsx! { pre { style: "{astyle}", {rendered_children} } },
+        // Only the explicit `block-pre` type is a code block. `code` here would be a
+        // legacy/imported block type that the old wiki rendered as a normal paragraph
+        // (its default case), so let it fall through. Otherwise prose stored as
+        // `type: "code"` renders in a non-wrapping monospace <pre> and overflows.
+        "block-pre" => rsx! { pre { style: "{astyle}", {rendered_children} } },
         "bulleted-list" | "ul" => rsx! { ul { style: "{astyle}", {rendered_children} } },
         "numbered-list" | "ol" => rsx! { ol { style: "{astyle}", {rendered_children} } },
         "list-item" | "li" => rsx! { li { style: "{astyle}", {rendered_children} } },
