@@ -578,138 +578,8 @@ a:hover {
 	text-overflow: ellipsis;
 }
 
-.bottom-bar {
-	position: fixed;
-	bottom: 0;
-	left: 0;
-	right: 0;
-	z-index: 100;
-	padding: 8px;
-	background: transparent;
-	pointer-events: none;
-}
-
-.bottom-bar > * {
-	pointer-events: auto;
-}
-
-@media (min-width: 1200px) {
-	.bottom-bar {
-		position: fixed;
-		top: 0;
-		bottom: auto;
-		left: 472px;
-	}
-}
-
 .bar-spacer {
 	padding: 32px;
-}
-
-/* Drawer (sidebar) */
-.drawer {
-	display: none;
-}
-
-@media (min-width: 1200px) {
-	.drawer {
-		display: block;
-		/* Reserve the whole left chrome (72px rail + 400px drawer) at the start
-         * of the flex row so the content begins to their right. */
-		width: 472px;
-		flex-shrink: 0;
-		order: -1;
-	}
-	.drawer-inner {
-		position: fixed;
-		/* Right of the app rail (which is the leftmost 72px). */
-		left: 72px;
-		top: 0;
-		bottom: 0;
-		width: 400px;
-		border-right: 1px solid var(--md-outline);
-		border-top-right-radius: 16px;
-		border-bottom-right-radius: 16px;
-		background: var(--md-surface);
-		overflow-y: auto;
-		/* 8px so the context bar aligns with the top panel (which is top:0 +
-           8px padding); the bar (48px) + its 8px margin then place the tree at
-           64px, level with the main content. */
-		padding-top: 8px;
-		scrollbar-width: none;
-	}
-	.drawer-inner::-webkit-scrollbar {
-		display: none;
-	}
-}
-
-.mobile-drawer {
-	position: fixed;
-	top: 0;
-	left: 0;
-	right: 0;
-	bottom: 0;
-	background: var(--md-surface);
-	z-index: 200;
-	overflow-y: auto;
-	padding-bottom: 80px;
-}
-
-.mobile-drawer.hidden {
-	display: none;
-}
-
-/* Mobile app bar — a floating horizontal row of the context apps, bottom-left
-   (the FAB owns bottom-right), above the bottom bar. Only on phones; hidden once
-   the desktop rail appears at 1200px. */
-.mobile-app-bar {
-	display: flex;
-	position: fixed;
-	left: 8px;
-	bottom: 84px;
-	gap: 2px;
-	padding: 4px;
-	background: var(--md-surface-container);
-	border-radius: 20px;
-	box-shadow: var(--md-sys-elevation-2);
-	z-index: 120;
-	max-width: calc(100vw - 96px);
-	overflow-x: auto;
-}
-
-.mobile-app-bar .btn-icon.active {
-	background: var(--md-primary);
-	color: var(--md-on-primary);
-}
-
-@media (min-width: 1200px) {
-	.mobile-app-bar {
-		display: none;
-	}
-}
-
-/* App sidebar (icon rail on large screens) */
-.app-rail {
-	display: none;
-}
-
-@media (min-width: 1200px) {
-	.app-rail {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		width: 72px;
-		position: fixed;
-		/* Leftmost column, to the left of the drawer. */
-		left: 0;
-		top: 0;
-		bottom: 0;
-		padding-top: 64px;
-		gap: 8px;
-		/* Same surface as the drawer to its right, so the left chrome (rail +
-         * drawer) reads as one continuous panel instead of two tones. */
-		background: var(--md-surface);
-	}
 }
 
 /* Cards — M3 elevated card: surface-container-low tone, corner-medium, a
@@ -727,20 +597,6 @@ a:hover {
 	   whole fill duration), which anchors and caps `position: fixed` descendants —
 	   the FAB, tool sheets, dialogs and their scrims render inside cards, so cards
 	   must stay transparent to them. */
-}
-
-/* Opacity-only entrance (no transform). A transform anywhere in this animation —
-   even only in the `from` frame — makes Firefox treat every .card as a containing
-   block for the whole fill duration, which breaks `position: fixed` descendants
-   (the FAB, tool sheets, dialogs, scrims) by anchoring them to the card instead
-   of the viewport. Fading in without a slide keeps cards transform-free. */
-@keyframes m3-enter {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
 }
 
 /* M3 accessibility: honour a reduced-motion preference — drop the entrance and
@@ -841,70 +697,6 @@ a:hover {
 /* Icons scale to their container (small avatars, the app rail). */
 .avatar.small .material-icons {
 	font-size: 16px;
-}
-
-.app-rail .material-icons {
-	font-size: 22px;
-}
-
-/* App-rail item label. The icon inherits the button's colour (on-surface when
-   idle, on-secondary on the active green box); the label follows the same
-   on-colour pattern so it never ends up muted-on-green. */
-/* M3 navigation-rail item: a column of [pill indicator holding the icon] over
-   the label. The active pill uses the secondary-container tone (not a full
-   button fill), matching the M3 NavigationRail active indicator. */
-.app-rail .btn-icon {
-	width: auto;
-	height: auto;
-	flex-direction: column;
-	gap: 4px;
-	padding: 0;
-	border-radius: 0;
-	background: transparent;
-}
-
-.app-rail .app-rail-icon {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 56px;
-	height: 32px;
-	border-radius: var(--md-sys-shape-corner-full);
-	color: var(--md-on-surface-variant);
-	transition: background-color var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard);
-}
-
-.app-rail .btn-icon:hover .app-rail-icon {
-	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
-}
-
-/* Active indicator: a secondary-container pill behind the icon; the button
-   itself stays transparent (override the generic .btn-icon.active fill). */
-.app-rail .btn-icon.active {
-	background: transparent;
-	color: inherit;
-}
-
-.app-rail .btn-icon.active .app-rail-icon {
-	/* primary-container (not secondary-container): this scheme's secondary is
-       very low-chroma, so a secondary pill is invisible on the neutral rail;
-       the brighter primary-container reads clearly by hue while staying a
-       tonal container indicator. */
-	background: var(--md-primary-container);
-	color: var(--md-on-primary-container);
-}
-
-.app-rail-label {
-	font-size: var(--md-sys-typescale-label-medium-size);
-	line-height: var(--md-sys-typescale-label-medium-line);
-	font-weight: 500;
-	letter-spacing: var(--md-sys-typescale-label-medium-tracking);
-	color: var(--md-on-surface-variant);
-}
-
-.app-rail .btn-icon.active .app-rail-label {
-	color: var(--md-on-surface);
 }
 
 /* "Not submitted" badge overlaid on a node avatar (mutable draft nodes). */
@@ -1256,15 +1048,6 @@ a.folder-item:focus-visible {
 /* On the coloured bar / active rail pill, ring in the on-colour so it shows. */
 .bar .btn-icon:focus-visible {
 	outline-color: var(--md-on-primary);
-}
-
-.app-rail .btn-icon:focus-visible {
-	outline: none;
-}
-
-.app-rail .btn-icon:focus-visible .app-rail-icon {
-	outline: 3px solid var(--md-primary);
-	outline-offset: 2px;
 }
 
 /* Form inputs */
