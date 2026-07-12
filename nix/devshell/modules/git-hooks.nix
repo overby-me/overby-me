@@ -1,13 +1,19 @@
-# Run `touch .envrc && direnv export json` to apply changes to the repository.
+# Git-hooks devshell module.
+#
+# Wraps the `git-hooks` (cachix/git-hooks.nix) input directly: `run` returns a
+# derivation whose `.shellHook` installs `.pre-commit-config.yaml` at the git
+# root at runtime (via `git rev-parse`), so no build-time working directory is
+# needed. Run `touch .envrc && direnv export json` to apply changes.
 {
   pkgs,
   lib,
   src,
+  inputs,
   ...
 }: let
   commitlintrc = import ./configs/commitlintrc.nix {inherit pkgs lib src;};
-in {
-  git-hooks = {
+  preCommit = inputs.git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
+    src = inputs.self;
     package = pkgs.prek;
     hooks = {
       denolint.enable = false;
@@ -34,7 +40,7 @@ in {
       };
       typos = {
         enable = true;
-        settings.configPath = "./nix/devenv/modules/configs/typos.toml";
+        settings.configPath = "./nix/devshell/modules/configs/typos.toml";
       };
       nickel-format = {
         enable = true;
@@ -349,5 +355,10 @@ in {
         stages = ["prepare-commit-msg"];
       };
     };
+  };
+in {
+  config = {
+    packages = [pkgs.prek] ++ preCommit.enabledPackages;
+    inherit (preCommit) shellHook;
   };
 }

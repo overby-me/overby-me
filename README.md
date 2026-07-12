@@ -247,7 +247,7 @@
 | [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/home-manager/config) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager configurations |
 | [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/nixos/config) | [NixOS](https://nixos.org) | NixOS configurations |
 | [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/darwin/config) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin configurations |
-| [Devenv ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/devenv/config.nix) | [Devenv](https://devenv.sh) | Devenv configurations |
+| [Devshell ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/devshell/lib/mkDevShell.nix) | [nixpkgs mkShell](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) | Default devshell |
 
 </details>
 
@@ -263,7 +263,7 @@
 | [Home Manager ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/home-manager/modules) | [Home Manager](https://nix-community.github.io/home-manager/) | Home Manager modules |
 | [NixOS ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/nixos/modules) | [NixOS](https://nixos.org) | NixOS modules |
 | [Nix Darwin ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/darwin/modules) | [Nix Darwin](https://github.com/nix-darwin/nix-darwin) | Nix Darwin modules |
-| [Devenv ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/devenv/modules) | [Devenv](https://devenv.sh) | Devenv modules |
+| [Devshell ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nix/devshell/modules) | [nixpkgs mkShell](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) | Devshell modules |
 
 </details>
 
@@ -548,7 +548,7 @@
 | ✅ | Repository Secrets | [Ragenix 🦀❄️](https://github.com/yaxitech/ragenix) | | 🆗 | [Agenix 🐹❄️](https://github.com/ryantm/agenix) |
 | 🚧 | Developer Secrets | | [SecretSpec 🦀](https://github.com/cachix/secretspec) | 🆗 | |
 | ✅ | Deployment | [Colmena 🦀️❄️](https://github.com/zhaofengli/colmena) | [Navi 🦀❄️](https://github.com/cafkafk/navi) | 🆗 | |
-| ✅ | Developer Environment | [Devenv 🦀️❄️](https://github.com/cachix/devenv) | [Organist ❄️](https://github.com/nickel-lang/organist) | 🆗 | |
+| ✅ | Developer Environment | [devShells ❄️](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) + [git-hooks.nix ❄️](https://github.com/cachix/git-hooks.nix) | [Devenv 🦀️❄️](https://github.com/cachix/devenv), [Organist ❄️](https://github.com/nickel-lang/organist) | 🆗 | |
 | 🚧 | Project Organization | [Flakelight ❄️](https://github.com/nix-community/flakelight) | [Nix-workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/nickel/workspace) | 🆗 | [Flake-parts ❄️](https://github.com/hercules-ci/flake-parts) |
 | ✅ | File Locator | [Nix-index 🦀](https://github.com/nix-community/nix-index), [Comma 🦀](https://github.com/nix-community/comma) | | 🆗 | |
 | ✅ | Rust Integration | [Crate2nix 🦀❄️](https://github.com/nix-community/crate2nix) | | 🆗 | [Crane ❄️](https://github.com/ipetkov/crane) |

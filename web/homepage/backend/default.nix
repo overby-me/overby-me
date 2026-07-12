@@ -1,22 +1,9 @@
 {
-  devenvConfigurations.backend = {
-    pkgs,
-    inputs,
-    ...
-  }: {
-    imports = with inputs.self.devenvModules; [
-      devenv-root
-    ];
-
-    languages = {
-      rust = {
-        enable = true;
-      };
-    };
-
-    packages = with pkgs; [
-      openssl
-      #scaleway-cli
+  devShells.backend = pkgs: {
+    packages = [
+      pkgs.rust-bin.stable.latest.default
+      pkgs.openssl
+      #pkgs.scaleway-cli
     ];
   };
 }

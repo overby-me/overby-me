@@ -1,8 +1,17 @@
 {
   description = "Personal Monorepo";
 
+  nixConfig = {
+    extra-substituters = ["https://overby-me.cachix.org"];
+    extra-trusted-public-keys = ["overby-me.cachix.org-1:dU7qOj5u97QZz98nqnh+Nwait6c+2d2Eq0KTOAXTyp4="];
+  };
+
   inputs = {
-    # Pass env through input
+    # Build-time environment values, passed in via `--override-input env`
+    # (e.g. CI injects PUBLIC_GIT_COMMIT_SHA for web/wiki). Defaults to an
+    # empty file, so local builds fall back to sensible defaults. This no
+    # longer carries the working directory: the devshells discover it at
+    # runtime instead.
     env = {
       url = "file+file:///dev/null";
       flake = false;
@@ -93,16 +102,6 @@
     crane = {
       url = "github:ipetkov/crane";
     };
-    devenv = {
-      url = "github:cachix/devenv";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        git-hooks.follows = "git-hooks";
-        flake-compat.follows = "flake-compat";
-        flake-parts.follows = "flake-parts";
-        rust-overlay.follows = "rust-overlay";
-      };
-    };
 
     # Apps
     zen-browser = {
@@ -176,9 +175,8 @@
         ./nix/flake/modules/darwin.nix
         ./nix/flake/modules/systemConfigs.nix
         ./nix/flake/modules/desktops.nix
+        ./nix/flake/modules/devShellDefault.nix
         ./nix/flake/modules/devShellNames.nix
-        ./nix/flake/modules/devenvConfigurations.nix
-        ./nix/flake/modules/devenvModules.nix
         ./nix/flake/modules/filterUnsupported.nix
         ./nix/flake/modules/hardware.nix
         ./nix/flake/modules/homeConfigurations.nix
@@ -260,8 +258,6 @@
         systemModules = ["system-manager/modules"];
         homeConfigurations = ["home-manager/config"];
         homeModules = ["home-manager/modules"];
-        devenvConfiguration = ["devenv/config"];
-        devenvModules = ["devenv/modules"];
         users = ["home-manager/users"];
         hardware = ["nixos/hardware"];
         desktops = ["nixos/desktops"];

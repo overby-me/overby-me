@@ -1,3 +1,0 @@
-{
-  cachix.pull = ["overby-me"];
-}

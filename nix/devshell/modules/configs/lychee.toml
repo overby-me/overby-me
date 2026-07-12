@@ -1,6 +1,6 @@
 # Run `touch .envrc && direnv export json` to apply changes to the repository.
 accept = [200, 201, 202, 203, 204, 206, 207, 429, 403]
-exclude_path = ["devenv/configs/lychee.toml"]
+exclude_path = ["nix/devshell/modules/configs/lychee.toml"]
 exclude = [
   '\$\{',
   "x-access-token",

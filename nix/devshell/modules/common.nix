@@ -1,16 +1,6 @@
-{
-  pkgs,
-  inputs,
-  ...
-}: {
-  imports = with inputs.self.devenvModules; [
-    devenv-root
-    git-hooks
-    configs
-    cachix
-  ];
-
-  packages = with pkgs.pkgsUnstable; [
+# Base tooling shared by the default devshell.
+{pkgs, ...}: {
+  config.packages = with pkgs.pkgsUnstable; [
     # IDE
     harper
     # Common

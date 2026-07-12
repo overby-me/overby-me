@@ -2,7 +2,7 @@
 #
 # Replaces flakelight's default outputs.devShells generation with one that
 # passes `name` directly into mkShell during creation, or applies
-# overrideAttrs for pre-built shells (e.g. devenv).
+# overrideAttrs for pre-built shells (e.g. the module-built default shell).
 {
   config,
   lib,
