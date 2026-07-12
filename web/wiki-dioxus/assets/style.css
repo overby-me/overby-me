@@ -998,6 +998,24 @@ html {
 	--card-accent: var(--md-error);
 }
 
+/* EXPERIMENT (functional: compact density): tighten card/list spacing so more
+   fits on screen. Toggled from the account menu (data-density on the shell). */
+.app-shell[data-density="compact"] .card {
+	margin-bottom: 10px;
+}
+.app-shell[data-density="compact"] .card-header {
+	padding: 12px 16px 8px;
+}
+.app-shell[data-density="compact"] .card-content {
+	padding: 12px 16px;
+}
+.app-shell[data-density="compact"] .folder-item {
+	padding: 8px 14px;
+}
+.app-shell[data-density="compact"] .list-item {
+	padding: 8px 12px;
+}
+
 /* EXPERIMENT (format-aware file card): tonal metadata chips under the file title. */
 .file-meta-chips {
 	display: flex;

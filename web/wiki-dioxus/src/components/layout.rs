@@ -217,6 +217,8 @@ pub fn Layout() -> Element {
             // Set when a view mounts a permanent (docked) tools side sheet, so the
             // content pane reserves room for it on the right.
             "data-tools-docked": if super::widgets::TOOLS_DOCKED() { "true" } else { "false" },
+            // EXPERIMENT (functional): reflect the UI density preference.
+            "data-density": if crate::density::COMPACT_DENSITY() { "compact" } else { "comfortable" },
             // Ctrl/Cmd+K opens search (a common shortcut). Catches keydowns that
             // bubble up from any focused element in the app.
             onkeydown: move |evt| {
@@ -1130,6 +1132,17 @@ fn UserMenu() -> Element {
                                 apply_theme(&new_theme);
                                 crate::theme::save_theme(&new_theme);
                                 *THEME.write() = new_theme;
+                            },
+                        }
+                    }
+                    // EXPERIMENT (functional): compact / comfortable UI density.
+                    div { class: "list-item switch-row",
+                        span { class: "material-icons", "density_medium" }
+                        span { class: "switch-row-label", "{t(\"layout.compactDensity\")}" }
+                        Switch {
+                            checked: Some(crate::density::COMPACT_DENSITY()),
+                            on_checked_change: move |on: bool| {
+                                crate::density::set_compact(on);
                             },
                         }
                     }
