@@ -214,6 +214,15 @@ pub fn Layout() -> Element {
     rsx! {
         div {
             class: "app-shell",
+            // EXPERIMENT (functional): make the shell focusable and grab focus once on
+            // mount, so keyboard shortcuts (Ctrl+K, /, ?) work immediately rather than
+            // only after the user first clicks something inside the app.
+            tabindex: "-1",
+            onmounted: move |e| {
+                spawn(async move {
+                    let _ = e.set_focus(true).await;
+                });
+            },
             "data-size-class": "{size_class.as_str()}",
             "data-tree-open": if tree_open() { "true" } else { "false" },
             // Set when a view mounts a permanent (docked) tools side sheet, so the
