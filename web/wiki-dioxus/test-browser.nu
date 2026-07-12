@@ -167,23 +167,23 @@ def capture-shots [session_id: string, name: string] {
     mkdir $dir
     for wh in [{ w: 1280, h: 900, tag: "desktop" }, { w: 390, h: 844, tag: "mobile" }] {
         wd-window-rect $session_id $wh.w $wh.h
-        sleep 300ms
+        sleep 200ms
         for theme in ["light", "dark"] {
-            wd-execute $session_id ("document.documentElement.setAttribute('data-theme','" + $theme + "'); return 1") | ignore
-            wd-execute $session_id "void document.body.offsetHeight; return 1" | ignore
-            sleep 500ms
+            # Set the theme and force a reflow in one round-trip.
+            wd-execute $session_id ("document.documentElement.setAttribute('data-theme','" + $theme + "'); void document.body.offsetHeight; return 1") | ignore
+            sleep 350ms
             let out = ($dir | path join $"($name)-($wh.tag)-($theme).png")
             # Screenshot twice: after a CSS-var (theme) change headless Firefox can
             # return a pre-repaint frame the first time; the second grabs the paint.
             wd-screenshot $session_id $out
-            sleep 250ms
+            sleep 200ms
             wd-screenshot $session_id $out
         }
     }
     # Restore the app's default (light) at desktop for subsequent tests.
     wd-execute $session_id "document.documentElement.setAttribute('data-theme','light'); return 1" | ignore
     wd-window-rect $session_id 1280 900
-    sleep 200ms
+    sleep 150ms
 }
 
 # Poll until a CSS selector matches (or timeout in seconds). Returns bool.
@@ -208,6 +208,19 @@ def wd-wait-for-mount [session_id: string, max_wait: int] {
         if ($len != null) and ($len != 0) { return true }
         sleep 500ms
         $elapsed = $elapsed + 1
+    }
+    false
+}
+
+# Poll a JS snippet (must `return "y"` when ready) every 150ms up to max_ms.
+# Returns as soon as it is ready, so it replaces a fixed sleep after an async
+# navigation/action while keeping a safety cap. A small settle follows on success.
+def wd-wait-y [session_id: string, js: string, max_ms: int] {
+    mut waited = 0
+    while $waited < $max_ms {
+        if ((try { wd-execute $session_id $js } catch { "n" }) == "y") { sleep 150ms; return true }
+        sleep 150ms
+        $waited = $waited + 150
     }
     false
 }
@@ -266,19 +279,20 @@ def gecko-cmd [log: string] {
     }
 }
 
-def do-cleanup [session_id: string, driver_pid: int, server_pid: int] {
+def do-cleanup [session_id: string, driver_pid: int, server_pid: int, keep_server: bool] {
     if ($session_id | is-not-empty) { wd-delete $"/session/($session_id)" }
-    for pid in [$driver_pid $server_pid] {
+    # Always tear down the browser; keep the dev server when it was reused.
+    let pids = if $keep_server { [$driver_pid] } else { [$driver_pid $server_pid] }
+    for pid in $pids {
         if $pid > 0 {
             let alive = (do -i { ^kill -0 $pid } | complete)
             if $alive.exit_code == 0 { do -i { ^kill $pid } | complete | ignore }
         }
     }
-    # dx serve spawns a wrapped child that outlives its parent, and geckodriver
-    # is launched through a nix wrapper whose pid isn't the driver's — sweep both
-    # ports so neither the dev server nor the WebDriver server is left running.
-    kill-port $SERVE_PORT
+    # geckodriver is launched through a nix wrapper whose pid isn't the driver's,
+    # so sweep the WebDriver port too. Leave the serve port alone when reusing.
     kill-port $WD_PORT
+    if not $keep_server { kill-port $SERVE_PORT }
 }
 
 # ── Tests: unauthenticated shell ────────────────────────────────────────────
@@ -385,7 +399,8 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     }
     if not $ok { log-fail "login did not establish a session"; return { passed: $p, failed: ($fl + 1) } }
     log-ok "login established a session"; $p = $p + 1
-    sleep 3sec
+    # Wait for the authed home to render (root node + drawer) rather than a fixed 3s.
+    wd-wait-y $session_id 'return document.querySelector("#main .card .headline-small")?"y":"n"' 4000 | ignore
 
     # ── Adaptive WindowSizeClass reacts to resize (M3 nav foundation) ────
     # The reactive size-class signal is written from a resize listener bridged
@@ -415,7 +430,9 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     let jwt_corrupt = (wd-execute $session_id 'try { var s=JSON.parse(localStorage.getItem("wiki_session")); if(!s || !s.access_token) return "nosession"; s.access_token = s.access_token.slice(0,-6) + "AAAAAA"; localStorage.setItem("wiki_session", JSON.stringify(s)); return "ok"; } catch(e){ return "err:"+e; }')
     if $jwt_corrupt != "ok" { log-warn $"could not stage JWT-recovery check: ($jwt_corrupt)" }
     wd-navigate $session_id $"(base-url)/"
-    sleep 5sec
+    # The stale token triggers a refresh + retry, then the drawer's groups/events
+    # load; poll for them (capped) instead of a fixed 5s.
+    wd-wait-y $session_id 'return document.querySelectorAll(".nav-rail-tree .list-item").length>0?"y":"n"' 6000 | ignore
     let jwt_items = (wd-execute $session_id 'return document.querySelectorAll(".nav-rail-tree .list-item").length')
     let jwt_tail = (wd-execute $session_id 'try { var s=JSON.parse(localStorage.getItem("wiki_session")); return s.access_token.slice(-6); } catch(e){ return "err"; }')
     let jwt_n = (try { $jwt_items | into int } catch { 0 })
@@ -440,13 +457,13 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # the welcome card links here). The root has no URL path, so this exercises the
     # dedicated `/` route sharing the resolver, not a separate `/edit/welcome` route.
     wd-navigate $session_id $"(base-url)/?app=editor"
-    sleep 2800ms
+    wd-wait-y $session_id 'return (document.querySelector(".author-field") && document.querySelector("[contenteditable]"))?"y":"n"' 5000 | ignore
     let root_ed = (wd-execute $session_id 'return (document.querySelector(".author-field") && document.querySelector("[contenteditable]"))?"y":"n"')
     if $root_ed == "y" { log-ok "root editor renders at /?app=editor"; $p = $p + 1 } else { log-fail "root editor did not render at /?app=editor"; $fl = $fl + 1 }
     # Returning to `/` must show the welcome again (the `Home` route round-trips;
     # regression: an empty catch-all serialized to a relative "?" and stuck).
     wd-navigate $session_id $"(base-url)/"
-    sleep 2000ms
+    wd-wait-y $session_id 'return [...document.querySelectorAll(".material-icons")].some(function(e){return e.textContent.trim()==="waving_hand"})?"y":"n"' 4000 | ignore
     let back_home = (wd-execute $session_id 'return [...document.querySelectorAll(".material-icons")].some(function(e){return e.textContent.trim()==="waving_hand"})?"y":"n"')
     if $back_home == "y" { log-ok "navigating back to / shows the welcome"; $p = $p + 1 } else { log-fail "/ did not show the welcome after the editor"; $fl = $fl + 1 }
 
@@ -955,7 +972,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
 
     # ── Breadcrumbs start at the context (nearest group/event), not the root ──
     wd-navigate $session_id $"(base-url)($ctx_path)"
-    sleep 2sec
+    wd-wait-y $session_id 'return document.querySelector(".breadcrumbs .crumb")?"y":"n"' 3000 | ignore
     # At a top-level context the trail begins with the context itself, so there
     # is no Home crumb (a breadcrumb link to "/").
     let home_crumb = (wd-execute $session_id 'return document.querySelector(".top-app-bar .breadcrumbs a[href=\"/\"]")?"y":"n"')
@@ -1376,6 +1393,9 @@ def main [
                 # catches client-side routing / rendering bugs Servo masks.
     --shots     # Capture PNG screenshots (light/dark x desktop/mobile) of key
                 # screens to ./screenshots for visual review.
+    --reuse     # Reuse a `dx serve` already listening on the serve port instead of
+                # rebuilding. Start one with `--keep` once, then pass --reuse to skip
+                # the ~minute build on every subsequent run.
 ] {
     let proj = $env.FILE_PWD
     if $shots {
@@ -1398,30 +1418,38 @@ def main [
         if (which $cmd | is-empty) { log-fail $"Required command not found: ($cmd)"; exit 2 }
     }
 
-    kill-port $SERVE_PORT
-    kill-port $WD_PORT
-
-    # Start dx serve (debug build — the one Servo can run).
-    log-info $"Starting `dx serve` on :($SERVE_PORT) \(first build may take a minute)..."
-    let serve_log = (^mktemp /tmp/wiki-dx-XXXXXX.log | str trim)
     cd $proj
-    $server_pid = (^bash -c $'dx serve --port ($SERVE_PORT) > "($serve_log)" 2>&1 & echo $!' | str trim | into int)
+    # Reuse a `dx serve` already listening on the serve port (skips the ~minute
+    # rebuild) when --reuse is set and it answers; otherwise start a fresh one.
+    let reuse_active = ($reuse and ((do -i { ^curl -sf -o /dev/null $"(base-url)/" } | complete).exit_code == 0))
+    mut serve_log = ""
+    if $reuse_active {
+        log-info $"Reusing `dx serve` already running on :($SERVE_PORT) — skipping build."
+    } else {
+        kill-port $SERVE_PORT
+        # Start dx serve (debug build — the one Servo can run).
+        log-info $"Starting `dx serve` on :($SERVE_PORT) \(first build may take a minute)..."
+        $serve_log = (^mktemp /tmp/wiki-dx-XXXXXX.log | str trim)
+        $server_pid = (^bash -c $'dx serve --port ($SERVE_PORT) > "($serve_log)" 2>&1 & echo $!' | str trim | into int)
 
-    # `dx serve` binds the port before it finishes the first wasm build, so wait
-    # for the build to actually complete (its log announces it) — otherwise the
-    # page loads with no wasm and nothing mounts.
-    let srv_pid = $server_pid
-    mut ready = false
-    for _ in 1..181 {
-        let built = (try { (open --raw $serve_log) | str contains "Build completed" } catch { false })
-        let up = ((do -i { ^curl -sf -o /dev/null $"(base-url)/" } | complete).exit_code == 0)
-        if $built and $up { $ready = true; break }
-        let alive = (do -i { ^kill -0 $srv_pid } | complete)
-        if $alive.exit_code != 0 { log-fail "dx serve exited during build"; break }
-        sleep 1sec
+        # `dx serve` binds the port before it finishes the first wasm build, so wait
+        # for the build to actually complete (its log announces it) — otherwise the
+        # page loads with no wasm and nothing mounts.
+        let srv_pid = $server_pid
+        mut ready = false
+        for _ in 1..181 {
+            let built = (try { (open --raw $serve_log) | str contains "Build completed" } catch { false })
+            let up = ((do -i { ^curl -sf -o /dev/null $"(base-url)/" } | complete).exit_code == 0)
+            if $built and $up { $ready = true; break }
+            let alive = (do -i { ^kill -0 $srv_pid } | complete)
+            if $alive.exit_code != 0 { log-fail "dx serve exited during build"; break }
+            sleep 1sec
+        }
+        if not $ready { log-fail "dx serve did not finish its first build"; if ($serve_log | path exists) { print -e (open --raw $serve_log | lines | last 15 | str join "\n") }; do-cleanup $session_id $servo_pid $server_pid $reuse_active; exit 2 }
+        log-info "dx serve ready (build complete)"
     }
-    if not $ready { log-fail "dx serve did not finish its first build"; if ($serve_log | path exists) { print -e (open --raw $serve_log | lines | last 15 | str join "\n") }; do-cleanup $session_id $servo_pid $server_pid; exit 2 }
-    log-info "dx serve ready (build complete)"
+
+    kill-port $WD_PORT
 
     # Start the WebDriver browser: Servo by default, or real Firefox (geckodriver)
     # with --firefox.
@@ -1440,7 +1468,7 @@ def main [
         if $check.exit_code == 0 { $wd_ready = true; break }
         sleep 300ms
     }
-    if not $wd_ready { log-fail "WebDriver server did not become ready"; do-cleanup $session_id $servo_pid $server_pid; exit 2 }
+    if not $wd_ready { log-fail "WebDriver server did not become ready"; do-cleanup $session_id $servo_pid $server_pid $reuse_active; exit 2 }
 
     let caps = if $firefox {
         '{"capabilities":{"alwaysMatch":{"moz:firefoxOptions":{"args":["-headless"]},"acceptInsecureCerts":true}}}'
@@ -1448,7 +1476,7 @@ def main [
         '{"capabilities":{}}'
     }
     $session_id = (wd-new-session $caps)
-    if ($session_id | is-empty) { log-fail "Failed to create WebDriver session"; do-cleanup $session_id $servo_pid $server_pid; exit 2 }
+    if ($session_id | is-empty) { log-fail "Failed to create WebDriver session"; do-cleanup $session_id $servo_pid $server_pid $reuse_active; exit 2 }
     wd-set-timeouts $session_id 20000
     log-info $"Session: ($session_id)"
 
@@ -1481,7 +1509,8 @@ def main [
         log-info "--- Servo output ---"; print -e (open --raw $servo_log); log-info "--- end ---"
     }
 
-    if not $keep { do-cleanup $session_id $servo_pid $server_pid; rm -f $serve_log $servo_log }
+    # Reused servers are always left running (implicit --keep for the server).
+    if $reuse_active { do-cleanup $session_id $servo_pid $server_pid true; rm -f $servo_log } else if not $keep { do-cleanup $session_id $servo_pid $server_pid false; rm -f $serve_log $servo_log }
 
     let total = $passed + $failed
     if $failed == 0 {
