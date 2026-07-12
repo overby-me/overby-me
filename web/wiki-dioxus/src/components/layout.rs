@@ -747,12 +747,16 @@ fn NavigationBar() -> Element {
 #[component]
 fn AppSwitcher(apps: Vec<(&'static str, String, Route, bool)>) -> Element {
     let mut open = use_signal(|| false);
+    let mut return_focus = use_signal(|| None::<web_sys::HtmlElement>);
     rsx! {
         button {
             class: "nav-bar-item state-layer",
             r#type: "button",
             aria_label: t("common.apps"),
-            onclick: move |_| open.set(true),
+            onclick: move |_| {
+                return_focus.set(super::widgets::active_html_element());
+                open.set(true);
+            },
             span { class: "nav-bar-indicator",
                 span { class: "material-icons", "apps" }
             }
@@ -761,7 +765,7 @@ fn AppSwitcher(apps: Vec<(&'static str, String, Route, bool)>) -> Element {
         div {
             class: if open() { "sheet-scrim open" } else { "sheet-scrim" },
             role: "presentation",
-            onclick: move |_| open.set(false),
+            onclick: move |_| super::widgets::close_modal(open, return_focus),
         }
         aside {
             class: if open() { "tool-sheet open" } else { "tool-sheet" },
@@ -770,8 +774,12 @@ fn AppSwitcher(apps: Vec<(&'static str, String, Route, bool)>) -> Element {
             "aria-label": t("common.apps"),
             tabindex: "-1",
             onkeydown: move |e| {
-                if e.key() == Key::Escape {
-                    open.set(false);
+                match e.key() {
+                    Key::Escape => super::widgets::close_modal(open, return_focus),
+                    Key::Tab if super::widgets::trap_tab_focus(".tool-sheet.open", e.modifiers().shift()) => {
+                        e.prevent_default();
+                    }
+                    _ => {}
                 }
             },
             if open() {
@@ -791,11 +799,13 @@ fn AppSwitcher(apps: Vec<(&'static str, String, Route, bool)>) -> Element {
                 button {
                     class: "btn-icon state-layer",
                     aria_label: t("common.close"),
-                    onclick: move |_| open.set(false),
+                    onclick: move |_| super::widgets::close_modal(open, return_focus),
                     span { class: "material-icons", "close" }
                 }
             }
-            div { class: "tool-sheet-body", onclick: move |_| open.set(false),
+            div {
+                class: "tool-sheet-body",
+                onclick: move |_| super::widgets::close_modal(open, return_focus),
                 for (mime_id , label , to , active) in apps.into_iter() {
                     Link {
                         key: "{mime_id}",

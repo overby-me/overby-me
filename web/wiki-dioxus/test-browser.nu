@@ -992,8 +992,9 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # ── Recursive folder export (.odt), now inside the M3 tools sheet ────────
     wd-navigate $session_id $"(base-url)($ctx_path)"
     sleep 1sec
-    # Open the tools sheet (the "tune" trigger in the folder card header).
-    wd-execute $session_id 'var t=[...document.querySelectorAll("#main .card-header .btn-icon")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent=="tune"}); if(t)t.click(); return 1' | ignore
+    # Open the tools sheet (the "tune" trigger in the folder card header). Focus it
+    # first so we can verify focus returns to it on close (a11y).
+    wd-execute $session_id 'var t=[...document.querySelectorAll("#main .card-header .btn-icon")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent=="tune"}); if(t){t.focus(); t.click();} return 1' | ignore
     sleep 500ms
     # Screenshot the open sheet (side sheet on desktop, bottom sheet on mobile).
     capture-shots $session_id "toolsheet"
@@ -1007,6 +1008,9 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     sleep 500ms
     let closed = (wd-execute $session_id 'return document.querySelector(".tool-sheet.open")?"open":"closed"')
     if $closed == "closed" { log-ok "Escape closes the tool sheet"; $p = $p + 1 } else { log-fail "Escape did not close the tool sheet"; $fl = $fl + 1 }
+    # Focus returns to the trigger after the sheet closes (a11y).
+    let refocused = (wd-execute $session_id 'var a=document.activeElement; var m=(a&&a.querySelector)?a.querySelector(".material-icons"):null; return (m&&m.textContent=="tune")?"y":"n"')
+    if $refocused == "y" { log-ok "focus returns to the trigger on sheet close"; $p = $p + 1 } else { log-fail "focus not returned to the trigger on close"; $fl = $fl + 1 }
     # Re-open the sheet for the export check.
     wd-execute $session_id 'var t=[...document.querySelectorAll("#main .card-header .btn-icon")].find(x=>{var m=x.querySelector(".material-icons"); return m&&m.textContent=="tune"}); if(t)t.click(); return 1' | ignore
     sleep 500ms

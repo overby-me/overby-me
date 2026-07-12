@@ -4,6 +4,90 @@
 //! dioxus-primitives in `components::ui`.
 
 use dioxus::prelude::*;
+use wasm_bindgen::JsCast;
+
+/// The currently focused element — captured when a modal opens so focus can be
+/// returned to the trigger on close (keyboard accessibility).
+pub(crate) fn active_html_element() -> Option<web_sys::HtmlElement> {
+    web_sys::window()?
+        .document()?
+        .active_element()?
+        .dyn_into::<web_sys::HtmlElement>()
+        .ok()
+}
+
+/// Close a modal surface (sheet/dialog) and return focus to whatever was focused
+/// when it opened (`return_focus`).
+pub(crate) fn close_modal(
+    mut open: Signal<bool>,
+    return_focus: Signal<Option<web_sys::HtmlElement>>,
+) {
+    open.set(false);
+    if let Some(el) = return_focus.read().clone() {
+        let _ = el.focus();
+    }
+}
+
+/// Dismiss a controlled dialog (via its `on_dismiss` handler) and return focus to
+/// whatever was focused when it opened.
+pub(crate) fn dialog_dismiss(
+    on_dismiss: EventHandler<()>,
+    return_focus: Signal<Option<web_sys::HtmlElement>>,
+) {
+    on_dismiss.call(());
+    if let Some(el) = return_focus.read().clone() {
+        let _ = el.focus();
+    }
+}
+
+/// Trap Tab focus within the open modal matched by `container_sel`. Called from a
+/// Tab keydown handler; returns true when it wrapped focus (the caller should then
+/// `prevent_default`), keeping keyboard focus inside the modal.
+pub(crate) fn trap_tab_focus(container_sel: &str, shift: bool) -> bool {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    let Some(container) = doc.query_selector(container_sel).ok().flatten() else {
+        return false;
+    };
+    let Ok(nodes) = container.query_selector_all(
+        "a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]",
+    ) else {
+        return false;
+    };
+    let mut items: Vec<web_sys::HtmlElement> = Vec::new();
+    for i in 0..nodes.length() {
+        let Some(el) = nodes
+            .item(i)
+            .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+        else {
+            continue;
+        };
+        // Skip the off-screen focus sentinel and hidden controls.
+        if el.get_attribute("tabindex").as_deref() == Some("-1") || el.offset_parent().is_none() {
+            continue;
+        }
+        items.push(el);
+    }
+    let (Some(first), Some(last)) = (items.first(), items.last()) else {
+        return false;
+    };
+    let active_html = doc
+        .active_element()
+        .and_then(|a| a.dyn_into::<web_sys::HtmlElement>().ok());
+    let no_active = active_html.is_none();
+    let matches = |t: &web_sys::HtmlElement| active_html.as_ref() == Some(t);
+    if shift {
+        if matches(first) || no_active {
+            let _ = last.focus();
+            return true;
+        }
+    } else if matches(last) || no_active {
+        let _ = first.focus();
+        return true;
+    }
+    false
+}
 
 /// A centred loading spinner overlay.
 #[component]
@@ -257,18 +341,23 @@ pub fn PaginatedTable(
 #[component]
 pub fn ToolSheet(title: String, children: Element) -> Element {
     let mut open = use_signal(|| false);
+    // Remember the trigger so focus returns to it when the sheet closes (a11y).
+    let mut return_focus = use_signal(|| None::<web_sys::HtmlElement>);
     rsx! {
         button {
             class: "btn-icon state-layer",
             aria_label: "{title}",
             title: "{title}",
-            onclick: move |_| open.set(true),
+            onclick: move |_| {
+                return_focus.set(active_html_element());
+                open.set(true);
+            },
             span { class: "material-icons", "tune" }
         }
         div {
             class: if open() { "sheet-scrim open" } else { "sheet-scrim" },
             role: "presentation",
-            onclick: move |_| open.set(false),
+            onclick: move |_| close_modal(open, return_focus),
         }
         aside {
             class: if open() { "tool-sheet open" } else { "tool-sheet" },
@@ -277,12 +366,16 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
             "aria-label": "{title}",
             tabindex: "-1",
             onkeydown: move |e| {
-                if e.key() == Key::Escape {
-                    open.set(false);
+                match e.key() {
+                    Key::Escape => close_modal(open, return_focus),
+                    Key::Tab if trap_tab_focus(".tool-sheet.open", e.modifiers().shift()) => {
+                        e.prevent_default();
+                    }
+                    _ => {}
                 }
             },
             // Focus sentinel: mounts when the sheet opens and pulls focus into it
-            // so Escape works and keyboard users land inside the sheet.
+            // so Escape/Tab work and keyboard users land inside the sheet.
             if open() {
                 div {
                     class: "sheet-focus-sentinel",
@@ -300,14 +393,14 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
                 button {
                     class: "btn-icon state-layer",
                     aria_label: "close",
-                    onclick: move |_| open.set(false),
+                    onclick: move |_| close_modal(open, return_focus),
                     span { class: "material-icons", "close" }
                 }
             }
             div {
                 class: "tool-sheet-body",
                 // Dismiss the sheet when an action inside it is chosen.
-                onclick: move |_| open.set(false),
+                onclick: move |_| close_modal(open, return_focus),
                 {children}
             }
         }
@@ -328,6 +421,9 @@ pub fn Dialog(
     icon: Option<String>,
     children: Element,
 ) -> Element {
+    // Remember the trigger so focus returns to it on dismiss (a11y). Declared
+    // before the early return so the hook order stays stable.
+    let mut return_focus = use_signal(|| None::<web_sys::HtmlElement>);
     if !open {
         return rsx! {};
     }
@@ -335,23 +431,29 @@ pub fn Dialog(
         div {
             class: "m3-dialog-scrim",
             role: "presentation",
-            onclick: move |_| on_dismiss.call(()),
+            onclick: move |_| dialog_dismiss(on_dismiss, return_focus),
             div {
                 class: "m3-dialog",
                 role: "dialog",
                 "aria-modal": "true",
                 tabindex: "-1",
                 onkeydown: move |e| {
-                    if e.key() == Key::Escape {
-                        on_dismiss.call(());
+                    match e.key() {
+                        Key::Escape => dialog_dismiss(on_dismiss, return_focus),
+                        Key::Tab if trap_tab_focus(".m3-dialog", e.modifiers().shift()) => {
+                            e.prevent_default();
+                        }
+                        _ => {}
                     }
                 },
                 onclick: move |e| e.stop_propagation(),
-                // Pull focus into the dialog on open (it mounts only when open).
+                // Remember the trigger, then pull focus into the dialog on open (it
+                // mounts only when open).
                 div {
                     class: "sheet-focus-sentinel",
                     tabindex: "-1",
                     onmounted: move |e| {
+                        return_focus.set(active_html_element());
                         spawn(async move {
                             let _ = e.set_focus(true).await;
                         });
