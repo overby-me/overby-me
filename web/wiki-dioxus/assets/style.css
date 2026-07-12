@@ -2860,14 +2860,16 @@ a.list-item:hover {
 /* Sticky formatting toolbar (#94): keeps Save/format controls visible while
  * scrolling a long document. Sits at the top of the scroll container with an
  * opaque surface so text doesn't show through. */
+/* M3 docked formatting toolbar: a tonal surface-container pill instead of a
+   border-bottom bar, so it reads as a distinct control surface. */
 .editor-toolbar {
 	position: sticky;
 	top: 0;
 	z-index: 3;
-	background: var(--md-surface);
-	padding-top: 8px;
-	margin-bottom: 8px;
-	border-bottom: 1px solid var(--md-outline);
+	background: var(--md-surface-container);
+	padding: 8px;
+	margin-bottom: 12px;
+	border-radius: var(--md-sys-shape-corner-large);
 }
 
 /* Editor area */
