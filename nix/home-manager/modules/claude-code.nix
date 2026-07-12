@@ -184,6 +184,28 @@
           ];
         }
       ];
+      Notification = [
+        {
+          matcher = "";
+          hooks = [
+            {
+              type = "command";
+              command = "${pkgs.libnotify}/bin/notify-send 'Claude Code' 'Waiting for your input'";
+            }
+          ];
+        }
+      ];
+      Stop = [
+        {
+          matcher = "";
+          hooks = [
+            {
+              type = "command";
+              command = "${pkgs.libnotify}/bin/notify-send 'Claude Code' 'Task completed'";
+            }
+          ];
+        }
+      ];
     };
   };
 
