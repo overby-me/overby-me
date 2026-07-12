@@ -3286,6 +3286,21 @@ h6,
 	font-size: 0.85em;
 	opacity: 0.7;
 }
+/* EXPERIMENT (reading): inline code gets a tonal monospace pill; block code inside
+   <pre> is reset back out so only true inline code is pilled. */
+.slate-content code {
+	font-family: monospace;
+	font-size: 0.9em;
+	padding: 0.1em 0.4em;
+	border-radius: var(--md-sys-shape-corner-small);
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
+}
+.slate-content pre code {
+	padding: 0;
+	background: none;
+	font-size: inherit;
+}
 
 /* Table of contents (#117): a boxed list of heading anchors above the content. */
 .toc {
