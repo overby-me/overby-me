@@ -147,10 +147,16 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
     match mime_id {
         "wiki/folder" => rsx! { FolderApp { node: node.clone(), parent_path: path } },
         "wiki/document" => rsx! {
-            ContentApp { node: node.clone() }
-            super::comments::CommentSection {
-                node_id: node.id.0.clone(),
-                context_id: node.context_id.as_ref().map(|u| u.0.clone()),
+            super::widgets::SupportingPaneLayout {
+                primary: rsx! {
+                    ContentApp { node: node.clone() }
+                },
+                supporting: rsx! {
+                    super::comments::CommentSection {
+                        node_id: node.id.0.clone(),
+                        context_id: node.context_id.as_ref().map(|u| u.0.clone()),
+                    }
+                },
             }
         },
         "wiki/file" => rsx! { FileApp { node: node.clone() } },
@@ -168,10 +174,16 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
         // the content); React hides members, which the port already omits here.
         "vote/candidate" => {
             rsx! {
-                ContentApp { node: node.clone() }
-                super::comments::CommentSection {
-                    node_id: node.id.0.clone(),
-                    context_id: node.context_id.as_ref().map(|u| u.0.clone()),
+                super::widgets::SupportingPaneLayout {
+                    primary: rsx! {
+                        ContentApp { node: node.clone() }
+                    },
+                    supporting: rsx! {
+                        super::comments::CommentSection {
+                            node_id: node.id.0.clone(),
+                            context_id: node.context_id.as_ref().map(|u| u.0.clone()),
+                        }
+                    },
                 }
             }
         }
