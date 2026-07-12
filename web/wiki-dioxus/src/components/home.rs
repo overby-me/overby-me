@@ -144,7 +144,7 @@ fn RecentContents() -> Element {
     rsx! {
         div { class: "card mt-2",
             div { class: "card-header",
-                div { class: "avatar", span { class: "material-icons", "schedule" } }
+                div { class: "avatar small", span { class: "material-icons", "schedule" } }
                 h3 { class: "title-medium", "{t(\"layout.newestContent\")}" }
             }
             div { class: "list",

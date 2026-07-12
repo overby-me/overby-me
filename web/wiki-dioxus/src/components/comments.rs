@@ -65,7 +65,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     rsx! {
         div { class: "card comment-section",
             div { class: "card-header",
-                div { class: "avatar", {crate::components::loader::icon_el("vote/comment")} }
+                div { class: "avatar small", {crate::components::loader::icon_el("vote/comment")} }
                 h3 { class: "title-medium", "{t(\"vote.comments\")}" }
                 if !list.is_empty() {
                     span { class: "count-badge", "{list.len()}" }

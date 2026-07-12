@@ -152,7 +152,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         // home; the body shows an empty state until the first amendment lands.
         div { class: "card mt-1",
             div { class: "card-header",
-                div { class: "avatar", {icon_el("vote/change")} }
+                div { class: "avatar small", {icon_el("vote/change")} }
                 h3 { class: "title-medium", "{t(\"vote.amendments\")}" }
                 div { class: "flex-grow" }
                 // Propose a new amendment (redirects to its editor).
@@ -191,7 +191,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         if !polls.is_empty() {
             div { class: "card mt-1",
                 div { class: "card-header",
-                    div { class: "avatar", {icon_el("vote/poll")} }
+                    div { class: "avatar small", {icon_el("vote/poll")} }
                     h3 { class: "title-medium", "{t(\"mime.vote\")}" }
                 }
                 div { class: "list",
@@ -321,7 +321,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         if !candidates.is_empty() {
             div { class: "card mt-1",
                 div { class: "card-header",
-                    div { class: "avatar", {icon_el("vote/candidate")} }
+                    div { class: "avatar small", {icon_el("vote/candidate")} }
                     h3 { class: "title-medium", "{t(\"vote.candidates\")}" }
                 }
                 // Candidates in an M3 carousel: a snapping, horizontally scrollable
@@ -368,7 +368,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         // Questions (numbered), with add + owner/author delete.
         div { class: "card mt-1",
             div { class: "card-header",
-                div { class: "avatar", {icon_el("vote/question")} }
+                div { class: "avatar small", {icon_el("vote/question")} }
                 h3 { class: "title-medium", "{t(\"vote.questions\")}" }
             }
             if questions.is_empty() {
@@ -453,7 +453,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         if !polls.is_empty() {
             div { class: "card mt-1",
                 div { class: "card-header",
-                    div { class: "avatar", {icon_el("vote/poll")} }
+                    div { class: "avatar small", {icon_el("vote/poll")} }
                     h3 { class: "title-medium", "{t(\"mime.vote\")}" }
                 }
                 div { class: "list",
