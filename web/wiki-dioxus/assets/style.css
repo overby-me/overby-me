@@ -898,6 +898,20 @@ html {
 	padding: 4px 10px;
 	text-decoration: none;
 	margin-bottom: 8px;
+	/* EXPERIMENT: a tonal "you are here" pill so the current group/event context
+	   reads as a distinct chip at the top of the drawer. */
+	border-radius: var(--md-sys-shape-corner-large);
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+	transition: background-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+.drawer-context-bar:hover {
+	background: color-mix(
+		in srgb,
+		var(--md-on-secondary-container) 8%,
+		var(--md-secondary-container)
+	);
 }
 
 .drawer-context-bar .avatar {
