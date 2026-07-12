@@ -81,6 +81,20 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         span { class: "material-icons", "download" }
                         "{t(\"folder.export\")}"
                     }
+                    // EXPERIMENT (functional): copy a shareable link to this page.
+                    button {
+                        class: "sheet-action",
+                        onclick: move |_| {
+                            if let Some(win) = web_sys::window() {
+                                if let Ok(href) = win.location().href() {
+                                    let _ = win.navigator().clipboard().write_text(&href);
+                                    crate::snackbar::show_snackbar(&t("common.linkCopied"));
+                                }
+                            }
+                        },
+                        span { class: "material-icons", "link" }
+                        "{t(\"common.copyLink\")}"
+                    }
                     if can_edit && !segments.is_empty() {
                         Link {
                             to: Route::PathPage {

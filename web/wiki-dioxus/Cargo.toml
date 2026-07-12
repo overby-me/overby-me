@@ -41,6 +41,7 @@ wasm-logger = "0.2"
 web-sys = { version = "=0.3.98", features = [
   "Blob",
   "BlobPropertyBag",
+  "Clipboard",
   "ClipboardEvent",
   "CloseEvent",
   "CssStyleDeclaration",
