@@ -597,12 +597,55 @@ pub fn ZoomableImage(src: String, alt: String) -> Element {
             }
         }
         if *zoomed.read() {
+            // M3-style expand: a scrim fades in and the image scales up (emphasized
+            // decelerate). Dismiss by clicking the scrim/image, the close button, or
+            // pressing Escape.
             div {
                 class: "image-lightbox",
                 role: "dialog",
+                "aria-modal": "true",
+                "aria-label": "{alt}",
+                tabindex: "-1",
                 onclick: move |_| zoomed.set(false),
-                img { src: "{src}", alt: "{alt}" }
+                onkeydown: move |e| {
+                    if e.key() == Key::Escape {
+                        zoomed.set(false);
+                    }
+                },
+                // Pull focus into the overlay so Escape works immediately.
+                onmounted: move |e| {
+                    spawn(async move {
+                        let _ = e.set_focus(true).await;
+                    });
+                },
+                button {
+                    class: "image-lightbox-close btn-icon state-layer",
+                    aria_label: "close",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        zoomed.set(false);
+                    },
+                    span { class: "material-icons", "close" }
+                }
+                img { class: "image-lightbox-img", src: "{src}", alt: "{alt}" }
             }
+        }
+    }
+}
+
+/// A Material 3 carousel: a horizontally scrollable, snapping strip of rounded
+/// items, with the next item peeking to signal there is more. Pass the items as
+/// `children`, each carrying the `m3-carousel-item` class.
+#[component]
+pub fn Carousel(#[props(default)] label: String, children: Element) -> Element {
+    rsx! {
+        div {
+            class: "m3-carousel",
+            role: "group",
+            "aria-label": "{label}",
+            // Keyboard-focusable so arrow keys scroll the strip.
+            tabindex: "0",
+            {children}
         }
     }
 }

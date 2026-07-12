@@ -2699,11 +2699,15 @@ h6,
 /* Click-to-zoom images (#114). */
 .zoomable {
 	cursor: zoom-in;
-	/* Fit the container and keep the card's rounded look (content images). */
+	/* A contained, M3-rounded thumbnail (not full-bleed) — click to expand. Caps
+	   both dimensions while preserving aspect ratio, so tall and wide images stay
+	   modest inside the content flow. */
 	display: block;
-	max-width: 100%;
+	max-width: min(100%, 20rem);
+	max-height: 18rem;
+	width: auto;
 	height: auto;
-	border-radius: var(--md-sys-shape-corner-medium, 12px);
+	border-radius: var(--md-sys-shape-corner-large, 16px);
 	/* Fade in on mount so images don't pop in abruptly. */
 	animation: image-fade-in var(--md-sys-motion-duration-medium2, 300ms)
 		var(--md-sys-motion-easing-standard, ease);
@@ -2737,19 +2741,139 @@ h6,
 	position: fixed;
 	inset: 0;
 	z-index: 1000;
-	background: rgba(0, 0, 0, 0.85);
+	background: color-mix(in srgb, var(--md-sys-color-scrim) 72%, transparent);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	cursor: zoom-out;
-	padding: 16px;
+	padding: 24px;
+	outline: none;
+	/* M3 scrim fades in. */
+	animation: lightbox-scrim-in var(--md-sys-motion-duration-short4, 200ms)
+		var(--md-sys-motion-easing-standard, ease);
 }
 
-.image-lightbox img {
-	max-width: 95vw;
-	max-height: 95vh;
-	border-radius: 8px;
-	box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+@keyframes lightbox-scrim-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+.image-lightbox-img {
+	max-width: 96vw;
+	max-height: 92vh;
+	border-radius: var(--md-sys-shape-corner-extra-large, 28px);
+	box-shadow: var(--md-sys-elevation-5);
+	/* M3 emphasized expand: the image scales up as it fades in (a container-
+	   transform-like grow from the tapped thumbnail). */
+	animation: lightbox-img-in var(--md-sys-motion-duration-medium4, 400ms)
+		var(--md-sys-motion-spring-spatial-default, cubic-bezier(0.05, 0.7, 0.1, 1));
+}
+
+@keyframes lightbox-img-in {
+	from {
+		transform: scale(0.85);
+		opacity: 0;
+	}
+	to {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+
+.image-lightbox-close {
+	position: fixed;
+	top: 16px;
+	right: 16px;
+	z-index: 1;
+	color: #fff;
+	background: color-mix(in srgb, var(--md-sys-color-scrim) 40%, transparent);
+}
+.image-lightbox-close:hover {
+	background: color-mix(in srgb, var(--md-sys-color-scrim) 60%, transparent);
+}
+
+/* ── Material 3 carousel (widgets::Carousel) ─────────────────────────────
+   A horizontally scrollable, snapping strip of rounded items; the next item
+   peeks past the edge to signal there is more to scroll. */
+.m3-carousel {
+	display: flex;
+	gap: var(--md-sys-spacing-2);
+	overflow-x: auto;
+	scroll-snap-type: x mandatory;
+	scroll-behavior: smooth;
+	overscroll-behavior-x: contain;
+	padding: 4px 16px 16px;
+	scrollbar-width: none;
+}
+.m3-carousel::-webkit-scrollbar {
+	display: none;
+}
+.m3-carousel:focus-visible {
+	outline: 3px solid var(--md-primary);
+	outline-offset: -3px;
+	border-radius: var(--md-sys-shape-corner-large);
+}
+/* One carousel item: a rounded, elevated tile that snaps to the start edge. */
+.m3-carousel-item {
+	position: relative;
+	flex: 0 0 auto;
+	width: 200px;
+	height: 240px;
+	scroll-snap-align: start;
+	border-radius: var(--md-sys-shape-corner-extra-large);
+	overflow: hidden;
+	background: var(--md-surface-container-high);
+	color: #fff;
+	text-decoration: none;
+	box-shadow: var(--md-sys-elevation-1);
+	/* Expressive: a gentle press feedback. */
+	transition: transform var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-spring-spatial-fast);
+}
+.m3-carousel-item:active {
+	transform: scale(0.97);
+}
+.m3-carousel-item:focus-visible {
+	outline: 3px solid var(--md-primary);
+	outline-offset: 2px;
+}
+.m3-carousel-img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+/* Placeholder when an item has no image. */
+.m3-carousel-placeholder {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+}
+.m3-carousel-placeholder .material-icons {
+	font-size: 56px;
+}
+/* Item label overlaid on the image bottom, over a legibility gradient (M3). */
+.m3-carousel-label {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	padding: 28px 14px 12px;
+	background: linear-gradient(
+		transparent,
+		color-mix(in srgb, var(--md-sys-color-scrim) 72%, transparent)
+	);
+	font-size: var(--md-sys-typescale-title-small-size);
+	font-weight: 600;
+	line-height: 1.2;
 }
 
 /* Cowsay easter egg (#82). */

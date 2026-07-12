@@ -1258,6 +1258,62 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     { passed: $p, failed: $fl }
 }
 
+# Component CSS contracts for the M3 carousel and content image/lightbox. These
+# render from data the harness may not have (candidate photos, content images),
+# so verify the styling by injecting the exact markup the components emit and
+# reading computed styles (data-independent), plus screenshots for review.
+def test-components [session_id: string, passed: int, failed: int] {
+    mut p = $passed
+    mut fl = $failed
+    log-info ""
+    log-info "── M3 carousel + content image ──"
+
+    # Carousel: horizontal snap-scroll strip of rounded items.
+    let cjs = 'var w=document.createElement("div"); w.id="__ctest_carousel"; var car=document.createElement("div"); car.className="m3-carousel"; car.setAttribute("aria-label","Candidates"); for(var i=0;i<5;i++){var a=document.createElement("a"); a.className="m3-carousel-item"; var ph=document.createElement("div"); ph.className="m3-carousel-placeholder"; var ic=document.createElement("span"); ic.className="material-icons"; ic.textContent="person"; ph.appendChild(ic); a.appendChild(ph); var lb=document.createElement("div"); lb.className="m3-carousel-label"; lb.textContent="Candidate "+(i+1); a.appendChild(lb); car.appendChild(a);} w.appendChild(car); document.body.appendChild(w); var cs=getComputedStyle(car); var it=car.querySelector(".m3-carousel-item"); var is=getComputedStyle(it); return JSON.stringify({snap:cs.scrollSnapType,overflowX:cs.overflowX,itemRadius:parseFloat(is.borderTopLeftRadius)||0,itemSnap:is.scrollSnapAlign,itemW:parseFloat(is.width)||0})'
+    let craw = (wd-execute $session_id $cjs)
+    let c = (try { $craw | from json } catch { null })
+    if $c == null {
+        log-fail "carousel CSS probe returned non-JSON"; $fl = $fl + 1
+    } else if ($c.snap | str contains "x") and (($c.overflowX == "auto") or ($c.overflowX == "scroll")) and ($c.itemRadius > 0) and ($c.itemSnap | str contains "start") and ($c.itemW > 0) {
+        log-ok $"carousel: horizontal snap-scroll, rounded items radius=($c.itemRadius)px width=($c.itemW)px"; $p = $p + 1
+    } else {
+        log-fail $"carousel CSS off: ($craw)"; $fl = $fl + 1
+    }
+    if (($env | get -o WIKI_SHOTS | default "") == "1") {
+        let dir = ($env | get -o WIKI_SHOTS_DIR | default "screenshots")
+        wd-execute $session_id 'var w=document.getElementById("__ctest_carousel"); if(w){w.style.cssText="position:fixed;top:80px;left:16px;width:540px;z-index:2000;background:var(--md-surface-container-low);border-radius:16px;padding-top:12px;box-shadow:0 2px 10px rgba(0,0,0,0.25)"; var h=document.createElement("div"); h.style.cssText="padding:4px 16px 4px;font-weight:600"; h.textContent="Candidates"; w.insertBefore(h,w.firstChild);} return 1' | ignore
+        sleep 300ms
+        wd-screenshot $session_id ($dir | path join "carousel.png")
+    }
+    wd-execute $session_id 'var w=document.getElementById("__ctest_carousel"); if(w)w.remove(); return 1' | ignore
+
+    # Content image: .zoomable is a capped, rounded thumbnail (not full-bleed). The
+    # `min(100%, 20rem)` cap is left unresolved by Firefox's getComputedStyle, so
+    # measure the RENDERED width inside a wide (900px) container instead.
+    wd-execute $session_id 'var box=document.createElement("div"); box.id="__ctest_img"; box.style.cssText="width:900px"; var img=document.createElement("img"); img.className="zoomable"; img.src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22800%22 height=%22600%22%3E%3Crect width=%22800%22 height=%22600%22 fill=%22%23607d8b%22/%3E%3C/svg%3E"; box.appendChild(img); document.body.appendChild(box); return 1' | ignore
+    sleep 400ms
+    let iraw = (wd-execute $session_id 'var img=document.querySelector("#__ctest_img img.zoomable"); if(!img) return "none"; var r=img.getBoundingClientRect(); var s=getComputedStyle(img); return JSON.stringify({w:Math.round(r.width),radius:parseFloat(s.borderTopLeftRadius)||0})')
+    let im = (try { $iraw | from json } catch { null })
+    if $im == null {
+        log-fail $"image CSS probe returned non-JSON: ($iraw)"; $fl = $fl + 1
+    } else if ($im.w > 0) and ($im.w <= 340) and ($im.radius > 0) {
+        log-ok $"content image is a capped rounded thumbnail, rendered width=($im.w)px in a 900px box"; $p = $p + 1
+    } else {
+        log-fail $"content image not constrained: ($iraw)"; $fl = $fl + 1
+    }
+    if (($env | get -o WIKI_SHOTS | default "") == "1") {
+        let dir = ($env | get -o WIKI_SHOTS_DIR | default "screenshots")
+        # Inject the lightbox (as clicking the image would) and screenshot it.
+        wd-execute $session_id 'var lb=document.createElement("div"); lb.className="image-lightbox"; var im=document.createElement("img"); im.className="image-lightbox-img"; im.src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22800%22 height=%22600%22%3E%3Crect width=%22800%22 height=%22600%22 fill=%22%23607d8b%22/%3E%3Ccircle cx=%22400%22 cy=%22300%22 r=%22160%22 fill=%22%23c2185b%22/%3E%3C/svg%3E"; lb.appendChild(im); var cb=document.createElement("button"); cb.className="image-lightbox-close btn-icon state-layer"; var ci=document.createElement("span"); ci.className="material-icons"; ci.textContent="close"; cb.appendChild(ci); lb.appendChild(cb); lb.id="__ctest_lb"; document.body.appendChild(lb); return 1' | ignore
+        sleep 400ms
+        wd-screenshot $session_id ($dir | path join "image-lightbox.png")
+        wd-execute $session_id 'var l=document.getElementById("__ctest_lb"); if(l)l.remove(); return 1' | ignore
+    }
+    wd-execute $session_id 'var b=document.getElementById("__ctest_img"); if(b)b.remove(); return 1' | ignore
+
+    { passed: $p, failed: $fl }
+}
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
 def main [
@@ -1364,6 +1420,9 @@ def main [
         log-info ""
         log-info "Skipping authenticated tests (set WIKI_EMAIL / WIKI_PASSWORD to enable)."
     }
+
+    # Component CSS contracts (carousel + content image/lightbox), data-independent.
+    let r = (test-components $session_id $passed $failed); $passed = $r.passed; $failed = $r.failed
 
     print -e ""
     if $verbose and ($servo_log | path exists) {

@@ -324,7 +324,9 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     div { class: "avatar", {icon_el("vote/candidate")} }
                     h3 { class: "title-medium", "{t(\"vote.candidates\")}" }
                 }
-                div { class: "folder-grid",
+                // Candidates in an M3 carousel: a snapping, horizontally scrollable
+                // strip of rounded photo tiles with the name overlaid.
+                super::widgets::Carousel { label: t("vote.candidates"),
                     for cand in candidates.iter() {
                         {
                             let mut full = path.clone();
@@ -346,17 +348,15 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                 Link {
                                     key: "{cand.id.0}",
                                     to: Route::PathPage { segments: full, app: None },
-                                    class: "folder-tile",
+                                    class: "m3-carousel-item",
                                     if let Some(src) = photo {
-                                        img {
-                                            src: "{src}",
-                                            alt: "{cand.name}",
-                                            style: "width: 100%; height: 140px; object-fit: cover; border-radius: 12px;",
-                                        }
+                                        img { class: "m3-carousel-img", src: "{src}", alt: "{cand.name}" }
                                     } else {
-                                        div { class: "avatar", {icon_el("vote/candidate")} }
+                                        div { class: "m3-carousel-placeholder",
+                                            {icon_el("vote/candidate")}
+                                        }
                                     }
-                                    div { class: "list-item-primary", "{cand.name}" }
+                                    div { class: "m3-carousel-label", "{cand.name}" }
                                 }
                             }
                         }
