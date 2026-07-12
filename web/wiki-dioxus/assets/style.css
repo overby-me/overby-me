@@ -261,6 +261,44 @@ a:hover {
 	align-items: center;
 }
 
+/* M3 Expressive docked search: a full-round surface-container container that
+   carries the breadcrumb trail behind a leading search button. */
+.expressive-search {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	height: 48px;
+	padding: 0 6px 0 2px;
+	background: var(--md-surface-container-high);
+	border-radius: var(--md-sys-shape-corner-full);
+}
+.expressive-search-btn {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	border: none;
+	background: none;
+	color: var(--md-on-surface-variant);
+	border-radius: var(--md-sys-shape-corner-full);
+	cursor: pointer;
+}
+.expressive-search-crumbs {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+.expressive-search-crumbs::-webkit-scrollbar {
+	display: none;
+}
+
 /* ── Navigation rail (medium+) ───────────────────────────────────────── */
 .nav-rail {
 	position: fixed;
@@ -472,8 +510,16 @@ a:hover {
 .app-shell[data-size-class="extra-large"] .top-app-bar {
 	left: var(--md-sys-rail-expanded);
 }
+/* Compact: the search/breadcrumb app bar moves to the BOTTOM (thumb reach, like
+   a browser's bottom URL bar), floating just above the navigation bar. The
+   content clears the top (no bar there) and both bottom bars. */
+.app-shell[data-size-class="compact"] .top-app-bar {
+	top: auto;
+	bottom: 80px;
+}
 .app-shell[data-size-class="compact"] .content-pane {
-	padding-bottom: calc(80px + var(--md-sys-margin));
+	padding-top: var(--md-sys-margin);
+	padding-bottom: calc(80px + 64px + var(--md-sys-margin));
 }
 
 /* Floating navigation bar — M3 primary container with a level-2 shadow (it
