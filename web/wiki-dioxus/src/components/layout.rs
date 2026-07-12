@@ -214,6 +214,9 @@ pub fn Layout() -> Element {
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
 
+            // EXPERIMENT (functional): a back-to-top button for long pages.
+            super::back_to_top::BackToTop {}
+
             // APP axis (medium+): a fixed icon rail. Its menu button toggles the
             // context tree pane. A bottom bar carries the apps on compact (below).
             if !size_class.is_compact() {
