@@ -20,10 +20,13 @@ pub fn MapApp(node: NodeWithChildren) -> Element {
                 div { class: "avatar", {icon_el("map/map")} }
                 h3 { class: "title-medium", "{name}" }
             }
-            iframe {
-                src: "{src}",
-                style: "width: 100%; height: 80vh; border: 0; border-radius: 0 0 12px 12px;",
-                title: "{name}",
+            // EXPERIMENT (framed viewport): a tonal rounded frame around the embed.
+            div { class: "viewport-frame",
+                iframe {
+                    src: "{src}",
+                    style: "width: 100%; height: 78vh; border: 0; border-radius: var(--md-sys-shape-corner-medium); display: block;",
+                    title: "{name}",
+                }
             }
         }
     }

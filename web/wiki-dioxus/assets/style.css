@@ -880,6 +880,21 @@ a:hover {
 	font-size: 15px;
 }
 
+/* EXPERIMENT (framed viewport): an expressive rounded tonal frame around embedded
+   map/graph media, so the viewport reads as a deliberate stage. */
+.viewport-frame {
+	position: relative;
+	margin: 4px 16px 16px;
+	padding: 8px;
+	border-radius: var(--md-sys-shape-corner-large);
+	overflow: hidden;
+	background: linear-gradient(
+		135deg,
+		color-mix(in srgb, var(--md-primary) 12%, transparent),
+		color-mix(in srgb, var(--md-tertiary) 8%, transparent)
+	);
+}
+
 /* EXPERIMENT (home hero): a bold tonal greeting header with an animated wave. */
 .home-hero-head {
 	display: flex;
