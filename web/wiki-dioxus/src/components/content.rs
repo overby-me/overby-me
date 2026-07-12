@@ -63,43 +63,50 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     }
                 }
                 div { class: "flex-grow" }
-                // Export this document (and any nested content) to an .odt file.
-                button {
-                    class: "btn-icon",
-                    title: "{t(\"folder.export\")}",
-                    onclick: {
-                        let export_name = name.clone();
-                        let export_id = node_id.clone();
-                        move |_| {
-                            let token = session.read().access_token.clone();
-                            let id = export_id.clone();
-                            let name = export_name.clone();
-                            spawn(async move {
-                                crate::export::export_tree(token, id, name).await;
-                            });
-                        }
-                    },
-                    span { class: "material-icons", "download" }
-                }
-                if can_edit && !segments.is_empty() {
-                    Link {
-                        to: Route::PathPage {
-                            segments: segments.clone(),
-                            app: Some("editor".to_string()),
+                // Document actions moved into the M3 tools sheet (bottom sheet on
+                // mobile, right side sheet on desktop) instead of a header toolbar.
+                super::widgets::ToolSheet {
+                    title: t("common.tools"),
+                    // Export this document (and any nested content) to an .odt file.
+                    button {
+                        class: "sheet-action",
+                        onclick: {
+                            let export_name = name.clone();
+                            let export_id = node_id.clone();
+                            move |_| {
+                                let token = session.read().access_token.clone();
+                                let id = export_id.clone();
+                                let name = export_name.clone();
+                                spawn(async move {
+                                    crate::export::export_tree(token, id, name).await;
+                                });
+                            }
                         },
-                        class: "btn-icon",
-                        title: "{t(\"mime.editor\")}",
-                        {icon_el("app/editor")}
+                        span { class: "material-icons", "download" }
+                        "{t(\"folder.export\")}"
+                    }
+                    if can_edit && !segments.is_empty() {
+                        Link {
+                            to: Route::PathPage {
+                                segments: segments.clone(),
+                                app: Some("editor".to_string()),
+                            },
+                            class: "sheet-action",
+                            {icon_el("app/editor")}
+                            "{t(\"mime.editor\")}"
+                        }
+                    }
+                    if can_manage && !segments.is_empty() {
+                        button {
+                            class: "sheet-action danger",
+                            onclick: move |_| confirm_open.set(true),
+                            span { class: "material-icons", "delete" }
+                            "{t(\"common.delete\")}"
+                        }
                     }
                 }
                 if can_manage && !segments.is_empty() {
                     // Delete via an accessible modal confirm dialog.
-                    button {
-                        class: "btn-icon",
-                        title: "{t(\"common.delete\")}",
-                        onclick: move |_| confirm_open.set(true),
-                        span { class: "material-icons", "delete" }
-                    }
                     AlertDialog {
                         open: Some(confirm_open()),
                         on_open_change: move |v| confirm_open.set(v),

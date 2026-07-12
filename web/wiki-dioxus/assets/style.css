@@ -1820,6 +1820,135 @@ select:focus {
 	text-align: center;
 }
 
+/* ── Tools / actions sheet (widgets::ToolSheet) ──────────────────────────
+   Bottom sheet on compact, right side sheet on medium+. Holds the current
+   view's actions and admin tools, moved out of the header toolbar. */
+.sheet-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 79;
+	background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard);
+}
+.sheet-scrim.open {
+	opacity: 1;
+	pointer-events: auto;
+}
+.tool-sheet {
+	position: fixed;
+	z-index: 80;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
+	box-shadow: var(--md-sys-elevation-3);
+}
+/* Bottom sheet (compact). */
+.tool-sheet {
+	left: 0;
+	right: 0;
+	bottom: 0;
+	max-height: 72vh;
+	border-radius: var(--md-sys-shape-corner-extra-large)
+		var(--md-sys-shape-corner-extra-large) 0 0;
+	transform: translateY(101%);
+	transition: transform var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
+}
+.tool-sheet.open {
+	transform: translateY(0);
+}
+/* Side sheet (medium+), anchored to the right edge. */
+@media (min-width: 600px) {
+	.tool-sheet {
+		top: 0;
+		bottom: 0;
+		right: 0;
+		left: auto;
+		width: 360px;
+		max-width: 90vw;
+		max-height: none;
+		border-radius: var(--md-sys-shape-corner-large) 0 0
+			var(--md-sys-shape-corner-large);
+		transform: translateX(101%);
+	}
+	.tool-sheet.open {
+		transform: translateX(0);
+	}
+}
+.tool-sheet-header {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 16px;
+	border-bottom: 1px solid var(--md-outline-variant);
+}
+.tool-sheet-header h3 {
+	flex: 1;
+	margin: 0;
+}
+.sheet-handle {
+	position: absolute;
+	top: 6px;
+	left: 50%;
+	transform: translateX(-50%);
+	width: 32px;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--md-outline-variant);
+}
+@media (min-width: 600px) {
+	.sheet-handle {
+		display: none;
+	}
+}
+.tool-sheet-body {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 12px;
+	overflow-y: auto;
+}
+/* A single action row inside a sheet: full-width icon + label. */
+.sheet-action {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	width: 100%;
+	min-height: 48px;
+	padding: 8px 12px;
+	border: none;
+	background: none;
+	color: var(--md-on-surface);
+	font: inherit;
+	font-size: var(--md-sys-typescale-body-large-size);
+	text-align: left;
+	text-decoration: none;
+	cursor: pointer;
+	border-radius: var(--md-sys-shape-corner-large);
+}
+.sheet-action:hover {
+	background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+.sheet-action .material-icons {
+	color: var(--md-on-surface-variant);
+}
+.sheet-action.danger {
+	color: var(--md-error);
+}
+.sheet-action.danger .material-icons {
+	color: var(--md-error);
+}
+.sheet-action:disabled {
+	opacity: var(--md-sys-state-disabled-opacity, 0.38);
+	cursor: default;
+}
+
 /* Bluesky social wall (social::PostCard): header row + round avatar + wrapped
    post text, tokenised off the M3 shape scale. */
 .post-header {

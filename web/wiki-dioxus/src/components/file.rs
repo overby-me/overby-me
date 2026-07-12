@@ -155,25 +155,32 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                             }
                         }
                         div { class: "flex-grow" }
-                        // Download the raw file (any previewable type), not just view it.
-                        if !file_url.is_empty() {
-                            a {
-                                href: "{file_url}",
-                                target: "_blank",
-                                download: "{name}",
-                                class: "btn-icon",
-                                title: "{t(\"common.download\")}",
-                                span { class: "material-icons", "download" }
+                        // File actions moved into the M3 tools sheet.
+                        if !file_url.is_empty() || (can_manage && !segments.is_empty()) {
+                            super::widgets::ToolSheet {
+                                title: t("common.tools"),
+                                if !file_url.is_empty() {
+                                    a {
+                                        href: "{file_url}",
+                                        target: "_blank",
+                                        download: "{name}",
+                                        class: "sheet-action",
+                                        span { class: "material-icons", "download" }
+                                        "{t(\"common.download\")}"
+                                    }
+                                }
+                                if can_manage && !segments.is_empty() {
+                                    button {
+                                        class: "sheet-action danger",
+                                        onclick: move |_| confirm_open.set(true),
+                                        span { class: "material-icons", "delete" }
+                                        "{t(\"common.delete\")}"
+                                    }
+                                }
                             }
                         }
-                        // Delete the file (owner-only), removing member rows first.
+                        // Delete confirm dialog (owner-only).
                         if can_manage && !segments.is_empty() {
-                            button {
-                                class: "btn-icon",
-                                title: "{t(\"common.delete\")}",
-                                onclick: move |_| confirm_open.set(true),
-                                span { class: "material-icons", "delete" }
-                            }
                             AlertDialog {
                                 open: Some(confirm_open()),
                                 on_open_change: move |v| confirm_open.set(v),

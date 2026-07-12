@@ -150,6 +150,50 @@ pub fn DataTable(columns: Vec<String>, children: Element) -> Element {
     }
 }
 
+/// An M3 tools/actions sheet: a trigger icon button that opens a sheet holding
+/// the current view's actions and admin tools. The sheet is a bottom sheet on
+/// compact screens and a right-anchored side sheet on medium+ (pure CSS off the
+/// viewport width). Pass the action rows (`.sheet-action`) as `children`.
+#[component]
+pub fn ToolSheet(title: String, children: Element) -> Element {
+    let mut open = use_signal(|| false);
+    rsx! {
+        button {
+            class: "btn-icon state-layer",
+            aria_label: "{title}",
+            title: "{title}",
+            onclick: move |_| open.set(true),
+            span { class: "material-icons", "tune" }
+        }
+        div {
+            class: if open() { "sheet-scrim open" } else { "sheet-scrim" },
+            role: "presentation",
+            onclick: move |_| open.set(false),
+        }
+        aside {
+            class: if open() { "tool-sheet open" } else { "tool-sheet" },
+            role: "dialog",
+            "aria-label": "{title}",
+            div { class: "tool-sheet-header",
+                div { class: "sheet-handle" }
+                h3 { class: "title-medium", "{title}" }
+                button {
+                    class: "btn-icon state-layer",
+                    aria_label: "close",
+                    onclick: move |_| open.set(false),
+                    span { class: "material-icons", "close" }
+                }
+            }
+            div {
+                class: "tool-sheet-body",
+                // Dismiss the sheet when an action inside it is chosen.
+                onclick: move |_| open.set(false),
+                {children}
+            }
+        }
+    }
+}
+
 /// A reusable Material Design 3 basic dialog: a scrim over a surface-container-
 /// high card (extra-large corners, level-3 elevation, spring rise-in) with an
 /// optional leading icon, a headline, the passed `children` as content, and an
