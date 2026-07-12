@@ -639,20 +639,49 @@ a:hover {
 	right: calc(var(--md-sys-tools-width) + 24px);
 }
 
-/* Compact: the search/breadcrumb app bar moves to the BOTTOM (thumb reach, like
-   a browser's bottom URL bar), floating just above the navigation bar. The
-   content clears the top (no bar there) and both bottom bars. */
-.app-shell[data-size-class="compact"] .top-app-bar {
-	top: auto;
-	bottom: 80px;
+/* EXPERIMENT (unified bottom dock): on compact the search/breadcrumb bar and the
+   navigation bar share ONE elevated, rounded surface floating at the bottom,
+   instead of two separately-floating stacked bars — reclaiming the second bar's
+   chrome and the gap between them. */
+.compact-dock {
+	position: fixed;
+	left: 8px;
+	right: 8px;
+	bottom: 8px;
+	z-index: 60;
+	display: flex;
+	flex-direction: column;
+	background: var(--md-surface-container);
+	border-radius: var(--md-sys-shape-corner-extra-large);
+	box-shadow: var(--md-sys-elevation-2);
+	overflow: hidden;
+}
+/* Inside the dock, the two bars become static, transparent tiers sharing the one
+   surface (override their standalone fixed positioning + chrome). */
+.app-shell[data-size-class="compact"] .compact-dock .top-app-bar {
+	position: static;
+	left: auto;
+	right: auto;
+	bottom: auto;
+	height: 52px;
+	background: transparent;
+	padding: 0 6px;
+}
+.app-shell[data-size-class="compact"] .compact-dock .nav-bar {
+	position: static;
+	height: 58px;
+	background: transparent;
+	border-top: 1px solid var(--md-outline-variant);
+}
+.app-shell[data-size-class="compact"] .compact-dock .nav-bar-item {
+	padding: 4px 0;
 }
 .app-shell[data-size-class="compact"] .content-pane {
-	/* No top padding on compact: there's no top bar there, so the first card sits
-	   flush with the top of the content area (edge-to-edge, like the sides). */
+	/* No top padding on compact (no top bar); clear the single bottom dock
+	   (its ~110px of tiers + its 8px offset + a margin). */
 	padding-top: 0;
-	padding-bottom: calc(80px + 64px + var(--md-sys-margin));
-	/* Drop the page's side padding on compact so cards can go edge to edge and
-	   reclaim the width for content (see the flattened cards below). */
+	padding-bottom: calc(118px + var(--md-sys-margin));
+	/* Drop the page's side padding so cards can go edge to edge. */
 	padding-left: 0;
 	padding-right: 0;
 }
@@ -1076,11 +1105,10 @@ a:hover {
 		bottom: 24px;
 	}
 }
-/* Compact: the search/breadcrumb bar is docked at the bottom (bottom: 80px, 64px
-   tall), so the default 88px would put the FAB on top of it. Lift the FAB clear
-   of the bar (its top edge sits at 80 + 64px) with a small gap above. */
+/* Compact: lift the FAB clear of the unified bottom dock (its top edge sits at
+   ~8px offset + ~110px of tiers) with a small gap above. */
 .app-shell[data-size-class="compact"] .fab {
-	bottom: calc(80px + 64px + 16px);
+	bottom: calc(118px + 16px);
 }
 
 /* M3 basic Dialog (the reusable widgets::Dialog): scrim + surface-container-high

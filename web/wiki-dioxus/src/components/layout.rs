@@ -255,8 +255,18 @@ pub fn Layout() -> Element {
                 }
             }
 
-            // Top app bar spanning the content region.
-            TopAppBar { search_mode, search_input, search_results, open_drawer }
+            // Top app bar. EXPERIMENT: on compact it joins the navigation bar in a
+            // single unified bottom dock (one elevated surface) to reclaim the
+            // vertical space a second free-floating bar would cost; on medium+ it is
+            // the top bar as before.
+            if size_class.is_compact() {
+                div { class: "compact-dock",
+                    TopAppBar { search_mode, search_input, search_results, open_drawer }
+                    NavigationBar {}
+                }
+            } else {
+                TopAppBar { search_mode, search_input, search_results, open_drawer }
+            }
 
             // Content pane (the resolved ?app= view). An inner measure caps the
             // reading column at ~A4 and centres it, so content stays legible on
@@ -268,9 +278,6 @@ pub fn Layout() -> Element {
                 }
             }
 
-            if size_class.is_compact() {
-                NavigationBar {}
-            }
         }
 
         // Compact keeps a modal navigation drawer for the tree (M3 uses a modal
