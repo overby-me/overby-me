@@ -211,6 +211,11 @@ pub fn Layout() -> Element {
                     evt.prevent_default();
                 }
             },
+            // EXPERIMENT (functional a11y): a skip link — the first focusable
+            // element, visually hidden until focused — jumps keyboard users past
+            // the chrome straight to the content.
+            a { class: "skip-link", href: "#main-content", "{t(\"common.skipToContent\")}" }
+
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
 
@@ -275,7 +280,7 @@ pub fn Layout() -> Element {
             // Content pane (the resolved ?app= view). An inner measure caps the
             // reading column at ~A4 and centres it, so content stays legible on
             // wide screens instead of stretching edge to edge.
-            main { class: "content-pane",
+            main { class: "content-pane", id: "main-content",
                 div { class: "content-measure",
                     Outlet::<Route> {}
                     div { class: "bar-spacer" }

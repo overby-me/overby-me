@@ -294,6 +294,25 @@ html {
 	scroll-behavior: smooth;
 }
 
+/* EXPERIMENT (functional a11y: skip link): off-screen until focused, then a real
+   pill button at the top-left that jumps keyboard users to the content. */
+.skip-link {
+	position: fixed;
+	top: 8px;
+	left: -9999px;
+	z-index: 400;
+	padding: 10px 18px;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-primary);
+	color: var(--md-on-primary);
+	font-weight: 600;
+	text-decoration: none;
+	box-shadow: var(--md-sys-elevation-3);
+}
+.skip-link:focus {
+	left: 8px;
+}
+
 /* EXPERIMENT (functional: reading progress): a thin gradient bar across the very
    top showing scroll progress through the page. */
 .reading-progress {
