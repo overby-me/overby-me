@@ -518,7 +518,9 @@ a:hover {
 	bottom: 80px;
 }
 .app-shell[data-size-class="compact"] .content-pane {
-	padding-top: var(--md-sys-margin);
+	/* No top padding on compact: there's no top bar there, so the first card sits
+	   flush with the top of the content area (edge-to-edge, like the sides). */
+	padding-top: 0;
 	padding-bottom: calc(80px + 64px + var(--md-sys-margin));
 	/* Drop the page's side padding on compact so cards can go edge to edge and
 	   reclaim the width for content (see the flattened cards below). */

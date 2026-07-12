@@ -99,26 +99,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
             div { class: "card-header",
                 div { class: "avatar", {icon_el(mime_id)} }
                 h3 { class: "title-medium", "{name}" }
-                // Child count (#143).
-                if count > 0 {
-                    span { class: "count-badge", title: "{t(\"common.items\")}", "{count}" }
-                }
                 div { class: "flex-grow" }
-                // Toggle list/grid layout (#125).
-                if count > 1 {
-                    super::widgets::SegmentedButton {
-                        segments: vec![
-                            ("list".to_string(), "view_list".to_string()),
-                            ("grid".to_string(), "grid_view".to_string()),
-                        ],
-                        selected: if is_grid { "grid".to_string() } else { "list".to_string() },
-                        on_select: move |v: String| {
-                            let g = v == "grid";
-                            grid.set(g);
-                            write_grid_pref(g);
-                        },
-                    }
-                }
                 // Secondary/admin folder actions live in the M3 tools sheet
                 // (bottom sheet on mobile, right side sheet on desktop).
                 if (is_auth && count > 0) || is_context_owner {
@@ -237,6 +218,37 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                     super::content::SlateRenderer { data: node.data.as_ref().map(|d| d.0.clone()) }
                 }
             }
+        }
+        // The folder's contents in a separate card, so the content card's header
+        // stays simple (identity + tools). The item count and the list/grid toggle
+        // live here, with the children they control.
+        div { class: "card",
+            div { class: "card-header",
+                div { class: "avatar small",
+                    span { class: "material-icons", "folder_open" }
+                }
+                h3 { class: "title-medium", "{t(\"common.items\")}" }
+                // Child count (#143).
+                if count > 0 {
+                    span { class: "count-badge", title: "{t(\"common.items\")}", "{count}" }
+                }
+                div { class: "flex-grow" }
+                // Toggle list/grid layout (#125).
+                if count > 1 {
+                    super::widgets::SegmentedButton {
+                        segments: vec![
+                            ("list".to_string(), "view_list".to_string()),
+                            ("grid".to_string(), "grid_view".to_string()),
+                        ],
+                        selected: if is_grid { "grid".to_string() } else { "list".to_string() },
+                        on_select: move |v: String| {
+                            let g = v == "grid";
+                            grid.set(g);
+                            write_grid_pref(g);
+                        },
+                    }
+                }
+            }
             if children.is_empty() {
                 div { class: "card-content",
                     p {
@@ -278,14 +290,13 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                     }
                 }
             }
-
-            // Create a document or subfolder here — only when the folder accepts
-            // children (`attachable`); the backend permissions gate what mimes.
-            if is_auth && attachable {
-                FolderAdd {
-                    parent_id: node.id.0.clone(),
-                    context_id: node.context_id.clone().map(|c| c.0),
-                }
+        }
+        // Create a document or subfolder here — only when the folder accepts
+        // children (`attachable`); the backend permissions gate what mimes.
+        if is_auth && attachable {
+            FolderAdd {
+                parent_id: node.id.0.clone(),
+                context_id: node.context_id.clone().map(|c| c.0),
             }
         }
 

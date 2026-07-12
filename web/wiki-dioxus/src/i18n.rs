@@ -142,7 +142,7 @@ const EN_JSON: &str = r#"{
         "download": "Download",
         "gridView": "Grid view",
         "listView": "List view",
-        "items": "items"
+        "items": "Items"
     },
     "auth": {
         "login": "Log In",
@@ -458,7 +458,7 @@ const DA_JSON: &str = r#"{
         "download": "Download",
         "gridView": "Gittervisning",
         "listView": "Listevisning",
-        "items": "elementer"
+        "items": "Elementer"
     },
     "auth": {
         "login": "Log Ind",
