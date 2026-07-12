@@ -2454,6 +2454,11 @@ h6,
  * line break rather than collapse to a space. Preserve newlines but keep wrap. */
 .slate-content p {
 	white-space: pre-wrap;
+	/* Auto-hyphenate long words (esp. Danish compound words) like the old wiki,
+	   with a hard break as the fallback when no hyphenation point fits. Needs the
+	   document <html lang> set (see i18n::apply_lang). */
+	hyphens: auto;
+	overflow-wrap: break-word;
 }
 
 /* Table of contents (#117): a boxed list of heading anchors above the content. */

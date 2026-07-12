@@ -296,6 +296,14 @@ def test-shell [session_id: string, timeout: int, passed: int, failed: int]: not
     sleep 300ms
 
     let r = (assert-exists $session_id "app shell mounts" "#main .app-shell" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    # <html lang> must be set so `hyphens: auto` (document text, node names) actually
+    # hyphenates — without a lang attribute the browser has no dictionary.
+    let htmllang = (wd-execute $session_id 'return document.documentElement.getAttribute("lang")||""')
+    if ($htmllang == "da") or ($htmllang == "en") {
+        log-ok $"html lang set to '($htmllang)' for hyphenation"; $p = $p + 1
+    } else {
+        log-fail $"html lang not set: '($htmllang)'"; $fl = $fl + 1
+    }
     # The welcome card's title is the home (root) node's name; unauthenticated it
     # falls back to the default. Assert a non-empty title renders (data-driven).
     let wtitle = (wd-execute $session_id 'var h=document.querySelector("#main .headline-small"); return h?h.innerText.trim():""')

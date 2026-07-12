@@ -1113,6 +1113,7 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                                 Lang::En => Lang::Da,
                                 Lang::Da => Lang::En,
                             };
+                            crate::i18n::apply_lang(&new_lang);
                             *LANG.write() = new_lang;
                             menu_open.set(false);
                         },

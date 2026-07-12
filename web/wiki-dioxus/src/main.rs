@@ -125,6 +125,8 @@ fn App() -> Element {
                 }
             }
         }
+        // Reflect the language on <html lang> so `hyphens: auto` works.
+        i18n::apply_lang(&i18n::LANG.read());
 
         // Load the persisted theme, then apply it to the document element.
         theme::load_theme();

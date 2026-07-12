@@ -32,6 +32,18 @@ pub fn current_locale() -> &'static str {
     LANG.read().locale()
 }
 
+/// Set the document's `<html lang>` so the browser can auto-hyphenate
+/// (`hyphens: auto`) — without a `lang` attribute the browser has no dictionary
+/// and hyphenation is a no-op. Mirrors the old wiki's `<html lang="da">`.
+pub fn apply_lang(lang: &Lang) {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.document_element())
+    {
+        let _ = el.set_attribute("lang", lang.code());
+    }
+}
+
 pub static LANG: GlobalSignal<Lang> = Signal::global(|| Lang::En);
 
 pub fn use_lang() -> Signal<Lang> {
