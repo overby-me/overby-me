@@ -502,16 +502,20 @@ fn Breadcrumbs() -> Element {
         (true, 0)
     };
 
-    // The default (unhovered) open crumb is the deepest one.
-    let last_id = if total > 0 { total } else { 0 };
+    // The deepest crumb is open (its name shown) by default: the app view when one
+    // is open — that is the current location — otherwise the last path node.
+    let last_id = if app.is_some() {
+        total + 1
+    } else if total > 0 {
+        total
+    } else {
+        0
+    };
     let hov = *hovered.read();
     let is_open = move |c: usize| match hov {
         Some(h) => h == c,
         None => c == last_id,
     };
-
-    // The open app, badged onto the current (last) crumb's avatar.
-    let app_badge = app.map(|a| format!("app/{a}"));
 
     rsx! {
         div {
@@ -526,7 +530,6 @@ fn Breadcrumbs() -> Element {
                     open: is_open(0),
                     crumb_id: 0,
                     hovered,
-                    app_badge: None,
                 }
             }
             for i in start..total {
@@ -545,7 +548,6 @@ fn Breadcrumbs() -> Element {
                         })
                         .unwrap_or_default();
                     let ordinal = info.and_then(|c| c.ordinal);
-                    let badge = if i + 1 == total { app_badge.clone() } else { None };
                     rsx! {
                         BreadcrumbCrumb {
                             key: "{i}",
@@ -556,12 +558,39 @@ fn Breadcrumbs() -> Element {
                             open: is_open(i + 1),
                             crumb_id: i + 1,
                             hovered,
-                            app_badge: badge,
                         }
                     }
                 }
             }
+            // The open app (vote / speak / members / editor / …) as its own trailing
+            // crumb — a labelled, clickable step rather than a badge on the node.
+            if let Some(a) = app.clone() {
+                BreadcrumbCrumb {
+                    to: Route::PathPage { segments: segments.clone(), app: Some(a.clone()) },
+                    mime: format!("app/{a}"),
+                    name: app_crumb_label(&a),
+                    ordinal: None,
+                    open: is_open(total + 1),
+                    crumb_id: total + 1,
+                    hovered,
+                }
+            }
         }
+    }
+}
+
+/// Human label for an `?app=` view, shown as the trailing breadcrumb. Mirrors the
+/// app-rail labels; hidden/URL-only apps fall back to their key.
+fn app_crumb_label(app: &str) -> String {
+    match app {
+        "folder" => t("mime.folder"),
+        "speak" => t("mime.speak"),
+        "vote" => t("mime.vote"),
+        "member" => t("common.members"),
+        "editor" => t("mime.editor"),
+        "sort" => t("mime.sort"),
+        "screen" => t("mime.screen"),
+        other => other.to_string(),
     }
 }
 
@@ -576,7 +605,6 @@ fn BreadcrumbCrumb(
     open: bool,
     crumb_id: usize,
     hovered: Signal<Option<usize>>,
-    app_badge: Option<String>,
 ) -> Element {
     let mut hovered = hovered;
     rsx! {
@@ -593,10 +621,6 @@ fn BreadcrumbCrumb(
             Link { to, class: "crumb-link",
                 div { class: "avatar small crumb-avatar",
                     {super::loader::node_avatar(&mime, &name, ordinal)}
-                    // The open app (e.g. vote, editor) badged onto the avatar.
-                    if let Some(badge) = app_badge {
-                        span { class: "crumb-app-badge", {super::loader::icon_el(&badge)} }
-                    }
                 }
                 span {
                     class: if open { "crumb-name open" } else { "crumb-name" },

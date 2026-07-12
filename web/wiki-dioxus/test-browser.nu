@@ -852,6 +852,15 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             }
             let r = (assert-exists $session_id "vote app renders" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
             let r = (check-contrast $session_id "vote app (active app-rail highlight)" $p $fl); $p = $r.passed; $fl = $r.failed
+            # The open app is its OWN trailing breadcrumb (a labelled, clickable
+            # step) rather than a small overlay badge on the node avatar.
+            let appcrumb = (wd-execute $session_id 'var links=[...document.querySelectorAll(".breadcrumbs .crumb .crumb-link")]; var last=links[links.length-1]; var href=last?(last.getAttribute("href")||""):""; var nmEl=last?last.querySelector(".crumb-name.open"):null; var badge=document.querySelector(".crumb-app-badge")?1:0; return JSON.stringify({href: href, name: nmEl?nmEl.innerText.trim():"", badge: badge})')
+            let ac = ($appcrumb | from json)
+            if ($ac.href | str contains "app=vote") and ($ac.badge == 0) {
+                log-ok $"open app is its own trailing crumb, name='($ac.name)', no overlay badge"; $p = $p + 1
+            } else {
+                log-fail $"app crumb missing or wrong: ($appcrumb)"; $fl = $fl + 1
+            }
             capture-shots $session_id "vote-app"
             # Speak app (if this context exposes it): capture it, then return to
             # the vote app so the downstream vote-app checks keep their state.
@@ -881,13 +890,15 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
                     log-fail $"active app indicator weak: readable ($m.readable):1, distinct ($m.distinct)"; $fl = $fl + 1
                 }
             }
-            # The open app is badged onto the current node's breadcrumb avatar.
+            # The open app is represented in the breadcrumb as its own trailing
+            # crumb carrying the app icon (the overlay badge was retired).
             sleep 1sec
-            let badge = (wd-execute $session_id 'return document.querySelector(".top-app-bar .breadcrumbs .crumb-app-badge")?"y":"n"')
-            if $badge == "y" {
-                log-ok "open app shows a breadcrumb badge"; $p = $p + 1
+            let crumbapp = (wd-execute $session_id 'var links=[...document.querySelectorAll(".top-app-bar .breadcrumbs .crumb .crumb-link")]; var last=links[links.length-1]; var ic=last?last.querySelector(".material-icons"):null; var noBadge=document.querySelector(".crumb-app-badge")?0:1; return JSON.stringify({icon: ic?ic.textContent.trim():"", trailingHref: last?(last.getAttribute("href")||""):"", noBadge: noBadge})')
+            let cba = ($crumbapp | from json)
+            if ($cba.icon == "how_to_vote") and ($cba.trailingHref | str contains "app=vote") and ($cba.noBadge == 1) {
+                log-ok "open app shows as a trailing breadcrumb with its icon"; $p = $p + 1
             } else {
-                log-fail "no app badge on the breadcrumb avatar"; $fl = $fl + 1
+                log-fail $"app not represented as a trailing crumb: ($crumbapp)"; $fl = $fl + 1
             }
             # Only the ready apps (folder/speak/vote/member) are in the rail; the
             # rest (graph/social/...) are hidden until ready.
