@@ -1981,6 +1981,13 @@ select:focus {
 .sheet-action:hover {
 	background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
+.sheet-action.selected {
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+}
+.sheet-action.selected .material-icons {
+	color: var(--md-on-secondary-container);
+}
 .sheet-action .material-icons {
 	color: var(--md-on-surface-variant);
 }

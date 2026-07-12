@@ -707,9 +707,18 @@ fn NavigationBar() -> Element {
     }
     let pending = PENDING_INVITES();
 
+    // M3 bottom navigation shows up to 5 destinations. Beyond that the bar does
+    // not scale, so the surplus moves into an "apps" switcher sheet: the bar keeps
+    // the first four destinations plus a trailing More button. With <=5 apps every
+    // destination stays inline (the current case), so this only kicks in as more
+    // apps are surfaced.
+    const MAX_INLINE: usize = 5;
+    let overflow = apps.len() > MAX_INLINE;
+    let inline = if overflow { MAX_INLINE - 1 } else { apps.len() };
+
     rsx! {
         nav { class: "nav-bar",
-            for (mime_id , label , to , active) in apps.into_iter() {
+            for (mime_id , label , to , active) in apps.iter().take(inline).cloned() {
                 Link {
                     key: "{mime_id}",
                     to,
@@ -723,6 +732,60 @@ fn NavigationBar() -> Element {
                         }
                     }
                     span { class: "nav-bar-label md-label-medium", "{label}" }
+                }
+            }
+            if overflow {
+                AppSwitcher { apps: apps.clone() }
+            }
+        }
+    }
+}
+
+/// The scalable "apps" overflow: a bottom-nav destination that opens a sheet
+/// listing every context app (bottom sheet on compact). Keeps the bottom bar
+/// within the M3 five-destination limit however many apps a context surfaces.
+#[component]
+fn AppSwitcher(apps: Vec<(&'static str, String, Route, bool)>) -> Element {
+    let mut open = use_signal(|| false);
+    rsx! {
+        button {
+            class: "nav-bar-item state-layer",
+            r#type: "button",
+            aria_label: t("common.apps"),
+            onclick: move |_| open.set(true),
+            span { class: "nav-bar-indicator",
+                span { class: "material-icons", "apps" }
+            }
+            span { class: "nav-bar-label md-label-medium", "{t(\"common.apps\")}" }
+        }
+        div {
+            class: if open() { "sheet-scrim open" } else { "sheet-scrim" },
+            role: "presentation",
+            onclick: move |_| open.set(false),
+        }
+        aside {
+            class: if open() { "tool-sheet open" } else { "tool-sheet" },
+            role: "dialog",
+            "aria-label": t("common.apps"),
+            div { class: "tool-sheet-header",
+                div { class: "sheet-handle" }
+                h3 { class: "title-medium", "{t(\"common.apps\")}" }
+                button {
+                    class: "btn-icon state-layer",
+                    aria_label: t("common.close"),
+                    onclick: move |_| open.set(false),
+                    span { class: "material-icons", "close" }
+                }
+            }
+            div { class: "tool-sheet-body", onclick: move |_| open.set(false),
+                for (mime_id , label , to , active) in apps.into_iter() {
+                    Link {
+                        key: "{mime_id}",
+                        to,
+                        class: if active { "sheet-action selected" } else { "sheet-action" },
+                        {super::loader::icon_el(mime_id)}
+                        "{label}"
+                    }
                 }
             }
         }
