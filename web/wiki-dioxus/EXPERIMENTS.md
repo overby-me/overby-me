@@ -99,6 +99,20 @@ These change behaviour / add capability rather than only looks:
   currently at the top of the viewport as you scroll a document. Completes the
   long-document reading set (typography + progress bar + back-to-top + spy).
 
+## Polish & small fixes
+
+Smaller, mostly CSS-only refinements and genuine fixes:
+
+- **Heading scroll-margin** — TOC/anchor jumps land the heading *below* the fixed
+  top bar instead of hidden under it (a real fix).
+- **External-link cue** — content links that open in a new tab show an outbound ↗.
+- **Keyboard focus baseline** — a consistent `:focus-visible` ring for anything
+  lacking its own (element-specific rings still win).
+- **Characterful empty folder** — the void-portal orb, compact, for empty folders.
+- **Image loading placeholder** — a tonal box shows while a content image loads.
+- **Destructive-action hover** — delete actions get an error-tinted hover.
+- **Branded text selection** — a primary-tinted `::selection`.
+
 ## Notes / follow-ups
 
 - The graph SVG could get the same `.viewport-frame` as the map (left out to avoid
