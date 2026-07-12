@@ -290,6 +290,10 @@ a:hover {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
+	justify-content: center;
+	/* Take the space below the header and centre the destinations vertically
+	   (M3 navigation-rail guidelines) instead of stacking them at the top. */
+	flex: 1;
 	gap: var(--md-sys-spacing-3);
 	width: 100%;
 }
@@ -334,30 +338,27 @@ a:hover {
 	text-align: center;
 }
 
-/* Expanded rail (large/xl): widens to host the tree inline. */
-.nav-rail.expanded {
-	width: var(--md-sys-rail-expanded);
-	align-items: stretch;
-	padding: var(--md-sys-spacing-2);
-	gap: var(--md-sys-spacing-2);
-}
-.nav-rail.expanded .nav-rail-destinations {
-	flex-direction: row;
-	flex-wrap: wrap;
-	justify-content: flex-start;
-	gap: var(--md-sys-spacing-2);
-}
-.nav-rail.expanded .nav-rail-item {
-	width: auto;
-	flex: 0 0 auto;
-	min-width: 72px;
-}
-.nav-rail-tree {
-	flex: 1;
+/* Permanent tree pane (large/xl): the groups/events tree in its own surface
+   beside the rail, so the rail stays a clean 88dp app strip. Fills the strip
+   between the rail (left) and the top-app-bar / content (right). */
+.nav-tree-pane {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	left: var(--md-sys-rail-width);
+	width: calc(var(--md-sys-rail-expanded) - var(--md-sys-rail-width));
+	z-index: 55;
+	background: var(--md-surface-container-low);
 	overflow-y: auto;
 	scrollbar-width: none;
-	border-top: 1px solid var(--md-outline-variant);
-	padding-top: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-2);
+}
+.nav-tree-pane::-webkit-scrollbar {
+	display: none;
+}
+.nav-rail-tree {
+	overflow-y: auto;
+	scrollbar-width: none;
 }
 .nav-rail-tree::-webkit-scrollbar {
 	display: none;

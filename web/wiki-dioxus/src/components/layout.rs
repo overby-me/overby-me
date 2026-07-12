@@ -199,11 +199,20 @@ pub fn Layout() -> Element {
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
 
-            // Primary navigation (APP axis): a navigation rail on medium+ (which
-            // widens to host the groups/events tree inline on large/xl); a bottom
-            // navigation bar on compact (rendered after the content, below).
+            // Primary navigation (APP axis): a clean vertical M3 navigation rail on
+            // medium+ (88dp, never widened); a bottom navigation bar on compact
+            // (rendered after the content, below).
             if !size_class.is_compact() {
                 NavigationRail { expanded: size_class.is_expanded_rail(), open_drawer }
+            }
+
+            // PLACE axis on large/xl: a permanent groups/events tree pane beside the
+            // rail (the rail stays a clean app strip; the tree is no longer crammed
+            // into it). On smaller sizes the tree is the modal drawer (below).
+            if size_class.is_expanded_rail() {
+                aside { class: "nav-tree-pane",
+                    div { class: "nav-rail-tree", DrawerContent {} }
+                }
             }
 
             // Top app bar spanning the content region.
@@ -645,9 +654,10 @@ fn NavigationRail(expanded: bool, open_drawer: Signal<bool>) -> Element {
     let pending = PENDING_INVITES();
 
     rsx! {
-        nav { class: if expanded { "nav-rail expanded" } else { "nav-rail" },
-            // Header: a menu toggle opens the modal tree drawer while collapsed
-            // (the tree is hosted inline below once the rail is expanded).
+        nav { class: "nav-rail",
+            // M3 rail header: a menu button opens the modal tree drawer on medium
+            // (where the tree is modal). On large/xl the tree is a permanent pane
+            // beside the rail, so the menu button is omitted there.
             if !expanded {
                 div { class: "nav-rail-header",
                     button {
@@ -658,6 +668,8 @@ fn NavigationRail(expanded: bool, open_drawer: Signal<bool>) -> Element {
                     }
                 }
             }
+            // Destinations are grouped and vertically centred in the rail (M3
+            // navigation-rail guidelines), not crammed into the top-left corner.
             div { class: "nav-rail-destinations",
                 for (mime_id , label , to , active) in apps.into_iter() {
                     Link {
@@ -676,11 +688,6 @@ fn NavigationRail(expanded: bool, open_drawer: Signal<bool>) -> Element {
                             "{label}"
                         }
                     }
-                }
-            }
-            if expanded {
-                div { class: "nav-rail-tree",
-                    DrawerContent {}
                 }
             }
         }
