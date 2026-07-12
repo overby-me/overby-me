@@ -2299,13 +2299,16 @@ h6,
 	gap: 12px;
 	padding: 12px 16px;
 	cursor: pointer;
-	border-left: 2px solid var(--md-outline);
+	border-left: 2px solid var(--md-outline-variant);
 	margin-left: 24px;
-	transition: background-color 0.15s;
+	border-radius: 0 var(--md-sys-shape-corner-medium)
+		var(--md-sys-shape-corner-medium) 0;
+	transition: background-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
 }
 
 .program-item:hover {
-	background-color: var(--md-surface-variant);
+	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
 .program-index {
@@ -3068,16 +3071,20 @@ a.list-item:hover {
 	padding-top: 8px;
 }
 
-/* Thread line for nested replies. */
+/* Magenta thread line for nested replies (the civic discussion accent). */
 .comment .comment {
-	border-left: 2px solid var(--md-outline);
+	border-left: 2px solid var(--md-tertiary);
 	padding-left: 12px;
 }
 
+/* Each comment reads as a tonal M3 card. */
 .comment-main {
 	display: flex;
 	gap: 10px;
 	align-items: flex-start;
+	background: var(--md-surface-container-low);
+	border-radius: var(--md-sys-shape-corner-medium);
+	padding: 12px;
 }
 
 .comment-avatar {
