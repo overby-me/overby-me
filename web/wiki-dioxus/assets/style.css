@@ -4052,12 +4052,18 @@ a.list-item:hover {
 }
 
 /* Rich-text toolbar */
+/* EXPERIMENT (floating editor toolbar): lift the controls onto their own tonal
+   surface-container bar so the toolbar reads as a distinct instrument tray. */
 .editor-tools {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 2px;
-	margin-bottom: 8px;
+	gap: 4px;
+	margin-bottom: 12px;
+	padding: 6px;
+	background: var(--md-surface-container);
+	border-radius: var(--md-sys-shape-corner-large);
+	box-shadow: var(--md-sys-elevation-1);
 }
 
 .editor-select {
@@ -4069,9 +4075,9 @@ a.list-item:hover {
 .editor-divider {
 	width: 1px;
 	align-self: stretch;
-	min-height: 24px;
-	margin: 0 4px;
-	background: var(--md-outline);
+	min-height: 20px;
+	margin: 0 6px;
+	background: var(--md-outline-variant);
 }
 
 .btn-icon.active {
