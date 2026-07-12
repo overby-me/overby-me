@@ -984,28 +984,30 @@ pub async fn query_members_page(
     offset: usize,
 ) -> Result<(Vec<MemberFields>, usize), String> {
     let where_clause = members_where(parent_id, filter);
+    // The `members` table exposes no `_aggregate` in this schema, so the total is
+    // counted with a separate id-only query (just UUIDs) instead of
+    // `members_aggregate` — which fails validation and would empty the whole page.
     let query = format!(
         "query {{ \
-           members(where: {w}, order_by: {{ name: asc }}, limit: {limit}, offset: {offset}) {{ \
+           page: members(where: {w}, order_by: {{ name: asc }}, limit: {limit}, offset: {offset}) {{ \
              id name email accepted active owner hidden nodeId \
              user {{ displayName }} node {{ mimeId }} \
            }} \
-           members_aggregate(where: {w}) {{ aggregate {{ count }} }} \
+           all: members(where: {w}) {{ id }} \
          }}",
         w = where_clause,
     );
     let data = execute_raw(access_token, &query).await?;
     let rows = data
-        .get("members")
+        .get("page")
         .and_then(|m| m.as_array())
         .map(|arr| arr.iter().filter_map(parse_member_row).collect())
         .unwrap_or_default();
     let total = data
-        .get("members_aggregate")
-        .and_then(|a| a.get("aggregate"))
-        .and_then(|a| a.get("count"))
-        .and_then(|c| c.as_u64())
-        .unwrap_or(0) as usize;
+        .get("all")
+        .and_then(|a| a.as_array())
+        .map(|arr| arr.len())
+        .unwrap_or(0);
     Ok((rows, total))
 }
 
