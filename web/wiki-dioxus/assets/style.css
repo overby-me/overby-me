@@ -2168,6 +2168,58 @@ h6,
 	}
 }
 
+/* ── Projector speaker module (SpeakMode::Screen) ────────────────────────
+   Room-distance, glanceable: the CURRENT speaker is the single focal element
+   (civic magenta, display-size name), the on-deck one is subordinate and asked
+   to get ready. Reads from across the room; no full queue. */
+.speak-projector {
+	gap: 16px;
+}
+.speak-projector .list-item {
+	padding: 24px;
+	border-radius: var(--md-sys-shape-corner-extra-large);
+	gap: 20px;
+}
+/* Current speaker = the focal civic card (overrides the in-app green). */
+.speak-projector .speak-current {
+	background: var(--md-tertiary-container);
+	color: var(--md-on-tertiary-container);
+	border-left: none;
+}
+.speak-projector .speak-current .avatar {
+	background: var(--md-tertiary);
+	color: var(--md-on-tertiary);
+	width: 56px;
+	height: 56px;
+	font-size: 1.5rem;
+}
+.speak-projector .speak-current .list-item-primary {
+	font-size: var(--md-sys-typescale-display-small-size);
+	line-height: var(--md-sys-typescale-display-small-line);
+	font-weight: 600;
+}
+.speak-projector .speak-current .list-item-secondary {
+	font-size: var(--md-sys-typescale-title-large-size);
+	line-height: var(--md-sys-typescale-title-large-line);
+}
+/* On-deck = subordinate surface card, magenta accent + get-ready eyebrow. */
+.speak-projector .speak-getready {
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
+	border-left: 4px solid var(--md-tertiary);
+}
+.speak-projector .speak-getready .list-item-primary {
+	font-size: var(--md-sys-typescale-headline-small-size);
+	line-height: var(--md-sys-typescale-headline-small-line);
+	font-weight: 600;
+}
+.speak-projector .speak-getready .list-item-secondary {
+	color: var(--md-tertiary);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+}
+
 /* Speaking-time countdown pill in the list header. */
 .chip-timer {
 	background: var(--md-primary);
@@ -2491,9 +2543,43 @@ h6,
 
 /* Projector view (?app=screen): full-screen content, no drawer/rail/bar chrome. */
 .screen-full {
-	padding: 16px;
+	padding: 0;
 	min-height: 100vh;
 	box-sizing: border-box;
+	/* Room-facing projector canvas: the plainest tonal step so bright panes pop
+	   and low contrast doesn't wash out under ambient light + projection. */
+	background: var(--md-surface-container-lowest);
+}
+
+/* Projector 2-pane supporting layout with a TV overscan-safe inset (nothing
+   critical hugs the bezel). Hero (active content) dominant, speaker rail fixed. */
+.projector {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 380px;
+	gap: var(--md-sys-pane-spacer);
+	min-height: 100vh;
+	box-sizing: border-box;
+	padding: 32px 48px;
+	align-items: start;
+}
+@media (min-width: 1600px) {
+	.projector {
+		grid-template-columns: minmax(0, 1fr) 480px;
+		padding: 4vh 5vw;
+	}
+}
+/* Below Large (unlikely for a projector): stack, hero over the speaker rail. */
+@media (max-width: 1199px) {
+	.projector {
+		grid-template-columns: 1fr;
+	}
+}
+.projector-hero {
+	min-width: 0;
+}
+.projector-rail {
+	position: sticky;
+	top: 32px;
 }
 
 /* The groups/events list rendered in the Home main pane — mobile only; on desktop

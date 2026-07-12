@@ -45,22 +45,23 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
     let active = active.read().clone().flatten();
 
     rsx! {
-        div { class: "grid grid-3", style: "gap: 8px;",
-            // Active content (spans two columns on wide screens).
-            div { style: "grid-column: span 2;",
+        // Projector: a chromeless, room-distance 2-pane layout — a dominant hero
+        // (the active content the room is looking at) + a supporting rail (the
+        // current + on-deck speaker). Tonal, overscan-safe (see `.projector`).
+        div { class: "projector",
+            div { class: "projector-hero",
                 match active {
                     Some(n) => rsx! { MimeLoader { node: n, path: Vec::new() } },
                     None => rsx! {
                         div { class: "card",
                             div { class: "card-content",
-                                p { class: "body-large", "…" }
+                                p { class: "md-display-small text-muted", "…" }
                             }
                         }
                     },
                 }
             }
-            // Speaker list alongside it.
-            div {
+            div { class: "projector-rail",
                 SpeakApp { node: node.clone(), mode: SpeakMode::Screen }
             }
         }

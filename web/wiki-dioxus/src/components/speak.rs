@@ -197,7 +197,7 @@ fn SpeakList(
                     }
                 }
             } else {
-                div { class: "list",
+                div { class: if screen { "list speak-projector" } else { "list" },
                     // On the projector (screen) the room only needs the current
                     // speaker and the single next one, who is asked to get ready;
                     // the full queue stays in the interactive SpeakApp/admin view.
