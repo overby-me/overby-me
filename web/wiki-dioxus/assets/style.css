@@ -1669,6 +1669,23 @@ select:focus {
 	text-decoration: none;
 }
 
+/* Bluesky social wall (social::PostCard): header row + round avatar + wrapped
+   post text, tokenised off the M3 shape scale. */
+.post-header {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+}
+.post-avatar {
+	width: 40px;
+	height: 40px;
+	border-radius: var(--md-sys-shape-corner-full);
+	object-fit: cover;
+}
+.post-text {
+	white-space: pre-wrap;
+}
+
 /* A <button> that should render as a full-width list row (e.g. an invite
    autocomplete match): strip the native chrome and inherit the list typography. */
 .list-button {

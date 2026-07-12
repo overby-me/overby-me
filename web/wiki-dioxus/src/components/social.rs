@@ -89,13 +89,9 @@ fn PostCard(post: Post) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-content",
-                div { class: "stack stack-h", style: "gap: 10px; align-items: center;",
+                div { class: "post-header",
                     if let Some(avatar) = post.avatar.clone() {
-                        img {
-                            src: "{avatar}",
-                            style: "width: 40px; height: 40px; border-radius: 50%;",
-                            alt: "avatar",
-                        }
+                        img { src: "{avatar}", class: "post-avatar", alt: "avatar" }
                     } else {
                         div { class: "avatar small", span { class: "material-icons", "public" } }
                     }
@@ -108,7 +104,7 @@ fn PostCard(post: Post) -> Element {
                         }
                     }
                 }
-                p { class: "body-medium mt-1", style: "white-space: pre-wrap;", "{post.text}" }
+                p { class: "post-text body-medium mt-1", "{post.text}" }
             }
         }
     }
