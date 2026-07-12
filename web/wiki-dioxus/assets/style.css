@@ -3220,6 +3220,15 @@ h6,
 .slate-content a:hover {
 	text-decoration-color: var(--md-primary);
 }
+/* EXPERIMENT (functional: external-link cue): links that open in a new tab show a
+   small outbound arrow so it's clear they leave the page. */
+.slate-content a[target="_blank"]::after {
+	content: "↗";
+	display: inline-block;
+	margin-left: 2px;
+	font-size: 0.85em;
+	opacity: 0.7;
+}
 
 /* Table of contents (#117): a boxed list of heading anchors above the content. */
 .toc {
