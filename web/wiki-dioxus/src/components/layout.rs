@@ -214,7 +214,8 @@ pub fn Layout() -> Element {
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
 
-            // EXPERIMENT (functional): a back-to-top button for long pages.
+            // EXPERIMENT (functional): a back-to-top button + reading progress bar.
+            super::back_to_top::ReadingProgress {}
             super::back_to_top::BackToTop {}
 
             // APP axis (medium+): a fixed icon rail. Its menu button toggles the

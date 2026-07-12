@@ -294,6 +294,24 @@ html {
 	scroll-behavior: smooth;
 }
 
+/* EXPERIMENT (functional: reading progress): a thin gradient bar across the very
+   top showing scroll progress through the page. */
+.reading-progress {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 3px;
+	z-index: 200;
+	background: transparent;
+	pointer-events: none;
+}
+.reading-progress-fill {
+	height: 100%;
+	background: linear-gradient(90deg, var(--md-primary), var(--md-tertiary));
+	transition: width 80ms linear;
+}
+
 /* EXPERIMENT (functional: back to top): a scroll-aware button that fades in after
    scrolling down and returns to the top on click. Sits opposite the FAB. */
 .back-to-top {
