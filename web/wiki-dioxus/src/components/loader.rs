@@ -134,7 +134,37 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
             }
         }
         None => {
-            rsx! { super::widgets::Spinner {} }
+            rsx! { ContentSkeleton {} }
+        }
+    }
+}
+
+/// EXPERIMENT (functional): a content-shaped shimmer placeholder shown while a
+/// node loads, instead of a bare spinner — better perceived performance because
+/// the layout appears immediately in roughly its final shape.
+#[component]
+fn ContentSkeleton() -> Element {
+    rsx! {
+        div { class: "card",
+            div { class: "skeleton-card",
+                div { class: "skeleton-row",
+                    div { class: "skeleton skeleton-avatar" }
+                    div { style: "flex: 1;",
+                        div { class: "skeleton skeleton-line", style: "width: 45%;" }
+                        div {
+                            class: "skeleton skeleton-line",
+                            style: "width: 25%; margin-bottom: 0;",
+                        }
+                    }
+                }
+                div { class: "skeleton skeleton-line", style: "width: 92%;" }
+                div { class: "skeleton skeleton-line", style: "width: 97%;" }
+                div { class: "skeleton skeleton-line", style: "width: 83%;" }
+                div {
+                    class: "skeleton skeleton-line",
+                    style: "width: 89%; margin-bottom: 0;",
+                }
+            }
         }
     }
 }
