@@ -499,8 +499,10 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             }
             let inview = (wd-execute $session_id 'var d=document.querySelector(".user-menu-dropdown"); var r=d.getBoundingClientRect(); return (r.left>=-1 && r.top>=-1 && r.right<=window.innerWidth+1 && r.bottom<=window.innerHeight+1)?"y":JSON.stringify({l:Math.round(r.left),t:Math.round(r.top),r:Math.round(r.right),b:Math.round(r.bottom),w:window.innerWidth,h:window.innerHeight})')
             if $inview == "y" { log-ok "user menu popup is within the viewport"; $p = $p + 1 } else { log-fail $"user menu popup off-screen: ($inview)"; $fl = $fl + 1 }
-            let bw = (wd-execute $session_id 'var b=document.querySelector(".user-menu > button"); return getComputedStyle(b).borderTopWidth')
-            if (($bw | default "") == "0px") { log-ok "user menu button has no stray border"; $p = $p + 1 } else { log-warn $"user menu button border-width: ($bw)" }
+            # The account row's only border is the intentional top separator; no
+            # stray side/bottom button chrome.
+            let bw = (wd-execute $session_id 'var b=document.querySelector(".user-menu > button"); var s=getComputedStyle(b); return s.borderLeftWidth+"/"+s.borderBottomWidth')
+            if (($bw | default "") == "0px/0px") { log-ok "account trigger has no stray border"; $p = $p + 1 } else { log-warn $"account trigger borders: ($bw)" }
             # The avatar must stand out from the green bar (the green-on-green
             # complaint): its background should differ clearly from the bar's.
             let avc = (wd-execute $session_id 'function L(c){var a=c.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]} function P(s){var m=s.match(/[0-9.]+/g);return m?[+m[0],+m[1],+m[2]]:[0,0,0]} function R(x,y){var p=L(P(x)),q=L(P(y)),h=Math.max(p,q),l=Math.min(p,q);return (h+0.05)/(l+0.05)} var av=document.querySelector(".user-menu .avatar"); var bar=document.querySelector(".bar"); if(!av||!bar) return "no"; return R(getComputedStyle(av).backgroundColor, getComputedStyle(bar).backgroundColor).toFixed(2)')

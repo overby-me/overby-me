@@ -415,9 +415,9 @@ a:hover {
 }
 .nav-rail-tree {
 	height: 100%;
-	padding: var(--md-sys-spacing-2);
-	overflow-y: auto;
-	scrollbar-width: none;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
 }
 .nav-rail-tree::-webkit-scrollbar {
 	display: none;
@@ -517,8 +517,32 @@ a:hover {
 	transform: translateX(-100%);
 	transition: transform var(--md-sys-motion-duration-long1)
 		var(--md-sys-motion-spring-spatial-default);
+	overflow: hidden;
+	scrollbar-width: none;
+	display: flex;
+	flex-direction: column;
+}
+/* The body below the header fills the drawer; the tree scrolls inside it while
+   the account footer stays pinned. */
+.nav-drawer-body {
+	flex: 1;
+	min-height: 0;
+}
+/* Drawer content: a scrollable tree with the account footer pinned below it. */
+.drawer-content {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+.drawer-scroll {
+	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 	scrollbar-width: none;
+	padding: 0 16px 16px;
+}
+.drawer-scroll::-webkit-scrollbar {
+	display: none;
 }
 .nav-drawer.open {
 	transform: translateX(0);
@@ -3319,6 +3343,54 @@ a.list-item:hover {
 		margin-top: 8px;
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 	}
+}
+
+/* Account menu in the navigation drawer (its trigger sits at the drawer's
+   bottom), so the popover opens UPWARD, filling the drawer width. */
+/* Account footer pinned at the bottom of the drawer, separated from the tree. */
+.user-menu.in-drawer {
+	flex: 0 0 auto;
+	width: 100%;
+	position: relative;
+	padding: 6px 8px;
+	background: var(--md-surface);
+	border-top: 1px solid var(--md-outline-variant);
+}
+/* Its popover opens UPWARD, filling the drawer width. */
+.user-menu.in-drawer .user-menu-dropdown {
+	position: absolute;
+	left: 8px;
+	right: 8px;
+	bottom: 100%;
+	top: auto;
+	min-width: 0;
+	max-width: none;
+	margin: 0 0 8px;
+	box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.18);
+}
+/* The account row: avatar + name, like a drawer list item. */
+.drawer-account-trigger {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	min-height: 48px;
+	padding: 8px 12px;
+	border: none;
+	background: none;
+	cursor: pointer;
+	font: inherit;
+	color: var(--md-on-surface);
+	text-align: left;
+	border-radius: var(--md-sys-shape-corner-large);
+}
+.drawer-account-name {
+	min-width: 0;
+	font-size: var(--md-sys-typescale-title-small-size);
+	font-weight: 500;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .user-menu-dropdown .list-item {

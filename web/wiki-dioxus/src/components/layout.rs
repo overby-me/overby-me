@@ -87,7 +87,6 @@ pub fn Layout() -> Element {
     let mut search_mode = use_signal(|| false);
     let search_input = use_signal(String::new);
     let search_results = use_signal(Vec::<NodeFields>::new);
-    let menu_open = use_signal(|| false);
 
     let route = use_route::<Route>();
     let nav = use_navigator();
@@ -257,7 +256,7 @@ pub fn Layout() -> Element {
             }
 
             // Top app bar spanning the content region.
-            TopAppBar { search_mode, search_input, search_results, open_drawer, menu_open }
+            TopAppBar { search_mode, search_input, search_results, open_drawer }
 
             // Content pane (the resolved ?app= view). An inner measure caps the
             // reading column at ~A4 and centres it, so content stays legible on
@@ -934,7 +933,7 @@ fn NavigationDrawer(open: Signal<bool>) -> Element {
                     span { class: "material-icons", "close" }
                 }
             }
-            div { onclick: move |_| open.set(false),
+            div { class: "nav-drawer-body", onclick: move |_| open.set(false),
                 DrawerContent {}
             }
         }
@@ -950,7 +949,6 @@ fn TopAppBar(
     search_input: Signal<String>,
     search_results: Signal<Vec<NodeFields>>,
     open_drawer: Signal<bool>,
-    menu_open: Signal<bool>,
 ) -> Element {
     let size = crate::window_size::WINDOW_SIZE();
 
@@ -987,20 +985,22 @@ fn TopAppBar(
                     }
                     div { class: "expressive-search-crumbs", Breadcrumbs {} }
                 }
-                UserMenu { menu_open }
             }
         }
     }
 }
 
-/// User menu with popover
+/// Account menu, shown at the bottom of the navigation drawer (the tree pane on
+/// medium+, the modal drawer on compact). The trigger is an avatar + name row;
+/// clicking it opens the account popover (theme, language, sign out). Owns its
+/// own open state.
 #[component]
-fn UserMenu(menu_open: Signal<bool>) -> Element {
+fn UserMenu() -> Element {
     let session = use_session();
     let nav = use_navigator();
     let is_auth = session.read().is_authenticated();
     let theme = use_theme();
-    let mut menu_open = menu_open;
+    let mut menu_open = use_signal(|| false);
 
     let initial = session
         .read()
@@ -1024,11 +1024,14 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
         .unwrap_or_default();
 
     rsx! {
-        div { class: "user-menu",
+        div { class: "user-menu in-drawer",
+            // Account row: avatar + name. Opens the account popover upward.
+            // stop_propagation so the click does not also dismiss the drawer.
             button {
-                class: "btn-icon",
+                class: "drawer-account-trigger state-layer",
                 aria_label: "{t(\"layout.userMenu\")}",
-                onclick: move |_| {
+                onclick: move |evt| {
+                    evt.stop_propagation();
                     let v = menu_open();
                     menu_open.set(!v);
                 },
@@ -1036,6 +1039,13 @@ fn UserMenu(menu_open: Signal<bool>) -> Element {
                     span { class: "avatar small secondary", "{initial}" }
                 } else {
                     span { class: "avatar small", span { class: "material-icons", "person" } }
+                }
+                span { class: "drawer-account-name",
+                    if is_auth {
+                        "{display_name}"
+                    } else {
+                        "{t(\"layout.account\")}"
+                    }
                 }
             }
             if menu_open() {
@@ -1197,7 +1207,8 @@ fn DrawerContent() -> Element {
         .unwrap_or_default();
 
     rsx! {
-        div { style: "padding: 0 16px 16px;",
+        div { class: "drawer-content",
+            div { class: "drawer-scroll",
             div { class: "list",
                 if segments.is_empty() {
                     // At the home route: Home, styled as a bar like the top panel.
@@ -1235,6 +1246,9 @@ fn DrawerContent() -> Element {
                     }
                 }
             }
+            }
+            // Account menu, pinned at the bottom of the drawer.
+            UserMenu {}
         }
     }
 }
