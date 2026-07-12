@@ -3507,9 +3507,25 @@ h6,
 
 /* Auth form */
 .auth-container {
-	max-width: 400px;
+	max-width: 420px;
 	margin: 0 auto;
 	padding: 24px;
+	position: relative;
+}
+/* EXPERIMENT (auth hero): a soft radial brand wash glowing behind the auth card. */
+.auth-container::before {
+	content: "";
+	position: absolute;
+	inset: -32px 0 auto 0;
+	height: 220px;
+	z-index: -1;
+	pointer-events: none;
+	background: radial-gradient(
+		ellipse at 50% 0%,
+		color-mix(in srgb, var(--md-primary) 20%, transparent),
+		color-mix(in srgb, var(--md-tertiary) 8%, transparent) 45%,
+		transparent 72%
+	);
 }
 
 .auth-form {
