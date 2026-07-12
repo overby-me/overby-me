@@ -1431,15 +1431,25 @@ a.folder-item:focus-visible {
 	background: transparent;
 	color: var(--md-on-surface);
 	outline: none;
-	transition: border-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+	transition:
+		border-color var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-easing-standard),
+		background-color var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-easing-standard),
+		border-radius var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default);
 }
 
+/* EXPERIMENT (expressive text field): focus morphs the corner larger, thickens
+   the outline to 2px (padding-compensated so nothing shifts), and adds a faint
+   primary wash. */
 .text-field input:focus {
 	border-color: var(--md-primary);
-	/* Inset ring reads as the M3 2px focus outline without shifting layout. */
-	box-shadow: inset 0 0 0 1px var(--md-primary);
-	padding: 15px;
+	border-width: 2px;
+	padding: 14px;
+	border-radius: var(--md-sys-shape-corner-large);
+	background: color-mix(in srgb, var(--md-primary) 5%, transparent);
+	box-shadow: none;
 }
 
 /* Styled file upload: a dashed drop-zone control wrapping a hidden native
