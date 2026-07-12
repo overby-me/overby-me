@@ -2273,19 +2273,24 @@ select:focus {
 	height: 32px;
 	padding: 0 12px 0 8px;
 	border: 1px solid var(--md-outline-strong);
-	border-radius: var(--md-sys-shape-corner-small);
+	/* EXPERIMENT (expressive chips): full pill + a springy hover lift. */
+	border-radius: var(--md-sys-shape-corner-full);
 	font-size: var(--md-sys-typescale-label-large-size);
 	line-height: 1;
 	letter-spacing: var(--md-sys-typescale-label-large-tracking);
 	color: var(--md-primary);
 	background: transparent;
 	max-width: 100%;
-	transition: background-color var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard);
+	transition:
+		background-color var(--md-sys-motion-duration-short4)
+			var(--md-sys-motion-easing-standard),
+		transform var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-spring-spatial-fast);
 }
 
 .chip:hover {
-	background-color: color-mix(in srgb, var(--md-primary) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-primary) 10%, transparent);
+	transform: translateY(-1px) scale(1.02);
 }
 
 .chip .material-icons {
@@ -3336,28 +3341,53 @@ h6,
 }
 
 /* Folder list */
+/* EXPERIMENT (expressive list rows): a leading accent bar grows in and the row
+   nudges right on hover — a tactile, directional affordance. */
 .folder-item {
 	display: flex;
 	align-items: center;
 	gap: 12px;
 	padding: 12px 16px;
 	cursor: pointer;
-	transition: background-color 0.15s;
+	position: relative;
+	border-radius: var(--md-sys-shape-corner-large);
+	transition:
+		background-color var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-easing-standard),
+		transform var(--md-sys-motion-duration-medium1)
+			var(--md-sys-motion-spring-spatial-fast);
 }
 
 .folder-item:hover {
-	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+	background-color: color-mix(in srgb, var(--md-primary) 9%, transparent);
+	transform: translateX(4px);
+}
+.folder-item::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	top: 50%;
+	width: 3px;
+	height: 0;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-primary);
+	transform: translateY(-50%);
+	transition: height var(--md-sys-motion-duration-medium1)
+		var(--md-sys-motion-spring-spatial-default);
+}
+.folder-item:hover::before {
+	height: 58%;
 }
 
 /* Child count badge in a folder header (#143). */
 .count-badge {
 	margin-left: 8px;
 	padding: 1px 10px;
-	border-radius: 12px;
-	background: var(--md-surface-variant);
-	color: var(--md-on-surface-variant);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
 	font-size: 13px;
-	font-weight: 600;
+	font-weight: 700;
 }
 
 /* Folder grid view (#125): responsive tiles. */
