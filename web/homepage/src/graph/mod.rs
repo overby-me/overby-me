@@ -27,12 +27,12 @@ fn pointer_client_xy(evt: &PointerEvent) -> (f32, f32) {
     (coords.x as f32, coords.y as f32)
 }
 
-fn wheel_delta_y(evt: &WheelEvent) -> f32 {
-    use dioxus_elements::geometry::WheelDelta;
-    match evt.data().delta() {
-        WheelDelta::Pixels(v) => v.y as f32,
-        WheelDelta::Lines(v) => v.y as f32 * 40.0,
-        WheelDelta::Pages(v) => v.y as f32 * 800.0,
+fn wheel_delta_y(evt: &web_sys::WheelEvent) -> f32 {
+    let dy = evt.delta_y() as f32;
+    match evt.delta_mode() {
+        1 => dy * 40.0,  // DOM_DELTA_LINE
+        2 => dy * 800.0, // DOM_DELTA_PAGE
+        _ => dy,         // DOM_DELTA_PIXEL (0)
     }
 }
 
@@ -62,8 +62,13 @@ pub fn Graph(data: GraphData) -> Element {
             let dpr = web_sys::window()
                 .map(|w| w.device_pixel_ratio())
                 .unwrap_or(1.0);
-            let display_width = canvas.client_width() as f64 * dpr;
-            let display_height = canvas.client_height() as f64 * dpr;
+            // CSS (layout) pixels drive interaction: pointer events report CSS
+            // coordinates, so picking / hover / tooltip must use these. The
+            // backing store is dpr-scaled physical pixels for a crisp render.
+            let css_width = canvas.client_width() as f64;
+            let css_height = canvas.client_height() as f64;
+            let display_width = css_width * dpr;
+            let display_height = css_height * dpr;
             canvas.set_width(display_width as u32);
             canvas.set_height(display_height as u32);
 
@@ -114,8 +119,8 @@ pub fn Graph(data: GraphData) -> Element {
                 expanded,
                 target_distance: distance,
                 aspect,
-                canvas_width: display_width as f32,
-                canvas_height: display_height as f32,
+                canvas_width: css_width as f32,
+                canvas_height: css_height as f32,
                 dragging_node: None,
                 drag_plane_point: glam::Vec3::ZERO,
                 drag_moved: false,
@@ -124,6 +129,31 @@ pub fn Graph(data: GraphData) -> Element {
             }));
 
             state.set(Some(Rc::clone(&gs)));
+
+            // Zoom via a non-passive wheel listener attached straight to the
+            // canvas, so a trackpad pinch (wheel + ctrlKey) or two-finger
+            // scroll zooms the graph instead of the browser page. Dioxus's
+            // delegated wheel listener is passive, so calling prevent_default
+            // in an `onwheel` handler is ignored.
+            {
+                let gs = Rc::clone(&gs);
+                let on_wheel = Closure::<dyn FnMut(web_sys::WheelEvent)>::new(
+                    move |evt: web_sys::WheelEvent| {
+                        evt.prevent_default();
+                        let dy = wheel_delta_y(&evt);
+                        let mut gs = gs.borrow_mut();
+                        gs.target_distance = (gs.target_distance + dy * 0.5).clamp(50.0, 2000.0);
+                    },
+                );
+                let opts = web_sys::AddEventListenerOptions::new();
+                opts.set_passive(false);
+                let _ = canvas.add_event_listener_with_callback_and_add_event_listener_options(
+                    "wheel",
+                    on_wheel.as_ref().unchecked_ref(),
+                    &opts,
+                );
+                on_wheel.forget();
+            }
 
             // Start animation loop
             start_animation_loop(gs);
@@ -292,14 +322,6 @@ pub fn Graph(data: GraphData) -> Element {
         }
     };
 
-    let onwheel = move |evt: WheelEvent| {
-        let dy = wheel_delta_y(&evt);
-        if let Some(ref gs) = *state.read() {
-            let mut gs = gs.borrow_mut();
-            gs.target_distance = (gs.target_distance + dy * 0.5).clamp(50.0, 2000.0);
-        }
-    };
-
     let cursor = if *cursor_pointer.read() {
         "pointer"
     } else {
@@ -319,7 +341,6 @@ pub fn Graph(data: GraphData) -> Element {
                 onpointermove: onpointermove,
                 onpointerup: onpointerup,
                 onpointercancel: onpointercancel,
-                onwheel: onwheel,
             }
             // Tooltip overlay
             if let Some(text) = &*tooltip_text.read() {

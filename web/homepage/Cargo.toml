@@ -15,10 +15,13 @@ wasm-bindgen = "=0.2.121"
 wasm-bindgen-futures = "0.4"
 wasm-logger = "0.2"
 web-sys = { version = "0.3", features = [
+  "AddEventListenerOptions",
   "CssStyleDeclaration",
   "Document",
   "DomRect",
   "Element",
+  "Event",
+  "EventTarget",
   "HtmlCanvasElement",
   "HtmlElement",
   "HtmlImageElement",
@@ -35,6 +38,7 @@ web-sys = { version = "0.3", features = [
   "WebGlShader",
   "WebGlTexture",
   "WebGlUniformLocation",
+  "WheelEvent",
   "Window",
   "console",
 ] }
