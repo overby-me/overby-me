@@ -75,6 +75,12 @@ impl WindowSizeClass {
     pub fn is_dual_pane(self) -> bool {
         matches!(self, Self::Large | Self::ExtraLarge)
     }
+
+    /// Extra-large (`>= 1600`): wide enough to stand a permanent tools side sheet
+    /// next to the rail/tree and the content column without crowding either.
+    pub fn is_extra_large(self) -> bool {
+        matches!(self, Self::ExtraLarge)
+    }
 }
 
 fn current_width() -> f64 {

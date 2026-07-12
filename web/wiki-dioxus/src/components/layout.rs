@@ -200,6 +200,9 @@ pub fn Layout() -> Element {
             class: "app-shell",
             "data-size-class": "{size_class.as_str()}",
             "data-tree-open": if tree_open() { "true" } else { "false" },
+            // Set when a view mounts a permanent (docked) tools side sheet, so the
+            // content pane reserves room for it on the right.
+            "data-tools-docked": if super::widgets::TOOLS_DOCKED() { "true" } else { "false" },
             // Ctrl/Cmd+K opens search (a common shortcut). Catches keydowns that
             // bubble up from any focused element in the app.
             onkeydown: move |evt| {
@@ -256,10 +259,14 @@ pub fn Layout() -> Element {
             // Top app bar spanning the content region.
             TopAppBar { search_mode, search_input, search_results, open_drawer, menu_open }
 
-            // Content pane (the resolved ?app= view).
+            // Content pane (the resolved ?app= view). An inner measure caps the
+            // reading column at ~A4 and centres it, so content stays legible on
+            // wide screens instead of stretching edge to edge.
             main { class: "content-pane",
-                Outlet::<Route> {}
-                div { class: "bar-spacer" }
+                div { class: "content-measure",
+                    Outlet::<Route> {}
+                    div { class: "bar-spacer" }
+                }
             }
 
             if size_class.is_compact() {

@@ -334,15 +334,49 @@ pub fn PaginatedTable(
     }
 }
 
-/// An M3 tools/actions sheet: a trigger icon button that opens a sheet holding
-/// the current view's actions and admin tools. The sheet is a bottom sheet on
-/// compact screens and a right-anchored side sheet on medium+ (pure CSS off the
-/// viewport width). Pass the action rows (`.sheet-action`) as `children`.
+/// Set while a [`ToolSheet`] is mounted in its docked (permanent) form, so the
+/// shell can reserve room for it on the right of the content pane. Released when
+/// the sheet unmounts (e.g. navigating to a view with no tools).
+pub static TOOLS_DOCKED: GlobalSignal<bool> = Signal::global(|| false);
+
+/// An M3 tools/actions sheet holding the current view's actions and admin tools.
+///
+/// - Compact: a modal bottom sheet opened from a trigger icon.
+/// - Medium/large: a modal right-anchored side sheet opened from a trigger icon.
+/// - Extra-large: a *permanent* docked side sheet — no trigger, always visible —
+///   since there is room to stand it beside the content (M3 standard side sheet).
+///
+/// Pass the action rows (`.sheet-action`) as `children`.
 #[component]
 pub fn ToolSheet(title: String, children: Element) -> Element {
     let mut open = use_signal(|| false);
     // Remember the trigger so focus returns to it when the sheet closes (a11y).
     let mut return_focus = use_signal(|| None::<web_sys::HtmlElement>);
+
+    // Extra-large screens dock the tools as a permanent standing side sheet.
+    let docked = use_memo(move || crate::window_size::WINDOW_SIZE().is_extra_large());
+    // Reserve/release the shell's right gutter as this sheet docks or unmounts.
+    use_effect(move || {
+        *TOOLS_DOCKED.write() = docked();
+    });
+    use_drop(move || {
+        *TOOLS_DOCKED.write() = false;
+    });
+
+    if docked() {
+        return rsx! {
+            aside {
+                class: "tool-sheet docked",
+                role: "complementary",
+                "aria-label": "{title}",
+                div { class: "tool-sheet-header",
+                    h3 { class: "title-medium", "{title}" }
+                }
+                div { class: "tool-sheet-body", {children} }
+            }
+        };
+    }
+
     rsx! {
         button {
             class: "btn-icon state-layer",

@@ -238,6 +238,14 @@ a:hover {
 	padding-top: calc(64px + var(--md-sys-spacing-2));
 	min-height: 100vh;
 }
+/* Cap the reading column at ~A4 and centre it inside the pane, so content stays
+   legible (a comfortable line length) on wide screens instead of stretching the
+   full pane width. On compact/medium the viewport is narrower than the cap, so
+   this is a no-op there. */
+.content-measure {
+	max-width: var(--md-sys-body-max);
+	margin-inline: auto;
+}
 
 /* ── Top app bar ─────────────────────────────────────────────────────── */
 .top-app-bar {
@@ -557,6 +565,17 @@ a:hover {
 .app-shell[data-tree-open="true"][data-size-class="extra-large"] .top-app-bar {
 	left: var(--md-sys-rail-expanded);
 }
+/* A docked tools side sheet (extra-large) reserves the right gutter so the
+   centred content column clears it, and nudges the FAB inboard of the pane. */
+.app-shell[data-tools-docked="true"] .content-pane {
+	padding-right: calc(var(--md-sys-tools-width) + var(--md-sys-margin));
+	transition: padding-right var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
+}
+.app-shell[data-tools-docked="true"] .fab {
+	right: calc(var(--md-sys-tools-width) + 24px);
+}
+
 /* Compact: the search/breadcrumb app bar moves to the BOTTOM (thumb reach, like
    a browser's bottom URL bar), floating just above the navigation bar. The
    content clears the top (no bar there) and both bottom bars. */
@@ -1780,6 +1799,30 @@ select:focus {
 	.tool-sheet.open {
 		transform: translateX(0);
 	}
+}
+/* Docked (permanent) tools side sheet on extra-large screens: a standing pane on
+   the right edge, below the top app bar — no scrim, no transform, no trigger. The
+   content pane reserves room for it (see data-tools-docked below), so it never
+   overlaps content. */
+.tool-sheet.docked {
+	top: 64px;
+	bottom: 0;
+	right: 0;
+	left: auto;
+	width: var(--md-sys-tools-width);
+	max-width: var(--md-sys-tools-width);
+	max-height: none;
+	transform: none;
+	border-radius: 0;
+	border-left: 1px solid var(--md-outline-variant);
+	box-shadow: none;
+	background: var(--md-surface-container);
+	/* Below the top app bar (50) and the FAB (120); it is not a modal surface. */
+	z-index: 40;
+}
+.tool-sheet.docked .tool-sheet-header {
+	/* No drag handle or close button on a docked pane — just the heading. */
+	justify-content: flex-start;
 }
 /* Off-screen element that grabs focus when a sheet/dialog opens (a11y). */
 .sheet-focus-sentinel {

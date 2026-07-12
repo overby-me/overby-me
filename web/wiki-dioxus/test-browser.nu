@@ -607,6 +607,30 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         sleep 400ms
     }
 
+    # Extra-large: the tools sheet DOCKS as a permanent right-side pane (no trigger,
+    # always visible), and the content column is capped near A4 and centred rather
+    # than stretching the full pane width.
+    wd-window-rect $session_id 1728 1000
+    sleep 800ms
+    let xl = (wd-execute $session_id 'var shell=document.querySelector(".app-shell"); var dk=document.querySelector(".tool-sheet.docked"); var vis=0, rightGap=-1; if(dk){var r=dk.getBoundingClientRect(); vis=(r.width>0 && r.right<=window.innerWidth+1 && r.right>=window.innerWidth-2)?1:0; rightGap=Math.round(window.innerWidth-r.right)} var cm=document.querySelector(".content-measure"); var cmw=cm?Math.round(cm.getBoundingClientRect().width):-1; var cap=cm?Math.round(parseFloat(getComputedStyle(cm).maxWidth)):-1; return JSON.stringify({docked: dk?1:0, vis: vis, rightGap: rightGap, toolsAttr: shell?shell.getAttribute("data-tools-docked"):"", measureW: cmw, cap: cap})')
+    let x = ($xl | from json)
+    if ($x.docked == 1) and ($x.vis == 1) and ($x.toolsAttr == "true") {
+        log-ok $"extra-large docks the tools pane on the right, gap=($x.rightGap)px"; $p = $p + 1
+    } else {
+        log-fail $"extra-large tools not docked: ($xl)"; $fl = $fl + 1
+    }
+    if ($x.cap > 0) and ($x.measureW <= ($x.cap + 2)) {
+        log-ok $"content column capped at ($x.cap)px, measured ($x.measureW)px"; $p = $p + 1
+    } else {
+        log-fail $"content column not capped: measured=($x.measureW), cap=($x.cap)"; $fl = $fl + 1
+    }
+    if (($env | get -o WIKI_SHOTS | default "") == "1") {
+        let dir = ($env | get -o WIKI_SHOTS_DIR | default "screenshots")
+        wd-screenshot $session_id ($dir | path join "tools-docked-xl.png")
+    }
+    wd-window-rect $session_id 1280 900
+    sleep 400ms
+
     # Compact mobile drawer: open it and verify the top is the current context node
     # (with a trailing close button) and that the redundant "Home" entries are gone
     # (one used to sit in the header, one in the body list).
