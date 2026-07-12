@@ -1669,6 +1669,38 @@ select:focus {
 	text-decoration: none;
 }
 
+/* M3 segmented button (widgets::SegmentedButton): a connected outlined row; the
+   selected segment fills with secondary-container. */
+.m3-segmented {
+	display: inline-flex;
+	border: 1px solid var(--md-outline-strong);
+	border-radius: var(--md-sys-shape-corner-full);
+	overflow: hidden;
+}
+.m3-segment {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 36px;
+	padding: 6px 16px;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	color: var(--md-on-surface-variant);
+	cursor: pointer;
+}
+.m3-segment:not(:last-child) {
+	border-right: 1px solid var(--md-outline-strong);
+}
+.m3-segment.selected {
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+}
+.m3-segment-check {
+	font-size: 18px;
+}
+
 /* Member / author chips */
 .chip-row {
 	display: flex;

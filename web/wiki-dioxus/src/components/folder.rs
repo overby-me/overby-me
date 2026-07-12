@@ -106,19 +106,17 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 div { class: "flex-grow" }
                 // Toggle list/grid layout (#125).
                 if count > 1 {
-                    button {
-                        class: "btn-icon",
-                        title: if is_grid { "{t(\"common.listView\")}" } else { "{t(\"common.gridView\")}" },
-                        onclick: move |_| {
-                            let v = !*grid.read();
-                            grid.set(v);
-                            write_grid_pref(v);
+                    super::widgets::SegmentedButton {
+                        segments: vec![
+                            ("list".to_string(), "view_list".to_string()),
+                            ("grid".to_string(), "grid_view".to_string()),
+                        ],
+                        selected: if is_grid { "grid".to_string() } else { "list".to_string() },
+                        on_select: move |v: String| {
+                            let g = v == "grid";
+                            grid.set(g);
+                            write_grid_pref(g);
                         },
-                        if is_grid {
-                            span { class: "material-icons", "view_list" }
-                        } else {
-                            span { class: "material-icons", "grid_view" }
-                        }
                     }
                 }
                 // Export the folder and everything nested under it to an .odt.
