@@ -254,6 +254,19 @@ const EN_JSON: &str = r#"{
         "castVote": "Vote",
         "voteCount": "Number of votes"
     },
+    "perm": {
+        "type": "Type",
+        "role": "Role",
+        "insert": "Create",
+        "select": "View",
+        "delete": "Delete",
+        "active": "Active"
+    },
+    "admin": {
+        "poll": "Poll",
+        "results": "Results",
+        "votes": "Votes"
+    },
     "speak": {
         "manageSpeakerList": "Manage Speaker List",
         "joinSpeakerList": "Join the speaker list",
@@ -545,6 +558,19 @@ const DA_JSON: &str = r#"{
         "noVoteNow": "Ingen afstemning nu",
         "castVote": "Stem",
         "voteCount": "Antal stemmer"
+    },
+    "perm": {
+        "type": "Type",
+        "role": "Rolle",
+        "insert": "Opret",
+        "select": "Vis",
+        "delete": "Slet",
+        "active": "Aktiv"
+    },
+    "admin": {
+        "poll": "Afstemning",
+        "results": "Resultater",
+        "votes": "Stemmer"
     },
     "speak": {
         "manageSpeakerList": "Administrer Talerlisten",

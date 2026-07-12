@@ -129,6 +129,27 @@ pub fn SegmentedButton(
     }
 }
 
+/// An M3 data table: a horizontally scrollable semantic `<table>` with a quiet
+/// surface-container header row and tonal row dividers. `columns` are the header
+/// labels; pass the `<tr>` body rows as `children`.
+#[component]
+pub fn DataTable(columns: Vec<String>, children: Element) -> Element {
+    rsx! {
+        div { class: "m3-data-table-wrap",
+            table { class: "m3-data-table",
+                thead {
+                    tr {
+                        for col in columns {
+                            th { key: "{col}", "{col}" }
+                        }
+                    }
+                }
+                tbody { {children} }
+            }
+        }
+    }
+}
+
 /// A reusable Material Design 3 basic dialog: a scrim over a surface-container-
 /// high card (extra-large corners, level-3 elevation, spring rise-in) with an
 /// optional leading icon, a headline, the passed `children` as content, and an

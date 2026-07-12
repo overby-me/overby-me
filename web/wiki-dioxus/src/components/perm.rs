@@ -45,35 +45,51 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
                     }
                 }
             } else {
-                div { class: "list",
+                super::widgets::DataTable {
+                    columns: vec![
+                        t("perm.type"),
+                        t("perm.role"),
+                        t("perm.insert"),
+                        t("perm.select"),
+                        t("perm.delete"),
+                        t("perm.active"),
+                    ],
                     for perm in perms.iter() {
                         {
                             let mime = perm.mime_id.clone().unwrap_or_default();
-                            let flags = [
-                                ("add", perm.insert),
-                                ("visibility", perm.select),
-                                ("delete", perm.delete),
-                                ("check", perm.active),
-                            ];
                             rsx! {
-                                div { class: "list-item", key: "{perm.id.0}",
-                                    div { class: "avatar small", {icon_el(&mime)} }
-                                    div { class: "list-item-text",
-                                        div { class: "list-item-primary", "{mime} — {perm.role}" }
-                                        div { class: "list-item-secondary",
-                                            for (label , on) in flags {
-                                                if on {
-                                                    span { class: "material-icons", style: "margin-right: 8px; font-size: 16px;", "{label}" }
-                                                }
-                                            }
+                                tr { key: "{perm.id.0}",
+                                    td {
+                                        span { class: "m3-cell-icon",
+                                            {icon_el(&mime)}
+                                            span { "{mime}" }
                                         }
                                     }
+                                    td { "{perm.role}" }
+                                    td { {flag_cell(perm.insert)} }
+                                    td { {flag_cell(perm.select)} }
+                                    td { {flag_cell(perm.delete)} }
+                                    td { {flag_cell(perm.active)} }
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/// A boolean permission cell: a filled primary check when granted, else a muted
+/// minus glyph.
+fn flag_cell(on: bool) -> Element {
+    if on {
+        rsx! {
+            span { class: "material-icons m3-flag-on", "check" }
+        }
+    } else {
+        rsx! {
+            span { class: "material-icons m3-flag-off", "remove" }
         }
     }
 }

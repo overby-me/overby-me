@@ -41,7 +41,8 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                     }
                 }
             } else {
-                div { class: "list",
+                super::widgets::DataTable {
+                    columns: vec![t("admin.poll"), t("admin.results"), t("admin.votes")],
                     for poll in polls.iter() {
                         AdminPollRow { key: "{poll.id.0}", poll: poll.clone() }
                     }
@@ -99,17 +100,21 @@ fn AdminPollRow(poll: PollSummaryFields) -> Element {
         .unwrap_or_default();
 
     rsx! {
-        div { class: "list-item", style: "flex-direction: column; align-items: stretch;",
-            div { class: "list-item-primary", "{poll.name}" }
-            div { style: "display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px;",
-                for (i , option) in opts.iter().enumerate() {
-                    span { class: "list-item-secondary",
-                        "{option}: {counts.get(i).copied().unwrap_or(0)}"
+        tr {
+            td {
+                div { class: "list-item-primary", "{poll.name}" }
+            }
+            td {
+                div { class: "admin-results",
+                    for (i , option) in opts.iter().enumerate() {
+                        span { class: "chip",
+                            span { class: "chip-label", "{option}: {counts.get(i).copied().unwrap_or(0)}" }
+                        }
                     }
                 }
-                span { class: "list-item-secondary", style: "font-weight: 600;",
-                    "{t(\"vote.voteCount\")}: {total}"
-                }
+            }
+            td {
+                span { class: "admin-total", "{total}" }
             }
         }
     }
