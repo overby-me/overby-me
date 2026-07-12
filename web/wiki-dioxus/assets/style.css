@@ -520,6 +520,20 @@ a:hover {
 .app-shell[data-size-class="compact"] .content-pane {
 	padding-top: var(--md-sys-margin);
 	padding-bottom: calc(80px + 64px + var(--md-sys-margin));
+	/* Drop the page's side padding on compact so cards can go edge to edge and
+	   reclaim the width for content (see the flattened cards below). */
+	padding-left: 0;
+	padding-right: 0;
+}
+
+/* Compact: M3 discourages wrapping a whole screen in one card. Flatten cards to
+   edge-to-edge sections — square edges, no floating shadow — so the redundant
+   outer inset is gone; the card's own 16px padding stays as the single text
+   inset, and the inter-card gap + header divider carry the structure. */
+.app-shell[data-size-class="compact"] .card {
+	border-radius: 0;
+	box-shadow: none;
+	margin-bottom: var(--md-sys-spacing-2);
 }
 
 /* Floating navigation bar — M3 primary container with a level-2 shadow (it
@@ -3447,6 +3461,35 @@ a.list-item:hover {
 .rich-editor ol {
 	margin: 0 0 0.5em;
 	padding-left: 1.6em;
+}
+
+/* Fluid document + editor typography. The renderer and the editor are made query
+   containers, and heading/body sizes are clamped to the CONTENT COLUMN width
+   (`cqi` = 1% of that column) rather than the viewport — so a document scales the
+   same whether it sits in a wide desktop column, a narrow side-pane, or a phone.
+   Big headings shrink on narrow columns (so they read like a scaled-down version
+   of the wide layout) while body stays near a readable floor. Applied to both
+   surfaces with identical sizes, which also makes what you type match what
+   publishes (the editor previously used `em`, the renderer the M3 tokens). */
+.slate-content,
+.rich-editor {
+	container-type: inline-size;
+}
+.slate-content h1,
+.rich-editor h1 {
+	font-size: clamp(1.35rem, 0.95rem + 1.8cqi, 1.75rem);
+}
+.slate-content h2,
+.rich-editor h2 {
+	font-size: clamp(1.2rem, 0.9rem + 1.35cqi, 1.5rem);
+}
+.slate-content h3,
+.rich-editor h3 {
+	font-size: clamp(1.1rem, 0.85rem + 1.2cqi, 1.375rem);
+}
+.slate-content p,
+.rich-editor p {
+	font-size: clamp(0.9375rem, 0.88rem + 0.28cqi, 1rem);
 }
 
 .rich-editor blockquote {

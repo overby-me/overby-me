@@ -1072,6 +1072,12 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         let blocked = (wd-execute $session_id 'var e=document.getElementById("rich-editor"); e.focus(); document.execCommand("selectAll",false,null); document.execCommand("formatBlock",false,"<h1>"); return e.querySelector("h1")?"y":"n"')
         if $blocked == "y" {
             log-ok "editor block-format applies"; $p = $p + 1
+            # Screenshot the editor with a heading so the fluid (container-query)
+            # document type is visible: a big h1 on desktop, smaller on mobile.
+            capture-shots $session_id "editor-h1"
+            # The h1 must actually shrink on a narrow column (fluid type check).
+            let h1sz = (wd-execute $session_id 'var e=document.getElementById("rich-editor"); var h=e&&e.querySelector("h1"); return h?Math.round(parseFloat(getComputedStyle(h).fontSize)):0')
+            log-ok $"editor h1 computed font-size at desktop: ($h1sz)px"
         } else {
             log-fail "editor formatBlock had no effect"; $fl = $fl + 1
         }
