@@ -2238,6 +2238,8 @@ select:focus {
 	border-radius: var(--md-sys-shape-corner-full);
 	overflow: hidden;
 }
+/* EXPERIMENT (springy segmented control): tactile press + a bolder, tonal
+   selected segment. */
 .m3-segment {
 	display: inline-flex;
 	align-items: center;
@@ -2250,13 +2252,28 @@ select:focus {
 	background: transparent;
 	color: var(--md-on-surface-variant);
 	cursor: pointer;
+	font-weight: 500;
+	transition:
+		background-color var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-easing-standard),
+		color var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-easing-standard),
+		transform var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-spring-spatial-fast);
 }
 .m3-segment:not(:last-child) {
 	border-right: 1px solid var(--md-outline-strong);
 }
+.m3-segment:hover:not(.selected) {
+	background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+}
+.m3-segment:active {
+	transform: scale(0.95);
+}
 .m3-segment.selected {
 	background: var(--md-secondary-container);
 	color: var(--md-on-secondary-container);
+	font-weight: 700;
 }
 .m3-segment-check {
 	font-size: 18px;
