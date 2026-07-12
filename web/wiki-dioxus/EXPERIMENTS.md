@@ -89,7 +89,9 @@ These change behaviour / add capability rather than only looks:
 - **Scroll-to-top on navigation** — moving to a different node returns to the top,
   keyed on the path so switching apps in place keeps your scroll position.
 - **Keyboard-shortcuts overlay** — pressing `?` opens a help dialog listing the
-  shortcuts (Ctrl+K / `/` search, `?` help, Esc close) with styled keycaps.
+  shortcuts (Ctrl+K / `/` search, `?` help, Esc close) with styled keycaps. The
+  shell also auto-focuses on load so all shortcuts work immediately (previously
+  even Ctrl+K needed a click inside the app first).
 - **Skeleton content loading** — a content-shaped shimmer placeholder while a node
   loads, instead of a bare spinner.
 - **Density toggle** — a compact/comfortable UI-density preference in the account
