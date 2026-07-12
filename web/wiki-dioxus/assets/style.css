@@ -335,11 +335,10 @@ a:hover {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	/* Top-aligned (below the header) in BOTH collapsed and expanded states, so
-	   expanding widens the rail and reveals labels in place instead of the items
-	   jumping from a vertical-centre to the top. */
-	justify-content: flex-start;
-	flex: 0 0 auto;
+	/* Centred vertically in the rail (M3 navigation-rail guidelines). The rail is
+	   fixed — only the tree pane to its right animates — so there is no jump. */
+	justify-content: center;
+	flex: 1;
 	gap: var(--md-sys-spacing-3);
 	width: 100%;
 }
@@ -385,58 +384,30 @@ a:hover {
 	text-align: center;
 }
 
-/* Expanded rail: wider and left-aligned; destinations become icon + label rows,
-   and the tree fills the space below them. */
-.nav-rail.expanded {
-	width: var(--md-sys-rail-expanded);
-	align-items: stretch;
-	padding: var(--md-sys-spacing-2);
-	gap: var(--md-sys-spacing-2);
-	box-shadow: var(--md-sys-elevation-1);
-}
-.nav-rail.expanded .nav-rail-header {
-	justify-content: flex-start;
-}
-.nav-rail.expanded .nav-rail-destinations {
-	gap: var(--md-sys-spacing-1);
-}
-.nav-rail.expanded .nav-rail-item {
-	flex-direction: row;
-	justify-content: flex-start;
-	gap: var(--md-sys-spacing-3);
-	padding: 4px 8px;
-}
-.nav-rail.expanded .nav-rail-item.active {
-	/* The whole row shows selection; the pill indicator loses its own fill.
-	   primary-container (green) — not secondary — so it stays clearly distinct
-	   from the neutral rail (this scheme's secondary-container is too low-chroma). */
-	background: var(--md-primary-container);
-	color: var(--md-on-primary-container);
-}
-.nav-rail.expanded .nav-rail-item .nav-rail-indicator {
-	width: 40px;
-	height: 40px;
-}
-.nav-rail.expanded .nav-rail-item.active .nav-rail-indicator {
-	background: transparent;
-	color: inherit;
-	transform: none;
-}
-.nav-rail.expanded .nav-rail-label {
-	flex: 1;
-	text-align: left;
-	white-space: nowrap;
+/* Context tree pane: sits to the RIGHT of the fixed app rail and slides open /
+   closed (the rail icons never move). Closed it is tucked behind the rail
+   (translateX(-100%)); open it slides out to the right. Persistent — the content
+   is pushed across (see the insets) — on large/xl; a modal overlay (scrim) on
+   medium widths. */
+.nav-tree-pane {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	left: var(--md-sys-rail-width);
+	width: calc(var(--md-sys-rail-expanded) - var(--md-sys-rail-width));
+	z-index: 55;
+	background: var(--md-surface-container-low);
 	overflow: hidden;
-	text-overflow: ellipsis;
+	transform: translateX(-100%);
+	transition: transform var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
 }
-.nav-rail.expanded .nav-rail-tree {
-	flex: 1;
-	border-top: 1px solid var(--md-outline-variant);
-	padding-top: var(--md-sys-spacing-2);
-	margin-top: var(--md-sys-spacing-1);
+.nav-tree-pane.open {
+	transform: translateX(0);
 }
 .nav-rail-tree {
-	width: 100%;
+	height: 100%;
+	padding: var(--md-sys-spacing-2);
 	overflow-y: auto;
 	scrollbar-width: none;
 }
@@ -448,7 +419,8 @@ a:hover {
 .nav-rail-scrim {
 	position: fixed;
 	inset: 0;
-	z-index: 58;
+	/* Above content + top app bar (50), below the tree pane (55) and rail (60). */
+	z-index: 52;
 	background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
 	opacity: 0;
 	pointer-events: none;
@@ -567,12 +539,12 @@ a:hover {
 /* The persistent expanded rail (large/xl) pushes the content across; on medium
    the expanded rail is a modal overlay, so content is NOT pushed (stays inset by
    the collapsed rail width). */
-.app-shell[data-rail-expanded="true"][data-size-class="large"] .content-pane,
-.app-shell[data-rail-expanded="true"][data-size-class="extra-large"] .content-pane {
+.app-shell[data-tree-open="true"][data-size-class="large"] .content-pane,
+.app-shell[data-tree-open="true"][data-size-class="extra-large"] .content-pane {
 	margin-left: var(--md-sys-rail-expanded);
 }
-.app-shell[data-rail-expanded="true"][data-size-class="large"] .top-app-bar,
-.app-shell[data-rail-expanded="true"][data-size-class="extra-large"] .top-app-bar {
+.app-shell[data-tree-open="true"][data-size-class="large"] .top-app-bar,
+.app-shell[data-tree-open="true"][data-size-class="extra-large"] .top-app-bar {
 	left: var(--md-sys-rail-expanded);
 }
 /* Compact: the search/breadcrumb app bar moves to the BOTTOM (thumb reach, like
