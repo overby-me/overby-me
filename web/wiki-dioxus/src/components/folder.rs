@@ -269,12 +269,12 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 }
             }
             if children.is_empty() {
-                div { class: "card-content",
-                    p {
-                        class: "body-medium",
-                        class: "text-muted",
-                        "{t(\"common.noContent\")}"
+                // EXPERIMENT: a compact characterful empty state (floating orb).
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "folder_open" }
                     }
+                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
                 }
             }
             // Events section (#132) — always a list, even in grid mode.

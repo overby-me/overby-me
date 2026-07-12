@@ -3016,6 +3016,18 @@ h6,
 	max-width: 34ch;
 	margin: 0;
 }
+/* Compact variant for empty sections inside a card (e.g. an empty folder). */
+.empty-state.empty-state-sm {
+	padding: 28px 20px;
+	gap: 10px;
+}
+.empty-state-orb.empty-state-orb-sm {
+	width: 72px;
+	height: 72px;
+}
+.empty-state-orb-sm .material-icons {
+	font-size: 32px;
+}
 
 /* Breadcrumbs */
 .breadcrumbs {
