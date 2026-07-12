@@ -803,6 +803,29 @@ a:hover {
 	--card-accent: var(--md-error);
 }
 
+/* EXPERIMENT (format-aware file card): tonal metadata chips under the file title. */
+.file-meta-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 5px;
+}
+.file-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 26px;
+	padding: 0 10px;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+	font-size: var(--md-sys-typescale-label-small-size);
+	font-weight: 600;
+}
+.file-chip .material-icons {
+	font-size: 15px;
+}
+
 /* M3 Expressive: card/app titles carry emphasized (heavier, tighter) type so each
    surface has a clear focal heading. */
 .card-header h3 {

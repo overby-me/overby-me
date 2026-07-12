@@ -80,6 +80,29 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
         .and_then(|d| d.get("type"))
         .and_then(|t| t.as_str())
         .unwrap_or("");
+    // EXPERIMENT (format-aware file card): retint the card accent by format
+    // (video/audio -> magenta tertiary, docs -> secondary, else primary) and show
+    // a short type chip. Reuses the .card --card-accent system.
+    let accent = if file_mime.starts_with("video") || file_mime.starts_with("audio") {
+        "accent-tertiary"
+    } else if file_mime.contains("pdf")
+        || file_mime.contains("word")
+        || file_mime.contains("sheet")
+        || file_mime.contains("presentation")
+        || file_mime.contains("officedocument")
+    {
+        "accent-secondary"
+    } else {
+        ""
+    };
+    let type_label = file_mime
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .split('+')
+        .next()
+        .unwrap_or("")
+        .to_uppercase();
 
     let file_url = if !file_id.is_empty() {
         let token = session.read().access_token.clone().unwrap_or_default();
@@ -93,18 +116,25 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
             // Primary pane: the file's identity header above the file itself, so the
             // title / date / tools sit atop the content rather than below it.
             primary: rsx! {
-                div { class: "card",
+                div { class: "card file-card {accent}",
                     div { class: "card-header",
                         div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
                         div {
                             h3 { class: "title-medium", "{name}" }
-                            if let Some(iso) = created.as_ref() {
-                                p {
-                                    class: "body-small",
-                                    class: "text-muted",
-                                    title: "{super::loader::full_datetime(iso)}",
-                                    span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
-                                    " {super::loader::relative_time(iso)}"
+                            div { class: "file-meta-chips",
+                                if !type_label.is_empty() {
+                                    span { class: "file-chip",
+                                        span { class: "material-icons", "description" }
+                                        "{type_label}"
+                                    }
+                                }
+                                if let Some(iso) = created.as_ref() {
+                                    span {
+                                        class: "file-chip",
+                                        title: "{super::loader::full_datetime(iso)}",
+                                        span { class: "material-icons", "schedule" }
+                                        "{super::loader::relative_time(iso)}"
+                                    }
                                 }
                             }
                         }
