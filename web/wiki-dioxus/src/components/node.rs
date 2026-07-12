@@ -29,15 +29,14 @@ pub fn NodeApp(node: NodeWithChildren, title: String) -> Element {
             if !children.is_empty() {
                 div { class: "list",
                     for child in children.iter() {
-                        div { class: "list-item", key: "{child.id.0}",
-                            div { class: "avatar small",
-                                {node_icon_el(child.mime_id.as_deref().unwrap_or(""), child.data.as_ref().map(|d| &d.0))}
-                            }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary",
-                                    "{child.name}"
+                        super::widgets::ListItem {
+                            key: "{child.id.0}",
+                            headline: child.name.clone(),
+                            leading: rsx! {
+                                div { class: "avatar small",
+                                    {node_icon_el(child.mime_id.as_deref().unwrap_or(""), child.data.as_ref().map(|d| &d.0))}
                                 }
-                            }
+                            },
                         }
                     }
                 }

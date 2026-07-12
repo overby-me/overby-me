@@ -1616,6 +1616,33 @@ select:focus {
 	color: var(--md-on-surface-variant);
 }
 
+/* Trailing slot of the slot-based widgets::ListItem (badge / action). */
+.list-item-trailing {
+	margin-left: auto;
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+/* M3 adaptive supporting-pane / list-detail scaffold (widgets::SupportingPane-
+   Layout): one column on compact/medium, ~2:1 side-by-side on large+. */
+.m3-supporting-pane {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--md-sys-pane-spacer);
+	align-items: start;
+}
+@media (min-width: 1200px) {
+	.m3-supporting-pane {
+		grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+	}
+}
+.m3-pane-primary,
+.m3-pane-supporting {
+	min-width: 0;
+}
+
 /* Member / author chips */
 .chip-row {
 	display: flex;

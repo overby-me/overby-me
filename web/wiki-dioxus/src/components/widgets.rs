@@ -51,6 +51,50 @@ pub fn Badge(count: Option<usize>) -> Element {
     }
 }
 
+/// A slot-based Material 3 list item: an optional leading element (avatar/icon),
+/// a headline, an optional supporting line, and an optional trailing element
+/// (badge/action). Carries the `.list-item` state layer; pass `selected` for the
+/// M3 selected treatment. Wrap in a `Link` (or add an `onclick`) for navigation.
+#[component]
+pub fn ListItem(
+    headline: String,
+    leading: Option<Element>,
+    supporting: Option<String>,
+    trailing: Option<Element>,
+    #[props(default)] selected: bool,
+) -> Element {
+    rsx! {
+        div { class: if selected { "list-item selected" } else { "list-item" },
+            if let Some(leading) = leading {
+                {leading}
+            }
+            div { class: "list-item-text",
+                div { class: "list-item-primary", "{headline}" }
+                if let Some(supporting) = supporting {
+                    div { class: "list-item-secondary", "{supporting}" }
+                }
+            }
+            if let Some(trailing) = trailing {
+                div { class: "list-item-trailing", {trailing} }
+            }
+        }
+    }
+}
+
+/// An adaptive M3 supporting-pane / list-detail scaffold: the `primary` pane and
+/// a `supporting` pane stack into one column on compact/medium and sit side by
+/// side (roughly 2:1) on large+ — a pure-CSS responsive grid off the window
+/// width, so foldables/split-window resolve for free.
+#[component]
+pub fn SupportingPaneLayout(primary: Element, supporting: Element) -> Element {
+    rsx! {
+        div { class: "m3-supporting-pane",
+            div { class: "m3-pane-primary", {primary} }
+            div { class: "m3-pane-supporting", {supporting} }
+        }
+    }
+}
+
 /// A reusable Material Design 3 basic dialog: a scrim over a surface-container-
 /// high card (extra-large corners, level-3 elevation, spring rise-in) with an
 /// optional leading icon, a headline, the passed `children` as content, and an
