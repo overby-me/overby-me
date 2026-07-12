@@ -3244,6 +3244,12 @@ h6,
 	text-decoration: underline;
 	color: var(--md-primary);
 }
+/* EXPERIMENT (functional: TOC scroll-spy): the section currently at the top of
+   the viewport is highlighted in the table of contents. */
+.toc-item.active {
+	color: var(--md-primary);
+	font-weight: 700;
+}
 
 .toc-l2 {
 	padding-left: 16px;

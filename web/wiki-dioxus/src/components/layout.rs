@@ -253,9 +253,11 @@ pub fn Layout() -> Element {
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
 
-            // EXPERIMENT (functional): a back-to-top button + reading progress bar.
+            // EXPERIMENT (functional): a back-to-top button + reading progress bar
+            // + a table-of-contents scroll-spy.
             super::back_to_top::ReadingProgress {}
             super::back_to_top::BackToTop {}
+            super::back_to_top::TocScrollSpy {}
 
             // APP axis (medium+): a fixed icon rail. Its menu button toggles the
             // context tree pane. A bottom bar carries the apps on compact (below).
