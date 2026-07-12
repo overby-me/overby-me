@@ -607,6 +607,37 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         sleep 400ms
     }
 
+    # Compact mobile drawer: open it and verify the top is the current context node
+    # (with a trailing close button) and that the redundant "Home" entries are gone
+    # (one used to sit in the header, one in the body list).
+    wd-window-rect $session_id 390 844
+    sleep 600ms
+    wd-execute $session_id 'var b=document.querySelector(".top-app-bar .btn-icon"); if(b)b.click(); return 1' | ignore
+    sleep 700ms
+    let dstate = (wd-execute $session_id 'var dr=document.querySelector(".nav-drawer.open"); if(!dr) return "noopen"; var hdrBar=dr.querySelector(".nav-drawer-header .drawer-context-bar .drawer-context-name"); var close=dr.querySelector(".nav-drawer-header button")?1:0; var mh=dr.querySelector(".drawer-mobile-home")?1:0; var bodyBar=dr.querySelector(".list .drawer-context-bar"); var bodyShown=bodyBar?(getComputedStyle(bodyBar).display!="none"?1:0):0; var homeCount=Array.prototype.filter.call(dr.querySelectorAll("*"),function(e){return e.children.length==0 && e.innerText && e.innerText.trim()=="Home"}).length; return JSON.stringify({headerCtx: hdrBar?hdrBar.innerText.trim():"", close: close, mobileHome: mh, bodyCtxShown: bodyShown, homeCount: homeCount})')
+    if $dstate == "noopen" {
+        log-warn "mobile drawer did not open — skipping drawer content check"
+    } else {
+        let d = ($dstate | from json)
+        if ($d.headerCtx != "") and ($d.headerCtx != "Home") and ($d.close == 1) {
+            log-ok $"mobile drawer top is the context '($d.headerCtx)' with a close button"; $p = $p + 1
+        } else {
+            log-fail $"mobile drawer header wrong: ctx='($d.headerCtx)', close=($d.close)"; $fl = $fl + 1
+        }
+        if ($d.mobileHome == 0) and ($d.bodyCtxShown == 0) and ($d.homeCount == 0) {
+            log-ok "mobile drawer has no redundant Home entries"; $p = $p + 1
+        } else {
+            log-fail $"mobile drawer has stray Home: mobileHome=($d.mobileHome), bodyCtxShown=($d.bodyCtxShown), homeCount=($d.homeCount)"; $fl = $fl + 1
+        }
+    }
+    if (($env | get -o WIKI_SHOTS | default "") == "1") {
+        let dir = ($env | get -o WIKI_SHOTS_DIR | default "screenshots")
+        wd-screenshot $session_id ($dir | path join "mobile-drawer.png")
+    }
+    wd-execute $session_id 'var s=document.querySelector(".nav-drawer-scrim"); if(s)s.click(); return 1' | ignore
+    wd-window-rect $session_id 1280 900
+    sleep 400ms
+
     # Pull-to-refresh must actually REFETCH data, not just animate. Hook fetch to
     # count GraphQL calls, over-scroll up, and expect fresh calls to fire (the
     # generalized use_data_resource! makes every view refetch on the bump).
@@ -663,16 +694,16 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     } else {
         log-fail "drawer still shows the home list inside a context"; $fl = $fl + 1
     }
-    # The drawer's top entry switches from Home to the current context (old-wiki
-    # behaviour); a mobile-only Home fallback stays in the DOM (desktop reaches
-    # Home via the app rail).
+    # The tree/drawer's top entry is the current context (not "Home"), and the old
+    # redundant mobile-Home fallback link is gone (Home is on the app rail / bottom
+    # nav bar instead).
     let dsw = (wd-execute $session_id 'var d=document.querySelector(".nav-rail-tree"); if(!d) return "nodrawer"; var mh=d.querySelector(".drawer-mobile-home")?1:0; var cn=d.querySelector(".drawer-context-bar .drawer-context-name"); return JSON.stringify({mobileHome:mh, contextText: cn?cn.innerText.trim():""})')
     if $dsw == "nodrawer" {
         log-warn "no drawer to check the context switch"
     } else {
         let m = ($dsw | from json)
-        if ($m.contextText != "Home") and ($m.contextText != "") and ($m.mobileHome == 1) {
-            log-ok $"drawer top is the context bar '($m.contextText)', mobile Home kept"; $p = $p + 1
+        if ($m.contextText != "Home") and ($m.contextText != "") and ($m.mobileHome == 0) {
+            log-ok $"drawer top is the context bar '($m.contextText)', no redundant Home"; $p = $p + 1
         } else {
             log-fail $"drawer context bar off: text='($m.contextText)', mobileHome=($m.mobileHome)"; $fl = $fl + 1
         }

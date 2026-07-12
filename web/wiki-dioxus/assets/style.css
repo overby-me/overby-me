@@ -521,8 +521,18 @@ a:hover {
 .nav-drawer-header {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
-	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
+	gap: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
+}
+/* The context node bar fills the header, the close button sits at the trailing end. */
+.nav-drawer-header .drawer-context-bar {
+	flex: 1;
+	min-width: 0;
+}
+/* The tree pane repeats the context bar at the top of its list; inside the drawer
+   the header already shows it, so hide the body copy to avoid two of them. */
+.nav-drawer .list .drawer-context-bar {
+	display: none;
 }
 
 /* ── Content / top-bar insets per window-size class ──────────────────── */

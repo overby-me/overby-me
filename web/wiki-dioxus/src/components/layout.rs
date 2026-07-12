@@ -860,6 +860,25 @@ fn AppSwitcher(apps: Vec<(&'static str, String, Route, bool)>) -> Element {
 /// manual-close bug.
 #[component]
 fn NavigationDrawer(open: Signal<bool>) -> Element {
+    let route = use_route::<Route>();
+    let segments: Vec<String> = match &route {
+        Route::PathPage { segments, .. } => segments.clone(),
+        _ => vec![],
+    };
+    // The current context (nearest group/event) heads the drawer next to the close
+    // icon — the same bar the tree pane shows, so it is hidden inside the drawer's
+    // body to avoid repeating it.
+    let ctx_path = context_path(&segments);
+    let crumbs = NAV_CRUMBS();
+    let ctx_crumb = crumbs.get(ctx_path.len().saturating_sub(1));
+    let ctx_name = ctx_crumb
+        .map(|c| c.name.clone())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| ctx_path.last().cloned().unwrap_or_default());
+    let ctx_mime = ctx_crumb
+        .and_then(|c| c.mime_id.clone())
+        .unwrap_or_default();
+
     rsx! {
         div {
             class: if open() { "nav-drawer-scrim open" } else { "nav-drawer-scrim" },
@@ -867,7 +886,25 @@ fn NavigationDrawer(open: Signal<bool>) -> Element {
         }
         aside { class: if open() { "nav-drawer open" } else { "nav-drawer" },
             div { class: "nav-drawer-header",
-                span { class: "md-title-medium", {t("common.home")} }
+                if segments.is_empty() {
+                    Link {
+                        to: Route::Home { app: None },
+                        class: "bar drawer-context-bar",
+                        onclick: move |_| open.set(false),
+                        div { class: "avatar small",
+                            span { class: "material-icons", "home" }
+                        }
+                        span { class: "drawer-context-name", "{t(\"common.home\")}" }
+                    }
+                } else {
+                    Link {
+                        to: Route::PathPage { segments: ctx_path.clone(), app: None },
+                        class: "bar drawer-context-bar",
+                        onclick: move |_| open.set(false),
+                        div { class: "avatar small", {super::loader::icon_el(&ctx_mime)} }
+                        span { class: "drawer-context-name", "{ctx_name}" }
+                    }
+                }
                 button {
                     class: "btn-icon state-layer",
                     aria_label: t("common.close"),
@@ -1156,16 +1193,6 @@ fn DrawerContent() -> Element {
                         class: "bar drawer-context-bar",
                         div { class: "avatar small", {super::loader::icon_el(&ctx_mime)} }
                         span { class: "drawer-context-name", "{ctx_name}" }
-                    }
-                    // On mobile there is no app rail, so keep Home reachable here
-                    // (desktop reaches it via the rail).
-                    Link {
-                        to: Route::Home { app: None },
-                        class: "list-item drawer-mobile-home",
-                        div { class: "avatar small", span { class: "material-icons", "home" } }
-                        div { class: "list-item-text",
-                            div { class: "list-item-primary", "{t(\"common.home\")}" }
-                        }
                     }
                 }
             }
