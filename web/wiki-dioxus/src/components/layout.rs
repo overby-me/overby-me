@@ -90,6 +90,21 @@ pub fn Layout() -> Element {
 
     let route = use_route::<Route>();
     let nav = use_navigator();
+
+    // EXPERIMENT (functional): scroll to the top when navigating to a DIFFERENT
+    // node, so each page starts at the top rather than wherever the previous one
+    // was left scrolled. Keyed on the path (not the ?app= view), so switching
+    // apps in place keeps your scroll position.
+    let path_key = match &route {
+        Route::PathPage { segments, .. } => segments.join("/"),
+        _ => String::new(),
+    };
+    use_effect(use_reactive!(|(path_key,)| {
+        let _ = &path_key;
+        if let Some(win) = web_sys::window() {
+            win.scroll_to_with_x_and_y(0.0, 0.0);
+        }
+    }));
     // Reactive M3 window size class (adaptive nav + panes). Called before the
     // early returns below so the hook order stays stable across auth/screen pages.
     let size_class = crate::window_size::use_window_size();
