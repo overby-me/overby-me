@@ -5,42 +5,54 @@
   gap: 15px;
 }
 
+/* EXPERIMENT (M3 Expressive switch): a full-size 52x32 switch whose thumb grows
+   from a small dot (off) to a large knob (on) with a spatial spring — the M3 2025
+   switch feel — instead of the compact dx default. */
 .dx-switch {
   all: unset;
   position: relative;
-  width: 2rem;
-  height: 1.15rem;
+  width: 3.25rem;
+  height: 2rem;
   border-radius: 9999px;
-  background-color: var(--primary-color-6);
+  background-color: var(--md-sys-color-surface-container-highest, var(--primary-color-6));
+  border: 2px solid var(--md-sys-color-outline);
+  box-sizing: border-box;
   cursor: pointer;
-  transition: background-color 150ms, box-shadow 150ms;
+  transition: background-color 200ms ease, border-color 200ms ease;
 }
 
 .dx-switch[data-state="checked"] {
-  /* M3 accent (Radikale green) instead of the dx grayscale. */
   background-color: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
 }
 
 .dx-switch:focus-visible {
   box-shadow: 0 0 0 3px
-    color-mix(in oklab, var(--focused-border-color) 50%, transparent);
+    color-mix(in oklab, var(--md-sys-color-primary) 45%, transparent);
 }
 
 .dx-switch-thumb {
   display: block;
-  width: calc(1.15rem - 2px);
-  height: calc(1.15rem - 2px);
+  position: absolute;
+  top: 50%;
+  left: 0.4rem;
+  width: 1rem;
+  height: 1rem;
   border-radius: 9999px;
-  background-color: var(--light, var(--primary-color)) var(--dark, var(--secondary-color-2));
-  transform: translateX(1px);
-  transition: transform 150ms;
-  will-change: transform;
+  background-color: var(--md-sys-color-outline);
+  transform: translateY(-50%);
+  transition:
+    left 260ms var(--md-sys-motion-spring-spatial-default, ease),
+    width 260ms var(--md-sys-motion-spring-spatial-default, ease),
+    height 260ms var(--md-sys-motion-spring-spatial-default, ease),
+    background-color 200ms ease;
 }
 
 .dx-switch[data-state="checked"] .dx-switch-thumb {
-  /* White thumb on the green track (the checked on-primary). */
+  width: 1.5rem;
+  height: 1.5rem;
+  left: calc(3.25rem - 1.5rem - 0.4rem);
   background-color: var(--md-sys-color-on-primary);
-  transform: translateX(calc(2rem - 1px - (1.15rem - 2px)));
 }
 
 /* Only apply disabled styles when data-disabled is "true" */
