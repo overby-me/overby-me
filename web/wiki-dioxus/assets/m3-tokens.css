@@ -217,7 +217,7 @@
 	--md-sys-pane-padding: 16px; /* inner padding of a pane */
 	--md-sys-list-pane-width: 360px; /* fixed list pane in list-detail */
 	--md-sys-rail-width: 88px; /* collapsed navigation rail */
-	--md-sys-rail-expanded: 320px; /* expanded rail (tree pane) */
+	--md-sys-rail-expanded: 384px; /* rail (88) + tree pane (~296) total */
 	--md-sys-body-max: 1200px; /* centred body cap on large/xl */
 
 	/* ── Motion: spring tokens (Expressive) ──────────────────────────────

@@ -94,7 +94,7 @@
 @media (min-width: 1600px) {
 	:root {
 		--md-sys-list-pane-width: 400px;
-		--md-sys-rail-expanded: 360px;
+		--md-sys-rail-expanded: 432px; /* rail (96) + tree pane (~336) total */
 	}
 }
 
