@@ -2396,15 +2396,42 @@ h6,
 }
 
 /* Loading spinner */
+/* EXPERIMENT (expressive loader): a filled primary blob that spins while morphing
+   its border-radius between organic shapes — the M3 2025 "expressive" loading
+   feel, replacing the plain border-spin ring. (prefers-reduced-motion collapses
+   it to a static shape via the global rule above.) */
 .spinner {
-	width: 24px;
-	height: 24px;
-	border: 3px solid var(--md-surface-variant);
-	border-top: 3px solid var(--md-primary);
-	border-radius: 50%;
-	animation: spin 1s linear infinite;
+	width: 44px;
+	height: 44px;
+	background: var(--md-primary);
+	border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
+	animation: m3-morph-spin 2.4s ease-in-out infinite;
 }
 
+@keyframes m3-morph-spin {
+	0% {
+		border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
+		transform: rotate(0deg) scale(1);
+	}
+	25% {
+		border-radius: 68% 32% 34% 66% / 63% 34% 66% 37%;
+		transform: rotate(90deg) scale(1.08);
+	}
+	50% {
+		border-radius: 34% 66% 68% 32% / 38% 62% 38% 62%;
+		transform: rotate(180deg) scale(1);
+	}
+	75% {
+		border-radius: 58% 42% 37% 63% / 66% 58% 42% 34%;
+		transform: rotate(270deg) scale(1.08);
+	}
+	100% {
+		border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
+		transform: rotate(360deg) scale(1);
+	}
+}
+
+/* Kept for any other spinning affordance that still references it. */
 @keyframes spin {
 	to {
 		transform: rotate(360deg);
