@@ -3974,11 +3974,15 @@ a.list-item:hover {
 	margin-top: 8px;
 }
 
+/* EXPERIMENT (conversational thread): an inviting tertiary-tinted composer well. */
 .comment-composer {
 	display: flex;
-	gap: 8px;
+	gap: 10px;
 	align-items: flex-end;
 	margin-bottom: 16px;
+	background: color-mix(in srgb, var(--md-tertiary) 7%, transparent);
+	padding: 12px;
+	border-radius: var(--md-sys-shape-corner-large);
 }
 
 .comment-input {
@@ -3997,7 +4001,8 @@ a.list-item:hover {
 }
 
 .comment-input:focus {
-	border-color: var(--md-primary);
+	border-color: var(--md-tertiary);
+	box-shadow: inset 0 0 0 1px var(--md-tertiary);
 }
 
 .comment-thread-list {
@@ -4017,7 +4022,7 @@ a.list-item:hover {
 	padding-left: 12px;
 }
 
-/* Each comment reads as a tonal M3 card. */
+/* Each comment reads as a tonal M3 card that lifts on hover. */
 .comment-main {
 	display: flex;
 	gap: 10px;
@@ -4025,6 +4030,20 @@ a.list-item:hover {
 	background: var(--md-surface-container-low);
 	border-radius: var(--md-sys-shape-corner-medium);
 	padding: 12px;
+	transition: background-color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+.comment-main:hover {
+	background: var(--md-surface-container);
+}
+/* EXPERIMENT (avatar rail): larger tertiary rounded-square avatars with a soft
+   glow, giving each speaker more presence than the default 24px circle. */
+.comment-main .comment-avatar {
+	width: 38px;
+	height: 38px;
+	border-radius: var(--md-sys-shape-corner-medium);
+	font-size: 15px;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-tertiary) 22%, transparent);
 }
 
 .comment-avatar {
@@ -4052,9 +4071,10 @@ a.list-item:hover {
 }
 
 .comment-author {
-	font-weight: 600;
+	font-weight: 700;
 	font-size: 14px;
 	color: var(--md-on-surface);
+	letter-spacing: 0.05px;
 }
 
 .comment-dot,
