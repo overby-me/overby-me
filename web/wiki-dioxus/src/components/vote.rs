@@ -867,8 +867,10 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                     if !error.read().is_empty() {
                         p { class: "body-medium", style: "color: var(--md-error, #b3261e);", "{error}" }
                     }
+                    // The civic focal action: casting a vote is a democratic act,
+                    // so it gets the magenta tertiary emphasis, not plain primary.
                     button {
-                        class: "btn btn-primary mt-1",
+                        class: "btn btn-cast mt-1",
                         onclick: submit,
                         span { class: "material-icons", "how_to_vote" }
                         " {t(\"vote.castVote\")}"

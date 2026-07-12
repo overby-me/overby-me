@@ -1075,6 +1075,22 @@ a:hover {
 	color: var(--md-on-primary);
 }
 
+/* Civic focal action (cast vote): magenta tertiary, elevated + emphasized, with
+   an Expressive shape-morph on hover — the one focal CTA of the ballot. */
+.btn-cast {
+	background-color: var(--md-tertiary);
+	color: var(--md-on-tertiary);
+	box-shadow: var(--md-sys-elevation-1);
+	font-weight: 700;
+	min-height: 48px;
+	padding: 12px 28px;
+	border-radius: var(--md-sys-shape-corner-large);
+}
+.btn-cast:hover {
+	box-shadow: var(--md-sys-elevation-2);
+	border-radius: var(--md-sys-shape-corner-extra-large);
+}
+
 .btn-primary:hover {
 	background-color: color-mix(
 		in srgb,
