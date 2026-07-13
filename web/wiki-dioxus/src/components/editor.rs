@@ -304,10 +304,14 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     };
 
     if !is_auth {
+        // EXPERIMENT: an expressive locked-barrier state instead of a plain card.
         return rsx! {
             div { class: "card",
-                div { class: "card-content",
-                    p { class: "body-large", "{t(\"node.documentUnavailable\")}" }
+                div { class: "empty-state",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "lock" }
+                    }
+                    p { class: "empty-state-body", "{t(\"node.documentUnavailable\")}" }
                 }
             }
         };

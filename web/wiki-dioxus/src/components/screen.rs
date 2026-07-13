@@ -53,9 +53,13 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
                 match active {
                     Some(n) => rsx! { MimeLoader { node: n, path: Vec::new() } },
                     None => rsx! {
+                        // EXPERIMENT: an expressive idle state instead of a bare "…".
                         div { class: "card",
-                            div { class: "card-content",
-                                p { class: "md-display-small text-muted", "…" }
+                            div { class: "empty-state",
+                                div { class: "empty-state-orb",
+                                    span { class: "material-icons", "cast" }
+                                }
+                                p { class: "empty-state-body", "{crate::i18n::t(\"common.noContent\")}" }
                             }
                         }
                     },

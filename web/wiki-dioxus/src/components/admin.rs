@@ -33,12 +33,12 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                 h3 { class: "title-medium", "{t(\"mime.vote\")}" }
             }
             if polls.is_empty() {
-                div { class: "card-content",
-                    p {
-                        class: "body-medium",
-                        class: "text-muted",
-                        "{t(\"common.noContent\")}"
+                // EXPERIMENT: orb empty state instead of a plain muted line.
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "how_to_vote" }
                     }
+                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
                 }
             } else {
                 super::widgets::DataTable {
