@@ -644,8 +644,11 @@ html {
 	left: var(--md-sys-rail-width);
 	width: calc(var(--md-sys-rail-expanded) - var(--md-sys-rail-width));
 	z-index: 55;
-	/* Match the rail so the whole left sidebar is one unified chrome colour. */
+	/* Match the rail so the whole left sidebar is one unified chrome colour, with a
+	   hairline divider at the rail boundary. The border rides the pane's transform,
+	   so it only shows while the drawer is out. */
 	background: var(--md-surface-container);
+	border-left: 1px solid var(--md-outline-variant);
 	overflow: hidden;
 	transform: translateX(-100%);
 	transition: transform var(--md-sys-motion-duration-medium2)
