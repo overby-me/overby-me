@@ -859,8 +859,13 @@ html {
 	/* End the content well at the docked tools sheet's left edge (a rounded corner
 	   there) rather than reserving the gutter as inner padding. */
 	margin-right: var(--md-sys-tools-width);
-	transition: margin-right var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-spring-spatial-default);
+	/* Keep margin-left transitioning too (this rule would otherwise drop it), so the
+	   content well slides with the drawer and app bar instead of snapping. */
+	transition:
+		margin-left var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default),
+		margin-right var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default);
 }
 /* End the app bar at the docked tools sheet's left edge so the full-height sheet
    owns the top-right corner. The bar keeps its symmetric padding, so its centred
