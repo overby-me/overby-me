@@ -2209,7 +2209,15 @@ pub async fn search_nodes(
 
     let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
-    Ok(result.nodes)
+    // The search query sets no order_by (it shares NodesWhereVariables), so order
+    // the hits newest-first here — more useful than Hasura's arbitrary order.
+    let mut nodes = result.nodes;
+    nodes.sort_by(|a, b| {
+        let at = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+        let bt = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+        bt.cmp(at)
+    });
+    Ok(nodes)
 }
 
 /// The most recently created content nodes for the home "Newest" list (#34):

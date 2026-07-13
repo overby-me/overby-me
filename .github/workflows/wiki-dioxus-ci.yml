@@ -1,0 +1,60 @@
+# App-level CI for web/wiki-dioxus, run on the GitHub mirror rather than the
+# tangled microVM (whose ~2 GiB RAM only fits the flake formatting check — see
+# .tangled/workflows.ncl). This compiles + tests the frontend and backend so a
+# broken WASM build, a failing unit test, or a stale git-dep FOD hash fails CI
+# instead of shipping (the frontend Nix package broke exactly this way before).
+name: wiki-dioxus CI
+
+on:
+  push:
+    paths:
+      - "web/wiki-dioxus/**"
+      - ".github/workflows/wiki-dioxus-ci.yml"
+  pull_request:
+    paths:
+      - "web/wiki-dioxus/**"
+  workflow_dispatch: {}
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/wiki-dioxus
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web/wiki-dioxus
+      - name: rustfmt
+        run: cargo fmt --check
+      - name: Unit tests (host target)
+        run: cargo test
+      - name: Clippy (wasm target)
+        run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
+      - name: Type-check (wasm target)
+        run: cargo check --target wasm32-unknown-unknown
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/wiki-dioxus/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web/wiki-dioxus/backend
+      - name: rustfmt
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+      - name: Unit tests
+        run: cargo test

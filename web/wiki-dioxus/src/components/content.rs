@@ -683,6 +683,22 @@ mod tests {
     }
 
     #[test]
+    fn safe_href_allows_web_and_app_urls_and_blocks_scripts() {
+        // Allowed schemes pass through unchanged (trimmed).
+        assert_eq!(safe_href("https://example.com/x"), "https://example.com/x");
+        assert_eq!(safe_href("  http://a.b  "), "http://a.b");
+        assert_eq!(safe_href("mailto:a@b.dk"), "mailto:a@b.dk");
+        assert_eq!(safe_href("/group/doc"), "/group/doc");
+        assert_eq!(safe_href("#section"), "#section");
+        // Dangerous schemes (any casing / whitespace) are neutralized to "#".
+        assert_eq!(safe_href("javascript:alert(1)"), "#");
+        assert_eq!(safe_href("JavaScript:alert(1)"), "#");
+        assert_eq!(safe_href("  javascript:alert(1)"), "#");
+        assert_eq!(safe_href("data:text/html,<script>"), "#");
+        assert_eq!(safe_href("vbscript:msgbox"), "#");
+    }
+
+    #[test]
     fn recovers_emoji_from_facebook_image_urls() {
         // Facebook single-codepoint and ZWJ-sequence emoji images.
         assert_eq!(
