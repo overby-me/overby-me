@@ -187,6 +187,8 @@ struct Sim {
     t: f64,
     /// Previous traced point, or None right after a reset.
     last: Option<(f64, f64)>,
+    /// When paused, time stops advancing (the frame still renders the overlay).
+    paused: bool,
     /// Logical (CSS-pixel) canvas size; drawing happens in this space.
     w: f64,
     h: f64,
@@ -211,7 +213,12 @@ impl Sim {
     fn frame(&mut self) {
         let s = self.settings.clone();
         let (cx, cy) = self.center();
-        let steps = (s.calrate.max(1.0)) as u32;
+        // Paused freezes time: still render the overlay, but add no new segments.
+        let steps = if self.paused {
+            0
+        } else {
+            (s.calrate.max(1.0)) as u32
+        };
         // Turbo uses the raw time step; otherwise it is scaled down so the
         // slider's 0..100 range maps to a gentle speed.
         let dt = if s.turbo {
@@ -378,6 +385,8 @@ pub fn Cardioid() -> Element {
     // shared link reproduces the configuration.
     let mut settings = use_signal(|| Settings::from_query(&captured_query()));
     let state: Signal<Option<Rc<RefCell<Sim>>>> = use_signal(|| None);
+    // Transport state: pause freezes time without clearing the trace.
+    let mut paused = use_signal(|| false);
 
     // Push setting changes into the running simulation, clearing the trace when
     // the curve geometry (not just speed/width) changed.
@@ -446,6 +455,7 @@ pub fn Cardioid() -> Element {
                     settings: settings.peek().clone(),
                     t: 0.0,
                     last: None,
+                    paused: false,
                     w: css_w,
                     h: css_h,
                     canvas,
@@ -467,6 +477,12 @@ pub fn Cardioid() -> Element {
             "background:#333;border-color:#555"
         }
     };
+    let is_paused = *paused.read();
+    let (play_label, play_style) = if is_paused {
+        ("▶ Play", "background:#2f7d32;border-color:#3faf43")
+    } else {
+        ("⏸ Pause", "background:#8a5a1a;border-color:#c98a2a")
+    };
 
     rsx! {
         div {
@@ -487,6 +503,20 @@ pub fn Cardioid() -> Element {
                 div {
                     style: "font-weight:700;font-size:18px;margin-bottom:10px;color:#ff4d8d;",
                     "Cardioid"
+                }
+
+                button {
+                    style: "width:100%;margin-bottom:12px;padding:7px;border:1px solid;\
+                            border-radius:6px;color:#fff;cursor:pointer;font:inherit;\
+                            font-size:14px;font-weight:600;{play_style}",
+                    onclick: move |_| {
+                        let now = !paused();
+                        paused.set(now);
+                        if let Some(sim) = state.read().clone() {
+                            sim.borrow_mut().paused = now;
+                        }
+                    },
+                    "{play_label}"
                 }
 
                 Slider { label: "Center circle radius (r₁)", min: "1", max: "300", step: "1",
