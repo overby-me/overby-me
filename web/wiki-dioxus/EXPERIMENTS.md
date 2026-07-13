@@ -143,6 +143,17 @@ Smaller, mostly CSS-only refinements and genuine fixes:
   the parent app (celebratory orb), the generic node fallback, and the admin /
   projector-idle / editor-locked empty states.
 
+## Second dullness sweep + richer treatments
+
+- Extended the orb empty-state to the **speak** (no lists / empty queue), **social**
+  (no results + error), and **profile** (no memberships) states.
+- **Search no-results** — the search dropdown now shows a clear "No results" row
+  instead of vanishing (safe from typing-flash: `search_run` only replaces results
+  on response).
+- **Auth hero** — the login/register/verify forms lead with a large tonal hero
+  icon badge + headline, complementing the auth backdrop.
+- Left the `cow` easter egg deliberately plain (its charm is the ASCII cowsay).
+
 ## Notes / follow-ups
 
 - The graph SVG could get the same `.viewport-frame` as the map (left out to avoid
