@@ -93,9 +93,20 @@ fn PostCard(post: Post) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-content",
-                div { class: "post-header",
+                a {
+                    class: "post-header post-author-link",
+                    href: "https://bsky.app/profile/{post.handle}",
+                    target: "_blank",
+                    rel: "noopener noreferrer",
                     if let Some(avatar) = post.avatar.clone() {
-                        img { src: "{avatar}", class: "post-avatar", alt: "avatar" }
+                        img {
+                            src: "{avatar}",
+                            class: "post-avatar",
+                            alt: "",
+                            loading: "lazy",
+                            decoding: "async",
+                            referrerpolicy: "no-referrer",
+                        }
                     } else {
                         div { class: "avatar small", span { class: "material-icons", "public" } }
                     }

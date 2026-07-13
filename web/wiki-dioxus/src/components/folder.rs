@@ -50,9 +50,10 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
     // Live children: subscribe to this folder's child nodes so additions and
     // removals (by anyone) show up immediately, filtered + ordered like React.
     let refresh = use_signal(|| 0u32);
+    let sub_node = crate::graphql::gql_escape(&node_id);
     crate::subscription::use_live(
         format!(
-            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{node_id}\" }} }}) {{ id }} }}"
+            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{sub_node}\" }} }}) {{ id }} }}"
         ),
         refresh,
     );

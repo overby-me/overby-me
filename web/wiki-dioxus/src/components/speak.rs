@@ -88,9 +88,10 @@ fn SpeakList(
 
     // Live updates: subscribe to this list's entries over the Hasura WebSocket
     // so entries added/removed by anyone appear at once.
+    let sub_list = crate::graphql::gql_escape(&list_id);
     crate::subscription::use_live(
         format!(
-            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{list_id}\" }}, mimeId: {{ _eq: \"speak/speak\" }} }}) {{ id }} }}"
+            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{sub_list}\" }}, mimeId: {{ _eq: \"speak/speak\" }} }}) {{ id }} }}"
         ),
         refresh,
     );

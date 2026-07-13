@@ -40,7 +40,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     // Live-update when a poll opens/closes: subscribe to the context `active`
     // relation so a freshly-opened ballot appears without a reload.
     let refresh = use_signal(|| 0u32);
-    let sub_ctx = context_id.clone();
+    let sub_ctx = crate::graphql::gql_escape(&context_id);
     crate::subscription::use_live(
         format!(
             "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _eq: \"active\" }} }}) {{ nodeId }} }}"
@@ -77,6 +77,32 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     };
 
     let state = active.read().clone();
+
+    // Notify when a poll opens — the transition from "no active vote" to an active
+    // vote/poll — for members who may vote. The narrow window to cast a ballot is
+    // the highest-stakes assembly event, and the subscription above already fires.
+    let active_poll_id = match &state {
+        Some(Some(a)) if a.mime_id.as_deref() == Some("vote/poll") => Some(a.id.0.clone()),
+        _ => None,
+    };
+    let mut seen_poll = use_signal(|| None::<Option<String>>);
+    {
+        let apid = active_poll_id.clone();
+        use_effect(use_reactive!(|(apid, can_vote)| {
+            let previous = seen_poll.peek().clone();
+            match previous {
+                // First render: remember the current poll without notifying.
+                None => seen_poll.set(Some(apid)),
+                Some(prev) => {
+                    if can_vote && apid.is_some() && apid != prev {
+                        crate::pwa::notify(&t("vote.pollOpenTitle"), &t("vote.pollOpenBody"));
+                    }
+                    seen_poll.set(Some(apid));
+                }
+            }
+        }));
+    }
+
     let content = match state {
         Some(Some(active)) if active.mime_id.as_deref() == Some("vote/poll") => {
             rsx! { PollApp { node: active } }
@@ -350,7 +376,15 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     to: Route::PathPage { segments: full, app: None },
                                     class: "m3-carousel-item",
                                     if let Some(src) = photo {
-                                        img { class: "m3-carousel-img", src: "{src}", alt: "{cand.name}" }
+                                        img {
+                                            class: "m3-carousel-img",
+                                            src: "{src}",
+                                            alt: "{cand.name}",
+                                            loading: "lazy",
+                                            decoding: "async",
+                                            // The src carries the nhost ?token=; keep it out of the Referer.
+                                            referrerpolicy: "no-referrer",
+                                        }
                                     } else {
                                         div { class: "m3-carousel-placeholder",
                                             {icon_el("vote/candidate")}
@@ -670,9 +704,10 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     let order = use_hook(|| ballot_order(options.len(), js_sys::Math::random));
 
     // Live results: any vote cast on this poll re-runs the tally / voted checks.
+    let sub_poll = crate::graphql::gql_escape(&poll_id);
     crate::subscription::use_live(
         format!(
-            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{poll_id}\" }}, mimeId: {{ _eq: \"vote/vote\" }} }}) {{ id }} }}"
+            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{sub_poll}\" }}, mimeId: {{ _eq: \"vote/vote\" }} }}) {{ id }} }}"
         ),
         refresh,
     );

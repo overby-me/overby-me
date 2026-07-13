@@ -8,6 +8,26 @@ use crate::session::use_session;
 
 use super::loader::{icon_el, mime_icon};
 
+/// Allowlist filter for an authored link href. Members can type link URLs into
+/// the rich-text editor; only http/https/mailto and app-relative (`/`, `#`) URLs
+/// are safe to render as a live anchor. Anything else — `javascript:`, `data:`,
+/// `vbscript:` — is neutralized to `#` so a planted link can't run script in
+/// another member's session when clicked (stored-XSS defense at the render sink).
+pub(crate) fn safe_href(url: &str) -> String {
+    let u = url.trim();
+    let lower = u.to_ascii_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("mailto:")
+        || u.starts_with('/')
+        || u.starts_with('#')
+    {
+        u.to_string()
+    } else {
+        "#".to_string()
+    }
+}
+
 /// The content card only (title, image, members, body). Comments are a separate
 /// [`super::comments::CommentSection`] composed by each caller, so composite
 /// views (policy/position) can place amendments/candidates above the thread.
@@ -457,8 +477,9 @@ fn SlateInline(node: serde_json::Value) -> Element {
             .and_then(|l| l.as_str())
             .filter(|l| !l.is_empty())
         {
+            let url = safe_href(url);
             return rsx! {
-                a { href: "{url}", target: "_blank", rel: "noopener",
+                a { href: "{url}", target: "_blank", rel: "noopener noreferrer",
                     if code {
                         code { "{text}" }
                     } else if style.is_empty() {
@@ -497,9 +518,9 @@ fn SlateInline(node: serde_json::Value) -> Element {
 
         match element_type {
             "link" => {
-                let url = node.get("url").and_then(|u| u.as_str()).unwrap_or("#");
+                let url = safe_href(node.get("url").and_then(|u| u.as_str()).unwrap_or("#"));
                 return rsx! {
-                    a { href: "{url}", target: "_blank", rel: "noopener",
+                    a { href: "{url}", target: "_blank", rel: "noopener noreferrer",
                         for (i , child) in children.iter().enumerate() {
                             SlateInline { key: "{i}", node: child.clone() }
                         }

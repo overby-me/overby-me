@@ -294,7 +294,9 @@ const EN_JSON: &str = r#"{
         "resultNone": "No result",
         "turnout": "Turnout",
         "eligible": "eligible",
-        "closed": "Voting closed"
+        "closed": "Voting closed",
+        "pollOpenTitle": "Vote open",
+        "pollOpenBody": "A vote has opened — cast your ballot"
     },
     "perm": {
         "type": "Type",
@@ -651,7 +653,9 @@ const DA_JSON: &str = r#"{
         "resultNone": "Intet resultat",
         "turnout": "Stemmeprocent",
         "eligible": "stemmeberettigede",
-        "closed": "Afstemning afsluttet"
+        "closed": "Afstemning afsluttet",
+        "pollOpenTitle": "Afstemning åben",
+        "pollOpenBody": "En afstemning er åbnet — afgiv din stemme"
     },
     "perm": {
         "type": "Type",

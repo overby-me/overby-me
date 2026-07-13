@@ -1084,7 +1084,9 @@ fn members_where(parent_id: &str, f: &MemberPageFilter) -> String {
 }
 
 /// Escape a value for embedding inside a GraphQL double-quoted string literal.
-fn gql_escape(s: &str) -> String {
+/// Used by the hand-built subscription strings in components too, so an id that
+/// ever carried a `"`/`\` can't rewrite the query's `where` filter.
+pub(crate) fn gql_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 

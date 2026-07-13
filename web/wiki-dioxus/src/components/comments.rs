@@ -50,8 +50,14 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     // once — and drive the "someone replied to you" notification below.
     {
         let filter = match &context_id {
-            Some(ctx) => format!("contextId: {{ _eq: \"{ctx}\" }}"),
-            None => format!("parentId: {{ _eq: \"{node_id}\" }}"),
+            Some(ctx) => format!(
+                "contextId: {{ _eq: \"{}\" }}",
+                crate::graphql::gql_escape(ctx)
+            ),
+            None => format!(
+                "parentId: {{ _eq: \"{}\" }}",
+                crate::graphql::gql_escape(&node_id)
+            ),
         };
         crate::subscription::use_live(
             format!(

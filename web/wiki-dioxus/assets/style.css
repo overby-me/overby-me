@@ -2724,6 +2724,16 @@ select:focus {
 	gap: 10px;
 	align-items: center;
 }
+
+/* The whole post header links to the author's Bluesky profile. */
+.post-author-link {
+	color: inherit;
+	text-decoration: none;
+}
+
+.post-author-link:hover .list-item-primary {
+	text-decoration: underline;
+}
 /* EXPERIMENT (social): a subtle tertiary ring on post avatars + airier text. */
 .post-avatar {
 	width: 40px;

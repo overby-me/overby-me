@@ -595,7 +595,11 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                     if url.trim().is_empty() {
                                         richtext::exec("unlink");
                                     } else {
-                                        richtext::exec_value("createLink", url.trim());
+                                        // Neutralize javascript:/data: schemes on insert too.
+                                        richtext::exec_value(
+                                            "createLink",
+                                            &super::content::safe_href(&url),
+                                        );
                                     }
                                     link_open.set(false);
                                 },

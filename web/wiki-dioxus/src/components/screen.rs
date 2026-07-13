@@ -23,7 +23,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
     // active node (remotely, from the admin) updates the projected pane without a
     // reload — the whole point of the screen view (React ScreenApp's useSubsGet).
     let refresh = use_signal(|| 0u32);
-    let sub_ctx = context_id.clone();
+    let sub_ctx = crate::graphql::gql_escape(&context_id);
     crate::subscription::use_live(
         format!(
             "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _eq: \"active\" }} }}) {{ nodeId }} }}"

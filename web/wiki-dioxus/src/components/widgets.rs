@@ -594,6 +594,9 @@ pub fn ZoomableImage(src: String, alt: String) -> Element {
                 alt: "{alt}",
                 // `.zoomable` fades the image in on mount (see CSS).
                 class: "zoomable",
+                loading: "lazy",
+                decoding: "async",
+                referrerpolicy: "no-referrer",
                 onerror: move |_| errored.set(true),
                 onclick: move |_| zoomed.set(true),
             }
