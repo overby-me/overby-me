@@ -93,4 +93,14 @@ disabled_rules = [
   # loop (the window-resize -> WindowSizeClass bridge) is a reactive signal
   # write, not buffered file I/O; deslop's file-sink heuristic misreads `.write()`.
   "rust_unbuffered_file_writes",
+
+  # ── Frontend-idiomatic false positives ────────────────────────────────
+  # `segments.join("/")` builds a client-route / scroll-cache key string, not a
+  # filesystem path; `main.rs` is the small (~200-line) module index, not an
+  # oversized file; and `#[serde(default)]` on `User.avatar_url` / `AtprotoLink`
+  # fields is intentional — sessions persisted before a field existed, and the
+  # backend's "not linked" status legitimately omits handle/did.
+  "rust_path_join_absolute",
+  "rust_oversized_module_file",
+  "rust_serde_default_on_required_field",
 ]

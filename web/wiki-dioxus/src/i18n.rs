@@ -196,7 +196,6 @@ const EN_JSON: &str = r#"{
     },
     "content": {
         "addContent": "Add content",
-        "addType": "Add {{type}}",
         "shareBluesky": "Share to Bluesky",
         "sharing": "Sharing to Bluesky…",
         "shared": "Shared to Bluesky",
@@ -209,10 +208,8 @@ const EN_JSON: &str = r#"{
         "authors": "Authors",
         "addAuthor": "Add Author",
         "addAtLeastOneAuthor": "Add at least 1 author",
-        "uploadImage": "Upload Image",
         "uploadFile": "Upload File",
         "chooseFile": "Choose a file",
-        "contentNameExists": "Content with this name already exists",
         "imageAlt": "Content image",
         "tableOfContents": "Table of contents"
     },
@@ -593,6 +590,7 @@ const DA_JSON: &str = r#"{
         "userMenu": "Brugermenu",
         "account": "Konto",
         "profile": "Profil",
+        "notSubmitted": "Ikke indsendt",
         "newestContent": "Nyeste indhold",
         "darkMode": "Mørk tilstand",
         "compactDensity": "Kompakt visning",
@@ -825,5 +823,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// English and Danish must expose exactly the same set of leaf keys, so no
+    /// locale renders a raw `section.key` fallback to users (t() falls back to the
+    /// key string). Guards against drift when keys are added to one map only.
+    #[test]
+    fn en_da_key_sets_match() {
+        fn leaf_keys(
+            map: &HashMap<String, serde_json::Value>,
+        ) -> std::collections::BTreeSet<String> {
+            let mut out = std::collections::BTreeSet::new();
+            for (section, value) in map {
+                if let Some(obj) = value.as_object() {
+                    for k in obj.keys() {
+                        out.insert(format!("{section}.{k}"));
+                    }
+                } else {
+                    out.insert(section.clone());
+                }
+            }
+            out
+        }
+        let en = leaf_keys(&en_translations());
+        let da = leaf_keys(&da_translations());
+        let en_only: Vec<_> = en.difference(&da).collect();
+        let da_only: Vec<_> = da.difference(&en).collect();
+        assert!(
+            en_only.is_empty() && da_only.is_empty(),
+            "i18n key drift — en-only: {en_only:?}, da-only: {da_only:?}"
+        );
     }
 }

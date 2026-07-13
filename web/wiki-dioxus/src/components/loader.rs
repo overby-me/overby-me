@@ -224,8 +224,6 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
         }
         "vote/poll" => rsx! { PollApp { node: node.clone() } },
         "map/map" => rsx! { super::map::MapApp { node: node.clone() } },
-        // A user node shows its public profile (memberships), not the raw node.
-        "wiki/user" => rsx! { super::profile::UserApp { node: node.clone() } },
         _ => rsx! { NodeApp { node: node.clone(), title: t("mime.unknown") } },
     }
 }

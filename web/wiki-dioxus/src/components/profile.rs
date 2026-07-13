@@ -1,80 +1,11 @@
 use dioxus::prelude::*;
 
-use crate::graphql::{self, NodeWithChildren};
+use crate::graphql;
 use crate::i18n::t;
 use crate::route::Route;
 use crate::session::use_session;
 
 use super::loader::{icon_el, user_avatar};
-
-/// UserApp — a public profile for a `wiki/user` node: the person's name plus the
-/// groups and events they belong to (React UserApp). Reached by navigating to a
-/// user node, unlike self-only [`ProfileApp`].
-#[component]
-pub fn UserApp(node: NodeWithChildren) -> Element {
-    let session = use_session();
-    let access_token = session.read().access_token.clone();
-    let uid = node.id.0.clone();
-    let name = node.name.clone();
-
-    // The groups + events this user belongs to (owner or accepted member).
-    let memberships = crate::use_data_resource!(|(uid, access_token)| async move {
-        let mut out = Vec::new();
-        for mime in ["wiki/group", "wiki/event"] {
-            if let Ok(nodes) = graphql::query_contexts(access_token.as_deref(), &uid, mime).await {
-                out.extend(nodes);
-            }
-        }
-        out
-    });
-    let contexts = memberships.read().clone().unwrap_or_default();
-
-    rsx! {
-        // EXPERIMENT (profile hero): a bold identity header with a large tonal
-        // avatar and a membership-count chip.
-        div { class: "card",
-            div { class: "profile-hero",
-                div { class: "profile-hero-avatar", {icon_el("wiki/user")} }
-                div {
-                    h3 { class: "profile-hero-name", "{name}" }
-                    if !contexts.is_empty() {
-                        span { class: "count-badge", "{contexts.len()} · {t(\"profile.memberships\")}" }
-                    }
-                }
-            }
-        }
-        div { class: "card mt-1",
-            div { class: "card-header",
-                h3 { class: "title-medium", "{t(\"profile.memberships\")}" }
-            }
-            if contexts.is_empty() {
-                // EXPERIMENT: orb empty state for a user with no memberships.
-                div { class: "empty-state empty-state-sm",
-                    div { class: "empty-state-orb empty-state-orb-sm",
-                        span { class: "material-icons", "groups" }
-                    }
-                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
-                }
-            } else {
-                div { class: "list",
-                    for ctx in contexts.iter() {
-                        Link {
-                            key: "{ctx.id.0}",
-                            to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
-                            class: "list-link",
-                            super::widgets::ListItem {
-                                headline: ctx.name.clone(),
-                                leading: rsx! {
-                                    div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
-                                },
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 /// ProfileApp — the signed-in user's profile (#78): who they are plus the groups
 /// and events they belong to. Reachable via `?app=profile`.

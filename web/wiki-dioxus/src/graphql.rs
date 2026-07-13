@@ -2236,6 +2236,9 @@ pub struct Author {
     /// The user's avatar URL (empty for groups / when none). Lets the invite
     /// autocomplete show the same Bluesky/gravatar picture used elsewhere.
     pub avatar_url: String,
+    /// The user's id when this author is a person (None for groups / free text),
+    /// so editor author chips can open the identity popover / profile.
+    pub user_id: Option<String>,
 }
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -2292,6 +2295,7 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
                 name: n.name,
                 node_id: Some(n.id.0),
                 avatar_url: String::new(),
+                user_id: None,
             });
         }
     }
@@ -2310,8 +2314,9 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
         for u in r.users.into_iter().take(10) {
             out.push(Author {
                 name: u.display_name,
-                node_id: Some(u.id.0),
+                node_id: Some(u.id.0.clone()),
                 avatar_url: u.avatar_url,
+                user_id: Some(u.id.0),
             });
         }
     }
@@ -2339,8 +2344,9 @@ pub async fn search_users(access_token: Option<&str>, query: &str) -> Vec<Author
         for u in r.users.into_iter().take(10) {
             out.push(Author {
                 name: u.display_name,
-                node_id: Some(u.id.0),
+                node_id: Some(u.id.0.clone()),
                 avatar_url: u.avatar_url,
+                user_id: Some(u.id.0),
             });
         }
     }

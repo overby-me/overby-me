@@ -90,10 +90,15 @@ fn AuthorField(authors: Signal<Vec<graphql::Author>>) -> Element {
             div { class: "chip-row",
                 for (i , a) in authors.read().iter().enumerate() {
                     div { class: "chip", key: "{i}",
-                        span { class: "material-icons",
-                            if a.node_id.is_some() { "groups" } else { "face" }
+                        super::loader::UserPopover {
+                            name: a.name.clone(),
+                            avatar_url: a.avatar_url.clone(),
+                            user_id: a.user_id.clone(),
+                            span { class: "material-icons",
+                                if a.node_id.is_some() { "groups" } else { "face" }
+                            }
+                            span { "{a.name}" }
                         }
-                        span { "{a.name}" }
                         button {
                             class: "chip-remove",
                             r#type: "button",
@@ -132,7 +137,7 @@ fn AuthorField(authors: Signal<Vec<graphql::Author>>) -> Element {
                         if evt.key().to_string() == "Enter" {
                             evt.prevent_default();
                             let name = input.read().trim().to_string();
-                            add_author(authors, input, suggestions, graphql::Author { name, node_id: None, avatar_url: String::new() });
+                            add_author(authors, input, suggestions, graphql::Author { name, node_id: None, avatar_url: String::new(), user_id: None });
                         }
                     },
                 }
@@ -198,6 +203,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     .as_ref()
                     .map(|u| u.avatar_url.clone())
                     .unwrap_or_default(),
+                user_id: m.user.as_ref().map(|u| u.id.0.clone()),
             })
             .filter(|a| !a.name.is_empty())
             .collect::<Vec<_>>()

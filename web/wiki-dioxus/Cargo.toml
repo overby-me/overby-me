@@ -11,7 +11,9 @@ console_error_panic_hook = "0.1"
 cynic = { version = "3", features = ["http-reqwest"] }
 dioxus = { version = "0.7.9" }
 dioxus-icons = { version = "0.1.0", default-features = false }
-dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version = "0.0.1", default-features = false }
+# Pinned to an explicit rev so `cargo update` can't float it to HEAD (which would
+# stale the Nix `outputHashes` FOD hash in default.nix and break the build).
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
 # StreamExt for the use_coroutine bridge that feeds window-resize widths into the
 # adaptive WindowSizeClass signal from inside the Dioxus runtime.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -90,3 +92,14 @@ default = ["web"]
 # panics) to Better Stack / Logtail. Reads BETTERSTACK_SOURCE_TOKEN at build time.
 remote-logging = []
 web = ["dioxus/router", "dioxus/web"]
+
+# dx builds the web bundle with the `wasm-release` profile. Size matters (phones
+# on venue wifi): fat LTO + a single codegen unit + abort-on-panic trim the wasm
+# meaningfully on top of `opt-level = "s"` before gzip/brotli.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
