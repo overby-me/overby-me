@@ -3261,6 +3261,11 @@ h6,
 	color: #fff;
 	cursor: pointer;
 }
+/* Breadcrumb links never underline on hover (overrides the global a:hover rule);
+   the crumb already reacts with its pill hover. */
+.crumb-link:hover {
+	text-decoration: none;
+}
 
 .crumb-avatar {
 	flex: 0 0 auto;
