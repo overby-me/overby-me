@@ -210,13 +210,16 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         } else if file_mime.starts_with("video/") {
                             video {
                                 controls: true,
-                                style: "width: 100%; max-height: 70vh;",
+                                style: "width: 100%; max-height: 70vh; border-radius: var(--md-sys-shape-corner-large);",
                                 src: "{file_url}",
                             }
                         } else if file_mime.starts_with("audio/") {
                             audio { controls: true, style: "width: 100%;", src: "{file_url}" }
                         } else if file_mime == "application/pdf" {
-                            iframe { src: "{file_url}", title: "{name}" }
+                            // EXPERIMENT: frame document previews like the map/graph.
+                            div { class: "viewport-frame",
+                                iframe { src: "{file_url}", title: "{name}" }
+                            }
                         } else if is_office_mime(file_mime) {
                             // Preview Word/Excel/PowerPoint via Microsoft's hosted
                             // viewer, which fetches the file URL server-side (mirrors
@@ -224,19 +227,29 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                             {
                                 let encoded = String::from(&js_sys::encode_uri_component(&file_url));
                                 rsx! {
-                                    iframe {
-                                        src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
-                                        title: "{name}",
+                                    div { class: "viewport-frame",
+                                        iframe {
+                                            src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
+                                            title: "{name}",
+                                        }
                                     }
                                 }
                             }
                         } else {
-                            a {
-                                href: "{file_url}",
-                                target: "_blank",
-                                class: "btn btn-outlined",
-                                span { class: "material-icons", "download" }
-                                " {t(\"common.download\")}"
+                            // EXPERIMENT: a rich "no preview" state (format orb +
+                            // prominent download) instead of a bare button.
+                            div { class: "empty-state empty-state-sm",
+                                div { class: "empty-state-orb empty-state-orb-sm",
+                                    {node_icon_el("wiki/file", data.as_ref())}
+                                }
+                                p { class: "empty-state-body", "{t(\"common.noPreview\")}" }
+                                a {
+                                    href: "{file_url}",
+                                    target: "_blank",
+                                    class: "btn btn-primary",
+                                    span { class: "material-icons", "download" }
+                                    " {t(\"common.download\")}"
+                                }
                             }
                         }
                     }

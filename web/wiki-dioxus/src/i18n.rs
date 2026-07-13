@@ -159,6 +159,7 @@ const EN_JSON: &str = r#"{
         "register": "Register",
         "unknown": "Unknown",
         "download": "Download",
+        "noPreview": "No preview available for this file",
         "gridView": "Grid view",
         "listView": "List view",
         "items": "Items"
@@ -493,6 +494,7 @@ const DA_JSON: &str = r#"{
         "register": "Registrer",
         "unknown": "Ukendt",
         "download": "Download",
+        "noPreview": "Ingen forhåndsvisning for denne fil",
         "gridView": "Gittervisning",
         "listView": "Listevisning",
         "items": "Elementer"
