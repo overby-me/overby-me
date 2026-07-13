@@ -122,7 +122,7 @@ fn App() -> Element {
         // outcome and drop the ?linked query so it does not re-fire on refresh.
         if let Some(win) = web_sys::window() {
             if let Ok(search) = win.location().search() {
-                let msg = if search.contains("linked=success") {
+                let msg = if search.contains("linked=bluesky") {
                     Some(i18n::t("profile.linkedOk"))
                 } else if search.contains("linked=error") {
                     Some(i18n::t("profile.linkedErr"))

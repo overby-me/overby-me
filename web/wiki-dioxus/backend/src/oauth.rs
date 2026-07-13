@@ -209,6 +209,19 @@ async fn callback_inner(
     )
     .await?;
 
+    // Best-effort: cache the account's Bluesky avatar on the NHost user so the app
+    // can show it as the profile picture everywhere. A failure must not fail linking.
+    if let Some(avatar) = bsky_avatar(client, cfg, &state.did).await {
+        let _ = nhost::update_user_avatar(
+            client,
+            &cfg.hasura_url,
+            &cfg.admin_secret,
+            &state.nhost_user_id,
+            &avatar,
+        )
+        .await;
+    }
+
     Ok(crate::redirect_set_cookie(
         &format!("{}/?linked=bluesky", cfg.app_origin),
         &clear_cookie(),
@@ -424,6 +437,21 @@ async fn dpop_form_post(
         return Err(format!("{url} -> {status}: {value}"));
     }
     Err(format!("{url}: DPoP nonce handshake did not settle"))
+}
+
+/// The account's Bluesky avatar URL from its public atproto profile (via the
+/// AppView, `handle_resolver`). Best-effort — returns None on any failure.
+async fn bsky_avatar(client: &reqwest::Client, cfg: &Config, actor: &str) -> Option<String> {
+    let url = format!(
+        "{}/xrpc/app.bsky.actor.getProfile?actor={actor}",
+        cfg.handle_resolver
+    );
+    let resp = client.get(url).send().await.ok()?;
+    let body: Value = resp.json().await.ok()?;
+    body.get("avatar")?
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// The value of a named cookie from the `Cookie` header.

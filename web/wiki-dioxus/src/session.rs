@@ -10,6 +10,9 @@ pub struct User {
     pub id: String,
     pub email: String,
     pub display_name: String,
+    /// The user's avatar URL (e.g. their linked Bluesky picture); empty if none.
+    #[serde(default)]
+    pub avatar_url: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -110,6 +113,7 @@ pub async fn establish_from_refresh_token(refresh_token: &str) -> bool {
                         id: user.id,
                         email: user.email.unwrap_or_default(),
                         display_name: user.display_name.unwrap_or_default(),
+                        avatar_url: user.avatar_url.unwrap_or_default(),
                     });
                 }
                 session.clone()
@@ -230,6 +234,7 @@ async fn refresh_access_token() -> RefreshOutcome {
                         id: user.id,
                         email: user.email.unwrap_or_default(),
                         display_name: user.display_name.unwrap_or_default(),
+                        avatar_url: user.avatar_url.unwrap_or_default(),
                     });
                 }
                 session.clone()

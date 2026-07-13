@@ -1327,6 +1327,16 @@ html {
 	flex-shrink: 0;
 }
 
+/* A user's profile image (e.g. their linked Bluesky picture) filling a circular
+   .avatar; see loader::user_avatar. Overrides the tonal fill with the photo. */
+.avatar-img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	border-radius: 50%;
+	display: block;
+}
+
 /* Context (group/event) name abbreviation: smaller so 2-3 letters fit the
  * circle on one line (e.g. "EU", "KM", "HB"). */
 .avatar-abbr {

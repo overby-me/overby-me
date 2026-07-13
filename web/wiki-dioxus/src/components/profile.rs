@@ -5,7 +5,7 @@ use crate::i18n::t;
 use crate::route::Route;
 use crate::session::use_session;
 
-use super::loader::icon_el;
+use super::loader::{icon_el, user_avatar};
 
 /// UserApp — a public profile for a `wiki/user` node: the person's name plus the
 /// groups and events they belong to (React UserApp). Reached by navigating to a
@@ -120,7 +120,7 @@ pub fn ProfileApp() -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar", {icon_el("app/profile")} }
+                div { class: "avatar", {user_avatar(&user.avatar_url, icon_el("app/profile"))} }
                 div {
                     h3 { class: "title-medium", "{user.display_name}" }
                     p {

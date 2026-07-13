@@ -1124,6 +1124,13 @@ fn UserMenu() -> Element {
         .as_ref()
         .map(|u| u.display_name.chars().next().unwrap_or('?').to_string())
         .unwrap_or_else(|| "?".to_string());
+    // The user's avatar image (e.g. their linked Bluesky picture), if any.
+    let avatar_url = session
+        .read()
+        .user
+        .as_ref()
+        .map(|u| u.avatar_url.clone())
+        .unwrap_or_default();
 
     let dark = *theme.read() == ThemeMode::Dark;
     let display_name = session
@@ -1152,7 +1159,9 @@ fn UserMenu() -> Element {
                     menu_open.set(!v);
                 },
                 if is_auth {
-                    span { class: "avatar small secondary", "{initial}" }
+                    span { class: "avatar small secondary",
+                        {super::loader::user_avatar(&avatar_url, rsx! { "{initial}" })}
+                    }
                 } else {
                     span { class: "avatar small", span { class: "material-icons", "person" } }
                 }

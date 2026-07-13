@@ -75,6 +75,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                                     id: u.id,
                                     email: u.email.unwrap_or_default(),
                                     display_name: u.display_name.unwrap_or_default(),
+                                    avatar_url: u.avatar_url.unwrap_or_default(),
                                 }),
                                 access_token: Some(session.access_token),
                                 refresh_token: Some(session.refresh_token),

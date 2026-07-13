@@ -362,6 +362,19 @@ pub fn icon_el(mime_id: &str) -> Element {
     }
 }
 
+/// Content for a user's `.avatar`: their profile image (e.g. the linked Bluesky
+/// picture, from `users.avatarUrl`) if set, otherwise `fallback` (an icon or
+/// initial). Place the result inside an `.avatar` element.
+pub fn user_avatar(avatar_url: &str, fallback: Element) -> Element {
+    if avatar_url.is_empty() {
+        fallback
+    } else {
+        rsx! {
+            img { class: "avatar-img", src: "{avatar_url}", alt: "", loading: "lazy" }
+        }
+    }
+}
+
 /// The mime id that should drive a NODE's icon: for a `wiki/file` it is the
 /// file's own content type (`data.type`) so uploads show format-specific icons
 /// (pdf, Word, Excel, PowerPoint, image, audio, video), mirroring the old wiki's

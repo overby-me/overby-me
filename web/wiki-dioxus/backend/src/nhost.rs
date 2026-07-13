@@ -78,3 +78,32 @@ pub async fn upsert_atproto_link(
     }
     Ok(())
 }
+
+/// Set the NHost user's `avatarUrl` so the app can show the linked Bluesky avatar
+/// as the profile picture. Uses the admin secret (nhost's `updateUser` by pk).
+pub async fn update_user_avatar(
+    client: &reqwest::Client,
+    graphql_url: &str,
+    admin_secret: &str,
+    user_id: &str,
+    avatar_url: &str,
+) -> Result<(), String> {
+    let query = "mutation($id: uuid!, $url: String!) { \
+        updateUser(pk_columns: { id: $id }, _set: { avatarUrl: $url }) { id } }";
+    let body = json!({
+        "query": query,
+        "variables": { "id": user_id, "url": avatar_url },
+    });
+    let resp = client
+        .post(graphql_url)
+        .header("x-hasura-admin-secret", admin_secret)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let value: Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(errors) = value.get("errors") {
+        return Err(format!("hasura error: {errors}"));
+    }
+    Ok(())
+}
