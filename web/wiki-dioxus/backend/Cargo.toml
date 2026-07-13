@@ -34,6 +34,10 @@ tower = { version = "0.5", features = ["util"] }
 # access token), P-256 ES256 signing (DPoP proofs), a CSRNG, and an AEAD to
 # carry the ephemeral link state (incl. the DPoP private key) across the redirect.
 base64 = "0.22"
+# Parse the bulk member-import .xlsx server-side, so the pure-Rust xlsx/zip/inflate
+# stack ships in the backend (an owner-only, once-per-event path) instead of every
+# phone's wasm bundle.
+calamine = "0.36"
 chacha20poly1305 = "0.10"
 hmac = "0.12"
 p256 = { version = "0.13", features = ["ecdsa", "jwk"] }

@@ -325,10 +325,8 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                                     return;
                                                 };
                                                 let roster: Vec<(String, String)> =
-                                                    crate::roster::parse_member_roster(bytes.to_vec())
-                                                        .into_iter()
-                                                        .map(|e| (e.name, e.email))
-                                                        .collect();
+                                                    crate::nhost::parse_roster(token.as_deref(), bytes.to_vec())
+                                                        .await;
                                                 if roster.is_empty() {
                                                     show_snackbar(&t("invite.noRosterRows"));
                                                     return;

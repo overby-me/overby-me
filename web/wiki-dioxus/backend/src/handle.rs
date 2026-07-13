@@ -20,36 +20,47 @@ mod dpop;
 mod nhost;
 mod oauth;
 mod pkce;
+mod roster;
 mod statecookie;
 mod util;
 
 pub async fn handle(req: Request<Body>) -> Response<Body> {
     let cfg = oauth::Config::from_env();
     let client = reqwest::Client::new();
-    // Extract what the routes need as `&str` (Send) up front — never hold a
-    // `&Request` across an await, since axum's Body is Send but not Sync, which
-    // would make the whole future non-Send and unusable in a threaded server.
-    let query = req.uri().query();
-    let cookie_header = req
-        .headers()
-        .get(http::header::COOKIE)
-        .and_then(|v| v.to_str().ok());
-    // Prefer the session JWT from the `Authorization: Bearer` header — it keeps the
-    // token out of the URL (browser history / Referer / access logs); the `?token=`
-    // query param stays a fallback (and is the only option for the `start`
-    // full-page redirect).
-    let bearer = req
-        .headers()
-        .get(http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "));
 
     // CORS preflight: the header-authenticated fetches are non-simple requests.
     if req.method() == http::Method::OPTIONS {
         return preflight();
     }
 
-    match req.uri().path() {
+    // Owned up front so the roster route can consume the request body afterwards.
+    let path = req.uri().path().to_string();
+    // Prefer the session JWT from the `Authorization: Bearer` header — it keeps the
+    // token out of the URL (browser history / Referer / access logs); the `?token=`
+    // query param stays a fallback (and is the only option for the `start`
+    // full-page redirect).
+    let bearer_owned = req
+        .headers()
+        .get(http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_string);
+
+    // Roster parse reads the uploaded .xlsx from the request body (consumes req).
+    if path == "/roster/parse" {
+        return roster::handle_parse(&cfg, req, bearer_owned.as_deref()).await;
+    }
+
+    // Extract the rest as `&str` (Send) — never hold a `&Request` across an await,
+    // since axum's Body is Send but not Sync, making the future non-Send.
+    let query = req.uri().query();
+    let cookie_header = req
+        .headers()
+        .get(http::header::COOKIE)
+        .and_then(|v| v.to_str().ok());
+    let bearer = bearer_owned.as_deref();
+
+    match path.as_str() {
         "/atproto/client-metadata.json" => client_metadata(&cfg),
         "/atproto/start" => oauth::start(&cfg, &client, query).await,
         "/atproto/callback" => oauth::callback(&cfg, &client, query, cookie_header).await,

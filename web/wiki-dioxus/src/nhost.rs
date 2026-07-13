@@ -87,6 +87,29 @@ pub async fn atproto_post(token: &str, text: &str, link: &str, title: &str) -> R
     }
 }
 
+#[derive(Deserialize)]
+struct RosterRow {
+    name: String,
+    email: String,
+}
+
+/// Parse a bulk-import roster (.xlsx) via the backend, which keeps calamine/zip
+/// out of the wasm bundle. Returns (name, email) pairs; empty on any error.
+pub async fn parse_roster(token: Option<&str>, bytes: Vec<u8>) -> Vec<(String, String)> {
+    let url = format!("{BACKEND_URL}/roster/parse");
+    let mut req = reqwest::Client::new().post(&url).body(bytes);
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    let Ok(resp) = req.send().await else {
+        return vec![];
+    };
+    match resp.json::<Vec<RosterRow>>().await {
+        Ok(rows) => rows.into_iter().map(|r| (r.name, r.email)).collect(),
+        Err(_) => vec![],
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct SignInRequest {
     pub email: String,
