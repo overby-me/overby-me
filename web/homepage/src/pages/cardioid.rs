@@ -1,16 +1,20 @@
 //! Cardioid / epicyclic curve tracer.
 //!
-//! A Dioxus + WASM port of pysim's `main3.py`: the traced point is the sum of
-//! two rotating arms,
+//! A Dioxus + WASM art toy built around a sum of rotating arms (a truncated
+//! Fourier series): the pen at parameter `t` is
 //!
 //! ```text
-//! OP = (r1·cos(w1·t) + r2·cos(w2·t) + cx,  r1·sin(w1·t) + r2·sin(w2·t) + cy)
+//! P(t) = center + Σ dampⁿ · rₙ · (cos(wₙ·t + φₙ), sin(wₙ·t + φₙ))
 //! ```
 //!
-//! Successive points are stroked onto a persistent trace buffer (an off-screen
-//! canvas, the analogue of pygame's `dsurface`); each frame the visible canvas
-//! is cleared, the trace composited on top when "Draw" is on, and the two
-//! construction circles and dot drawn as a live overlay.
+//! Points are sampled at a step `Δt` and connected with lines onto a persistent
+//! trace buffer (the analogue of pygame's `dsurface`). A large `Δt` samples the
+//! curve stroboscopically, which is where the star-polygon / moiré patterns come
+//! from. A separate "times-table" mode draws the classic modular chords
+//! (connect `i` to `k·i mod N` on a circle).
+//!
+//! The panel is simple by default (a two-arm cardioid); every advanced knob
+//! lives in a collapsed `<details>` section.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -22,10 +26,12 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 const TAU: f64 = std::f64::consts::TAU;
-/// Radius (px) of the little construction dots, fixed as in pysim (`r3`).
+/// Radius (px) of the little construction dots.
 const DOT_R: f64 = 5.0;
 /// Fixed stroke width for the trace and construction lines.
 const LINE_WIDTH: f64 = 1.0;
+/// Upper bound on the number of rotating arms.
+const MAX_ARMS: usize = 6;
 
 thread_local! {
     /// The page's initial `?query`, snapshotted in `main()` before the Dioxus
@@ -45,116 +51,254 @@ fn captured_query() -> String {
     INITIAL_QUERY.with(|q| q.borrow().clone())
 }
 
+/// A tiny xorshift PRNG seeded from `js_sys::Math::random`, so "Randomize" and
+/// per-segment colors vary without pulling in a rng crate.
+fn rand() -> f64 {
+    js_sys::Math::random()
+}
+
+/// What drives the geometry.
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    /// Sum of rotating arms.
+    Epicycle,
+    /// Modular "times-table" chords on a circle.
+    TimesTable,
+}
+
+impl Mode {
+    fn tag(self) -> &'static str {
+        match self {
+            Mode::Epicycle => "epi",
+            Mode::TimesTable => "tt",
+        }
+    }
+    fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "epi" => Some(Mode::Epicycle),
+            "tt" => Some(Mode::TimesTable),
+            _ => None,
+        }
+    }
+}
+
+/// How each segment is colored.
+#[derive(Clone, Copy, PartialEq)]
+enum Fill {
+    /// The fixed `color`.
+    Solid,
+    /// Hue cycles with the parameter `t`.
+    HueTime,
+    /// Hue mapped from the pen's speed.
+    HueSpeed,
+    /// A fresh random color per segment.
+    Random,
+}
+
+impl Fill {
+    fn tag(self) -> &'static str {
+        match self {
+            Fill::Solid => "solid",
+            Fill::HueTime => "huet",
+            Fill::HueSpeed => "hues",
+            Fill::Random => "rand",
+        }
+    }
+    fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "solid" => Some(Fill::Solid),
+            "huet" => Some(Fill::HueTime),
+            "hues" => Some(Fill::HueSpeed),
+            "rand" => Some(Fill::Random),
+            _ => None,
+        }
+    }
+}
+
+/// One rotating arm: radius, angular velocity, phase offset.
+#[derive(Clone, PartialEq)]
+struct Arm {
+    r: f64,
+    w: f64,
+    phase: f64,
+}
+
 #[derive(Clone, PartialEq)]
 struct Settings {
-    r1: f64,
-    w1: f64,
-    r2: f64,
-    w2: f64,
-    time: f64,
-    calrate: f64,
+    mode: Mode,
+    arms: Vec<Arm>,
+    /// Parameter step between sampled points (small = smooth, large = strobed).
+    step: f64,
+    /// Samples drawn per animation frame.
+    speed: f64,
+    /// Exponential radius decay `e^(-damping·t)` (0 = none). Harmonograph look.
+    damping: f64,
+    /// k-fold rotational symmetry (1 = none).
+    symmetry: u32,
+    // Times-table mode.
+    tt_points: f64,
+    tt_mult: f64,
+    tt_radius: f64,
+    // Aesthetics.
+    color: String,
+    fill: Fill,
+    glow: bool,
+    /// Per-frame fade of the trace (0 = accumulate forever, 1 = wipe each frame).
+    fade: f64,
+    // Overlay toggles.
     draw: bool,
-    clean: bool,
     drawdot: bool,
     circles: bool,
-    /// Random per-segment colors (pysim's "Colors" toggle). When off, the trace
-    /// uses the fixed `color`.
-    rainbow: bool,
     antialiasing: bool,
-    /// Advance simulated time ~1000x faster (pysim's "Sandbox" toggle): use the
-    /// raw time step instead of the scaled-down one.
-    turbo: bool,
-    /// Base trace color (`#rrggbb`), used when `rainbow` is off.
-    color: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        // pysim starts everything at rest (time = 0), which shows a blank
-        // screen. Seed a live cardioid instead: two equal arms at a 1:2
-        // frequency ratio, animating, with the construction circles shown.
+        // The simple default: a live two-arm cardioid, drawn smoothly.
         Self {
-            r1: 140.0,
-            r2: 140.0,
-            w1: 1.0,
-            w2: 2.0,
-            time: 30.0,
-            calrate: 2.0,
+            mode: Mode::Epicycle,
+            arms: vec![
+                Arm {
+                    r: 140.0,
+                    w: 1.0,
+                    phase: 0.0,
+                },
+                Arm {
+                    r: 140.0,
+                    w: 2.0,
+                    phase: 0.0,
+                },
+            ],
+            step: 0.02,
+            speed: 3.0,
+            damping: 0.0,
+            symmetry: 1,
+            tt_points: 200.0,
+            tt_mult: 2.0,
+            tt_radius: 300.0,
+            color: "#ff4d8d".to_string(),
+            fill: Fill::Solid,
+            glow: false,
+            fade: 0.0,
             draw: true,
-            clean: false,
             drawdot: true,
             circles: true,
-            rainbow: false,
             antialiasing: true,
-            turbo: false,
-            color: "#ff0000".to_string(),
         }
     }
 }
 
 impl Settings {
-    /// The geometry-defining parameters. When these change the traced curve is
-    /// different, so the accumulated trace is cleared (pysim clears `dsurface`
-    /// on any slider drag; we keep the drawing when other parameters change).
-    fn geometry(&self) -> (f64, f64, f64, f64) {
-        (self.r1, self.w1, self.r2, self.w2)
+    /// The parameters that change the *drawn figure* (as opposed to purely
+    /// cosmetic ones). When any of these change, the accumulated trace is
+    /// cleared and redrawn.
+    #[allow(clippy::type_complexity)]
+    fn figure(&self) -> (Mode, Vec<Arm>, u64, u64, u32, u64, u64, u64) {
+        (
+            self.mode,
+            self.arms.clone(),
+            self.step.to_bits(),
+            self.damping.to_bits(),
+            self.symmetry,
+            self.tt_points.to_bits(),
+            self.tt_mult.to_bits(),
+            self.tt_radius.to_bits(),
+        )
     }
 
     /// Serialize to a shareable query string (no leading `?`).
     fn to_query(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
+        let arms = self
+            .arms
+            .iter()
+            .map(|a| format!("{},{},{}", a.r, a.w, a.phase))
+            .collect::<Vec<_>>()
+            .join(";");
         format!(
-            "r1={}&w1={}&r2={}&w2={}&time={}&cal={}&draw={}&clean={}&dot={}&circ={}&rand={}&aa={}&turbo={}&color={}",
-            self.r1,
-            self.w1,
-            self.r2,
-            self.w2,
-            self.time,
-            self.calrate,
+            "mode={}&arms={}&step={}&speed={}&damp={}&sym={}&ttn={}&ttk={}&ttr={}&fill={}&glow={}&fade={}&draw={}&dot={}&circ={}&aa={}&color={}",
+            self.mode.tag(),
+            arms,
+            self.step,
+            self.speed,
+            self.damping,
+            self.symmetry,
+            self.tt_points,
+            self.tt_mult,
+            self.tt_radius,
+            self.fill.tag(),
+            b(self.glow),
+            self.fade,
             b(self.draw),
-            b(self.clean),
             b(self.drawdot),
             b(self.circles),
-            b(self.rainbow),
             b(self.antialiasing),
-            b(self.turbo),
             self.color.trim_start_matches('#'),
         )
     }
 
     /// Parse settings from a URL query string, falling back to defaults for any
-    /// parameter that is missing or malformed, so a shared link like
-    /// `/cardioid?r1=140&w1=1&...` reproduces the configuration.
+    /// parameter that is missing or malformed.
     fn from_query(query: &str) -> Self {
         let mut s = Self::default();
-        let Ok(params) = web_sys::UrlSearchParams::new_with_str(query) else {
+        let Ok(p) = web_sys::UrlSearchParams::new_with_str(query) else {
             return s;
         };
-        let num = |k: &str| params.get(k).and_then(|v| v.parse::<f64>().ok());
-        let flag = |k: &str| params.get(k).map(|v| v == "1" || v == "true");
-        if let Some(v) = num("r1") {
-            s.r1 = v;
+        let num = |k: &str| p.get(k).and_then(|v| v.parse::<f64>().ok());
+        let flag = |k: &str| p.get(k).map(|v| v == "1" || v == "true");
+
+        if let Some(m) = p.get("mode").and_then(|v| Mode::from_tag(&v)) {
+            s.mode = m;
         }
-        if let Some(v) = num("w1") {
-            s.w1 = v;
+        if let Some(arms) = p.get("arms") {
+            let parsed: Vec<Arm> = arms
+                .split(';')
+                .filter_map(|a| {
+                    let mut it = a.split(',').map(|v| v.parse::<f64>().ok());
+                    Some(Arm {
+                        r: it.next()??,
+                        w: it.next()??,
+                        phase: it.next().flatten().unwrap_or(0.0),
+                    })
+                })
+                .take(MAX_ARMS)
+                .collect();
+            if !parsed.is_empty() {
+                s.arms = parsed;
+            }
         }
-        if let Some(v) = num("r2") {
-            s.r2 = v;
+        if let Some(v) = num("step") {
+            s.step = v;
         }
-        if let Some(v) = num("w2") {
-            s.w2 = v;
+        if let Some(v) = num("speed") {
+            s.speed = v;
         }
-        if let Some(v) = num("time") {
-            s.time = v;
+        if let Some(v) = num("damp") {
+            s.damping = v;
         }
-        if let Some(v) = num("cal") {
-            s.calrate = v;
+        if let Some(v) = num("sym") {
+            s.symmetry = (v as u32).max(1);
+        }
+        if let Some(v) = num("ttn") {
+            s.tt_points = v;
+        }
+        if let Some(v) = num("ttk") {
+            s.tt_mult = v;
+        }
+        if let Some(v) = num("ttr") {
+            s.tt_radius = v;
+        }
+        if let Some(f) = p.get("fill").and_then(|v| Fill::from_tag(&v)) {
+            s.fill = f;
+        }
+        if let Some(v) = flag("glow") {
+            s.glow = v;
+        }
+        if let Some(v) = num("fade") {
+            s.fade = v;
         }
         if let Some(v) = flag("draw") {
             s.draw = v;
-        }
-        if let Some(v) = flag("clean") {
-            s.clean = v;
         }
         if let Some(v) = flag("dot") {
             s.drawdot = v;
@@ -162,16 +306,10 @@ impl Settings {
         if let Some(v) = flag("circ") {
             s.circles = v;
         }
-        if let Some(v) = flag("rand") {
-            s.rainbow = v;
-        }
         if let Some(v) = flag("aa") {
             s.antialiasing = v;
         }
-        if let Some(v) = flag("turbo") {
-            s.turbo = v;
-        }
-        if let Some(c) = params.get("color") {
+        if let Some(c) = p.get("color") {
             let c = c.trim_start_matches('#');
             if c.len() == 6 && c.chars().all(|ch| ch.is_ascii_hexdigit()) {
                 s.color = format!("#{c}");
@@ -181,9 +319,137 @@ impl Settings {
     }
 }
 
+/// A named preset (label, settings).
+fn presets() -> Vec<(&'static str, Settings)> {
+    let arm = |r: f64, w: f64, phase: f64| Arm { r, w, phase };
+    let base = Settings::default;
+    vec![
+        ("Cardioid", Settings::default()),
+        (
+            "Rose",
+            Settings {
+                arms: vec![arm(150.0, 1.0, 0.0), arm(150.0, 6.0, 0.0)],
+                ..base()
+            },
+        ),
+        (
+            "Spirograph",
+            Settings {
+                arms: vec![arm(150.0, 1.0, 0.0), arm(60.0, 7.0, 0.0)],
+                ..base()
+            },
+        ),
+        (
+            "Star (strobe)",
+            Settings {
+                arms: vec![arm(180.0, 1.0, 0.0), arm(60.0, 2.0, 0.0)],
+                step: 0.74,
+                speed: 40.0,
+                glow: true,
+                fill: Fill::HueTime,
+                ..base()
+            },
+        ),
+        (
+            "Harmonograph",
+            Settings {
+                arms: vec![
+                    arm(150.0, 2.0, 0.0),
+                    arm(120.0, 3.01, 1.2),
+                    arm(60.0, 5.0, 0.5),
+                ],
+                damping: 0.06,
+                fade: 0.02,
+                circles: false,
+                fill: Fill::HueSpeed,
+                ..base()
+            },
+        ),
+        (
+            "Kaleidoscope",
+            Settings {
+                arms: vec![arm(120.0, 3.0, 0.0), arm(80.0, -5.0, 0.6)],
+                symmetry: 6,
+                glow: true,
+                fill: Fill::HueTime,
+                circles: false,
+                ..base()
+            },
+        ),
+        (
+            "Times-table",
+            Settings {
+                mode: Mode::TimesTable,
+                tt_points: 220.0,
+                tt_mult: 2.0,
+                tt_radius: 320.0,
+                glow: true,
+                fill: Fill::HueTime,
+                ..base()
+            },
+        ),
+    ]
+}
+
+/// A tasteful random configuration.
+fn randomized() -> Settings {
+    let mut s = Settings::default();
+    if rand() < 0.25 {
+        // A times-table figure.
+        s.mode = Mode::TimesTable;
+        s.tt_points = (60.0 + rand() * 260.0).round();
+        s.tt_mult = (2.0 + rand() * 20.0 * rand()).round().max(2.0);
+        s.tt_radius = 260.0 + rand() * 120.0;
+    } else {
+        let n = 2 + (rand() * 3.0) as usize; // 2..=4 arms
+        s.arms = (0..n)
+            .map(|_| {
+                let mut w = (rand() * 16.0 - 8.0).round();
+                if w == 0.0 {
+                    w = 1.0;
+                }
+                Arm {
+                    r: 30.0 + rand() * 150.0,
+                    w,
+                    phase: rand() * TAU,
+                }
+            })
+            .collect();
+        // Half the time, strobe; otherwise a smooth curve.
+        s.step = if rand() < 0.5 {
+            0.01 + rand() * 0.08
+        } else {
+            0.25 + rand() * 1.2
+        };
+        s.speed = 4.0 + rand() * 60.0;
+        if rand() < 0.4 {
+            s.symmetry = 2 + (rand() * 7.0) as u32;
+        }
+        if rand() < 0.3 {
+            s.damping = 0.02 + rand() * 0.08;
+            s.fade = 0.02;
+        }
+        s.circles = false;
+    }
+    s.glow = rand() < 0.6;
+    s.fill = match (rand() * 4.0) as u32 {
+        0 => Fill::Solid,
+        1 => Fill::HueTime,
+        2 => Fill::HueSpeed,
+        _ => Fill::Random,
+    };
+    s.color = format!(
+        "#{:02x}{:02x}{:02x}",
+        50 + (rand() * 205.0) as u32,
+        50 + (rand() * 205.0) as u32,
+        50 + (rand() * 205.0) as u32,
+    );
+    s
+}
+
 struct Sim {
     settings: Settings,
-    /// Curve parameter, advanced every sub-step.
+    /// Curve parameter, advanced every sample.
     t: f64,
     /// Previous traced point, or None right after a reset.
     last: Option<(f64, f64)>,
@@ -203,77 +469,107 @@ impl Sim {
         (self.w / 2.0, self.h / 2.0)
     }
 
-    /// Clear the accumulated trace and restart from the current parameters.
+    /// Clear the accumulated trace and restart.
     fn reset_trace(&mut self) {
+        self.trace
+            .set_global_composite_operation("source-over")
+            .ok();
         self.trace.clear_rect(0.0, 0.0, self.w, self.h);
         self.last = None;
+        self.t = 0.0;
+    }
+
+    /// The pen position and (optional) speed at parameter `t`.
+    fn pen(&self, t: f64) -> ((f64, f64), f64) {
+        let (cx, cy) = self.center();
+        let damp = if self.settings.damping > 0.0 {
+            (-self.settings.damping * t).exp()
+        } else {
+            1.0
+        };
+        let (mut x, mut y) = (cx, cy);
+        let (mut vx, mut vy) = (0.0, 0.0);
+        for a in &self.settings.arms {
+            let ang = a.w * t + a.phase;
+            let rr = a.r * damp;
+            x += rr * ang.cos();
+            y += rr * ang.sin();
+            vx -= rr * a.w * ang.sin();
+            vy += rr * a.w * ang.cos();
+        }
+        ((x, y), vx.hypot(vy))
     }
 
     /// Advance the simulation and render one frame.
     fn frame(&mut self) {
         let s = self.settings.clone();
         let (cx, cy) = self.center();
-        // Paused freezes time: still render the overlay, but add no new segments.
+
+        if let Mode::TimesTable = s.mode {
+            self.render_times_table(&s);
+            return;
+        }
+
         let steps = if self.paused {
             0
         } else {
-            (s.calrate.max(1.0)) as u32
-        };
-        // Turbo uses the raw time step; otherwise it is scaled down so the
-        // slider's 0..100 range maps to a gentle speed.
-        let dt = if s.turbo {
-            s.time / s.calrate
-        } else {
-            s.time / 1000.0 / s.calrate
+            s.speed.max(0.0) as u32
         };
 
-        // One color for the whole frame lets the common (non-random) case batch
-        // every sub-step into a single stroked path.
-        let batched = !s.rainbow;
-        if batched {
-            self.trace.set_stroke_style_str(&s.color);
-            self.trace.set_line_width(LINE_WIDTH);
-            self.trace.begin_path();
-            if let Some((lx, ly)) = self.last {
-                self.trace.move_to(lx, ly);
-            }
+        // Fade or accumulate on the trace buffer.
+        self.trace
+            .set_global_composite_operation("source-over")
+            .ok();
+        if s.fade > 0.0 {
+            self.trace
+                .set_fill_style_str(&format!("rgba(0,0,0,{})", s.fade.clamp(0.0, 1.0)));
+            self.trace.fill_rect(0.0, 0.0, self.w, self.h);
         }
+        if s.glow {
+            self.trace.set_global_composite_operation("lighter").ok();
+        }
+        self.trace.set_line_width(LINE_WIDTH);
 
         for _ in 0..steps {
-            self.t += dt;
-            let opx = s.r1 * (s.w1 * self.t).cos() + s.r2 * (s.w2 * self.t).cos() + cx;
-            let opy = s.r1 * (s.w1 * self.t).sin() + s.r2 * (s.w2 * self.t).sin() + cy;
-            let (px, py) = if s.antialiasing {
-                (opx, opy)
-            } else {
-                (opx.round(), opy.round())
-            };
-
-            if batched {
-                if self.last.is_none() {
-                    self.trace.move_to(px, py);
-                } else {
-                    self.trace.line_to(px, py);
+            self.t += s.step;
+            // Harmonograph: once the amplitude has decayed away, loop.
+            if s.damping > 0.0 && (-s.damping * self.t).exp() < 0.02 {
+                self.t = 0.0;
+                self.last = None;
+                self.trace
+                    .set_global_composite_operation("source-over")
+                    .ok();
+                self.trace.clear_rect(0.0, 0.0, self.w, self.h);
+                if s.glow {
+                    self.trace.set_global_composite_operation("lighter").ok();
                 }
-            } else if let Some((lx, ly)) = self.last {
-                self.trace.set_stroke_style_str(&random_color());
-                self.trace.set_line_width(LINE_WIDTH);
-                self.trace.begin_path();
-                self.trace.move_to(lx, ly);
-                self.trace.line_to(px, py);
-                self.trace.stroke();
+            }
+            let ((ox, oy), speed) = self.pen(self.t);
+            let (px, py) = if s.antialiasing {
+                (ox, oy)
+            } else {
+                (ox.round(), oy.round())
+            };
+            if let Some((lx, ly)) = self.last {
+                self.trace
+                    .set_stroke_style_str(&segment_color(&s, self.t, speed));
+                draw_symmetric(&self.trace, s.symmetry, cx, cy, lx, ly, px, py);
             }
             self.last = Some((px, py));
         }
-        if batched {
-            self.trace.stroke();
-        }
+        self.trace
+            .set_global_composite_operation("source-over")
+            .ok();
 
-        // Overlay: clear, composite the trace, then draw the live construction.
+        // Composite the trace and draw the live construction on the visible canvas.
         let ctx = &self.ctx;
+        ctx.set_global_composite_operation("source-over").ok();
         ctx.set_fill_style_str("#000000");
         ctx.fill_rect(0.0, 0.0, self.w, self.h);
         if s.draw {
+            if s.glow {
+                ctx.set_global_composite_operation("lighter").ok();
+            }
             let _ = ctx.draw_image_with_html_canvas_element_and_dw_and_dh(
                 &self.trace_canvas,
                 0.0,
@@ -281,37 +577,109 @@ impl Sim {
                 self.w,
                 self.h,
             );
+            ctx.set_global_composite_operation("source-over").ok();
         }
 
         if s.circles {
-            let c2x = s.r1 * (s.w1 * self.t).cos() + cx;
-            let c2y = s.r1 * (s.w1 * self.t).sin() + cy;
+            let damp = if s.damping > 0.0 {
+                (-s.damping * self.t).exp()
+            } else {
+                1.0
+            };
+            let (mut px, mut py) = (cx, cy);
             ctx.set_line_width(1.0);
-            ctx.set_stroke_style_str("green");
-            ctx.set_fill_style_str("green");
-            stroke_circle(ctx, cx, cy, s.r1);
-            fill_circle(ctx, cx, cy, DOT_R);
-            ctx.set_stroke_style_str("purple");
-            ctx.set_fill_style_str("purple");
-            stroke_circle(ctx, c2x, c2y, s.r2);
-            fill_circle(ctx, c2x, c2y, DOT_R);
-            ctx.set_stroke_style_str("red");
-            ctx.set_line_width(LINE_WIDTH);
-            draw_line(ctx, cx, cy, c2x, c2y);
+            for a in &s.arms {
+                let rr = a.r * damp;
+                ctx.set_stroke_style_str("rgba(120,200,255,0.45)");
+                stroke_circle(ctx, px, py, rr);
+                let ang = a.w * self.t + a.phase;
+                let nx = px + rr * ang.cos();
+                let ny = py + rr * ang.sin();
+                ctx.set_stroke_style_str("rgba(255,120,200,0.55)");
+                draw_line(ctx, px, py, nx, ny);
+                px = nx;
+                py = ny;
+            }
         }
 
         if s.drawdot
             && let Some((px, py)) = self.last
         {
-            ctx.set_fill_style_str("yellow");
+            ctx.set_fill_style_str("#ffe14d");
             fill_circle(ctx, px, py, DOT_R);
         }
+    }
 
-        // pysim wipes `dsurface` at the end of the frame while "Clean" is on, so
-        // only the current frame's fresh segments are ever shown.
-        if s.clean {
-            self.trace.clear_rect(0.0, 0.0, self.w, self.h);
+    /// Times-table mode: chords `i -> (k·i mod N)` on a circle, redrawn each
+    /// frame straight onto the visible canvas.
+    fn render_times_table(&self, s: &Settings) {
+        let (cx, cy) = self.center();
+        let ctx = &self.ctx;
+        ctx.set_global_composite_operation("source-over").ok();
+        ctx.set_fill_style_str("#000000");
+        ctx.fill_rect(0.0, 0.0, self.w, self.h);
+        if s.glow {
+            ctx.set_global_composite_operation("lighter").ok();
         }
+        ctx.set_line_width(LINE_WIDTH);
+        let n = s.tt_points.max(2.0) as u32;
+        let r = s.tt_radius;
+        let point = |i: u32| {
+            let a = TAU * i as f64 / n as f64;
+            (cx + r * a.cos(), cy + r * a.sin())
+        };
+        for i in 0..n {
+            let j = ((s.tt_mult * i as f64).rem_euclid(n as f64)) as u32 % n;
+            let (x0, y0) = point(i);
+            let (x1, y1) = point(j);
+            ctx.set_stroke_style_str(&segment_color(s, i as f64 / n as f64 * TAU, 0.0));
+            draw_symmetric(ctx, s.symmetry, cx, cy, x0, y0, x1, y1);
+        }
+        ctx.set_global_composite_operation("source-over").ok();
+    }
+}
+
+/// Color for one segment given the fill mode.
+fn segment_color(s: &Settings, t: f64, speed: f64) -> String {
+    match s.fill {
+        Fill::Solid => s.color.clone(),
+        Fill::HueTime => format!("hsl({:.0}, 95%, 60%)", (t * 40.0).rem_euclid(360.0)),
+        Fill::HueSpeed => format!("hsl({:.0}, 95%, 60%)", (speed * 0.4).rem_euclid(360.0)),
+        Fill::Random => format!(
+            "rgb({},{},{})",
+            50 + (rand() * 205.0) as u32,
+            50 + (rand() * 205.0) as u32,
+            50 + (rand() * 205.0) as u32
+        ),
+    }
+}
+
+/// Draw a segment plus its `sym`-fold rotations about `(cx, cy)`.
+#[allow(clippy::too_many_arguments)]
+fn draw_symmetric(
+    ctx: &CanvasRenderingContext2d,
+    sym: u32,
+    cx: f64,
+    cy: f64,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+) {
+    let k = sym.max(1);
+    for i in 0..k {
+        let a = TAU * i as f64 / k as f64;
+        let (sn, cs) = (a.sin(), a.cos());
+        let rot = |x: f64, y: f64| {
+            let (dx, dy) = (x - cx, y - cy);
+            (cx + dx * cs - dy * sn, cy + dx * sn + dy * cs)
+        };
+        let (ax, ay) = rot(x1, y1);
+        let (bx, by) = rot(x2, y2);
+        ctx.begin_path();
+        ctx.move_to(ax, ay);
+        ctx.line_to(bx, by);
+        ctx.stroke();
     }
 }
 
@@ -334,12 +702,6 @@ fn draw_line(ctx: &CanvasRenderingContext2d, x1: f64, y1: f64, x2: f64, y2: f64)
     ctx.stroke();
 }
 
-/// A bright random color, matching pysim's `randint(50, 255)` per channel.
-fn random_color() -> String {
-    let ch = || 50 + (js_sys::Math::random() * 206.0) as u32;
-    format!("rgb({},{},{})", ch(), ch(), ch())
-}
-
 fn context_2d(canvas: &HtmlCanvasElement) -> CanvasRenderingContext2d {
     canvas
         .get_context("2d")
@@ -349,10 +711,29 @@ fn context_2d(canvas: &HtmlCanvasElement) -> CanvasRenderingContext2d {
         .unwrap()
 }
 
+/// Trigger a PNG download of the current canvas.
+fn save_png(canvas: &HtmlCanvasElement) {
+    let Ok(url) = canvas.to_data_url_with_type("image/png") else {
+        return;
+    };
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(a) = document
+        .create_element("a")
+        .ok()
+        .and_then(|e| e.dyn_into::<web_sys::HtmlAnchorElement>().ok())
+    else {
+        return;
+    };
+    a.set_href(&url);
+    a.set_download("cardioid.png");
+    a.click();
+}
+
 type AnimationClosure = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 
-/// requestAnimationFrame loop; stops itself once the canvas leaves the document
-/// (e.g. the user navigates away from `/cardioid`).
+/// requestAnimationFrame loop; stops once the canvas leaves the document.
 fn start_animation_loop(sim: Rc<RefCell<Sim>>) {
     let f: AnimationClosure = Rc::new(RefCell::new(None));
     let g = Rc::clone(&f);
@@ -381,29 +762,26 @@ fn start_animation_loop(sim: Rc<RefCell<Sim>>) {
 
 #[component]
 pub fn Cardioid() -> Element {
-    // Seed from the query captured in `main()` before the router ran, so a
-    // shared link reproduces the configuration.
+    // Seed from the query captured in `main()` before the router ran.
     let mut settings = use_signal(|| Settings::from_query(&captured_query()));
     let state: Signal<Option<Rc<RefCell<Sim>>>> = use_signal(|| None);
-    // Transport state: pause freezes time without clearing the trace.
     let mut paused = use_signal(|| false);
 
-    // Push setting changes into the running simulation, clearing the trace when
-    // the curve geometry (not just speed/width) changed.
+    // Push setting changes into the running sim, clearing the trace when the
+    // drawn figure (not just a cosmetic property) changed.
     use_effect(move || {
         let s = settings.read().clone();
         if let Some(sim) = state.read().clone() {
             let mut sim = sim.borrow_mut();
-            let shape_changed = sim.settings.geometry() != s.geometry();
+            let changed = sim.settings.figure() != s.figure();
             sim.settings = s;
-            if shape_changed {
+            if changed {
                 sim.reset_trace();
             }
         }
     });
 
-    // Mirror the live settings into the URL query (via replaceState, so the
-    // canvas is not remounted) — the address bar always holds a shareable link.
+    // Mirror settings into the URL (replaceState: no remount, canvas stays live).
     use_effect(move || {
         let query = settings.read().to_query();
         if let Some(history) = web_sys::window().and_then(|w| w.history().ok()) {
@@ -426,7 +804,6 @@ pub fn Cardioid() -> Element {
                 canvas.set_width((css_w * dpr) as u32);
                 canvas.set_height((css_h * dpr) as u32);
 
-                // Off-screen trace buffer, same physical size as the canvas.
                 let Some(document) = web_sys::window().and_then(|w| w.document()) else {
                     return;
                 };
@@ -442,8 +819,6 @@ pub fn Cardioid() -> Element {
 
                 let ctx = context_2d(&canvas);
                 let trace = context_2d(&trace_canvas);
-                // Draw in CSS pixels; the dpr scale keeps it crisp on HiDPI. The
-                // trace composites 1:1 because it shares the physical size.
                 let _ = ctx.scale(dpr, dpr);
                 let _ = trace.scale(dpr, dpr);
                 ctx.set_line_cap("round");
@@ -470,19 +845,12 @@ pub fn Cardioid() -> Element {
     };
 
     let s = settings.read();
-    let toggle_bg = |on: bool| {
-        if on {
-            "background:#2f7d32;border-color:#3faf43"
-        } else {
-            "background:#333;border-color:#555"
-        }
-    };
-    let is_paused = *paused.read();
-    let (play_label, play_style) = if is_paused {
+    let (play_label, play_style) = if *paused.read() {
         ("▶ Play", "background:#2f7d32;border-color:#3faf43")
     } else {
         ("⏸ Pause", "background:#8a5a1a;border-color:#c98a2a")
     };
+    let is_tt = matches!(s.mode, Mode::TimesTable);
 
     rsx! {
         div {
@@ -494,12 +862,12 @@ pub fn Cardioid() -> Element {
                 onmounted: onmounted,
             }
 
-            // Control panel.
             div {
                 style: "position:absolute;top:16px;left:16px;max-height:calc(100vh - 32px);\
                         overflow:auto;padding:14px 16px;border-radius:10px;\
-                        background:rgba(20,20,20,.82);backdrop-filter:blur(4px);\
-                        box-shadow:0 4px 24px rgba(0,0,0,.5);width:290px;user-select:none;",
+                        background:rgba(20,20,20,.85);backdrop-filter:blur(4px);\
+                        box-shadow:0 4px 24px rgba(0,0,0,.5);width:300px;user-select:none;",
+
                 div {
                     style: "font-weight:700;font-size:18px;margin-bottom:10px;color:#ff4d8d;",
                     "Cardioid"
@@ -519,69 +887,166 @@ pub fn Cardioid() -> Element {
                     "{play_label}"
                 }
 
-                Slider { label: "Center circle radius (r₁)", min: "1", max: "300", step: "1",
-                    value: s.r1, decimals: 0, oninput: move |v| settings.write().r1 = v }
-                Slider { label: "Center circle speed (ω₁)", min: "-200", max: "200", step: "0.1",
-                    value: s.w1, decimals: 1, oninput: move |v| settings.write().w1 = v }
-                Slider { label: "Rotating circle radius (r₂)", min: "1", max: "300", step: "1",
-                    value: s.r2, decimals: 0, oninput: move |v| settings.write().r2 = v }
-                Slider { label: "Rotating circle speed (ω₂)", min: "-200", max: "200", step: "0.1",
-                    value: s.w2, decimals: 1, oninput: move |v| settings.write().w2 = v }
-                Slider { label: "Time", min: "0", max: "100", step: "0.5",
-                    value: s.time, decimals: 1, oninput: move |v| settings.write().time = v }
-                Slider { label: "Calc / frame", min: "1", max: "1000", step: "1",
-                    value: s.calrate, decimals: 0, oninput: move |v| settings.write().calrate = v }
-
-                // Trace color (used when the random "Colors" toggle is off).
-                div {
-                    style: "display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0 2px;font-size:12px;color:#bbb;",
-                    span { "Trace color" }
-                    input {
-                        r#type: "color",
-                        value: "{s.color}",
-                        style: "width:46px;height:26px;border:none;background:none;cursor:pointer;padding:0;",
-                        oninput: move |e| settings.write().color = e.value(),
+                // ── Basic: the arms and the trace color ──────────────────────
+                if !is_tt {
+                    for (i , arm) in s.arms.iter().enumerate() {
+                        Slider {
+                            label: format!("Arm {} radius", i + 1),
+                            min: "1", max: "300", step: "1", value: arm.r, decimals: 0,
+                            oninput: move |v| settings.write().arms[i].r = v,
+                        }
+                        Slider {
+                            label: format!("Arm {} speed", i + 1),
+                            min: "-20", max: "20", step: "0.1", value: arm.w, decimals: 1,
+                            oninput: move |v| settings.write().arms[i].w = v,
+                        }
                     }
-                }
-
-                div {
-                    style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;",
-                    for (name , on) in [
-                        ("Draw", s.draw),
-                        ("Clean", s.clean),
-                        ("Dot", s.drawdot),
-                        ("Circles", s.circles),
-                        ("Rainbow", s.rainbow),
-                        ("Antialias", s.antialiasing),
-                        ("Turbo", s.turbo),
-                    ] {
+                    div {
+                        style: "display:flex;gap:8px;margin:6px 0 10px;",
                         button {
-                            style: "flex:0 0 auto;padding:5px 10px;border:1px solid;border-radius:6px;\
-                                    color:#eee;cursor:pointer;font:inherit;font-size:13px;{toggle_bg(on)}",
+                            style: "flex:1;padding:5px;border:1px solid #555;border-radius:6px;\
+                                    background:#333;color:#eee;cursor:pointer;font:inherit;font-size:13px;",
                             onclick: move |_| {
                                 let mut w = settings.write();
-                                match name {
-                                    "Draw" => w.draw = !w.draw,
-                                    "Clean" => w.clean = !w.clean,
-                                    "Dot" => w.drawdot = !w.drawdot,
-                                    "Circles" => w.circles = !w.circles,
-                                    "Rainbow" => w.rainbow = !w.rainbow,
-                                    "Antialias" => w.antialiasing = !w.antialiasing,
-                                    "Turbo" => w.turbo = !w.turbo,
-                                    _ => {}
+                                if w.arms.len() < MAX_ARMS {
+                                    let a = w.arms.last().cloned().unwrap_or(Arm { r: 80.0, w: 3.0, phase: 0.0 });
+                                    w.arms.push(a);
                                 }
                             },
-                            "{name}"
+                            "+ arm"
+                        }
+                        button {
+                            style: "flex:1;padding:5px;border:1px solid #555;border-radius:6px;\
+                                    background:#333;color:#eee;cursor:pointer;font:inherit;font-size:13px;",
+                            onclick: move |_| {
+                                let mut w = settings.write();
+                                if w.arms.len() > 1 {
+                                    w.arms.pop();
+                                }
+                            },
+                            "– arm"
                         }
                     }
                 }
 
                 div {
+                    style: "display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 4px;font-size:12px;color:#bbb;",
+                    span { "Trace color" }
+                    input {
+                        r#type: "color", value: "{s.color}",
+                        style: "width:46px;height:26px;border:none;background:none;cursor:pointer;padding:0;",
+                        oninput: move |e| settings.write().color = e.value(),
+                    }
+                }
+
+                // ── Advanced sections (collapsed by default) ─────────────────
+                Details { summary: "Phase & sampling",
+                    if !is_tt {
+                        for (i , arm) in s.arms.iter().enumerate() {
+                            Slider {
+                                label: format!("Arm {} phase", i + 1),
+                                min: "0", max: "6.283", step: "0.01", value: arm.phase, decimals: 2,
+                                oninput: move |v| settings.write().arms[i].phase = v,
+                            }
+                        }
+                    }
+                    Slider { label: "Sample step (Δt)", min: "0.001", max: "1.6", step: "0.001",
+                        value: s.step, decimals: 3, oninput: move |v| settings.write().step = v }
+                    Slider { label: "Draw speed (samples/frame)", min: "1", max: "800", step: "1",
+                        value: s.speed, decimals: 0, oninput: move |v| settings.write().speed = v }
+                }
+
+                Details { summary: "Look",
+                    div {
+                        style: "font-size:12px;color:#bbb;margin:4px 0 2px;",
+                        "Color mode"
+                    }
+                    select {
+                        style: "width:100%;margin-bottom:8px;padding:4px;background:#222;color:#eee;border:1px solid #555;border-radius:6px;font:inherit;font-size:13px;",
+                        onchange: move |e| {
+                            if let Some(f) = Fill::from_tag(&e.value()) {
+                                settings.write().fill = f;
+                            }
+                        },
+                        option { value: "solid", selected: matches!(s.fill, Fill::Solid), "Solid" }
+                        option { value: "huet", selected: matches!(s.fill, Fill::HueTime), "Hue by time" }
+                        option { value: "hues", selected: matches!(s.fill, Fill::HueSpeed), "Hue by speed" }
+                        option { value: "rand", selected: matches!(s.fill, Fill::Random), "Random" }
+                    }
+                    Slider { label: "Trail fade (0 = keep all)", min: "0", max: "0.3", step: "0.005",
+                        value: s.fade, decimals: 3, oninput: move |v| settings.write().fade = v }
+                    div {
+                        style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;",
+                        Toggle { label: "Glow", on: s.glow, onclick: move |_| { let v = settings.read().glow; settings.write().glow = !v; } }
+                        Toggle { label: "Draw", on: s.draw, onclick: move |_| { let v = settings.read().draw; settings.write().draw = !v; } }
+                        Toggle { label: "Dot", on: s.drawdot, onclick: move |_| { let v = settings.read().drawdot; settings.write().drawdot = !v; } }
+                        Toggle { label: "Circles", on: s.circles, onclick: move |_| { let v = settings.read().circles; settings.write().circles = !v; } }
+                        Toggle { label: "Antialias", on: s.antialiasing, onclick: move |_| { let v = settings.read().antialiasing; settings.write().antialiasing = !v; } }
+                    }
+                }
+
+                Details { summary: "Symmetry & damping",
+                    Slider { label: "Symmetry (k-fold)", min: "1", max: "16", step: "1",
+                        value: s.symmetry as f64, decimals: 0, oninput: move |v| settings.write().symmetry = (v as u32).max(1) }
+                    Slider { label: "Damping (harmonograph)", min: "0", max: "0.2", step: "0.002",
+                        value: s.damping, decimals: 3, oninput: move |v| settings.write().damping = v }
+                }
+
+                Details { summary: "Mode",
+                    div {
+                        style: "display:flex;gap:8px;margin:4px 0 8px;",
+                        Toggle { label: "Epicycle", on: !is_tt, onclick: move |_| settings.write().mode = Mode::Epicycle }
+                        Toggle { label: "Times-table", on: is_tt, onclick: move |_| settings.write().mode = Mode::TimesTable }
+                    }
+                    if is_tt {
+                        Slider { label: "Points (N)", min: "3", max: "500", step: "1",
+                            value: s.tt_points, decimals: 0, oninput: move |v| settings.write().tt_points = v }
+                        Slider { label: "Multiplier (k)", min: "2", max: "100", step: "0.05",
+                            value: s.tt_mult, decimals: 2, oninput: move |v| settings.write().tt_mult = v }
+                        Slider { label: "Radius", min: "50", max: "400", step: "1",
+                            value: s.tt_radius, decimals: 0, oninput: move |v| settings.write().tt_radius = v }
+                    }
+                }
+
+                Details { summary: "Presets & tools",
+                    div {
+                        style: "display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px;",
+                        for (name , preset) in presets() {
+                            button {
+                                style: "flex:0 0 auto;padding:5px 9px;border:1px solid #555;border-radius:6px;\
+                                        background:#26304a;color:#cfe0ff;cursor:pointer;font:inherit;font-size:12px;",
+                                onclick: move |_| *settings.write() = preset.clone(),
+                                "{name}"
+                            }
+                        }
+                    }
+                    div {
+                        style: "display:flex;gap:8px;",
+                        button {
+                            style: "flex:1;padding:6px;border:1px solid #7a4bbf;border-radius:6px;\
+                                    background:#3a2a55;color:#e0c8ff;cursor:pointer;font:inherit;font-size:13px;",
+                            onclick: move |_| *settings.write() = randomized(),
+                            "🎲 Randomize"
+                        }
+                        button {
+                            style: "flex:1;padding:6px;border:1px solid #555;border-radius:6px;\
+                                    background:#333;color:#eee;cursor:pointer;font:inherit;font-size:13px;",
+                            onclick: move |_| {
+                                if let Some(sim) = state.read().clone() {
+                                    save_png(&sim.borrow().canvas);
+                                }
+                            },
+                            "💾 PNG"
+                        }
+                    }
+                }
+
+                // ── Transport: clear / reset ─────────────────────────────────
+                div {
                     style: "display:flex;gap:8px;margin-top:12px;",
                     button {
                         style: "flex:1;padding:6px;border:1px solid #555;border-radius:6px;\
                                 background:#3a2030;color:#ff9dc0;cursor:pointer;font:inherit;font-size:13px;",
-                        // The trace is off-screen state, not a setting, so wipe it directly.
                         onclick: move |_| {
                             if let Some(sim) = state.read().clone() {
                                 sim.borrow_mut().reset_trace();
@@ -592,8 +1057,6 @@ pub fn Cardioid() -> Element {
                     button {
                         style: "flex:1;padding:6px;border:1px solid #555;border-radius:6px;\
                                 background:#203a30;color:#9dffc0;cursor:pointer;font:inherit;font-size:13px;",
-                        // Restore every parameter to its default; the geometry change
-                        // clears the trace and the URL is rewritten by the sync effect.
                         onclick: move |_| *settings.write() = Settings::default(),
                         "Reset"
                     }
@@ -605,6 +1068,39 @@ pub fn Cardioid() -> Element {
                     "← home"
                 }
             }
+        }
+    }
+}
+
+/// A collapsible advanced section (native `<details>`, closed by default).
+#[component]
+fn Details(summary: String, children: Element) -> Element {
+    rsx! {
+        details {
+            style: "margin-top:10px;border-top:1px solid #333;padding-top:8px;",
+            summary {
+                style: "cursor:pointer;font-size:13px;color:#9aa;font-weight:600;margin-bottom:6px;",
+                "{summary}"
+            }
+            {children}
+        }
+    }
+}
+
+/// A small on/off pill button.
+#[component]
+fn Toggle(label: String, on: bool, onclick: EventHandler<MouseEvent>) -> Element {
+    let bg = if on {
+        "background:#2f7d32;border-color:#3faf43"
+    } else {
+        "background:#333;border-color:#555"
+    };
+    rsx! {
+        button {
+            style: "flex:0 0 auto;padding:5px 10px;border:1px solid;border-radius:6px;\
+                    color:#eee;cursor:pointer;font:inherit;font-size:13px;{bg}",
+            onclick: move |e| onclick.call(e),
+            "{label}"
         }
     }
 }
@@ -629,11 +1125,7 @@ fn Slider(
                 span { style: "color:#ff8fb8;font-variant-numeric:tabular-nums;", "{shown}" }
             }
             input {
-                r#type: "range",
-                min,
-                max,
-                step,
-                value: "{value}",
+                r#type: "range", min, max, step, value: "{value}",
                 style: "width:100%;accent-color:#ff4d8d;",
                 oninput: move |e| {
                     if let Ok(v) = e.value().parse::<f64>() {
