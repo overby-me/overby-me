@@ -366,7 +366,10 @@ pub fn icon_el(mime_id: &str) -> Element {
 /// picture, from `users.avatarUrl`) if set, otherwise `fallback` (an icon or
 /// initial). Place the result inside an `.avatar` element.
 pub fn user_avatar(avatar_url: &str, fallback: Element) -> Element {
-    if avatar_url.is_empty() {
+    // NHost gives every user a gravatar URL (with `default=blank`, i.e. usually a
+    // blank image), so only a non-gravatar URL — e.g. the linked Bluesky picture —
+    // counts as a real avatar; otherwise fall back to the icon/initial.
+    if avatar_url.is_empty() || avatar_url.contains("gravatar") {
         fallback
     } else {
         rsx! {

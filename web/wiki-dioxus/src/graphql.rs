@@ -192,6 +192,9 @@ pub struct MemberFields {
 #[cynic(schema_path = "graphql/schema.graphql", graphql_type = "users")]
 pub struct UserRef {
     pub display_name: String,
+    /// The user's avatar URL (gravatar by default, their Bluesky picture once
+    /// linked). Readable via the `user` role's `users` select permission.
+    pub avatar_url: String,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
@@ -991,7 +994,7 @@ pub async fn query_members_page(
         "query {{ \
            page: members(where: {w}, order_by: {{ name: asc }}, limit: {limit}, offset: {offset}) {{ \
              id name email accepted active owner hidden nodeId \
-             user {{ displayName }} node {{ mimeId }} \
+             user {{ displayName avatarUrl }} node {{ mimeId }} \
            }} \
            all: members(where: {w}) {{ id }} \
          }}",
@@ -1055,13 +1058,17 @@ fn parse_member_row(v: &serde_json::Value) -> Option<MemberFields> {
         owner: b("owner"),
         hidden: b("hidden"),
         node_id: s("nodeId").map(Uuid),
-        user: v
-            .get("user")
-            .and_then(|u| u.get("displayName"))
-            .and_then(|d| d.as_str())
-            .map(|s| UserRef {
-                display_name: s.to_string(),
-            }),
+        user: v.get("user").and_then(|u| {
+            let display_name = u.get("displayName").and_then(|d| d.as_str())?;
+            Some(UserRef {
+                display_name: display_name.to_string(),
+                avatar_url: u
+                    .get("avatarUrl")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+            })
+        }),
         node: v.get("node").map(|n| MemberNodeRef {
             mime_id: n.get("mimeId").and_then(|m| m.as_str()).map(String::from),
         }),

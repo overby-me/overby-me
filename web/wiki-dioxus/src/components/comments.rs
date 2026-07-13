@@ -143,6 +143,11 @@ fn CommentThread(
         .next()
         .map(|c| c.to_uppercase().to_string())
         .unwrap_or_default();
+    let avatar_url = comment
+        .owner
+        .as_ref()
+        .map(|o| o.avatar_url.clone())
+        .unwrap_or_default();
     let text = comment_text(&comment);
     let when = comment
         .created_at
@@ -155,7 +160,9 @@ fn CommentThread(
     rsx! {
         div { class: "comment", style: "margin-left: {indent}rem;",
             div { class: "comment-main",
-                div { class: "avatar small comment-avatar", "{initial}" }
+                div { class: "avatar small comment-avatar",
+                    {super::loader::user_avatar(&avatar_url, rsx! { "{initial}" })}
+                }
                 div { class: "comment-body",
                     div { class: "comment-meta",
                         span { class: "comment-author", "{author}" }

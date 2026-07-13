@@ -474,6 +474,11 @@ fn MemberTableRow(
     let active = member.active;
     let hidden = member.hidden;
     let (status_icon, status_label) = member_status(&member);
+    let avatar_url = member
+        .user
+        .as_ref()
+        .map(|u| u.avatar_url.clone())
+        .unwrap_or_default();
     // EXPERIMENT: colour-code the status chip by category.
     let status_class = match status_icon {
         "check_circle" => "status-active",
@@ -486,7 +491,9 @@ fn MemberTableRow(
         tr { class: if hidden { "member-row-hidden" } else { "" },
             td {
                 span { class: "m3-cell-icon",
-                    div { class: "avatar small", span { class: "material-icons", "person" } }
+                    div { class: "avatar small",
+                        {super::loader::user_avatar(&avatar_url, rsx! { span { class: "material-icons", "person" } })}
+                    }
                     span { "{member.label()}" }
                 }
             }
