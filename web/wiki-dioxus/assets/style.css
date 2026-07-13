@@ -4447,12 +4447,24 @@ a.list-item:hover {
 }
 
 /* Sort drag-and-drop */
+/* EXPERIMENT (reorder): a leading drag-handle cue + rounded rows so it's clear
+   the items are draggable. */
 .sort-list .sort-item {
 	cursor: grab;
 	user-select: none;
+	border-radius: var(--md-sys-shape-corner-large);
 	transition:
 		background-color 0.15s,
 		opacity 0.15s;
+}
+.sort-list .sort-item::before {
+	content: "drag_indicator";
+	font-family: "Material Icons";
+	font-size: 20px;
+	color: var(--md-on-surface-variant);
+	opacity: 0.5;
+	margin-right: 2px;
+	flex: 0 0 auto;
 }
 
 .sort-list .sort-item:active {
