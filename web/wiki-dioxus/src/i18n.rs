@@ -343,6 +343,7 @@ const EN_JSON: &str = r#"{
     "poll": {
         "managePoll": "Manage Poll",
         "hideResult": "Hide running tally (not a secret ballot)",
+        "secretBallot": "Secret ballot (anonymous)",
         "newPoll": "New poll",
         "voteRange": "Number of votes",
         "start": "Start",
@@ -706,6 +707,7 @@ const DA_JSON: &str = r#"{
     "poll": {
         "managePoll": "Administrer Afstemning",
         "hideResult": "Skjul løbende optælling (ikke hemmelig afstemning)",
+        "secretBallot": "Hemmelig afstemning (anonym)",
         "newPoll": "Ny afstemning",
         "voteRange": "Antal stemmer",
         "start": "Start",

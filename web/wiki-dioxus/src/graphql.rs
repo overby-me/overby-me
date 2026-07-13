@@ -777,6 +777,15 @@ pub async fn set_active_relation(
     Ok(result.insert_relation.is_some())
 }
 
+/// The two independent visibility choices for a new poll's ballot.
+#[derive(Clone, Copy, Default)]
+pub struct BallotRules {
+    /// Hide the running tally from non-owners while the poll is open.
+    pub hide_tally: bool,
+    /// Anonymous (secret) ballot: casts route through the backend with no owner_id.
+    pub secret: bool,
+}
+
 /// Open a poll on `parent_id` (a policy/change/position): close any prior active
 /// poll, insert a `vote/poll` node with the ballot config, and set the context's
 /// `active` relation to it. Mirrors React's PollDialog.
@@ -790,7 +799,7 @@ pub async fn create_poll(
     options: &[String],
     min_vote: usize,
     max_vote: usize,
-    hidden: bool,
+    rules: BallotRules,
 ) -> Result<InsertedNode, String> {
     // Close the context's current active poll, if any (only one is open at once).
     if let Ok(Some(prior)) = active_node_id(access_token, context_id).await {
@@ -808,7 +817,8 @@ pub async fn create_poll(
         "options": options,
         "minVote": min_vote,
         "maxVote": max_vote,
-        "hidden": hidden,
+        "hidden": rules.hide_tally,
+        "secret": rules.secret,
         "nodeId": parent_id,
     });
     let inserted = insert_node(

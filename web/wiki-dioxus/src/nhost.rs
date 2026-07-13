@@ -110,6 +110,65 @@ pub async fn parse_roster(token: Option<&str>, bytes: Vec<u8>) -> Vec<(String, S
     }
 }
 
+/// Cast an anonymous ballot on a SECRET poll via the backend: the vote node is
+/// inserted with no owner_id, and a has-voted marker enforces one vote/member.
+/// Ok on success; Err("already voted") or a message otherwise.
+pub async fn vote_cast_secret(
+    token: &str,
+    poll: &str,
+    context: Option<&str>,
+    choices: &[usize],
+) -> Result<(), String> {
+    let url = format!("{BACKEND_URL}/vote/cast");
+    let choices_str = choices
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut params = vec![("poll", poll.to_string()), ("choices", choices_str)];
+    if let Some(c) = context {
+        params.push(("context", c.to_string()));
+    }
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(token)
+        .query(&params)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if body.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        Ok(())
+    } else {
+        Err(body
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("cast failed")
+            .to_string())
+    }
+}
+
+/// Whether the caller has already voted on a secret poll (the anonymous vote
+/// nodes carry no owner_id, so the has-voted marker lives backend-side).
+pub async fn vote_status(token: &str, poll: &str) -> bool {
+    let url = format!("{BACKEND_URL}/vote/status");
+    match reqwest::Client::new()
+        .get(&url)
+        .bearer_auth(token)
+        .query(&[("poll", poll)])
+        .send()
+        .await
+    {
+        Ok(resp) => resp
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| v.get("voted").and_then(|b| b.as_bool()))
+            .unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct SignInRequest {
     pub email: String,

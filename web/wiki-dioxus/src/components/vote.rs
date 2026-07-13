@@ -696,6 +696,14 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let show_results = !poll_hidden || node.is_context_owner.unwrap_or(false);
+    // Secret ballot (`data.secret`): casts route through the backend so the vote
+    // node carries no owner_id, and the has-voted check comes from the backend.
+    let poll_secret = node
+        .data
+        .as_ref()
+        .and_then(|d| d.0.get("secret"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let mut selected = use_signal(|| vec![false; options.len()]);
     let mut error = use_signal(String::new);
@@ -722,14 +730,24 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     let av_poll = poll_id.clone();
     let av_token = session.read().access_token.clone();
     let av_user = user_id.clone();
-    let already_voted = crate::use_data_resource!(|(av_poll, av_token, av_user, rev)| async move {
-        let _ = rev;
-        let Some(uid) = av_user else { return false };
-        graphql::count_user_votes(av_token.as_deref(), &av_poll, &uid)
-            .await
-            .map(|n| n > 0)
-            .unwrap_or(false)
-    });
+    let av_secret = poll_secret;
+    let already_voted =
+        crate::use_data_resource!(|(av_poll, av_token, av_user, av_secret, rev)| async move {
+            let _ = rev;
+            if av_secret {
+                // Anonymous votes have no owner_id, so ask the backend's has-voted marker.
+                match &av_token {
+                    Some(t) => crate::nhost::vote_status(t, &av_poll).await,
+                    None => false,
+                }
+            } else {
+                let Some(uid) = av_user else { return false };
+                graphql::count_user_votes(av_token.as_deref(), &av_poll, &uid)
+                    .await
+                    .map(|n| n > 0)
+                    .unwrap_or(false)
+            }
+        });
     let voted = already_voted.read().unwrap_or(false);
 
     // Tally of the votes visible to this user (all of them for the poll owner /
@@ -846,13 +864,26 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
             let ctx = ctx.clone();
             spawn(async move {
                 let suffix = format!("{:.0}", now_ms());
-                match graphql::cast_vote(token.as_deref(), &poll, ctx.as_deref(), &chosen, &suffix)
-                    .await
-                {
-                    Ok(true) => {
+                // A secret ballot goes through the backend (anonymous insert +
+                // has-voted marker); a normal cast inserts under the user's token.
+                let result = if poll_secret {
+                    match token.as_deref() {
+                        Some(t) => {
+                            crate::nhost::vote_cast_secret(t, &poll, ctx.as_deref(), &chosen).await
+                        }
+                        None => Err("not signed in".to_string()),
+                    }
+                } else {
+                    graphql::cast_vote(token.as_deref(), &poll, ctx.as_deref(), &chosen, &suffix)
+                        .await
+                        .map(|_| ())
+                };
+                match result {
+                    Ok(()) => {
                         show_snackbar(&t("vote.hasVoted"));
                         refresh += 1;
                     }
+                    Err(e) if e == "already voted" => error.set(t("vote.hasVoted")),
                     _ => error.set(t("error.somethingWentWrong")),
                 }
             });
@@ -1154,6 +1185,9 @@ fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Element {
     let nav = use_navigator();
     let mut open = use_signal(|| false);
     let mut hidden = use_signal(|| is_position);
+    // Secret ballot: casts route through the backend so vote nodes carry no
+    // owner_id (untraceable). Defaults on for candidate elections (positions).
+    let mut secret = use_signal(|| is_position);
     let mut min_vote = use_signal(|| 1usize);
     let mut max_vote = use_signal(|| 1usize);
 
@@ -1210,6 +1244,7 @@ fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Element {
                             let name = name.clone();
                             let options = options.clone();
                             let hidden = hidden();
+                            let secret = secret();
                             let mn = min_vote();
                             let mx = max_vote().max(mn);
                             let mut poll_path = path.clone();
@@ -1224,7 +1259,10 @@ fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     &options,
                                     mn,
                                     mx,
-                                    hidden,
+                                    graphql::BallotRules {
+                                        hide_tally: hidden,
+                                        secret,
+                                    },
                                 )
                                 .await
                                 {
@@ -1282,7 +1320,16 @@ fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Element {
                 span { class: "switch-row-label", "{t(\"poll.hideResult\")}" }
                 Switch {
                     checked: Some(hidden()),
+                    aria_label: t("poll.hideResult"),
                     on_checked_change: move |v: bool| hidden.set(v),
+                }
+            }
+            div { class: "list-item switch-row",
+                span { class: "switch-row-label", "{t(\"poll.secretBallot\")}" }
+                Switch {
+                    checked: Some(secret()),
+                    aria_label: t("poll.secretBallot"),
+                    on_checked_change: move |v: bool| secret.set(v),
                 }
             }
         }

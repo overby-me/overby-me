@@ -23,6 +23,7 @@ mod pkce;
 mod roster;
 mod statecookie;
 mod util;
+mod vote;
 
 pub async fn handle(req: Request<Body>) -> Response<Body> {
     let cfg = oauth::Config::from_env();
@@ -67,6 +68,8 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
         "/atproto/status" => oauth::status(&cfg, &client, query, bearer).await,
         "/atproto/unlink" => oauth::unlink(&cfg, &client, query, bearer).await,
         "/atproto/post" => oauth::post(&cfg, &client, query, bearer).await,
+        "/vote/cast" => vote::cast(&cfg, &client, query, bearer).await,
+        "/vote/status" => vote::status(&cfg, &client, query, bearer).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }
