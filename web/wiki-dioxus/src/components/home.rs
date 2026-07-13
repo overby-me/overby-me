@@ -125,9 +125,11 @@ pub fn HomeApp() -> Element {
                     }
                 }
                 // The user's groups/events — shown here only on mobile, where the
-                // drawer (which carries this list on desktop) is hidden.
+                // drawer (which carries this list on desktop) is hidden. EXPERIMENT:
+                // wrap it in a card so it reads as a home section rather than a bare
+                // list floating on the page background.
                 if is_auth {
-                    div { class: "home-mobile-list mt-1",
+                    div { class: "card home-mobile-list mt-1",
                         crate::components::layout::HomeList {}
                     }
                 }
