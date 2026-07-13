@@ -172,6 +172,151 @@ async fn delete_by_endpoints(
     Ok(())
 }
 
+/// Fetch the subscriptions for a set of member emails, push `payload` to each,
+/// and prune any that report gone (404/410). Returns (recipients, sent).
+async fn push_to_emails(
+    cfg: &Config,
+    client: &reqwest::Client,
+    emails: &[String],
+    payload: &str,
+) -> Result<(usize, usize), String> {
+    if emails.is_empty() {
+        return Ok((0, 0));
+    }
+    let subs = admin_gql(cfg, client, json!({
+        "query": "query($e: [String!]!) { push_subscriptions(where: {email: {_in: $e}}) { endpoint p256dh auth } }",
+        "variables": { "e": emails },
+    })).await?;
+    let subs: Vec<Subscription> = subs
+        .pointer("/data/push_subscriptions")
+        .and_then(|a| a.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| {
+                    Some(Subscription {
+                        endpoint: s.get("endpoint")?.as_str()?.to_string(),
+                        p256dh: s.get("p256dh")?.as_str()?.to_string(),
+                        auth: s.get("auth")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let recipients = subs.len();
+    let mut sent = 0usize;
+    let mut stale: Vec<String> = Vec::new();
+    for sub in &subs {
+        match push::send(cfg, client, sub, payload.as_bytes()).await {
+            Ok(status) if (200..300).contains(&status) => sent += 1,
+            Ok(404) | Ok(410) => stale.push(sub.endpoint.clone()),
+            Ok(status) => eprintln!("push send to {} -> {status}", sub.endpoint),
+            Err(e) => eprintln!("push send error: {e}"),
+        }
+    }
+    let _ = delete_by_endpoints(cfg, client, &stale).await;
+    Ok((recipients, sent))
+}
+
+// --- reply: push to the author of the node being commented on ----------------
+
+pub async fn reply(
+    cfg: &Config,
+    client: &reqwest::Client,
+    query: Option<&str>,
+    bearer: Option<&str>,
+) -> Response<Body> {
+    match reply_inner(cfg, client, query, bearer).await {
+        Ok((recipients, sent)) => crate::json(
+            StatusCode::OK,
+            json!({ "ok": true, "recipients": recipients, "sent": sent }).to_string(),
+        ),
+        Err(e) => {
+            eprintln!("push reply error: {e}");
+            crate::json(
+                StatusCode::BAD_REQUEST,
+                json!({ "ok": false, "error": e }).to_string(),
+            )
+        }
+    }
+}
+
+async fn reply_inner(
+    cfg: &Config,
+    client: &reqwest::Client,
+    query: Option<&str>,
+    bearer: Option<&str>,
+) -> Result<(usize, usize), String> {
+    let params = crate::util::parse_query(query);
+    let get = |k: &str| {
+        params
+            .iter()
+            .find(|(pk, _)| pk == k)
+            .map(|(_, v)| v.clone())
+    };
+    let parent = get("parent")
+        .filter(|s| !s.is_empty())
+        .ok_or("missing parent")?;
+    let title = get("title").unwrap_or_else(|| "RadikalWiki".into());
+    let body = get("body").unwrap_or_default();
+    let url = get("url").unwrap_or_default();
+
+    let (uid, email) = caller(cfg, client, query, bearer).await?;
+
+    // The node being commented on: whose author should hear about the reply.
+    let node = admin_gql(
+        cfg,
+        client,
+        json!({
+            "query": "query($id: uuid!) { node(id: $id) { ownerId contextId } }",
+            "variables": { "id": parent },
+        }),
+    )
+    .await?;
+    let owner_id = match node.pointer("/data/node/ownerId").and_then(|v| v.as_str()) {
+        Some(o) => o.to_string(),
+        None => return Ok((0, 0)), // anonymous / ownerless node: nobody to notify
+    };
+    if owner_id == uid {
+        return Ok((0, 0)); // don't notify yourself about your own comment
+    }
+    let ctx = node
+        .pointer("/data/node/contextId")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| parent.clone());
+
+    // Anti-abuse: only an active member of the node's context may ping its author.
+    let member = admin_gql(cfg, client, json!({
+        "query": "query($c: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, email: {_eq: $e}, active: {_eq: true}}, limit: 1) { id } }",
+        "variables": { "c": ctx, "e": email },
+    })).await?;
+    if member
+        .pointer("/data/members")
+        .and_then(|a| a.as_array())
+        .map(|a| a.is_empty())
+        .unwrap_or(true)
+    {
+        return Err("not a member of this context".into());
+    }
+
+    let owner = admin_gql(
+        cfg,
+        client,
+        json!({
+            "query": "query($id: uuid!) { user(id: $id) { email } }",
+            "variables": { "id": owner_id },
+        }),
+    )
+    .await?;
+    let owner_email = match owner.pointer("/data/user/email").and_then(|v| v.as_str()) {
+        Some(e) if e != email => e.to_string(),
+        _ => return Ok((0, 0)),
+    };
+
+    let payload = json!({ "title": title, "body": body, "url": url }).to_string();
+    push_to_emails(cfg, client, &[owner_email], &payload).await
+}
+
 // --- notify -----------------------------------------------------------------
 
 pub async fn notify(
@@ -247,43 +392,6 @@ async fn notify_inner(
                 .collect()
         })
         .unwrap_or_default();
-    if emails.is_empty() {
-        return Ok((0, 0));
-    }
-
-    let subs = admin_gql(cfg, client, json!({
-        "query": "query($e: [String!]!) { push_subscriptions(where: {email: {_in: $e}}) { endpoint p256dh auth } }",
-        "variables": { "e": emails },
-    })).await?;
-    let subs: Vec<Subscription> = subs
-        .pointer("/data/push_subscriptions")
-        .and_then(|a| a.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|s| {
-                    Some(Subscription {
-                        endpoint: s.get("endpoint")?.as_str()?.to_string(),
-                        p256dh: s.get("p256dh")?.as_str()?.to_string(),
-                        auth: s.get("auth")?.as_str()?.to_string(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let recipients = subs.len();
     let payload = json!({ "title": title, "body": body, "url": url }).to_string();
-    let mut sent = 0usize;
-    let mut stale: Vec<String> = Vec::new();
-    for sub in &subs {
-        match push::send(cfg, client, sub, payload.as_bytes()).await {
-            Ok(status) if (200..300).contains(&status) => sent += 1,
-            // 404/410 = the subscription is gone; prune it.
-            Ok(404) | Ok(410) => stale.push(sub.endpoint.clone()),
-            Ok(status) => eprintln!("push send to {} -> {status}", sub.endpoint),
-            Err(e) => eprintln!("push send error: {e}"),
-        }
-    }
-    let _ = delete_by_endpoints(cfg, client, &stale).await;
-    Ok((recipients, sent))
+    push_to_emails(cfg, client, &emails, &payload).await
 }

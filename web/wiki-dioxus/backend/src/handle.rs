@@ -75,6 +75,7 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
         "/push/subscribe" => notify::subscribe(&cfg, &client, query, bearer).await,
         "/push/unsubscribe" => notify::unsubscribe(&cfg, &client, query, bearer).await,
         "/push/notify" => notify::notify(&cfg, &client, query, bearer).await,
+        "/push/reply" => notify::reply(&cfg, &client, query, bearer).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }

@@ -350,6 +350,28 @@ fn CommentComposer(
                     let v = refresh();
                     refresh.set(v + 1);
                     on_posted.call(());
+                    // Best-effort background push to the author of the node being
+                    // commented on ("someone replied to you"), so they hear about it
+                    // with the app closed. The page URL is the node the reply lands
+                    // on; the backend gates on the caller being a context member.
+                    if let Some(tok) = token.as_ref() {
+                        let link = web_sys::window()
+                            .and_then(|w| w.location().pathname().ok())
+                            .unwrap_or_default();
+                        let body = if author.is_empty() {
+                            t("vote.replyNotifyBody")
+                        } else {
+                            author.clone()
+                        };
+                        let _ = crate::nhost::push_reply(
+                            tok,
+                            &parent_id,
+                            &t("vote.replyNotifyTitle"),
+                            &body,
+                            &link,
+                        )
+                        .await;
+                    }
                 }
                 Err(e) => {
                     log::error!("comment post failed: {e}");

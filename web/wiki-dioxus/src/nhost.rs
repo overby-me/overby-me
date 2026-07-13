@@ -243,6 +243,44 @@ pub async fn push_notify(
     }
 }
 
+/// Ask the backend to push a "someone commented on your content" notification to
+/// the author of `parent` (the node being commented on). The backend gates this
+/// on the caller being an active member of the node's context. Best-effort.
+pub async fn push_reply(
+    token: &str,
+    parent: &str,
+    title: &str,
+    body: &str,
+    link: &str,
+) -> Result<(u64, u64), String> {
+    let url = format!("{BACKEND_URL}/push/reply");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(token)
+        .query(&[
+            ("parent", parent),
+            ("title", title),
+            ("body", body),
+            ("url", link),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if v.get("ok").and_then(|b| b.as_bool()) == Some(true) {
+        Ok((
+            v.get("recipients").and_then(|n| n.as_u64()).unwrap_or(0),
+            v.get("sent").and_then(|n| n.as_u64()).unwrap_or(0),
+        ))
+    } else {
+        Err(v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("reply notify failed")
+            .to_string())
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct SignInRequest {
     pub email: String,
