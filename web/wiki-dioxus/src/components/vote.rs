@@ -708,6 +708,8 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
         (counts, votes.len())
     });
     let (counts, total_votes) = tally.read().clone().unwrap_or((vec![], 0));
+    // EXPERIMENT: the leading option(s) in the results get a winner highlight.
+    let max_count = counts.iter().copied().max().unwrap_or(0);
 
     let opts = options.clone();
 
@@ -901,10 +903,17 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                     // already voted, or logged out).
                     div { class: "list",
                         for (i , option) in opts.iter().enumerate() {
-                            div { class: "list-item", key: "{i}",
+                            div {
+                                class: if show_results && max_count > 0 && counts.get(i).copied().unwrap_or(0) == max_count { "list-item ballot-winner" } else { "list-item" },
+                                key: "{i}",
                                 div { class: "avatar small", "{i + 1}" }
                                 div { class: "list-item-text",
-                                    div { class: "list-item-primary", "{option}" }
+                                    div { class: "list-item-primary",
+                                        "{option}"
+                                        if show_results && max_count > 0 && counts.get(i).copied().unwrap_or(0) == max_count {
+                                            span { class: "winner-badge material-icons", "emoji_events" }
+                                        }
+                                    }
                                     {
                                         if show_results {
                                             let count = counts.get(i).copied().unwrap_or(0);

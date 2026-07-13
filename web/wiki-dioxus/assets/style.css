@@ -2840,6 +2840,18 @@ select:focus {
 	color: var(--md-on-primary-container);
 	box-shadow: var(--md-sys-elevation-2);
 }
+/* EXPERIMENT (winner highlight): the leading option(s) in poll results get a tonal
+   tint and a trophy. */
+.ballot-winner {
+	background: color-mix(in srgb, var(--md-primary) 8%, transparent);
+	border-radius: var(--md-sys-shape-corner-medium);
+}
+.winner-badge {
+	color: var(--md-tertiary);
+	font-size: 18px;
+	margin-left: 6px;
+	vertical-align: middle;
+}
 
 /* Typography */
 h1,
