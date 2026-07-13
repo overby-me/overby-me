@@ -1267,6 +1267,17 @@ fn UserMenu() -> Element {
                         {match *LANG.read() { Lang::En => " Dansk", Lang::Da => " English" }}
                     }
                     if is_auth {
+                        // Your profile (memberships + the link-Bluesky card). Only
+                        // reachable here, so keep it above the account actions.
+                        button {
+                            class: "list-item",
+                            onclick: move |_| {
+                                menu_open.set(false);
+                                nav.push(Route::Home { app: Some("profile".to_string()) });
+                            },
+                            span { class: "material-icons", "person" }
+                            " {t(\"layout.profile\")}"
+                        }
                         button {
                             class: "list-item",
                             onclick: move |_| {
