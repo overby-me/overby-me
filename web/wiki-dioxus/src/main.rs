@@ -118,6 +118,30 @@ fn App() -> Element {
         // Load persisted session from localStorage.
         session::load_session();
 
+        // If we just came back from the atproto (Bluesky) linking flow, surface the
+        // outcome and drop the ?linked query so it does not re-fire on refresh.
+        if let Some(win) = web_sys::window() {
+            if let Ok(search) = win.location().search() {
+                let msg = if search.contains("linked=success") {
+                    Some(i18n::t("profile.linkedOk"))
+                } else if search.contains("linked=error") {
+                    Some(i18n::t("profile.linkedErr"))
+                } else {
+                    None
+                };
+                if let Some(msg) = msg {
+                    snackbar::show_snackbar(&msg);
+                    if let Ok(history) = win.history() {
+                        let _ = history.replace_state_with_url(
+                            &wasm_bindgen::JsValue::NULL,
+                            "",
+                            Some("/"),
+                        );
+                    }
+                }
+            }
+        }
+
         // Detect browser language for i18n.
         if let Some(window) = web_sys::window() {
             if let Some(lang) = window.navigator().language() {

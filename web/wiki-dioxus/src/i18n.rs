@@ -345,7 +345,12 @@ const EN_JSON: &str = r#"{
     "profile": {
         "memberships": "Your groups and events",
         "signedInAs": "Signed in as",
-        "userId": "User ID"
+        "userId": "User ID",
+        "linkBluesky": "Link Bluesky account",
+        "linkBlueskyHint": "Connect your Bluesky (atproto) account to this profile.",
+        "blueskyHandle": "Bluesky handle",
+        "linkedOk": "Bluesky account linked",
+        "linkedErr": "Could not link Bluesky account"
     },
     "program": {
         "empty": "No programme items yet."
@@ -675,7 +680,12 @@ const DA_JSON: &str = r#"{
     "profile": {
         "memberships": "Dine grupper og begivenheder",
         "signedInAs": "Logget ind som",
-        "userId": "Bruger-ID"
+        "userId": "Bruger-ID",
+        "linkBluesky": "Forbind Bluesky-konto",
+        "linkBlueskyHint": "Forbind din Bluesky (atproto) konto til denne profil.",
+        "blueskyHandle": "Bluesky-håndtag",
+        "linkedOk": "Bluesky-konto forbundet",
+        "linkedErr": "Kunne ikke forbinde Bluesky-konto"
     },
     "program": {
         "empty": "Ingen programpunkter endnu."

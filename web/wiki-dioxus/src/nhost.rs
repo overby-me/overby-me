@@ -15,6 +15,13 @@ pub fn storage_url() -> String {
     format!("https://{NHOST_SUBDOMAIN}.storage.{NHOST_REGION}.nhost.run/v1")
 }
 
+/// The RadikalWiki backend (a Rust axum service on Scaleway Serverless Containers,
+/// fr-par). Hosts the atproto OAuth flow for linking a Bluesky account:
+/// `GET /atproto/start?handle=&token=` begins linking and redirects back with
+/// `?linked=success|error`.
+pub const BACKEND_URL: &str =
+    "https://wikidioxusd0caa45e-wiki-backend.functions.fnc.fr-par.scw.cloud";
+
 #[derive(Debug, Serialize)]
 pub struct SignInRequest {
     pub email: String,

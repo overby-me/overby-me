@@ -84,6 +84,9 @@ pub fn ProfileApp() -> Element {
     let user = session.read().user.clone();
     let access_token = session.read().access_token.clone();
     let user_id = user.as_ref().map(|u| u.id.clone());
+    // Bluesky handle to link — declared before the no-user early return below so
+    // the hook order stays stable across renders.
+    let mut bsky_handle = use_signal(String::new);
 
     // The user's groups + events (same query the home list uses).
     let memberships = crate::use_data_resource!(move || {
@@ -132,6 +135,48 @@ pub fn ProfileApp() -> Element {
                     class: "body-small",
                     class: "text-muted",
                     "{t(\"profile.userId\")}: {user.id}"
+                }
+            }
+        }
+
+        // Link a Bluesky (atproto) account: hand off to the backend OAuth flow with
+        // the handle + current NHost access token; it redirects back to APP_ORIGIN
+        // with ?linked=success|error (surfaced in a snackbar by App on load).
+        div { class: "card",
+            div { class: "card-header",
+                div { class: "avatar small", span { class: "material-icons", "link" } }
+                h3 { class: "title-medium", "{t(\"profile.linkBluesky\")}" }
+            }
+            div { class: "card-content",
+                p { class: "body-medium text-muted mb-1", "{t(\"profile.linkBlueskyHint\")}" }
+                div { class: "text-field",
+                    label { "{t(\"profile.blueskyHandle\")}" }
+                    input {
+                        r#type: "text",
+                        placeholder: "alice.bsky.social",
+                        value: "{bsky_handle}",
+                        oninput: move |e| bsky_handle.set(e.value()),
+                    }
+                }
+                button {
+                    class: "btn btn-primary mt-1",
+                    disabled: bsky_handle.read().trim().is_empty(),
+                    onclick: move |_| {
+                        let handle = bsky_handle.read().trim().to_string();
+                        let token = session.read().access_token.clone();
+                        if let (false, Some(token)) = (handle.is_empty(), token) {
+                            // handle (a domain) and the base64url JWT are URL-safe.
+                            let url = format!(
+                                "{}/atproto/start?handle={handle}&token={token}",
+                                crate::nhost::BACKEND_URL
+                            );
+                            if let Some(w) = web_sys::window() {
+                                let _ = w.location().set_href(&url);
+                            }
+                        }
+                    },
+                    span { class: "material-icons", "link" }
+                    " {t(\"profile.linkBluesky\")}"
                 }
             }
         }
