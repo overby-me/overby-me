@@ -58,6 +58,26 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
         .map(|c| c.0.clone())
         .unwrap_or_else(|| node.id.0.clone());
 
+    // Owner toggle state: whether the context is currently set to also show the
+    // active node's comments on the projector (the `screenComments` relation).
+    // The hook is unconditional (stable order); only the fetch is owner-gated.
+    let mut screen_comments = use_signal(|| None::<bool>);
+    {
+        let token = session.read().access_token.clone();
+        let ctx = node_context.clone();
+        let can = can_manage;
+        use_hook(move || {
+            if can {
+                spawn(async move {
+                    let on = crate::graphql::screen_comments_on(token.as_deref(), &ctx)
+                        .await
+                        .unwrap_or(false);
+                    screen_comments.set(Some(on));
+                });
+            }
+        });
+    }
+
     // Optional inline image (a `data.image` file id), mirroring React's Content.
     // Fetched with the token in the Authorization header → a blob: URL, so the JWT
     // never enters an <img src> attribute.
@@ -204,6 +224,39 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         },
                         span { class: "material-icons", "cast" }
                         "{t(\"content.projectScreen\")}"
+                    }
+                    // Owner: also show the active node's comments on the Screen.
+                    button {
+                        class: "sheet-action",
+                        onclick: {
+                            let ctx = node_context.clone();
+                            move |_| {
+                                let ctx = ctx.clone();
+                                let token = session.read().access_token.clone();
+                                let next = !(*screen_comments.read()).unwrap_or(false);
+                                spawn(async move {
+                                    match crate::graphql::set_screen_comments(token.as_deref(), &ctx, next).await {
+                                        Ok(_) => {
+                                            screen_comments.set(Some(next));
+                                            crate::snackbar::show_snackbar(&t(if next {
+                                                "content.commentsOnScreen"
+                                            } else {
+                                                "content.commentsOffScreen"
+                                            }));
+                                        }
+                                        Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                    }
+                                });
+                            }
+                        },
+                        span { class: "material-icons",
+                            if (*screen_comments.read()).unwrap_or(false) { "speaker_notes_off" } else { "forum" }
+                        }
+                        if (*screen_comments.read()).unwrap_or(false) {
+                            "{t(\"content.hideCommentsScreen\")}"
+                        } else {
+                            "{t(\"content.showCommentsScreen\")}"
+                        }
                     }
                 }
                 if can_edit && !segments.is_empty() {

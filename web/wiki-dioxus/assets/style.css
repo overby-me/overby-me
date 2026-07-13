@@ -4461,6 +4461,67 @@ h6,
 	top: 32px;
 }
 
+/* --- Projector content: room-distance scaling + chrome removal (screen app). ---
+   ScreenApp renders the active node via MimeLoader in projector mode. Scale the
+   hero's typography up so it reads across a room, and strip every interactive
+   affordance (tool sheets, FABs, buttons, inline comment panes, form fields) —
+   the room-facing screen is passive; input happens on personal devices. */
+.projector-hero .card {
+	box-shadow: none;
+}
+.projector-hero .title-medium,
+.projector-hero .content-hero-title {
+	font-size: clamp(30px, 3.4vw, 60px);
+	line-height: 1.12;
+}
+.projector-hero .body-large,
+.projector-hero .body-medium,
+.projector-hero .list-item-primary,
+.projector-hero .slate-content p,
+.projector-hero .slate-content li,
+.projector-hero .ballot-verdict {
+	font-size: clamp(20px, 2vw, 38px);
+	line-height: 1.4;
+}
+.projector-hero .slate-content h1 {
+	font-size: clamp(32px, 3.6vw, 64px);
+}
+.projector-hero .slate-content h2 {
+	font-size: clamp(28px, 3vw, 52px);
+}
+.projector-hero .slate-content h3 {
+	font-size: clamp(24px, 2.4vw, 44px);
+}
+/* Strip interactive chrome that means nothing on a passive room screen. */
+.projector-hero .tool-sheet,
+.projector-hero .fab,
+.projector-hero .btn,
+.projector-hero .btn-icon,
+.projector-hero .chip-row,
+.projector-hero .m3-pane-supporting,
+.projector-hero .comment-section,
+.projector-hero input,
+.projector-hero textarea,
+.projector-hero select {
+	display: none !important;
+}
+/* Any leftover supporting-pane grid collapses to a single column. */
+.projector-hero .m3-supporting-pane {
+	display: block;
+}
+/* Owner-opt-in comment feed in the rail: read-only (inputs/buttons hidden), scrolls. */
+.projector-comments {
+	margin-top: 16px;
+	max-height: 46vh;
+	overflow-y: auto;
+}
+.projector-comments textarea,
+.projector-comments input,
+.projector-comments .btn,
+.projector-comments button {
+	display: none !important;
+}
+
 /* The groups/events list rendered in the Home main pane — mobile only; on desktop
    the always-visible drawer already carries it. Block-level (unlike .mobile-only,
    which is inline-flex for buttons). */

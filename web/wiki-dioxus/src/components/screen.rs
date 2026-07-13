@@ -19,30 +19,43 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         .map(|c| c.0)
         .unwrap_or_else(|| node.id.0.clone());
 
-    // Live projector: subscribe to the context `active` relation so switching the
-    // active node (remotely, from the admin) updates the projected pane without a
-    // reload — the whole point of the screen view (React ScreenApp's useSubsGet).
+    // Live projector: subscribe to the context's `active` (what to show) and
+    // `screenComments` (whether the owner opted to show comments) relations so
+    // remote changes update the projected pane without a reload (React's useSubsGet).
     let refresh = use_signal(|| 0u32);
     let sub_ctx = crate::graphql::gql_escape(&context_id);
     crate::subscription::use_live(
         format!(
-            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _eq: \"active\" }} }}) {{ nodeId }} }}"
+            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _in: [\"active\", \"screenComments\"] }} }}) {{ nodeId name }} }}"
         ),
         refresh,
     );
     let rev = *refresh.read();
 
-    let active = crate::use_data_resource!(|(context_id, access_token, rev)| async move {
+    let active_ctx = context_id.clone();
+    let active_token = access_token.clone();
+    let active = crate::use_data_resource!(|(active_ctx, active_token, rev)| async move {
         let _ = rev;
-        let id = graphql::active_node_id(access_token.as_deref(), &context_id)
+        let id = graphql::active_node_id(active_token.as_deref(), &active_ctx)
             .await
             .ok()
             .flatten()?;
-        graphql::query_node_by_id(access_token.as_deref(), &id)
+        graphql::query_node_by_id(active_token.as_deref(), &id)
             .await
             .ok()?
     });
     let active = active.read().clone().flatten();
+
+    let comments_ctx = context_id.clone();
+    let comments_token = session.read().access_token.clone();
+    let show_comments =
+        crate::use_data_resource!(|(comments_ctx, comments_token, rev)| async move {
+            let _ = rev;
+            graphql::screen_comments_on(comments_token.as_deref(), &comments_ctx)
+                .await
+                .unwrap_or(false)
+        });
+    let show_comments = show_comments.read().unwrap_or(false);
 
     rsx! {
         // Projector: a chromeless, room-distance 2-pane layout — a dominant hero
@@ -50,8 +63,8 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         // current + on-deck speaker). Tonal, overscan-safe (see `.projector`).
         div { class: "projector",
             div { class: "projector-hero",
-                match active {
-                    Some(n) => rsx! { MimeLoader { node: n, path: Vec::new() } },
+                match active.clone() {
+                    Some(n) => rsx! { MimeLoader { node: n, path: Vec::new(), projector: true } },
                     None => rsx! {
                         // EXPERIMENT: an expressive idle state instead of a bare "…".
                         div { class: "card",
@@ -67,6 +80,18 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
             }
             div { class: "projector-rail",
                 SpeakApp { node: node.clone(), mode: SpeakMode::Screen }
+                // Comments only when the owner opted in (screenComments relation).
+                // Read-only on the room screen — the composer is hidden via CSS.
+                if show_comments {
+                    if let Some(n) = active.as_ref() {
+                        div { class: "projector-comments",
+                            super::comments::CommentSection {
+                                node_id: n.id.0.clone(),
+                                context_id: n.context_id.as_ref().map(|u| u.0.clone()),
+                            }
+                        }
+                    }
+                }
             }
         }
     }

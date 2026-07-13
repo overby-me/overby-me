@@ -673,7 +673,7 @@ fn poll_config(node: &NodeWithChildren) -> PollConfig {
 /// is closed. Mirrors the React VoteApp ballot: radio for single-choice, else
 /// checkboxes; the last option ("Blank") can only be chosen alone.
 #[component]
-pub fn PollApp(node: NodeWithChildren) -> Element {
+pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
@@ -903,8 +903,9 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                     }
                 }
                 div { class: "flex-grow" }
-                // Owner-only: close the poll (mutable:false) so results show.
-                if open && node.is_context_owner.unwrap_or(false) {
+                // Owner-only: close the poll (mutable:false) so results show. Never
+                // on the projector — the room-facing screen carries no controls.
+                if open && node.is_context_owner.unwrap_or(false) && !projector {
                     button {
                         class: "btn-icon",
                         aria_label: "{t(\"poll.stopPoll\")}",
@@ -940,9 +941,11 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                         class: "text-muted",
                         "{t(\"common.noContent\")}"
                     }
-                } else if is_auth && open && !voted {
+                } else if is_auth && open && !voted && !projector {
                     // The ballot: single-choice uses an accessible RadioGroup,
-                    // multi-choice uses Checkbox per option.
+                    // multi-choice uses Checkbox per option. On the projector the
+                    // ballot is never shown (casting happens on personal devices) —
+                    // the room sees the live tally via the read-only branch below.
                     if single {
                         {
                             let current = selected.read().iter().position(|&b| b).map(|i| i.to_string());

@@ -174,13 +174,20 @@ fn ContentSkeleton() -> Element {
     }
 }
 
-/// Routes a node to the appropriate app based on its MIME type
+/// Routes a node to the appropriate app based on its MIME type. `projector` is set
+/// only by the Screen/projector view, where a poll shows its live tally (not the
+/// ballot) and the room-facing CSS strips interactive chrome.
 #[component]
-pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
+pub fn MimeLoader(
+    node: NodeWithChildren,
+    path: Vec<String>,
+    #[props(default)] projector: bool,
+) -> Element {
     let mime_id = node.mime_id.as_deref().unwrap_or("");
 
     match mime_id {
         "wiki/folder" => rsx! { FolderApp { node: node.clone(), parent_path: path } },
+        "wiki/document" if projector => rsx! { ContentApp { node: node.clone() } },
         "wiki/document" => rsx! {
             super::widgets::SupportingPaneLayout {
                 primary: rsx! {
@@ -207,6 +214,7 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
         }
         // A candidate reads as content (its photo is `data.image`, description is
         // the content); React hides members, which the port already omits here.
+        "vote/candidate" if projector => rsx! { ContentApp { node: node.clone() } },
         "vote/candidate" => {
             rsx! {
                 super::widgets::SupportingPaneLayout {
@@ -222,9 +230,51 @@ pub fn MimeLoader(node: NodeWithChildren, path: Vec<String>) -> Element {
                 }
             }
         }
-        "vote/poll" => rsx! { PollApp { node: node.clone() } },
+        "vote/poll" => rsx! { PollApp { node: node.clone(), projector } },
         "map/map" => rsx! { super::map::MapApp { node: node.clone() } },
+        // Leaf text nodes (a plain note, a Q&A question, a single comment) carry
+        // their body in `data.text` / `data.content`; without an arm they fell to
+        // NodeApp, which dropped the text entirely — bad on the projector.
+        "text/plain" | "vote/question" | "vote/comment" => {
+            rsx! { TextNode { node: node.clone() } }
+        }
         _ => rsx! { NodeApp { node: node.clone(), title: t("mime.unknown") } },
+    }
+}
+
+/// A minimal renderer for leaf text nodes (plain notes, questions, comments):
+/// the name as a heading and the body (`data.content` rich text or `data.text`).
+#[component]
+fn TextNode(node: NodeWithChildren) -> Element {
+    let mime = node
+        .mime_id
+        .clone()
+        .unwrap_or_else(|| "text/plain".to_string());
+    let name = node.name.clone();
+    let data = node.data.as_ref().map(|d| d.0.clone());
+    let has_rich = super::content::has_rich_content(data.as_ref());
+    let text = data
+        .as_ref()
+        .and_then(|d| d.get("text"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    rsx! {
+        div { class: "card",
+            div { class: "card-header",
+                div { class: "avatar", {icon_el(&mime)} }
+                h3 { class: "title-medium", "{name}" }
+            }
+            div { class: "card-content",
+                if has_rich {
+                    super::content::SlateRenderer { data: data.clone() }
+                } else if !text.is_empty() {
+                    p { class: "body-large", style: "white-space: pre-wrap;", "{text}" }
+                } else {
+                    p { class: "body-medium text-muted", "{t(\"common.noContent\")}" }
+                }
+            }
+        }
     }
 }
 

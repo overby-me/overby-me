@@ -777,6 +777,54 @@ pub async fn set_active_relation(
     Ok(result.insert_relation.is_some())
 }
 
+/// Whether the context owner has opted to also project the active node's comments
+/// on the Screen. Stored as a `screenComments` relation whose non-null `nodeId`
+/// means "on" (mirrors how `active` is keyed on parentId+name).
+pub async fn screen_comments_on(
+    access_token: Option<&str>,
+    context_id: &str,
+) -> Result<bool, String> {
+    let where_clause = RelationsBoolExp {
+        name: Some(StringComparisonExp {
+            eq: Some("screenComments".to_string()),
+            ..Default::default()
+        }),
+        parent_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(context_id.to_string())),
+            is_null: None,
+        }),
+    };
+    let operation = RelationsQuery::build(RelationsWhereVariables { where_clause });
+    let result = execute(access_token, operation).await?;
+    Ok(result.relations.into_iter().any(|r| r.node_id.is_some()))
+}
+
+/// Owner toggle: show (`on`) or hide the active node's comments on the projector.
+/// Upserts the `screenComments` relation, setting `nodeId` to the context (on) or
+/// null (off) so ScreenApp's relation subscription picks up the change live.
+pub async fn set_screen_comments(
+    access_token: Option<&str>,
+    context_id: &str,
+    on: bool,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let object = RelationsInsertInput {
+        name: Some("screenComments".to_string()),
+        node_id: on.then(|| Uuid(context_id.to_string())),
+        parent_id: Some(Uuid(context_id.to_string())),
+    };
+    let on_conflict = RelationsOnConflict {
+        constraint: RelationsConstraint::RelationsParentIdNameKey,
+        update_columns: vec![RelationsUpdateColumn::NodeId],
+    };
+    let operation = InsertRelationMutation::build(InsertRelationVariables {
+        object,
+        on_conflict,
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.insert_relation.is_some())
+}
+
 /// The two independent visibility choices for a new poll's ballot.
 #[derive(Clone, Copy, Default)]
 pub struct BallotRules {
