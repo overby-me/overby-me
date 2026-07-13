@@ -866,36 +866,47 @@ html {
 	z-index: 60;
 	display: flex;
 	flex-direction: column;
-	background: var(--md-surface-container);
+	/* One rounded rectangle in the SEARCH BAR's own surface (surface-container-high),
+	   so the search/breadcrumbs and apps rows read as parts of a single control
+	   rather than a pill floating in a box. */
+	background: var(--md-surface-container-high);
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-2);
 	overflow: hidden;
 }
-/* Inside the dock, the two bars become static, transparent tiers sharing the one
-   surface (override their standalone fixed positioning + chrome). */
+/* Inside the dock, the two bars become static, EQUAL-HEIGHT, transparent tiers
+   sharing the one surface (override their standalone positioning + chrome). */
 .app-shell[data-size-class="compact"] .compact-dock .top-app-bar {
 	position: static;
 	left: auto;
 	right: auto;
 	bottom: auto;
-	height: 52px;
+	height: 56px;
 	background: transparent;
-	padding: 0 6px;
+	padding: 0 8px;
+}
+/* The search pill drops its own surface — the dock IS the surface now, so the
+   search/breadcrumbs blend into the single rectangle instead of being a pill. */
+.app-shell[data-size-class="compact"] .compact-dock .expressive-search {
+	background: transparent;
+	height: auto;
+	align-self: stretch;
 }
 .app-shell[data-size-class="compact"] .compact-dock .nav-bar {
 	position: static;
-	height: 58px;
+	height: 56px;
 	background: transparent;
-	border-top: 1px solid var(--md-outline-variant);
+	/* A hairline splits the two functions without breaking the single surface. */
+	border-top: 1px solid color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
 }
 .app-shell[data-size-class="compact"] .compact-dock .nav-bar-item {
 	padding: 4px 0;
 }
 .app-shell[data-size-class="compact"] .content-pane {
 	/* No top padding on compact (no top bar); clear the single bottom dock
-	   (its ~110px of tiers + its 8px offset + a margin). */
+	   (its two 56px rows + its 8px offset + a margin). */
 	padding-top: 0;
-	padding-bottom: calc(118px + var(--md-sys-margin));
+	padding-bottom: calc(120px + var(--md-sys-margin));
 	/* Drop the page's side padding so cards can go edge to edge. */
 	padding-left: 0;
 	padding-right: 0;
@@ -1407,10 +1418,10 @@ html {
 		bottom: 24px;
 	}
 }
-/* Compact: lift the FAB clear of the unified bottom dock (its top edge sits at
-   ~8px offset + ~110px of tiers) with a small gap above. */
+/* Compact: lift the FAB clear of the unified bottom dock (8px offset + two 56px
+   rows) with a small gap above. */
 .app-shell[data-size-class="compact"] .fab {
-	bottom: calc(118px + 16px);
+	bottom: calc(120px + 16px);
 }
 
 /* M3 basic Dialog (the reusable widgets::Dialog): scrim + surface-container-high
