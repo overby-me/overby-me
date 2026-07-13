@@ -959,16 +959,16 @@ html {
 /* Drawer's Home / current-context entry, styled like the top panel: a green
    bar (.bar) with an inverted avatar (light on green) and an on-primary name. */
 .drawer-context-bar {
-	/* Align the avatar (padding-left) and name (gap) with the tree rows below:
-	   their avatars sit at the same x and their names share one text column. */
+	/* Mirror the docked "Actions" header on the right: a 36px badge + title with
+	   16px padding, sat on the same horizontal line (badge top ≈ y16) and divided
+	   from the tree list by a separator, so both side-panel headers match. The
+	   avatar's left edge still lines up with the tree rows' avatars below. */
 	gap: 12px;
-	min-height: 48px;
-	padding: 8px 12px 12px 20px;
+	padding: 16px 12px 16px 20px;
 	text-decoration: none;
 	margin-bottom: 8px;
-	/* The current-context header matches the sidebar (no tonal fill) — a bolder
-	   row on the same surface, divided from the tree list by a separator. Overrides
-	   the .bar class's primary fill, shadow and pill rounding it also carries. */
+	/* No tonal fill — a header on the same surface. Overrides the .bar class's
+	   primary fill, shadow and pill rounding it also carries. */
 	border-radius: 0;
 	background: transparent;
 	box-shadow: none;
@@ -981,8 +981,15 @@ html {
 	background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
 }
 
-.drawer-context-bar .avatar {
+/* Size the header badge to the Actions badge (36px), beating .avatar.small. */
+.drawer-context-bar .avatar.small {
+	width: 36px;
+	height: 36px;
+	font-size: 15px;
 	flex-shrink: 0;
+}
+.drawer-context-bar .avatar.small .material-icons {
+	font-size: 20px;
 }
 
 .drawer-context-name {
