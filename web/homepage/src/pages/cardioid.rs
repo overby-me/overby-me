@@ -10,7 +10,7 @@
 //! Successive points are stroked onto a persistent trace buffer (an off-screen
 //! canvas, the analogue of pygame's `dsurface`); each frame the visible canvas
 //! is cleared, the trace composited on top when "Draw" is on, and the two
-//! construction circles / dot / scale bar / speed drawn as a live overlay.
+//! construction circles and dot drawn as a live overlay.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,8 +24,8 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 const TAU: f64 = std::f64::consts::TAU;
 /// Radius (px) of the little construction dots, fixed as in pysim (`r3`).
 const DOT_R: f64 = 5.0;
-/// pysim's `pixelpermeter`, used only for the speed readout / scale bar.
-const PIXELS_PER_METER: f64 = 6200.0;
+/// Fixed stroke width for the trace and construction lines.
+const LINE_WIDTH: f64 = 1.0;
 
 #[derive(Clone, PartialEq)]
 struct Settings {
@@ -35,18 +35,18 @@ struct Settings {
     w2: f64,
     time: f64,
     calrate: f64,
-    linewidth: f64,
     draw: bool,
     clean: bool,
     drawdot: bool,
     circles: bool,
-    showspeed: bool,
     /// Random per-segment colors (pysim's "Colors" toggle). When off, the trace
     /// uses the fixed `color`.
     rainbow: bool,
     antialiasing: bool,
-    sandbox: bool,
-    /// Base trace color (`#rrggbb`), used when `colors` is off.
+    /// Advance simulated time ~1000x faster (pysim's "Sandbox" toggle): use the
+    /// raw time step instead of the scaled-down one.
+    turbo: bool,
+    /// Base trace color (`#rrggbb`), used when `rainbow` is off.
     color: String,
 }
 
@@ -62,15 +62,13 @@ impl Default for Settings {
             w2: 2.0,
             time: 30.0,
             calrate: 2.0,
-            linewidth: 2.0,
             draw: true,
             clean: false,
             drawdot: true,
             circles: true,
-            showspeed: false,
             rainbow: false,
             antialiasing: true,
-            sandbox: false,
+            turbo: false,
             color: "#ff0000".to_string(),
         }
     }
@@ -79,7 +77,7 @@ impl Default for Settings {
 impl Settings {
     /// The geometry-defining parameters. When these change the traced curve is
     /// different, so the accumulated trace is cleared (pysim clears `dsurface`
-    /// on any slider drag; we keep the drawing when only speed/width change).
+    /// on any slider drag; we keep the drawing when other parameters change).
     fn geometry(&self) -> (f64, f64, f64, f64) {
         (self.r1, self.w1, self.r2, self.w2)
     }
@@ -88,35 +86,31 @@ impl Settings {
     fn to_query(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "r1={}&w1={}&r2={}&w2={}&time={}&cal={}&lw={}&draw={}&clean={}&dot={}&circ={}&speed={}&rand={}&aa={}&sb={}&color={}",
+            "r1={}&w1={}&r2={}&w2={}&time={}&cal={}&draw={}&clean={}&dot={}&circ={}&rand={}&aa={}&turbo={}&color={}",
             self.r1,
             self.w1,
             self.r2,
             self.w2,
             self.time,
             self.calrate,
-            self.linewidth,
             b(self.draw),
             b(self.clean),
             b(self.drawdot),
             b(self.circles),
-            b(self.showspeed),
             b(self.rainbow),
             b(self.antialiasing),
-            b(self.sandbox),
+            b(self.turbo),
             self.color.trim_start_matches('#'),
         )
     }
 
-    /// Read the current page URL's query string, falling back to defaults for
-    /// any parameter that is missing or malformed. This is what makes a link
-    /// like `/cardioid?r1=140&w1=1&...` reproduce a shared configuration.
-    fn from_url() -> Self {
+    /// Parse settings from a URL query string, falling back to defaults for any
+    /// parameter that is missing or malformed. The string comes from the route's
+    /// `?:query` capture, so a shared link like `/cardioid?r1=140&w1=1&...`
+    /// reproduces the configuration (the query survives the router).
+    fn from_query(query: &str) -> Self {
         let mut s = Self::default();
-        let Some(params) = web_sys::window()
-            .and_then(|w| w.location().search().ok())
-            .and_then(|q| web_sys::UrlSearchParams::new_with_str(&q).ok())
-        else {
+        let Ok(params) = web_sys::UrlSearchParams::new_with_str(query) else {
             return s;
         };
         let num = |k: &str| params.get(k).and_then(|v| v.parse::<f64>().ok());
@@ -139,9 +133,6 @@ impl Settings {
         if let Some(v) = num("cal") {
             s.calrate = v;
         }
-        if let Some(v) = num("lw") {
-            s.linewidth = v;
-        }
         if let Some(v) = flag("draw") {
             s.draw = v;
         }
@@ -154,17 +145,14 @@ impl Settings {
         if let Some(v) = flag("circ") {
             s.circles = v;
         }
-        if let Some(v) = flag("speed") {
-            s.showspeed = v;
-        }
         if let Some(v) = flag("rand") {
             s.rainbow = v;
         }
         if let Some(v) = flag("aa") {
             s.antialiasing = v;
         }
-        if let Some(v) = flag("sb") {
-            s.sandbox = v;
+        if let Some(v) = flag("turbo") {
+            s.turbo = v;
         }
         if let Some(c) = params.get("color") {
             let c = c.trim_start_matches('#');
@@ -182,8 +170,6 @@ struct Sim {
     t: f64,
     /// Previous traced point, or None right after a reset.
     last: Option<(f64, f64)>,
-    /// Most recent speed magnitude (px/param-unit) for the readout.
-    speed: f64,
     /// Logical (CSS-pixel) canvas size; drawing happens in this space.
     w: f64,
     h: f64,
@@ -209,9 +195,9 @@ impl Sim {
         let s = self.settings.clone();
         let (cx, cy) = self.center();
         let steps = (s.calrate.max(1.0)) as u32;
-        // Sandbox uses the raw time step; otherwise it is scaled down so the
+        // Turbo uses the raw time step; otherwise it is scaled down so the
         // slider's 0..100 range maps to a gentle speed.
-        let dt = if s.sandbox {
+        let dt = if s.turbo {
             s.time / s.calrate
         } else {
             s.time / 1000.0 / s.calrate
@@ -222,7 +208,7 @@ impl Sim {
         let batched = !s.rainbow;
         if batched {
             self.trace.set_stroke_style_str(&s.color);
-            self.trace.set_line_width(s.linewidth);
+            self.trace.set_line_width(LINE_WIDTH);
             self.trace.begin_path();
             if let Some((lx, ly)) = self.last {
                 self.trace.move_to(lx, ly);
@@ -247,19 +233,13 @@ impl Sim {
                 }
             } else if let Some((lx, ly)) = self.last {
                 self.trace.set_stroke_style_str(&random_color());
-                self.trace.set_line_width(s.linewidth);
+                self.trace.set_line_width(LINE_WIDTH);
                 self.trace.begin_path();
                 self.trace.move_to(lx, ly);
                 self.trace.line_to(px, py);
                 self.trace.stroke();
             }
             self.last = Some((px, py));
-
-            if s.showspeed {
-                let vx = -s.r1 * s.w1 * (self.t * s.w1).sin() - s.r2 * s.w2 * (self.t * s.w2).sin();
-                let vy = s.r1 * s.w1 * (self.t * s.w1).cos() + s.r2 * s.w2 * (self.t * s.w2).cos();
-                self.speed = vx.hypot(vy);
-            }
         }
         if batched {
             self.trace.stroke();
@@ -292,7 +272,7 @@ impl Sim {
             stroke_circle(ctx, c2x, c2y, s.r2);
             fill_circle(ctx, c2x, c2y, DOT_R);
             ctx.set_stroke_style_str("red");
-            ctx.set_line_width(s.linewidth);
+            ctx.set_line_width(LINE_WIDTH);
             draw_line(ctx, cx, cy, c2x, c2y);
         }
 
@@ -301,19 +281,6 @@ impl Sim {
         {
             ctx.set_fill_style_str("yellow");
             fill_circle(ctx, px, py, DOT_R);
-        }
-
-        if s.showspeed {
-            ctx.set_fill_style_str("#ffffff");
-            ctx.set_font("20px 'Space Grotesk', system-ui, sans-serif");
-            ctx.set_text_baseline("top");
-            ctx.set_text_align("right");
-            let mm_s = self.speed / PIXELS_PER_METER * 1000.0;
-            let _ = ctx.fill_text(
-                &format!("Speed: {mm_s:.0} mm/s"),
-                self.w - 20.0,
-                self.h - 62.0,
-            );
         }
 
         // pysim wipes `dsurface` at the end of the frame while "Clean" is on, so
@@ -389,9 +356,10 @@ fn start_animation_loop(sim: Rc<RefCell<Sim>>) {
 }
 
 #[component]
-pub fn Cardioid() -> Element {
-    // Seed from the URL so a shared link reproduces the exact configuration.
-    let mut settings = use_signal(Settings::from_url);
+pub fn Cardioid(query: String) -> Element {
+    // Seed from the route's `?:query` capture so a shared link reproduces the
+    // configuration (Dioxus drops query params it isn't told to keep).
+    let mut settings = use_signal(move || Settings::from_query(&query));
     let state: Signal<Option<Rc<RefCell<Sim>>>> = use_signal(|| None);
 
     // Push setting changes into the running simulation, clearing the trace when
@@ -461,7 +429,6 @@ pub fn Cardioid() -> Element {
                     settings: settings.peek().clone(),
                     t: 0.0,
                     last: None,
-                    speed: 0.0,
                     w: css_w,
                     h: css_h,
                     canvas,
@@ -517,8 +484,6 @@ pub fn Cardioid() -> Element {
                     value: s.time, decimals: 1, oninput: move |v| settings.write().time = v }
                 Slider { label: "Calc / frame", min: "1", max: "1000", step: "1",
                     value: s.calrate, decimals: 0, oninput: move |v| settings.write().calrate = v }
-                Slider { label: "Line width", min: "1", max: "10", step: "1",
-                    value: s.linewidth, decimals: 0, oninput: move |v| settings.write().linewidth = v }
 
                 // Trace color (used when the random "Colors" toggle is off).
                 div {
@@ -539,10 +504,9 @@ pub fn Cardioid() -> Element {
                         ("Clean", s.clean),
                         ("Dot", s.drawdot),
                         ("Circles", s.circles),
-                        ("Speed", s.showspeed),
                         ("Rainbow", s.rainbow),
                         ("Antialias", s.antialiasing),
-                        ("Sandbox", s.sandbox),
+                        ("Turbo", s.turbo),
                     ] {
                         button {
                             style: "flex:0 0 auto;padding:5px 10px;border:1px solid;border-radius:6px;\
@@ -554,10 +518,9 @@ pub fn Cardioid() -> Element {
                                     "Clean" => w.clean = !w.clean,
                                     "Dot" => w.drawdot = !w.drawdot,
                                     "Circles" => w.circles = !w.circles,
-                                    "Speed" => w.showspeed = !w.showspeed,
                                     "Rainbow" => w.rainbow = !w.rainbow,
                                     "Antialias" => w.antialiasing = !w.antialiasing,
-                                    "Sandbox" => w.sandbox = !w.sandbox,
+                                    "Turbo" => w.turbo = !w.turbo,
                                     _ => {}
                                 }
                             },

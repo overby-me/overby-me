@@ -22,8 +22,8 @@ enum Route {
     X { url: String },
     #[route("/yt?:url")]
     Yt { url: String },
-    #[route("/cardioid")]
-    Cardioid {},
+    #[route("/cardioid?:query")]
+    Cardioid { query: String },
     // Any other single segment is treated as an atproto request: `/@handle`
     // renders that account's platform graph. Kept last so the static routes
     // above take precedence.
