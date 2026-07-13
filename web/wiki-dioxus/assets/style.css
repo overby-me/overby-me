@@ -3640,11 +3640,16 @@ h6,
 	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
+/* EXPERIMENT (agenda): times pop in tertiary bold; the timeline dot glows on hover. */
 .program-time {
 	font-size: 0.8125rem;
 	text-align: right;
-	color: var(--md-on-surface-variant);
+	color: var(--md-tertiary);
+	font-weight: 700;
 	font-variant-numeric: tabular-nums;
+}
+.program-item:hover .program-dot {
+	box-shadow: 0 0 0 4px color-mix(in srgb, var(--md-primary) 18%, transparent);
 }
 
 /* The rail: a vertical line drawn behind each marker cell so consecutive dots
