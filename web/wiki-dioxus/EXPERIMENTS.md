@@ -116,6 +116,16 @@ Smaller, mostly CSS-only refinements and genuine fixes:
 - **Image loading placeholder** — a tonal box shows while a content image loads.
 - **Destructive-action hover** — delete actions get an error-tinted hover.
 - **Branded text selection** — a primary-tinted `::selection`.
+- **Unified dock refinement** — the compact search+nav dock is now a *single*
+  rounded rectangle in the search bar's own surface, with the search/breadcrumbs
+  and apps rows at equal height (the search pill blends into the dock).
+- **Characterful empty comments** — the floating-orb empty state for empty threads.
+- **Poll winner highlight** — the leading result gets a tonal tint + trophy.
+- **Color-coded member status** — active/pending/owner chips tinted by category.
+- **Expressive agenda timeline** — tertiary-bold times + a dot glow on hover.
+- **Elevated modal drawer, spinning FAB icon, inline-code pills, list markers,
+  M3 switch/checkbox/radio, context pill, table headers** — assorted primitive
+  and surface refinements.
 
 ## Notes / follow-ups
 
