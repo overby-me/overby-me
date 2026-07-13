@@ -340,11 +340,13 @@ pub fn PaginatedTable(
 pub static TOOLS_DOCKED: GlobalSignal<bool> = Signal::global(|| false);
 
 /// An M3 tools/actions sheet holding the current view's actions and admin tools.
+/// Two modes only:
 ///
-/// - Compact: a modal bottom sheet opened from a trigger icon.
-/// - Medium/large: a modal right-anchored side sheet opened from a trigger icon.
 /// - Extra-large: a *permanent* docked side sheet — no trigger, always visible —
 ///   since there is room to stand it beside the content (M3 standard side sheet).
+/// - Anything smaller: a modal sheet (bottom sheet on compact, right-anchored side
+///   sheet on medium/large) opened from a bottom-right FAB — never an in-header
+///   button on the content card.
 ///
 /// Pass the action rows (`.sheet-action`) as `children`.
 #[component]
@@ -355,9 +357,6 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
 
     // Extra-large screens dock the tools as a permanent standing side sheet.
     let docked = use_memo(move || crate::window_size::WINDOW_SIZE().is_extra_large());
-    // Compact screens open the sheet from a FAB (the screen's primary affordance)
-    // rather than a header icon button.
-    let compact = use_memo(move || crate::window_size::WINDOW_SIZE().is_compact());
     // Reserve/release the shell's right gutter as this sheet docks or unmounts.
     use_effect(move || {
         *TOOLS_DOCKED.write() = docked();
@@ -382,10 +381,11 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
     }
 
     rsx! {
-        // The trigger: a bottom-right FAB on compact (the screen's focal action),
-        // an in-header icon button on medium/large.
+        // The trigger is always a bottom-right FAB (fixed) whenever the sheet is not
+        // docked — the same focal affordance at every non-docked size, never an
+        // in-header button on the content card.
         button {
-            class: if compact() { "fab" } else { "btn-icon state-layer" },
+            class: "fab",
             aria_label: "{title}",
             title: "{title}",
             onclick: move |_| {

@@ -41,137 +41,160 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             let token = session.read().access_token.clone().unwrap_or_default();
             format!("{}/files/{file_id}?token={token}", storage_url())
         });
+    let has_image = image_url.is_some();
 
     rsx! {
-        div { class: "card",
-            div { class: "card-header",
-                div { class: "avatar", {icon_el("wiki/document")} }
-                div {
-                    h3 { class: "title-medium", "{name}" }
-                    if let Some(iso) = created.as_ref() {
-                        p {
-                            class: "body-small",
-                            class: "text-muted",
-                            title: "{super::loader::full_datetime(iso)}",
-                            span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
-                            " {super::loader::relative_time(iso)}"
-                        }
+        div { class: if has_image { "card has-hero" } else { "card" },
+            // Identity zone: when the document carries an image it becomes a full-bleed
+            // cover hero with the title/date overlaid on a legibility scrim, so the
+            // image frames the document instead of sitting as a plain block above it.
+            if let Some(url) = image_url {
+                div { class: "content-hero",
+                    img {
+                        class: "content-hero-img",
+                        src: "{url}",
+                        alt: t("content.imageAlt"),
+                        loading: "lazy",
                     }
-                }
-                div { class: "flex-grow" }
-                // Document actions moved into the M3 tools sheet (bottom sheet on
-                // mobile, right side sheet on desktop) instead of a header toolbar.
-                super::widgets::ToolSheet {
-                    title: t("common.tools"),
-                    // Export this document (and any nested content) to an .odt file.
-                    button {
-                        class: "sheet-action",
-                        onclick: {
-                            let export_name = name.clone();
-                            let export_id = node_id.clone();
-                            move |_| {
-                                let token = session.read().access_token.clone();
-                                let id = export_id.clone();
-                                let name = export_name.clone();
-                                spawn(async move {
-                                    crate::export::export_tree(token, id, name).await;
-                                });
-                            }
-                        },
-                        span { class: "material-icons", "download" }
-                        "{t(\"folder.export\")}"
-                    }
-                    // EXPERIMENT (functional): copy a shareable link to this page.
-                    button {
-                        class: "sheet-action",
-                        onclick: move |_| {
-                            if let Some(win) = web_sys::window() {
-                                if let Ok(href) = win.location().href() {
-                                    let _ = win.navigator().clipboard().write_text(&href);
-                                    crate::snackbar::show_snackbar(&t("common.linkCopied"));
+                    div { class: "content-hero-veil",
+                        div { class: "avatar content-hero-avatar", {icon_el("wiki/document")} }
+                        div { class: "content-hero-meta",
+                            h3 { class: "content-hero-title", "{name}" }
+                            if let Some(iso) = created.as_ref() {
+                                p {
+                                    class: "content-hero-date",
+                                    title: "{super::loader::full_datetime(iso)}",
+                                    span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
+                                    " {super::loader::relative_time(iso)}"
                                 }
                             }
-                        },
-                        span { class: "material-icons", "link" }
-                        "{t(\"common.copyLink\")}"
-                    }
-                    if can_edit && !segments.is_empty() {
-                        Link {
-                            to: Route::PathPage {
-                                segments: segments.clone(),
-                                app: Some("editor".to_string()),
-                            },
-                            class: "sheet-action",
-                            {icon_el("app/editor")}
-                            "{t(\"mime.editor\")}"
-                        }
-                    }
-                    if can_manage && !segments.is_empty() {
-                        button {
-                            class: "sheet-action danger",
-                            onclick: move |_| confirm_open.set(true),
-                            span { class: "material-icons", "delete" }
-                            "{t(\"common.delete\")}"
                         }
                     }
                 }
-                if can_manage && !segments.is_empty() {
-                    // Delete via an accessible modal confirm dialog (the custom
-                    // Dialog; the primitives AlertDialog's controlled open never
-                    // opened).
-                    super::widgets::Dialog {
-                        open: confirm_open(),
-                        on_dismiss: move |_| confirm_open.set(false),
-                        headline: t("content.confirmDelete"),
-                        icon: "delete".to_string(),
-                        actions: rsx! {
-                            button {
-                                class: "btn btn-outlined",
-                                onclick: move |_| confirm_open.set(false),
-                                "{t(\"common.cancel\")}"
+            } else {
+                div { class: "card-header",
+                    div { class: "avatar", {icon_el("wiki/document")} }
+                    div {
+                        h3 { class: "title-medium", "{name}" }
+                        if let Some(iso) = created.as_ref() {
+                            p {
+                                class: "body-small",
+                                class: "text-muted",
+                                title: "{super::loader::full_datetime(iso)}",
+                                span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
+                                " {super::loader::relative_time(iso)}"
                             }
-                            button {
-                                class: "btn btn-primary",
-                                onclick: {
-                                    let node_id = node_id.clone();
-                                    let parent = segments[..segments.len() - 1].to_vec();
-                                    move |_| {
-                                        let token = session.read().access_token.clone();
-                                        let node_id = node_id.clone();
-                                        let parent = parent.clone();
-                                        confirm_open.set(false);
-                                        spawn(async move {
-                                            // Remove the node's member rows first
-                                            // so deleting it leaves no orphans
-                                            // (React DeleteButton order).
-                                            let _ = graphql::delete_node_members(
-                                                token.as_deref(),
-                                                &node_id,
-                                            )
-                                            .await;
-                                            if graphql::delete_node(token.as_deref(), &node_id)
-                                                .await
-                                                .unwrap_or(false)
-                                            {
-                                                crate::session::bump_data_version();
-                                                nav.push(Route::PathPage {
-                                                    segments: parent,
-                                                    app: None,
-                                                });
-                                            }
-                                        });
-                                    }
-                                },
-                                "{t(\"common.delete\")}"
-                            }
-                        },
-                        p { class: "body-medium", "{name}" }
+                        }
                     }
                 }
             }
-            if let Some(url) = image_url {
-                div { class: "card-content",
-                    super::widgets::ZoomableImage { src: url.clone(), alt: t("content.imageAlt") }
+            // Document actions live in the M3 tools sheet — a fixed FAB (or the docked
+            // side sheet on wide screens), never an in-header button — with a
+            // delete-confirm dialog.
+            super::widgets::ToolSheet {
+                title: t("common.tools"),
+                // Export this document (and any nested content) to an .odt file.
+                button {
+                    class: "sheet-action",
+                    onclick: {
+                        let export_name = name.clone();
+                        let export_id = node_id.clone();
+                        move |_| {
+                            let token = session.read().access_token.clone();
+                            let id = export_id.clone();
+                            let name = export_name.clone();
+                            spawn(async move {
+                                crate::export::export_tree(token, id, name).await;
+                            });
+                        }
+                    },
+                    span { class: "material-icons", "download" }
+                    "{t(\"folder.export\")}"
+                }
+                // EXPERIMENT (functional): copy a shareable link to this page.
+                button {
+                    class: "sheet-action",
+                    onclick: move |_| {
+                        if let Some(win) = web_sys::window() {
+                            if let Ok(href) = win.location().href() {
+                                let _ = win.navigator().clipboard().write_text(&href);
+                                crate::snackbar::show_snackbar(&t("common.linkCopied"));
+                            }
+                        }
+                    },
+                    span { class: "material-icons", "link" }
+                    "{t(\"common.copyLink\")}"
+                }
+                if can_edit && !segments.is_empty() {
+                    Link {
+                        to: Route::PathPage {
+                            segments: segments.clone(),
+                            app: Some("editor".to_string()),
+                        },
+                        class: "sheet-action",
+                        {icon_el("app/editor")}
+                        "{t(\"mime.editor\")}"
+                    }
+                }
+                if can_manage && !segments.is_empty() {
+                    button {
+                        class: "sheet-action danger",
+                        onclick: move |_| confirm_open.set(true),
+                        span { class: "material-icons", "delete" }
+                        "{t(\"common.delete\")}"
+                    }
+                }
+            }
+            if can_manage && !segments.is_empty() {
+                // Delete via an accessible modal confirm dialog (the custom Dialog;
+                // the primitives AlertDialog's controlled open never opened).
+                super::widgets::Dialog {
+                    open: confirm_open(),
+                    on_dismiss: move |_| confirm_open.set(false),
+                    headline: t("content.confirmDelete"),
+                    icon: "delete".to_string(),
+                    actions: rsx! {
+                        button {
+                            class: "btn btn-outlined",
+                            onclick: move |_| confirm_open.set(false),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            onclick: {
+                                let node_id = node_id.clone();
+                                let parent = segments[..segments.len() - 1].to_vec();
+                                move |_| {
+                                    let token = session.read().access_token.clone();
+                                    let node_id = node_id.clone();
+                                    let parent = parent.clone();
+                                    confirm_open.set(false);
+                                    spawn(async move {
+                                        // Remove the node's member rows first so
+                                        // deleting it leaves no orphans (React
+                                        // DeleteButton order).
+                                        let _ = graphql::delete_node_members(
+                                            token.as_deref(),
+                                            &node_id,
+                                        )
+                                        .await;
+                                        if graphql::delete_node(token.as_deref(), &node_id)
+                                            .await
+                                            .unwrap_or(false)
+                                        {
+                                            crate::session::bump_data_version();
+                                            nav.push(Route::PathPage {
+                                                segments: parent,
+                                                app: None,
+                                            });
+                                        }
+                                    });
+                                }
+                            },
+                            "{t(\"common.delete\")}"
+                        }
+                    },
+                    p { class: "body-medium", "{name}" }
                 }
             }
             // Author chips (the document's members), mirroring MemberChips.
