@@ -4498,7 +4498,9 @@ a.list-item:hover {
 	width: 100%;
 	position: relative;
 	padding: 6px 8px;
-	background: var(--md-surface);
+	/* Inherit the side panel's surface (surface-container) rather than painting an
+	   opaque surface fill, so the account footer reads as part of the sidebar. */
+	background: transparent;
 	border-top: 1px solid var(--md-outline-variant);
 }
 /* Its popover opens UPWARD, filling the drawer width. */
