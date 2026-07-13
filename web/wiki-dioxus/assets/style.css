@@ -4299,31 +4299,10 @@ h6,
    which is inline-flex for buttons). */
 .home-mobile-list {
 	display: block;
-	padding-bottom: 8px;
 }
-/* As a card, the group/event section titles become prominent sub-headers (not the
-   faint muted labels the drawer uses) so each section reads with identity. */
-.home-mobile-list h4 {
-	font-size: var(--md-sys-typescale-title-medium-size);
-	line-height: var(--md-sys-typescale-title-medium-line);
-	font-weight: 700;
-	color: var(--md-on-surface);
-	padding: 16px 16px 6px;
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-/* A leading tonal icon gives each section a clear identity. */
-.home-mobile-list h4::before {
-	font-family: "Material Icons";
-	font-size: 20px;
-	color: var(--md-primary);
-}
-.home-mobile-list h4:first-of-type::before {
-	content: "groups";
-}
-.home-mobile-list h4:nth-of-type(2)::before {
-	content: "event";
+/* Trim the year sub-headers' top padding inside the home section cards. */
+.home-section-body > div:first-child .label-medium {
+	padding-top: 8px;
 }
 
 @media (min-width: 1200px) {

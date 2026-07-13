@@ -126,11 +126,10 @@ pub fn HomeApp() -> Element {
                 }
                 // The user's groups/events — shown here only on mobile, where the
                 // drawer (which carries this list on desktop) is hidden. EXPERIMENT:
-                // wrap it in a card so it reads as a home section rather than a bare
-                // list floating on the page background.
+                // as_cards renders Groups and Events as two separate home cards.
                 if is_auth {
-                    div { class: "card home-mobile-list mt-1",
-                        crate::components::layout::HomeList {}
+                    div { class: "home-mobile-list mt-1",
+                        crate::components::layout::HomeList { as_cards: true }
                     }
                 }
                 // Newest content across the user's contexts (#34). Pending group /

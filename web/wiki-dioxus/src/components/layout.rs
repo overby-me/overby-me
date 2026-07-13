@@ -1583,7 +1583,7 @@ type ContextLists = (
 /// invitations appear inline at the top of the matching list (group or event),
 /// each with accept / reject actions.
 #[component]
-pub fn HomeList() -> Element {
+pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     let session = use_session();
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let email = session
@@ -1642,73 +1642,101 @@ pub fn HomeList() -> Element {
     let invited_groups = invited_by_mime("wiki/group");
     let invited_events = invited_by_mime("wiki/event");
 
-    rsx! {
-        div { style: "margin-top: 16px;",
-            // Groups
-            h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px;",
-                "{t(\"layout.groups\")}"
-            }
-            {match &state {
-                None => rsx! {
-                    p { class: "body-medium text-muted", style: "{hint_style}", "…" }
-                },
-                Some(Err(e)) => rsx! {
-                    p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
-                },
-                Some(Ok((groups, _, _))) if groups.is_empty() && invited_groups.is_empty() => rsx! {
-                    p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noGroups\")}" }
-                },
-                Some(Ok((groups, _, _))) => rsx! {
+    // The two section bodies (shared between the drawer's bare list and the home's
+    // two-card layout).
+    let groups_body = rsx! {
+        {match &state {
+            None => rsx! {
+                p { class: "body-medium text-muted", style: "{hint_style}", "…" }
+            },
+            Some(Err(e)) => rsx! {
+                p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
+            },
+            Some(Ok((groups, _, _))) if groups.is_empty() && invited_groups.is_empty() => rsx! {
+                p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noGroups\")}" }
+            },
+            Some(Ok((groups, _, _))) => rsx! {
+                div { class: "list",
+                    // Invitations first — they need action.
+                    for inv in invited_groups.iter() {
+                        InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
+                    }
+                    for node in groups.iter() {
+                        ContextItem { key: "{node.id.0}", node: node.clone() }
+                    }
+                }
+            },
+        }}
+    };
+    let events_body = rsx! {
+        {match &state {
+            None => rsx! {
+                p { class: "body-medium text-muted", style: "{hint_style}", "…" }
+            },
+            Some(Err(e)) => rsx! {
+                p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
+            },
+            Some(Ok((_, events, _))) if events.is_empty() && invited_events.is_empty() => rsx! {
+                p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noEvents\")}" }
+            },
+            Some(Ok((_, events, _))) => rsx! {
+                // Invited events first (no year bucket — they need action).
+                if !invited_events.is_empty() {
                     div { class: "list",
-                        // Invitations first — they need action.
-                        for inv in invited_groups.iter() {
+                        for inv in invited_events.iter() {
                             InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
                         }
-                        for node in groups.iter() {
-                            ContextItem { key: "{node.id.0}", node: node.clone() }
-                        }
                     }
-                },
-            }}
-
-            // Events, grouped by year (newest first)
-            h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px; margin-top: 8px;",
-                "{t(\"layout.events\")}"
-            }
-            {match &state {
-                None => rsx! {
-                    p { class: "body-medium text-muted", style: "{hint_style}", "…" }
-                },
-                Some(Err(e)) => rsx! {
-                    p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
-                },
-                Some(Ok((_, events, _))) if events.is_empty() && invited_events.is_empty() => rsx! {
-                    p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noEvents\")}" }
-                },
-                Some(Ok((_, events, _))) => rsx! {
-                    // Invited events first (no year bucket — they need action).
-                    if !invited_events.is_empty() {
+                }
+                for (year , items) in group_by_year(events) {
+                    div { key: "{year}",
+                        p { class: "label-medium",
+                            class: "text-muted", style: "padding: 4px 16px; font-weight: 600;",
+                            "{year}"
+                        }
                         div { class: "list",
-                            for inv in invited_events.iter() {
-                                InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
+                            for node in items.iter() {
+                                ContextItem { key: "{node.id.0}", node: node.clone() }
                             }
                         }
                     }
-                    for (year , items) in group_by_year(events) {
-                        div { key: "{year}",
-                            p { class: "label-medium",
-                                class: "text-muted", style: "padding: 4px 16px; font-weight: 600;",
-                                "{year}"
-                            }
-                            div { class: "list",
-                                for node in items.iter() {
-                                    ContextItem { key: "{node.id.0}", node: node.clone() }
-                                }
-                            }
-                        }
-                    }
-                },
-            }}
+                }
+            },
+        }}
+    };
+
+    // EXPERIMENT: on the home app (as_cards), Groups and Events are SEPARATE cards,
+    // each with its own icon-avatar header — so they read as distinct home sections
+    // rather than one bare list. The drawer keeps the compact bare list.
+    if as_cards {
+        rsx! {
+            div { class: "card",
+                div { class: "card-header",
+                    div { class: "avatar small", span { class: "material-icons", "groups" } }
+                    h3 { class: "title-medium", "{t(\"layout.groups\")}" }
+                }
+                div { class: "home-section-body", {groups_body} }
+            }
+            div { class: "card mt-1",
+                div { class: "card-header",
+                    div { class: "avatar small", span { class: "material-icons", "event" } }
+                    h3 { class: "title-medium", "{t(\"layout.events\")}" }
+                }
+                div { class: "home-section-body", {events_body} }
+            }
+        }
+    } else {
+        rsx! {
+            div { style: "margin-top: 16px;",
+                h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px;",
+                    "{t(\"layout.groups\")}"
+                }
+                {groups_body}
+                h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px; margin-top: 8px;",
+                    "{t(\"layout.events\")}"
+                }
+                {events_body}
+            }
         }
     }
 }
