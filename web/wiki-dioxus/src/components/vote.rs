@@ -717,10 +717,38 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
         (counts, votes.len())
     });
     let (counts, total_votes) = tally.read().clone().unwrap_or((vec![], 0));
+    // Eligible voters = active members of the poll's context, for the turnout /
+    // quorum line the room reads off the projector.
+    let el_ctx = context_id.clone();
+    let el_token = session.read().access_token.clone();
+    let eligible = crate::use_data_resource!(|(el_ctx, el_token, rev)| async move {
+        let _ = rev;
+        match el_ctx {
+            Some(ctx) => graphql::count_active_members(el_token.as_deref(), &ctx).await,
+            None => 0,
+        }
+    });
+    let eligible_count = (*eligible.read()).unwrap_or(0);
+    let turnout_pct = (total_votes * 100).checked_div(eligible_count).unwrap_or(0);
     // EXPERIMENT: the leading option(s) in the results get a winner highlight.
     let max_count = counts.iter().copied().max().unwrap_or(0);
 
     let opts = options.clone();
+
+    // A single strict maximum is the winner (trophy + verdict); two or more options
+    // sharing the top count is a tie — no trophy, shown as "Uafgjort". A tie on a
+    // For/Imod motion means it is not carried, which the verdict line makes explicit.
+    let n_at_max = counts.iter().filter(|&&c| c == max_count).count();
+    let has_single_winner = show_results && max_count > 0 && n_at_max == 1;
+    let is_tie = show_results && max_count > 0 && n_at_max > 1;
+    let winning_option = if has_single_winner {
+        counts
+            .iter()
+            .position(|&c| c == max_count)
+            .and_then(|i| opts.get(i).cloned())
+    } else {
+        None
+    };
 
     let submit = {
         let token = session.read().access_token.clone();
@@ -911,16 +939,30 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                 } else {
                     // Read-only option list with per-option tallies (closed poll,
                     // already voted, or logged out).
+                    // Closed poll: announce the outcome prominently (the room follows
+                    // this on the projector), distinct from an open ballot.
+                    if !open && show_results {
+                        div { class: "ballot-verdict",
+                            span { class: "material-icons", if is_tie { "balance" } else { "emoji_events" } }
+                            if let Some(win) = winning_option.clone() {
+                                span { "{t(\"vote.resultWinner\")}: {win}" }
+                            } else if is_tie {
+                                span { "{t(\"vote.resultTie\")}" }
+                            } else {
+                                span { "{t(\"vote.resultNone\")}" }
+                            }
+                        }
+                    }
                     div { class: "list",
                         for (i , option) in opts.iter().enumerate() {
                             div {
-                                class: if show_results && max_count > 0 && counts.get(i).copied().unwrap_or(0) == max_count { "list-item ballot-winner" } else { "list-item" },
+                                class: if has_single_winner && counts.get(i).copied().unwrap_or(0) == max_count { "list-item ballot-winner" } else { "list-item" },
                                 key: "{i}",
                                 div { class: "avatar small", "{i + 1}" }
                                 div { class: "list-item-text",
                                     div { class: "list-item-primary",
                                         "{option}"
-                                        if show_results && max_count > 0 && counts.get(i).copied().unwrap_or(0) == max_count {
+                                        if has_single_winner && counts.get(i).copied().unwrap_or(0) == max_count {
                                             span { class: "winner-badge material-icons", "emoji_events" }
                                         }
                                     }
@@ -945,6 +987,9 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                         if voted { "{t(\"vote.hasVoted\")} · " }
                         if show_results {
                             "{t(\"vote.voteCount\")}: {total_votes}"
+                            if eligible_count > 0 {
+                                " · {t(\"vote.turnout\")}: {total_votes}/{eligible_count} ({turnout_pct}%)"
+                            }
                         } else {
                             "{t(\"poll.resultsHidden\")}"
                         }

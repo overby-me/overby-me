@@ -489,6 +489,42 @@ pub struct MembersBoolExp {
     pub parent: Option<Box<NodesBoolExp>>,
 }
 
+#[derive(cynic::QueryVariables, Debug)]
+pub struct MembersCountVariables {
+    pub where_clause: MembersBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "MembersCountVariables"
+)]
+pub struct MembersCountQuery {
+    #[arguments(where: $where_clause)]
+    pub members: Vec<MemberIdRef>,
+}
+
+/// Count the active members of a context (its eligible voters), for poll turnout.
+/// The schema exposes no `members_aggregate`, so this fetches ids and counts them.
+pub async fn count_active_members(access_token: Option<&str>, context_id: &str) -> usize {
+    use cynic::QueryBuilder;
+    let op = MembersCountQuery::build(MembersCountVariables {
+        where_clause: MembersBoolExp {
+            parent_id: Some(UuidComparisonExp {
+                eq: Some(Uuid(context_id.to_string())),
+                is_null: None,
+            }),
+            active: Some(BooleanComparisonExp { eq: Some(true) }),
+            ..Default::default()
+        },
+    });
+    execute(access_token, op)
+        .await
+        .map(|r| r.members.len())
+        .unwrap_or(0)
+}
+
 #[derive(cynic::InputObject, Debug, Default)]
 #[cynic(
     schema_path = "graphql/schema.graphql",

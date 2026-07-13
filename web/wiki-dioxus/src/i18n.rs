@@ -288,7 +288,13 @@ const EN_JSON: &str = r#"{
         "updateStatus": "Update status",
         "noVoteNow": "No vote right now",
         "castVote": "Vote",
-        "voteCount": "Number of votes"
+        "voteCount": "Number of votes",
+        "resultWinner": "Result",
+        "resultTie": "Tie — not carried",
+        "resultNone": "No result",
+        "turnout": "Turnout",
+        "eligible": "eligible",
+        "closed": "Voting closed"
     },
     "perm": {
         "type": "Type",
@@ -330,12 +336,12 @@ const EN_JSON: &str = r#"{
     },
     "poll": {
         "managePoll": "Manage Poll",
-        "hideResult": "Hide result",
+        "hideResult": "Hide running tally (not a secret ballot)",
         "newPoll": "New poll",
         "voteRange": "Number of votes",
         "start": "Start",
         "stopPoll": "Stop poll",
-        "resultsHidden": "Results hidden"
+        "resultsHidden": "Running tally hidden until the poll closes"
     },
     "redirect": {
         "forwarding": "Forwarding you to:",
@@ -639,7 +645,13 @@ const DA_JSON: &str = r#"{
         "updateStatus": "Opdater status",
         "noVoteNow": "Ingen afstemning nu",
         "castVote": "Stem",
-        "voteCount": "Antal stemmer"
+        "voteCount": "Antal stemmer",
+        "resultWinner": "Resultat",
+        "resultTie": "Uafgjort — ikke vedtaget",
+        "resultNone": "Intet resultat",
+        "turnout": "Stemmeprocent",
+        "eligible": "stemmeberettigede",
+        "closed": "Afstemning afsluttet"
     },
     "perm": {
         "type": "Type",
@@ -681,12 +693,12 @@ const DA_JSON: &str = r#"{
     },
     "poll": {
         "managePoll": "Administrer Afstemning",
-        "hideResult": "Skjul resultatet",
+        "hideResult": "Skjul løbende optælling (ikke hemmelig afstemning)",
         "newPoll": "Ny afstemning",
         "voteRange": "Antal stemmer",
         "start": "Start",
         "stopPoll": "Stop afstemning",
-        "resultsHidden": "Resultat skjult"
+        "resultsHidden": "Løbende optælling skjult indtil afstemningen lukkes"
     },
     "redirect": {
         "forwarding": "Sender dig videre til:",

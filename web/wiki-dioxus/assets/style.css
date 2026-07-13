@@ -2995,6 +2995,20 @@ select:focus {
 	background: color-mix(in srgb, var(--md-primary) 8%, transparent);
 	border-radius: var(--md-sys-shape-corner-medium);
 }
+
+/* Closed-poll outcome banner (winner / tie / no result) — the headline the room
+   reads off the projector when a vote finishes. */
+.ballot-verdict {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+	padding: 10px 14px;
+	border-radius: 14px;
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+	font-weight: 600;
+}
 .winner-badge {
 	color: var(--md-tertiary);
 	font-size: 18px;

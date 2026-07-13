@@ -87,6 +87,14 @@ fn AdminPollRow(poll: PollSummaryFields) -> Element {
         (counts, votes.len())
     });
     let (counts, total) = tally.read().clone().unwrap_or((vec![], 0));
+    // A hidden-tally poll (data.hidden) gets an eye-off badge so an organizer can
+    // tell at a glance which polls suppress the running count.
+    let hidden = poll
+        .data
+        .as_ref()
+        .and_then(|d| d.0.get("hidden"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let opts: Vec<String> = poll
         .data
         .as_ref()
@@ -102,7 +110,17 @@ fn AdminPollRow(poll: PollSummaryFields) -> Element {
     rsx! {
         tr {
             td {
-                div { class: "list-item-primary", "{poll.name}" }
+                span { class: "m3-cell-icon",
+                    if hidden {
+                        span {
+                            class: "material-icons",
+                            title: "{t(\"poll.hideResult\")}",
+                            style: "font-size: 18px; color: var(--md-on-surface-variant);",
+                            "visibility_off"
+                        }
+                    }
+                    div { class: "list-item-primary", "{poll.name}" }
+                }
             }
             td {
                 div { class: "admin-results",
