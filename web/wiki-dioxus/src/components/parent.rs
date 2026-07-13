@@ -56,13 +56,12 @@ pub fn ParentApp() -> Element {
                     }
                 },
                 Some(Ok(_)) => rsx! {
-                    div { class: "card-content",
-                        p {
-                            class: "body-medium",
-                            class: "text-muted",
-                            span { class: "material-icons", style: "vertical-align: middle;", "check_circle" }
-                            " {t(\"parent.none\")}"
+                    // EXPERIMENT: a celebratory orb empty state for the all-healthy case.
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "verified" }
                         }
+                        p { class: "empty-state-body", "{t(\"parent.none\")}" }
                     }
                 },
                 Some(Err(e)) => rsx! {

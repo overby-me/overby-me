@@ -41,11 +41,12 @@ pub fn NodeApp(node: NodeWithChildren, title: String) -> Element {
                     }
                 }
             } else {
-                div { class: "card-content",
-                    p { class: "body-medium",
-                        class: "text-muted",
-                        "{t(\"common.noContent\")}"
+                // EXPERIMENT: orb empty state for unknown / empty node types.
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "help_outline" }
                     }
+                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
                 }
             }
         }

@@ -40,7 +40,11 @@ pub fn RedirectApp(node: NodeWithChildren) -> Element {
             div { class: "card-content",
                 match target {
                     Some(url) => rsx! {
-                        p { class: "body-large mb-1", "{t(\"redirect.forwarding\")}" }
+                        // EXPERIMENT: a tonal forwarding banner with the morphing loader.
+                        div { class: "tonal-banner",
+                            div { class: "spinner", style: "width: 22px; height: 22px;" }
+                            span { class: "body-medium", "{t(\"redirect.forwarding\")}" }
+                        }
                         a {
                             class: "btn btn-primary",
                             href: "{url}",
@@ -50,10 +54,12 @@ pub fn RedirectApp(node: NodeWithChildren) -> Element {
                         }
                     },
                     None => rsx! {
-                        p {
-                            class: "body-medium",
-                            class: "text-muted",
-                            "{t(\"redirect.noTarget\")}"
+                        // EXPERIMENT: orb empty state for a redirect with no target set.
+                        div { class: "empty-state empty-state-sm",
+                            div { class: "empty-state-orb empty-state-orb-sm",
+                                span { class: "material-icons", "link_off" }
+                            }
+                            p { class: "empty-state-body", "{t(\"redirect.noTarget\")}" }
                         }
                     },
                 }

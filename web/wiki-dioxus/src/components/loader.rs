@@ -124,10 +124,15 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
             rsx! { NodeNotFound {} }
         }
         Some(Err(e)) => {
+            // EXPERIMENT: an expressive error state (error-tinted orb + accent card)
+            // instead of a bare debug panel.
             rsx! {
-                div { class: "card",
-                    div { class: "card-content",
-                        p { class: "body-large", "{t(\"error.somethingWentWrong\")}" }
+                div { class: "card accent-error",
+                    div { class: "empty-state",
+                        div { class: "empty-state-orb error-orb",
+                            span { class: "material-icons", "error_outline" }
+                        }
+                        h3 { class: "empty-state-title", "{t(\"error.somethingWentWrong\")}" }
                         pre { class: "error-fallback", "{e}" }
                     }
                 }
