@@ -1255,12 +1255,18 @@ html {
 	overflow: hidden;
 	background: var(--md-surface-container-high);
 }
-.content-hero-img {
+/* The hero image is a ZoomableImage; fill the hero as a cover crop (overriding the
+   contained-thumbnail defaults of .zoomable) while keeping its click-to-expand. */
+.content-hero .zoomable,
+.content-hero .image-error {
 	position: absolute;
 	inset: 0;
 	width: 100%;
 	height: 100%;
+	max-width: none;
+	max-height: none;
 	object-fit: cover;
+	border-radius: 0;
 	display: block;
 }
 .content-hero-veil {
@@ -1270,6 +1276,8 @@ html {
 	align-items: flex-end;
 	gap: 14px;
 	padding: 20px;
+	/* Click-through so the image underneath still opens the zoom lightbox. */
+	pointer-events: none;
 	/* Legibility scrim: deep at the base where the identity sits, clear up top. */
 	background: linear-gradient(
 		to top,

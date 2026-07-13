@@ -50,12 +50,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             // image frames the document instead of sitting as a plain block above it.
             if let Some(url) = image_url {
                 div { class: "content-hero",
-                    img {
-                        class: "content-hero-img",
-                        src: "{url}",
-                        alt: t("content.imageAlt"),
-                        loading: "lazy",
-                    }
+                    // ZoomableImage keeps the click-to-expand lightbox; the veil above
+                    // is click-through so the image underneath still receives it.
+                    super::widgets::ZoomableImage { src: url.clone(), alt: t("content.imageAlt") }
                     div { class: "content-hero-veil",
                         div { class: "avatar content-hero-avatar", {icon_el("wiki/document")} }
                         div { class: "content-hero-meta",
