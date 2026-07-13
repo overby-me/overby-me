@@ -127,6 +127,22 @@ Smaller, mostly CSS-only refinements and genuine fixes:
   M3 switch/checkbox/radio, context pill, table headers** — assorted primitive
   and surface refinements.
 
+## Reconceptualization & the dullness pass
+
+- **"Actions" sheet** (was "Tools") — the contextual-actions surface is renamed
+  Actions, its trigger icon changes from the `tune` sliders to a `bolt`, and the
+  sheet header gains a leading tertiary tonal badge, so it reads as an actions
+  surface (matching the FAB's accent) rather than a generic tools drawer.
+- **Enlivened the empty voting page** — the no-active-vote screen now uses the
+  floating ballot orb instead of a text card, and the voting-rights indicator is a
+  tonal status banner (primary when you can vote, error otherwise).
+- **Dullness audit → expressive states** — a parallel audit flagged plain/dull
+  pages; each now reuses the empty-state orb / viewport-frame / tonal-banner
+  patterns: the error state (error-tinted orb in an accent-error card), the graph
+  (framed like the map + orb empty), the redirect app (orb + forwarding banner),
+  the parent app (celebratory orb), the generic node fallback, and the admin /
+  projector-idle / editor-locked empty states.
+
 ## Notes / follow-ups
 
 - The graph SVG could get the same `.viewport-frame` as the map (left out to avoid
