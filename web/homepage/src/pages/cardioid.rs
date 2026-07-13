@@ -458,6 +458,15 @@ struct Sim {
     /// Logical (CSS-pixel) canvas size; drawing happens in this space.
     w: f64,
     h: f64,
+    /// Device pixel ratio (the backing store is `w*dpr` by `h*dpr`).
+    dpr: f64,
+    /// View transform: magnification and screen-space pan, applied only when
+    /// compositing onto the visible canvas (the trace itself is unscaled).
+    zoom: f64,
+    pan: (f64, f64),
+    /// Left-drag panning state.
+    dragging: bool,
+    drag_last: (f64, f64),
     canvas: HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
     trace_canvas: HtmlCanvasElement,
@@ -477,6 +486,34 @@ impl Sim {
         self.trace.clear_rect(0.0, 0.0, self.w, self.h);
         self.last = None;
         self.t = 0.0;
+    }
+
+    /// Visible-context transform with dpr only (no zoom) — for the background.
+    fn base_transform(&self) {
+        let _ = self
+            .ctx
+            .set_transform(self.dpr, 0.0, 0.0, self.dpr, 0.0, 0.0);
+    }
+
+    /// Visible-context transform including zoom + pan about the center.
+    fn view_transform(&self) {
+        let (cx, cy) = self.center();
+        let a = self.dpr * self.zoom;
+        let e = self.dpr * (cx * (1.0 - self.zoom) + self.pan.0);
+        let f = self.dpr * (cy * (1.0 - self.zoom) + self.pan.1);
+        let _ = self.ctx.set_transform(a, 0.0, 0.0, a, e, f);
+    }
+
+    /// Zoom about a screen point (CSS px), keeping that world point fixed.
+    fn zoom_at(&mut self, mx: f64, my: f64, factor: f64) {
+        let (cx, cy) = self.center();
+        let z = self.zoom;
+        let wx = (mx - (cx * (1.0 - z) + self.pan.0)) / z;
+        let wy = (my - (cy * (1.0 - z) + self.pan.1)) / z;
+        let z2 = (z * factor).clamp(0.1, 60.0);
+        self.pan.0 = mx - z2 * wx - cx * (1.0 - z2);
+        self.pan.1 = my - z2 * wy - cy * (1.0 - z2);
+        self.zoom = z2;
     }
 
     /// The pen position and (optional) speed at parameter `t`.
@@ -561,11 +598,15 @@ impl Sim {
             .set_global_composite_operation("source-over")
             .ok();
 
-        // Composite the trace and draw the live construction on the visible canvas.
+        // Composite the trace and draw the live construction on the visible
+        // canvas. The background is filled at 1:1; the trace and overlay are
+        // drawn under the view transform (zoom + pan).
+        self.base_transform();
         let ctx = &self.ctx;
         ctx.set_global_composite_operation("source-over").ok();
         ctx.set_fill_style_str("#000000");
         ctx.fill_rect(0.0, 0.0, self.w, self.h);
+        self.view_transform();
         if s.draw {
             if s.glow {
                 ctx.set_global_composite_operation("lighter").ok();
@@ -614,10 +655,12 @@ impl Sim {
     /// frame straight onto the visible canvas.
     fn render_times_table(&self, s: &Settings) {
         let (cx, cy) = self.center();
+        self.base_transform();
         let ctx = &self.ctx;
         ctx.set_global_composite_operation("source-over").ok();
         ctx.set_fill_style_str("#000000");
         ctx.fill_rect(0.0, 0.0, self.w, self.h);
+        self.view_transform();
         if s.glow {
             ctx.set_global_composite_operation("lighter").ok();
         }
@@ -833,12 +876,43 @@ pub fn Cardioid() -> Element {
                     paused: false,
                     w: css_w,
                     h: css_h,
+                    dpr,
+                    zoom: 1.0,
+                    pan: (0.0, 0.0),
+                    dragging: false,
+                    drag_last: (0.0, 0.0),
                     canvas,
                     ctx,
                     trace_canvas,
                     trace,
                 }));
                 state.set(Some(Rc::clone(&sim)));
+
+                // Mouse-wheel zoom, centered on the cursor. A non-passive
+                // listener so the graph zooms instead of the browser page.
+                {
+                    let sim_wheel = Rc::clone(&sim);
+                    let canvas = sim.borrow().canvas.clone();
+                    let on_wheel = Closure::<dyn FnMut(web_sys::WheelEvent)>::new(
+                        move |evt: web_sys::WheelEvent| {
+                            evt.prevent_default();
+                            let factor = (-evt.delta_y() * 0.0015).exp();
+                            let rect = sim_wheel.borrow().canvas.get_bounding_client_rect();
+                            let mx = evt.client_x() as f64 - rect.left();
+                            let my = evt.client_y() as f64 - rect.top();
+                            sim_wheel.borrow_mut().zoom_at(mx, my, factor);
+                        },
+                    );
+                    let opts = web_sys::AddEventListenerOptions::new();
+                    opts.set_passive(false);
+                    let _ = canvas.add_event_listener_with_callback_and_add_event_listener_options(
+                        "wheel",
+                        on_wheel.as_ref().unchecked_ref(),
+                        &opts,
+                    );
+                    on_wheel.forget();
+                }
+
                 start_animation_loop(sim);
             });
         }
@@ -858,8 +932,47 @@ pub fn Cardioid() -> Element {
                     font-family:'Space Grotesk',system-ui,sans-serif;color:#eee;",
             canvas {
                 id: "cardioid-canvas",
-                style: "position:absolute;inset:0;width:100%;height:100%;display:block;",
+                style: "position:absolute;inset:0;width:100%;height:100%;display:block;\
+                        cursor:grab;touch-action:none;",
                 onmounted: onmounted,
+                // Left-drag to pan the view.
+                onpointerdown: move |e| {
+                    let c = e.data().client_coordinates();
+                    if let Some(sim) = state.read().clone() {
+                        let mut sim = sim.borrow_mut();
+                        sim.dragging = true;
+                        sim.drag_last = (c.x, c.y);
+                    }
+                },
+                onpointermove: move |e| {
+                    let c = e.data().client_coordinates();
+                    if let Some(sim) = state.read().clone() {
+                        let mut sim = sim.borrow_mut();
+                        if sim.dragging {
+                            sim.pan.0 += c.x - sim.drag_last.0;
+                            sim.pan.1 += c.y - sim.drag_last.1;
+                            sim.drag_last = (c.x, c.y);
+                        }
+                    }
+                },
+                onpointerup: move |_| {
+                    if let Some(sim) = state.read().clone() {
+                        sim.borrow_mut().dragging = false;
+                    }
+                },
+                onpointerleave: move |_| {
+                    if let Some(sim) = state.read().clone() {
+                        sim.borrow_mut().dragging = false;
+                    }
+                },
+                // Double-click resets the view to 1:1.
+                ondoubleclick: move |_| {
+                    if let Some(sim) = state.read().clone() {
+                        let mut sim = sim.borrow_mut();
+                        sim.zoom = 1.0;
+                        sim.pan = (0.0, 0.0);
+                    }
+                },
             }
 
             div {
@@ -869,8 +982,12 @@ pub fn Cardioid() -> Element {
                         box-shadow:0 4px 24px rgba(0,0,0,.5);width:300px;user-select:none;",
 
                 div {
-                    style: "font-weight:700;font-size:18px;margin-bottom:10px;color:#ff4d8d;",
+                    style: "font-weight:700;font-size:18px;margin-bottom:2px;color:#ff4d8d;",
                     "Cardioid"
+                }
+                div {
+                    style: "font-size:11px;color:#777;margin-bottom:10px;",
+                    "scroll = zoom · drag = pan · dbl-click = reset view"
                 }
 
                 button {
