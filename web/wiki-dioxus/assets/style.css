@@ -1251,7 +1251,7 @@ html {
 	position: relative;
 	width: 100%;
 	aspect-ratio: 16 / 9;
-	max-height: 320px;
+	max-height: 400px;
 	overflow: hidden;
 	background: var(--md-surface-container-high);
 }
