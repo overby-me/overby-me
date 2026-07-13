@@ -2891,6 +2891,25 @@ select:focus {
 	margin-left: 6px;
 	vertical-align: middle;
 }
+/* EXPERIMENT (voting-rights banner): a tonal status banner coloured by whether you
+   can vote, instead of a plain card. */
+.vote-rights-banner {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 16px;
+	border-radius: var(--md-sys-shape-corner-large);
+	margin-bottom: 12px;
+	font-weight: 500;
+}
+.vote-rights-banner.can-vote {
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+}
+.vote-rights-banner.cannot-vote {
+	background: var(--md-error-container, color-mix(in srgb, var(--md-error) 14%, transparent));
+	color: var(--md-error);
+}
 
 /* Typography */
 h1,

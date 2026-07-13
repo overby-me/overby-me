@@ -60,14 +60,16 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
             .ok()?
     });
 
+    // EXPERIMENT: an expressive empty state (floating ballot orb) instead of a dull
+    // text card when there is no active vote.
     let no_vote = rsx! {
         div { class: "card",
-            div { class: "card-header",
-                div { class: "avatar", {icon_el("vote/poll")} }
-                h3 { class: "title-medium", "{t(\"mime.vote\")}" }
-            }
-            div { class: "card-content",
-                p { class: "body-large",
+            div { class: "empty-state",
+                div { class: "empty-state-orb",
+                    span { class: "material-icons", "how_to_vote" }
+                }
+                h3 { class: "empty-state-title", "{t(\"mime.vote\")}" }
+                p { class: "empty-state-body",
                     if is_auth { "{t(\"vote.noVoteNow\")}" } else { "{t(\"vote.noVotingRight\")}" }
                 }
             }
@@ -88,18 +90,16 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     };
 
     rsx! {
-        // Voting-rights indicator (React VoteApp's canVote status).
+        // Voting-rights indicator (React VoteApp's canVote status) — a tonal status
+        // banner rather than a plain card (EXPERIMENT).
         if is_auth {
-            div { class: "card mb-1",
-                div { class: "card-content stack stack-h", style: "align-items: center; gap: 8px;",
-                    span {
-                        class: "material-icons",
-                        style: if can_vote { "color: var(--md-primary);" } else { "color: var(--md-error, #b3261e);" },
-                        if can_vote { "how_to_reg" } else { "do_not_disturb" }
-                    }
-                    span { class: "body-medium",
-                        if can_vote { "{t(\"vote.hasVotingRight\")}" } else { "{t(\"vote.noVotingRight\")}" }
-                    }
+            div {
+                class: if can_vote { "vote-rights-banner can-vote" } else { "vote-rights-banner cannot-vote" },
+                span { class: "material-icons",
+                    if can_vote { "how_to_reg" } else { "do_not_disturb" }
+                }
+                span { class: "body-medium",
+                    if can_vote { "{t(\"vote.hasVotingRight\")}" } else { "{t(\"vote.noVotingRight\")}" }
                 }
             }
         }
