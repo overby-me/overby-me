@@ -35,10 +35,16 @@ pub struct AtprotoLink {
 }
 
 /// Ask the backend whether the caller has a linked Bluesky account (and its
-/// handle). Returns "not linked" on any error.
+/// handle). The session JWT goes in the `Authorization` header (not the URL).
+/// Returns "not linked" on any error.
 pub async fn atproto_status(token: &str) -> AtprotoLink {
-    let url = format!("{BACKEND_URL}/atproto/status?token={token}");
-    match reqwest::Client::new().get(url).send().await {
+    let url = format!("{BACKEND_URL}/atproto/status");
+    match reqwest::Client::new()
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+    {
         Ok(resp) => resp.json::<AtprotoLink>().await.unwrap_or_default(),
         Err(_) => AtprotoLink::default(),
     }
@@ -46,9 +52,10 @@ pub async fn atproto_status(token: &str) -> AtprotoLink {
 
 /// Unlink the caller's Bluesky account via the backend. Returns true on success.
 pub async fn atproto_unlink(token: &str) -> bool {
-    let url = format!("{BACKEND_URL}/atproto/unlink?token={token}");
+    let url = format!("{BACKEND_URL}/atproto/unlink");
     reqwest::Client::new()
         .get(url)
+        .bearer_auth(token)
         .send()
         .await
         .map(|r| r.status().is_success())
@@ -56,13 +63,15 @@ pub async fn atproto_unlink(token: &str) -> bool {
 }
 
 /// Post `text` to the caller's linked Bluesky account via the backend (which holds
-/// the encrypted session). Ok on success; Err carries the backend's message (e.g.
-/// `no linked Bluesky account`) for the UI to surface.
-pub async fn atproto_post(token: &str, text: &str) -> Result<(), String> {
+/// the encrypted session). `link`/`title` become a tappable facet + link card when
+/// non-empty. Ok on success; Err carries the backend's message (e.g. `no linked
+/// Bluesky account`) for the UI to surface.
+pub async fn atproto_post(token: &str, text: &str, link: &str, title: &str) -> Result<(), String> {
     let url = format!("{BACKEND_URL}/atproto/post");
     let resp = reqwest::Client::new()
         .post(&url)
-        .query(&[("token", token), ("text", text)])
+        .bearer_auth(token)
+        .query(&[("text", text), ("url", link), ("title", title)])
         .send()
         .await
         .map_err(|e| e.to_string())?;

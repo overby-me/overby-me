@@ -169,7 +169,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                     let title: String = title.chars().take(200).collect();
                                     let text = format!("{title}\n\n{href}");
                                     crate::snackbar::show_snackbar(&t("content.sharing"));
-                                    match crate::nhost::atproto_post(&token, &text).await {
+                                    match crate::nhost::atproto_post(&token, &text, &href, &title).await {
                                         Ok(()) => crate::snackbar::show_snackbar(&t("content.shared")),
                                         Err(e) if e.contains("no linked") => {
                                             crate::snackbar::show_snackbar(&t("content.shareNoLink"))

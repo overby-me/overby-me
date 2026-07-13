@@ -269,8 +269,26 @@ async fn callback_inner(
 /// Report whether the caller has a linked atproto account, and if so its handle
 /// and DID. Lets the profile page show "Linked as @handle" without exposing the
 /// custom `user_providers` table to the browser.
-pub async fn status(cfg: &Config, client: &reqwest::Client, query: Option<&str>) -> Response<Body> {
-    match status_inner(cfg, client, query).await {
+/// The session JWT, preferred from the `Authorization: Bearer` header, falling
+/// back to a `?token=` query param (used by the `start` redirect).
+fn resolve_token(query: Option<&str>, bearer: Option<&str>) -> Result<String, String> {
+    if let Some(b) = bearer.filter(|b| !b.is_empty()) {
+        return Ok(b.to_string());
+    }
+    util::parse_query(query)
+        .into_iter()
+        .find(|(k, _)| k == "token")
+        .map(|(_, v)| v)
+        .ok_or_else(|| "missing token".to_string())
+}
+
+pub async fn status(
+    cfg: &Config,
+    client: &reqwest::Client,
+    query: Option<&str>,
+    bearer: Option<&str>,
+) -> Response<Body> {
+    match status_inner(cfg, client, query, bearer).await {
         Ok(body) => crate::json(StatusCode::OK, body),
         Err(e) => {
             eprintln!("atproto status error: {e}");
@@ -283,13 +301,9 @@ async fn status_inner(
     cfg: &Config,
     client: &reqwest::Client,
     query: Option<&str>,
+    bearer: Option<&str>,
 ) -> Result<String, String> {
-    let params = util::parse_query(query);
-    let token = params
-        .iter()
-        .find(|(k, _)| k == "token")
-        .map(|(_, v)| v.clone())
-        .ok_or("missing token")?;
+    let token = resolve_token(query, bearer)?;
     let uid = nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)?;
     match nhost::get_atproto_link(client, &cfg.hasura_url, &cfg.admin_secret, &uid).await? {
         Some((handle, did)) => Ok(serde_json::json!({
@@ -303,8 +317,13 @@ async fn status_inner(
 /// Unlink the caller's atproto account: verify their NHost token, delete the
 /// `user_providers` row, and clear the cached avatar. Returns JSON (CORS-enabled
 /// via `crate::json`) so the profile page can update in place via `fetch`.
-pub async fn unlink(cfg: &Config, client: &reqwest::Client, query: Option<&str>) -> Response<Body> {
-    match unlink_inner(cfg, client, query).await {
+pub async fn unlink(
+    cfg: &Config,
+    client: &reqwest::Client,
+    query: Option<&str>,
+    bearer: Option<&str>,
+) -> Response<Body> {
+    match unlink_inner(cfg, client, query, bearer).await {
         Ok(()) => crate::json(StatusCode::OK, "{\"ok\":true}".to_string()),
         Err(e) => {
             eprintln!("atproto unlink error: {e}");
@@ -317,13 +336,9 @@ async fn unlink_inner(
     cfg: &Config,
     client: &reqwest::Client,
     query: Option<&str>,
+    bearer: Option<&str>,
 ) -> Result<(), String> {
-    let params = util::parse_query(query);
-    let token = params
-        .iter()
-        .find(|(k, _)| k == "token")
-        .map(|(_, v)| v.clone())
-        .ok_or("missing token")?;
+    let token = resolve_token(query, bearer)?;
     let uid = nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)?;
     nhost::delete_atproto_link(client, &cfg.hasura_url, &cfg.admin_secret, &uid).await?;
     // Best-effort: clear the cached avatar so the profile falls back to its icon.
@@ -335,8 +350,13 @@ async fn unlink_inner(
 /// the NHost token, loads the stored atproto session, refreshes the (DPoP-bound)
 /// access token, and calls the PDS `createRecord`. Query params: `token` (NHost
 /// JWT) and `text` (the post body). Returns the created record's `uri`.
-pub async fn post(cfg: &Config, client: &reqwest::Client, query: Option<&str>) -> Response<Body> {
-    match post_inner(cfg, client, query).await {
+pub async fn post(
+    cfg: &Config,
+    client: &reqwest::Client,
+    query: Option<&str>,
+    bearer: Option<&str>,
+) -> Response<Body> {
+    match post_inner(cfg, client, query, bearer).await {
         Ok(uri) => crate::json(
             StatusCode::OK,
             serde_json::json!({ "ok": true, "uri": uri }).to_string(),
@@ -355,6 +375,7 @@ async fn post_inner(
     cfg: &Config,
     client: &reqwest::Client,
     query: Option<&str>,
+    bearer: Option<&str>,
 ) -> Result<String, String> {
     let params = util::parse_query(query);
     let get = |k: &str| {
@@ -363,8 +384,10 @@ async fn post_inner(
             .find(|(pk, _)| pk == k)
             .map(|(_, v)| v.clone())
     };
-    let token = get("token").ok_or("missing token")?;
+    let token = resolve_token(query, bearer)?;
     let text = get("text").ok_or("missing text")?;
+    // Optional link to embed as a rich-text facet + external card (the page URL).
+    let link = get("url").filter(|u| !u.is_empty());
     if text.trim().is_empty() {
         return Err("empty post text".into());
     }
@@ -417,14 +440,29 @@ async fn post_inner(
 
     // Create the post record on the user's repo.
     let url = format!("{pds}/xrpc/com.atproto.repo.createRecord");
+    let mut record = serde_json::json!({
+        "$type": "app.bsky.feed.post",
+        "text": text,
+        "createdAt": util::rfc3339_utc(util::now_secs()),
+    });
+    if let Some(link) = &link {
+        // Bluesky does not auto-linkify: attach a richtext facet over the URL's
+        // UTF-8 byte range so it renders as a tappable link, plus an external card.
+        if let Some(start) = text.find(link.as_str()) {
+            record["facets"] = serde_json::json!([{
+                "index": { "byteStart": start, "byteEnd": start + link.len() },
+                "features": [{ "$type": "app.bsky.richtext.facet#link", "uri": link }],
+            }]);
+        }
+        record["embed"] = serde_json::json!({
+            "$type": "app.bsky.embed.external",
+            "external": { "uri": link, "title": get("title").unwrap_or_default(), "description": "" },
+        });
+    }
     let record = serde_json::json!({
         "repo": did,
         "collection": "app.bsky.feed.post",
-        "record": {
-            "$type": "app.bsky.feed.post",
-            "text": text,
-            "createdAt": util::rfc3339_utc(util::now_secs()),
-        },
+        "record": record,
     });
     let result = dpop_json_post(client, &url, &record, &dpop, access_token, &mut nonce).await?;
     result

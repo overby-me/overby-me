@@ -34,16 +34,46 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
         .headers()
         .get(http::header::COOKIE)
         .and_then(|v| v.to_str().ok());
+    // Prefer the session JWT from the `Authorization: Bearer` header — it keeps the
+    // token out of the URL (browser history / Referer / access logs); the `?token=`
+    // query param stays a fallback (and is the only option for the `start`
+    // full-page redirect).
+    let bearer = req
+        .headers()
+        .get(http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+
+    // CORS preflight: the header-authenticated fetches are non-simple requests.
+    if req.method() == http::Method::OPTIONS {
+        return preflight();
+    }
+
     match req.uri().path() {
         "/atproto/client-metadata.json" => client_metadata(&cfg),
         "/atproto/start" => oauth::start(&cfg, &client, query).await,
         "/atproto/callback" => oauth::callback(&cfg, &client, query, cookie_header).await,
-        "/atproto/status" => oauth::status(&cfg, &client, query).await,
-        "/atproto/unlink" => oauth::unlink(&cfg, &client, query).await,
-        "/atproto/post" => oauth::post(&cfg, &client, query).await,
+        "/atproto/status" => oauth::status(&cfg, &client, query, bearer).await,
+        "/atproto/unlink" => oauth::unlink(&cfg, &client, query, bearer).await,
+        "/atproto/post" => oauth::post(&cfg, &client, query, bearer).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }
+}
+
+/// CORS preflight response allowing the app's header-authenticated fetches.
+fn preflight() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        .header(
+            "Access-Control-Allow-Headers",
+            "authorization, content-type",
+        )
+        .header("Access-Control-Max-Age", "86400")
+        .body(Body::empty())
+        .unwrap()
 }
 
 /// The atproto OAuth *client metadata* document, served at a stable public URL
