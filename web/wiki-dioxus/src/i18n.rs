@@ -197,6 +197,11 @@ const EN_JSON: &str = r#"{
     "content": {
         "addContent": "Add content",
         "addType": "Add {{type}}",
+        "shareBluesky": "Share to Bluesky",
+        "sharing": "Sharing to Bluesky…",
+        "shared": "Shared to Bluesky",
+        "shareNoLink": "Link your Bluesky account first (in your profile)",
+        "shareErr": "Could not share to Bluesky",
         "confirmDelete": "Confirm Deletion",
         "confirmSubmit": "Confirm Submission",
         "submitWarning": "Once you have submitted, it is no longer possible to edit.",
@@ -543,6 +548,11 @@ const DA_JSON: &str = r#"{
     },
     "content": {
         "addContent": "Tilf\u00f8j indhold",
+        "shareBluesky": "Del p\u00e5 Bluesky",
+        "sharing": "Deler p\u00e5 Bluesky\u2026",
+        "shared": "Delt p\u00e5 Bluesky",
+        "shareNoLink": "Forbind din Bluesky-konto f\u00f8rst (p\u00e5 din profil)",
+        "shareErr": "Kunne ikke dele p\u00e5 Bluesky",
         "confirmDelete": "Bekr\u00e6ft sletning",
         "confirmSubmit": "Bekr\u00e6ft indsendelse",
         "submitWarning": "N\u00e5r du har indsendt, er det ikke l\u00e6ngere muligt at redigere.",

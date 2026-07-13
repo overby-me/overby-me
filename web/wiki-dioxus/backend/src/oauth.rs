@@ -16,6 +16,19 @@ use serde_json::Value;
 
 pub const SCOPE: &str = "atproto transition:generic";
 
+/// The at-rest atproto session: everything needed to post on the user's behalf
+/// later. Sealed with `STATE_SECRET` (ChaCha20-Poly1305) before it is stored in
+/// the `user_providers.atproto_session` column, and never exposed to the browser.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SessionCreds {
+    did: String,
+    pds: String,
+    token_endpoint: String,
+    refresh_token: String,
+    /// b64url of the DPoP key's 32-byte P-256 scalar (bound to the refresh token).
+    dpop_key: String,
+}
+
 pub struct Config {
     pub function_origin: String,
     pub app_origin: String,
@@ -120,6 +133,7 @@ async fn start_inner(
         nhost_user_id,
         handle,
         did,
+        pds,
         token_endpoint: meta.token_endpoint,
         code_verifier: pk.verifier,
         dpop_key: util::b64url(&dpop.to_scalar_bytes()),
@@ -174,7 +188,7 @@ async fn callback_inner(
     let returned_state = get("state").ok_or("missing state")?;
 
     let cookie_val = cookie(cookie_header, COOKIE_NAME).ok_or("missing link cookie")?;
-    let state = statecookie::open(&cfg.state_secret, &cookie_val)?;
+    let state: LinkState = statecookie::open(&cfg.state_secret, &cookie_val)?;
     if returned_state != state.oauth_state {
         return Err("state mismatch".into());
     }
@@ -209,6 +223,29 @@ async fn callback_inner(
         &state.handle,
     )
     .await?;
+
+    // Persist the (encrypted) session so the app can later post on the user's
+    // behalf: the refresh token, the DPoP key bound to it, and the endpoints.
+    // Best-effort — a failure here must not fail the link itself.
+    if let Some(refresh_token) = tokens.get("refresh_token").and_then(|v| v.as_str()) {
+        let creds = SessionCreds {
+            did: state.did.clone(),
+            pds: state.pds.clone(),
+            token_endpoint: state.token_endpoint.clone(),
+            refresh_token: refresh_token.to_string(),
+            dpop_key: state.dpop_key.clone(),
+        };
+        if let Ok(blob) = statecookie::seal(&cfg.state_secret, &creds) {
+            let _ = nhost::store_atproto_session(
+                client,
+                &cfg.hasura_url,
+                &cfg.admin_secret,
+                &state.nhost_user_id,
+                &blob,
+            )
+            .await;
+        }
+    }
 
     // Best-effort: cache the account's Bluesky avatar on the NHost user so the app
     // can show it as the profile picture everywhere. A failure must not fail linking.
@@ -292,6 +329,149 @@ async fn unlink_inner(
     // Best-effort: clear the cached avatar so the profile falls back to its icon.
     let _ = nhost::update_user_avatar(client, &cfg.hasura_url, &cfg.admin_secret, &uid, "").await;
     Ok(())
+}
+
+/// Create a Bluesky post (`app.bsky.feed.post`) on the caller's behalf. Verifies
+/// the NHost token, loads the stored atproto session, refreshes the (DPoP-bound)
+/// access token, and calls the PDS `createRecord`. Query params: `token` (NHost
+/// JWT) and `text` (the post body). Returns the created record's `uri`.
+pub async fn post(cfg: &Config, client: &reqwest::Client, query: Option<&str>) -> Response<Body> {
+    match post_inner(cfg, client, query).await {
+        Ok(uri) => crate::json(
+            StatusCode::OK,
+            serde_json::json!({ "ok": true, "uri": uri }).to_string(),
+        ),
+        Err(e) => {
+            eprintln!("atproto post error: {e}");
+            crate::json(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({ "ok": false, "error": e }).to_string(),
+            )
+        }
+    }
+}
+
+async fn post_inner(
+    cfg: &Config,
+    client: &reqwest::Client,
+    query: Option<&str>,
+) -> Result<String, String> {
+    let params = util::parse_query(query);
+    let get = |k: &str| {
+        params
+            .iter()
+            .find(|(pk, _)| pk == k)
+            .map(|(_, v)| v.clone())
+    };
+    let token = get("token").ok_or("missing token")?;
+    let text = get("text").ok_or("missing text")?;
+    if text.trim().is_empty() {
+        return Err("empty post text".into());
+    }
+    // Bluesky caps a post at 300 graphemes; approximate with chars to avoid
+    // sending something the PDS will reject.
+    if text.chars().count() > 300 {
+        return Err("post text too long (max 300 characters)".into());
+    }
+    let uid = nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)?;
+
+    let blob = nhost::get_atproto_session(client, &cfg.hasura_url, &cfg.admin_secret, &uid)
+        .await?
+        .ok_or("no linked Bluesky account")?;
+    let creds: SessionCreds = statecookie::open(&cfg.state_secret, &blob)?;
+    let dpop = DpopKey::from_scalar_bytes(&util::b64url_decode(&creds.dpop_key)?)?;
+    // Keep the repo (DID) and PDS before `creds` is consumed by the rotation below.
+    let pds = creds.pds.clone();
+    let did = creds.did.clone();
+    let mut nonce: Option<String> = None;
+
+    // Refresh the (short-lived, DPoP-bound) access token using the stored refresh
+    // token. atproto rotates refresh tokens, so persist the new one for next time.
+    let client_id = cfg.client_id();
+    let form = [
+        ("grant_type", "refresh_token"),
+        ("refresh_token", creds.refresh_token.as_str()),
+        ("client_id", client_id.as_str()),
+    ];
+    let tokens = dpop_form_post(client, &creds.token_endpoint, &form, &dpop, &mut nonce).await?;
+    let access_token = tokens
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or("refresh response missing access_token")?;
+    if let Some(new_refresh) = tokens.get("refresh_token").and_then(|v| v.as_str()) {
+        let rotated = SessionCreds {
+            refresh_token: new_refresh.to_string(),
+            ..creds
+        };
+        if let Ok(new_blob) = statecookie::seal(&cfg.state_secret, &rotated) {
+            let _ = nhost::store_atproto_session(
+                client,
+                &cfg.hasura_url,
+                &cfg.admin_secret,
+                &uid,
+                &new_blob,
+            )
+            .await;
+        }
+    }
+
+    // Create the post record on the user's repo.
+    let url = format!("{pds}/xrpc/com.atproto.repo.createRecord");
+    let record = serde_json::json!({
+        "repo": did,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": text,
+            "createdAt": util::rfc3339_utc(util::now_secs()),
+        },
+    });
+    let result = dpop_json_post(client, &url, &record, &dpop, access_token, &mut nonce).await?;
+    result
+        .get("uri")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| format!("createRecord response missing uri: {result}"))
+}
+
+/// A DPoP + Bearer JSON POST to a resource server (the PDS), retrying once when it
+/// demands a fresh DPoP nonce. The access token is bound via the proof's `ath`.
+async fn dpop_json_post(
+    client: &reqwest::Client,
+    url: &str,
+    body: &Value,
+    dpop: &DpopKey,
+    access_token: &str,
+    nonce: &mut Option<String>,
+) -> Result<Value, String> {
+    for _ in 0..2 {
+        let proof = dpop.proof("POST", url, nonce.as_deref(), Some(access_token));
+        let resp = client
+            .post(url)
+            .header("Authorization", format!("DPoP {access_token}"))
+            .header("DPoP", proof)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(n) = resp
+            .headers()
+            .get("DPoP-Nonce")
+            .and_then(|v| v.to_str().ok())
+        {
+            *nonce = Some(n.to_string());
+        }
+        let status = resp.status();
+        let value: Value = resp.json().await.map_err(|e| e.to_string())?;
+        if status.is_success() {
+            return Ok(value);
+        }
+        if value.get("error").and_then(|e| e.as_str()) == Some("use_dpop_nonce") {
+            continue;
+        }
+        return Err(format!("{url} -> {status}: {value}"));
+    }
+    Err(format!("{url}: DPoP nonce handshake did not settle"))
 }
 
 // --- atproto discovery -----------------------------------------------------

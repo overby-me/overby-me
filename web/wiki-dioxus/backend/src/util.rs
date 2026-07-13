@@ -31,6 +31,26 @@ pub fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// Format a Unix timestamp as an RFC 3339 / ISO 8601 UTC string (e.g.
+/// `2026-07-13T12:34:56.000Z`), for the `createdAt` of an atproto record. Uses
+/// Howard Hinnant's civil-from-days algorithm so no date crate is needed.
+pub fn rfc3339_utc(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { year + 1 } else { year };
+    format!("{year:04}-{month:02}-{day:02}T{hh:02}:{mm:02}:{ss:02}.000Z")
+}
+
 /// Percent-decode one `application/x-www-form-urlencoded` component.
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();

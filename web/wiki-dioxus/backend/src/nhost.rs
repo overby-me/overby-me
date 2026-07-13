@@ -122,6 +122,67 @@ pub async fn get_atproto_link(
     }))
 }
 
+/// Store the encrypted atproto session blob (refresh token + DPoP key + endpoints)
+/// on the user's link row, so the app can later post on their behalf. Admin-only;
+/// the `atproto_session` column is never exposed to the `user` role.
+pub async fn store_atproto_session(
+    client: &reqwest::Client,
+    graphql_url: &str,
+    admin_secret: &str,
+    user_id: &str,
+    session_blob: &str,
+) -> Result<(), String> {
+    let query = "mutation($uid: uuid!, $s: String!) { \
+        update_user_providers(where: { user_id: { _eq: $uid }, \
+            provider: { _eq: \"atproto\" } }, _set: { atproto_session: $s }) \
+        { affected_rows } }";
+    let body = json!({ "query": query, "variables": { "uid": user_id, "s": session_blob } });
+    let resp = client
+        .post(graphql_url)
+        .header("x-hasura-admin-secret", admin_secret)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let value: Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(errors) = value.get("errors") {
+        return Err(format!("hasura error: {errors}"));
+    }
+    Ok(())
+}
+
+/// Load the encrypted atproto session blob for a user, if present. Admin query.
+pub async fn get_atproto_session(
+    client: &reqwest::Client,
+    graphql_url: &str,
+    admin_secret: &str,
+    user_id: &str,
+) -> Result<Option<String>, String> {
+    let query = "query($uid: uuid!) { user_providers(where: { \
+        user_id: { _eq: $uid }, provider: { _eq: \"atproto\" } }, limit: 1) \
+        { atproto_session } }";
+    let body = json!({ "query": query, "variables": { "uid": user_id } });
+    let resp = client
+        .post(graphql_url)
+        .header("x-hasura-admin-secret", admin_secret)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let value: Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(errors) = value.get("errors") {
+        return Err(format!("hasura error: {errors}"));
+    }
+    Ok(value
+        .get("data")
+        .and_then(|d| d.get("user_providers"))
+        .and_then(|a| a.as_array())
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("atproto_session"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string))
+}
+
 /// Remove the atproto link (`provider = atproto`) for a user. Used by the unlink
 /// endpoint; the caller separately clears the cached avatar (best-effort).
 pub async fn delete_atproto_link(

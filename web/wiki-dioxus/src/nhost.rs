@@ -55,6 +55,29 @@ pub async fn atproto_unlink(token: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Post `text` to the caller's linked Bluesky account via the backend (which holds
+/// the encrypted session). Ok on success; Err carries the backend's message (e.g.
+/// `no linked Bluesky account`) for the UI to surface.
+pub async fn atproto_post(token: &str, text: &str) -> Result<(), String> {
+    let url = format!("{BACKEND_URL}/atproto/post");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .query(&[("token", token), ("text", text)])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if body.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        Ok(())
+    } else {
+        Err(body
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("post failed")
+            .to_string())
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct SignInRequest {
     pub email: String,

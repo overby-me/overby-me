@@ -40,6 +40,7 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
         "/atproto/callback" => oauth::callback(&cfg, &client, query, cookie_header).await,
         "/atproto/status" => oauth::status(&cfg, &client, query).await,
         "/atproto/unlink" => oauth::unlink(&cfg, &client, query).await,
+        "/atproto/post" => oauth::post(&cfg, &client, query).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }

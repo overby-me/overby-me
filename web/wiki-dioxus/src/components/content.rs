@@ -14,6 +14,7 @@ use super::loader::{icon_el, mime_icon};
 #[component]
 pub fn ContentApp(node: NodeWithChildren) -> Element {
     let session = use_session();
+    let is_auth = session.read().is_authenticated();
     let nav = use_navigator();
     let route = use_route::<Route>();
     let segments: Vec<String> = match &route {
@@ -121,6 +122,39 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     },
                     span { class: "material-icons", "link" }
                     "{t(\"common.copyLink\")}"
+                }
+                // Share this page to the signed-in user's linked Bluesky account
+                // (posts the title + link; guides them to link if they haven't).
+                if is_auth {
+                    button {
+                        class: "sheet-action",
+                        onclick: {
+                            let share_name = name.clone();
+                            move |_| {
+                                let token = session.read().access_token.clone();
+                                let title = share_name.clone();
+                                spawn(async move {
+                                    let Some(token) = token else { return };
+                                    let href = web_sys::window()
+                                        .and_then(|w| w.location().href().ok())
+                                        .unwrap_or_default();
+                                    // Keep the title within Bluesky's 300-grapheme cap.
+                                    let title: String = title.chars().take(200).collect();
+                                    let text = format!("{title}\n\n{href}");
+                                    crate::snackbar::show_snackbar(&t("content.sharing"));
+                                    match crate::nhost::atproto_post(&token, &text).await {
+                                        Ok(()) => crate::snackbar::show_snackbar(&t("content.shared")),
+                                        Err(e) if e.contains("no linked") => {
+                                            crate::snackbar::show_snackbar(&t("content.shareNoLink"))
+                                        }
+                                        Err(_) => crate::snackbar::show_snackbar(&t("content.shareErr")),
+                                    }
+                                });
+                            }
+                        },
+                        {icon_el("app/social")}
+                        "{t(\"content.shareBluesky\")}"
+                    }
                 }
                 if can_edit && !segments.is_empty() {
                     Link {

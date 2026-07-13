@@ -9,7 +9,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const COOKIE_NAME: &str = "atproto_link";
@@ -19,6 +19,8 @@ pub struct LinkState {
     pub nhost_user_id: String,
     pub handle: String,
     pub did: String,
+    /// The account's PDS base URL (where authenticated repo writes go).
+    pub pds: String,
     pub token_endpoint: String,
     pub code_verifier: String,
     /// b64url of the DPoP key's 32-byte P-256 scalar.
@@ -33,8 +35,10 @@ fn cipher(secret: &str) -> ChaCha20Poly1305 {
     ChaCha20Poly1305::new(Key::from_slice(&key))
 }
 
-/// Encrypt the state into an opaque cookie value.
-pub fn seal(secret: &str, state: &LinkState) -> Result<String, String> {
+/// Encrypt any serializable value into an opaque, self-describing blob (a random
+/// nonce prefix + AEAD ciphertext, base64url). Used for the link-state cookie and
+/// the at-rest atproto session credentials.
+pub fn seal<T: Serialize>(secret: &str, state: &T) -> Result<String, String> {
     let plaintext = serde_json::to_vec(state).map_err(|e| e.to_string())?;
     let nonce_bytes = util::random_bytes(12);
     let ct = cipher(secret)
@@ -45,8 +49,8 @@ pub fn seal(secret: &str, state: &LinkState) -> Result<String, String> {
     Ok(util::b64url(&out))
 }
 
-/// Decrypt a cookie value back into the state.
-pub fn open(secret: &str, blob: &str) -> Result<LinkState, String> {
+/// Decrypt a blob produced by [`seal`] back into a value of the expected type.
+pub fn open<T: DeserializeOwned>(secret: &str, blob: &str) -> Result<T, String> {
     let raw = util::b64url_decode(blob)?;
     // 12-byte nonce prefix + AEAD ciphertext; `split_at_checked` guards the
     // untrusted length instead of panicking.
@@ -66,6 +70,7 @@ mod tests {
             nhost_user_id: "u1".into(),
             handle: "alice.bsky.social".into(),
             did: "did:plc:abc".into(),
+            pds: "https://pds.example".into(),
             token_endpoint: "https://pds.example/oauth/token".into(),
             code_verifier: "v".into(),
             dpop_key: "kkk".into(),
@@ -78,12 +83,12 @@ mod tests {
     fn seal_open_roundtrip() {
         let st = sample();
         let blob = seal("secret", &st).unwrap();
-        assert_eq!(open("secret", &blob).unwrap(), st);
+        assert_eq!(open::<LinkState>("secret", &blob).unwrap(), st);
     }
 
     #[test]
     fn wrong_secret_fails() {
         let blob = seal("secret", &sample()).unwrap();
-        assert!(open("other", &blob).is_err());
+        assert!(open::<LinkState>("other", &blob).is_err());
     }
 }
