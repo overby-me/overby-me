@@ -41,9 +41,13 @@ struct Settings {
     drawdot: bool,
     circles: bool,
     showspeed: bool,
-    colors: bool,
+    /// Random per-segment colors (pysim's "Colors" toggle). When off, the trace
+    /// uses the fixed `color`.
+    rainbow: bool,
     antialiasing: bool,
     sandbox: bool,
+    /// Base trace color (`#rrggbb`), used when `colors` is off.
+    color: String,
 }
 
 impl Default for Settings {
@@ -64,9 +68,10 @@ impl Default for Settings {
             drawdot: true,
             circles: true,
             showspeed: false,
-            colors: false,
+            rainbow: false,
             antialiasing: true,
             sandbox: false,
+            color: "#ff0000".to_string(),
         }
     }
 }
@@ -77,6 +82,97 @@ impl Settings {
     /// on any slider drag; we keep the drawing when only speed/width change).
     fn geometry(&self) -> (f64, f64, f64, f64) {
         (self.r1, self.w1, self.r2, self.w2)
+    }
+
+    /// Serialize to a shareable query string (no leading `?`).
+    fn to_query(&self) -> String {
+        let b = |v: bool| if v { "1" } else { "0" };
+        format!(
+            "r1={}&w1={}&r2={}&w2={}&time={}&cal={}&lw={}&draw={}&clean={}&dot={}&circ={}&speed={}&rand={}&aa={}&sb={}&color={}",
+            self.r1,
+            self.w1,
+            self.r2,
+            self.w2,
+            self.time,
+            self.calrate,
+            self.linewidth,
+            b(self.draw),
+            b(self.clean),
+            b(self.drawdot),
+            b(self.circles),
+            b(self.showspeed),
+            b(self.rainbow),
+            b(self.antialiasing),
+            b(self.sandbox),
+            self.color.trim_start_matches('#'),
+        )
+    }
+
+    /// Read the current page URL's query string, falling back to defaults for
+    /// any parameter that is missing or malformed. This is what makes a link
+    /// like `/cardioid?r1=140&w1=1&...` reproduce a shared configuration.
+    fn from_url() -> Self {
+        let mut s = Self::default();
+        let Some(params) = web_sys::window()
+            .and_then(|w| w.location().search().ok())
+            .and_then(|q| web_sys::UrlSearchParams::new_with_str(&q).ok())
+        else {
+            return s;
+        };
+        let num = |k: &str| params.get(k).and_then(|v| v.parse::<f64>().ok());
+        let flag = |k: &str| params.get(k).map(|v| v == "1" || v == "true");
+        if let Some(v) = num("r1") {
+            s.r1 = v;
+        }
+        if let Some(v) = num("w1") {
+            s.w1 = v;
+        }
+        if let Some(v) = num("r2") {
+            s.r2 = v;
+        }
+        if let Some(v) = num("w2") {
+            s.w2 = v;
+        }
+        if let Some(v) = num("time") {
+            s.time = v;
+        }
+        if let Some(v) = num("cal") {
+            s.calrate = v;
+        }
+        if let Some(v) = num("lw") {
+            s.linewidth = v;
+        }
+        if let Some(v) = flag("draw") {
+            s.draw = v;
+        }
+        if let Some(v) = flag("clean") {
+            s.clean = v;
+        }
+        if let Some(v) = flag("dot") {
+            s.drawdot = v;
+        }
+        if let Some(v) = flag("circ") {
+            s.circles = v;
+        }
+        if let Some(v) = flag("speed") {
+            s.showspeed = v;
+        }
+        if let Some(v) = flag("rand") {
+            s.rainbow = v;
+        }
+        if let Some(v) = flag("aa") {
+            s.antialiasing = v;
+        }
+        if let Some(v) = flag("sb") {
+            s.sandbox = v;
+        }
+        if let Some(c) = params.get("color") {
+            let c = c.trim_start_matches('#');
+            if c.len() == 6 && c.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                s.color = format!("#{c}");
+            }
+        }
+        s
     }
 }
 
@@ -123,9 +219,9 @@ impl Sim {
 
         // One color for the whole frame lets the common (non-random) case batch
         // every sub-step into a single stroked path.
-        let batched = !s.colors;
+        let batched = !s.rainbow;
         if batched {
-            self.trace.set_stroke_style_str("red");
+            self.trace.set_stroke_style_str(&s.color);
             self.trace.set_line_width(s.linewidth);
             self.trace.begin_path();
             if let Some((lx, ly)) = self.last {
@@ -207,23 +303,10 @@ impl Sim {
             fill_circle(ctx, px, py, DOT_R);
         }
 
-        // Scale bar: a 100px reference labelled in millimetres.
-        ctx.set_fill_style_str("#ffffff");
-        ctx.set_stroke_style_str("#ffffff");
-        ctx.set_line_width(1.0);
-        ctx.set_font("20px 'Space Grotesk', system-ui, sans-serif");
-        ctx.set_text_baseline("top");
-        ctx.set_text_align("center");
-        let _ = ctx.fill_text(
-            &format!("{:.1}mm", 100.0 / PIXELS_PER_METER * 1000.0),
-            70.0,
-            self.h - 62.0,
-        );
-        draw_line(ctx, 20.0, self.h - 40.0, 120.0, self.h - 40.0);
-        draw_line(ctx, 20.0, self.h - 44.0, 20.0, self.h - 36.0);
-        draw_line(ctx, 120.0, self.h - 44.0, 120.0, self.h - 36.0);
-
         if s.showspeed {
+            ctx.set_fill_style_str("#ffffff");
+            ctx.set_font("20px 'Space Grotesk', system-ui, sans-serif");
+            ctx.set_text_baseline("top");
             ctx.set_text_align("right");
             let mm_s = self.speed / PIXELS_PER_METER * 1000.0;
             let _ = ctx.fill_text(
@@ -307,7 +390,8 @@ fn start_animation_loop(sim: Rc<RefCell<Sim>>) {
 
 #[component]
 pub fn Cardioid() -> Element {
-    let mut settings = use_signal(Settings::default);
+    // Seed from the URL so a shared link reproduces the exact configuration.
+    let mut settings = use_signal(Settings::from_url);
     let state: Signal<Option<Rc<RefCell<Sim>>>> = use_signal(|| None);
 
     // Push setting changes into the running simulation, clearing the trace when
@@ -321,6 +405,15 @@ pub fn Cardioid() -> Element {
             if shape_changed {
                 sim.reset_trace();
             }
+        }
+    });
+
+    // Mirror the live settings into the URL query (via replaceState, so the
+    // canvas is not remounted) — the address bar always holds a shareable link.
+    use_effect(move || {
+        let query = settings.read().to_query();
+        if let Some(history) = web_sys::window().and_then(|w| w.history().ok()) {
+            let _ = history.replace_state_with_url(&JsValue::NULL, "", Some(&format!("?{query}")));
         }
     });
 
@@ -427,6 +520,18 @@ pub fn Cardioid() -> Element {
                 Slider { label: "Line width", min: "1", max: "10", step: "1",
                     value: s.linewidth, decimals: 0, oninput: move |v| settings.write().linewidth = v }
 
+                // Trace color (used when the random "Colors" toggle is off).
+                div {
+                    style: "display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0 2px;font-size:12px;color:#bbb;",
+                    span { "Trace color" }
+                    input {
+                        r#type: "color",
+                        value: "{s.color}",
+                        style: "width:46px;height:26px;border:none;background:none;cursor:pointer;padding:0;",
+                        oninput: move |e| settings.write().color = e.value(),
+                    }
+                }
+
                 div {
                     style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;",
                     for (name , on) in [
@@ -435,7 +540,7 @@ pub fn Cardioid() -> Element {
                         ("Dot", s.drawdot),
                         ("Circles", s.circles),
                         ("Speed", s.showspeed),
-                        ("Colors", s.colors),
+                        ("Rainbow", s.rainbow),
                         ("Antialias", s.antialiasing),
                         ("Sandbox", s.sandbox),
                     ] {
@@ -450,7 +555,7 @@ pub fn Cardioid() -> Element {
                                     "Dot" => w.drawdot = !w.drawdot,
                                     "Circles" => w.circles = !w.circles,
                                     "Speed" => w.showspeed = !w.showspeed,
-                                    "Colors" => w.colors = !w.colors,
+                                    "Rainbow" => w.rainbow = !w.rainbow,
                                     "Antialias" => w.antialiasing = !w.antialiasing,
                                     "Sandbox" => w.sandbox = !w.sandbox,
                                     _ => {}
@@ -461,18 +566,27 @@ pub fn Cardioid() -> Element {
                     }
                 }
 
-                button {
-                    style: "margin-top:12px;width:100%;padding:6px;border:1px solid #555;\
-                            border-radius:6px;background:#3a2030;color:#ff9dc0;cursor:pointer;\
-                            font:inherit;font-size:13px;",
-                    // Nudging r1 by nothing still triggers the sync effect's
-                    // shape check to false, so clear the trace directly.
-                    onclick: move |_| {
-                        if let Some(sim) = state.read().clone() {
-                            sim.borrow_mut().reset_trace();
-                        }
-                    },
-                    "Clear trace"
+                div {
+                    style: "display:flex;gap:8px;margin-top:12px;",
+                    button {
+                        style: "flex:1;padding:6px;border:1px solid #555;border-radius:6px;\
+                                background:#3a2030;color:#ff9dc0;cursor:pointer;font:inherit;font-size:13px;",
+                        // The trace is off-screen state, not a setting, so wipe it directly.
+                        onclick: move |_| {
+                            if let Some(sim) = state.read().clone() {
+                                sim.borrow_mut().reset_trace();
+                            }
+                        },
+                        "Clear trace"
+                    }
+                    button {
+                        style: "flex:1;padding:6px;border:1px solid #555;border-radius:6px;\
+                                background:#203a30;color:#9dffc0;cursor:pointer;font:inherit;font-size:13px;",
+                        // Restore every parameter to its default; the geometry change
+                        // clears the trace and the URL is rewritten by the sync effect.
+                        onclick: move |_| *settings.write() = Settings::default(),
+                        "Reset"
+                    }
                 }
 
                 a {

@@ -23,6 +23,7 @@ web-sys = { version = "0.3", features = [
   "Element",
   "Event",
   "EventTarget",
+  "History",
   "HtmlCanvasElement",
   "HtmlElement",
   "HtmlImageElement",
