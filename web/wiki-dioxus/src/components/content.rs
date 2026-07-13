@@ -339,8 +339,16 @@ fn SlateBlock(block: serde_json::Value, index: usize) -> Element {
         "list-item" | "li" => rsx! { li { style: "{astyle}", {rendered_children} } },
         "image" => {
             let url = block.get("url").and_then(|u| u.as_str()).unwrap_or("");
-            rsx! {
-                super::widgets::ZoomableImage { src: url.to_string(), alt: "content image".to_string() }
+            // Emoji pasted from Facebook/Messenger arrive as one `image` block each,
+            // pointing at a codepoint-named PNG. Rendered as block images they stack
+            // one-per-line; recover the emoji and render it inline so a run flows with
+            // the text.
+            if let Some(emoji) = emoji_from_image_url(url) {
+                rsx! { span { class: "content-emoji", "{emoji}" } }
+            } else {
+                rsx! {
+                    super::widgets::ZoomableImage { src: url.to_string(), alt: "content image".to_string() }
+                }
             }
         }
         _ => rsx! { p { style: "{astyle}", {rendered_children} } },
@@ -529,6 +537,27 @@ fn is_email(w: &str) -> bool {
     }
 }
 
+/// Recover a Unicode emoji from an emoji-image URL. Editors that paste from
+/// Facebook/Messenger store each emoji as its own `image` block pointing at a
+/// codepoint-named PNG (e.g. `…/emoji.php/v9/…/1fa77.png`, or `1f469_200d_1f467.png`
+/// for ZWJ sequences). Rendered as block images they stack one-per-line, so we turn
+/// them back into the inline emoji character. Returns None for ordinary images: it
+/// only fires when the URL is clearly an emoji one AND every filename segment parses
+/// as a codepoint.
+fn emoji_from_image_url(url: &str) -> Option<String> {
+    if !url.to_ascii_lowercase().contains("emoji") {
+        return None;
+    }
+    let file = url.rsplit('/').next()?;
+    let stem = file.split(['.', '?', '#']).next()?;
+    let mut emoji = String::new();
+    for part in stem.split(['_', '-']) {
+        let cp = u32::from_str_radix(part, 16).ok()?;
+        emoji.push(char::from_u32(cp)?);
+    }
+    (!emoji.is_empty()).then_some(emoji)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,6 +569,31 @@ mod tests {
         assert_eq!(heading_anchor(0, "Intro"), "h0-intro");
         assert_eq!(heading_anchor(2, "Intro"), "h2-intro");
         assert_eq!(heading_anchor(1, "  Hello, World!  "), "h1-hello-world");
+    }
+
+    #[test]
+    fn recovers_emoji_from_facebook_image_urls() {
+        // Facebook single-codepoint and ZWJ-sequence emoji images.
+        assert_eq!(
+            emoji_from_image_url(
+                "https://static.xx.fbcdn.net/images/emoji.php/v9/t99/1/16/1fa77.png"
+            )
+            .as_deref(),
+            Some("\u{1fa77}")
+        );
+        assert_eq!(
+            emoji_from_image_url("https://x/emoji.php/v9/x/1f469_200d_1f467.png").as_deref(),
+            Some("\u{1f469}\u{200d}\u{1f467}")
+        );
+        // Ordinary content images are left alone (rendered as images).
+        assert_eq!(
+            emoji_from_image_url("https://cdn.example.com/photo.jpg"),
+            None
+        );
+        assert_eq!(
+            emoji_from_image_url("https://cdn.example.com/emoji-banner.png"),
+            None
+        );
     }
 
     #[test]

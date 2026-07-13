@@ -3416,6 +3416,15 @@ h6,
 	margin: 0 0 1rem;
 }
 
+/* Emoji recovered from pasted emoji-image blocks (see content.rs): inline at text
+   size so a run of them flows with the prose instead of stacking as block images. */
+.content-emoji {
+	display: inline;
+	font-size: 1.15em;
+	line-height: 1;
+	vertical-align: -0.1em;
+}
+
 /* Expressive section headings: heavier, tighter, with a short green-to-magenta
    underline mark that gives each section a bold anchor. */
 .slate-content h2,
