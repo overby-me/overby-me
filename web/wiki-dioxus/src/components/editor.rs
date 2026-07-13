@@ -132,7 +132,7 @@ fn AuthorField(authors: Signal<Vec<graphql::Author>>) -> Element {
                         if evt.key().to_string() == "Enter" {
                             evt.prevent_default();
                             let name = input.read().trim().to_string();
-                            add_author(authors, input, suggestions, graphql::Author { name, node_id: None });
+                            add_author(authors, input, suggestions, graphql::Author { name, node_id: None, avatar_url: String::new() });
                         }
                     },
                 }
@@ -193,6 +193,11 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
             .map(|m| graphql::Author {
                 name: m.label(),
                 node_id: m.node_id.as_ref().map(|u| u.0.clone()),
+                avatar_url: m
+                    .user
+                    .as_ref()
+                    .map(|u| u.avatar_url.clone())
+                    .unwrap_or_default(),
             })
             .filter(|a| !a.name.is_empty())
             .collect::<Vec<_>>()

@@ -7022,6 +7022,7 @@ input nodes_bool_exp {
 	context: nodes_bool_exp
 	contextId: uuid_comparison_exp
 	contextOwners: users_bool_exp
+	content_text: String_comparison_exp
 	createdAt: timestamptz_comparison_exp
 	data: jsonb_comparison_exp
 	delete: Boolean_comparison_exp

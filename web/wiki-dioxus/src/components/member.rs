@@ -239,6 +239,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                             let uname = u.name.clone();
                                             let nid = u.node_id.clone();
                                             let parent = node_id.clone();
+                                            let avatar_url = u.avatar_url.clone();
                                             rsx! {
                                                 button {
                                                     key: "{u.node_id.clone().unwrap_or_default()}",
@@ -262,7 +263,9 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                                             }
                                                         });
                                                     },
-                                                    div { class: "avatar small", span { class: "material-icons", "person" } }
+                                                    div { class: "avatar small",
+                                                        {super::loader::user_avatar(&avatar_url, rsx! { span { class: "material-icons", "person" } })}
+                                                    }
                                                     div { class: "list-item-text",
                                                         div { class: "list-item-primary", "{u.name}" }
                                                     }

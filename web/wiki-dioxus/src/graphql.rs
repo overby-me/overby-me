@@ -425,6 +425,11 @@ pub struct NodesBoolExp {
     pub key: Option<StringComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub name: Option<StringComparisonExp>,
+    // Full-text of the document body (Slate content extracted to plain text by a
+    // Postgres generated column); lets search match inside content, not just the
+    // title. Snake-case in the API (unlike the camelCased columns), so renamed.
+    #[cynic(rename = "content_text", skip_serializing_if = "Option::is_none")]
+    pub content_text: Option<StringComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<UuidComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
@@ -2088,12 +2093,27 @@ pub async fn search_nodes(
         return Ok(vec![]);
     }
 
+    let like = format!("%{query}%");
     let mut filters = vec![
+        // Match the title OR the document body (full-text over the extracted
+        // `content_text`), so search finds terms that appear only inside content.
         NodesBoolExp {
-            name: Some(StringComparisonExp {
-                ilike: Some(format!("%{query}%")),
-                ..Default::default()
-            }),
+            or: Some(vec![
+                NodesBoolExp {
+                    name: Some(StringComparisonExp {
+                        ilike: Some(like.clone()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                NodesBoolExp {
+                    content_text: Some(StringComparisonExp {
+                        ilike: Some(like.clone()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            ]),
             ..Default::default()
         },
         // Exclude orphan/root nodes (no parent), matching React's search.
@@ -2205,6 +2225,9 @@ pub async fn query_recent_nodes(
 pub struct Author {
     pub name: String,
     pub node_id: Option<String>,
+    /// The user's avatar URL (empty for groups / when none). Lets the invite
+    /// autocomplete show the same Bluesky/gravatar picture used elsewhere.
+    pub avatar_url: String,
 }
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -2238,6 +2261,7 @@ pub struct UsersSearchQuery {
 pub struct UserSearchFields {
     pub id: Uuid,
     pub display_name: String,
+    pub avatar_url: String,
 }
 
 /// Search groups and users by name for the author autocomplete (each carries the
@@ -2257,6 +2281,7 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
             out.push(Author {
                 name: n.name,
                 node_id: Some(n.id.0),
+                avatar_url: String::new(),
             });
         }
     }
@@ -2275,6 +2300,7 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
             out.push(Author {
                 name: u.display_name,
                 node_id: Some(u.id.0),
+                avatar_url: u.avatar_url,
             });
         }
     }
@@ -2302,6 +2328,7 @@ pub async fn search_users(access_token: Option<&str>, query: &str) -> Vec<Author
             out.push(Author {
                 name: u.display_name,
                 node_id: Some(u.id.0),
+                avatar_url: u.avatar_url,
             });
         }
     }
