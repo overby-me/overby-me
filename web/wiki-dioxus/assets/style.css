@@ -986,45 +986,21 @@ html {
    level-1 tonal shadow, no outline. Content fades + rises in on mount (an M3
    emphasized-decelerate entrance) so page/list changes feel motionful. */
 .card {
-	/* EXPERIMENT (card-system v2): expressive tonal card with an accent spine.
-	   `position: relative` is SAFE for fixed descendants (only transform/filter/
-	   will-change/contain establish a containing block for position:fixed), so the
-	   FAB / tool sheets / dialogs that render inside cards stay viewport-anchored. */
-	position: relative;
 	background: var(--md-surface-container-low);
-	/* Accent colour for the leading spine + header wash; retinted per card below. */
+	/* Accent colour for the header wash; retinted per card via the accent classes. */
 	--card-accent: var(--md-primary);
 	/* M3 Expressive: extra-large corner radius for a softer, bolder surface. */
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-1);
 	overflow: hidden;
 	margin-bottom: 16px;
-	/* Only shadow/border-radius transition — NEVER transform/opacity on the card
-	   (that would trap the fixed FAB, tool sheets, dialogs and their scrims). */
+	/* Only shadow transition — NEVER transform/opacity on the card (that would trap
+	   the fixed FAB, tool sheets, dialogs and their scrims). */
 	transition: box-shadow var(--md-sys-motion-duration-short4)
 		var(--md-sys-motion-easing-standard);
 }
-/* Expressive accent spine down the leading edge, keyed to --card-accent and
-   clipped by the card's rounding. A soft top-to-bottom fade keeps it from reading
-   as a hard rule. It widens on hover for a tactile response. */
-.card::before {
-	content: "";
-	position: absolute;
-	inset: 0 auto 0 0;
-	width: 4px;
-	background: linear-gradient(
-		to bottom,
-		var(--card-accent),
-		color-mix(in srgb, var(--card-accent) 55%, transparent)
-	);
-	transition: width var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-spring-spatial-default);
-}
 .card:hover {
 	box-shadow: var(--md-sys-elevation-3);
-}
-.card:hover::before {
-	width: 7px;
 }
 
 /* M3 accessibility: honour a reduced-motion preference — drop the entrance and
@@ -3056,8 +3032,8 @@ h6,
 	max-width: min(90vw, 480px);
 }
 
-/* EXPERIMENT (expressive snackbar): a tonal surface with a primary accent spine
-   (the card accent language) and a spring entrance, replacing the dark toast. */
+/* EXPERIMENT (expressive snackbar): a tonal surface with a spring entrance,
+   replacing the dark toast. */
 .snackbar {
 	position: relative;
 	background: var(--md-surface-container-high);
@@ -3066,7 +3042,6 @@ h6,
 	border-radius: var(--md-sys-shape-corner-large);
 	z-index: 300;
 	box-shadow: var(--md-sys-elevation-3);
-	border-left: 4px solid var(--md-primary);
 	font-size: var(--md-sys-typescale-body-medium-size);
 	line-height: var(--md-sys-typescale-body-medium-line);
 	animation: snackbar-in var(--md-sys-motion-duration-medium2)
