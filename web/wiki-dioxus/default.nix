@@ -33,6 +33,7 @@
     dioxus-cli,
     wasm-bindgen-cli,
     binaryen,
+    lld,
     ...
   }:
     rustPlatform.buildRustPackage {
@@ -51,12 +52,22 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      cargoLock = {
+        lockFile = ./Cargo.lock;
+        # The Dioxus component library is pinned to a git rev, so its checkout
+        # needs an explicit FOD hash to vendor reproducibly.
+        outputHashes = {
+          "dioxus-attributes-0.1.0" = "sha256-QjZOGBtnmS+bncNCGpJpuACroUuxy61WA/Sq6P5aUc0=";
+          "dioxus-primitives-0.0.1" = "sha256-QjZOGBtnmS+bncNCGpJpuACroUuxy61WA/Sq6P5aUc0=";
+        };
+      };
 
       nativeBuildInputs = [
         dioxus-cli
         wasm-bindgen-cli
         binaryen
+        # dx links the wasm with lld.
+        lld
       ];
 
       buildPhase = ''
@@ -64,8 +75,17 @@
       '';
 
       installPhase = ''
-        cp -r dist $out
+        cp -r target/dx/wiki-dioxus/release/web/public $out
+        # Serve the service worker from the site ROOT so its scope is `/` (not the
+        # hashed `/assets/` path, whose scope is only `/assets/`). statichost.eu
+        # serves $out at the domain root, so $out/sw.js is reachable at /sw.js and
+        # can control the whole app (/, /wasm/*) for offline use.
+        cp ${./assets/sw.js} $out/sw.js
       '';
+
+      # Unit tests run separately (`just test`); the nix build only produces the
+      # web bundle, and the test fixtures aren't in this package's source set.
+      doCheck = false;
 
       meta.description = "RadikalWiki frontend built with Dioxus + Rust/WASM";
     };

@@ -7,7 +7,12 @@
 use dioxus::prelude::*;
 
 const ICON: Asset = asset!("/assets/icon.svg");
-const SW: Asset = asset!("/assets/sw.js");
+/// The service worker is served from the site ROOT (`/sw.js`) — copied there by
+/// the `wiki-dioxus-frontend` Nix package's install phase — rather than via
+/// `asset!()` (which hashes it under `/assets/`, limiting its scope to
+/// `/assets/`). A worker registered at `/sw.js` gets scope `/` by default, so it
+/// controls the whole app (`/`, `/wasm/*`) for offline use.
+const SW_URL: &str = "/sw.js";
 
 /// Install the PWA head tags (manifest, icons, theme colour) and register the
 /// service worker. Safe to call once at startup, before `launch` (the page's
@@ -47,11 +52,10 @@ pub fn setup() {
         append_meta(&document, &head, "mobile-web-app-capable", "yes");
     }
 
-    // Service worker (offline where it controls the root — see sw.js).
-    let _ = window
-        .navigator()
-        .service_worker()
-        .register(&SW.to_string());
+    // Service worker at the site root, so its scope is `/` and it can serve the
+    // whole app offline after a first online visit (see sw.js). In `dx serve` dev
+    // `/sw.js` isn't present, so registration simply no-ops there.
+    let _ = window.navigator().service_worker().register(SW_URL);
 }
 
 fn append_link(
