@@ -644,7 +644,8 @@ html {
 	left: var(--md-sys-rail-width);
 	width: calc(var(--md-sys-rail-expanded) - var(--md-sys-rail-width));
 	z-index: 55;
-	background: var(--md-surface-container-low);
+	/* Match the rail so the whole left sidebar is one unified chrome colour. */
+	background: var(--md-surface-container);
 	overflow: hidden;
 	transform: translateX(-100%);
 	transition: transform var(--md-sys-motion-duration-medium2)
@@ -811,10 +812,27 @@ html {
 }
 
 /* ── Content / top-bar insets per window-size class ──────────────────── */
+/* EXPERIMENT (unified chrome + content well): on non-compact the whole backdrop
+   is the chrome colour (surface-container), so the rail, top bar and docked tools
+   sheet blend into it seamlessly (no lines). The content becomes a distinct,
+   lighter surface panel floating in that frame with rounded corners. */
+.app-shell:not([data-size-class="compact"]) {
+	background: var(--md-surface-container);
+}
 .app-shell:not([data-size-class="compact"]) .content-pane {
 	margin-left: var(--md-sys-rail-width);
-	transition: margin-left var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-spring-spatial-default);
+	margin-top: 64px;
+	margin-right: var(--md-sys-margin);
+	min-height: calc(100vh - 64px);
+	/* margin-top clears the bar now, so the pane's own top padding is normal. */
+	padding-top: var(--md-sys-margin);
+	background: var(--md-surface);
+	border-radius: var(--md-sys-shape-corner-large);
+	transition:
+		margin-left var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default),
+		margin-right var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default);
 }
 .app-shell:not([data-size-class="compact"]) .top-app-bar {
 	left: var(--md-sys-rail-width);
@@ -835,8 +853,10 @@ html {
 /* A docked tools side sheet (extra-large) reserves the right gutter so the
    centred content column clears it, and nudges the FAB inboard of the pane. */
 .app-shell[data-tools-docked="true"] .content-pane {
-	padding-right: calc(var(--md-sys-tools-width) + var(--md-sys-margin));
-	transition: padding-right var(--md-sys-motion-duration-medium2)
+	/* End the content well at the docked tools sheet's left edge (a rounded corner
+	   there) rather than reserving the gutter as inner padding. */
+	margin-right: var(--md-sys-tools-width);
+	transition: margin-right var(--md-sys-motion-duration-medium2)
 		var(--md-sys-motion-spring-spatial-default);
 }
 /* End the app bar at the docked tools sheet's left edge so the full-height sheet
@@ -2464,7 +2484,6 @@ select:focus {
 	max-height: none;
 	transform: none;
 	border-radius: 0;
-	border-left: 1px solid var(--md-outline-variant);
 	box-shadow: none;
 	background: var(--md-surface-container);
 	/* Below the top app bar (50) and the FAB (120); it is not a modal surface. */
