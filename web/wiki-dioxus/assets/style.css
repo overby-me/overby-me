@@ -965,25 +965,21 @@ html {
 	padding: 4px 10px;
 	text-decoration: none;
 	margin-bottom: 8px;
-	/* EXPERIMENT: a tonal "you are here" pill so the current group/event context
-	   reads as a distinct chip at the top of the drawer. */
+	/* The current-context header now matches the sidebar (no tonal fill) — just a
+	   bolder row on the same surface, with a subtle hover. Overrides the .bar
+	   class's primary fill + shadow that this element also carries. */
 	border-radius: var(--md-sys-shape-corner-large);
-	background: var(--md-secondary-container);
-	color: var(--md-on-secondary-container);
+	background: transparent;
+	box-shadow: none;
+	color: var(--md-on-surface);
 	transition: background-color var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-easing-standard);
 }
 .drawer-context-bar:hover {
-	background: color-mix(
-		in srgb,
-		var(--md-on-secondary-container) 8%,
-		var(--md-secondary-container)
-	);
+	background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
 }
 
 .drawer-context-bar .avatar {
-	background: var(--md-on-primary);
-	color: var(--md-primary);
 	flex-shrink: 0;
 }
 
@@ -991,8 +987,8 @@ html {
 	min-width: 0;
 	font-size: var(--md-sys-typescale-title-medium-size);
 	line-height: var(--md-sys-typescale-title-medium-line);
-	font-weight: 500;
-	color: var(--md-on-primary);
+	font-weight: 600;
+	color: var(--md-on-surface);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
