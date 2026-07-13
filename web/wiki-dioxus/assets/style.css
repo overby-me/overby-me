@@ -3332,6 +3332,14 @@ h6,
 	scrollbar-width: none;
 }
 
+/* The docked search input reuses .breadcrumbs but must read on the light top-app
+   bar surface (not the legacy dark bar), and its placeholder needs a visible,
+   muted colour. */
+.search-field::placeholder {
+	color: var(--md-on-surface-variant);
+	opacity: 1;
+}
+
 .breadcrumbs::-webkit-scrollbar {
 	display: none;
 }

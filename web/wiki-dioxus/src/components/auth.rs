@@ -199,8 +199,9 @@ fn AuthForm(mode: AuthMode) -> Element {
                 // Name field (register only)
                 if mode == AuthMode::Register {
                     div { class: if error_name.read().is_empty() { "text-field" } else { "text-field error" },
-                        label { "{t(\"auth.fullName\")}" }
+                        label { r#for: "auth-fullname", "{t(\"auth.fullName\")}" }
                         input {
+                            id: "auth-fullname",
                             r#type: "text",
                             name: "fullname",
                             value: "{name}",
@@ -220,8 +221,9 @@ fn AuthForm(mode: AuthMode) -> Element {
                 // Email field (not for set-password)
                 if mode != AuthMode::SetPassword {
                     div { class: if error_email.read().is_empty() { "text-field" } else { "text-field error" },
-                        label { "{t(\"auth.email\")}" }
+                        label { r#for: "auth-email", "{t(\"auth.email\")}" }
                         input {
+                            id: "auth-email",
                             r#type: "email",
                             name: "email",
                             autocomplete: "username",
@@ -264,6 +266,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                 if mode != AuthMode::ResetPassword {
                     div { class: if error_password.read().is_empty() { "text-field" } else { "text-field error" },
                         label {
+                            r#for: "auth-password",
                             if mode == AuthMode::SetPassword {
                                 "{t(\"auth.newPassword\")}"
                             } else {
@@ -271,6 +274,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                             }
                         }
                         input {
+                            id: "auth-password",
                             r#type: "password",
                             name: "password",
                             autocomplete: "current-password",
@@ -289,8 +293,9 @@ fn AuthForm(mode: AuthMode) -> Element {
                 // Repeat password (register and set-password)
                 if mode == AuthMode::Register || mode == AuthMode::SetPassword {
                     div { class: if error_password_repeat.read().is_empty() { "text-field" } else { "text-field error" },
-                        label { "{t(\"auth.repeatPassword\")}" }
+                        label { r#for: "auth-password-repeat", "{t(\"auth.repeatPassword\")}" }
                         input {
+                            id: "auth-password-repeat",
                             r#type: "password",
                             name: "password-repeat",
                             value: "{password_repeat}",

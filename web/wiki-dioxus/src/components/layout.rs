@@ -465,9 +465,14 @@ fn SearchBar(
                 }
             }
             input {
-                class: "breadcrumbs",
-                style: "background: transparent; border: none; color: white; outline: none; font-size: 14px; flex: 1; min-width: 0;",
+                class: "breadcrumbs search-field",
+                style: "background: transparent; border: none; color: var(--md-on-surface); outline: none; font-size: 14px; flex: 1; min-width: 0;",
                 placeholder: "{t(\"common.search\")}",
+                aria_label: "{t(\"common.search\")}",
+                role: "combobox",
+                aria_autocomplete: "list",
+                aria_expanded: "{!results.read().is_empty()}",
+                aria_controls: "search-results-list",
                 value: "{input}",
                 oninput: move |evt| {
                     let value = evt.value();
@@ -510,10 +515,16 @@ fn SearchBar(
             }
             // Search results dropdown
             if !results.read().is_empty() {
-                div { class: "search-results",
+                div {
+                    class: "search-results",
+                    id: "search-results-list",
+                    role: "listbox",
+                    aria_label: "{t(\"common.search\")}",
                     for (idx , node) in results.read().iter().enumerate() {
                         div {
                             class: if idx == *selected.read() { "list-item selected" } else { "list-item" },
+                            role: "option",
+                            aria_selected: "{idx == *selected.read()}",
                             key: "{node.id.0}",
                             onclick: {
                                 // A search hit can live anywhere in the tree, so
@@ -1153,10 +1164,17 @@ fn UserMenu() -> Element {
             button {
                 class: "drawer-account-trigger state-layer",
                 aria_label: "{t(\"layout.userMenu\")}",
+                aria_haspopup: "menu",
+                aria_expanded: "{menu_open()}",
                 onclick: move |evt| {
                     evt.stop_propagation();
                     let v = menu_open();
                     menu_open.set(!v);
+                },
+                onkeydown: move |evt| {
+                    if evt.key() == Key::Escape {
+                        menu_open.set(false);
+                    }
                 },
                 if is_auth {
                     span { class: "avatar small secondary",
@@ -1206,6 +1224,7 @@ fn UserMenu() -> Element {
                         span { class: "switch-row-label", "{t(\"layout.darkMode\")}" }
                         Switch {
                             checked: Some(dark),
+                            aria_label: t("layout.darkMode"),
                             on_checked_change: move |on: bool| {
                                 let new_theme = if on { ThemeMode::Dark } else { ThemeMode::Light };
                                 apply_theme(&new_theme);
@@ -1220,6 +1239,7 @@ fn UserMenu() -> Element {
                         span { class: "switch-row-label", "{t(\"layout.compactDensity\")}" }
                         Switch {
                             checked: Some(crate::density::COMPACT_DENSITY()),
+                            aria_label: t("layout.compactDensity"),
                             on_checked_change: move |on: bool| {
                                 crate::density::set_compact(on);
                             },

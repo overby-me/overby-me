@@ -857,7 +857,7 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                                                         selected.set(cur);
                                                         error.set(String::new());
                                                     },
-                                                    RadioItem { value: "{ri}", index: dp }
+                                                    RadioItem { value: "{ri}", index: dp, aria_label: "{option}" }
                                                     div { class: "list-item-text",
                                                         div { class: "list-item-primary", "{option}" }
                                                     }
@@ -885,6 +885,7 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                                                 } else {
                                                     CheckboxState::Unchecked
                                                 }),
+                                                aria_label: "{option}",
                                                 on_checked_change: move |_| apply_toggle(selected, error, ri, false, max_vote),
                                             }
                                             div { class: "list-item-text",
