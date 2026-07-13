@@ -191,6 +191,8 @@ pub struct MemberFields {
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
 #[cynic(schema_path = "graphql/schema.graphql", graphql_type = "users")]
 pub struct UserRef {
+    /// The user's id, used to link to their profile (`/profile/:id`).
+    pub id: Uuid,
     pub display_name: String,
     /// The user's avatar URL (gravatar by default, their Bluesky picture once
     /// linked). Readable via the `user` role's `users` select permission.
@@ -999,7 +1001,7 @@ pub async fn query_members_page(
         "query {{ \
            page: members(where: {w}, order_by: {{ name: asc }}, limit: {limit}, offset: {offset}) {{ \
              id name email accepted active owner hidden nodeId \
-             user {{ displayName avatarUrl }} node {{ mimeId }} \
+             user {{ id displayName avatarUrl }} node {{ mimeId }} \
            }} \
            all: members(where: {w}) {{ id }} \
          }}",
@@ -1066,6 +1068,12 @@ fn parse_member_row(v: &serde_json::Value) -> Option<MemberFields> {
         user: v.get("user").and_then(|u| {
             let display_name = u.get("displayName").and_then(|d| d.as_str())?;
             Some(UserRef {
+                id: Uuid(
+                    u.get("id")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
                 display_name: display_name.to_string(),
                 avatar_url: u
                     .get("avatarUrl")
@@ -2237,6 +2245,8 @@ pub struct Author {
 )]
 pub struct UsersBoolExp {
     #[cynic(skip_serializing_if = "Option::is_none")]
+    pub id: Option<UuidComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<StringComparisonExp>,
 }
 
@@ -2293,6 +2303,7 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
                 ilike: Some(format!("%{query}%")),
                 ..Default::default()
             }),
+            ..Default::default()
         },
     });
     if let Ok(r) = execute(access_token, op).await {
@@ -2320,6 +2331,7 @@ pub async fn search_users(access_token: Option<&str>, query: &str) -> Vec<Author
                 ilike: Some(format!("%{query}%")),
                 ..Default::default()
             }),
+            ..Default::default()
         },
     });
     let mut out = Vec::new();
@@ -2333,6 +2345,28 @@ pub async fn search_users(access_token: Option<&str>, query: &str) -> Vec<Author
         }
     }
     out
+}
+
+/// Fetch a single user's public identity (id + name + avatar) by id, for the
+/// per-user profile page. Only readable when the viewer shares a context with
+/// them (the `users` select permission), so returns None otherwise.
+pub async fn query_user(access_token: Option<&str>, id: &str) -> Option<UserSearchFields> {
+    use cynic::QueryBuilder;
+    let op = UsersSearchQuery::build(UsersSearchVariables {
+        where_clause: UsersBoolExp {
+            id: Some(UuidComparisonExp {
+                eq: Some(Uuid(id.to_string())),
+                is_null: None,
+            }),
+            ..Default::default()
+        },
+    });
+    execute(access_token, op)
+        .await
+        .ok()?
+        .users
+        .into_iter()
+        .next()
 }
 
 /// Invite a known user by node id (binds `nodeId` + `name`), as opposed to the

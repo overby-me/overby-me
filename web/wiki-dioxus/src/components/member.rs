@@ -482,6 +482,8 @@ fn MemberTableRow(
         .as_ref()
         .map(|u| u.avatar_url.clone())
         .unwrap_or_default();
+    let user_id = member.user.as_ref().map(|u| u.id.0.clone());
+    let member_name = member.label();
     // EXPERIMENT: colour-code the status chip by category.
     let status_class = match status_icon {
         "check_circle" => "status-active",
@@ -494,10 +496,16 @@ fn MemberTableRow(
         tr { class: if hidden { "member-row-hidden" } else { "" },
             td {
                 span { class: "m3-cell-icon",
-                    div { class: "avatar small",
-                        {super::loader::user_avatar(&avatar_url, rsx! { span { class: "material-icons", "person" } })}
+                    super::loader::UserPopover {
+                        name: member_name.clone(),
+                        avatar_url: avatar_url.clone(),
+                        user_id: user_id.clone(),
+                        role: Some(status_label.clone()),
+                        div { class: "avatar small",
+                            {super::loader::user_avatar(&avatar_url, rsx! { span { class: "material-icons", "person" } })}
+                        }
                     }
-                    span { "{member.label()}" }
+                    span { "{member_name}" }
                 }
             }
             td { class: "member-email-cell", "{member.email.clone().unwrap_or_default()}" }

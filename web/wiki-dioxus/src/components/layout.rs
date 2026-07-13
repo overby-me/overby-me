@@ -1180,12 +1180,21 @@ fn UserMenu() -> Element {
                     // Signed-in identity header (the old wiki had no user card in
                     // the sidebar; this belongs with the account menu instead).
                     if is_auth {
-                        div { class: "user-menu-header",
-                            span { class: "avatar secondary", "{initial}" }
+                        // The identity card doubles as a shortcut to your profile.
+                        button {
+                            class: "user-menu-header",
+                            onclick: move |_| {
+                                menu_open.set(false);
+                                nav.push(Route::Home { app: Some("profile".to_string()) });
+                            },
+                            span { class: "avatar secondary",
+                                {super::loader::user_avatar(&avatar_url, rsx! { "{initial}" })}
+                            }
                             div { class: "user-menu-identity",
                                 div { class: "user-menu-name", "{display_name}" }
                                 div { class: "user-menu-email", "{email}" }
                             }
+                            span { class: "material-icons user-menu-header-chevron", "chevron_right" }
                         }
                     }
                     // Dark-mode toggle, as an accessible on/off switch (the menu

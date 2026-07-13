@@ -4,6 +4,7 @@ use crate::components::{
     auth::{Login, Register, ResetPassword, SetPassword, Unverified},
     layout::Layout,
     loader::{Home, PathPage},
+    profile::UserProfile,
 };
 
 #[derive(Routable, Clone, Debug, PartialEq)]
@@ -32,6 +33,11 @@ pub enum Route {
 
     #[route("/user/unverified")]
     Unverified {},
+
+    // Another user's public profile, by user id. Listed before the catch-all so
+    // `/profile/<uuid>` resolves here rather than as a node path.
+    #[route("/profile/:id")]
+    UserProfile { id: String },
 
     // `app` carries the `?app=` query (vote/speak/member/editor/sort). Modelling
     // it in the route keeps Dioxus from stripping the query on navigation, so

@@ -4536,6 +4536,48 @@ a.list-item:hover {
 	z-index: 290;
 }
 
+/* User identity popover (loader::UserPopover). The trigger is layout-transparent
+   (display: contents) so wrapping an avatar/name/chip does not disturb layout;
+   the card is a small centred surface, robust regardless of the trigger's spot. */
+.user-pop-trigger {
+	all: unset;
+	display: contents;
+	cursor: pointer;
+}
+
+.user-pop-card {
+	position: fixed;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	z-index: 300;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-width: 240px;
+	max-width: min(320px, 90vw);
+	padding: 16px;
+	background: var(--md-surface-container-high, var(--md-surface));
+	border: 1px solid var(--md-outline-variant, var(--md-outline));
+	border-radius: 16px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.user-pop-head {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.user-pop-name {
+	font-weight: 600;
+}
+
+.user-pop-role {
+	color: var(--md-on-surface-variant);
+	font-size: 0.85em;
+}
+
 /* User menu dropdown */
 .user-menu-dropdown {
 	position: absolute;
@@ -4558,8 +4600,24 @@ a.list-item:hover {
 	align-items: center;
 	gap: 12px;
 	padding: 12px 16px;
+	border: none;
 	border-bottom: 1px solid var(--md-outline-variant);
 	margin-bottom: 4px;
+	width: 100%;
+	background: none;
+	font: inherit;
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.user-menu-header:hover {
+	background: var(--md-surface-container-high);
+}
+
+.user-menu-header-chevron {
+	margin-left: auto;
+	color: var(--md-on-surface-variant);
 }
 
 .user-menu-identity {

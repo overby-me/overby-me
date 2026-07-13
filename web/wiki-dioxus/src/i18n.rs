@@ -352,7 +352,9 @@ const EN_JSON: &str = r#"{
     },
     "profile": {
         "memberships": "Your groups and events",
+        "sharedMemberships": "Groups and events you share",
         "signedInAs": "Signed in as",
+        "viewProfile": "View profile",
         "userId": "User ID",
         "linkBluesky": "Link Bluesky account",
         "linkBlueskyHint": "Connect your Bluesky (atproto) account to this profile.",
@@ -700,7 +702,9 @@ const DA_JSON: &str = r#"{
     },
     "profile": {
         "memberships": "Dine grupper og begivenheder",
+        "sharedMemberships": "Grupper og begivenheder I deler",
         "signedInAs": "Logget ind som",
+        "viewProfile": "Vis profil",
         "userId": "Bruger-ID",
         "linkBluesky": "Forbind Bluesky-konto",
         "linkBlueskyHint": "Forbind din Bluesky (atproto) konto til denne profil.",

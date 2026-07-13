@@ -261,3 +261,89 @@ pub fn ProfileApp() -> Element {
         }
     }
 }
+
+/// A per-user public profile viewed by user id (`/profile/:id`): the person's
+/// name + avatar and the groups/events you share with them. The memberships
+/// query is filtered by what the viewer may see, so it is the intersection —
+/// permission-safe. Distinct from the self-only [`ProfileApp`]; user
+/// representations across the app link here via [`super::loader::UserPopover`].
+#[component]
+pub fn UserProfile(id: String) -> Element {
+    let session = use_session();
+    let access_token = session.read().access_token.clone();
+
+    let uid = id.clone();
+    let tok = access_token.clone();
+    let user_res = crate::use_data_resource!(|(uid, tok)| async move {
+        graphql::query_user(tok.as_deref(), &uid).await
+    });
+
+    let uid2 = id.clone();
+    let tok2 = access_token.clone();
+    let memberships = crate::use_data_resource!(|(uid2, tok2)| async move {
+        let mut out = Vec::new();
+        for mime in ["wiki/group", "wiki/event"] {
+            if let Ok(nodes) = graphql::query_contexts(tok2.as_deref(), &uid2, mime).await {
+                out.extend(nodes);
+            }
+        }
+        out
+    });
+
+    let user = user_res.read().clone().flatten();
+    let name = user
+        .as_ref()
+        .map(|u| u.display_name.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| t("common.unknown"));
+    let avatar_url = user
+        .as_ref()
+        .map(|u| u.avatar_url.clone())
+        .unwrap_or_default();
+    let contexts = memberships.read().clone().unwrap_or_default();
+
+    rsx! {
+        div { class: "card",
+            div { class: "profile-hero",
+                div { class: "profile-hero-avatar",
+                    {user_avatar(&avatar_url, icon_el("wiki/user"))}
+                }
+                div {
+                    h3 { class: "profile-hero-name", "{name}" }
+                    if !contexts.is_empty() {
+                        span { class: "count-badge", "{contexts.len()} · {t(\"profile.memberships\")}" }
+                    }
+                }
+            }
+        }
+        div { class: "card mt-1",
+            div { class: "card-header",
+                h3 { class: "title-medium", "{t(\"profile.sharedMemberships\")}" }
+            }
+            if contexts.is_empty() {
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "groups" }
+                    }
+                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+                }
+            } else {
+                div { class: "list",
+                    for ctx in contexts.iter() {
+                        Link {
+                            key: "{ctx.id.0}",
+                            to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
+                            class: "list-link",
+                            super::widgets::ListItem {
+                                headline: ctx.name.clone(),
+                                leading: rsx! {
+                                    div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

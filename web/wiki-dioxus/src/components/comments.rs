@@ -209,6 +209,9 @@ fn CommentThread(
         .as_ref()
         .map(|o| o.avatar_url.clone())
         .unwrap_or_default();
+    // The comment author's user id (for the identity popover); None for legacy
+    // free-text authors with no linked account.
+    let author_id = comment.owner.as_ref().map(|o| o.id.0.clone());
     let text = comment_text(&comment);
     let when = comment
         .created_at
@@ -221,8 +224,13 @@ fn CommentThread(
     rsx! {
         div { class: "comment", style: "margin-left: {indent}rem;",
             div { class: "comment-main",
-                div { class: "avatar small comment-avatar",
-                    {super::loader::user_avatar(&avatar_url, rsx! { "{initial}" })}
+                super::loader::UserPopover {
+                    name: author.clone(),
+                    avatar_url: avatar_url.clone(),
+                    user_id: author_id.clone(),
+                    div { class: "avatar small comment-avatar",
+                        {super::loader::user_avatar(&avatar_url, rsx! { "{initial}" })}
+                    }
                 }
                 div { class: "comment-body",
                     div { class: "comment-meta",

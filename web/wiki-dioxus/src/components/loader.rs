@@ -378,6 +378,71 @@ pub fn user_avatar(avatar_url: &str, fallback: Element) -> Element {
     }
 }
 
+/// A click-triggered identity popover for any user representation. Wrap the
+/// trigger markup (an avatar, a name, a chip) as `children`; clicking it opens a
+/// small card showing a larger avatar, the display name, an optional role line,
+/// and a "View profile" link (to the signed-in user's own profile when it's
+/// them, otherwise the person's `/profile/:id` page). `user_id = None` hides the
+/// profile link (e.g. a free-text author with no account).
+#[component]
+pub fn UserPopover(
+    name: String,
+    avatar_url: String,
+    user_id: Option<String>,
+    #[props(default)] role: Option<String>,
+    children: Element,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let nav = use_navigator();
+    let session = use_session();
+    let my_id = session.read().user.as_ref().map(|u| u.id.clone());
+    let is_me = user_id.is_some() && user_id == my_id;
+
+    rsx! {
+        button {
+            class: "user-pop-trigger",
+            aria_label: "{name}",
+            onclick: move |e| {
+                e.stop_propagation();
+                let v = open();
+                open.set(!v);
+            },
+            {children}
+        }
+        if open() {
+            div { class: "menu-backdrop", onclick: move |_| open.set(false) }
+            div { class: "user-pop-card",
+                div { class: "user-pop-head",
+                    div { class: "avatar",
+                        {user_avatar(&avatar_url, rsx! { span { class: "material-icons", "person" } })}
+                    }
+                    div {
+                        div { class: "user-pop-name", "{name}" }
+                        if let Some(r) = role.clone() {
+                            div { class: "user-pop-role", "{r}" }
+                        }
+                    }
+                }
+                if let Some(uid) = user_id.clone() {
+                    button {
+                        class: "btn btn-primary btn-full",
+                        onclick: move |_| {
+                            open.set(false);
+                            if is_me {
+                                nav.push(Route::Home { app: Some("profile".to_string()) });
+                            } else {
+                                nav.push(Route::UserProfile { id: uid.clone() });
+                            }
+                        },
+                        span { class: "material-icons", "person" }
+                        " {t(\"profile.viewProfile\")}"
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The mime id that should drive a NODE's icon: for a `wiki/file` it is the
 /// file's own content type (`data.type`) so uploads show format-specific icons
 /// (pdf, Word, Excel, PowerPoint, image, audio, video), mirroring the old wiki's

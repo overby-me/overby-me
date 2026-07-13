@@ -206,6 +206,8 @@ fn RecentItem(node: graphql::ChildNodeFields) -> Element {
         .as_ref()
         .map(|o| o.avatar_url.clone())
         .unwrap_or_default();
+    let owner_id = node.owner.as_ref().map(|o| o.id.0.clone());
+    let author_name = author.clone().unwrap_or_else(|| t("common.unknown"));
     let created = node.created_at.as_ref().map(|t| t.0.clone());
     let parent_name = node.parent.as_ref().map(|p| p.name.clone());
     let mime = node.mime_id.clone().unwrap_or_default();
@@ -230,9 +232,14 @@ fn RecentItem(node: graphql::ChildNodeFields) -> Element {
                 });
             },
             // Author avatar (Bluesky picture when linked, else initials), like a
-            // social post header.
-            div { class: "avatar small recent-avatar",
-                {super::loader::user_avatar(&avatar_url, rsx! { "{initials}" })}
+            // social post header — click for the identity popover.
+            super::loader::UserPopover {
+                name: author_name.clone(),
+                avatar_url: avatar_url.clone(),
+                user_id: owner_id.clone(),
+                div { class: "avatar small recent-avatar",
+                    {super::loader::user_avatar(&avatar_url, rsx! { "{initials}" })}
+                }
             }
             div { class: "recent-body",
                 // Who + when.
