@@ -191,8 +191,9 @@ fn AuthForm(mode: AuthMode) -> Element {
     rsx! {
         div { class: "auth-container",
             form { class: "auth-form", onsubmit: on_submit,
-                div { class: "avatar", span { class: "material-icons", "{icon}" } }
-                h2 { class: "title-large", "{title}" }
+                // EXPERIMENT: a hero icon badge (matching the home/profile heroes).
+                div { class: "auth-hero-icon", span { class: "material-icons", "{icon}" } }
+                h2 { class: "headline-small auth-title", "{title}" }
 
                 // Name field (register only)
                 if mode == AuthMode::Register {
@@ -363,8 +364,8 @@ pub fn Unverified() -> Element {
     rsx! {
         div { class: "auth-container",
             div { class: "auth-form",
-                div { class: "avatar", span { class: "material-icons", "mail" } }
-                h2 { class: "title-large", "{t(\"auth.verifyEmail\")}" }
+                div { class: "auth-hero-icon", span { class: "material-icons", "mail" } }
+                h2 { class: "headline-small auth-title", "{t(\"auth.verifyEmail\")}" }
                 p { class: "body-large", "{t(\"auth.verificationEmailSent\")}" }
                 p { class: "body-large", "{t(\"auth.useToActivate\")}" }
                 p { class: "body-medium", "{t(\"auth.checkSpam\")}" }

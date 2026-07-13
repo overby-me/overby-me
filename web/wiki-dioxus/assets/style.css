@@ -4120,6 +4120,24 @@ h6,
 	align-items: center;
 	gap: 16px;
 }
+/* EXPERIMENT: a hero icon badge for the auth forms (matching home/profile heroes). */
+.auth-hero-icon {
+	width: 72px;
+	height: 72px;
+	display: grid;
+	place-items: center;
+	border-radius: var(--md-sys-shape-corner-extra-large);
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+	box-shadow: var(--md-sys-elevation-2);
+}
+.auth-hero-icon .material-icons {
+	font-size: 36px;
+}
+.auth-title {
+	margin: 0;
+	font-weight: 700;
+}
 
 /* File viewers */
 .file-viewer {
