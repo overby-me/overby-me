@@ -148,6 +148,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                         href: "{file_url}",
                                         target: "_blank",
                                         download: "{name}",
+                                        "referrerpolicy": "no-referrer",
                                         class: "sheet-action",
                                         span { class: "material-icons", "download" }
                                         "{t(\"common.download\")}"
@@ -211,14 +212,15 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                             video {
                                 controls: true,
                                 style: "width: 100%; max-height: 70vh; border-radius: var(--md-sys-shape-corner-large);",
+                                "referrerpolicy": "no-referrer",
                                 src: "{file_url}",
                             }
                         } else if file_mime.starts_with("audio/") {
-                            audio { controls: true, style: "width: 100%;", src: "{file_url}" }
+                            audio { controls: true, style: "width: 100%;", "referrerpolicy": "no-referrer", src: "{file_url}" }
                         } else if file_mime == "application/pdf" {
                             // EXPERIMENT: frame document previews like the map/graph.
                             div { class: "viewport-frame",
-                                iframe { src: "{file_url}", title: "{name}" }
+                                iframe { src: "{file_url}", title: "{name}", "referrerpolicy": "no-referrer" }
                             }
                         } else if is_office_mime(file_mime) {
                             // Preview Word/Excel/PowerPoint via Microsoft's hosted
@@ -246,6 +248,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 a {
                                     href: "{file_url}",
                                     target: "_blank",
+                                    "referrerpolicy": "no-referrer",
                                     class: "btn btn-primary",
                                     span { class: "material-icons", "download" }
                                     " {t(\"common.download\")}"

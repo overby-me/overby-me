@@ -376,6 +376,54 @@ pub fn user_avatar(avatar_url: &str, fallback: Element) -> Element {
     }
 }
 
+/// Fetch a protected nhost file with the session token in the `Authorization`
+/// header (never the URL) and expose it as a `blob:` object URL, so the JWT never
+/// enters the DOM as an `src`/`href` attribute. Empty `file_id` yields None;
+/// the object URL is revoked when the component unmounts.
+pub fn use_file_object_url(file_id: String) -> Option<String> {
+    let session = use_session();
+    let token = session.read().access_token.clone();
+    let mut blob_url = use_signal(|| None::<String>);
+    use_hook(|| {
+        if file_id.is_empty() {
+            return;
+        }
+        spawn(async move {
+            let Some(token) = token else { return };
+            let url = format!("{}/files/{}", crate::nhost::storage_url(), file_id);
+            let Ok(resp) = reqwest::Client::new()
+                .get(&url)
+                .bearer_auth(&token)
+                .send()
+                .await
+            else {
+                return;
+            };
+            if !resp.status().is_success() {
+                return;
+            }
+            let Ok(bytes) = resp.bytes().await else {
+                return;
+            };
+            let arr = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+            arr.copy_from(&bytes);
+            let parts = js_sys::Array::of1(&arr);
+            if let Ok(blob) = web_sys::Blob::new_with_u8_array_sequence(parts.as_ref()) {
+                if let Ok(obj) = web_sys::Url::create_object_url_with_blob(&blob) {
+                    blob_url.set(Some(obj));
+                }
+            }
+        });
+    });
+    use_drop(move || {
+        if let Some(u) = blob_url.peek().clone() {
+            let _ = web_sys::Url::revoke_object_url(&u);
+        }
+    });
+    let current = blob_url.read().clone();
+    current
+}
+
 /// A click-triggered identity popover for any user representation. Wrap the
 /// trigger markup (an avatar, a name, a chip) as `children`; clicking it opens a
 /// small card showing a larger avatar, the display name, an optional role line,

@@ -2,7 +2,6 @@ use dioxus::prelude::*;
 
 use crate::graphql::{self, NodeWithChildren};
 use crate::i18n::t;
-use crate::nhost::storage_url;
 use crate::route::Route;
 use crate::session::use_session;
 
@@ -60,16 +59,16 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
         .unwrap_or_else(|| node.id.0.clone());
 
     // Optional inline image (a `data.image` file id), mirroring React's Content.
-    let image_url = data
+    // Fetched with the token in the Authorization header → a blob: URL, so the JWT
+    // never enters an <img src> attribute.
+    let image_file_id = data
         .as_ref()
         .and_then(|d| d.get("image"))
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .map(|file_id| {
-            let token = session.read().access_token.clone().unwrap_or_default();
-            format!("{}/files/{file_id}?token={token}", storage_url())
-        });
-    let has_image = image_url.is_some();
+        .map(String::from);
+    let has_image = image_file_id.is_some();
+    let image_url = super::loader::use_file_object_url(image_file_id.unwrap_or_default());
 
     rsx! {
         div { class: if has_image { "card has-hero" } else { "card" },
