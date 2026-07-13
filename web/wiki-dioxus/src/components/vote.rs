@@ -1270,6 +1270,25 @@ fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Element {
                                         crate::session::bump_data_version();
                                         open.set(false);
                                         poll_path.push(inserted.key);
+                                        // Best-effort background push to the group's members
+                                        // ("a vote has opened"); the backend gates this on the
+                                        // caller owning the context, so non-owners just no-op.
+                                        if let Some(tok) = token.clone() {
+                                            let ctx = context_id.clone();
+                                            let title = t("vote.pollOpenTitle");
+                                            let body = if name.trim().is_empty() {
+                                                t("vote.pollOpenBody")
+                                            } else {
+                                                name.clone()
+                                            };
+                                            let link = format!("/{}", poll_path.join("/"));
+                                            spawn(async move {
+                                                let _ = crate::nhost::push_notify(
+                                                    &tok, &ctx, &title, &body, &link,
+                                                )
+                                                .await;
+                                            });
+                                        }
                                         nav.push(Route::PathPage {
                                             segments: poll_path,
                                             app: None,

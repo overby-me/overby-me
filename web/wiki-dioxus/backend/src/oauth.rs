@@ -40,6 +40,13 @@ pub struct Config {
     pub doh_resolver: String,
     /// AppView fallback for handle resolution (indexed accounts only).
     pub handle_resolver: String,
+    /// VAPID (RFC 8292) application-server key for Web Push, as its 32-byte P-256
+    /// private scalar (base64url); empty disables push. The matching public key
+    /// (uncompressed point, base64url) is what the browser subscribes with.
+    pub vapid_private: String,
+    pub vapid_public: String,
+    /// VAPID `sub` claim: a `mailto:` or `https:` contact for the push service.
+    pub vapid_subject: String,
 }
 
 impl Config {
@@ -58,6 +65,10 @@ impl Config {
                 .unwrap_or_else(|_| format!("{}/resolve", "https://dns.google")),
             handle_resolver: std::env::var("HANDLE_RESOLVER")
                 .unwrap_or_else(|_| "https://public.api.bsky.app".to_string()),
+            vapid_private: env("VAPID_PRIVATE_KEY"),
+            vapid_public: env("VAPID_PUBLIC_KEY"),
+            vapid_subject: std::env::var("VAPID_SUBJECT")
+                .unwrap_or_else(|_| "mailto:niclasoverby@gmail.com".to_string()),
         }
     }
     pub fn client_id(&self) -> String {

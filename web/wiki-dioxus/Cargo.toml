@@ -70,9 +70,13 @@ web-sys = { version = "=0.3.98", features = [
   "NotificationOptions",
   "NotificationPermission",
   "Performance",
+  "PushManager",
+  "PushSubscription",
+  "PushSubscriptionOptionsInit",
   "Range",
   "Selection",
   "ServiceWorkerContainer",
+  "ServiceWorkerRegistration",
   "Storage",
   "Touch",
   "TouchEvent",
@@ -98,7 +102,7 @@ web = ["dioxus/router", "dioxus/web"]
 [profile.wasm-release]
 inherits = "release"
 opt-level = "s"
-lto = "fat"
-codegen-units = 1
-panic = "abort"
 strip = true
+lto = "fat"
+panic = "abort"
+codegen-units = 1

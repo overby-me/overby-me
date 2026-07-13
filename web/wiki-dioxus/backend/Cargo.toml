@@ -29,6 +29,12 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
 
+# Background Web Push (RFC 8291 message encryption + RFC 8292 VAPID) is hand-rolled
+# on pure-Rust RustCrypto primitives, since the `web-push` crate pulls libcurl/
+# openssl that the minimal rustls container omits: `ecdh` on p256 for the ECDH
+# agreement, `hkdf` for key derivation, and `aes-gcm` for the aes128gcm content
+# encoding. VAPID JWTs reuse the p256 `ecdsa` (ES256) already used for DPoP.
+aes-gcm = "0.10"
 # atproto OAuth (public client, PKCE + DPoP) needs URL-safe base64, SHA-256
 # (PKCE challenge, JWK thumbprint, DPoP `ath`), HMAC (verify the HS256 NHost
 # access token), P-256 ES256 signing (DPoP proofs), a CSRNG, and an AEAD to
@@ -39,7 +45,8 @@ base64 = "0.22"
 # phone's wasm bundle.
 calamine = "0.36"
 chacha20poly1305 = "0.10"
+hkdf = "0.12"
 hmac = "0.12"
-p256 = { version = "0.13", features = ["ecdsa", "jwk"] }
+p256 = { version = "0.13", features = ["ecdh", "ecdsa", "jwk"] }
 rand = "0.8"
 sha2 = "0.10"

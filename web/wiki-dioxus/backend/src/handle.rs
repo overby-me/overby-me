@@ -18,8 +18,10 @@ use http::StatusCode;
 
 mod dpop;
 mod nhost;
+mod notify;
 mod oauth;
 mod pkce;
+mod push;
 mod roster;
 mod statecookie;
 mod util;
@@ -70,6 +72,9 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
         "/atproto/post" => oauth::post(&cfg, &client, query, bearer).await,
         "/vote/cast" => vote::cast(&cfg, &client, query, bearer).await,
         "/vote/status" => vote::status(&cfg, &client, query, bearer).await,
+        "/push/subscribe" => notify::subscribe(&cfg, &client, query, bearer).await,
+        "/push/unsubscribe" => notify::unsubscribe(&cfg, &client, query, bearer).await,
+        "/push/notify" => notify::notify(&cfg, &client, query, bearer).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }

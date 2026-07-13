@@ -375,7 +375,14 @@ const EN_JSON: &str = r#"{
         "linkedAs": "Linked as",
         "unlink": "Unlink",
         "unlinkedOk": "Bluesky account unlinked",
-        "unlinkErr": "Could not unlink Bluesky account"
+        "unlinkErr": "Could not unlink Bluesky account",
+        "notifications": "Notifications",
+        "notifyHint": "Get notified on this device when a vote opens in a group you're in, even when the app is closed.",
+        "enableNotify": "Enable notifications",
+        "disableNotify": "Disable notifications",
+        "notifyEnabled": "Notifications enabled on this device",
+        "notifyDisabled": "Notifications disabled",
+        "notifyErr": "Could not enable notifications"
     },
     "program": {
         "empty": "No programme items yet."
@@ -739,7 +746,14 @@ const DA_JSON: &str = r#"{
         "linkedAs": "Forbundet som",
         "unlink": "Fjern forbindelse",
         "unlinkedOk": "Bluesky-forbindelse fjernet",
-        "unlinkErr": "Kunne ikke fjerne Bluesky-forbindelse"
+        "unlinkErr": "Kunne ikke fjerne Bluesky-forbindelse",
+        "notifications": "Notifikationer",
+        "notifyHint": "Bliv notificeret på denne enhed, når en afstemning åbner i en gruppe, du er med i, også når appen er lukket.",
+        "enableNotify": "Slå notifikationer til",
+        "disableNotify": "Slå notifikationer fra",
+        "notifyEnabled": "Notifikationer slået til på denne enhed",
+        "notifyDisabled": "Notifikationer slået fra",
+        "notifyErr": "Kunne ikke slå notifikationer til"
     },
     "program": {
         "empty": "Ingen programpunkter endnu."

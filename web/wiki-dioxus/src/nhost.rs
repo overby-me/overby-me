@@ -169,6 +169,80 @@ pub async fn vote_status(token: &str, poll: &str) -> bool {
     }
 }
 
+/// Register this browser's Web Push subscription with the backend (keyed to the
+/// caller's user + email so a context owner can notify its members).
+pub async fn push_subscribe(
+    token: &str,
+    endpoint: &str,
+    p256dh: &str,
+    auth: &str,
+) -> Result<(), String> {
+    let url = format!("{BACKEND_URL}/push/subscribe");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(token)
+        .query(&[("endpoint", endpoint), ("p256dh", p256dh), ("auth", auth)])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("subscribe failed: {}", resp.status()))
+    }
+}
+
+/// Drop this browser's push subscription from the backend.
+pub async fn push_unsubscribe(token: &str, endpoint: &str) -> Result<(), String> {
+    let url = format!("{BACKEND_URL}/push/unsubscribe");
+    reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(token)
+        .query(&[("endpoint", endpoint)])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Ask the backend to push a notification to the active members of `context`
+/// (only a context owner may). Returns (recipients, sent). Best-effort: errors
+/// are surfaced but never block the action that triggered the notification.
+pub async fn push_notify(
+    token: &str,
+    context: &str,
+    title: &str,
+    body: &str,
+    link: &str,
+) -> Result<(u64, u64), String> {
+    let url = format!("{BACKEND_URL}/push/notify");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(token)
+        .query(&[
+            ("context", context),
+            ("title", title),
+            ("body", body),
+            ("url", link),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if v.get("ok").and_then(|b| b.as_bool()) == Some(true) {
+        Ok((
+            v.get("recipients").and_then(|n| n.as_u64()).unwrap_or(0),
+            v.get("sent").and_then(|n| n.as_u64()).unwrap_or(0),
+        ))
+    } else {
+        Err(v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("notify failed")
+            .to_string())
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct SignInRequest {
     pub email: String,

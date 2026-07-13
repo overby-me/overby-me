@@ -32,6 +32,15 @@ pub fn ProfileApp() -> Element {
         }
     });
 
+    // Background Web Push (#128): whether THIS browser is subscribed (None until
+    // the async check resolves). Declared before the early return for hook order.
+    let mut push_on = use_signal(|| None::<bool>);
+    use_hook(|| {
+        spawn(async move {
+            push_on.set(Some(crate::pwa::push_subscribed().await));
+        });
+    });
+
     // The user's groups + events (same query the home list uses).
     let memberships = crate::use_data_resource!(move || {
         let token = access_token.clone();
@@ -155,6 +164,59 @@ pub fn ProfileApp() -> Element {
                         },
                         span { class: "material-icons", "link" }
                         " {t(\"profile.linkBluesky\")}"
+                    }
+                }
+            }
+        }
+
+        // Background Web Push: opt this device in/out of notifications that arrive
+        // even when the app is closed (e.g. a vote opening in a group you're in).
+        if crate::pwa::push_supported() {
+            div { class: "card",
+                div { class: "card-header",
+                    div { class: "avatar small", span { class: "material-icons", "notifications" } }
+                    h3 { class: "title-medium", "{t(\"profile.notifications\")}" }
+                }
+                div { class: "card-content",
+                    p { class: "body-medium text-muted mb-1", "{t(\"profile.notifyHint\")}" }
+                    {
+                        let on = *push_on.read();
+                        let label = match on {
+                            Some(true) => t("profile.disableNotify"),
+                            _ => t("profile.enableNotify"),
+                        };
+                        rsx! {
+                            button {
+                                class: if on == Some(true) { "btn btn-secondary mt-1" } else { "btn btn-primary mt-1" },
+                                disabled: on.is_none(),
+                                onclick: move |_| {
+                                    let tok = session.read().access_token.clone();
+                                    let currently = (*push_on.read()).unwrap_or(false);
+                                    spawn(async move {
+                                        let Some(tok) = tok else { return };
+                                        if currently {
+                                            let _ = crate::pwa::unsubscribe_push(&tok).await;
+                                            push_on.set(Some(false));
+                                            crate::snackbar::show_snackbar(&t("profile.notifyDisabled"));
+                                        } else {
+                                            match crate::pwa::subscribe_push(&tok).await {
+                                                Ok(()) => {
+                                                    push_on.set(Some(true));
+                                                    crate::snackbar::show_snackbar(&t("profile.notifyEnabled"));
+                                                }
+                                                Err(_) => {
+                                                    crate::snackbar::show_snackbar(&t("profile.notifyErr"));
+                                                }
+                                            }
+                                        }
+                                    });
+                                },
+                                span { class: "material-icons",
+                                    if on == Some(true) { "notifications_off" } else { "notifications_active" }
+                                }
+                                " {label}"
+                            }
+                        }
                     }
                 }
             }
