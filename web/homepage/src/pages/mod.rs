@@ -6,7 +6,7 @@ mod x;
 mod yt;
 
 pub use atproto::AtProto;
-pub use cardioid::Cardioid;
+pub use cardioid::{Cardioid, capture_url_query};
 pub use index::Index;
 pub use search::Search;
 pub use x::X;

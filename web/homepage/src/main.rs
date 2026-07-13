@@ -22,8 +22,8 @@ enum Route {
     X { url: String },
     #[route("/yt?:url")]
     Yt { url: String },
-    #[route("/cardioid?:query")]
-    Cardioid { query: String },
+    #[route("/cardioid")]
+    Cardioid {},
     // Any other single segment is treated as an atproto request: `/@handle`
     // renders that account's platform graph. Kept last so the static routes
     // above take precedence.
@@ -33,6 +33,9 @@ enum Route {
 
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
+    // Snapshot the URL query before the router normalizes it off the location,
+    // so `/cardioid?...` shared links can reproduce the configuration.
+    pages::capture_url_query();
     dioxus::launch(App);
 }
 

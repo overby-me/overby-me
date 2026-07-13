@@ -27,6 +27,24 @@ const DOT_R: f64 = 5.0;
 /// Fixed stroke width for the trace and construction lines.
 const LINE_WIDTH: f64 = 1.0;
 
+thread_local! {
+    /// The page's initial `?query`, snapshotted in `main()` before the Dioxus
+    /// web router normalizes it off `window.location` on load.
+    static INITIAL_QUERY: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Snapshot the URL query string. Must be called from `main()` before
+/// `dioxus::launch`, while a shared link's query is still on the location.
+pub fn capture_url_query() {
+    if let Some(search) = web_sys::window().and_then(|w| w.location().search().ok()) {
+        INITIAL_QUERY.with(|q| *q.borrow_mut() = search);
+    }
+}
+
+fn captured_query() -> String {
+    INITIAL_QUERY.with(|q| q.borrow().clone())
+}
+
 #[derive(Clone, PartialEq)]
 struct Settings {
     r1: f64,
@@ -105,9 +123,8 @@ impl Settings {
     }
 
     /// Parse settings from a URL query string, falling back to defaults for any
-    /// parameter that is missing or malformed. The string comes from the route's
-    /// `?:query` capture, so a shared link like `/cardioid?r1=140&w1=1&...`
-    /// reproduces the configuration (the query survives the router).
+    /// parameter that is missing or malformed, so a shared link like
+    /// `/cardioid?r1=140&w1=1&...` reproduces the configuration.
     fn from_query(query: &str) -> Self {
         let mut s = Self::default();
         let Ok(params) = web_sys::UrlSearchParams::new_with_str(query) else {
@@ -356,10 +373,10 @@ fn start_animation_loop(sim: Rc<RefCell<Sim>>) {
 }
 
 #[component]
-pub fn Cardioid(query: String) -> Element {
-    // Seed from the route's `?:query` capture so a shared link reproduces the
-    // configuration (Dioxus drops query params it isn't told to keep).
-    let mut settings = use_signal(move || Settings::from_query(&query));
+pub fn Cardioid() -> Element {
+    // Seed from the query captured in `main()` before the router ran, so a
+    // shared link reproduces the configuration.
+    let mut settings = use_signal(|| Settings::from_query(&captured_query()));
     let state: Signal<Option<Rc<RefCell<Sim>>>> = use_signal(|| None);
 
     // Push setting changes into the running simulation, clearing the trace when
