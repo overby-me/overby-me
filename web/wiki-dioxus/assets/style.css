@@ -959,19 +959,21 @@ html {
 /* Drawer's Home / current-context entry, styled like the top panel: a green
    bar (.bar) with an inverted avatar (light on green) and an on-primary name. */
 .drawer-context-bar {
-	gap: 8px;
-	/* Match the top panel's height (its 40px icon buttons + 8px padding). */
+	/* Align the avatar (padding-left) and name (gap) with the tree rows below:
+	   their avatars sit at the same x and their names share one text column. */
+	gap: 12px;
 	min-height: 48px;
-	padding: 4px 10px;
+	padding: 8px 12px 12px 20px;
 	text-decoration: none;
 	margin-bottom: 8px;
-	/* The current-context header now matches the sidebar (no tonal fill) — just a
-	   bolder row on the same surface, with a subtle hover. Overrides the .bar
-	   class's primary fill + shadow that this element also carries. */
-	border-radius: var(--md-sys-shape-corner-large);
+	/* The current-context header matches the sidebar (no tonal fill) — a bolder
+	   row on the same surface, divided from the tree list by a separator. Overrides
+	   the .bar class's primary fill, shadow and pill rounding it also carries. */
+	border-radius: 0;
 	background: transparent;
 	box-shadow: none;
 	color: var(--md-on-surface);
+	border-bottom: 1px solid var(--md-outline-variant);
 	transition: background-color var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-easing-standard);
 }
