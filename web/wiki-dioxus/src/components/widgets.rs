@@ -373,6 +373,7 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
                 role: "complementary",
                 "aria-label": "{title}",
                 div { class: "tool-sheet-header",
+                    span { class: "tool-sheet-icon material-icons", "bolt" }
                     h3 { class: "title-medium", "{title}" }
                 }
                 div { class: "tool-sheet-body", {children} }
@@ -391,7 +392,7 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
                 return_focus.set(active_html_element());
                 open.set(true);
             },
-            span { class: "material-icons", "tune" }
+            span { class: "material-icons", "bolt" }
         }
         div {
             class: if open() { "sheet-scrim open" } else { "sheet-scrim" },
@@ -428,6 +429,7 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
             }
             div { class: "tool-sheet-header",
                 div { class: "sheet-handle" }
+                span { class: "tool-sheet-icon material-icons", "bolt" }
                 h3 { class: "title-medium", "{title}" }
                 button {
                     class: "btn-icon state-layer",

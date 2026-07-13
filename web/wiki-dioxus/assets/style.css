@@ -2538,6 +2538,20 @@ select:focus {
 	flex: 1;
 	margin: 0;
 }
+/* EXPERIMENT (Actions sheet identity): a tertiary tonal badge leading the header —
+   matching the FAB's accent — so the sheet reads clearly as an actions surface. */
+.tool-sheet-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-tertiary-container);
+	color: var(--md-on-tertiary-container);
+	font-size: 20px;
+	flex: 0 0 auto;
+}
 .sheet-handle {
 	position: absolute;
 	top: 6px;
