@@ -765,22 +765,49 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
     });
     let eligible_count = (*eligible.read()).unwrap_or(0);
     let turnout_pct = (total_votes * 100).checked_div(eligible_count).unwrap_or(0);
-    // EXPERIMENT: the leading option(s) in the results get a winner highlight.
-    let max_count = counts.iter().copied().max().unwrap_or(0);
+    // The trailing option is always the "Blank" abstention (see StartPollButton /
+    // ballot_order): it is shown as a distinct muted row and excluded from the
+    // winner, and the For/Imod split is computed on the non-blank cast votes.
+    let blank_idx = counts.len().saturating_sub(1);
+    let has_blank = counts.len() > 1;
+    let is_abstention = move |i: usize| i == blank_idx && has_blank;
+    let max_count = counts
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !is_abstention(*i))
+        .map(|(_, c)| *c)
+        .max()
+        .unwrap_or(0);
+    // Ballots that expressed a preference (excludes blanks), the base for the
+    // decisive percentages on a single-choice motion.
+    let cast_votes: usize = counts
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !is_abstention(*i))
+        .map(|(_, c)| *c)
+        .sum();
+    // Multi-select ballots contribute several selections, so "share of ballots"
+    // (count / ballots) is the honest base; single-choice divides by cast votes.
+    let multi_select = max_vote > 1;
 
     let opts = options.clone();
 
     // A single strict maximum is the winner (trophy + verdict); two or more options
     // sharing the top count is a tie — no trophy, shown as "Uafgjort". A tie on a
     // For/Imod motion means it is not carried, which the verdict line makes explicit.
-    let n_at_max = counts.iter().filter(|&&c| c == max_count).count();
+    let n_at_max = counts
+        .iter()
+        .enumerate()
+        .filter(|(i, &c)| !is_abstention(*i) && c == max_count)
+        .count();
     let has_single_winner = show_results && max_count > 0 && n_at_max == 1;
     let is_tie = show_results && max_count > 0 && n_at_max > 1;
     let winning_option = if has_single_winner {
         counts
             .iter()
-            .position(|&c| c == max_count)
-            .and_then(|i| opts.get(i).cloned())
+            .enumerate()
+            .find(|(i, &c)| !is_abstention(*i) && c == max_count)
+            .and_then(|(i, _)| opts.get(i).cloned())
     } else {
         None
     };
@@ -991,21 +1018,31 @@ pub fn PollApp(node: NodeWithChildren) -> Element {
                     div { class: "list",
                         for (i , option) in opts.iter().enumerate() {
                             div {
-                                class: if has_single_winner && counts.get(i).copied().unwrap_or(0) == max_count { "list-item ballot-winner" } else { "list-item" },
+                                class: if is_abstention(i) {
+                                    "list-item ballot-abstention"
+                                } else if has_single_winner && counts.get(i).copied().unwrap_or(0) == max_count {
+                                    "list-item ballot-winner"
+                                } else {
+                                    "list-item"
+                                },
                                 key: "{i}",
                                 div { class: "avatar small", "{i + 1}" }
                                 div { class: "list-item-text",
                                     div { class: "list-item-primary",
                                         "{option}"
-                                        if has_single_winner && counts.get(i).copied().unwrap_or(0) == max_count {
+                                        if has_single_winner && !is_abstention(i) && counts.get(i).copied().unwrap_or(0) == max_count {
                                             span { class: "winner-badge material-icons", "emoji_events" }
                                         }
                                     }
                                     {
                                         if show_results {
                                             let count = counts.get(i).copied().unwrap_or(0);
-                                            let pct = (count * 100).checked_div(total_votes).unwrap_or(0);
-                                            let fraction = count as f64 / total_votes.max(1) as f64;
+                                            // Single-choice non-blank options divide by cast (non-blank)
+                                            // votes so the For/Imod split is decisive; blanks and
+                                            // multi-select ballots divide by the ballot count.
+                                            let base = if multi_select || is_abstention(i) { total_votes } else { cast_votes };
+                                            let pct = (count * 100).checked_div(base).unwrap_or(0);
+                                            let fraction = count as f64 / base.max(1) as f64;
                                             rsx! {
                                                 super::widgets::Bar { fraction }
                                                 div { class: "list-item-secondary", "{count} ({pct}%)" }

@@ -3006,6 +3006,12 @@ select:focus {
 	border-radius: var(--md-sys-shape-corner-medium);
 }
 
+/* The Blank abstention row: muted and never a winner, so the decisive For/Imod
+   split reads clearly. */
+.ballot-abstention {
+	opacity: 0.6;
+}
+
 /* Closed-poll outcome banner (winner / tie / no result) — the headline the room
    reads off the projector when a vote finishes. */
 .ballot-verdict {

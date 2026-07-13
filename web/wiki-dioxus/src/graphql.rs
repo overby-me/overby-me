@@ -1916,6 +1916,8 @@ pub struct PollSummaryFields {
     pub name: String,
     pub data: Option<Jsonb>,
     pub created_at: Option<Timestamptz>,
+    /// Whether the poll is still open (mutable) — drives the admin open/closed badge.
+    pub mutable: bool,
 }
 
 /// Every `vote/poll` in a context, newest first — for the admin results grid.

@@ -111,6 +111,17 @@ fn AdminPollRow(poll: PollSummaryFields) -> Element {
         tr {
             td {
                 span { class: "m3-cell-icon",
+                    // Open (mutable) vs closed poll — the organizer's at-a-glance status.
+                    span {
+                        class: "material-icons",
+                        title: if poll.mutable { "{t(\"speak.open\")}" } else { "{t(\"vote.closed\")}" },
+                        style: if poll.mutable {
+                            "font-size: 18px; color: var(--md-primary);"
+                        } else {
+                            "font-size: 18px; color: var(--md-on-surface-variant);"
+                        },
+                        if poll.mutable { "lock_open" } else { "lock" }
+                    }
                     if hidden {
                         span {
                             class: "material-icons",
