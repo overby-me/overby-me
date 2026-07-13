@@ -239,6 +239,17 @@ a:hover {
 	text-decoration: underline;
 }
 
+/* An inline link that should read as a tappable accent (e.g. a linked Bluesky
+   handle): primary colour with a medium weight and hover underline. */
+.link-accent {
+	color: var(--md-primary);
+	font-weight: 500;
+}
+
+.link-accent:hover {
+	text-decoration: underline;
+}
+
 /* ═══ Layout — adaptive M3 shell ═══
    The navigation rail + top app bar are fixed to the leading / top edges; the
    content pane is inset by their sizes per window-size class (data-size-class on

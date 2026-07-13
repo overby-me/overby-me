@@ -350,7 +350,12 @@ const EN_JSON: &str = r#"{
         "linkBlueskyHint": "Connect your Bluesky (atproto) account to this profile.",
         "blueskyHandle": "Bluesky handle",
         "linkedOk": "Bluesky account linked",
-        "linkedErr": "Could not link Bluesky account"
+        "linkedErr": "Could not link Bluesky account",
+        "blueskyAccount": "Bluesky account",
+        "linkedAs": "Linked as",
+        "unlink": "Unlink",
+        "unlinkedOk": "Bluesky account unlinked",
+        "unlinkErr": "Could not unlink Bluesky account"
     },
     "program": {
         "empty": "No programme items yet."
@@ -685,7 +690,12 @@ const DA_JSON: &str = r#"{
         "linkBlueskyHint": "Forbind din Bluesky (atproto) konto til denne profil.",
         "blueskyHandle": "Bluesky-håndtag",
         "linkedOk": "Bluesky-konto forbundet",
-        "linkedErr": "Kunne ikke forbinde Bluesky-konto"
+        "linkedErr": "Kunne ikke forbinde Bluesky-konto",
+        "blueskyAccount": "Bluesky-konto",
+        "linkedAs": "Forbundet som",
+        "unlink": "Fjern forbindelse",
+        "unlinkedOk": "Bluesky-forbindelse fjernet",
+        "unlinkErr": "Kunne ikke fjerne Bluesky-forbindelse"
     },
     "program": {
         "empty": "Ingen programpunkter endnu."

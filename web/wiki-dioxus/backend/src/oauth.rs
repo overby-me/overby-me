@@ -11,6 +11,7 @@ use crate::statecookie::{self, LinkState, COOKIE_NAME};
 use crate::{nhost, pkce, util};
 use axum::body::Body;
 use axum::response::Response;
+use http::StatusCode;
 use serde_json::Value;
 
 pub const SCOPE: &str = "atproto transition:generic";
@@ -226,6 +227,71 @@ async fn callback_inner(
         &format!("{}/?linked=bluesky", cfg.app_origin),
         &clear_cookie(),
     ))
+}
+
+/// Report whether the caller has a linked atproto account, and if so its handle
+/// and DID. Lets the profile page show "Linked as @handle" without exposing the
+/// custom `user_providers` table to the browser.
+pub async fn status(cfg: &Config, client: &reqwest::Client, query: Option<&str>) -> Response<Body> {
+    match status_inner(cfg, client, query).await {
+        Ok(body) => crate::json(StatusCode::OK, body),
+        Err(e) => {
+            eprintln!("atproto status error: {e}");
+            crate::json(StatusCode::BAD_REQUEST, "{\"linked\":false}".to_string())
+        }
+    }
+}
+
+async fn status_inner(
+    cfg: &Config,
+    client: &reqwest::Client,
+    query: Option<&str>,
+) -> Result<String, String> {
+    let params = util::parse_query(query);
+    let token = params
+        .iter()
+        .find(|(k, _)| k == "token")
+        .map(|(_, v)| v.clone())
+        .ok_or("missing token")?;
+    let uid = nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)?;
+    match nhost::get_atproto_link(client, &cfg.hasura_url, &cfg.admin_secret, &uid).await? {
+        Some((handle, did)) => Ok(serde_json::json!({
+            "linked": true, "handle": handle, "did": did,
+        })
+        .to_string()),
+        None => Ok("{\"linked\":false}".to_string()),
+    }
+}
+
+/// Unlink the caller's atproto account: verify their NHost token, delete the
+/// `user_providers` row, and clear the cached avatar. Returns JSON (CORS-enabled
+/// via `crate::json`) so the profile page can update in place via `fetch`.
+pub async fn unlink(cfg: &Config, client: &reqwest::Client, query: Option<&str>) -> Response<Body> {
+    match unlink_inner(cfg, client, query).await {
+        Ok(()) => crate::json(StatusCode::OK, "{\"ok\":true}".to_string()),
+        Err(e) => {
+            eprintln!("atproto unlink error: {e}");
+            crate::json(StatusCode::BAD_REQUEST, "{\"ok\":false}".to_string())
+        }
+    }
+}
+
+async fn unlink_inner(
+    cfg: &Config,
+    client: &reqwest::Client,
+    query: Option<&str>,
+) -> Result<(), String> {
+    let params = util::parse_query(query);
+    let token = params
+        .iter()
+        .find(|(k, _)| k == "token")
+        .map(|(_, v)| v.clone())
+        .ok_or("missing token")?;
+    let uid = nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)?;
+    nhost::delete_atproto_link(client, &cfg.hasura_url, &cfg.admin_secret, &uid).await?;
+    // Best-effort: clear the cached avatar so the profile falls back to its icon.
+    let _ = nhost::update_user_avatar(client, &cfg.hasura_url, &cfg.admin_secret, &uid, "").await;
+    Ok(())
 }
 
 // --- atproto discovery -----------------------------------------------------

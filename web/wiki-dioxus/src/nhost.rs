@@ -22,6 +22,39 @@ pub fn storage_url() -> String {
 pub const BACKEND_URL: &str =
     "https://wikidioxusd0caa45e-wiki-backend.functions.fnc.fr-par.scw.cloud";
 
+/// The caller's Bluesky (atproto) link status, from the backend `/atproto/status`
+/// endpoint. Defaults to "not linked" so a failed lookup just shows the link form.
+#[derive(Deserialize, Clone, PartialEq, Debug, Default)]
+pub struct AtprotoLink {
+    #[serde(default)]
+    pub linked: bool,
+    #[serde(default)]
+    pub handle: String,
+    #[serde(default)]
+    pub did: String,
+}
+
+/// Ask the backend whether the caller has a linked Bluesky account (and its
+/// handle). Returns "not linked" on any error.
+pub async fn atproto_status(token: &str) -> AtprotoLink {
+    let url = format!("{BACKEND_URL}/atproto/status?token={token}");
+    match reqwest::Client::new().get(url).send().await {
+        Ok(resp) => resp.json::<AtprotoLink>().await.unwrap_or_default(),
+        Err(_) => AtprotoLink::default(),
+    }
+}
+
+/// Unlink the caller's Bluesky account via the backend. Returns true on success.
+pub async fn atproto_unlink(token: &str) -> bool {
+    let url = format!("{BACKEND_URL}/atproto/unlink?token={token}");
+    reqwest::Client::new()
+        .get(url)
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Serialize)]
 pub struct SignInRequest {
     pub email: String,

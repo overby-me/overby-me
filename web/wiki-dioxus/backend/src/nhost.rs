@@ -79,6 +79,75 @@ pub async fn upsert_atproto_link(
     Ok(())
 }
 
+/// Look up the caller's atproto link (handle + DID), if any. Admin query, so the
+/// custom `user_providers` table stays entirely backend-side.
+pub async fn get_atproto_link(
+    client: &reqwest::Client,
+    graphql_url: &str,
+    admin_secret: &str,
+    user_id: &str,
+) -> Result<Option<(String, String)>, String> {
+    let query = "query($uid: uuid!) { user_providers(where: { \
+        user_id: { _eq: $uid }, provider: { _eq: \"atproto\" } }, limit: 1) \
+        { handle provider_id } }";
+    let body = json!({ "query": query, "variables": { "uid": user_id } });
+    let resp = client
+        .post(graphql_url)
+        .header("x-hasura-admin-secret", admin_secret)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let value: Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(errors) = value.get("errors") {
+        return Err(format!("hasura error: {errors}"));
+    }
+    let row = value
+        .get("data")
+        .and_then(|d| d.get("user_providers"))
+        .and_then(|a| a.as_array())
+        .and_then(|a| a.first());
+    Ok(row.map(|r| {
+        let handle = r
+            .get("handle")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let did = r
+            .get("provider_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        (handle, did)
+    }))
+}
+
+/// Remove the atproto link (`provider = atproto`) for a user. Used by the unlink
+/// endpoint; the caller separately clears the cached avatar (best-effort).
+pub async fn delete_atproto_link(
+    client: &reqwest::Client,
+    graphql_url: &str,
+    admin_secret: &str,
+    user_id: &str,
+) -> Result<(), String> {
+    let query = "mutation($uid: uuid!) { \
+        delete_user_providers(where: { user_id: { _eq: $uid }, \
+            provider: { _eq: \"atproto\" } }) { affected_rows } }";
+    let body = json!({ "query": query, "variables": { "uid": user_id } });
+    let resp = client
+        .post(graphql_url)
+        .header("x-hasura-admin-secret", admin_secret)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let value: Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(errors) = value.get("errors") {
+        return Err(format!("hasura error: {errors}"));
+    }
+    Ok(())
+}
+
 /// Set the NHost user's `avatarUrl` so the app can show the linked Bluesky avatar
 /// as the profile picture. Uses the admin secret (nhost's `updateUser` by pk).
 pub async fn update_user_avatar(
