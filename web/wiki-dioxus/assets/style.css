@@ -2352,6 +2352,32 @@ select:focus {
 	background: var(--md-secondary-container);
 	color: var(--md-on-secondary-container);
 }
+/* EXPERIMENT (member status): colour-code the status chip so active / pending /
+   owner read at a glance. */
+.member-status.status-active .chip,
+.member-status.status-active .chip .material-icons {
+	color: var(--md-primary);
+}
+.member-status.status-active .chip {
+	border-color: var(--md-primary);
+	background: color-mix(in srgb, var(--md-primary) 10%, transparent);
+}
+.member-status.status-pending .chip,
+.member-status.status-pending .chip .material-icons {
+	color: var(--md-tertiary);
+}
+.member-status.status-pending .chip {
+	border-color: var(--md-tertiary);
+	background: color-mix(in srgb, var(--md-tertiary) 10%, transparent);
+}
+.member-status.status-owner .chip,
+.member-status.status-owner .chip .material-icons {
+	color: var(--md-secondary);
+}
+.member-status.status-owner .chip {
+	border-color: var(--md-secondary);
+	background: color-mix(in srgb, var(--md-secondary) 10%, transparent);
+}
 .paginated-table-footer {
 	display: flex;
 	align-items: center;

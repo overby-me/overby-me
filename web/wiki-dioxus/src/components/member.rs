@@ -466,6 +466,13 @@ fn MemberTableRow(
     let active = member.active;
     let hidden = member.hidden;
     let (status_icon, status_label) = member_status(&member);
+    // EXPERIMENT: colour-code the status chip by category.
+    let status_class = match status_icon {
+        "check_circle" => "status-active",
+        "mail" => "status-pending",
+        "star" => "status-owner",
+        _ => "",
+    };
 
     rsx! {
         tr { class: if hidden { "member-row-hidden" } else { "" },
@@ -477,7 +484,9 @@ fn MemberTableRow(
             }
             td { class: "member-email-cell", "{member.email.clone().unwrap_or_default()}" }
             td {
-                super::widgets::Chip { icon: status_icon.to_string(), label: status_label }
+                span { class: "member-status {status_class}",
+                    super::widgets::Chip { icon: status_icon.to_string(), label: status_label }
+                }
             }
             if can_manage {
                 td {
