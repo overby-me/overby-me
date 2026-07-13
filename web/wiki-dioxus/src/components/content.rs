@@ -51,6 +51,13 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     // owner may delete; editing also requires the node to still be mutable.
     let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
     let can_edit = can_manage && node.mutable;
+    // The context whose projector (Screen) this node can be pushed to; falls back
+    // to the node itself when it is its own context (a top-level group/event).
+    let node_context = node
+        .context_id
+        .as_ref()
+        .map(|c| c.0.clone())
+        .unwrap_or_else(|| node.id.0.clone());
 
     // Optional inline image (a `data.image` file id), mirroring React's Content.
     let image_url = data
@@ -174,6 +181,30 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         },
                         {icon_el("app/social")}
                         "{t(\"content.shareBluesky\")}"
+                    }
+                }
+                // Owner: put this node on the context's projector (Screen view), so
+                // the chair can walk the agenda and project the current item.
+                if can_manage {
+                    button {
+                        class: "sheet-action",
+                        onclick: {
+                            let target = node_id.clone();
+                            let ctx = node_context.clone();
+                            move |_| {
+                                let target = target.clone();
+                                let ctx = ctx.clone();
+                                let token = session.read().access_token.clone();
+                                spawn(async move {
+                                    match crate::graphql::set_active_relation(token.as_deref(), &ctx, Some(&target)).await {
+                                        Ok(_) => crate::snackbar::show_snackbar(&t("content.projected")),
+                                        Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                    }
+                                });
+                            }
+                        },
+                        span { class: "material-icons", "cast" }
+                        "{t(\"content.projectScreen\")}"
                     }
                 }
                 if can_edit && !segments.is_empty() {

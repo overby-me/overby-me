@@ -180,9 +180,13 @@ fn SpeakList(
                         "{t(\"speak.speakerList\")}"
                     }
                 }
-                if remaining > 0 {
+                if running {
                     div { class: "flex-grow" }
-                    div { class: "chip-timer", title: "{t(\"speak.talk\")}",
+                    // Keep the timer visible at 00:00 with an unmistakable expired
+                    // state, rather than silently vanishing when time is up.
+                    div {
+                        class: if remaining == 0 { "chip-timer chip-timer-expired" } else { "chip-timer" },
+                        title: "{t(\"speak.remaining\")}",
                         span { class: "material-icons", style: "font-size: 18px; vertical-align: middle;", "timer" }
                         " {time_string(remaining)}"
                     }
@@ -329,8 +333,41 @@ fn SpeakList(
         // Owner admin panel (#6): open/close the list, clear it, run the timer.
         if is_owner && !screen {
             div { class: "card",
+                div { class: "card-header",
+                    h3 { class: "title-medium", "{t(\"speak.manageSpeakerList\")}" }
+                }
                 div { class: "card-content",
                     div { class: "stack stack-h", style: "gap: 8px; flex-wrap: wrap; align-items: center;",
+                        // Serve the queue: remove the current speaker and re-anchor
+                        // the countdown for the new one, so the projected timer always
+                        // reflects the person actually speaking.
+                        if count > 0 {
+                            button {
+                                class: "btn btn-primary",
+                                onclick: {
+                                    let token = session.read().access_token.clone();
+                                    let list_id = list_id.clone();
+                                    let current = speakers.first().map(|s| s.id.0.clone());
+                                    let limit = *time_box.read();
+                                    move |_| {
+                                        let del_token = token.clone();
+                                        let current = current.clone();
+                                        spawn(async move {
+                                            if let Some(cur) = current {
+                                                let _ = graphql::delete_node(del_token.as_deref(), &cur).await;
+                                            }
+                                            refresh += 1;
+                                        });
+                                        // Re-anchor the per-turn timer for the next speaker.
+                                        if limit > 0 {
+                                            move_timer(token.clone(), list_id.clone(), limit, refresh);
+                                        }
+                                    }
+                                },
+                                span { class: "material-icons", "skip_next" }
+                                " {t(\"speak.nextSpeaker\")}"
+                            }
+                        }
                         button {
                             class: "btn btn-secondary",
                             onclick: {

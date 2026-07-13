@@ -3832,6 +3832,26 @@ h6,
 	white-space: nowrap;
 }
 
+/* Time is up: an unmistakable red pill (with a gentle pulse) so the chair and
+   the speaker both see the limit was reached, instead of the timer vanishing. */
+.chip-timer-expired {
+	background: var(--md-sys-color-error, #ba1a1a);
+	color: var(--md-sys-color-on-error, #fff);
+	animation: chip-timer-pulse 1s ease-in-out infinite;
+}
+
+@keyframes chip-timer-pulse {
+	50% {
+		opacity: 0.6;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chip-timer-expired {
+		animation: none;
+	}
+}
+
 /* Programme / agenda timeline (#60). */
 .program-timeline {
 	padding: 8px 0;
