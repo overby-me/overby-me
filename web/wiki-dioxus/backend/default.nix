@@ -16,7 +16,8 @@
 
     packages = with pkgs; [
       openssl
-      #scaleway-cli
+      # `scw`, used by `just deploy` to ship the backend to Scaleway Functions.
+      scaleway-cli
     ];
   };
 }

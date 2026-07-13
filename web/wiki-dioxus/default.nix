@@ -1,4 +1,8 @@
 {
+  imports = [
+    ./backend
+  ];
+
   devShells.wiki-dioxus = pkgs: let
     inherit (pkgs) lib stdenv;
   in {
