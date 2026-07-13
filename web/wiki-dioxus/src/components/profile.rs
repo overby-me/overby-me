@@ -48,8 +48,12 @@ pub fn UserApp(node: NodeWithChildren) -> Element {
                 h3 { class: "title-medium", "{t(\"profile.memberships\")}" }
             }
             if contexts.is_empty() {
-                div { class: "card-content",
-                    p { class: "body-medium", class: "text-muted", "{t(\"common.noContent\")}" }
+                // EXPERIMENT: orb empty state for a user with no memberships.
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "groups" }
+                    }
+                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
                 }
             } else {
                 div { class: "list",
