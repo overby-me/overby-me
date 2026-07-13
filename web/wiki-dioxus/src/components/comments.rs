@@ -82,9 +82,12 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                     }
                 }
                 if list.is_empty() {
-                    p { class: "body-medium comment-empty",
-                        class: "text-muted",
-                        "{t(\"vote.noComments\")}"
+                    // EXPERIMENT: a compact characterful empty state (floating orb).
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "forum" }
+                        }
+                        p { class: "empty-state-body", "{t(\"vote.noComments\")}" }
                     }
                 } else {
                     div { class: "comment-thread-list",
