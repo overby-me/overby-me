@@ -195,6 +195,14 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                 // Invite input (owner action, mirroring React InvitesFab).
                 if can_manage {
                     div { class: "card",
+                        // EXPERIMENT: give the invite card a header identity like the
+                        // other cards (it was headerless).
+                        div { class: "card-header",
+                            div { class: "avatar small",
+                                span { class: "material-icons", "person_add" }
+                            }
+                            h3 { class: "title-medium", "{t(\"invite.invite\")}" }
+                        }
                         div { class: "card-content",
                             div { class: "text-field",
                                 label { "{t(\"invite.nameOrEmail\")}" }
