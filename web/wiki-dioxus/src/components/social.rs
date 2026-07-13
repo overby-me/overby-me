@@ -61,20 +61,24 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
                 }
             },
             Some(Ok(_)) => rsx! {
+                // EXPERIMENT: orb empty state for a search with no results.
                 div { class: "card",
-                    div { class: "card-content",
-                        p {
-                            class: "body-medium",
-                            class: "text-muted",
-                            "{t(\"social.empty\")}"
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "search_off" }
                         }
+                        p { class: "empty-state-body", "{t(\"social.empty\")}" }
                     }
                 }
             },
             Some(Err(e)) => rsx! {
-                div { class: "card",
-                    div { class: "card-content",
-                        p { class: "body-medium", "{t(\"error.somethingWentWrong\")}" }
+                // EXPERIMENT: expressive error state (error-tinted orb).
+                div { class: "card accent-error",
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm error-orb",
+                            span { class: "material-icons", "error_outline" }
+                        }
+                        h3 { class: "empty-state-title", "{t(\"error.somethingWentWrong\")}" }
                         pre { class: "error-fallback", "{e}" }
                     }
                 }

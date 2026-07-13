@@ -42,12 +42,12 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
     if lists.is_empty() {
         return rsx! {
             div { class: "card",
-                div { class: "card-content",
-                    p {
-                        class: "body-medium",
-                        class: "text-muted",
-                        "{t(\"speak.emptyList\")}"
+                // EXPERIMENT: orb empty state instead of a plain muted line.
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "record_voice_over" }
                     }
+                    p { class: "empty-state-body", "{t(\"speak.emptyList\")}" }
                 }
             }
         };
@@ -189,12 +189,12 @@ fn SpeakList(
             }
 
             if speakers.is_empty() {
-                div { class: "card-content",
-                    p {
-                        class: "body-medium",
-                        class: "text-muted",
-                        "{t(\"speak.emptyList\")}"
+                // EXPERIMENT: orb empty state for an empty speaker queue.
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "record_voice_over" }
                     }
+                    p { class: "empty-state-body", "{t(\"speak.emptyList\")}" }
                 }
             } else {
                 div { class: if screen { "list speak-projector" } else { "list" },
