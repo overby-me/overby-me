@@ -47,6 +47,10 @@ disabled_rules = [
   "rust_mod_rs_catchall",
   # `create_buffer` mirrors the WebGL call it wraps.
   "generic_name",
+  # The cardioid page's `Settings` is a flat bag of simulation parameters
+  # (radii, angular velocities, toggles) mirroring pysim's `settings` dict.
+  # These values are inherently primitive and gain nothing from newtypes.
+  "rust_domain_raw_primitive",
 
   # ── Performance heuristics that don't apply ───────────────────────────
   # The force simulation and renderer iterate node/link arrays accessing
