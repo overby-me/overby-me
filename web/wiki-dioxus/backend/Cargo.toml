@@ -3,16 +3,31 @@ name = "wiki-backend"
 version = "0.1.0"
 edition = "2021"
 
-# Scaleway serverless function: the runtime calls `handle(req) -> response`.
+# The request handler `handle(req) -> response` lives in the lib; the binary
+# (src/main.rs) serves it over HTTP on $PORT as a Serverless Container.
 [lib]
 path = "src/handle.rs"
+
+[[bin]]
+name = "wiki-backend"
+path = "src/main.rs"
 
 [dependencies]
 axum = "0.8.6"
 http = "1.3.1"
-reqwest = { version = "0.12.24", features = ["json"] }
+# rustls-tls (not the default native-tls/openssl): self-contained TLS with the CA
+# roots compiled in (webpki-roots), so the minimal container image needs no system
+# libssl and no ca-certificates for outbound HTTPS.
+reqwest = { version = "0.12.24", default-features = false, features = [
+  "charset",
+  "http2",
+  "json",
+  "rustls-tls"
+] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
 
 # atproto OAuth (public client, PKCE + DPoP) needs URL-safe base64, SHA-256
 # (PKCE challenge, JWK thumbprint, DPoP `ath`), HMAC (verify the HS256 NHost

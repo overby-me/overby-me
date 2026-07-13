@@ -26,10 +26,18 @@ mod util;
 pub async fn handle(req: Request<Body>) -> Response<Body> {
     let cfg = oauth::Config::from_env();
     let client = reqwest::Client::new();
+    // Extract what the routes need as `&str` (Send) up front — never hold a
+    // `&Request` across an await, since axum's Body is Send but not Sync, which
+    // would make the whole future non-Send and unusable in a threaded server.
+    let query = req.uri().query();
+    let cookie_header = req
+        .headers()
+        .get(http::header::COOKIE)
+        .and_then(|v| v.to_str().ok());
     match req.uri().path() {
         "/atproto/client-metadata.json" => client_metadata(&cfg),
-        "/atproto/start" => oauth::start(&cfg, &client, &req).await,
-        "/atproto/callback" => oauth::callback(&cfg, &client, &req).await,
+        "/atproto/start" => oauth::start(&cfg, &client, query).await,
+        "/atproto/callback" => oauth::callback(&cfg, &client, query, cookie_header).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }

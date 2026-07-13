@@ -1,4 +1,27 @@
-{
+let
+  # The container binary derivation, shared by the `wiki-backend` package and the
+  # OCI image below. An axum HTTP server (src/main.rs) wrapping `handle`.
+  mkBackend = {
+    lib,
+    rustPlatform,
+  }:
+    rustPlatform.buildRustPackage {
+      pname = "wiki-backend";
+      version = "0.1.0";
+      src = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [
+          ./Cargo.toml
+          ./Cargo.lock
+          ./src
+        ];
+      };
+      cargoLock.lockFile = ./Cargo.lock;
+      # Unit tests run in the devshell / CI; the package build just produces the
+      # container binary.
+      doCheck = false;
+    };
+in {
   devenvConfigurations.wiki-backend = {
     pkgs,
     inputs,
@@ -8,16 +31,48 @@
       devenv-root
     ];
 
-    languages = {
-      rust = {
-        enable = true;
-      };
-    };
+    languages.rust.enable = true;
 
     packages = with pkgs; [
       openssl
-      # `scw`, used by `just deploy` to ship the backend to Scaleway Functions.
+      # scw: create/manage the Serverless Container + Container Registry.
       scaleway-cli
+      # skopeo: push the Nix-built OCI image to a registry with no Docker daemon.
+      skopeo
     ];
   };
+
+  # The Serverless Container binary.
+  packages.wiki-backend = {
+    lib,
+    rustPlatform,
+    ...
+  }:
+    mkBackend {inherit lib rustPlatform;};
+
+  # A reproducible OCI image built entirely with Nix (dockerTools), for Scaleway
+  # Serverless Containers. `nix build .#wiki-backend-image` produces a docker-archive
+  # tarball; push it with `skopeo copy docker-archive:result docker://<registry>`.
+  # Build for linux/amd64 — Scaleway Serverless Containers does not support arm64.
+  packages.wiki-backend-image = {
+    lib,
+    rustPlatform,
+    dockerTools,
+    cacert,
+    ...
+  }:
+    dockerTools.buildLayeredImage {
+      name = "wiki-backend";
+      tag = "latest";
+      contents = [cacert];
+      config = {
+        Cmd = ["${mkBackend {inherit lib rustPlatform;}}/bin/wiki-backend"];
+        ExposedPorts = {"8080/tcp" = {};};
+        # The container binds 0.0.0.0:$PORT (see src/main.rs).
+        Env = [
+          "PORT=8080"
+          "SSL_CERT_FILE=${cacert}/etc/ssl/certs/ca-bundle.crt"
+        ];
+      };
+    };
 }

@@ -10,7 +10,6 @@ use crate::dpop::DpopKey;
 use crate::statecookie::{self, LinkState, COOKIE_NAME};
 use crate::{nhost, pkce, util};
 use axum::body::Body;
-use axum::extract::Request;
 use axum::response::Response;
 use serde_json::Value;
 
@@ -55,8 +54,8 @@ impl Config {
     }
 }
 
-pub async fn start(cfg: &Config, client: &reqwest::Client, req: &Request) -> Response<Body> {
-    match start_inner(cfg, client, req).await {
+pub async fn start(cfg: &Config, client: &reqwest::Client, query: Option<&str>) -> Response<Body> {
+    match start_inner(cfg, client, query).await {
         Ok(resp) => resp,
         Err(e) => crate::redirect(&format!("{}/?linked=error", cfg.app_origin), Some(&e)),
     }
@@ -65,9 +64,9 @@ pub async fn start(cfg: &Config, client: &reqwest::Client, req: &Request) -> Res
 async fn start_inner(
     cfg: &Config,
     client: &reqwest::Client,
-    req: &Request,
+    query: Option<&str>,
 ) -> Result<Response<Body>, String> {
-    let params = util::parse_query(req.uri().query());
+    let params = util::parse_query(query);
     let handle = params
         .iter()
         .find(|(k, _)| k == "handle")
@@ -142,8 +141,13 @@ async fn start_inner(
     ))
 }
 
-pub async fn callback(cfg: &Config, client: &reqwest::Client, req: &Request) -> Response<Body> {
-    match callback_inner(cfg, client, req).await {
+pub async fn callback(
+    cfg: &Config,
+    client: &reqwest::Client,
+    query: Option<&str>,
+    cookie_header: Option<&str>,
+) -> Response<Body> {
+    match callback_inner(cfg, client, query, cookie_header).await {
         Ok(resp) => resp,
         Err(e) => crate::redirect(&format!("{}/?linked=error", cfg.app_origin), Some(&e)),
     }
@@ -152,9 +156,10 @@ pub async fn callback(cfg: &Config, client: &reqwest::Client, req: &Request) -> 
 async fn callback_inner(
     cfg: &Config,
     client: &reqwest::Client,
-    req: &Request,
+    query: Option<&str>,
+    cookie_header: Option<&str>,
 ) -> Result<Response<Body>, String> {
-    let params = util::parse_query(req.uri().query());
+    let params = util::parse_query(query);
     let get = |k: &str| {
         params
             .iter()
@@ -167,7 +172,7 @@ async fn callback_inner(
     let code = get("code").ok_or("missing code")?;
     let returned_state = get("state").ok_or("missing state")?;
 
-    let cookie_val = cookie(req, COOKIE_NAME).ok_or("missing link cookie")?;
+    let cookie_val = cookie(cookie_header, COOKIE_NAME).ok_or("missing link cookie")?;
     let state = statecookie::open(&cfg.state_secret, &cookie_val)?;
     if returned_state != state.oauth_state {
         return Err("state mismatch".into());
@@ -422,11 +427,8 @@ async fn dpop_form_post(
 }
 
 /// The value of a named cookie from the `Cookie` header.
-fn cookie(req: &Request, name: &str) -> Option<String> {
-    req.headers()
-        .get(http::header::COOKIE)?
-        .to_str()
-        .ok()?
+fn cookie(header: Option<&str>, name: &str) -> Option<String> {
+    header?
         .split(';')
         .filter_map(|kv| kv.trim().split_once('='))
         .find(|(k, _)| *k == name)
