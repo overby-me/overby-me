@@ -245,7 +245,12 @@ fn RecentItem(node: graphql::ChildNodeFields) -> Element {
                 // Who + when.
                 div { class: "recent-meta",
                     if let Some(a) = author.as_ref() {
-                        span { class: "recent-author", "{a}" }
+                        super::loader::UserPopover {
+                            name: author_name.clone(),
+                            avatar_url: avatar_url.clone(),
+                            user_id: owner_id.clone(),
+                            span { class: "recent-author", "{a}" }
+                        }
                     }
                     if let Some(iso) = created.as_ref() {
                         if author.is_some() {

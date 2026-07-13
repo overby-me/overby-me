@@ -4542,7 +4542,18 @@ a.list-item:hover {
 .user-pop-trigger {
 	all: unset;
 	display: contents;
+}
+
+/* The trigger is display:contents (no box), so cursor + focus ring must land on
+   its child boxes (the avatar / name), not the button itself. */
+.user-pop-trigger > * {
 	cursor: pointer;
+}
+
+.user-pop-trigger:focus-visible > * {
+	outline: 2px solid var(--md-primary);
+	outline-offset: 2px;
+	border-radius: 4px;
 }
 
 .user-pop-card {

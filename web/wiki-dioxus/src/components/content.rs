@@ -232,11 +232,16 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             if !members.is_empty() {
                 div { class: "chip-row", style: "padding: 12px 16px 8px;",
                     for member in members.iter() {
-                        super::widgets::Chip {
+                        super::loader::UserPopover {
                             key: "{member.id.0}",
-                            icon: mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
-                            label: member.label(),
-                            title: t("member.author"),
+                            name: member.label(),
+                            avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()).unwrap_or_default(),
+                            user_id: member.user.as_ref().map(|u| u.id.0.clone()),
+                            super::widgets::Chip {
+                                icon: mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
+                                label: member.label(),
+                                title: t("member.author"),
+                            }
                         }
                     }
                 }

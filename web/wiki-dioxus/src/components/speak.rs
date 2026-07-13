@@ -205,6 +205,14 @@ fn SpeakList(
                         {
                             let speaker_id = speaker.id.0.clone();
                             let name = speaker.name.clone();
+                            // Identity for the popover from the queue entry's owner
+                            // (gated on a non-empty name so the card's name and the
+                            // linked profile always refer to the same person).
+                            let owner = speaker.owner.as_ref().filter(|o| !o.display_name.is_empty());
+                            let owner_id = owner.map(|o| o.id.0.clone());
+                            let owner_avatar = owner.map(|o| o.avatar_url.clone()).unwrap_or_default();
+                            let popover_name =
+                                owner.map(|o| o.display_name.clone()).unwrap_or_else(|| name.clone());
                             let (type_icon , type_key) = speak_type_meta(speaker_type(speaker));
                             let secondary = match i {
                                 0 => t("speak.speakingNow"),
@@ -227,7 +235,12 @@ fn SpeakList(
                                 div { class: "{row_class}", key: "{speaker_id}",
                                     div { class: "avatar small secondary", "{i + 1}" }
                                     div { class: "list-item-text",
-                                        div { class: "list-item-primary", "{name}" }
+                                        super::loader::UserPopover {
+                                            name: popover_name.clone(),
+                                            avatar_url: owner_avatar.clone(),
+                                            user_id: owner_id.clone(),
+                                            div { class: "list-item-primary", "{name}" }
+                                        }
                                         div { class: "list-item-secondary",
                                             span {
                                                 class: "material-icons",

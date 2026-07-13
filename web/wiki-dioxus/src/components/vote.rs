@@ -386,12 +386,16 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string();
-                            let author = q
-                                .owner
-                                .as_ref()
+                            // Treat an owner with a blank display name as free-text
+                            // (no identity), so the shown name and the linked profile
+                            // never diverge; a real free-text author has no owner.
+                            let owner = q.owner.as_ref().filter(|o| !o.display_name.is_empty());
+                            let author = owner
                                 .map(|o| o.display_name.clone())
-                                .filter(|s| !s.is_empty())
                                 .unwrap_or_else(|| q.name.clone());
+                            let author_id = owner.map(|o| o.id.0.clone());
+                            let author_avatar =
+                                owner.map(|o| o.avatar_url.clone()).unwrap_or_default();
                             let can_del =
                                 q.is_owner.unwrap_or(false) || q.is_context_owner.unwrap_or(false);
                             let qid = q.id.0.clone();
@@ -401,7 +405,12 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     div { class: "list-item-text",
                                         div { class: "list-item-primary", "{text}" }
                                         if !author.is_empty() {
-                                            div { class: "list-item-secondary", "{author}" }
+                                            super::loader::UserPopover {
+                                                name: author.clone(),
+                                                avatar_url: author_avatar.clone(),
+                                                user_id: author_id.clone(),
+                                                div { class: "list-item-secondary", "{author}" }
+                                            }
                                         }
                                     }
                                     if can_del {

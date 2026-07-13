@@ -505,7 +505,13 @@ fn MemberTableRow(
                             {super::loader::user_avatar(&avatar_url, rsx! { span { class: "material-icons", "person" } })}
                         }
                     }
-                    span { "{member_name}" }
+                    super::loader::UserPopover {
+                        name: member_name.clone(),
+                        avatar_url: avatar_url.clone(),
+                        user_id: user_id.clone(),
+                        role: Some(status_label.clone()),
+                        span { "{member_name}" }
+                    }
                 }
             }
             td { class: "member-email-cell", "{member.email.clone().unwrap_or_default()}" }

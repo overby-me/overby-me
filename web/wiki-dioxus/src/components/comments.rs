@@ -234,7 +234,12 @@ fn CommentThread(
                 }
                 div { class: "comment-body",
                     div { class: "comment-meta",
-                        span { class: "comment-author", "{author}" }
+                        super::loader::UserPopover {
+                            name: author.clone(),
+                            avatar_url: avatar_url.clone(),
+                            user_id: author_id.clone(),
+                            span { class: "comment-author", "{author}" }
+                        }
                         if !when.is_empty() {
                             span { class: "comment-dot", "·" }
                             span { class: "comment-time", "{when}" }

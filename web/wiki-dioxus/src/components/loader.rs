@@ -402,16 +402,37 @@ pub fn UserPopover(
         button {
             class: "user-pop-trigger",
             aria_label: "{name}",
+            aria_haspopup: "dialog",
+            aria_expanded: "{open()}",
             onclick: move |e| {
                 e.stop_propagation();
                 let v = open();
                 open.set(!v);
             },
+            onkeydown: move |e| {
+                if e.key() == Key::Escape {
+                    open.set(false);
+                }
+            },
             {children}
         }
         if open() {
-            div { class: "menu-backdrop", onclick: move |_| open.set(false) }
-            div { class: "user-pop-card",
+            // Every interactive part stops propagation, so the popover is safe even
+            // when its trigger sits inside a clickable parent (e.g. a recent-item
+            // that navigates): dismissing or tapping "View profile" must not also
+            // fire the ancestor's onclick.
+            div {
+                class: "menu-backdrop",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    open.set(false);
+                },
+            }
+            div {
+                class: "user-pop-card",
+                role: "dialog",
+                aria_modal: "true",
+                onclick: move |e| e.stop_propagation(),
                 div { class: "user-pop-head",
                     div { class: "avatar",
                         {user_avatar(&avatar_url, rsx! { span { class: "material-icons", "person" } })}
@@ -426,7 +447,8 @@ pub fn UserPopover(
                 if let Some(uid) = user_id.clone() {
                     button {
                         class: "btn btn-primary btn-full",
-                        onclick: move |_| {
+                        onclick: move |e| {
+                            e.stop_propagation();
                             open.set(false);
                             if is_me {
                                 nav.push(Route::Home { app: Some("profile".to_string()) });
