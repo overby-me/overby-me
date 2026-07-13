@@ -524,9 +524,12 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                 }
             }
             div { class: "mt-2",
-                // TODO: migrate to the shadcn Select once its trigger shows the
-                // option label (not the raw value) for value != label.
+                // A native <select> (styled to match the editor's) — it renders the
+                // localized option labels correctly, which the dioxus-primitives
+                // Select does not for value != label, so it stays native by choice.
                 select {
+                    class: "editor-select",
+                    "aria-label": t("common.type"),
                     value: "{kind}",
                     onchange: move |e| kind.set(e.value()),
                     option { value: "wiki/document", "{t(\"mime.document\")}" }

@@ -2141,11 +2141,22 @@ pub async fn search_nodes(
         return Ok(vec![]);
     }
 
-    let like = format!("%{query}%");
-    let mut filters = vec![
-        // Match the title OR the document body (full-text over the extracted
-        // `content_text`), so search finds terms that appear only inside content.
-        NodesBoolExp {
+    // Split into terms so a multi-word query matches when the words appear in any
+    // order (each term must be in the title or the body), not only contiguously —
+    // "budget klima" then finds "Klima og budget". Keeps substring (ilike) matching,
+    // which a pure-tsvector switch would lose.
+    let patterns: Vec<String> = {
+        let terms: Vec<&str> = query.split_whitespace().collect();
+        if terms.is_empty() {
+            vec![format!("%{query}%")]
+        } else {
+            terms.iter().map(|t| format!("%{t}%")).collect()
+        }
+    };
+    let mut filters: Vec<NodesBoolExp> = patterns
+        .into_iter()
+        .map(|like| NodesBoolExp {
+            // This term must appear in the title OR the extracted body content_text.
             or: Some(vec![
                 NodesBoolExp {
                     name: Some(StringComparisonExp {
@@ -2156,44 +2167,44 @@ pub async fn search_nodes(
                 },
                 NodesBoolExp {
                     content_text: Some(StringComparisonExp {
-                        ilike: Some(like.clone()),
+                        ilike: Some(like),
                         ..Default::default()
                     }),
                     ..Default::default()
                 },
             ]),
             ..Default::default()
-        },
-        // Exclude orphan/root nodes (no parent), matching React's search.
-        NodesBoolExp {
-            parent_id: Some(UuidComparisonExp {
-                eq: None,
-                is_null: Some(false),
-            }),
-            ..Default::default()
-        },
-        // Hide system/hidden mimes unless they are contexts (groups/events):
-        // `mime.hidden = false OR mime.context = true`.
-        NodesBoolExp {
-            or: Some(vec![
-                NodesBoolExp {
-                    mime: Some(MimesBoolExp {
-                        hidden: Some(BooleanComparisonExp { eq: Some(false) }),
-                        ..Default::default()
-                    }),
+        })
+        .collect();
+    // Exclude orphan/root nodes (no parent), matching React's search.
+    filters.push(NodesBoolExp {
+        parent_id: Some(UuidComparisonExp {
+            eq: None,
+            is_null: Some(false),
+        }),
+        ..Default::default()
+    });
+    // Hide system/hidden mimes unless they are contexts (groups/events):
+    // `mime.hidden = false OR mime.context = true`.
+    filters.push(NodesBoolExp {
+        or: Some(vec![
+            NodesBoolExp {
+                mime: Some(MimesBoolExp {
+                    hidden: Some(BooleanComparisonExp { eq: Some(false) }),
                     ..Default::default()
-                },
-                NodesBoolExp {
-                    mime: Some(MimesBoolExp {
-                        context: Some(BooleanComparisonExp { eq: Some(true) }),
-                        ..Default::default()
-                    }),
+                }),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                mime: Some(MimesBoolExp {
+                    context: Some(BooleanComparisonExp { eq: Some(true) }),
                     ..Default::default()
-                },
-            ]),
-            ..Default::default()
-        },
-    ];
+                }),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    });
     // Scope the search to a single context (group/event) when requested.
     if let Some(ctx) = context_id {
         filters.push(NodesBoolExp {
