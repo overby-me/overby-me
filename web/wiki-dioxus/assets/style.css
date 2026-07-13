@@ -2230,8 +2230,18 @@ select:focus {
 .m3-cell-icon .material-icons {
 	font-size: 20px;
 }
+/* EXPERIMENT (permissions): granted flags become a tonal primary-container badge
+   so grants scan at a glance across the roles x operations grid. */
 .m3-flag-on {
-	color: var(--md-primary);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+	font-size: 18px;
 }
 .m3-flag-off {
 	color: var(--md-on-surface-variant);
