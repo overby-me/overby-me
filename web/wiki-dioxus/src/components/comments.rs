@@ -45,6 +45,22 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     });
     let list = comments.read().clone().unwrap_or_default();
 
+    // Live: refetch when any comment/reply in this context (or, lacking a context,
+    // directly under this node) changes, so new comments and replies appear at
+    // once — and drive the "someone replied to you" notification below.
+    {
+        let filter = match &context_id {
+            Some(ctx) => format!("contextId: {{ _eq: \"{ctx}\" }}"),
+            None => format!("parentId: {{ _eq: \"{node_id}\" }}"),
+        };
+        crate::subscription::use_live(
+            format!(
+                "subscription {{ nodes(where: {{ {filter}, mimeId: {{ _eq: \"vote/comment\" }} }}) {{ id }} }}"
+            ),
+            refresh,
+        );
+    }
+
     // Whether the current user may comment here: gate the composer on the node's
     // `inserts` (allowed child mimes), matching the old wiki's AddCommentButton.
     // Within a context this also governs replies, since comment nodes share the
@@ -121,6 +137,7 @@ fn CommentThread(
     let session = use_session();
     let token = session.read().access_token.clone();
     let is_auth = session.read().is_authenticated();
+    let current_user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let mut replying = use_signal(|| false);
 
     let cid = comment.id.0.clone();
@@ -132,6 +149,50 @@ fn CommentThread(
             .unwrap_or_default()
     });
     let replies = replies_res.read().clone().unwrap_or_default();
+
+    // Notify me when a new reply lands on a comment I wrote — not my own replies,
+    // and not on first load. Only shows if notification permission was granted
+    // (requested when you post a comment). Live comments (see CommentSection)
+    // make this fire in real time.
+    let mut seen_replies = use_signal(|| None::<std::collections::HashSet<String>>);
+    {
+        let mine = current_user_id.is_some()
+            && comment.owner_id.as_ref().map(|o| o.0.clone()) == current_user_id;
+        let snapshot: Vec<(String, bool)> = replies
+            .iter()
+            .map(|r| {
+                let from_other = r.owner_id.as_ref().map(|o| o.0.clone()) != current_user_id;
+                (r.id.0.clone(), from_other)
+            })
+            .collect();
+        let sig = snapshot
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>()
+            .join(",");
+        use_effect(use_reactive!(|(sig, mine, snapshot)| {
+            let _ = &sig;
+            let ids: std::collections::HashSet<String> =
+                snapshot.iter().map(|(id, _)| id.clone()).collect();
+            // Clone out of the signal first so its read guard is released before
+            // we write back below.
+            let previous = seen_replies.peek().clone();
+            match previous {
+                // First load: remember what's here without notifying.
+                None => seen_replies.set(Some(ids)),
+                Some(prev) => {
+                    if mine
+                        && snapshot
+                            .iter()
+                            .any(|(id, other)| *other && !prev.contains(id))
+                    {
+                        crate::pwa::notify(&t("vote.replyNotifyTitle"), &t("vote.replyNotifyBody"));
+                    }
+                    seen_replies.set(Some(ids));
+                }
+            }
+        }));
+    }
 
     let author = if comment.name.trim().is_empty() {
         t("common.unknown")
@@ -235,6 +296,9 @@ fn CommentComposer(
         if body.is_empty() {
             return;
         }
+        // Natural opt-in: if you're joining the conversation, offer to notify you
+        // when someone replies (no-op once the choice has been made).
+        crate::pwa::request_notification_permission();
         let token = session.read().access_token.clone();
         let author = session
             .read()
