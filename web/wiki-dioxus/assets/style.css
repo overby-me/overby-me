@@ -4337,6 +4337,15 @@ a.list-item:hover {
 	margin-bottom: 8px;
 	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
 }
+/* EXPERIMENT (functional): a clear no-results row in the search dropdown. */
+.search-no-results {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	padding: 18px 16px;
+	color: var(--md-on-surface-variant);
+}
 
 @media (min-width: 1200px) {
 	.search-results {

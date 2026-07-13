@@ -549,6 +549,15 @@ fn SearchBar(
                         }
                     }
                 }
+            } else if !input.read().is_empty() {
+                // EXPERIMENT (functional): a clear "no results" state instead of an
+                // empty dropdown when a query matches nothing.
+                div { class: "search-results",
+                    div { class: "search-no-results",
+                        span { class: "material-icons", "search_off" }
+                        span { "{t(\"common.noResults\")}" }
+                    }
+                }
             }
         }
         button {
