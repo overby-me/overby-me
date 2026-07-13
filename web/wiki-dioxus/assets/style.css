@@ -2614,14 +2614,17 @@ select:focus {
 	gap: 10px;
 	align-items: center;
 }
+/* EXPERIMENT (social): a subtle tertiary ring on post avatars + airier text. */
 .post-avatar {
 	width: 40px;
 	height: 40px;
 	border-radius: var(--md-sys-shape-corner-full);
 	object-fit: cover;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-tertiary) 22%, transparent);
 }
 .post-text {
 	white-space: pre-wrap;
+	line-height: 1.55;
 }
 
 /* A <button> that should render as a full-width list row (e.g. an invite
