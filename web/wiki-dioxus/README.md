@@ -85,6 +85,22 @@ with its output captured to see `RadikalWiki starting...` and any wasm traps.
   instantiation. The harness sidesteps it by always signing in *fresh*
   (mount logged-out → submit the form). Tracked in `PLAN.md`.
 
+## Deploy
+
+Two independent pieces against the shared NHost/Hasura backend.
+
+**Backend** (Scaleway Serverless Container `wiki-backend`, fr-par): `just deploy`
+in `backend/`. It provisions `skopeo` + `scaleway-cli` from nixpkgs, builds the
+OCI image with Nix, pushes it to `rg.fr-par.scw.cloud/wiki-dioxus`, redeploys the
+container, and polls until it reports `ready`. Env vars/secrets live on the
+container (managed in the Scaleway console).
+
+**Frontend** (`dev.radikal.wiki`, served by statichost.eu): `just deploy-build`
+builds the Nix bundle (`#wiki-dioxus-frontend` → `index.html` + `assets/` + a
+root `sw.js`) and prints the output dir. The upload to statichost.eu is **manual**
+(credentials are not in the repo) — upload the *contents* of that dir, keeping
+`sw.js` at the served root so its service-worker scope is `/`.
+
 ## Layout
 
 ```text

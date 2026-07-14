@@ -6,6 +6,19 @@ dev:
 build:
     {{dx}} build --release
 
+# Build the deployable frontend bundle (index.html + assets + sw.js at the root)
+# via the Nix package, then print the output dir. The final upload to
+# statichost.eu (dev.radikal.wiki) is manual — see README.md#deploy — since the
+# statichost credentials are not in the repo.
+deploy-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$(git rev-parse --show-toplevel)"
+    out="$(nix build --no-link --print-out-paths "$root#wiki-dioxus-frontend")"
+    echo "frontend bundle: $out"
+    echo "Upload the CONTENTS of that directory to statichost.eu (dev.radikal.wiki),"
+    echo "keeping sw.js at the served root so its scope is '/'."
+
 check:
     cargo check --target wasm32-unknown-unknown
     nu scripts/check-css-spacing.nu
