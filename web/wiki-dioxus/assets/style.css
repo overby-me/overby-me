@@ -4522,6 +4522,36 @@ h6,
 	display: none !important;
 }
 
+/* --- Follow mode: a member's device tracks the room's active node (screen app). */
+.follow-view {
+	max-width: 900px;
+	margin: 0 auto;
+}
+.follow-banner {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: fit-content;
+	margin-bottom: 12px;
+	padding: 6px 14px;
+	border-radius: 999px;
+	font-weight: 600;
+	background: var(--md-sys-color-secondary-container, #d7e3d8);
+	color: var(--md-sys-color-on-secondary-container, #101f13);
+}
+.follow-pulse {
+	animation: follow-pulse 1.6s ease-in-out infinite;
+}
+@keyframes follow-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+
 /* The groups/events list rendered in the Home main pane — mobile only; on desktop
    the always-visible drawer already carries it. Block-level (unlike .mobile-only,
    which is inline-flex for buttons). */

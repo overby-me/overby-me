@@ -64,7 +64,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         div { class: "projector",
             div { class: "projector-hero",
                 match active.clone() {
-                    Some(n) => rsx! { MimeLoader { node: n, path: Vec::new(), projector: true } },
+                    Some(n) => rsx! { MimeLoader { key: "{n.id.0}", node: n, path: Vec::new(), projector: true } },
                     None => rsx! {
                         // EXPERIMENT: an expressive idle state instead of a bare "…".
                         div { class: "card",
@@ -92,6 +92,66 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// FollowApp — a personal-device "follow the room" view (`?app=follow`). Tracks the
+/// context's `active` node (the item the chair projected) live and renders it
+/// INTERACTIVELY, so a member reads the motion or casts a vote as focus moves,
+/// auto-updating without a reload. The device-side mirror of [`ScreenApp`], which
+/// shows the same active node room-facing.
+#[component]
+pub fn FollowApp(node: NodeWithChildren) -> Element {
+    let session = use_session();
+    let access_token = session.read().access_token.clone();
+    let context_id = node
+        .context_id
+        .clone()
+        .map(|c| c.0)
+        .unwrap_or_else(|| node.id.0.clone());
+
+    let refresh = use_signal(|| 0u32);
+    let sub_ctx = crate::graphql::gql_escape(&context_id);
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _eq: \"active\" }} }}) {{ nodeId }} }}"
+        ),
+        refresh,
+    );
+    let rev = *refresh.read();
+
+    let active = crate::use_data_resource!(|(context_id, access_token, rev)| async move {
+        let _ = rev;
+        let id = graphql::active_node_id(access_token.as_deref(), &context_id)
+            .await
+            .ok()
+            .flatten()?;
+        graphql::query_node_by_id(access_token.as_deref(), &id)
+            .await
+            .ok()?
+    });
+    let active = active.read().clone().flatten();
+
+    rsx! {
+        div { class: "follow-view",
+            div { class: "follow-banner",
+                span { class: "material-icons follow-pulse", "sensors" }
+                span { "{crate::i18n::t(\"follow.live\")}" }
+            }
+            match active {
+                Some(n) => rsx! { MimeLoader { key: "{n.id.0}", node: n, path: Vec::new() } },
+                None => rsx! {
+                    div { class: "card",
+                        div { class: "empty-state",
+                            div { class: "empty-state-orb",
+                                span { class: "material-icons", "sensors_off" }
+                            }
+                            p { class: "empty-state-body", "{crate::i18n::t(\"follow.idle\")}" }
+                        }
+                    }
+                },
             }
         }
     }

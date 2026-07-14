@@ -700,6 +700,7 @@ fn app_crumb_label(app: &str) -> String {
         "editor" => t("mime.editor"),
         "sort" => t("mime.sort"),
         "screen" => t("mime.screen"),
+        "follow" => t("mime.follow"),
         other => other.to_string(),
     }
 }
@@ -814,6 +815,18 @@ fn context_apps(route: &Route, is_auth: bool) -> Vec<(&'static str, String, Rout
                 current_app.as_deref() == Some(app),
             ));
         }
+        // Follow the room: a member's device tracks the context's active node
+        // (what the chair projected) and shows it live, to read/vote in step with
+        // the room. Sits after the per-item apps as a live-session destination.
+        apps.push((
+            "app/follow",
+            t("mime.follow"),
+            Route::PathPage {
+                segments: ctx_path.clone(),
+                app: Some("follow".to_string()),
+            },
+            current_app.as_deref() == Some("follow"),
+        ));
         // The other apps (screen, admin, program, graph, social, map, profile,
         // perm, parent) are still reachable via their `?app=` URL but hidden
         // from these nav surfaces until they are ready to show.

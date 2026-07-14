@@ -436,6 +436,10 @@ const EN_JSON: &str = r#"{
         "filterAll": "All",
         "search": "Search members"
     },
+    "follow": {
+        "live": "Following the room, live",
+        "idle": "Nothing is being presented right now."
+    },
     "mime": {
         "group": "Group",
         "event": "Event",
@@ -455,6 +459,7 @@ const EN_JSON: &str = r#"{
         "members": "Members",
         "map": "Map",
         "screen": "Screen",
+        "follow": "Follow",
         "admin": "Results",
         "permissions": "Permissions",
         "graph": "Graph",
@@ -811,6 +816,10 @@ const DA_JSON: &str = r#"{
         "filterAll": "Alle",
         "search": "Søg medlemmer"
     },
+    "follow": {
+        "live": "Følger salen, live",
+        "idle": "Der vises ikke noget lige nu."
+    },
     "mime": {
         "group": "Gruppe",
         "event": "Begivenhed",
@@ -830,6 +839,7 @@ const DA_JSON: &str = r#"{
         "members": "Medlemmer",
         "map": "Kort",
         "screen": "Skærm",
+        "follow": "Følg",
         "admin": "Resultater",
         "permissions": "Tilladelser",
         "graph": "Graf",

@@ -105,6 +105,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
                 Some("editor") => rsx! { EditorApp { node } },
                 Some("sort") => rsx! { SortApp { node } },
                 Some("screen") => rsx! { super::screen::ScreenApp { node } },
+                Some("follow") => rsx! { super::screen::FollowApp { node } },
                 Some("admin") => rsx! { super::admin::AdminApp { node } },
                 Some("perm") => rsx! { super::perm::PermApp { node } },
                 Some("map") => rsx! { super::map::MapApp { node } },
@@ -387,6 +388,7 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "app/sort" => "low_priority",
         "app/vote" => "how_to_vote",
         "app/screen" => "connected_tv",
+        "app/follow" => "sensors",
         "application/pdf" => "picture_as_pdf",
         "app/map" | "map/map" => "map",
         // Apps the old wiki did not have — closest Material icons.
