@@ -5105,6 +5105,12 @@ a.list-item:hover {
 	padding-top: 8px;
 }
 
+/* An optimistic comment/reply awaiting server confirmation: dimmed until the
+   refetch reconciles it (see components/comments.rs). */
+.comment-pending {
+	opacity: 0.55;
+}
+
 /* Magenta thread line for nested replies (the civic discussion accent). */
 .comment .comment {
 	border-left: 2px solid var(--md-tertiary);

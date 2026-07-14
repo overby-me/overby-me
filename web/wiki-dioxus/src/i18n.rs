@@ -278,6 +278,7 @@ const EN_JSON: &str = r#"{
     "vote": {
         "newAmendment": "New Amendment",
         "newComment": "Write a comment…",
+        "sending": "Sending…",
         "comments": "Comments",
         "reply": "Reply",
         "replies": "replies",
@@ -672,6 +673,7 @@ const DA_JSON: &str = r#"{
     "vote": {
         "newAmendment": "Nyt \u00c6ndringsforslag",
         "newComment": "Skriv en kommentar\u2026",
+        "sending": "Sender\u2026",
         "comments": "Kommentarer",
         "reply": "Svar",
         "replies": "svar",

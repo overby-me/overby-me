@@ -23,6 +23,43 @@ fn comment_text(comment: &ChildNodeFields) -> String {
         .to_string()
 }
 
+/// A comment shown optimistically before the server confirms it. Reconciled by
+/// `key`: once the refetch returns a comment with the same key, the pending row is
+/// dropped — no duplicate, no flicker.
+#[derive(Clone, PartialEq)]
+struct PendingComment {
+    key: String,
+    author: String,
+    text: String,
+}
+
+/// An optimistic (not-yet-confirmed) comment row at `depth`, muted with a
+/// "sending" marker.
+#[component]
+fn PendingRow(author: String, text: String, depth: usize) -> Element {
+    let initial = author
+        .chars()
+        .next()
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_default();
+    let indent = depth.min(6) as f32 * 1.5;
+    rsx! {
+        div { class: "comment comment-pending", style: "margin-left: {indent}rem;",
+            div { class: "comment-main",
+                div { class: "avatar small comment-avatar", "{initial}" }
+                div { class: "comment-body",
+                    div { class: "comment-meta",
+                        span { class: "comment-author", "{author}" }
+                        span { class: "comment-dot", "·" }
+                        span { class: "comment-time", "{t(\"vote.sending\")}" }
+                    }
+                    p { class: "comment-text", "{text}" }
+                }
+            }
+        }
+    }
+}
+
 /// The comment section for a post: a composer and the top-level threads.
 #[component]
 pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
@@ -87,6 +124,20 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     });
     let can_comment = (*can_comment_res.read()).unwrap_or(false);
 
+    // Optimistic comments: shown before the server confirms, reconciled by key —
+    // an entry is hidden once the refetch returns a comment with the same key.
+    let pending = use_signal(Vec::<PendingComment>::new);
+    let fetched_keys: std::collections::HashSet<String> = match &state {
+        Some(Ok(list)) => list.iter().map(|c| c.key.clone()).collect(),
+        _ => Default::default(),
+    };
+    let pending_shown: Vec<PendingComment> = pending
+        .read()
+        .iter()
+        .filter(|p| !fetched_keys.contains(&p.key))
+        .cloned()
+        .collect();
+
     rsx! {
         div { class: "card comment-section",
             div { class: "card-header",
@@ -102,8 +153,22 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                         parent_id: node_id.clone(),
                         context_id: context_id.clone(),
                         refresh,
+                        pending,
                         placeholder: t("vote.newComment"),
                         on_posted: move |_| {},
+                    }
+                }
+                // Optimistic rows for top-level comments still in flight.
+                if !pending_shown.is_empty() {
+                    div { class: "comment-thread-list",
+                        for p in pending_shown.iter() {
+                            PendingRow {
+                                key: "{p.key}",
+                                author: p.author.clone(),
+                                text: p.text.clone(),
+                                depth: 0,
+                            }
+                        }
                     }
                 }
                 match &state {
@@ -177,6 +242,16 @@ fn CommentThread(
             .unwrap_or_default()
     });
     let replies = replies_res.read().clone().unwrap_or_default();
+    // Optimistic replies — same reconcile-by-key pattern as top-level comments.
+    let reply_pending = use_signal(Vec::<PendingComment>::new);
+    let reply_keys: std::collections::HashSet<String> =
+        replies.iter().map(|c| c.key.clone()).collect();
+    let reply_pending_shown: Vec<PendingComment> = reply_pending
+        .read()
+        .iter()
+        .filter(|p| !reply_keys.contains(&p.key))
+        .cloned()
+        .collect();
 
     // Notify me when a new reply lands on a comment I wrote — not my own replies,
     // and not on first load. Only shows if notification permission was granted
@@ -298,10 +373,20 @@ fn CommentThread(
                             parent_id: comment.id.0.clone(),
                             context_id: context_id.clone(),
                             refresh,
+                            pending: reply_pending,
                             placeholder: t("vote.reply"),
                             on_posted: move |_| replying.set(false),
                         }
                     }
+                }
+            }
+            // Optimistic reply rows still in flight.
+            for p in reply_pending_shown.iter() {
+                PendingRow {
+                    key: "{p.key}",
+                    author: p.author.clone(),
+                    text: p.text.clone(),
+                    depth: depth + 1,
                 }
             }
             for r in replies.iter() {
@@ -325,12 +410,14 @@ fn CommentComposer(
     parent_id: String,
     context_id: Option<String>,
     refresh: Signal<u32>,
+    pending: Signal<Vec<PendingComment>>,
     placeholder: String,
     on_posted: EventHandler,
 ) -> Element {
     let session = use_session();
     let mut text = use_signal(String::new);
     let mut posting = use_signal(|| false);
+    let mut pending = pending;
 
     let post = move |_| {
         let body = text.read().trim().to_string();
@@ -350,10 +437,19 @@ fn CommentComposer(
         let parent_id = parent_id.clone();
         let context_id = context_id.clone();
         let mut refresh = refresh;
+        // A unique per-parent key for the comment node — also the reconciliation
+        // join: the refetch drops the optimistic row once a real comment shares it.
+        let key = format!("c{}", (js_sys::Math::random() * 1e12) as u64);
+        // Optimistic: show it and clear the input immediately; a failed post rolls
+        // it back and restores the text.
+        pending.write().push(PendingComment {
+            key: key.clone(),
+            author: author.clone(),
+            text: body.clone(),
+        });
+        text.set(String::new());
         spawn(async move {
             posting.set(true);
-            // A unique per-parent key for the comment node.
-            let key = format!("c{}", (js_sys::Math::random() * 1e12) as u64);
             let result = graphql::insert_comment(
                 token.as_deref(),
                 &parent_id,
@@ -368,7 +464,6 @@ fn CommentComposer(
                 // Any non-error is a success: Hasura may return no row when the
                 // fresh comment is not yet selectable, but it WAS inserted.
                 Ok(_) => {
-                    text.set(String::new());
                     let v = refresh();
                     refresh.set(v + 1);
                     on_posted.call(());
@@ -397,6 +492,9 @@ fn CommentComposer(
                 }
                 Err(e) => {
                     log::error!("comment post failed: {e}");
+                    // Roll back the optimistic row and restore the unsent text.
+                    pending.write().retain(|p| p.key != key);
+                    text.set(body);
                     crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                 }
             }
