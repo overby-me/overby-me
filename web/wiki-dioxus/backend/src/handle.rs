@@ -138,6 +138,16 @@ pub(crate) fn json(status: StatusCode, body: String) -> Response<Body> {
         .unwrap()
 }
 
+/// The standard `{ok:false,error}` failure response for an endpoint, logging the
+/// detail under `ctx`. Collapses the Err-arm that every handler repeated.
+pub(crate) fn error_json(ctx: &str, e: String) -> Response<Body> {
+    eprintln!("{ctx} error: {e}");
+    json(
+        StatusCode::BAD_REQUEST,
+        serde_json::json!({ "ok": false, "error": e }).to_string(),
+    )
+}
+
 pub(crate) fn redirect(location: &str, err: Option<&str>) -> Response<Body> {
     if let Some(e) = err {
         eprintln!("atproto link error: {e}");

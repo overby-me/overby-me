@@ -24,13 +24,7 @@ pub async fn subscribe(
 ) -> Response<Body> {
     match subscribe_inner(cfg, client, query, bearer).await {
         Ok(()) => crate::json(StatusCode::OK, "{\"ok\":true}".into()),
-        Err(e) => {
-            eprintln!("push subscribe error: {e}");
-            crate::json(
-                StatusCode::BAD_REQUEST,
-                json!({ "ok": false, "error": e }).to_string(),
-            )
-        }
+        Err(e) => crate::error_json("push subscribe", e),
     }
 }
 
@@ -77,13 +71,7 @@ pub async fn unsubscribe(
 ) -> Response<Body> {
     match unsubscribe_inner(cfg, client, query, bearer).await {
         Ok(()) => crate::json(StatusCode::OK, "{\"ok\":true}".into()),
-        Err(e) => {
-            eprintln!("push unsubscribe error: {e}");
-            crate::json(
-                StatusCode::BAD_REQUEST,
-                json!({ "ok": false, "error": e }).to_string(),
-            )
-        }
+        Err(e) => crate::error_json("push unsubscribe", e),
     }
 }
 
@@ -179,13 +167,7 @@ pub async fn reply(
             StatusCode::OK,
             json!({ "ok": true, "recipients": recipients, "sent": sent }).to_string(),
         ),
-        Err(e) => {
-            eprintln!("push reply error: {e}");
-            crate::json(
-                StatusCode::BAD_REQUEST,
-                json!({ "ok": false, "error": e }).to_string(),
-            )
-        }
+        Err(e) => crate::error_json("push reply", e),
     }
 }
 
@@ -279,13 +261,7 @@ pub async fn notify(
             StatusCode::OK,
             json!({ "ok": true, "recipients": recipients, "sent": sent }).to_string(),
         ),
-        Err(e) => {
-            eprintln!("push notify error: {e}");
-            crate::json(
-                StatusCode::BAD_REQUEST,
-                json!({ "ok": false, "error": e }).to_string(),
-            )
-        }
+        Err(e) => crate::error_json("push notify", e),
     }
 }
 

@@ -29,13 +29,7 @@ pub async fn claim(
             StatusCode::OK,
             json!({ "ok": true, "context": context }).to_string(),
         ),
-        Err(e) => {
-            eprintln!("member claim error: {e}");
-            crate::json(
-                StatusCode::BAD_REQUEST,
-                json!({ "ok": false, "error": e }).to_string(),
-            )
-        }
+        Err(e) => crate::error_json("member claim", e),
     }
 }
 
@@ -109,13 +103,7 @@ pub async fn claim_link(
             StatusCode::OK,
             json!({ "ok": true, "token": token }).to_string(),
         ),
-        Err(e) => {
-            eprintln!("member claim-link error: {e}");
-            crate::json(
-                StatusCode::BAD_REQUEST,
-                json!({ "ok": false, "error": e }).to_string(),
-            )
-        }
+        Err(e) => crate::error_json("member claim-link", e),
     }
 }
 

@@ -26,13 +26,7 @@ pub async fn cast(
             StatusCode::CONFLICT,
             json!({ "ok": false, "error": e }).to_string(),
         ),
-        Err(e) => {
-            eprintln!("vote cast error: {e}");
-            crate::json(
-                StatusCode::BAD_REQUEST,
-                json!({ "ok": false, "error": e }).to_string(),
-            )
-        }
+        Err(e) => crate::error_json("vote cast", e),
     }
 }
 
