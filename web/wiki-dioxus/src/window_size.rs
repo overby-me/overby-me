@@ -59,20 +59,9 @@ impl WindowSizeClass {
         matches!(self, Self::Compact)
     }
 
-    /// Medium/Expanded: primary nav is the collapsed navigation rail; the tree
-    /// lives behind a modal drawer.
-    pub fn is_rail(self) -> bool {
-        matches!(self, Self::Medium | Self::Expanded)
-    }
-
     /// Large/Extra-large: the rail expands to host the groups/events tree inline
     /// (the 2025 replacement for the permanent navigation drawer).
     pub fn is_expanded_rail(self) -> bool {
-        matches!(self, Self::Large | Self::ExtraLarge)
-    }
-
-    /// Whether two panes (list + detail) fit side by side.
-    pub fn is_dual_pane(self) -> bool {
         matches!(self, Self::Large | Self::ExtraLarge)
     }
 

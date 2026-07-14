@@ -639,7 +639,6 @@ pub fn sign_out() {
 pub struct UploadedFile {
     pub id: String,
     pub mime_type: Option<String>,
-    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

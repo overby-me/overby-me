@@ -12,13 +12,6 @@ pub enum ThemeMode {
 }
 
 impl ThemeMode {
-    pub fn toggle(&self) -> Self {
-        match self {
-            ThemeMode::Light => ThemeMode::Dark,
-            ThemeMode::Dark => ThemeMode::Light,
-        }
-    }
-
     pub fn data_attr(&self) -> &'static str {
         match self {
             ThemeMode::Light => "light",

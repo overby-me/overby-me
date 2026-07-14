@@ -335,6 +335,9 @@ office:version=\"1.2\">\
 }
 
 /// The ODF `content.xml` for a single document `title` + its Slate `content`.
+/// Test-only: `export_tree` builds the body itself; this exists so the ODT
+/// block mapping can be unit-tested.
+#[cfg(test)]
 fn content_xml(title: &str, content: Option<&Value>) -> String {
     let mut body = heading_el(1, &xml_escape(title));
     if let Some(Value::Array(blocks)) = content {
@@ -474,6 +477,8 @@ fn odt_from_content_xml(content: String) -> Vec<u8> {
 }
 
 /// Build a complete `.odt` for a single document `title` and its Slate `content`.
+/// Test-only: `export_tree` builds multi-doc ODTs directly.
+#[cfg(test)]
 pub fn build_odt(title: &str, content: Option<&Value>) -> Vec<u8> {
     odt_from_content_xml(content_xml(title, content))
 }

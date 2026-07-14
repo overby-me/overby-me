@@ -20,22 +20,6 @@ cynic::impl_scalar!(Timestamptz, schema::timestamptz);
 pub struct Jsonb(pub serde_json::Value);
 cynic::impl_scalar!(Jsonb, schema::jsonb);
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Bigint(pub String);
-cynic::impl_scalar!(Bigint, schema::bigint);
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Bytea(pub String);
-cynic::impl_scalar!(Bytea, schema::bytea);
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Citext(pub String);
-cynic::impl_scalar!(Citext, schema::citext);
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Text(pub String);
-cynic::impl_scalar!(Text, schema::_text);
-
 // --- Query: Fetch a single node by ID ---
 
 #[derive(cynic::QueryVariables, Debug)]
@@ -1288,27 +1272,6 @@ pub async fn accept_invitation(
         set: MembersSetInput {
             accepted: Some(true),
             node_id: Some(Uuid(user_id.to_string())),
-            ..Default::default()
-        },
-    });
-    let result = execute(access_token, operation).await?;
-    Ok(result.update_member.is_some())
-}
-
-/// Hide or unhide a member in its context (#51). Owners use this to keep a
-/// user's membership private within a group without removing them.
-pub async fn set_member_hidden(
-    access_token: Option<&str>,
-    member_id: &str,
-    hidden: bool,
-) -> Result<bool, String> {
-    use cynic::MutationBuilder;
-    let operation = UpdateMemberMutation::build(UpdateMemberVariables {
-        pk: MembersPkColumnsInput {
-            id: Uuid(member_id.to_string()),
-        },
-        set: MembersSetInput {
-            hidden: Some(hidden),
             ..Default::default()
         },
     });

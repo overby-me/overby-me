@@ -1,26 +1,20 @@
 mod components;
 mod density;
-#[allow(dead_code)]
 mod export;
+// cynic query-result structs must select fields the code doesn't read (e.g. an
+// insert's returned `id`, a delete's `affected_rows`), which reads as dead code.
 #[allow(dead_code)]
 mod graphql;
-#[allow(dead_code)]
 mod i18n;
 #[cfg(feature = "remote-logging")]
 mod logging;
-#[allow(dead_code)]
 mod nhost;
 mod pwa;
-#[allow(dead_code)]
 mod route;
-#[allow(dead_code)]
 mod session;
 pub mod snackbar;
-#[allow(dead_code)]
 mod subscription;
-#[allow(dead_code)]
 mod theme;
-#[allow(dead_code)]
 mod window_size;
 
 use dioxus::prelude::*;

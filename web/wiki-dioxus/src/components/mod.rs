@@ -26,7 +26,8 @@ pub mod social;
 pub mod sort;
 pub mod speak;
 pub mod widgets;
-// Generated dioxus-primitives components; some are not wired into screens yet.
+// Accessible form-control primitives (checkbox/radio/switch) wrapping
+// dioxus-primitives. Their generated code carries some unused API surface.
 #[allow(dead_code, unused_imports)]
 pub mod ui;
 pub mod vote;

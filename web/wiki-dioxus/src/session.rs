@@ -199,8 +199,8 @@ fn take_visibility_nudge() -> bool {
 
 /// Result of a single refresh attempt.
 enum RefreshOutcome {
-    /// Renewed; carries the new token lifetime in seconds.
-    Renewed(i64),
+    /// Renewed (a fresh access token was stored).
+    Renewed,
     /// No stored refresh token (not logged in).
     NoSession,
     /// Another refresh was already running; nothing to do.
@@ -250,7 +250,7 @@ async fn refresh_access_token() -> RefreshOutcome {
                 session.clone()
             };
             save_session(&snapshot);
-            RefreshOutcome::Renewed(new.access_token_expires_in.unwrap_or(900))
+            RefreshOutcome::Renewed
         }
         Err(err) if nhost::is_auth_error(&err) => {
             // Another tab may have rotated the refresh token out from under us
@@ -289,9 +289,7 @@ async fn refresh_access_token() -> RefreshOutcome {
 pub async fn ensure_fresh_token() -> Option<String> {
     use gloo_timers::future::TimeoutFuture;
     match refresh_access_token().await {
-        RefreshOutcome::Renewed(_) | RefreshOutcome::Transient => {
-            SESSION.peek().access_token.clone()
-        }
+        RefreshOutcome::Renewed | RefreshOutcome::Transient => SESSION.peek().access_token.clone(),
         RefreshOutcome::InFlight => {
             // The background loop (or a sibling query) is already refreshing; wait
             // for it to land rather than starting a second, racing refresh.

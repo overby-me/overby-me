@@ -46,10 +46,6 @@ pub fn apply_lang(lang: &Lang) {
 
 pub static LANG: GlobalSignal<Lang> = Signal::global(|| Lang::En);
 
-pub fn use_lang() -> Signal<Lang> {
-    LANG.signal()
-}
-
 /// Translation function — looks up key in nested translation map
 pub fn t(key: &str) -> String {
     let lang = LANG.read();
