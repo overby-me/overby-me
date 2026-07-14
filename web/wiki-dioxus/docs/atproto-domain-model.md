@@ -12,48 +12,100 @@ A first cut of the data model for the custom backend, derived from the current
 > Draft, not committed. NSID `wiki.radikal.*` is a placeholder — use a domain the
 > org controls.
 
-## The headline realisation
+## The headline: visibility is per-item — a public/private hybrid
 
-Running the split across every entity produces one clear conclusion:
+The scope may grow into a general social platform (feed, groups, events) where
+those things can **optionally be public**. So visibility is a *per-item property*,
+not a global stance — and that makes atproto a first-class substrate for the
+public half:
 
-> **This is a DID-authenticated *private* app with a thin, optional public
-> publishing layer — not an atproto-native app.**
+> Public content (posts, groups, events, statements, resolutions) lives as
+> user- or org-owned **atproto records** — a real, federatable social platform.
+> Private content and the always-private machinery (secret ballots, the roster,
+> authoritative state) live in the **backend DB**. One queryable store unifies
+> the two via materialisation.
 
-Because atproto records are public and the app is internal political
-deliberation + voting, almost everything is private org-authoritative state.
-atproto's real jobs are narrow: **(1) identity (DID)** and **(2) optional public
-publishing** (a member or the org choosing to publish a statement/resolution).
-That's not a downgrade — it's the honest shape, and it means the backend DB is
-the primary substrate and the lexicon surface is deliberately tiny.
+Two constraints shape the whole design, and both matter:
+
+- **atproto has no private records.** Anything private is simply DB-only, never a
+  record. "Optionally public" therefore means "optionally *becomes* a record" —
+  publish creates it, un-publish tombstones it.
+- **A few things are never public regardless of the toggle.** Secret ballots
+  (obviously). And for a political org, **membership/affiliation** probably —
+  outing who belongs is a real harm, so being a *member* stays private even in a
+  public group (posting *in* it can be public; belonging to it is not, unless the
+  member opts in).
+
+So it's not "private app" vs "atproto app" — it's both, split per item. The
+lexicon surface is consequently **substantial** (posts, groups, events, …), not
+tiny, and the backend DB is still the source of truth (public items are mirrored
+out as records; see the visibility model below).
 
 ## Source-of-truth split, per entity
 
-| Current (`mimeId`) | What it is | Public atproto record? | Private DB (org-authoritative)? |
-|---|---|---|---|
-| user | a person | DID = identity; public profile optional | membership/roles **private** |
-| `wiki/group`, `wiki/event` | org chapter / meeting | no | **yes** (container; content private) |
-| `wiki/folder` | organising container | no | **yes** |
-| `wiki/document`, `vote/policy`, `vote/position`, `vote/candidate`, `vote/change` | wiki content / proposals | **optional** publication | **yes** (draft/internal by default) |
-| `wiki/file` | attachment (blob) | no | **yes** (private storage) |
-| `vote/poll` | official ballot | no | **yes** (authoritative: options, open/closed, tally) |
-| `vote/vote` | a cast ballot | **no** (secret; can't be public/DID-signed) | **yes** (anonymised) |
-| `has_voted` | one-vote dedup | no | **yes** (anonymity mechanism) |
-| `vote/comment` | discussion | optional public reply | **yes** (internal) |
-| `speak/list`, `speak/speak` | speaker queue | no | **yes** (ephemeral coordination) |
-| members | roster + roles | no (public membership would *out* members) | **yes** (org signs it, not self-asserted) |
-| relations (`active`, `screenComments`) | projector state | no | **yes** (ephemeral) |
+Visibility dispositions: **optional** (public → an atproto record; private →
+DB-only), **always-private** (never a record), **public** (always a record).
+The DB is the source of truth throughout; public items are *mirrored out* as
+records.
 
-Everything operational is private. The only genuine public records are
-publications (below).
+| Entity | What it is | Visibility | Where the record lives (when public) |
+|---|---|---|---|
+| user / profile | a person (DID) | public profile | member repo (or reuse `app.bsky.actor.profile`) |
+| **post** *(new — the feed unit)* | a feed item | **optional** | author's repo |
+| `wiki/group` | group | **optional** | org or owner repo |
+| `wiki/event` | event | **optional** | org or owner repo |
+| `wiki/document`, `vote/policy`/`position`/`candidate`/`change` | content / proposals | **optional** | author's repo |
+| `vote/comment` | reply / discussion | **optional** (public iff on public content) | author's repo |
+| `wiki/file` | attachment (blob) | follows its parent | blob ref in the parent record |
+| resolution | official vote **outcome** | **public** | **org** repo (org-signed) |
+| statement | personal public statement | **public** | member repo |
+| `wiki/folder` | organising structure | private | — (DB) |
+| `vote/poll` | a poll | optional (a *public* poll may be announced) | org repo (announcement only) |
+| `vote/vote` ballot | a cast ballot | **always-private** | — (never a record; anonymised in DB) |
+| `has_voted` | one-vote dedup | **always-private** | — |
+| members | roster + roles | **private** (opt-in "member of public group X" only) | member repo (only if the member opts in) |
+| `speak/*`, relations (`active`, `screenComments`) | ephemeral coordination | private | — (DB) |
+
+The always-private set is small and specific — secret ballots, the dedup marker,
+the roster/roles, and ephemeral coordination. Almost everything *content* is
+optionally public, which is what makes the public half a genuine atproto social
+platform.
 
 ## Lexicons (the public surface)
 
-Two record types, on two kinds of identity:
+The public surface is the app's social content, published to repos. User-authored
+things (**post**, statement, comment, document) live in the **author's** repo;
+org-owned things (public group / event, official **resolution**) live in the
+**org's** repo (the service holds its own DID). Core sketches below — group,
+event and document follow the same record shape and are omitted for brevity.
 
-- A **member DID** publishes a personal **statement**.
-- The **org's own DID** (the service has its own repo) publishes an official
-  **resolution** — the *outcome* of a vote (title + tally), which is
-  publicly verifiable while individual ballots stay private.
+The `post` is the feed unit — the atproto-native heart of the "public half":
+
+```json
+{
+  "lexicon": 1,
+  "id": "wiki.radikal.post",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["text", "createdAt"],
+        "properties": {
+          "text":      { "type": "string", "maxGraphemes": 3000 },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "group":     { "type": "string", "format": "at-uri",
+                         "description": "the public group/event this was posted in, if any" },
+          "reply":     { "type": "string", "format": "at-uri",
+                         "description": "parent post, for threads" },
+          "embed":     { "type": "union", "refs": ["#image", "#link"] }
+        }
+      }
+    }
+  }
+}
+```
 
 ```json
 {
@@ -105,8 +157,29 @@ Two record types, on two kinds of identity:
 }
 ```
 
-Publishing writes the record to a repo via `atrium`; the AppView also ingests it
-back from Jetstream to link it to the internal artifact (`document.published_uri`).
+## Visibility model (how "optionally public" works)
+
+The DB is always the source of truth. Visibility is a per-item field:
+
+- **private** → DB only; never leaves the backend.
+- **public** → DB **plus** a mirrored atproto record. On publish, the backend
+  writes the record — to the **author's** repo for user content (via their OAuth
+  session) or the **org's** repo for org content — via `atrium`. On un-publish it
+  tombstones the record.
+- The AppView also **ingests public records from Jetstream** (your users' and,
+  optionally, external ones), materialising them into the same DB, so a single
+  query serves a feed that mixes private-DB items and public-record items.
+
+Design consequences:
+
+- **Public is (potentially) forever.** Toggling public→private issues an atproto
+  delete, but you can't recall it from caches/AppViews you don't control. Treat
+  "make public" as "this becomes world-readable, possibly permanently."
+- **User-owned when in the user's repo** — that's the atproto payoff (data
+  ownership, federation, visible to other AppViews/clients). Org-owned public
+  content (groups, resolutions) is owned by the org's DID instead.
+- **Always-private items get no visibility toggle** — ballots, the dedup marker,
+  the roster. The toggle exists only where publishing is meaningful and safe.
 
 ## Domain model (private, org-authoritative — SurrealQL)
 
@@ -124,6 +197,8 @@ DEFINE FIELD kind       ON context TYPE string ASSERT $value IN ['group', 'event
 DEFINE FIELD name       ON context TYPE string;
 DEFINE FIELD slug       ON context TYPE string;
 DEFINE FIELD parent     ON context TYPE option<record<context>>;
+DEFINE FIELD visibility  ON context TYPE string DEFAULT 'private' ASSERT $value IN ['private', 'public'];
+DEFINE FIELD published_uri ON context TYPE option<string>;   -- the at-uri, if the group/event is public
 DEFINE FIELD created_at ON context TYPE datetime DEFAULT time::now();
 DEFINE INDEX context_slug ON context FIELDS parent, slug UNIQUE;
 
@@ -135,8 +210,20 @@ DEFINE FIELD kind          ON document TYPE string;              -- document|fol
 DEFINE FIELD title         ON document TYPE string;
 DEFINE FIELD content       ON document FLEXIBLE TYPE option<object>;  -- Slate JSON (carries over)
 DEFINE FIELD author        ON document TYPE option<record<user>>;
-DEFINE FIELD published_uri ON document TYPE option<string>;      -- set if published to a repo
+DEFINE FIELD visibility    ON document TYPE string DEFAULT 'private' ASSERT $value IN ['private', 'public'];
+DEFINE FIELD published_uri ON document TYPE option<string>;      -- the at-uri, once published
 DEFINE FIELD created_at    ON document TYPE datetime DEFAULT time::now();
+
+-- Feed posts: the social unit. `visibility=public` -> mirrored to a repo.
+DEFINE TABLE post SCHEMAFULL;
+DEFINE FIELD author        ON post TYPE record<user>;
+DEFINE FIELD group         ON post TYPE option<record<context>>;  -- posted in a group/event
+DEFINE FIELD reply         ON post TYPE option<record<post>>;     -- thread parent
+DEFINE FIELD text          ON post TYPE string;
+DEFINE FIELD visibility    ON post TYPE string DEFAULT 'private' ASSERT $value IN ['private', 'public'];
+DEFINE FIELD published_uri ON post TYPE option<string>;
+DEFINE FIELD created_at    ON post TYPE datetime DEFAULT time::now();
+DEFINE INDEX post_feed     ON post FIELDS group, created_at;      -- feed by group + time
 
 -- Membership as a GRAPH edge (user -> context) — this is where SurrealDB beats
 -- Hasura's per-row RLS subqueries.

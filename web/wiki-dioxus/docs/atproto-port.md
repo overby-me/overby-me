@@ -94,10 +94,15 @@ firehose. For a political youth org, internal deliberation and secret ballots
 > profiles). The actual assembly machinery — debate, roster, secret votes, the
 > official tally — stays in the **private backend DB**.
 
-This inverts the usual "move everything into user repos" story: the DB holds most
-of the real state, and atproto is mostly the identity/publishing layer. Decide
-consciously how atproto-native vs. "DID-authenticated custom app" you want to be —
-it's the decision that most shapes everything else.
+But visibility is **per-item, not global**. If the scope extends to a social
+platform (feed, groups, events) where content can *optionally* be public, then
+atproto is a first-class substrate for the public half — public posts/groups/
+events become user- or org-owned records (a real, federatable platform), while
+private content and the always-private machinery (secret ballots, roster,
+authoritative state) stay in the DB. So it's a **public/private hybrid**: the DB
+is the source of truth and public items are mirrored out as records. See
+[`atproto-domain-model.md`](./atproto-domain-model.md) for the per-entity split,
+lexicons, and the visibility model.
 
 ## 5. Tech stack
 
