@@ -84,7 +84,7 @@ async fn cast_inner(
         cfg,
         client,
         json!({
-            "query": "query($p: uuid!) { node(id: $p) { mimeId mutable contextId } }",
+            "query": "query($p: uuid!) { node(id: $p) { mimeId mutable contextId createdAt } }",
             "variables": { "p": poll },
         }),
     )
@@ -105,6 +105,11 @@ async fn cast_inner(
         .filter(|c| !c.is_empty())
         .ok_or("poll has no context")?
         .to_string();
+    // The poll's own creation time, used to coarsen the ballot's timestamps below.
+    let poll_created = pnode
+        .get("createdAt")
+        .and_then(|c| c.as_str())
+        .map(str::to_string);
 
     // Active membership in the poll's context, matched by the durable node_id
     // binding or (fallback) the invite email.
@@ -136,16 +141,24 @@ async fn cast_inner(
         return Err("already voted".into());
     }
 
-    // Insert the ANONYMOUS vote node (no owner_id).
-    let secs = crate::util::now_secs();
-    let obj = json!({
-        "name": format!("vote-{secs}"),
-        "key": format!("vote-{secs}-{}", crate::util::random_token(6)),
+    // Insert the ANONYMOUS vote node (no owner_id). Anonymity depends on the
+    // ballot carrying NOTHING that correlates it to the per-user `has_voted`
+    // marker: no owner, no time in the name/key, and its `created_at`/`updated_at`
+    // are coarsened to the poll's own creation time (default `now()` would let a
+    // DB/admin holder align the ballot with the marker's timestamp to recover who
+    // voted how). All ballots for a poll therefore share one timestamp.
+    let mut obj = json!({
+        "name": "ballot",
+        "key": format!("ballot-{}", crate::util::random_token(16)),
         "mimeId": "vote/vote",
         "parentId": poll,
         "contextId": poll_context,
         "data": choices,
     });
+    if let Some(ts) = &poll_created {
+        obj["createdAt"] = json!(ts);
+        obj["updatedAt"] = json!(ts);
+    }
     let insert = json!({
         "query": "mutation($obj: nodes_insert_input!) { insertNode(object: $obj) { id } }",
         "variables": { "obj": obj },
