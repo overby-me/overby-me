@@ -32,6 +32,15 @@ fn at_top() -> bool {
         .unwrap_or(false)
 }
 
+/// Set the pull distance only when it actually changes. Touch/wheel handlers fire
+/// at 60-120Hz and often write the same value (a repeated 0.0 reset, or the
+/// MAX_PULL clamp), each write re-rendering the indicator's subscribers.
+fn set_pull(dist: f64) {
+    if *PULL_DISTANCE.peek() != dist {
+        *PULL_DISTANCE.write() = dist;
+    }
+}
+
 /// Arm the refresh: show the spinner, bump the data version so resources refetch,
 /// and clear the spinner once the animation has settled.
 fn trigger_refresh() {
@@ -39,7 +48,7 @@ fn trigger_refresh() {
         return;
     }
     *PTR_REFRESHING.write() = true;
-    *PULL_DISTANCE.write() = 0.0;
+    set_pull(0.0);
     session::bump_data_version();
     wasm_bindgen_futures::spawn_local(async {
         gloo_timers::future::TimeoutFuture::new(900).await;
@@ -52,7 +61,7 @@ fn schedule_wheel_decay(epoch: Rc<Cell<u32>>, mine: u32) {
     wasm_bindgen_futures::spawn_local(async move {
         gloo_timers::future::TimeoutFuture::new(280).await;
         if epoch.get() == mine && !*PTR_REFRESHING.peek() {
-            *PULL_DISTANCE.write() = 0.0;
+            set_pull(0.0);
         }
     });
 }
@@ -103,10 +112,10 @@ fn install_listeners() {
             };
             let dy = t.client_y() as f64 - start_y.get();
             if dy > 0.0 && at_top() {
-                *PULL_DISTANCE.write() = (dy * DAMPING).min(MAX_PULL);
+                set_pull((dy * DAMPING).min(MAX_PULL));
             } else {
                 active.set(false);
-                *PULL_DISTANCE.write() = 0.0;
+                set_pull(0.0);
             }
         }) as Box<dyn FnMut(web_sys::Event)>);
         let _ = win.add_event_listener_with_callback("touchmove", cb.as_ref().unchecked_ref());
@@ -124,7 +133,7 @@ fn install_listeners() {
             if *PULL_DISTANCE.peek() >= THRESHOLD {
                 trigger_refresh();
             } else {
-                *PULL_DISTANCE.write() = 0.0;
+                set_pull(0.0);
             }
         }) as Box<dyn FnMut(web_sys::Event)>);
         let _ = win.add_event_listener_with_callback("touchend", cb.as_ref().unchecked_ref());
@@ -145,7 +154,7 @@ fn install_listeners() {
             if dy < 0.0 && at_top() {
                 let cur = *PULL_DISTANCE.peek();
                 let dist = (cur + (-dy) * DAMPING).min(MAX_PULL);
-                *PULL_DISTANCE.write() = dist;
+                set_pull(dist);
                 if dist >= THRESHOLD {
                     trigger_refresh();
                 } else {
@@ -154,7 +163,7 @@ fn install_listeners() {
                     schedule_wheel_decay(wheel_epoch.clone(), next);
                 }
             } else if dy > 0.0 {
-                *PULL_DISTANCE.write() = 0.0;
+                set_pull(0.0);
             }
         }) as Box<dyn FnMut(web_sys::Event)>);
         let _ = win.add_event_listener_with_callback("wheel", cb.as_ref().unchecked_ref());

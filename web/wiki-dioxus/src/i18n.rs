@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use dioxus::prelude::*;
 
@@ -54,7 +55,7 @@ pub fn t(key: &str) -> String {
         Lang::Da => da_translations(),
     };
 
-    lookup_key(&translations, key).unwrap_or_else(|| key.to_string())
+    lookup_key(translations, key).unwrap_or_else(|| key.to_string())
 }
 
 /// Translation with interpolation: t_with("layout.greeting", &[("name", "Niclas")])
@@ -78,12 +79,20 @@ fn lookup_key(map: &HashMap<String, serde_json::Value>, key: &str) -> Option<Str
     None
 }
 
-fn en_translations() -> HashMap<String, serde_json::Value> {
-    serde_json::from_str(EN_JSON).unwrap_or_default()
+// The translation tables are parsed from the embedded JSON exactly once each and
+// cached; `t()` runs on every render across 200+ call sites, so re-parsing ~29KB
+// of JSON per call (the previous behaviour) dominated render CPU.
+static EN_TABLE: LazyLock<HashMap<String, serde_json::Value>> =
+    LazyLock::new(|| serde_json::from_str(EN_JSON).unwrap_or_default());
+static DA_TABLE: LazyLock<HashMap<String, serde_json::Value>> =
+    LazyLock::new(|| serde_json::from_str(DA_JSON).unwrap_or_default());
+
+fn en_translations() -> &'static HashMap<String, serde_json::Value> {
+    &EN_TABLE
 }
 
-fn da_translations() -> HashMap<String, serde_json::Value> {
-    serde_json::from_str(DA_JSON).unwrap_or_default()
+fn da_translations() -> &'static HashMap<String, serde_json::Value> {
+    &DA_TABLE
 }
 
 const EN_JSON: &str = r#"{
