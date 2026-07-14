@@ -1,4 +1,4 @@
-//! EXPERIMENT (functional): scroll-driven navigation aids.
+//! DESIGN (functional): scroll-driven navigation aids.
 //!
 //! - [`BackToTop`]: a button that appears once the page has scrolled down past a
 //!   threshold and smooth-scrolls to the top on click.

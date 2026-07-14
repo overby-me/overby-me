@@ -315,7 +315,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     };
 
     if !is_auth {
-        // EXPERIMENT: an expressive locked-barrier state instead of a plain card.
+        // DESIGN: an expressive locked-barrier state instead of a plain card.
         return rsx! {
             div { class: "card",
                 div { class: "empty-state",

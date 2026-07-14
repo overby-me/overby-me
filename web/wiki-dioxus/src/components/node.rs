@@ -41,7 +41,7 @@ pub fn NodeApp(node: NodeWithChildren, title: String) -> Element {
                     }
                 }
             } else {
-                // EXPERIMENT: orb empty state for unknown / empty node types.
+                // DESIGN: orb empty state for unknown / empty node types.
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "help_outline" }

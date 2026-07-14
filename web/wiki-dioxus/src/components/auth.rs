@@ -192,7 +192,7 @@ fn AuthForm(mode: AuthMode) -> Element {
     rsx! {
         div { class: "auth-container",
             form { class: "auth-form", onsubmit: on_submit,
-                // EXPERIMENT: a hero icon badge (matching the home/profile heroes).
+                // DESIGN: a hero icon badge (matching the home/profile heroes).
                 div { class: "auth-hero-icon", span { class: "material-icons", "{icon}" } }
                 h2 { class: "headline-small auth-title", "{title}" }
 

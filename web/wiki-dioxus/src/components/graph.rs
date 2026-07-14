@@ -37,7 +37,7 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
             }
             div { class: "card-content", style: "overflow-x: auto;",
                 if children.is_empty() {
-                    // EXPERIMENT: orb empty state (consistent with the rest of the app).
+                    // DESIGN: orb empty state (consistent with the rest of the app).
                     div { class: "empty-state empty-state-sm",
                         div { class: "empty-state-orb empty-state-orb-sm",
                             span { class: "material-icons", "hub" }
@@ -45,7 +45,7 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                         p { class: "empty-state-body", "{t(\"common.noContent\")}" }
                     }
                 } else {
-                    // EXPERIMENT: frame the graph like the map's viewport.
+                    // DESIGN: frame the graph like the map's viewport.
                     div { class: "viewport-frame",
                     svg {
                         width: "100%",

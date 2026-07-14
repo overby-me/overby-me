@@ -85,7 +85,7 @@ fn parse_reset_token(search: &str) -> Option<String> {
 pub fn Layout() -> Element {
     let open_drawer = use_signal(|| false);
     let mut search_mode = use_signal(|| false);
-    // EXPERIMENT (functional): a keyboard-shortcuts help overlay, opened with "?".
+    // DESIGN (functional): a keyboard-shortcuts help overlay, opened with "?".
     let mut shortcuts_open = use_signal(|| false);
     let search_input = use_signal(String::new);
     let search_results = use_signal(Vec::<NodeFields>::new);
@@ -93,7 +93,7 @@ pub fn Layout() -> Element {
     let route = use_route::<Route>();
     let nav = use_navigator();
 
-    // EXPERIMENT (functional): scroll to the top when navigating to a DIFFERENT
+    // DESIGN (functional): scroll to the top when navigating to a DIFFERENT
     // node, so each page starts at the top rather than wherever the previous one
     // was left scrolled. Keyed on the path (not the ?app= view), so switching
     // apps in place keeps your scroll position.
@@ -214,7 +214,7 @@ pub fn Layout() -> Element {
     rsx! {
         div {
             class: "app-shell",
-            // EXPERIMENT (functional): make the shell focusable and grab focus once on
+            // DESIGN (functional): make the shell focusable and grab focus once on
             // mount, so keyboard shortcuts (Ctrl+K, /, ?) work immediately rather than
             // only after the user first clicks something inside the app.
             tabindex: "-1",
@@ -228,7 +228,7 @@ pub fn Layout() -> Element {
             // Set when a view mounts a permanent (docked) tools side sheet, so the
             // content pane reserves room for it on the right.
             "data-tools-docked": if super::widgets::TOOLS_DOCKED() { "true" } else { "false" },
-            // EXPERIMENT (functional): reflect the UI density preference.
+            // DESIGN (functional): reflect the UI density preference.
             "data-density": if crate::density::COMPACT_DENSITY() { "compact" } else { "comfortable" },
             // Ctrl/Cmd+K opens search (a common shortcut). Catches keydowns that
             // bubble up from any focused element in the app.
@@ -250,21 +250,21 @@ pub fn Layout() -> Element {
                 } else if !typing && !m.ctrl() && !m.meta()
                     && evt.key() == Key::Character("/".to_string())
                 {
-                    // EXPERIMENT (functional): bare "/" opens search too.
+                    // DESIGN (functional): bare "/" opens search too.
                     search_mode.set(true);
                     evt.prevent_default();
                 } else if !typing && evt.key() == Key::Character("?".to_string()) {
-                    // EXPERIMENT (functional): "?" opens the keyboard-shortcuts help.
+                    // DESIGN (functional): "?" opens the keyboard-shortcuts help.
                     shortcuts_open.set(true);
                     evt.prevent_default();
                 }
             },
-            // EXPERIMENT (functional a11y): a skip link — the first focusable
+            // DESIGN (functional a11y): a skip link — the first focusable
             // element, visually hidden until focused — jumps keyboard users past
             // the chrome straight to the content.
             a { class: "skip-link", href: "#main-content", "{t(\"common.skipToContent\")}" }
 
-            // EXPERIMENT (functional): keyboard-shortcuts help overlay (opened with ?).
+            // DESIGN (functional): keyboard-shortcuts help overlay (opened with ?).
             super::widgets::Dialog {
                 open: shortcuts_open(),
                 on_dismiss: move |_| shortcuts_open.set(false),
@@ -348,7 +348,7 @@ pub fn Layout() -> Element {
                 }
             }
 
-            // Top app bar. EXPERIMENT: on compact it joins the navigation bar in a
+            // Top app bar. DESIGN: on compact it joins the navigation bar in a
             // single unified bottom dock (one elevated surface) to reclaim the
             // vertical space a second free-floating bar would cost; on medium+ it is
             // the top bar as before.
@@ -559,7 +559,7 @@ fn SearchBar(
                     }
                 }
             } else if !input.read().is_empty() {
-                // EXPERIMENT (functional): a clear "no results" state instead of an
+                // DESIGN (functional): a clear "no results" state instead of an
                 // empty dropdown when a query matches nothing.
                 div { class: "search-results",
                     div { class: "search-no-results",
@@ -1293,7 +1293,7 @@ fn UserMenu() -> Element {
                             },
                         }
                     }
-                    // EXPERIMENT (functional): compact / comfortable UI density.
+                    // DESIGN (functional): compact / comfortable UI density.
                     div { class: "list-item switch-row",
                         span { class: "material-icons", "density_medium" }
                         span { class: "switch-row-label", "{t(\"layout.compactDensity\")}" }
@@ -1814,7 +1814,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
         }}
     };
 
-    // EXPERIMENT: on the home app (as_cards), Groups and Events are SEPARATE cards,
+    // DESIGN: on the home app (as_cards), Groups and Events are SEPARATE cards,
     // each with its own icon-avatar header — so they read as distinct home sections
     // rather than one bare list. The drawer keeps the compact bare list.
     if as_cards {

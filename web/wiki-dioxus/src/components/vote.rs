@@ -60,7 +60,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
             .ok()?
     });
 
-    // EXPERIMENT: an expressive empty state (floating ballot orb) instead of a dull
+    // DESIGN: an expressive empty state (floating ballot orb) instead of a dull
     // text card when there is no active vote.
     let no_vote = rsx! {
         div { class: "card",
@@ -117,7 +117,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
 
     rsx! {
         // Voting-rights indicator (React VoteApp's canVote status) — a tonal status
-        // banner rather than a plain card (EXPERIMENT).
+        // banner rather than a plain card (DESIGN).
         if is_auth {
             div {
                 class: if can_vote { "vote-rights-banner can-vote" } else { "vote-rights-banner cannot-vote" },
@@ -972,7 +972,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                                                     class: if selected.read().get(ri).copied().unwrap_or(false) { "list-item ballot-option selected" } else { "list-item ballot-option" },
                                                     key: "{ri}",
                                                     style: "gap: 8px; cursor: pointer;",
-                                                    // EXPERIMENT (functional): the whole option card selects, not
+                                                    // DESIGN (functional): the whole option card selects, not
                                                     // just the small radio. Idempotent with the RadioItem for
                                                     // single-choice, so clicking either works.
                                                     onclick: move |_| {

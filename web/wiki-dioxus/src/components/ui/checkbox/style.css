@@ -1,4 +1,4 @@
-/* EXPERIMENT (M3 checkbox): a larger, outlined box that fills primary when checked,
+/* DESIGN (M3 checkbox): a larger, outlined box that fills primary when checked,
    with a tactile press — matching the M3 Expressive switch. */
 .dx-checkbox {
     width: 1.25rem;

@@ -5,7 +5,7 @@
   gap: 15px;
 }
 
-/* EXPERIMENT (M3 Expressive switch): a full-size 52x32 switch whose thumb grows
+/* DESIGN (M3 Expressive switch): a full-size 52x32 switch whose thumb grows
    from a small dot (off) to a large knob (on) with a spatial spring — the M3 2025
    switch feel — instead of the compact dx default. */
 .dx-switch {

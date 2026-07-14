@@ -106,7 +106,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 if (is_auth && count > 0) || is_context_owner {
                     super::widgets::ToolSheet {
                         title: t("common.tools"),
-                        // EXPERIMENT (functional): copy a shareable link to this folder.
+                        // DESIGN (functional): copy a shareable link to this folder.
                         button {
                             class: "sheet-action",
                             onclick: move |_| {
@@ -270,7 +270,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 }
             }
             if children.is_empty() {
-                // EXPERIMENT: a compact characterful empty state (floating orb).
+                // DESIGN: a compact characterful empty state (floating orb).
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "folder_open" }

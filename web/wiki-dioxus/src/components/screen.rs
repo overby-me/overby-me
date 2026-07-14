@@ -66,7 +66,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
                 match active.clone() {
                     Some(n) => rsx! { MimeLoader { key: "{n.id.0}", node: n, path: Vec::new(), projector: true } },
                     None => rsx! {
-                        // EXPERIMENT: an expressive idle state instead of a bare "…".
+                        // DESIGN: an expressive idle state instead of a bare "…".
                         div { class: "card",
                             div { class: "empty-state",
                                 div { class: "empty-state-orb",

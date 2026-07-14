@@ -155,7 +155,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     span { class: "material-icons", "download" }
                     "{t(\"folder.export\")}"
                 }
-                // EXPERIMENT (functional): copy a shareable link to this page.
+                // DESIGN (functional): copy a shareable link to this page.
                 button {
                     class: "sheet-action",
                     onclick: move |_| {

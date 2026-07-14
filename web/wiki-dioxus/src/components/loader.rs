@@ -139,7 +139,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     }
 }
 
-/// EXPERIMENT (functional): a content-shaped shimmer placeholder shown while a
+/// DESIGN (functional): a content-shaped shimmer placeholder shown while a
 /// node loads, instead of a bare spinner — better perceived performance because
 /// the layout appears immediately in roughly its final shape.
 #[component]
@@ -878,7 +878,7 @@ fn NodeNotFound() -> Element {
 
     rsx! {
         div { class: "card",
-            // EXPERIMENT (expressive empty state): a centred "void portal" — a big
+            // DESIGN (expressive empty state): a centred "void portal" — a big
             // floating, morphing tonal orb holding the icon, a bold title, actions.
             div { class: "empty-state",
                 div { class: "empty-state-orb",

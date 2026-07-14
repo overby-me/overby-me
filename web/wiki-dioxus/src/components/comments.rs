@@ -104,7 +104,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                     }
                 }
                 if list.is_empty() {
-                    // EXPERIMENT: a compact characterful empty state (floating orb).
+                    // DESIGN: a compact characterful empty state (floating orb).
                     div { class: "empty-state empty-state-sm",
                         div { class: "empty-state-orb empty-state-orb-sm",
                             span { class: "material-icons", "forum" }

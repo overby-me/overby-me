@@ -42,7 +42,7 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
     if lists.is_empty() {
         return rsx! {
             div { class: "card",
-                // EXPERIMENT: orb empty state instead of a plain muted line.
+                // DESIGN: orb empty state instead of a plain muted line.
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "record_voice_over" }
@@ -194,7 +194,7 @@ fn SpeakList(
             }
 
             if speakers.is_empty() {
-                // EXPERIMENT: orb empty state for an empty speaker queue.
+                // DESIGN: orb empty state for an empty speaker queue.
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "record_voice_over" }

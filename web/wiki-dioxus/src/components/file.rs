@@ -80,7 +80,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
         .and_then(|d| d.get("type"))
         .and_then(|t| t.as_str())
         .unwrap_or("");
-    // EXPERIMENT (format-aware file card): retint the card accent by format
+    // DESIGN (format-aware file card): retint the card accent by format
     // (video/audio -> magenta tertiary, docs -> secondary, else primary) and show
     // a short type chip. Reuses the .card --card-accent system.
     let accent = if file_mime.starts_with("video") || file_mime.starts_with("audio") {
@@ -218,7 +218,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         } else if file_mime.starts_with("audio/") {
                             audio { controls: true, style: "width: 100%;", "referrerpolicy": "no-referrer", src: "{file_url}" }
                         } else if file_mime == "application/pdf" {
-                            // EXPERIMENT: frame document previews like the map/graph.
+                            // DESIGN: frame document previews like the map/graph.
                             div { class: "viewport-frame",
                                 iframe { src: "{file_url}", title: "{name}", "referrerpolicy": "no-referrer" }
                             }
@@ -238,7 +238,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 }
                             }
                         } else {
-                            // EXPERIMENT: a rich "no preview" state (format orb +
+                            // DESIGN: a rich "no preview" state (format orb +
                             // prominent download) instead of a bare button.
                             div { class: "empty-state empty-state-sm",
                                 div { class: "empty-state-orb empty-state-orb-sm",

@@ -1,4 +1,4 @@
-//! EXPERIMENT (functional): a UI density preference (comfortable / compact).
+//! DESIGN (functional): a UI density preference (comfortable / compact).
 //!
 //! When compact, lists and cards tighten their spacing so more fits on screen —
 //! useful for large rosters and deep folders. Persisted in localStorage and

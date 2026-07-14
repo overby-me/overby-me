@@ -195,7 +195,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                 // Invite input (owner action, mirroring React InvitesFab).
                 if can_manage {
                     div { class: "card",
-                        // EXPERIMENT: give the invite card a header identity like the
+                        // DESIGN: give the invite card a header identity like the
                         // other cards (it was headerless).
                         div { class: "card-header",
                             div { class: "avatar small",
@@ -482,7 +482,7 @@ fn MemberTableRow(
         .unwrap_or_default();
     let user_id = member.user.as_ref().map(|u| u.id.0.clone());
     let member_name = member.label();
-    // EXPERIMENT: colour-code the status chip by category.
+    // DESIGN: colour-code the status chip by category.
     let status_class = match status_icon {
         "check_circle" => "status-active",
         "mail" => "status-pending",

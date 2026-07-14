@@ -176,7 +176,7 @@ fn App() -> Element {
         theme::apply_theme(&theme::THEME.read());
         // Load any user-picked M3 seed colours and inject the override scheme.
         theme::load_seeds();
-        // EXPERIMENT: load the persisted UI density preference.
+        // DESIGN: load the persisted UI density preference.
         density::load_density();
 
         // Nudge the token-refresh loop whenever the tab becomes visible again:

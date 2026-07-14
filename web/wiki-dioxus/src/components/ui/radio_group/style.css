@@ -16,7 +16,7 @@
   gap: .75rem;
 }
 
-/* EXPERIMENT (M3 radio): a larger outlined ring with a tactile press, matching the
+/* DESIGN (M3 radio): a larger outlined ring with a tactile press, matching the
    M3 checkbox / switch. */
 .dx-radio-item::before {
   display: block;

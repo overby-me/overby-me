@@ -56,7 +56,7 @@ pub fn ParentApp() -> Element {
                     }
                 },
                 Some(Ok(_)) => rsx! {
-                    // EXPERIMENT: a celebratory orb empty state for the all-healthy case.
+                    // DESIGN: a celebratory orb empty state for the all-healthy case.
                     div { class: "empty-state empty-state-sm",
                         div { class: "empty-state-orb empty-state-orb-sm",
                             span { class: "material-icons", "verified" }

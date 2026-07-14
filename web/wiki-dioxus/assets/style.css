@@ -147,7 +147,7 @@
 	line-height: 1;
 	font-weight: 700;
 	pointer-events: none;
-	/* EXPERIMENT (expressive badge): an M3 cutout ring in the surface colour plus
+	/* DESIGN (expressive badge): an M3 cutout ring in the surface colour plus
 	   a springy pop-in when it appears. */
 	box-shadow: 0 0 0 2px var(--md-surface-container);
 	animation: md-badge-pop var(--md-sys-motion-duration-medium2)
@@ -274,7 +274,7 @@ a:hover {
 	margin-inline: auto;
 }
 
-/* EXPERIMENT (tonal scrollbars): slim, theme-tinted scrollbars app-wide. Elements
+/* DESIGN (tonal scrollbars): slim, theme-tinted scrollbars app-wide. Elements
    that opt out with `scrollbar-width: none` (breadcrumbs, carousel) still win by
    specificity, so they stay hidden. */
 * {
@@ -305,7 +305,7 @@ html {
 	scroll-behavior: smooth;
 }
 
-/* EXPERIMENT (functional a11y: focus baseline): a consistent keyboard-focus ring
+/* DESIGN (functional a11y: focus baseline): a consistent keyboard-focus ring
    for any interactive element that lacks its own, so tab-navigation is always
    visible. Element-specific :focus-visible rules (higher specificity) still win. */
 :focus-visible {
@@ -313,12 +313,12 @@ html {
 	outline-offset: 2px;
 }
 
-/* EXPERIMENT (polish): branded text selection instead of the browser default. */
+/* DESIGN (polish): branded text selection instead of the browser default. */
 ::selection {
 	background: color-mix(in srgb, var(--md-primary) 28%, transparent);
 }
 
-/* EXPERIMENT (functional: shortcuts help). A list of key + action rows. */
+/* DESIGN (functional: shortcuts help). A list of key + action rows. */
 .shortcut-list {
 	display: flex;
 	flex-direction: column;
@@ -351,7 +351,7 @@ html {
 	color: var(--md-on-surface);
 }
 
-/* EXPERIMENT (functional a11y: skip link): off-screen until focused, then a real
+/* DESIGN (functional a11y: skip link): off-screen until focused, then a real
    pill button at the top-left that jumps keyboard users to the content. */
 .skip-link {
 	position: fixed;
@@ -370,7 +370,7 @@ html {
 	left: 8px;
 }
 
-/* EXPERIMENT (functional: skeleton loading): content-shaped shimmer placeholders
+/* DESIGN (functional: skeleton loading): content-shaped shimmer placeholders
    instead of a bare spinner, for better perceived performance while a node loads. */
 .skeleton {
 	background: linear-gradient(
@@ -411,7 +411,7 @@ html {
 	margin-bottom: 10px;
 }
 
-/* EXPERIMENT (functional: reading progress): a thin gradient bar across the very
+/* DESIGN (functional: reading progress): a thin gradient bar across the very
    top showing scroll progress through the page. */
 .reading-progress {
 	position: fixed;
@@ -429,7 +429,7 @@ html {
 	transition: width 80ms linear;
 }
 
-/* EXPERIMENT (functional: back to top): a scroll-aware button that fades in after
+/* DESIGN (functional: back to top): a scroll-aware button that fades in after
    scrolling down and returns to the top on click. Sits opposite the FAB. */
 .back-to-top {
 	position: fixed;
@@ -628,7 +628,7 @@ html {
 	color: var(--md-on-surface);
 }
 .nav-rail-item.active .nav-rail-indicator {
-	/* EXPERIMENT (morphing pill): the active indicator grows and morphs from a
+	/* DESIGN (morphing pill): the active indicator grows and morphs from a
 	   full pill toward a rounded square, in primary-container with a soft primary
 	   glow — a bolder, more spatial active cue than a simple scale pop. */
 	width: 64px;
@@ -767,7 +767,7 @@ html {
 	z-index: 201;
 	width: min(360px, 88vw);
 	background: var(--md-surface);
-	/* EXPERIMENT: a modal drawer is an elevated surface — give it a shadow and a
+	/* DESIGN: a modal drawer is an elevated surface — give it a shadow and a
 	   bolder trailing corner so it clearly floats over the scrim. */
 	border-radius: 0 var(--md-sys-shape-corner-extra-large)
 		var(--md-sys-shape-corner-extra-large) 0;
@@ -826,7 +826,7 @@ html {
 }
 
 /* ── Content / top-bar insets per window-size class ──────────────────── */
-/* EXPERIMENT (unified chrome + content well): on non-compact the whole backdrop
+/* DESIGN (unified chrome + content well): on non-compact the whole backdrop
    is the chrome colour (surface-container), so the rail, top bar and docked tools
    sheet blend into it seamlessly (no lines). The content becomes a distinct,
    lighter surface panel floating in that frame with rounded corners. */
@@ -893,7 +893,7 @@ html {
 	right: calc(var(--md-sys-tools-width) + 24px);
 }
 
-/* EXPERIMENT (unified bottom dock): on compact the search/breadcrumb bar and the
+/* DESIGN (unified bottom dock): on compact the search/breadcrumb bar and the
    navigation bar share ONE elevated, rounded surface floating at the bottom,
    instead of two separately-floating stacked bars — reclaiming the second bar's
    chrome and the gap between them. */
@@ -1092,7 +1092,7 @@ html {
 	--card-accent: var(--md-error);
 }
 
-/* EXPERIMENT (functional: compact density): tighten card/list spacing so more
+/* DESIGN (functional: compact density): tighten card/list spacing so more
    fits on screen. Toggled from the account menu (data-density on the shell). */
 .app-shell[data-density="compact"] .card {
 	margin-bottom: 10px;
@@ -1110,7 +1110,7 @@ html {
 	padding: 8px 12px;
 }
 
-/* EXPERIMENT (format-aware file card): tonal metadata chips under the file title. */
+/* DESIGN (format-aware file card): tonal metadata chips under the file title. */
 .file-meta-chips {
 	display: flex;
 	flex-wrap: wrap;
@@ -1133,7 +1133,7 @@ html {
 	font-size: 15px;
 }
 
-/* EXPERIMENT (profile hero): a bold identity header with a large tonal avatar. */
+/* DESIGN (profile hero): a bold identity header with a large tonal avatar. */
 .profile-hero {
 	display: flex;
 	align-items: center;
@@ -1166,7 +1166,7 @@ html {
 	font-weight: 700;
 }
 
-/* EXPERIMENT (framed viewport): an expressive rounded tonal frame around embedded
+/* DESIGN (framed viewport): an expressive rounded tonal frame around embedded
    map/graph media, so the viewport reads as a deliberate stage. */
 .viewport-frame {
 	position: relative;
@@ -1181,7 +1181,7 @@ html {
 	);
 }
 
-/* EXPERIMENT (home hero): a bold tonal greeting header with an animated wave. */
+/* DESIGN (home hero): a bold tonal greeting header with an animated wave. */
 .home-hero-head {
 	display: flex;
 	align-items: center;
@@ -1500,7 +1500,7 @@ html {
 
 .fab .material-icons {
 	font-size: 26px;
-	/* EXPERIMENT: the tools "tune" icon spins a quarter-turn on hover — a small
+	/* DESIGN: the tools "tune" icon spins a quarter-turn on hover — a small
 	   playful cue that the FAB opens a settings/tools surface. */
 	transition: transform var(--md-sys-motion-duration-medium1)
 		var(--md-sys-motion-spring-spatial-default);
@@ -1547,7 +1547,7 @@ html {
 	animation: m3-dialog-rise var(--md-sys-motion-duration-long1)
 		var(--md-sys-motion-spring-spatial-default);
 }
-/* EXPERIMENT (expressive dialog): the icon becomes a tonal circular badge. */
+/* DESIGN (expressive dialog): the icon becomes a tonal circular badge. */
 .m3-dialog-icon {
 	display: grid;
 	place-items: center;
@@ -1676,7 +1676,7 @@ html {
 	cursor: not-allowed;
 }
 
-/* EXPERIMENT (button morph): filled buttons lift on hover and squish to a squarer
+/* DESIGN (button morph): filled buttons lift on hover and squish to a squarer
    corner on press — the M3 2025 expressive button feel. Plus a tonal variant. */
 .btn-primary:hover,
 .btn-secondary:hover {
@@ -1850,7 +1850,7 @@ a.folder-item:focus-visible {
 			var(--md-sys-motion-spring-spatial-default);
 }
 
-/* EXPERIMENT (expressive text field): focus morphs the corner larger, thickens
+/* DESIGN (expressive text field): focus morphs the corner larger, thickens
    the outline to 2px (padding-compensated so nothing shifts), and adds a faint
    primary wash. */
 .text-field input:focus {
@@ -2304,7 +2304,7 @@ select:focus {
 	padding: 12px 16px;
 	background: var(--md-surface-container-high);
 	color: var(--md-on-surface-variant);
-	/* EXPERIMENT: a crisper small-caps-ish column label. */
+	/* DESIGN: a crisper small-caps-ish column label. */
 	font-weight: 600;
 	font-size: var(--md-sys-typescale-label-large-size);
 	letter-spacing: 0.04em;
@@ -2327,7 +2327,7 @@ select:focus {
 .m3-cell-icon .material-icons {
 	font-size: 20px;
 }
-/* EXPERIMENT (permissions): granted flags become a tonal primary-container badge
+/* DESIGN (permissions): granted flags become a tonal primary-container badge
    so grants scan at a glance across the roles x operations grid. */
 .m3-flag-on {
 	display: inline-flex;
@@ -2439,7 +2439,7 @@ select:focus {
 	display: flex;
 	align-items: center;
 	gap: 2px;
-	/* EXPERIMENT (expressive roster): actions rest quiet and fade in on row hover. */
+	/* DESIGN (expressive roster): actions rest quiet and fade in on row hover. */
 	opacity: 0.4;
 	transition: opacity var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-easing-standard);
@@ -2459,7 +2459,7 @@ select:focus {
 	background: var(--md-secondary-container);
 	color: var(--md-on-secondary-container);
 }
-/* EXPERIMENT (member status): colour-code the status chip so active / pending /
+/* DESIGN (member status): colour-code the status chip so active / pending /
    owner read at a glance. */
 .member-status.status-active .chip,
 .member-status.status-active .chip .material-icons {
@@ -2611,7 +2611,7 @@ select:focus {
 	padding: 16px;
 	border-bottom: 1px solid var(--md-outline-variant);
 }
-/* EXPERIMENT (M3 bottom-sheet handle): a drag-handle pill on the compact bottom
+/* DESIGN (M3 bottom-sheet handle): a drag-handle pill on the compact bottom
    sheet (not the medium side sheet or the docked pane). */
 @media (max-width: 599px) {
 	.tool-sheet:not(.docked)::before {
@@ -2634,7 +2634,7 @@ select:focus {
 	flex: 1;
 	margin: 0;
 }
-/* EXPERIMENT (Actions sheet identity): a tertiary tonal badge leading the header —
+/* DESIGN (Actions sheet identity): a tertiary tonal badge leading the header —
    matching the FAB's accent — so the sheet reads clearly as an actions surface. */
 .tool-sheet-icon {
 	display: inline-flex;
@@ -2707,7 +2707,7 @@ select:focus {
 .sheet-action.danger .material-icons {
 	color: var(--md-error);
 }
-/* EXPERIMENT (clarity): destructive actions get an error-tinted hover so they read
+/* DESIGN (clarity): destructive actions get an error-tinted hover so they read
    clearly as dangerous before you commit. */
 .sheet-action.danger:hover {
 	background: color-mix(in srgb, var(--md-error) 11%, transparent);
@@ -2734,7 +2734,7 @@ select:focus {
 .post-author-link:hover .list-item-primary {
 	text-decoration: underline;
 }
-/* EXPERIMENT (social): a subtle tertiary ring on post avatars + airier text. */
+/* DESIGN (social): a subtle tertiary ring on post avatars + airier text. */
 .post-avatar {
 	width: 40px;
 	height: 40px;
@@ -2766,7 +2766,7 @@ select:focus {
 	border-radius: var(--md-sys-shape-corner-full);
 	overflow: hidden;
 }
-/* EXPERIMENT (springy segmented control): tactile press + a bolder, tonal
+/* DESIGN (springy segmented control): tactile press + a bolder, tonal
    selected segment. */
 .m3-segment {
 	display: inline-flex;
@@ -2824,7 +2824,7 @@ select:focus {
 	height: 32px;
 	padding: 0 12px 0 8px;
 	border: 1px solid var(--md-outline-strong);
-	/* EXPERIMENT (expressive chips): full pill + a springy hover lift. */
+	/* DESIGN (expressive chips): full pill + a springy hover lift. */
 	border-radius: var(--md-sys-shape-corner-full);
 	font-size: var(--md-sys-typescale-label-large-size);
 	line-height: 1;
@@ -2944,7 +2944,7 @@ select:focus {
 /* Poll result bars */
 /* M3 linear progress (poll / vote / admin result bars): full-round track on the
    highest container tone, primary indicator, spring fill. */
-/* EXPERIMENT (expressive result bars): taller track, a green-primary to
+/* DESIGN (expressive result bars): taller track, a green-primary to
    magenta-tertiary tonal gradient (the brand's two axes), and a spring grow-in. */
 .vote-bar {
 	height: 12px;
@@ -2972,7 +2972,7 @@ select:focus {
 	}
 }
 
-/* EXPERIMENT (tactile ballot): each open-poll option reads as a bordered card
+/* DESIGN (tactile ballot): each open-poll option reads as a bordered card
    that fills with primary-container when selected — a clearer, more tactile
    choice than a bare list row. (Interaction stays on the radio/checkbox.) */
 .ballot-option {
@@ -2999,7 +2999,7 @@ select:focus {
 	color: var(--md-on-primary-container);
 	box-shadow: var(--md-sys-elevation-2);
 }
-/* EXPERIMENT (winner highlight): the leading option(s) in poll results get a tonal
+/* DESIGN (winner highlight): the leading option(s) in poll results get a tonal
    tint and a trophy. */
 .ballot-winner {
 	background: color-mix(in srgb, var(--md-primary) 8%, transparent);
@@ -3031,7 +3031,7 @@ select:focus {
 	margin-left: 6px;
 	vertical-align: middle;
 }
-/* EXPERIMENT (voting-rights banner): a tonal status banner coloured by whether you
+/* DESIGN (voting-rights banner): a tonal status banner coloured by whether you
    can vote, instead of a plain card. */
 .vote-rights-banner {
 	display: flex;
@@ -3182,7 +3182,7 @@ h6,
 	max-width: min(90vw, 480px);
 }
 
-/* EXPERIMENT (expressive snackbar): a tonal surface with a spring entrance,
+/* DESIGN (expressive snackbar): a tonal surface with a spring entrance,
    replacing the dark toast. */
 .snackbar {
 	position: relative;
@@ -3210,7 +3210,7 @@ h6,
 }
 
 /* Loading spinner */
-/* EXPERIMENT (expressive loader): a filled primary blob that spins while morphing
+/* DESIGN (expressive loader): a filled primary blob that spins while morphing
    its border-radius between organic shapes — the M3 2025 "expressive" loading
    feel, replacing the plain border-spin ring. (prefers-reduced-motion collapses
    it to a static shape via the global rule above.) */
@@ -3259,7 +3259,7 @@ h6,
 	padding: 32px;
 }
 
-/* EXPERIMENT (expressive empty state): a centred "void portal" for not-found /
+/* DESIGN (expressive empty state): a centred "void portal" for not-found /
    empty screens — a big floating, morphing tonal orb, bold title, helpful body. */
 .empty-state {
 	display: flex;
@@ -3382,7 +3382,7 @@ h6,
 	align-items: center;
 	padding: 2px 4px;
 	border-radius: var(--md-sys-shape-corner-full);
-	/* EXPERIMENT (spatial crumb rail): each crumb is a quiet tonal pill that
+	/* DESIGN (spatial crumb rail): each crumb is a quiet tonal pill that
 	   springs up on hover; the current location stays filled. Transform is safe
 	   here — crumbs hold no position:fixed descendants. */
 	transition:
@@ -3478,7 +3478,7 @@ h6,
 }
 
 /* Content (Slate document renderer) */
-/* EXPERIMENT (expressive reading): long-form content gets a slightly larger,
+/* DESIGN (expressive reading): long-form content gets a slightly larger,
    airier measure than UI chrome for comfortable reading. */
 .slate-content {
 	padding: 8px 20px 20px;
@@ -3580,7 +3580,7 @@ h6,
 .slate-content a:hover {
 	text-decoration-color: var(--md-primary);
 }
-/* EXPERIMENT (functional: external-link cue): links that open in a new tab show a
+/* DESIGN (functional: external-link cue): links that open in a new tab show a
    small outbound arrow so it's clear they leave the page. */
 .slate-content a[target="_blank"]::after {
 	content: "↗";
@@ -3589,7 +3589,7 @@ h6,
 	font-size: 0.85em;
 	opacity: 0.7;
 }
-/* EXPERIMENT (reading): inline code gets a tonal monospace pill; block code inside
+/* DESIGN (reading): inline code gets a tonal monospace pill; block code inside
    <pre> is reset back out so only true inline code is pilled. */
 .slate-content code {
 	font-family: monospace;
@@ -3616,7 +3616,7 @@ h6,
 	scroll-margin-top: 80px;
 }
 
-/* EXPERIMENT (functional: print). A clean printout of the current page: hide all
+/* DESIGN (functional: print). A clean printout of the current page: hide all
    chrome and floating affordances, drop the surfaces to plain bordered blocks,
    and let the content flow full-width. Useful for printing an agenda / document. */
 @media print {
@@ -3678,7 +3678,7 @@ h6,
 	padding-left: 24px;
 	margin: 8px 0;
 }
-/* EXPERIMENT (reading): airier list items and magenta-tinted markers. */
+/* DESIGN (reading): airier list items and magenta-tinted markers. */
 .slate-content li {
 	margin: 0.35em 0;
 }
@@ -3737,7 +3737,7 @@ h6,
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	gap: 20px;
 }
-/* Current speaker = the focal civic card. EXPERIMENT: a bold gradient stage with
+/* Current speaker = the focal civic card. DESIGN: a bold gradient stage with
    a glowing avatar and a display-scale name, for room-distance presence. */
 .speak-projector .speak-current {
 	background: linear-gradient(
@@ -3838,7 +3838,7 @@ h6,
 	background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
-/* EXPERIMENT (agenda): times pop in tertiary bold; the timeline dot glows on hover. */
+/* DESIGN (agenda): times pop in tertiary bold; the timeline dot glows on hover. */
 .program-time {
 	font-size: 0.8125rem;
 	text-align: right;
@@ -3904,7 +3904,7 @@ h6,
 	width: auto;
 	height: auto;
 	border-radius: var(--md-sys-shape-corner-large, 16px);
-	/* EXPERIMENT (functional): a tonal placeholder shows in the image box while it
+	/* DESIGN (functional): a tonal placeholder shows in the image box while it
 	   loads, instead of empty space; the loaded image paints over it. */
 	background: var(--md-surface-container-high);
 	/* Fade in on mount so images don't pop in abruptly. */
@@ -4035,7 +4035,7 @@ h6,
 		box-shadow var(--md-sys-motion-duration-short3)
 			var(--md-sys-motion-easing-standard);
 }
-/* EXPERIMENT (expressive carousel): a wider hero lead tile, a hover grow with a
+/* DESIGN (expressive carousel): a wider hero lead tile, a hover grow with a
    Ken-Burns image zoom, and a press squish. */
 .m3-carousel-item:first-child {
 	width: 260px;
@@ -4100,7 +4100,7 @@ h6,
 }
 
 /* Folder list */
-/* EXPERIMENT (expressive list rows): a leading accent bar grows in and the row
+/* DESIGN (expressive list rows): a leading accent bar grows in and the row
    nudges right on hover — a tactile, directional affordance. */
 .folder-item {
 	display: flex;
@@ -4222,7 +4222,7 @@ h6,
 	padding: 24px;
 	position: relative;
 }
-/* EXPERIMENT (auth hero): a soft radial brand wash glowing behind the auth card. */
+/* DESIGN (auth hero): a soft radial brand wash glowing behind the auth card. */
 .auth-container::before {
 	content: "";
 	position: absolute;
@@ -4244,7 +4244,7 @@ h6,
 	align-items: center;
 	gap: 16px;
 }
-/* EXPERIMENT: a hero icon badge for the auth forms (matching home/profile heroes). */
+/* DESIGN: a hero icon badge for the auth forms (matching home/profile heroes). */
 .auth-hero-icon {
 	width: 72px;
 	height: 72px;
@@ -4593,7 +4593,7 @@ a.list-item:hover {
 	margin-bottom: 8px;
 	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
 }
-/* EXPERIMENT (functional): a clear no-results row in the search dropdown. */
+/* DESIGN (functional): a clear no-results row in the search dropdown. */
 .search-no-results {
 	display: flex;
 	align-items: center;
@@ -4857,7 +4857,7 @@ a.list-item:hover {
 }
 
 /* Sort drag-and-drop */
-/* EXPERIMENT (reorder): a leading drag-handle cue + rounded rows so it's clear
+/* DESIGN (reorder): a leading drag-handle cue + rounded rows so it's clear
    the items are draggable. */
 .sort-list .sort-item {
 	cursor: grab;
@@ -4924,7 +4924,7 @@ a.list-item:hover {
 }
 
 /* Rich-text toolbar */
-/* EXPERIMENT (floating editor toolbar): lift the controls onto their own tonal
+/* DESIGN (floating editor toolbar): lift the controls onto their own tonal
    surface-container bar so the toolbar reads as a distinct instrument tray. */
 .editor-tools {
 	display: flex;
@@ -5099,7 +5099,7 @@ a.list-item:hover {
 	margin-top: 8px;
 }
 
-/* EXPERIMENT (conversational thread): an inviting tertiary-tinted composer well. */
+/* DESIGN (conversational thread): an inviting tertiary-tinted composer well. */
 .comment-composer {
 	display: flex;
 	gap: 10px;
@@ -5161,7 +5161,7 @@ a.list-item:hover {
 .comment-main:hover {
 	background: var(--md-surface-container);
 }
-/* EXPERIMENT (avatar rail): larger tertiary rounded-square avatars with a soft
+/* DESIGN (avatar rail): larger tertiary rounded-square avatars with a soft
    glow, giving each speaker more presence than the default 24px circle. */
 .comment-main .comment-avatar {
 	width: 38px;

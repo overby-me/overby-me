@@ -20,7 +20,7 @@ pub fn MapApp(node: NodeWithChildren) -> Element {
                 div { class: "avatar", {icon_el("map/map")} }
                 h3 { class: "title-medium", "{name}" }
             }
-            // EXPERIMENT (framed viewport): a tonal rounded frame around the embed.
+            // DESIGN (framed viewport): a tonal rounded frame around the embed.
             div { class: "viewport-frame",
                 iframe {
                     src: "{src}",

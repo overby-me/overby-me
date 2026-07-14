@@ -42,7 +42,7 @@ pub fn HomeApp() -> Element {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| t("layout.welcomeTitle"));
 
-    // EXPERIMENT (home hero): a time-aware greeting above the title, from the
+    // DESIGN (home hero): a time-aware greeting above the title, from the
     // browser's local hour, with an animated waving hand in a tonal hero header.
     let greeting_key = {
         let hour = js_sys::Date::new_0().get_hours();
@@ -125,7 +125,7 @@ pub fn HomeApp() -> Element {
                     }
                 }
                 // The user's groups/events — shown here only on mobile, where the
-                // drawer (which carries this list on desktop) is hidden. EXPERIMENT:
+                // drawer (which carries this list on desktop) is hidden. DESIGN:
                 // as_cards renders Groups and Events as two separate home cards.
                 if is_auth {
                     div { class: "home-mobile-list mt-1",
