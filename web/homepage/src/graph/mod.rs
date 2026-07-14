@@ -101,10 +101,21 @@ pub fn Graph(data: GraphData) -> Element {
             let aspect = display_width as f32 / display_height as f32;
             camera.set_aspect(aspect);
 
-            // A collapsible graph starts collapsed: only the center + hubs show.
-            let expanded = std::collections::HashSet::new();
+            // Open every category hub by default so a collapsible graph starts
+            // fully expanded (a non-collapsible graph ignores `expanded`).
+            let expanded: std::collections::HashSet<String> = data
+                .nodes
+                .iter()
+                .filter(|n| n.hub)
+                .map(|n| n.id.clone())
+                .collect();
             let visible = filtered_graph(&data, &expanded);
-            let distance = fit_camera_distance(&visible, aspect, OVERVIEW_MARGIN);
+            let margin = if data.collapsible {
+                EXPANDED_MARGIN
+            } else {
+                OVERVIEW_MARGIN
+            };
+            let distance = fit_camera_distance(&visible, aspect, margin);
             camera.distance = distance;
 
             let simulation = Simulation::new(&visible);

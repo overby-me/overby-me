@@ -214,7 +214,7 @@ impl GraphData {
             node(
                 "Mastodon",
                 "Mastodon\nProfile",
-                "mastodon.avif",
+                "bridgy.avif",
                 None,
                 None,
                 Some("https://mastodon.social/@overby.me@bsky.brid.gy"),

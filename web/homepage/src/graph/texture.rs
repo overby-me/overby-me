@@ -33,6 +33,7 @@ pub fn icon_url(icon: &str) -> String {
         "codeberg.avif" => asset!("/assets/icons/codeberg.avif").to_string(),
         "tangled.avif" => asset!("/assets/icons/tangled.avif").to_string(),
         "mastodon.avif" => asset!("/assets/icons/mastodon.avif").to_string(),
+        "bridgy.avif" => asset!("/assets/icons/bridgy.avif").to_string(),
         "bluesky.avif" => asset!("/assets/icons/bluesky.avif").to_string(),
         "radikale.avif" => asset!("/assets/icons/radikale.avif").to_string(),
         "aivero.avif" => asset!("/assets/icons/aivero.avif").to_string(),

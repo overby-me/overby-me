@@ -470,7 +470,7 @@ pub fn bridged_mastodon(handle: &str) -> Platform {
     Platform {
         name: "Mastodon".to_string(),
         domain: "bsky.brid.gy".to_string(),
-        icon: Icon::Bundled("mastodon.avif"),
+        icon: Icon::Bundled("bridgy.avif"),
         profile_url: format!("https://fed.brid.gy/bsky/{handle}"),
         category: "Social",
     }
