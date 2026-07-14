@@ -309,7 +309,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                                 let token = session.read().access_token.clone();
                                 let poll_id = poll_id.clone();
                                 spawn(async move {
-                                    let _ = graphql::update_node(
+                                    match graphql::update_node(
                                         token.as_deref(),
                                         &poll_id,
                                         graphql::NodesSetInput {
@@ -317,8 +317,14 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                                             ..Default::default()
                                         },
                                     )
-                                    .await;
-                                    crate::session::bump_data_version();
+                                    .await
+                                    {
+                                        Ok(true) => crate::session::bump_data_version(),
+                                        other => {
+                                            log::error!("stop poll failed: {other:?}");
+                                            show_snackbar(&t("error.somethingWentWrong"));
+                                        }
+                                    }
                                 });
                             }
                         },

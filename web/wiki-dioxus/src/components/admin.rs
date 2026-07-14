@@ -117,7 +117,13 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                                     let ctx = ctx.clone();
                                     let token = session.read().access_token.clone();
                                     spawn(async move {
-                                        let _ = graphql::set_active_relation(token.as_deref(), &ctx, None).await;
+                                        match graphql::set_active_relation(token.as_deref(), &ctx, None).await {
+                                            Ok(true) => crate::session::bump_data_version(),
+                                            other => {
+                                                log::error!("stop projecting failed: {other:?}");
+                                                crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                            }
+                                        }
                                     });
                                 }
                             },
@@ -312,7 +318,7 @@ fn AdminPollRow(poll: PollSummaryFields, #[props(default)] can_manage: bool) -> 
                             let token = session.read().access_token.clone();
                             let poll_id = poll_id_close.clone();
                             spawn(async move {
-                                let _ = graphql::update_node(
+                                match graphql::update_node(
                                     token.as_deref(),
                                     &poll_id,
                                     graphql::NodesSetInput {
@@ -320,8 +326,14 @@ fn AdminPollRow(poll: PollSummaryFields, #[props(default)] can_manage: bool) -> 
                                         ..Default::default()
                                     },
                                 )
-                                .await;
-                                crate::session::bump_data_version();
+                                .await
+                                {
+                                    Ok(true) => crate::session::bump_data_version(),
+                                    other => {
+                                        log::error!("close poll failed: {other:?}");
+                                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                    }
+                                }
                             });
                         },
                         span { class: "material-icons", "stop" }
