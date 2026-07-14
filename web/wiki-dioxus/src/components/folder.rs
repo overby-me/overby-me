@@ -63,7 +63,10 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
         ),
         refresh,
     );
-    let initial = visible_sorted(&node.children);
+    // Sort the resolver-provided children once per mount rather than re-cloning +
+    // re-sorting on every render (multi-select toggles SELECTED, which re-renders
+    // this whole component). node.children is fixed for the mount (nav remounts).
+    let initial = use_hook(|| visible_sorted(&node.children));
     // Re-fetch when the folder (node_id) changes or a live update bumps refresh.
     // Depend on these reactively via use_reactive rather than a keyed remount,
     // which the web renderer does not perform reliably (see PathResolver).

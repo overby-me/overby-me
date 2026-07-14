@@ -1551,9 +1551,19 @@ pub async fn query_node_by_id(
     Ok(result.node)
 }
 
+thread_local! {
+    /// The root node's id, cached for the session. The parentless root never
+    /// changes, yet `resolve_path` and `path_crumbs` each re-queried it on every
+    /// navigation (2 redundant round-trips per nav).
+    static ROOT_ID: std::cell::OnceCell<String> = const { std::cell::OnceCell::new() };
+}
+
 /// Id of the single parent-less root node ("Hjem", key "root"). Paths are
 /// resolved relative to it: the root's key is not part of any URL path.
 async fn query_root_id(access_token: Option<&str>) -> Result<Option<String>, String> {
+    if let Some(id) = ROOT_ID.with(|c| c.get().cloned()) {
+        return Ok(Some(id));
+    }
     let where_clause = NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
             is_null: Some(true),
@@ -1563,7 +1573,13 @@ async fn query_root_id(access_token: Option<&str>) -> Result<Option<String>, Str
     };
     let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
-    Ok(result.nodes.into_iter().next().map(|n| n.id.0))
+    let id = result.nodes.into_iter().next().map(|n| n.id.0);
+    if let Some(id) = &id {
+        ROOT_ID.with(|c| {
+            let _ = c.set(id.clone());
+        });
+    }
+    Ok(id)
 }
 
 /// The parent-less root node ("Hjem"), whose `data.content` backs the editable
