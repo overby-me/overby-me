@@ -9,6 +9,7 @@
 mod atoms;
 mod color_picker;
 mod dialog;
+mod feedback;
 mod focus;
 mod image;
 mod segmented_button;
@@ -18,6 +19,7 @@ mod tool_sheet;
 pub use atoms::{Badge, Bar, Carousel, Chip, ListItem, Spinner, SupportingPaneLayout};
 pub use color_picker::ColorPicker;
 pub use dialog::Dialog;
+pub use feedback::{EmptyState, ErrorState};
 pub use image::ZoomableImage;
 pub use segmented_button::SegmentedButton;
 pub use table::{DataTable, PaginatedTable};

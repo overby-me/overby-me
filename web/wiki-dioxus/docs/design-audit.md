@@ -41,15 +41,23 @@ non-functional (custom `widgets::Dialog` built instead).
   crate lift. Consider dropping `dx-components-theme.css` if the 3 kept primitives
   don't need it (they reference no `--dx*` tokens).
 
-## 3. Loading / Error / Empty — no single contract (◻️)
+## 3. Loading / Error / Empty — no single contract (partly ✅)
 
 Three loading treatments plus screens that render nothing while pending;
 `unwrap_or_default()` collapses loading/error/empty into one blank render, so a
 failed fetch looks like "no groups" and screens flash blank→full. No optimistic UI —
 every mutation is fire-then-full-refetch.
 
-- ◻️ A shared LEE wrapper that distinguishes `None`(→skeleton)/`Err`(→error)/
-  `Some(empty)`(→orb)/`Some(data)`, rolled across home/folder/comments/social/profile.
+- ✅ Reusable `widgets::EmptyState` + `widgets::ErrorState` establish the shared
+  empty/error presentation; `widgets/feedback.rs` documents the four-state match
+  (`None`→skeleton / `Err`→error / `Some(empty)`→orb / `Some(data)`→rows).
+- ✅ `social.rs` and the page resolver (`loader.rs`) now use them and log the error
+  detail instead of dumping raw `{e}` into the UI. `social.rs` is the reference LEE
+  screen.
+- ◻️ Roll the four-state match across the screens that still `unwrap_or_default()`
+  (home Recent, folder, comments, profile) — each needs its resource closure to
+  return `Result<_, _>` instead of swallowing the error, so a failed fetch stops
+  looking like "empty". Verify in a real browser.
 - ◻️ Optimistic insert for high-frequency low-risk actions (comments).
 
 ## 4. Accessibility — strong, with a few sharp gaps (mostly ✅)

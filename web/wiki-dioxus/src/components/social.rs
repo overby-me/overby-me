@@ -61,28 +61,26 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
                 }
             },
             Some(Ok(_)) => rsx! {
-                // EXPERIMENT: orb empty state for a search with no results.
                 div { class: "card",
-                    div { class: "empty-state empty-state-sm",
-                        div { class: "empty-state-orb empty-state-orb-sm",
-                            span { class: "material-icons", "search_off" }
-                        }
-                        p { class: "empty-state-body", "{t(\"social.empty\")}" }
+                    super::widgets::EmptyState {
+                        icon: "search_off".to_string(),
+                        message: t("social.empty"),
+                        small: true,
                     }
                 }
             },
-            Some(Err(e)) => rsx! {
-                // EXPERIMENT: expressive error state (error-tinted orb).
-                div { class: "card accent-error",
-                    div { class: "empty-state empty-state-sm",
-                        div { class: "empty-state-orb empty-state-orb-sm error-orb",
-                            span { class: "material-icons", "error_outline" }
+            Some(Err(e)) => {
+                // Log the detail; the UI shows a friendly state, never raw error text.
+                log::error!("bluesky wall fetch: {e}");
+                rsx! {
+                    div { class: "card accent-error",
+                        super::widgets::ErrorState {
+                            title: t("error.somethingWentWrong"),
+                            small: true,
                         }
-                        h3 { class: "empty-state-title", "{t(\"error.somethingWentWrong\")}" }
-                        pre { class: "error-fallback", "{e}" }
                     }
                 }
-            },
+            }
             None => rsx! { super::widgets::Spinner {} },
         }
     }
