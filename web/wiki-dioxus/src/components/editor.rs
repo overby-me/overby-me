@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use dioxus::prelude::*;
 
 use crate::components::richtext;
@@ -13,6 +15,57 @@ pub const NODE_NAME_MAXLEN: usize = 120;
 
 /// DOM id of the `contenteditable` editing surface.
 const EDITOR_ID: &str = "rich-editor";
+
+/// Idle time after the last keystroke before the editor silently autosaves the
+/// draft, so a crash or accidental close never loses more than this window.
+const AUTOSAVE_DEBOUNCE_MS: u32 = 2500;
+
+/// Set while the open editor holds unsaved edits. A plain atomic (not a signal)
+/// so the `beforeunload` callback can read it without touching Dioxus's reactive
+/// graph — the callback outlives the editor, but the flag is cleared on unmount.
+static EDITOR_DIRTY: AtomicBool = AtomicBool::new(false);
+
+/// Mark / clear the unsaved-edits flag the `beforeunload` guard consults.
+fn set_editor_dirty(dirty: bool) {
+    EDITOR_DIRTY.store(dirty, Ordering::Relaxed);
+}
+
+/// Install a one-time, app-lifetime `beforeunload` guard that prompts the user
+/// before a tab close / reload while [`EDITOR_DIRTY`] is set. In-app navigation
+/// is handled by saving before we route away; this covers the browser-level
+/// exits the router cannot intercept.
+#[cfg(target_arch = "wasm32")]
+fn install_unsaved_guard() {
+    use std::sync::Once;
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::{JsCast, JsValue};
+
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let Some(win) = web_sys::window() else {
+            return;
+        };
+        let cb = Closure::<dyn FnMut(web_sys::Event)>::new(|e: web_sys::Event| {
+            if EDITOR_DIRTY.load(Ordering::Relaxed) {
+                // Cancelling beforeunload makes modern engines show their generic
+                // "leave site?" prompt; `returnValue` is the legacy trigger some
+                // still require.
+                e.prevent_default();
+                let _ = js_sys::Reflect::set(
+                    e.as_ref(),
+                    &JsValue::from_str("returnValue"),
+                    &JsValue::from_str(""),
+                );
+            }
+        });
+        let _ = win.add_event_listener_with_callback("beforeunload", cb.as_ref().unchecked_ref());
+        // The listener must outlive this call; it is installed exactly once.
+        cb.forget();
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn install_unsaved_guard() {}
 
 /// The block-type key for the caret, from the browser's `formatBlock` state.
 fn current_block() -> String {
@@ -229,6 +282,17 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     let mut link_open = use_signal(|| false);
     let mut link_url = use_signal(String::new);
 
+    // Unsaved-changes tracking (#144). `dirty` drives the debounced autosave and
+    // mirrors the atomic the beforeunload guard reads; `autosave_seq` lets a
+    // scheduled save bail out when the user has kept typing.
+    let is_mutable = node.mutable;
+    let mut dirty = use_signal(|| false);
+    let mut autosave_seq = use_signal(|| 0u32);
+    // Install the beforeunload guard once, and clear the unsaved flag when this
+    // editor unmounts (saved or routed away) so no stale guard stays armed.
+    use_hook(install_unsaved_guard);
+    use_drop(|| set_editor_dirty(false));
+
     let handle_save = {
         let token = session.read().access_token.clone();
         let node_id = node_id.clone();
@@ -287,6 +351,10 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
 
                 match graphql::update_node(token.as_deref(), &node_id, set).await {
                     Ok(true) => {
+                        // Saved: disarm the unsaved-changes guard before we route
+                        // away from the editor.
+                        dirty.set(false);
+                        set_editor_dirty(false);
                         show_snackbar(&t("common.save"));
                         // Invalidate the cached node so the view we return to
                         // shows the saved content instead of the stale copy.
@@ -313,6 +381,71 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
             });
         }
     };
+
+    // Debounced silent autosave of the in-progress draft (#144). Content only —
+    // it never touches authors, never navigates, and never bumps the data
+    // version (which would remount and blank the live editor surface).
+    let autosave = {
+        let token = session.read().access_token.clone();
+        let node_id = node_id.clone();
+        let base_data = node
+            .data
+            .as_ref()
+            .and_then(|d| d.0.as_object().cloned())
+            .unwrap_or_default();
+        move || {
+            // Only autosave a still-mutable draft, and never while a manual
+            // save/submit is in flight (that navigates away on success).
+            if !is_mutable || *saving.peek() {
+                return;
+            }
+            let token = token.clone();
+            let node_id = node_id.clone();
+            let base_data = base_data.clone();
+            let title_val = title.peek().clone();
+            let seq = *autosave_seq.peek();
+            spawn(async move {
+                let content_json = richtext::serialize_editor(EDITOR_ID).unwrap_or_else(
+                    || serde_json::json!([{ "type": "paragraph", "children": [{"text": ""}] }]),
+                );
+                let content_json = richtext::strip_leading_empty_paragraph(content_json);
+                let mut data_obj = base_data;
+                data_obj.insert("content".to_string(), content_json);
+                let set = graphql::NodesSetInput {
+                    name: Some(title_val),
+                    data: Some(graphql::Jsonb(serde_json::Value::Object(data_obj))),
+                    mutable: Some(true),
+                    ..Default::default()
+                };
+                if let Ok(true) = graphql::update_node(token.as_deref(), &node_id, set).await {
+                    // Only disarm the guard if no newer keystroke queued another
+                    // autosave since we captured `seq`.
+                    if *autosave_seq.peek() == seq {
+                        dirty.set(false);
+                        set_editor_dirty(false);
+                    }
+                }
+            });
+        }
+    };
+
+    // Mark dirty and (re)start the autosave debounce. Each keystroke bumps the
+    // sequence; the scheduled task only fires if it is still the latest edit.
+    let schedule_autosave = move || {
+        dirty.set(true);
+        set_editor_dirty(true);
+        let seq = *autosave_seq.peek() + 1;
+        autosave_seq.set(seq);
+        let autosave = autosave.clone();
+        spawn(async move {
+            gloo_timers::future::TimeoutFuture::new(AUTOSAVE_DEBOUNCE_MS).await;
+            if *autosave_seq.peek() == seq {
+                autosave();
+            }
+        });
+    };
+    let mut schedule_title = schedule_autosave.clone();
+    let mut schedule_editor = schedule_autosave;
 
     if !is_auth {
         // DESIGN: an expressive locked-barrier state instead of a plain card.
@@ -341,7 +474,10 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         r#type: "text",
                         maxlength: "{NODE_NAME_MAXLEN}",
                         value: "{title}",
-                        oninput: move |evt| title.set(evt.value()),
+                        oninput: move |evt| {
+                            title.set(evt.value());
+                            schedule_title();
+                        },
                     }
                 }
 
@@ -653,7 +789,8 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block)
                     },
                     oninput: move |_| {
-                        refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block)
+                        refresh_toolbar(st_bold, st_italic, st_underline, st_strike, st_block);
+                        schedule_editor();
                     },
                     onblur: move |_| richtext::save_selection(),
                 }

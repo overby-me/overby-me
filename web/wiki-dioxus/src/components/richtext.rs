@@ -460,6 +460,17 @@ mod dom {
     // -----------------------------------------------------------------------
     // execCommand / selection plumbing
     // -----------------------------------------------------------------------
+    //
+    // NOTE (#144): `document.execCommand` is deprecated but still implemented by
+    // every current engine, and it remains the pragmatic way to drive a
+    // `contenteditable` surface (bold/italic/lists/alignment/format-block/links
+    // + `queryCommandState`). A from-scratch Selection/Range editing engine is a
+    // large, high-risk rewrite with poor ROI here: this Dioxus frontend is an
+    // interim step before the atproto-based rewrite, which will replace the
+    // editor wholesale. The whole dependency is deliberately isolated behind this
+    // thin `exec` / `query_*` API so that replacement has a single clean seam.
+    // The data-loss half of #144 (autosave + a beforeunload guard) shipped in
+    // `components::editor`.
 
     /// Run a plain `execCommand`.
     pub fn exec(command: &str) -> bool {
