@@ -4552,6 +4552,50 @@ h6,
 	}
 }
 
+/* --- Chair console: agenda walker + quick actions (run-the-meeting). --- */
+.console-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 12px;
+}
+.agenda-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+.agenda-icon {
+	color: var(--md-on-surface-variant, #43483e);
+	font-size: 22px;
+}
+.agenda-name {
+	flex: 1;
+	min-width: 0;
+	text-decoration: none;
+	color: inherit;
+}
+.agenda-name:hover {
+	text-decoration: underline;
+}
+/* The item currently on the room screen: a tinted rail + a live chip. */
+.agenda-item.active {
+	background: var(--md-sys-color-secondary-container, #d7e3d8);
+	border-radius: 12px;
+}
+.agenda-item.active .agenda-icon {
+	color: var(--md-primary, #006d39);
+}
+.agenda-live {
+	background: var(--md-primary, #006d39);
+	color: var(--md-on-primary, #fff);
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+.agenda-live .material-icons {
+	font-size: 16px;
+}
+
 /* The groups/events list rendered in the Home main pane — mobile only; on desktop
    the always-visible drawer already carries it. Block-level (unlike .mobile-only,
    which is inline-flex for buttons). */

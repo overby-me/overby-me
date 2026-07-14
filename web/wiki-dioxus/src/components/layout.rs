@@ -701,6 +701,7 @@ fn app_crumb_label(app: &str) -> String {
         "sort" => t("mime.sort"),
         "screen" => t("mime.screen"),
         "follow" => t("mime.follow"),
+        "admin" => t("console.title"),
         other => other.to_string(),
     }
 }
@@ -826,6 +827,17 @@ fn context_apps(route: &Route, is_auth: bool) -> Vec<(&'static str, String, Rout
                 app: Some("follow".to_string()),
             },
             current_app.as_deref() == Some("follow"),
+        ));
+        // The chair's run-the-meeting console (agenda + project + results). Owner
+        // actions gate themselves inside; members see the agenda/results read-only.
+        apps.push((
+            "app/admin",
+            t("console.title"),
+            Route::PathPage {
+                segments: ctx_path.clone(),
+                app: Some("admin".to_string()),
+            },
+            current_app.as_deref() == Some("admin"),
         ));
         // The other apps (screen, admin, program, graph, social, map, profile,
         // perm, parent) are still reachable via their `?app=` URL but hidden

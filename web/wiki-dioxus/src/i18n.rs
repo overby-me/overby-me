@@ -444,6 +444,12 @@ const EN_JSON: &str = r#"{
         "live": "Following the room, live",
         "idle": "Nothing is being presented right now."
     },
+    "console": {
+        "title": "Console",
+        "agenda": "Agenda",
+        "onScreen": "On screen",
+        "stopProjecting": "Stop projecting"
+    },
     "mime": {
         "group": "Group",
         "event": "Event",
@@ -827,6 +833,12 @@ const DA_JSON: &str = r#"{
     "follow": {
         "live": "Følger salen, live",
         "idle": "Der vises ikke noget lige nu."
+    },
+    "console": {
+        "title": "Konsol",
+        "agenda": "Dagsorden",
+        "onScreen": "På skærmen",
+        "stopProjecting": "Stop projektion"
     },
     "mime": {
         "group": "Gruppe",

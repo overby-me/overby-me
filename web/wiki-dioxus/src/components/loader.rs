@@ -389,6 +389,7 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "app/vote" => "how_to_vote",
         "app/screen" => "connected_tv",
         "app/follow" => "sensors",
+        "app/admin" => "co_present",
         "application/pdf" => "picture_as_pdf",
         "app/map" | "map/map" => "map",
         // Apps the old wiki did not have — closest Material icons.

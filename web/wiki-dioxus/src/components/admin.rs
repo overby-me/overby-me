@@ -2,13 +2,25 @@ use dioxus::prelude::*;
 
 use crate::graphql::{self, NodeWithChildren, PollSummaryFields};
 use crate::i18n::t;
+use crate::route::Route;
 use crate::session::use_session;
 
-use super::loader::icon_el;
+use super::loader::{icon_el, mime_icon};
 
-/// AdminApp — the results overview (`?app=admin`): every poll in the context
-/// with its per-option tallies. React shipped this as a stubbed data grid; here
-/// it is a live table.
+/// Child mimes that are not agenda items (comments, ballots, questions, member
+/// nodes) — the console walks the real content the room discusses.
+fn is_agenda_item(mime: &str) -> bool {
+    !matches!(
+        mime,
+        "vote/comment" | "vote/vote" | "vote/question" | "wiki/user"
+    )
+}
+
+/// AdminApp — the chair's run-the-meeting console (`?app=admin`). One owner-facing
+/// screen to drive a live assembly: walk the agenda and project the current item
+/// to the room + followers (the `active` relation), jump to the screen/speaker
+/// views, and watch every poll's live tally (with a close action). Non-owners see
+/// the agenda + results read-only.
 #[component]
 pub fn AdminApp(node: NodeWithChildren) -> Element {
     let session = use_session();
@@ -18,33 +30,179 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
         .clone()
         .map(|c| c.0)
         .unwrap_or_else(|| node.id.0.clone());
+    let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
 
-    let polls = crate::use_data_resource!(|(context_id, access_token)| async move {
-        graphql::query_context_polls(access_token.as_deref(), &context_id)
+    let route = use_route::<Route>();
+    let segments: Vec<String> = match &route {
+        Route::PathPage { segments, .. } => segments.clone(),
+        _ => vec![],
+    };
+
+    // Live "now showing": subscribe to the context `active` relation so the agenda
+    // highlight tracks whatever the chair projected, from any device.
+    let refresh = use_signal(|| 0u32);
+    let sub_ctx = graphql::gql_escape(&context_id);
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _eq: \"active\" }} }}) {{ nodeId }} }}"
+        ),
+        refresh,
+    );
+    let rev = *refresh.read();
+    let active_ctx = context_id.clone();
+    let active_token = access_token.clone();
+    let active = crate::use_data_resource!(|(active_ctx, active_token, rev)| async move {
+        let _ = rev;
+        graphql::active_node_id(active_token.as_deref(), &active_ctx)
+            .await
+            .ok()
+            .flatten()
+    });
+    let active_id = active.read().clone().flatten();
+
+    // Agenda = the context's content children, in order.
+    let mut agenda: Vec<_> = node
+        .children
+        .iter()
+        .filter(|c| is_agenda_item(c.mime_id.as_deref().unwrap_or("")))
+        .cloned()
+        .collect();
+    agenda.sort_by_key(|c| c.index);
+
+    let polls_ctx = context_id.clone();
+    let polls = crate::use_data_resource!(|(polls_ctx, access_token)| async move {
+        graphql::query_context_polls(access_token.as_deref(), &polls_ctx)
             .await
             .unwrap_or_default()
     });
     let polls = polls.read().clone().unwrap_or_default();
 
     rsx! {
-        div { class: "card",
-            div { class: "card-header",
-                div { class: "avatar", {icon_el("vote/poll")} }
-                h3 { class: "title-medium", "{t(\"mime.vote\")}" }
-            }
-            if polls.is_empty() {
-                // EXPERIMENT: orb empty state instead of a plain muted line.
-                div { class: "empty-state empty-state-sm",
-                    div { class: "empty-state-orb empty-state-orb-sm",
-                        span { class: "material-icons", "how_to_vote" }
-                    }
-                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+        div { class: "console",
+            // Jump to the room-facing views without leaving the console flow.
+            div { class: "console-actions",
+                Link {
+                    to: Route::PathPage { segments: segments.clone(), app: Some("screen".to_string()) },
+                    class: "btn btn-tonal",
+                    span { class: "material-icons", "connected_tv" }
+                    "{t(\"mime.screen\")}"
                 }
-            } else {
-                super::widgets::DataTable {
-                    columns: vec![t("admin.poll"), t("admin.results"), t("admin.votes")],
-                    for poll in polls.iter() {
-                        AdminPollRow { key: "{poll.id.0}", poll: poll.clone() }
+                Link {
+                    to: Route::PathPage { segments: segments.clone(), app: Some("follow".to_string()) },
+                    class: "btn btn-tonal",
+                    span { class: "material-icons", "sensors" }
+                    "{t(\"mime.follow\")}"
+                }
+                Link {
+                    to: Route::PathPage { segments: segments.clone(), app: Some("speak".to_string()) },
+                    class: "btn btn-tonal",
+                    span { class: "material-icons", "record_voice_over" }
+                    "{t(\"mime.speak\")}"
+                }
+            }
+
+            // Agenda: project any item to the room + followers with one tap.
+            div { class: "card",
+                div { class: "card-header",
+                    div { class: "avatar", {icon_el("app/program")} }
+                    h3 { class: "title-medium", "{t(\"console.agenda\")}" }
+                    div { class: "flex-grow" }
+                    if can_manage && active_id.is_some() {
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"console.stopProjecting\")}",
+                            onclick: {
+                                let ctx = context_id.clone();
+                                move |_| {
+                                    let ctx = ctx.clone();
+                                    let token = session.read().access_token.clone();
+                                    spawn(async move {
+                                        let _ = graphql::set_active_relation(token.as_deref(), &ctx, None).await;
+                                    });
+                                }
+                            },
+                            span { class: "material-icons", "cancel_presentation" }
+                        }
+                    }
+                }
+                if agenda.is_empty() {
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "list_alt" }
+                        }
+                        p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+                    }
+                } else {
+                    div { class: "list",
+                        for item in agenda.iter() {
+                            {
+                                let is_active = active_id.as_deref() == Some(item.id.0.as_str());
+                                let mut item_path = segments.clone();
+                                item_path.push(item.key.clone());
+                                let item_id = item.id.0.clone();
+                                let proj_ctx = context_id.clone();
+                                rsx! {
+                                    div {
+                                        key: "{item.id.0}",
+                                        class: if is_active { "list-item agenda-item active" } else { "list-item agenda-item" },
+                                        span { class: "material-icons agenda-icon",
+                                            "{mime_icon(item.mime_id.as_deref().unwrap_or(\"wiki/document\"))}"
+                                        }
+                                        Link {
+                                            to: Route::PathPage { segments: item_path, app: None },
+                                            class: "list-item-text agenda-name",
+                                            "{item.name}"
+                                        }
+                                        if is_active {
+                                            span { class: "chip agenda-live",
+                                                span { class: "material-icons", "connected_tv" }
+                                                span { class: "chip-label", "{t(\"console.onScreen\")}" }
+                                            }
+                                        } else if can_manage {
+                                            button {
+                                                class: "btn btn-tonal btn-sm",
+                                                onclick: move |_| {
+                                                    let ctx = proj_ctx.clone();
+                                                    let item_id = item_id.clone();
+                                                    let token = session.read().access_token.clone();
+                                                    spawn(async move {
+                                                        match graphql::set_active_relation(token.as_deref(), &ctx, Some(&item_id)).await {
+                                                            Ok(_) => crate::snackbar::show_snackbar(&t("content.projected")),
+                                                            Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                                        }
+                                                    });
+                                                },
+                                                span { class: "material-icons", "cast" }
+                                                "{t(\"content.projectScreen\")}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Live results: every poll's tally, with a close action for owners.
+            div { class: "card",
+                div { class: "card-header",
+                    div { class: "avatar", {icon_el("vote/poll")} }
+                    h3 { class: "title-medium", "{t(\"admin.results\")}" }
+                }
+                if polls.is_empty() {
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "how_to_vote" }
+                        }
+                        p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+                    }
+                } else {
+                    super::widgets::DataTable {
+                        columns: vec![t("admin.poll"), t("admin.results"), t("admin.votes")],
+                        for poll in polls.iter() {
+                            AdminPollRow { key: "{poll.id.0}", poll: poll.clone(), can_manage }
+                        }
                     }
                 }
             }
@@ -52,9 +210,10 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     }
 }
 
-/// One poll's row: its name and each option's vote count (live).
+/// One poll's row: its name and each option's vote count (live), plus a close
+/// action for owners while the poll is open.
 #[component]
-fn AdminPollRow(poll: PollSummaryFields) -> Element {
+fn AdminPollRow(poll: PollSummaryFields, #[props(default)] can_manage: bool) -> Element {
     let session = use_session();
     let access_token = session.read().access_token.clone();
     let poll_id = poll.id.0.clone();
@@ -106,6 +265,7 @@ fn AdminPollRow(poll: PollSummaryFields) -> Element {
                 .collect()
         })
         .unwrap_or_default();
+    let poll_id_close = poll.id.0.clone();
 
     rsx! {
         tr {
@@ -144,6 +304,29 @@ fn AdminPollRow(poll: PollSummaryFields) -> Element {
             }
             td {
                 span { class: "admin-total", "{total}" }
+                if can_manage && poll.mutable {
+                    button {
+                        class: "btn-icon",
+                        title: "{t(\"poll.stopPoll\")}",
+                        onclick: move |_| {
+                            let token = session.read().access_token.clone();
+                            let poll_id = poll_id_close.clone();
+                            spawn(async move {
+                                let _ = graphql::update_node(
+                                    token.as_deref(),
+                                    &poll_id,
+                                    graphql::NodesSetInput {
+                                        mutable: Some(false),
+                                        ..Default::default()
+                                    },
+                                )
+                                .await;
+                                crate::session::bump_data_version();
+                            });
+                        },
+                        span { class: "material-icons", "stop" }
+                    }
+                }
             }
         }
     }
