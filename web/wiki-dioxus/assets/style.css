@@ -498,13 +498,6 @@ html {
 	align-items: center;
 	gap: var(--md-sys-spacing-2);
 }
-.top-app-bar-headline {
-	flex: 1;
-	min-width: 0;
-	display: flex;
-	align-items: center;
-}
-
 /* M3 Expressive docked search: a full-round surface-container container that
    carries the breadcrumb trail behind a leading search button. */
 .expressive-search {
@@ -3134,10 +3127,6 @@ h6,
 	gap: 8px;
 }
 
-.grid-2 {
-	grid-template-columns: 1fr;
-}
-
 @media (min-width: 900px) {
 	.grid-2 {
 		grid-template-columns: 1fr 1fr;
@@ -4196,12 +4185,6 @@ h6,
 	hyphens: auto;
 }
 
-/* Theme toggle */
-.theme-toggle {
-	cursor: pointer;
-	padding: 8px;
-}
-
 /* Error boundary */
 .error-fallback {
 	padding: 24px;
@@ -4298,19 +4281,9 @@ h6,
 	background: var(--md-surface);
 }
 
-/* Home page */
-.home-welcome {
-	text-align: center;
-	padding: 32px 16px;
-}
-
 /* Utility */
 .flex-grow {
 	flex-grow: 1;
-}
-
-.text-center {
-	text-align: center;
 }
 
 .hidden {
@@ -4332,24 +4305,6 @@ h6,
 }
 .mb-2 {
 	margin-bottom: var(--md-sys-spacing-4);
-}
-
-/* Pending-invite count badge on the Home nav item (rail + mobile bar). */
-.nav-badge {
-	position: absolute;
-	top: 2px;
-	right: 8px;
-	min-width: 16px;
-	height: 16px;
-	padding: 0 4px;
-	border-radius: 8px;
-	background: var(--md-tertiary);
-	color: var(--md-on-tertiary);
-	font-size: 10px;
-	font-weight: 600;
-	line-height: 16px;
-	text-align: center;
-	box-sizing: border-box;
 }
 
 /* Projector view (?app=screen): full-screen content, no drawer/rail/bar chrome. */
@@ -4543,12 +4498,6 @@ h6,
 	.home-mobile-list {
 		display: none;
 	}
-}
-
-/* A drawer list-item shown only on mobile (keeps flex layout, unlike
-   .mobile-only which is inline-flex). Desktop reaches Home via the app rail. */
-.drawer-mobile-home {
-	display: flex;
 }
 
 @media (min-width: 1200px) {
