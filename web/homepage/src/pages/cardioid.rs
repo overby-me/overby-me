@@ -339,6 +339,7 @@ fn presets() -> Vec<(&'static str, Settings)> {
                 glow: true,
                 fill: Fill::HueSpeed,
                 circles: false,
+                drawdot: false,
                 ..base()
             },
         ),
