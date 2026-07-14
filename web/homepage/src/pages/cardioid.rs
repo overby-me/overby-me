@@ -336,7 +336,6 @@ fn presets() -> Vec<(&'static str, Settings)> {
                 step: 0.069,
                 speed: 700.0,
                 fade: 0.07,
-                glow: true,
                 fill: Fill::HueSpeed,
                 circles: false,
                 drawdot: false,
