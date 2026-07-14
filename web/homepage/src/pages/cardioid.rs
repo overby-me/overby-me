@@ -570,11 +570,12 @@ impl Sim {
             s.speed.max(0.0) as u32
         };
 
-        // Fade or accumulate on the trace buffer.
+        // Fade or accumulate on the trace buffer. Skip while paused so a frozen
+        // view doesn't keep fading away.
         self.trace
             .set_global_composite_operation("source-over")
             .ok();
-        if s.fade > 0.0 {
+        if s.fade > 0.0 && !self.paused {
             self.trace
                 .set_fill_style_str(&format!("rgba(0,0,0,{})", s.fade.clamp(0.0, 1.0)));
             self.trace.fill_rect(0.0, 0.0, self.w, self.h);
