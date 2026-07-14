@@ -38,6 +38,11 @@ pub static SESSION: GlobalSignal<Session> = Signal::global(Session::default);
 /// Bumped after a mutation so cached data queries refetch instead of serving a
 /// stale result. `use_resource` only re-runs when its dependencies change, so a
 /// query that reads this in its `use_reactive` deps refetches on every bump.
+///
+/// This is one app-wide counter: a bump refetches EVERY mounted `use_data_resource!`
+/// at once (coarse but correct). Scoping it per-context is deliberately deferred —
+/// see `docs/data-version-invalidation.md` for the mechanism, the load-bearing
+/// cross-view-consistency constraint, and a low-regression scoping design.
 pub static DATA_VERSION: GlobalSignal<u32> = Signal::global(|| 0);
 
 /// Invalidate cached data queries; call after a successful mutation so views
