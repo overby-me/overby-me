@@ -37,13 +37,16 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     let rev = refresh();
     // Refetches on a local post (`rev`) and on a global refresh (pull-to-refresh),
     // so comments update alongside the rest of the view.
+    // LEE: keep the error so a failed load shows an error state, not "no comments".
     let comments = crate::use_data_resource!(|(nid, token, rev)| async move {
         let _ = rev;
-        graphql::query_comments(token.as_deref(), &nid)
-            .await
-            .unwrap_or_default()
+        graphql::query_comments(token.as_deref(), &nid).await
     });
-    let list = comments.read().clone().unwrap_or_default();
+    let state = comments.read().clone();
+    let count = match &state {
+        Some(Ok(list)) => list.len(),
+        _ => 0,
+    };
 
     // Live: refetch when any comment/reply in this context (or, lacking a context,
     // directly under this node) changes, so new comments and replies appear at
@@ -89,8 +92,8 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
             div { class: "card-header",
                 div { class: "avatar small", {crate::components::loader::icon_el("vote/comment")} }
                 h3 { class: "title-medium", "{t(\"vote.comments\")}" }
-                if !list.is_empty() {
-                    span { class: "count-badge", "{list.len()}" }
+                if count > 0 {
+                    span { class: "count-badge", "{count}" }
                 }
             }
             div { class: "card-content",
@@ -103,27 +106,46 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                         on_posted: move |_| {},
                     }
                 }
-                if list.is_empty() {
-                    // DESIGN: a compact characterful empty state (floating orb).
-                    div { class: "empty-state empty-state-sm",
-                        div { class: "empty-state-orb empty-state-orb-sm",
-                            span { class: "material-icons", "forum" }
+                match &state {
+                    // Loading: a spinner rather than a premature "no comments".
+                    None => rsx! {
+                        div { class: "empty-state empty-state-sm",
+                            crate::components::widgets::Spinner {}
                         }
-                        p { class: "empty-state-body", "{t(\"vote.noComments\")}" }
-                    }
-                } else {
-                    div { class: "comment-thread-list",
-                        for c in list.iter() {
-                            CommentThread {
-                                key: "{c.id.0}",
-                                comment: c.clone(),
-                                context_id: context_id.clone(),
-                                depth: 0,
-                                refresh,
-                                can_comment,
+                    },
+                    // Error: never looks like an empty thread (log the detail).
+                    Some(Err(e)) => {
+                        log::error!("Loading comments failed: {e}");
+                        rsx! {
+                            crate::components::widgets::ErrorState {
+                                title: t("error.somethingWentWrong"),
+                                small: true,
                             }
                         }
                     }
+                    Some(Ok(list)) if list.is_empty() => rsx! {
+                        // DESIGN: a compact characterful empty state (floating orb).
+                        div { class: "empty-state empty-state-sm",
+                            div { class: "empty-state-orb empty-state-orb-sm",
+                                span { class: "material-icons", "forum" }
+                            }
+                            p { class: "empty-state-body", "{t(\"vote.noComments\")}" }
+                        }
+                    },
+                    Some(Ok(list)) => rsx! {
+                        div { class: "comment-thread-list",
+                            for c in list.iter() {
+                                CommentThread {
+                                    key: "{c.id.0}",
+                                    comment: c.clone(),
+                                    context_id: context_id.clone(),
+                                    depth: 0,
+                                    refresh,
+                                    can_comment,
+                                }
+                            }
+                        }
+                    },
                 }
             }
         }

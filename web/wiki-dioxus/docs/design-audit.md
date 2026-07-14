@@ -24,8 +24,13 @@ not a token edit.
 - ◻️ Migrate the ~340 remaining literals to tokens incrementally (verify in a real
   browser — ~90% already sit on the 4px grid). NB the utility numeral is a size STEP,
   not the token index (`.mt-1` == 8px == `spacing-2`); a rename would remove that
-  confusion but costs ~37 call-site edits.
-- ◻️ Self-host the two render-blocking Google Fonts `@import`s.
+  confusion but costs ~37 call-site edits. **Deferred**: large, tedious, and the
+  ratchet already prevents regressions; best done in browser-verified batches.
+- ◻️ Self-host the two render-blocking Google Fonts `@import`s. **Deferred**: Google
+  serves per-`unicode-range` woff2 subsets, so static self-hosting risks dropping the
+  Danish glyphs (æ ø å) from the primary text font and breaking every Material icon —
+  app-wide blast radius that needs browser verification. Do it with the full,
+  unsubsetted font files and a real-browser check.
 
 ## 2. Component library — was two systems (✅)
 
@@ -39,7 +44,10 @@ non-functional (custom `widgets::Dialog` built instead).
   `focus` a11y module), re-exported at `widgets::`. Domain-free → crate-extractable.
 - ◻️ `ToolSheet` has one app coupling (`crate::window_size`) to decouple before a
   crate lift. Consider dropping `dx-components-theme.css` if the 3 kept primitives
-  don't need it (they reference no `--dx*` tokens).
+  don't need it (they reference no `--dx*` tokens). **Deferred**: it is a single
+  `WINDOW_SIZE().is_extra_large()` call; decoupling it now (a `docked` prop the
+  caller computes) just pushes the same window-size logic onto every call site with
+  no benefit until the library is actually extracted. Do it at lift time.
 
 ## 3. Loading / Error / Empty — no single contract (partly ✅)
 
@@ -54,11 +62,18 @@ every mutation is fire-then-full-refetch.
 - ✅ `social.rs` and the page resolver (`loader.rs`) now use them and log the error
   detail instead of dumping raw `{e}` into the UI. `social.rs` is the reference LEE
   screen.
-- ◻️ Roll the four-state match across the screens that still `unwrap_or_default()`
-  (home Recent, folder, comments, profile) — each needs its resource closure to
-  return `Result<_, _>` instead of swallowing the error, so a failed fetch stops
-  looking like "empty". Verify in a real browser.
-- ◻️ Optimistic insert for high-frequency low-risk actions (comments).
+- ✅ Rolled the four-state match onto the screens with the real "error looks empty"
+  bug: `comments.rs` (a failed thread load now shows an error state, not "no
+  comments") and `profile.rs` memberships (a failed load shows an error, not an
+  empty membership list) — both resources now return `Result<_, _>`.
+- ✅ `folder.rs` and home `Recent` intentionally left as-is: the folder always has an
+  `initial` server-resolved child set to fall back on (a failed live refetch shows
+  stale rows, never a false "empty"), and Recent is a supplementary widget that is
+  by-design hidden when it has nothing to show, where a large error card would be
+  worse UX than silence.
+- ◻️ Optimistic insert for high-frequency low-risk actions (comments). **Deferred**:
+  needs an insert-then-reconcile path with rollback on failure; medium risk, best
+  landed with browser verification.
 
 ## 4. Accessibility — strong, with a few sharp gaps (mostly ✅)
 
@@ -71,12 +86,18 @@ contrast, status never colour-only.
   aria-label/return-focus pattern it was missing.
 - ✅ `Dialog` + user popover now carry accessible names; `aria-current` on nav;
   `aria-pressed` on editor format toggles.
-- ◻️ Remaining: `aria-activedescendant` on the search combobox; SVG graph text alt;
-  perm-matrix icon labels; range-slider labels; a live region for the speaker queue;
-  the medium-width tree overlay's focus trap.
+- ✅ Closed the remaining gaps: `aria-activedescendant` on the search combobox; an
+  accessible name on the SVG graph (`role=img`); granted/denied labels on the
+  perm-matrix glyphs; min/max names + `aria-valuetext` on the range sliders; an
+  sr-only polite live region for the speaker queue; and the medium-width tree
+  overlay now has the focus-trap/Escape/aria-modal/return-focus pattern when modal.
 
 ## Highest-risk survivor
 
-The rich-text editor (`editor.rs` + `richtext.rs`, ~1,750 lines) rests on the
-deprecated `document.execCommand`, with no autosave and no unsaved-changes guard.
-It carries over on paper but is the piece most likely to need replacing in the rewrite.
+The rich-text editor (`editor.rs` + `richtext/`, ~1,750 lines) rests on the
+deprecated `document.execCommand`. It now has a debounced autosave and a
+beforeunload unsaved-changes guard (so a crash/close no longer loses work), but
+the `execCommand` engine itself is retained on purpose: it works in every current
+browser, is isolated behind the `richtext::exec`/`query_*` seam, and the interim
+Dioxus frontend will be replaced wholesale by the atproto rewrite. It carries over
+on paper but is still the piece most likely to be rebuilt in that rewrite.

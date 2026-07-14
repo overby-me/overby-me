@@ -41,19 +41,20 @@ pub fn ProfileApp() -> Element {
         });
     });
 
-    // The user's groups + events (same query the home list uses).
+    // The user's groups + events (same query the home list uses). Returns a
+    // Result so a failed load shows an error state, not an empty membership list.
     let memberships = crate::use_data_resource!(move || {
         let token = access_token.clone();
         let uid = user_id.clone();
         async move {
-            let uid = uid?;
+            let Some(uid) = uid else {
+                return Ok::<Vec<graphql::ContextNodeFields>, String>(Vec::new());
+            };
             let mut out = Vec::new();
             for mime in ["wiki/group", "wiki/event"] {
-                if let Ok(nodes) = graphql::query_contexts(token.as_deref(), &uid, mime).await {
-                    out.extend(nodes);
-                }
+                out.extend(graphql::query_contexts(token.as_deref(), &uid, mime).await?);
             }
-            Some(out)
+            Ok(out)
         }
     });
 
@@ -68,7 +69,7 @@ pub fn ProfileApp() -> Element {
         };
     };
 
-    let contexts = memberships.read().clone().flatten().unwrap_or_default();
+    let mem_state = memberships.read().clone();
     let link = bsky_status.read().clone().unwrap_or_default();
     let show_linked = link.linked && !*just_unlinked.read();
 
@@ -226,30 +227,45 @@ pub fn ProfileApp() -> Element {
             div { class: "card-header",
                 h3 { class: "title-medium", "{t(\"profile.memberships\")}" }
             }
-            if contexts.is_empty() {
-                div { class: "card-content",
-                    p {
-                        class: "body-medium",
-                        class: "text-muted",
-                        "{t(\"common.noContent\")}"
-                    }
-                }
-            } else {
-                div { class: "list",
-                    for ctx in contexts.iter() {
-                        Link {
-                            key: "{ctx.id.0}",
-                            to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
-                            class: "list-link",
-                            super::widgets::ListItem {
-                                headline: ctx.name.clone(),
-                                leading: rsx! {
-                                    div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
-                                },
-                            }
+            match &mem_state {
+                None => rsx! {
+                    div { class: "card-content", crate::components::widgets::Spinner {} }
+                },
+                Some(Err(e)) => {
+                    log::error!("Loading memberships failed: {e}");
+                    rsx! {
+                        crate::components::widgets::ErrorState {
+                            title: t("error.somethingWentWrong"),
+                            small: true,
                         }
                     }
                 }
+                Some(Ok(contexts)) if contexts.is_empty() => rsx! {
+                    div { class: "card-content",
+                        p {
+                            class: "body-medium",
+                            class: "text-muted",
+                            "{t(\"common.noContent\")}"
+                        }
+                    }
+                },
+                Some(Ok(contexts)) => rsx! {
+                    div { class: "list",
+                        for ctx in contexts.iter() {
+                            Link {
+                                key: "{ctx.id.0}",
+                                to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
+                                class: "list-link",
+                                super::widgets::ListItem {
+                                    headline: ctx.name.clone(),
+                                    leading: rsx! {
+                                        div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
+                                    },
+                                }
+                            }
+                        }
+                    }
+                },
             }
         }
     }
