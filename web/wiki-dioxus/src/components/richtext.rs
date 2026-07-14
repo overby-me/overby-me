@@ -293,7 +293,16 @@ mod dom {
                     "U" | "INS" => m.underline = true,
                     "S" | "STRIKE" | "DEL" => m.strikethrough = true,
                     "CODE" | "KBD" | "SAMP" => m.code = true,
-                    "A" => m.link = el.get_attribute("href").filter(|h| !h.is_empty()),
+                    // Drop dangerous link schemes (javascript:, data:, ...) as the
+                    // href enters the stored model, so a pasted/edited link can
+                    // never persist one. Viewers additionally re-check via
+                    // `content::safe_href`.
+                    "A" => {
+                        m.link = el
+                            .get_attribute("href")
+                            .filter(|h| !h.is_empty())
+                            .filter(|h| crate::components::content::safe_href(h) != "#")
+                    }
                     "SPAN" | "FONT" => apply_span_style(el, &mut m),
                     _ => {}
                 }
@@ -362,7 +371,9 @@ mod dom {
                 if child.node_type() != Node::ELEMENT_NODE {
                     continue;
                 }
-                let cel = child.dyn_ref::<Element>().unwrap();
+                let Some(cel) = child.dyn_ref::<Element>() else {
+                    continue;
+                };
                 if cel.tag_name().to_uppercase() == "LI" {
                     items.push(block_from_element(cel));
                 }
@@ -422,7 +433,9 @@ mod dom {
             let Some(node) = kids.get(i) else { continue };
             match node.node_type() {
                 Node::ELEMENT_NODE => {
-                    let el = node.dyn_ref::<Element>().unwrap();
+                    let Some(el) = node.dyn_ref::<Element>() else {
+                        continue;
+                    };
                     let tag = el.tag_name().to_uppercase();
                     if is_block_tag(&tag) {
                         flush(&mut pending, &mut blocks);

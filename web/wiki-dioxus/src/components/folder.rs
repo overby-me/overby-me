@@ -14,6 +14,12 @@ const FOLDER_VIEW_KEY: &str = "wiki_folder_grid";
 /// keeps it on the session).
 static SELECTED: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
 
+/// Clear the paste clipboard. Called on logout so one user's selection never
+/// carries into the next session.
+pub(crate) fn clear_selection() {
+    *SELECTED.write() = Vec::new();
+}
+
 /// Read the remembered folder view mode (grid = true) from localStorage.
 fn read_grid_pref() -> bool {
     web_sys::window()

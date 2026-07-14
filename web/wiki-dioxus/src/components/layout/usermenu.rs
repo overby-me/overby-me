@@ -212,8 +212,10 @@ pub(super) fn UserMenu() -> Element {
                                 crate::nhost::sign_out();
                                 *SESSION.write() = Default::default();
                                 save_session(&Default::default());
-                                // Drop cached data so nothing from the old session
-                                // lingers (React clears the GraphQL cache here).
+                                // Drop cached data + the folder paste clipboard so
+                                // nothing from the old session lingers (React clears
+                                // the GraphQL cache here).
+                                crate::components::folder::clear_selection();
                                 crate::session::bump_data_version();
                                 nav.push(Route::Home { app: None });
                             },
