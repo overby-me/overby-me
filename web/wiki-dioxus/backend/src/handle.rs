@@ -17,6 +17,7 @@ use axum::{body::Body, extract::Request, response::Response};
 use http::StatusCode;
 
 mod dpop;
+mod members;
 mod nhost;
 mod notify;
 mod oauth;
@@ -76,6 +77,8 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
         "/push/unsubscribe" => notify::unsubscribe(&cfg, &client, query, bearer).await,
         "/push/notify" => notify::notify(&cfg, &client, query, bearer).await,
         "/push/reply" => notify::reply(&cfg, &client, query, bearer).await,
+        "/members/claim" => members::claim(&cfg, &client, query, bearer).await,
+        "/members/claim-link" => members::claim_link(&cfg, &client, query, bearer).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }

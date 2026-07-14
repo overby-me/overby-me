@@ -281,6 +281,59 @@ pub async fn push_reply(
     }
 }
 
+/// Claim a rostered membership via its secret token (from a `?claim=` link),
+/// binding it to the caller's account regardless of the roster email. Returns the
+/// context (group/event) id so the app can navigate there.
+pub async fn claim_membership(token: &str, claim_token: &str) -> Result<String, String> {
+    let url = format!("{BACKEND_URL}/members/claim");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(token)
+        .query(&[("claim", claim_token)])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if v.get("ok").and_then(|b| b.as_bool()) == Some(true) {
+        Ok(v.get("context")
+            .and_then(|c| c.as_str())
+            .unwrap_or_default()
+            .to_string())
+    } else {
+        Err(v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("claim failed")
+            .to_string())
+    }
+}
+
+/// Owner-only: fetch a member's secret claim token so the owner can share a
+/// `?claim=<token>` link with the rostered person (whose email may not match).
+pub async fn member_claim_link(token: &str, member_id: &str) -> Result<String, String> {
+    let url = format!("{BACKEND_URL}/members/claim-link");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(token)
+        .query(&[("member", member_id)])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if v.get("ok").and_then(|b| b.as_bool()) == Some(true) {
+        Ok(v.get("token")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_string())
+    } else {
+        Err(v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("claim link failed")
+            .to_string())
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct SignInRequest {
     pub email: String,

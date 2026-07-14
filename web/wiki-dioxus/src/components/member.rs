@@ -521,6 +521,39 @@ fn MemberTableRow(
             if can_manage {
                 td {
                     div { class: "member-row-actions",
+                        // Unclaimed roster entry (no bound account): copy a claim link
+                        // to hand to the person, whose signup email may not match the
+                        // roster email. Claiming binds their account to this row.
+                        if member.user.is_none() {
+                            button {
+                                class: "btn-icon",
+                                title: "{t(\"invite.copyClaimLink\")}",
+                                onclick: {
+                                    let mid = mid.clone();
+                                    move |_| {
+                                        let mid = mid.clone();
+                                        let token = session.read().access_token.clone();
+                                        spawn(async move {
+                                            let Some(token) = token else { return };
+                                            match crate::nhost::member_claim_link(&token, &mid).await {
+                                                Ok(ct) => {
+                                                    let origin = web_sys::window()
+                                                        .and_then(|w| w.location().origin().ok())
+                                                        .unwrap_or_default();
+                                                    let link = format!("{origin}/?claim={ct}");
+                                                    if let Some(win) = web_sys::window() {
+                                                        let _ = win.navigator().clipboard().write_text(&link);
+                                                    }
+                                                    show_snackbar(&t("invite.claimLinkCopied"));
+                                                }
+                                                Err(_) => show_snackbar(&t("error.somethingWentWrong")),
+                                            }
+                                        });
+                                    }
+                                },
+                                span { class: "material-icons", "person_add" }
+                            }
+                        }
                         // Promote / demote owner.
                         button {
                             class: "btn-icon",

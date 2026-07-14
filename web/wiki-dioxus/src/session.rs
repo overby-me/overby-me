@@ -51,6 +51,11 @@ pub fn bump_data_version() {
     *DATA_VERSION.write() += 1;
 }
 
+/// A pending membership claim token from a `?claim=<token>` link, stashed at
+/// startup so it survives a login redirect; consumed once the user is signed in
+/// (see `App`). `None` when there is nothing to claim.
+pub static PENDING_CLAIM: GlobalSignal<Option<String>> = Signal::global(|| None);
+
 /// A `use_resource` that also refetches whenever the global data version bumps
 /// (any mutation via [`bump_data_version`], or a pull-to-refresh), so one refresh
 /// updates the whole view. It mirrors the two `use_resource` idioms, folding the

@@ -412,7 +412,11 @@ const EN_JSON: &str = r#"{
         "reject": "Reject",
         "importRoster": "Import roster (.xlsx: Fornavn, Efternavn, Email)",
         "imported": "Imported {{count}} members",
-        "noRosterRows": "No rows with an email found in the file"
+        "noRosterRows": "No rows with an email found in the file",
+        "copyClaimLink": "Copy claim link",
+        "claimLinkCopied": "Claim link copied — send it to this person",
+        "claimedOk": "Invitation claimed",
+        "claimErr": "Could not claim this invitation"
     },
     "member": {
         "name": "Name",
@@ -792,7 +796,11 @@ const DA_JSON: &str = r#"{
         "reject": "Afvis",
         "importRoster": "Importér liste (.xlsx: Fornavn, Efternavn, Email)",
         "imported": "Importerede {{count}} medlemmer",
-        "noRosterRows": "Ingen rækker med en email fundet i filen"
+        "noRosterRows": "Ingen rækker med en email fundet i filen",
+        "copyClaimLink": "Kopiér tilmeldingslink",
+        "claimLinkCopied": "Tilmeldingslink kopieret — send det til personen",
+        "claimedOk": "Invitation tilmeldt",
+        "claimErr": "Kunne ikke tilmelde denne invitation"
     },
     "member": {
         "name": "Navn",

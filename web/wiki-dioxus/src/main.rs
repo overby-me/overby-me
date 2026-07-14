@@ -106,6 +106,17 @@ fn install_history_query_shim() {
     }
 }
 
+/// Extract the `claim` query-param value from a `location.search` string
+/// (e.g. `?claim=abc&x=1` → `abc`). The token is a uuid, so no decoding needed.
+fn claim_token_from_search(search: &str) -> Option<String> {
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("claim="))
+        .map(str::to_string)
+        .filter(|v| !v.is_empty())
+}
+
 #[component]
 fn App() -> Element {
     // Initialize global state once, *inside* the Dioxus runtime. Writing to a
@@ -130,6 +141,20 @@ fn App() -> Element {
                 };
                 if let Some(msg) = msg {
                     snackbar::show_snackbar(&msg);
+                    if let Ok(history) = win.history() {
+                        let _ = history.replace_state_with_url(
+                            &wasm_bindgen::JsValue::NULL,
+                            "",
+                            Some("/"),
+                        );
+                    }
+                }
+
+                // A `?claim=<token>` invitation link: stash the token (so it
+                // survives a login) and strip it from the URL so the secret token
+                // isn't left in history. Consumed by the effect below once signed in.
+                if let Some(tok) = claim_token_from_search(&search) {
+                    *session::PENDING_CLAIM.write() = Some(tok);
                     if let Ok(history) = win.history() {
                         let _ = history.replace_state_with_url(
                             &wasm_bindgen::JsValue::NULL,
@@ -176,6 +201,41 @@ fn App() -> Element {
             );
             // Leak the closure so the listener lives for the app's lifetime.
             closure.forget();
+        }
+    });
+
+    // Consume a pending `?claim=` invitation once signed in: bind the membership
+    // to this account (regardless of the roster email) and land on the context.
+    let session_sig = session::use_session();
+    use_effect(move || {
+        let authed = session_sig.read().is_authenticated();
+        let pending = session::PENDING_CLAIM();
+        if authed {
+            if let Some(claim) = pending {
+                *session::PENDING_CLAIM.write() = None;
+                let token = session_sig.read().access_token.clone();
+                spawn(async move {
+                    let Some(token) = token else { return };
+                    match nhost::claim_membership(&token, &claim).await {
+                        Ok(context) => {
+                            session::bump_data_version();
+                            snackbar::show_snackbar(&i18n::t("invite.claimedOk"));
+                            if let Ok(segments) =
+                                graphql::path_from_id(Some(&token), &context).await
+                            {
+                                if !segments.is_empty() {
+                                    if let Some(win) = web_sys::window() {
+                                        let _ = win
+                                            .location()
+                                            .set_href(&format!("/{}", segments.join("/")));
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => snackbar::show_snackbar(&i18n::t("invite.claimErr")),
+                    }
+                });
+            }
         }
     });
 
