@@ -194,6 +194,38 @@ embeddings + content.
    SurrealDB for the non-critical project (its live queries are the sync engine),
    with Postgres + Rust extensions as the conservative fallback.
 
+## 9. Transition-easing steps (do during the interim)
+
+The cheapest cutover is an incremental one. Maximise what transfers, and
+pre-populate the data the new world needs.
+
+1. **Design the domain model + atproto lexicons now (highest leverage).** The
+   data model is the one artifact that transfers 100%. Writing the lexicons
+   (record schemas for `app.radikal.*`) forces the hardest decision — what's a
+   *public* record vs *private* authoritative state (§4 split + privacy pivot) —
+   while it's still cheap, on paper. Bonus: `atrium` codegens Rust types straight
+   from lexicons. A first cut is derivable from the current `mimeId` taxonomy +
+   the public/private split.
+2. **Sketch the data-migration path (current Postgres → new model).** The current
+   data (~4k nodes + members + Slate content) has to move. Writing the mapping now
+   — node tree → records + authoritative tables — surfaces model mismatches early
+   and yields a runnable migration. Content is already portable Slate JSON.
+3. **Pre-populate identity bindings — IF members will hold DIDs.** The member→DID
+   pivot is the riskiest migration. If members can get DIDs before cutover
+   (especially if you run your own PDS that issues them), start capturing the
+   member↔DID binding in the interim app now (atproto OAuth linking already
+   exists) so the map fills incrementally instead of a mass re-link at cutover. If
+   DIDs are only issued at cutover, at least finalise the email→DID claim-flow
+   design now. Depends on pivotal decision §7.2.
+4. **Decouple the frontend's data-access seam — IF the Dioxus frontend survives.**
+   If you keep the Dioxus UI and only swap the backend, have components read
+   *domain types* through a repository/service boundary rather than calling
+   `graphql.rs` / cynic types directly; then the backend swap is contained to that
+   layer, not every component. If the frontend is also rewritten, skip it.
+5. **Freeze discipline.** No new Hasura-coupled features (RLS/computed-field/
+   subscription-heavy) that you'll only have to unwind. Every new `mimeId` kind
+   should map to a planned lexicon.
+
 ## 8. Related notes
 
 - Security findings (fixed vs deferred) and the secret-ballot de-anonymisation
