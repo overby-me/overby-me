@@ -30,8 +30,13 @@ mod util;
 mod vote;
 
 pub async fn handle(req: Request<Body>) -> Response<Body> {
-    let cfg = oauth::Config::from_env();
-    let client = reqwest::Client::new();
+    // Config (from fixed env secrets) and the HTTP client are process-wide: the
+    // container stays warm across requests, so rebuilding the client per request
+    // threw away Hasura keep-alive/pooling and re-init TLS state every time.
+    static CFG: std::sync::OnceLock<oauth::Config> = std::sync::OnceLock::new();
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let cfg = CFG.get_or_init(oauth::Config::from_env);
+    let client = CLIENT.get_or_init(reqwest::Client::new);
 
     // CORS preflight: the header-authenticated fetches are non-simple requests.
     if req.method() == http::Method::OPTIONS {
@@ -53,7 +58,7 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
 
     // Roster parse reads the uploaded .xlsx from the request body (consumes req).
     if path == "/roster/parse" {
-        return roster::handle_parse(&cfg, req, bearer_owned.as_deref()).await;
+        return roster::handle_parse(cfg, req, bearer_owned.as_deref()).await;
     }
 
     // Extract the rest as `&str` (Send) — never hold a `&Request` across an await,
@@ -66,20 +71,20 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
     let bearer = bearer_owned.as_deref();
 
     match path.as_str() {
-        "/atproto/client-metadata.json" => client_metadata(&cfg),
-        "/atproto/start" => oauth::start(&cfg, &client, query).await,
-        "/atproto/callback" => oauth::callback(&cfg, &client, query, cookie_header).await,
-        "/atproto/status" => oauth::status(&cfg, &client, query, bearer).await,
-        "/atproto/unlink" => oauth::unlink(&cfg, &client, query, bearer).await,
-        "/atproto/post" => oauth::post(&cfg, &client, query, bearer).await,
-        "/vote/cast" => vote::cast(&cfg, &client, query, bearer).await,
-        "/vote/status" => vote::status(&cfg, &client, query, bearer).await,
-        "/push/subscribe" => notify::subscribe(&cfg, &client, query, bearer).await,
-        "/push/unsubscribe" => notify::unsubscribe(&cfg, &client, query, bearer).await,
-        "/push/notify" => notify::notify(&cfg, &client, query, bearer).await,
-        "/push/reply" => notify::reply(&cfg, &client, query, bearer).await,
-        "/members/claim" => members::claim(&cfg, &client, query, bearer).await,
-        "/members/claim-link" => members::claim_link(&cfg, &client, query, bearer).await,
+        "/atproto/client-metadata.json" => client_metadata(cfg),
+        "/atproto/start" => oauth::start(cfg, client, query).await,
+        "/atproto/callback" => oauth::callback(cfg, client, query, cookie_header).await,
+        "/atproto/status" => oauth::status(cfg, client, query, bearer).await,
+        "/atproto/unlink" => oauth::unlink(cfg, client, query, bearer).await,
+        "/atproto/post" => oauth::post(cfg, client, query, bearer).await,
+        "/vote/cast" => vote::cast(cfg, client, query, bearer).await,
+        "/vote/status" => vote::status(cfg, client, query, bearer).await,
+        "/push/subscribe" => notify::subscribe(cfg, client, query, bearer).await,
+        "/push/unsubscribe" => notify::unsubscribe(cfg, client, query, bearer).await,
+        "/push/notify" => notify::notify(cfg, client, query, bearer).await,
+        "/push/reply" => notify::reply(cfg, client, query, bearer).await,
+        "/members/claim" => members::claim(cfg, client, query, bearer).await,
+        "/members/claim-link" => members::claim_link(cfg, client, query, bearer).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }

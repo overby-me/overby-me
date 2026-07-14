@@ -144,20 +144,29 @@ async fn push_to_emails(
         })
         .unwrap_or_default();
     let recipients = subs.len();
+    let bytes = payload.as_bytes();
+    // Deliver concurrently instead of one blocking HTTPS round-trip at a time: a
+    // context with N members took N × ~200ms sequentially. Member counts are small
+    // (dozens), so unbounded join is fine; reqwest's pool caps per-host sockets.
+    let outcomes: Vec<(String, Result<u16, String>)> =
+        futures::future::join_all(subs.iter().map(|sub| async move {
+            (
+                sub.endpoint.clone(),
+                push::send(cfg, client, sub, bytes).await,
+            )
+        }))
+        .await;
+
     let mut sent = 0usize;
     let mut stale: Vec<String> = Vec::new();
-    for sub in &subs {
-        match push::send(cfg, client, sub, payload.as_bytes()).await {
+    for (endpoint, res) in outcomes {
+        match res {
             Ok(status) if (200..300).contains(&status) => sent += 1,
-            Ok(404) | Ok(410) => stale.push(sub.endpoint.clone()),
+            Ok(404) | Ok(410) => stale.push(endpoint),
             // Log only the endpoint origin: its path segment is a per-user secret.
             Ok(status) => eprintln!(
                 "push send -> {status} ({})",
-                sub.endpoint
-                    .split('/')
-                    .take(3)
-                    .collect::<Vec<_>>()
-                    .join("/")
+                endpoint.split('/').take(3).collect::<Vec<_>>().join("/")
             ),
             Err(e) => eprintln!("push send error: {e}"),
         }
