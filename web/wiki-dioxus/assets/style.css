@@ -3605,37 +3605,8 @@ h6,
 	font-size: inherit;
 }
 
-/* Table of contents (#117): a boxed list of heading anchors above the content. */
-.toc {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-	margin: 0 0 16px;
-	padding: 12px 16px;
-	border: 1px solid var(--md-outline);
-	border-radius: 8px;
-	background: var(--md-surface-variant);
-}
-
-.toc-item {
-	color: var(--md-on-surface);
-	text-decoration: none;
-	font-size: 14px;
-	padding: 2px 0;
-}
-
-.toc-item:hover {
-	text-decoration: underline;
-	color: var(--md-primary);
-}
-/* EXPERIMENT (functional: TOC scroll-spy): the section currently at the top of
-   the viewport is highlighted in the table of contents. */
-.toc-item.active {
-	color: var(--md-primary);
-	font-weight: 700;
-}
-/* EXPERIMENT (functional): when a heading is jumped to from the TOC, offset it so
-   it lands below the fixed top bar instead of hiding underneath it. */
+/* Headings carry anchor ids; offset a jumped-to heading below the fixed top bar
+   instead of hiding it underneath. */
 .slate-content h1[id],
 .slate-content h2[id],
 .slate-content h3[id],
@@ -3681,20 +3652,6 @@ h6,
 		font-size: 12pt;
 		color: #000;
 	}
-}
-
-.toc-l2 {
-	padding-left: 16px;
-}
-
-.toc-l3 {
-	padding-left: 32px;
-}
-
-.toc-l4,
-.toc-l5,
-.toc-l6 {
-	padding-left: 48px;
 }
 
 .slate-content blockquote {

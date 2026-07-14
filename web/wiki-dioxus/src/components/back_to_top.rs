@@ -85,33 +85,3 @@ pub fn ReadingProgress() -> Element {
         }
     }
 }
-
-/// EXPERIMENT (functional): a table-of-contents scroll-spy. It highlights the TOC
-/// entry (`.toc-item`) for the section currently at the top of the viewport as you
-/// scroll a document. Done in a tiny injected script because the TOC + headings
-/// are rendered ad hoc by the slate renderer (not reactive state); a `window`
-/// guard installs it once, and a low-frequency interval re-syncs after navigation.
-#[component]
-pub fn TocScrollSpy() -> Element {
-    use_hook(|| {
-        let _ = dioxus::document::eval(
-            r#"(function(){
-              if (window.__tocSpy) return;
-              window.__tocSpy = true;
-              var spy = function(){
-                var heads = document.querySelectorAll('.slate-content [id]');
-                var items = document.querySelectorAll('.toc-item');
-                if (!heads.length || !items.length) return;
-                var id = heads[0].id;
-                heads.forEach(function(h){ if (h.getBoundingClientRect().top <= 120) id = h.id; });
-                items.forEach(function(it){ it.classList.toggle('active', it.getAttribute('href') === '#' + id); });
-              };
-              window.addEventListener('scroll', spy, { passive: true });
-              window.addEventListener('resize', spy, { passive: true });
-              setInterval(spy, 500);
-              spy();
-            })();"#,
-        );
-    });
-    rsx! {}
-}

@@ -212,8 +212,7 @@ const EN_JSON: &str = r#"{
         "addAtLeastOneAuthor": "Add at least 1 author",
         "uploadFile": "Upload File",
         "chooseFile": "Choose a file",
-        "imageAlt": "Content image",
-        "tableOfContents": "Table of contents"
+        "imageAlt": "Content image"
     },
     "layout": {
         "welcomeTitle": "Welcome to RadikalWiki",
@@ -603,8 +602,7 @@ const DA_JSON: &str = r#"{
         "addAtLeastOneAuthor": "Tilf\u00f8j mindst 1 forfatter",
         "imageAlt": "Indholdsbillede",
         "uploadFile": "Upload fil",
-        "chooseFile": "Vælg en fil",
-        "tableOfContents": "Indholdsfortegnelse"
+        "chooseFile": "Vælg en fil"
     },
     "layout": {
         "welcomeTitle": "Velkommen til RadikalWiki",
