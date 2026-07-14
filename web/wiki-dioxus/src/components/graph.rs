@@ -51,6 +51,11 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                         width: "100%",
                         view_box: "0 0 {width} {height}",
                         style: "min-width: {width}px; max-width: 100%; height: auto;",
+                        // The diagram is decorative-looking but conveys structure,
+                        // so expose it as a single labelled image to assistive tech.
+                        // (svg uses raw attribute names, not the typed HTML set.)
+                        "role": "img",
+                        "aria-label": format!("{}: {}", t("mime.graph"), node.name),
                         // Edges first so boxes draw on top.
                         for (i , _child) in children.iter().enumerate() {
                             line {

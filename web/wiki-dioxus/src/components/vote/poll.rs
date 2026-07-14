@@ -710,6 +710,8 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
                     min: "1",
                     max: "{max_range}",
                     value: "{min_vote}",
+                    aria_label: t("poll.minVotesLabel"),
+                    aria_valuetext: "{min_vote}",
                     style: "width: 100%;",
                     oninput: move |e| {
                         let v: usize = e.value().parse().unwrap_or(1);
@@ -724,6 +726,8 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
                     min: "1",
                     max: "{max_range}",
                     value: "{max_vote}",
+                    aria_label: t("poll.maxVotesLabel"),
+                    aria_valuetext: "{max_vote}",
                     style: "width: 100%; margin-bottom: 8px;",
                     oninput: move |e| {
                         let v: usize = e.value().parse().unwrap_or(1);

@@ -96,6 +96,9 @@ pub(super) fn SearchBar(
                 aria_autocomplete: "list",
                 aria_expanded: "{!results.read().is_empty()}",
                 aria_controls: "search-results-list",
+                // Point assistive tech at the highlighted option (keyboard focus
+                // stays in the input; the option is "active" not focused).
+                aria_activedescendant: if results.read().is_empty() { String::new() } else { format!("search-opt-{}", selected.read()) },
                 value: "{input}",
                 oninput: move |evt| {
                     let value = evt.value();
@@ -147,6 +150,7 @@ pub(super) fn SearchBar(
                         div {
                             class: if idx == *selected.read() { "list-item selected" } else { "list-item" },
                             role: "option",
+                            id: "search-opt-{idx}",
                             aria_selected: "{idx == *selected.read()}",
                             key: "{node.id.0}",
                             onclick: {

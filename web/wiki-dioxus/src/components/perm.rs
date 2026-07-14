@@ -81,15 +81,26 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
 }
 
 /// A boolean permission cell: a filled primary check when granted, else a muted
-/// minus glyph.
+/// minus glyph. The glyph is exposed to assistive tech as "granted"/"denied" so
+/// screen readers don't announce the raw icon ligature ("check"/"remove").
 fn flag_cell(on: bool) -> Element {
     if on {
         rsx! {
-            span { class: "material-icons m3-flag-on", "check" }
+            span {
+                class: "material-icons m3-flag-on",
+                role: "img",
+                aria_label: t("perm.granted"),
+                "check"
+            }
         }
     } else {
         rsx! {
-            span { class: "material-icons m3-flag-off", "remove" }
+            span {
+                class: "material-icons m3-flag-off",
+                role: "img",
+                aria_label: t("perm.denied"),
+                "remove"
+            }
         }
     }
 }

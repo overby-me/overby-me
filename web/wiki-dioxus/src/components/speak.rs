@@ -144,6 +144,9 @@ fn SpeakList(
     let min_index = speakers.iter().map(|s| s.index).min().unwrap_or(0);
     let max_index = speakers.iter().map(|s| s.index).max().unwrap_or(0);
     let count = speakers.len();
+    // Announced (screen-reader-only) whenever the person at the front of the
+    // queue changes, so blind participants hear turn-changes like the room does.
+    let now_speaking = speakers.first().map(|s| s.name.clone()).unwrap_or_default();
 
     // Native notification when it becomes the user's turn to speak (#139). Keyed
     // on the current speaker so it fires once per turn-change; permission is
@@ -190,6 +193,16 @@ fn SpeakList(
                         span { class: "material-icons", style: "font-size: 18px; vertical-align: middle;", "timer" }
                         " {time_string(remaining)}"
                     }
+                }
+            }
+
+            // Live region for turn-changes (announces only when the text differs).
+            div {
+                class: "sr-only",
+                role: "status",
+                aria_live: "polite",
+                if !now_speaking.is_empty() {
+                    "{t(\"speak.speakingNow\")}: {now_speaking}"
                 }
             }
 

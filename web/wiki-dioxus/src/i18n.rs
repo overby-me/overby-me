@@ -305,7 +305,9 @@ const EN_JSON: &str = r#"{
         "insert": "Create",
         "select": "View",
         "delete": "Delete",
-        "active": "Active"
+        "active": "Active",
+        "granted": "granted",
+        "denied": "denied"
     },
     "admin": {
         "poll": "Poll",
@@ -345,6 +347,8 @@ const EN_JSON: &str = r#"{
         "secretBallot": "Secret ballot (anonymous)",
         "newPoll": "New poll",
         "voteRange": "Number of votes",
+        "minVotesLabel": "Minimum number of votes",
+        "maxVotesLabel": "Maximum number of votes",
         "start": "Start",
         "stopPoll": "Stop poll",
         "resultsHidden": "Running tally hidden until the poll closes"
@@ -694,7 +698,9 @@ const DA_JSON: &str = r#"{
         "insert": "Opret",
         "select": "Vis",
         "delete": "Slet",
-        "active": "Aktiv"
+        "active": "Aktiv",
+        "granted": "tildelt",
+        "denied": "ikke tildelt"
     },
     "admin": {
         "poll": "Afstemning",
@@ -734,6 +740,8 @@ const DA_JSON: &str = r#"{
         "secretBallot": "Hemmelig afstemning (anonym)",
         "newPoll": "Ny afstemning",
         "voteRange": "Antal stemmer",
+        "minVotesLabel": "Mindste antal stemmer",
+        "maxVotesLabel": "Største antal stemmer",
         "start": "Start",
         "stopPoll": "Stop afstemning",
         "resultsHidden": "Løbende optælling skjult indtil afstemningen lukkes"

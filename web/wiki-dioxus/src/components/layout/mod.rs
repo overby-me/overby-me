@@ -138,6 +138,8 @@ pub fn Layout() -> Element {
     // when the large threshold is crossed — a manual toggle persists otherwise.
     use_effect(move || tree_open.set(is_large()));
     let modal_tree = tree_open() && !is_large() && !size_class.is_compact();
+    // Return focus to the rail's menu trigger when the modal tree overlay closes.
+    let mut tree_return_focus = use_signal(|| None::<web_sys::HtmlElement>);
 
     // NHost password-reset emails link to `/?type=passwordReset&refreshToken=...`,
     // which the router renders as home. The token was stashed by
@@ -341,13 +343,49 @@ pub fn Layout() -> Element {
             if !size_class.is_compact() {
                 aside {
                     class: if tree_open() { "nav-tree-pane open" } else { "nav-tree-pane" },
+                    // On medium the tree opens as a modal overlay (scrim): give it
+                    // the same modal a11y as the other overlays (name, focus trap,
+                    // Escape, return-focus). On large/xl it is a persistent
+                    // complementary landmark, so none of that applies.
+                    role: if modal_tree { "dialog" } else { "complementary" },
+                    "aria-modal": if modal_tree { "true" } else { "false" },
+                    "aria-label": t("common.menu"),
+                    tabindex: if modal_tree { "-1" } else { "" },
+                    onkeydown: move |e| {
+                        if !modal_tree {
+                            return;
+                        }
+                        match e.key() {
+                            Key::Escape => crate::components::widgets::close_modal(tree_open, tree_return_focus),
+                            Key::Tab
+                                if crate::components::widgets::trap_tab_focus(".nav-tree-pane.open", e.modifiers().shift()) =>
+                            {
+                                e.prevent_default();
+                            }
+                            _ => {}
+                        }
+                    },
+                    // Focus sentinel: capture the trigger + pull focus into the
+                    // overlay when it opens modally.
+                    if modal_tree {
+                        div {
+                            class: "sheet-focus-sentinel",
+                            tabindex: "-1",
+                            onmounted: move |ev| {
+                                tree_return_focus.set(crate::components::widgets::active_html_element());
+                                spawn(async move {
+                                    let _ = ev.set_focus(true).await;
+                                });
+                            },
+                        }
+                    }
                     div {
                         class: "nav-rail-tree",
                         // On the modal (overlay) tree, a click inside collapses it
                         // after navigating.
                         onclick: move |_| {
                             if modal_tree {
-                                tree_open.set(false);
+                                crate::components::widgets::close_modal(tree_open, tree_return_focus);
                             }
                         },
                         DrawerContent {}
@@ -360,7 +398,7 @@ pub fn Layout() -> Element {
                 div {
                     class: "nav-rail-scrim open",
                     role: "presentation",
-                    onclick: move |_| tree_open.set(false),
+                    onclick: move |_| crate::components::widgets::close_modal(tree_open, tree_return_focus),
                 }
             }
 
