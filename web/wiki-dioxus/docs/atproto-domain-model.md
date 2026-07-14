@@ -41,6 +41,31 @@ lexicon surface is consequently **substantial** (posts, groups, events, …), no
 tiny, and the backend DB is still the source of truth (public items are mirrored
 out as records; see the visibility model below).
 
+## Lexicons as the canonical model (not just the public surface)
+
+atproto earns its place on two counts, independent of how public the app is:
+
+1. **Identity.** The DID is the primary identity; atproto OAuth is the login —
+   portable, password-less, and it de-risks the hardest migration (member → DID).
+   True even for a mostly-private app.
+2. **Lexicons model ALL the data — public *and* private.** A lexicon is a
+   schema/IDL. Define one per entity (user, post, group, event, document, poll,
+   ballot, comment, membership…) and it is the single canonical contract:
+   `atrium` codegens Rust types from it, so *one* type model drives both the
+   record wire-format (public items) AND the DB rows (private items). Visibility
+   decides only **publication**, not schema:
+   - **public** instance → published as a record in a repo (governed by its lexicon);
+   - **private** instance → the *same* lexicon shape, kept in the DB, validated but
+     never broadcast.
+
+Precision worth keeping: atproto-the-network is public-by-default, so for the
+private half this is **"lexicons as the schema language"** (one canonical model +
+validation + codegen), not "private atproto records" (which don't exist on the
+public network). Private instances live in your store; the lexicon is the shared
+shape. **SurrealDB then *realises* these entities** — adding the relational/graph
+structure (membership edges, references), indexes, and the always-private tables —
+while the lexicons stay the source of truth for entity *shape*.
+
 ## Source-of-truth split, per entity
 
 Visibility dispositions: **optional** (public → an atproto record; private →
@@ -71,13 +96,13 @@ the roster/roles, and ephemeral coordination. Almost everything *content* is
 optionally public, which is what makes the public half a genuine atproto social
 platform.
 
-## Lexicons (the public surface)
+## Publishable lexicons (the ones that reach public repos)
 
-The public surface is the app's social content, published to repos. User-authored
-things (**post**, statement, comment, document) live in the **author's** repo;
-org-owned things (public group / event, official **resolution**) live in the
-**org's** repo (the service holds its own DID). Core sketches below — group,
-event and document follow the same record shape and are omitted for brevity.
+Every entity has a lexicon (see above); this is the subset that, when an instance
+is *public*, is published to a repo. User-authored things (**post**, statement,
+comment, document) go to the **author's** repo; org-owned things (public group /
+event, official **resolution**) go to the **org's** repo (the service holds its
+own DID). Core sketches below — group, event and document follow the same shape.
 
 The `post` is the feed unit — the atproto-native heart of the "public half":
 
@@ -181,7 +206,13 @@ Design consequences:
 - **Always-private items get no visibility toggle** — ballots, the dedup marker,
   the roster. The toggle exists only where publishing is meaningful and safe.
 
-## Domain model (private, org-authoritative — SurrealQL)
+## DB realisation (SurrealQL)
+
+The SurrealDB tables *realise* the lexicon-defined entities — same shapes,
+codegen-shared with the record types — and add what lexicons don't express: the
+relational/graph structure (membership edges, references), indexes, and the
+always-private tables (ballots, dedup, roster). `visibility` marks which rows also
+exist as published records.
 
 ```surql
 -- Identity: the DID *is* the person (record id = the DID).
