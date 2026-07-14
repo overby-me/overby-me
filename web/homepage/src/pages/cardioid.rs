@@ -326,6 +326,23 @@ fn presets() -> Vec<(&'static str, Settings)> {
     vec![
         ("Cardioid", Settings::default()),
         (
+            // The old "turbo" feel: high, incommensurate frequencies sampled
+            // coarsely (heavy aliasing) and drawn fast, with a light fade so it
+            // shimmers erratically rather than settling. Nudge `fade` toward 0
+            // to accumulate a dense web, or toward 1 for a live scribble.
+            "Turbo",
+            Settings {
+                arms: vec![arm(190.0, 13.3, 0.0), arm(190.0, 198.5, 0.0)],
+                step: 0.069,
+                speed: 700.0,
+                fade: 0.07,
+                glow: true,
+                fill: Fill::HueSpeed,
+                circles: false,
+                ..base()
+            },
+        ),
+        (
             "Rose",
             Settings {
                 arms: vec![arm(150.0, 1.0, 0.0), arm(150.0, 6.0, 0.0)],
@@ -1014,7 +1031,7 @@ pub fn Cardioid() -> Element {
                         }
                         Slider {
                             label: format!("Arm {} speed", i + 1),
-                            min: "-20", max: "20", step: "0.1", value: arm.w, decimals: 1,
+                            min: "-200", max: "200", step: "0.1", value: arm.w, decimals: 1,
                             oninput: move |v| settings.write().arms[i].w = v,
                         }
                     }
@@ -1069,7 +1086,7 @@ pub fn Cardioid() -> Element {
                     }
                     Slider { label: "Sample step (Δt)", min: "0.001", max: "1.6", step: "0.001",
                         value: s.step, decimals: 3, oninput: move |v| settings.write().step = v }
-                    Slider { label: "Draw speed (samples/frame)", min: "1", max: "800", step: "1",
+                    Slider { label: "Draw speed (samples/frame)", min: "1", max: "1200", step: "1",
                         value: s.speed, decimals: 0, oninput: move |v| settings.write().speed = v }
                 }
 
