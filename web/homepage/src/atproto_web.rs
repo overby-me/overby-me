@@ -541,7 +541,7 @@ pub async fn resolve_graph(raw: &str) -> Result<GraphData, String> {
     // bundled logo — external links are never in that registry.
     let need_atstore = platforms.iter().any(|p| matches!(p.icon, Icon::Badge(_)));
 
-    // A fediverse presence via Bridgy Fed (opt-in bridge) shows as a Mastodon
+    // A fediverse presence via Bridgy Fed (opt-in bridge) shows as a Bridgy Fed
     // leaf. Added before external links so those dedupe against it.
     if is_bridged(&handle).await {
         platforms.push(bridged_mastodon(&handle));

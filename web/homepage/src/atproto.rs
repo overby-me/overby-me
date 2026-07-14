@@ -468,7 +468,7 @@ pub fn detect_platforms(collections: &[String], handle: &str, did: &str) -> Vec<
 /// The caller in [`crate::atproto_web`] adds it after confirming the bridge.
 pub fn bridged_mastodon(handle: &str) -> Platform {
     Platform {
-        name: "Mastodon".to_string(),
+        name: "Bridgy Fed".to_string(),
         domain: "bsky.brid.gy".to_string(),
         icon: Icon::Bundled("bridgy.avif"),
         profile_url: format!("https://fed.brid.gy/bsky/{handle}"),
@@ -973,9 +973,9 @@ mod tests {
     #[test]
     fn bridged_mastodon_points_to_the_fediverse_profile() {
         let m = bridged_mastodon("overby.me");
-        assert_eq!(m.name, "Mastodon");
+        assert_eq!(m.name, "Bridgy Fed");
         assert_eq!(m.category, "Social");
-        assert_eq!(m.icon, Icon::Bundled("mastodon.avif"));
+        assert_eq!(m.icon, Icon::Bundled("bridgy.avif"));
         assert_eq!(m.profile_url, "https://fed.brid.gy/bsky/overby.me");
     }
 
