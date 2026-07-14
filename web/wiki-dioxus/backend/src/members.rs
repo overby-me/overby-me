@@ -14,37 +14,7 @@
 use crate::oauth::Config;
 use axum::{body::Body, response::Response};
 use http::StatusCode;
-use serde_json::{json, Value};
-
-fn token_from(query: Option<&str>, bearer: Option<&str>) -> Option<String> {
-    if let Some(b) = bearer.filter(|b| !b.is_empty()) {
-        return Some(b.to_string());
-    }
-    crate::util::parse_query(query)
-        .into_iter()
-        .find(|(k, _)| k == "token")
-        .map(|(_, v)| v)
-}
-
-async fn admin_gql(cfg: &Config, client: &reqwest::Client, body: Value) -> Result<Value, String> {
-    let resp = client
-        .post(&cfg.hasura_url)
-        .header("x-hasura-admin-secret", &cfg.admin_secret)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let v: Value = resp.json().await.map_err(|e| e.to_string())?;
-    if let Some(errors) = v.get("errors") {
-        return Err(format!("hasura error: {errors}"));
-    }
-    Ok(v)
-}
-
-fn caller_uid(cfg: &Config, query: Option<&str>, bearer: Option<&str>) -> Result<String, String> {
-    let token = token_from(query, bearer).ok_or("missing token")?;
-    crate::nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)
-}
+use serde_json::json;
 
 // --- claim ------------------------------------------------------------------
 
@@ -84,9 +54,9 @@ async fn claim_inner(
         .map(|(_, v)| v.clone())
         .filter(|s| !s.is_empty())
         .ok_or("missing claim token")?;
-    let uid = caller_uid(cfg, query, bearer)?;
+    let uid = crate::auth::caller_uid(cfg, query, bearer)?;
 
-    let m = admin_gql(cfg, client, json!({
+    let m = crate::auth::admin_gql(cfg, client, json!({
         "query": "query($t: String!) { members(where: {claim_token: {_eq: $t}}, limit: 1) { id nodeId parentId } }",
         "variables": { "t": claim_token },
     })).await?;
@@ -112,7 +82,7 @@ async fn claim_inner(
     }
 
     // Bind (guarded on nodeId still null, so a race can't double-claim).
-    let updated = admin_gql(cfg, client, json!({
+    let updated = crate::auth::admin_gql(cfg, client, json!({
         "query": "mutation($id: uuid!, $u: uuid!) { updateMembers(where: {id: {_eq: $id}, nodeId: {_is_null: true}}, _set: {nodeId: $u, accepted: true}) { affected_rows } }",
         "variables": { "id": member_id, "u": uid },
     })).await?;
@@ -164,9 +134,9 @@ async fn claim_link_inner(
         .map(|(_, v)| v.clone())
         .filter(|s| !s.is_empty())
         .ok_or("missing member id")?;
-    let uid = caller_uid(cfg, query, bearer)?;
+    let uid = crate::auth::caller_uid(cfg, query, bearer)?;
 
-    let m = admin_gql(cfg, client, json!({
+    let m = crate::auth::admin_gql(cfg, client, json!({
         "query": "query($id: uuid!) { members(where: {id: {_eq: $id}}, limit: 1) { parentId claim_token } }",
         "variables": { "id": member_id },
     })).await?;
@@ -182,7 +152,7 @@ async fn claim_link_inner(
         .to_string();
 
     // Owner = a member of the context flagged owner, or the context node's owner.
-    let owner = admin_gql(cfg, client, json!({
+    let owner = crate::auth::admin_gql(cfg, client, json!({
         "query": "query($c: uuid!, $u: uuid!) { members(where: {parentId: {_eq: $c}, nodeId: {_eq: $u}, owner: {_eq: true}}, limit: 1) { id } node(id: $c) { ownerId } }",
         "variables": { "c": context, "u": uid },
     })).await?;

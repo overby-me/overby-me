@@ -16,6 +16,7 @@
 use axum::{body::Body, extract::Request, response::Response};
 use http::StatusCode;
 
+mod auth;
 mod dpop;
 mod members;
 mod nhost;

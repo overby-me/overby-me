@@ -12,32 +12,7 @@
 use crate::oauth::Config;
 use axum::{body::Body, response::Response};
 use http::StatusCode;
-use serde_json::{json, Value};
-
-fn token_from(query: Option<&str>, bearer: Option<&str>) -> Option<String> {
-    if let Some(b) = bearer.filter(|b| !b.is_empty()) {
-        return Some(b.to_string());
-    }
-    crate::util::parse_query(query)
-        .into_iter()
-        .find(|(k, _)| k == "token")
-        .map(|(_, v)| v)
-}
-
-async fn admin_gql(cfg: &Config, client: &reqwest::Client, body: Value) -> Result<Value, String> {
-    let resp = client
-        .post(&cfg.hasura_url)
-        .header("x-hasura-admin-secret", &cfg.admin_secret)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let v: Value = resp.json().await.map_err(|e| e.to_string())?;
-    if let Some(errors) = v.get("errors") {
-        return Err(format!("hasura error: {errors}"));
-    }
-    Ok(v)
-}
+use serde_json::json;
 
 pub async fn cast(
     cfg: &Config,
@@ -74,7 +49,7 @@ async fn cast_inner(
             .find(|(pk, _)| pk == k)
             .map(|(_, v)| v.clone())
     };
-    let token = token_from(query, bearer).ok_or("missing token")?;
+    let token = crate::auth::token_from(query, bearer).ok_or("missing token")?;
     let poll = get("poll").ok_or("missing poll")?;
     let context = get("context").filter(|c| !c.is_empty());
     let choices: Vec<i64> = get("choices")
@@ -89,7 +64,7 @@ async fn cast_inner(
         "query": "mutation($p: uuid!, $u: uuid!) { insert_has_voted(objects: [{poll_id: $p, user_id: $u}], on_conflict: {constraint: has_voted_pkey, update_columns: []}) { affected_rows } }",
         "variables": { "p": poll, "u": uid },
     });
-    let v = admin_gql(cfg, client, marker).await?;
+    let v = crate::auth::admin_gql(cfg, client, marker).await?;
     let inserted = v
         .pointer("/data/insert_has_voted/affected_rows")
         .and_then(|n| n.as_i64())
@@ -113,7 +88,7 @@ async fn cast_inner(
         "query": "mutation($obj: nodes_insert_input!) { insertNode(object: $obj) { id } }",
         "variables": { "obj": obj },
     });
-    admin_gql(cfg, client, insert).await?;
+    crate::auth::admin_gql(cfg, client, insert).await?;
     Ok(())
 }
 
@@ -144,13 +119,13 @@ async fn status_inner(
         .find(|(k, _)| k == "poll")
         .map(|(_, v)| v.clone())
         .ok_or("missing poll")?;
-    let token = token_from(query, bearer).ok_or("missing token")?;
+    let token = crate::auth::token_from(query, bearer).ok_or("missing token")?;
     let uid = crate::nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)?;
     let q = json!({
         "query": "query($p: uuid!, $u: uuid!) { has_voted(where: {poll_id: {_eq: $p}, user_id: {_eq: $u}}, limit: 1) { poll_id } }",
         "variables": { "p": poll, "u": uid },
     });
-    let v = admin_gql(cfg, client, q).await?;
+    let v = crate::auth::admin_gql(cfg, client, q).await?;
     Ok(v.pointer("/data/has_voted")
         .and_then(|a| a.as_array())
         .map(|a| !a.is_empty())

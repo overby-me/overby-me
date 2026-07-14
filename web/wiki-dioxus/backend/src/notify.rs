@@ -12,58 +12,7 @@ use crate::oauth::Config;
 use crate::push::{self, Subscription};
 use axum::{body::Body, response::Response};
 use http::StatusCode;
-use serde_json::{json, Value};
-
-fn token_from(query: Option<&str>, bearer: Option<&str>) -> Option<String> {
-    if let Some(b) = bearer.filter(|b| !b.is_empty()) {
-        return Some(b.to_string());
-    }
-    crate::util::parse_query(query)
-        .into_iter()
-        .find(|(k, _)| k == "token")
-        .map(|(_, v)| v)
-}
-
-async fn admin_gql(cfg: &Config, client: &reqwest::Client, body: Value) -> Result<Value, String> {
-    let resp = client
-        .post(&cfg.hasura_url)
-        .header("x-hasura-admin-secret", &cfg.admin_secret)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let v: Value = resp.json().await.map_err(|e| e.to_string())?;
-    if let Some(errors) = v.get("errors") {
-        return Err(format!("hasura error: {errors}"));
-    }
-    Ok(v)
-}
-
-/// The signed-in caller's uuid + email (email is how membership is keyed).
-async fn caller(
-    cfg: &Config,
-    client: &reqwest::Client,
-    query: Option<&str>,
-    bearer: Option<&str>,
-) -> Result<(String, String), String> {
-    let token = token_from(query, bearer).ok_or("missing token")?;
-    let uid = crate::nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)?;
-    let v = admin_gql(
-        cfg,
-        client,
-        json!({
-            "query": "query($id: uuid!) { user(id: $id) { email } }",
-            "variables": { "id": uid },
-        }),
-    )
-    .await?;
-    let email = v
-        .pointer("/data/user/email")
-        .and_then(|e| e.as_str())
-        .ok_or("no email for user")?
-        .to_string();
-    Ok((uid, email))
-}
+use serde_json::json;
 
 // --- subscribe / unsubscribe -----------------------------------------------
 
@@ -107,10 +56,10 @@ async fn subscribe_inner(
     let auth = get("auth")
         .filter(|s| !s.is_empty())
         .ok_or("missing auth")?;
-    let (uid, email) = caller(cfg, client, query, bearer).await?;
+    let (uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
 
     // Upsert by endpoint: a device re-subscribing keeps one row with fresh keys.
-    admin_gql(cfg, client, json!({
+    crate::auth::admin_gql(cfg, client, json!({
         "query": "mutation($o: [push_subscriptions_insert_input!]!) { insert_push_subscriptions(objects: $o, on_conflict: {constraint: push_subscriptions_endpoint_key, update_columns: [user_id, email, p256dh, auth]}) { affected_rows } }",
         "variables": { "o": [{
             "user_id": uid, "email": email, "endpoint": endpoint,
@@ -152,7 +101,7 @@ async fn unsubscribe_inner(
         .filter(|s| !s.is_empty())
         .ok_or("missing endpoint")?;
     // Must be signed in, but a subscription is device-owned: drop it by endpoint.
-    let _ = caller(cfg, client, query, bearer).await?;
+    let _ = crate::auth::caller(cfg, client, query, bearer).await?;
     delete_by_endpoints(cfg, client, &[endpoint]).await?;
     Ok(())
 }
@@ -165,7 +114,7 @@ async fn delete_by_endpoints(
     if endpoints.is_empty() {
         return Ok(());
     }
-    admin_gql(cfg, client, json!({
+    crate::auth::admin_gql(cfg, client, json!({
         "query": "mutation($e: [String!]!) { delete_push_subscriptions(where: {endpoint: {_in: $e}}) { affected_rows } }",
         "variables": { "e": endpoints },
     })).await?;
@@ -183,7 +132,7 @@ async fn push_to_emails(
     if emails.is_empty() {
         return Ok((0, 0));
     }
-    let subs = admin_gql(cfg, client, json!({
+    let subs = crate::auth::admin_gql(cfg, client, json!({
         "query": "query($e: [String!]!) { push_subscriptions(where: {email: {_in: $e}}) { endpoint p256dh auth } }",
         "variables": { "e": emails },
     })).await?;
@@ -260,10 +209,10 @@ async fn reply_inner(
     let body = get("body").unwrap_or_default();
     let url = get("url").unwrap_or_default();
 
-    let (uid, email) = caller(cfg, client, query, bearer).await?;
+    let (uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
 
     // The node being commented on: whose author should hear about the reply.
-    let node = admin_gql(
+    let node = crate::auth::admin_gql(
         cfg,
         client,
         json!({
@@ -286,7 +235,7 @@ async fn reply_inner(
         .unwrap_or_else(|| parent.clone());
 
     // Anti-abuse: only an active member of the node's context may ping its author.
-    let member = admin_gql(cfg, client, json!({
+    let member = crate::auth::admin_gql(cfg, client, json!({
         "query": "query($c: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, email: {_eq: $e}, active: {_eq: true}}, limit: 1) { id } }",
         "variables": { "c": ctx, "e": email },
     })).await?;
@@ -299,7 +248,7 @@ async fn reply_inner(
         return Err("not a member of this context".into());
     }
 
-    let owner = admin_gql(
+    let owner = crate::auth::admin_gql(
         cfg,
         client,
         json!({
@@ -360,10 +309,10 @@ async fn notify_inner(
     let body = get("body").unwrap_or_default();
     let url = get("url").unwrap_or_default();
 
-    let (_uid, email) = caller(cfg, client, query, bearer).await?;
+    let (_uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
 
     // Only a context owner may notify its members (anti-spam).
-    let owner = admin_gql(cfg, client, json!({
+    let owner = crate::auth::admin_gql(cfg, client, json!({
         "query": "query($c: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, email: {_eq: $e}, owner: {_eq: true}}, limit: 1) { id } }",
         "variables": { "c": context, "e": email },
     })).await?;
@@ -377,7 +326,7 @@ async fn notify_inner(
     }
 
     // Recipients = active, accepted members other than the sender.
-    let members = admin_gql(cfg, client, json!({
+    let members = crate::auth::admin_gql(cfg, client, json!({
         "query": "query($c: uuid!) { members(where: {parentId: {_eq: $c}, active: {_eq: true}, accepted: {_eq: true}}) { email } }",
         "variables": { "c": context },
     })).await?;
