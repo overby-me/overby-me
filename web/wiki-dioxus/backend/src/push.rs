@@ -96,6 +96,38 @@ fn encrypt(p256dh: &str, auth: &str, plaintext: &[u8]) -> Result<Vec<u8>, String
     encrypt_with(&as_secret, &salt, &ua_public, &auth, plaintext)
 }
 
+/// Whether a client-registered push endpoint is safe for the backend to POST to
+/// (SSRF guard). Web-push endpoints are always `https://` on public push
+/// infrastructure with a DNS hostname (`fcm.googleapis.com`,
+/// `*.push.services.mozilla.com`, `*.notify.windows.com`, `web.push.apple.com`),
+/// so we reject anything that is not https, any IP-literal host (which blocks
+/// the cloud metadata service, loopback, and private ranges), and localhost.
+/// This rejects no legitimate browser subscription. Residual (accepted): a
+/// hostname that DNS-resolves to an internal address (rebinding) still passes.
+pub fn endpoint_allowed(endpoint: &str) -> bool {
+    let Some(rest) = endpoint.strip_prefix("https://") else {
+        return false;
+    };
+    // Host is up to the first '/', '?' or '#'; bracketed IPv6 ends at ']'.
+    let host = if let Some(after) = rest.strip_prefix('[') {
+        after.split(']').next().unwrap_or("")
+    } else {
+        rest.split(['/', ':', '?', '#']).next().unwrap_or("")
+    };
+    if host.is_empty() {
+        return false;
+    }
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost" || lower.ends_with(".localhost") || lower.ends_with(".local") {
+        return false;
+    }
+    // Reject IP-literal hosts outright (real push endpoints use DNS names).
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
+    true
+}
+
 /// The `scheme://host[:port]` origin of a push endpoint, for the VAPID `aud` claim.
 fn origin_of(endpoint: &str) -> Result<String, String> {
     let rest = endpoint
@@ -145,6 +177,11 @@ pub async fn send(
     if cfg.vapid_private.is_empty() {
         return Err("push not configured".into());
     }
+    // SSRF guard at send time too, in case a disallowed endpoint predates the
+    // subscribe-time check (defense in depth).
+    if !endpoint_allowed(&sub.endpoint) {
+        return Err("disallowed push endpoint".into());
+    }
     let body = encrypt(&sub.p256dh, &sub.auth, payload)?;
     let auth = vapid_header(cfg, &sub.endpoint, util::now_secs())?;
     let resp = client
@@ -178,6 +215,30 @@ mod tests {
         "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
     const SALT: &str = "DGv6ra1nlYgDCS1FRnbzlw";
     const EXPECTED: &str = "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN";
+
+    #[test]
+    fn endpoint_allowlist_blocks_ssrf_targets() {
+        // Real browser push endpoints (https, DNS host) are allowed.
+        assert!(endpoint_allowed(
+            "https://fcm.googleapis.com/fcm/send/abc123"
+        ));
+        assert!(endpoint_allowed(
+            "https://updates.push.services.mozilla.com/wpush/v2/xyz"
+        ));
+        assert!(endpoint_allowed("https://web.push.apple.com/QA/def"));
+
+        // SSRF targets and non-https are rejected.
+        assert!(!endpoint_allowed("http://fcm.googleapis.com/fcm/send/abc")); // not https
+        assert!(!endpoint_allowed(
+            "https://169.254.169.254/latest/meta-data/"
+        )); // metadata
+        assert!(!endpoint_allowed("https://127.0.0.1/internal"));
+        assert!(!endpoint_allowed("https://10.0.0.5/x"));
+        assert!(!endpoint_allowed("https://192.168.1.1/x"));
+        assert!(!endpoint_allowed("https://localhost/x"));
+        assert!(!endpoint_allowed("https://[::1]/x")); // IPv6 loopback
+        assert!(!endpoint_allowed("ftp://fcm.googleapis.com/x"));
+    }
 
     #[test]
     fn rfc8291_example_matches() {

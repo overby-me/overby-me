@@ -6,8 +6,13 @@
 //! so the ballot is untraceable, while a separate `has_voted(poll_id, user_id)`
 //! marker enforces one vote per member without linking the marker to the ballot.
 //!
-//!   POST /vote/cast?poll=&context=&choices=0,2   (Authorization: Bearer <jwt>)
-//!   GET  /vote/status?poll=                       -> {"voted": bool}
+//! The cast is authorised server-side (the admin path bypasses row-level
+//! security): the target must be an open `vote/poll` and the caller an active
+//! member of that poll's context. The `context` derives from the poll, not the
+//! request.
+//!
+//!   POST /vote/cast?poll=&choices=0,2   (Authorization: Bearer <jwt>)
+//!   GET  /vote/status?poll=             -> {"voted": bool}
 
 use crate::oauth::Config;
 use axum::{body::Body, response::Response};
@@ -26,6 +31,24 @@ pub async fn cast(
             StatusCode::CONFLICT,
             json!({ "ok": false, "error": e }).to_string(),
         ),
+        // Authorization/state failures carry a safe, user-facing message and a
+        // 403, so they reach the voter instead of being genericised by
+        // `error_json` (which is reserved for internal errors).
+        Err(e)
+            if matches!(
+                e.as_str(),
+                "not a poll"
+                    | "poll closed"
+                    | "poll not found"
+                    | "poll has no context"
+                    | "not a member of this context"
+            ) =>
+        {
+            crate::json(
+                StatusCode::FORBIDDEN,
+                json!({ "ok": false, "error": e }).to_string(),
+            )
+        }
         Err(e) => crate::error_json("vote cast", e),
     }
 }
@@ -43,15 +66,60 @@ async fn cast_inner(
             .find(|(pk, _)| pk == k)
             .map(|(_, v)| v.clone())
     };
-    let token = crate::auth::token_from(query, bearer).ok_or("missing token")?;
     let poll = get("poll").ok_or("missing poll")?;
-    let context = get("context").filter(|c| !c.is_empty());
     let choices: Vec<i64> = get("choices")
         .unwrap_or_default()
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
-    let uid = crate::nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)?;
+    // Identify the caller (verifies the JWT and fetches their invite email).
+    let (uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
+
+    // Authorize the ballot. The admin-secret path below bypasses Hasura's
+    // row-level security, so membership + poll state MUST be checked here: the
+    // target must be an OPEN `vote/poll`, and the caller an active member of that
+    // poll's context. The context is read from the poll itself (authoritative),
+    // never trusted from the client.
+    let poll_v = crate::auth::admin_gql(
+        cfg,
+        client,
+        json!({
+            "query": "query($p: uuid!) { node(id: $p) { mimeId mutable contextId } }",
+            "variables": { "p": poll },
+        }),
+    )
+    .await?;
+    let pnode = poll_v
+        .pointer("/data/node")
+        .filter(|n| !n.is_null())
+        .ok_or("poll not found")?;
+    if pnode.get("mimeId").and_then(|m| m.as_str()) != Some("vote/poll") {
+        return Err("not a poll".into());
+    }
+    if pnode.get("mutable").and_then(|m| m.as_bool()) != Some(true) {
+        return Err("poll closed".into());
+    }
+    let poll_context = pnode
+        .get("contextId")
+        .and_then(|c| c.as_str())
+        .filter(|c| !c.is_empty())
+        .ok_or("poll has no context")?
+        .to_string();
+
+    // Active membership in the poll's context, matched by the durable node_id
+    // binding or (fallback) the invite email.
+    let mem_v = crate::auth::admin_gql(
+        cfg,
+        client,
+        json!({
+            "query": "query($c: uuid!, $u: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, active: {_eq: true}, _or: [{nodeId: {_eq: $u}}, {email: {_eq: $e}}]}, limit: 1) { id } }",
+            "variables": { "c": poll_context, "u": uid, "e": email },
+        }),
+    )
+    .await?;
+    if mem_v.pointer("/data/members/0").is_none() {
+        return Err("not a member of this context".into());
+    }
 
     // Dedup first: insert the has_voted marker. A conflict (0 rows) = already voted.
     let marker = json!({
@@ -75,7 +143,7 @@ async fn cast_inner(
         "key": format!("vote-{secs}-{}", crate::util::random_token(6)),
         "mimeId": "vote/vote",
         "parentId": poll,
-        "contextId": context,
+        "contextId": poll_context,
         "data": choices,
     });
     let insert = json!({

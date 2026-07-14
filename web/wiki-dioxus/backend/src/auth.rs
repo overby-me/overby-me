@@ -35,7 +35,11 @@ pub async fn admin_gql(
         .map_err(|e| e.to_string())?;
     let v: Value = resp.json().await.map_err(|e| e.to_string())?;
     if let Some(errors) = v.get("errors") {
-        return Err(format!("hasura error: {errors}"));
+        // Log the Hasura detail server-side, but return a generic error so query
+        // internals (schema, constraint names) never reach the client via
+        // `error_json`. Handler-level domain errors are unaffected.
+        eprintln!("hasura error: {errors}");
+        return Err("backend query failed".into());
     }
     Ok(v)
 }

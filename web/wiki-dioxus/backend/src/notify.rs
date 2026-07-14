@@ -44,6 +44,10 @@ async fn subscribe_inner(
     let endpoint = get("endpoint")
         .filter(|s| !s.is_empty())
         .ok_or("missing endpoint")?;
+    // SSRF guard: never store an endpoint the backend must not POST to.
+    if !push::endpoint_allowed(&endpoint) {
+        return Err("disallowed push endpoint".into());
+    }
     let p256dh = get("p256dh")
         .filter(|s| !s.is_empty())
         .ok_or("missing p256dh")?;
@@ -146,7 +150,15 @@ async fn push_to_emails(
         match push::send(cfg, client, sub, payload.as_bytes()).await {
             Ok(status) if (200..300).contains(&status) => sent += 1,
             Ok(404) | Ok(410) => stale.push(sub.endpoint.clone()),
-            Ok(status) => eprintln!("push send to {} -> {status}", sub.endpoint),
+            // Log only the endpoint origin: its path segment is a per-user secret.
+            Ok(status) => eprintln!(
+                "push send -> {status} ({})",
+                sub.endpoint
+                    .split('/')
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join("/")
+            ),
             Err(e) => eprintln!("push send error: {e}"),
         }
     }
