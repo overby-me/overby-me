@@ -121,8 +121,17 @@ social — groups/events/feeds — plus AI = vector/semantic search).
     unique `(poll, voter)` constraint, tally computed by **aggregation** over
     ballots (not a mutable counter), regular exports/backups. Then a concurrency
     hiccup can't silently corrupt a result — worst case, recompute.
-  - **Validate LIVE queries early** (reconnect, missed-on-disconnect, concurrent
-    live-query load) — it's the biggest payoff and the thing most worth proving.
+  - **LIVE queries validated by a throwaway spike (2026-07)** — SurrealDB 2.6.1,
+    Rust SDK over WS. Results: (a) correct, ordered Create/Update/Delete
+    notifications; (b) concurrent live queries multiplex with no cross-talk;
+    (c) events that occur while a client is disconnected are **not** backfilled;
+    (d) on a real server drop the stream cleanly **errors then ends** (detectable),
+    the SDK **auto-reconnects the handle**, but the old live query does **not**
+    resume — you must re-subscribe. Net: the failure mode is clean and detectable,
+    not a silent-dead-stream gotcha. The **one required pattern is
+    refetch-on-reconnect** (re-`SELECT` current state + issue a fresh `LIVE`
+    query) — table stakes for any push sync, not a SurrealDB quirk. Verdict:
+    solid enough to build the sync layer on.
   - License: BSL 1.1 — fine self-hosted (converts to Apache 2.0 after 4 years).
 
 - **Conservative alternative — PostgreSQL + Rust extensions.** If the SurrealDB
