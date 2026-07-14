@@ -524,9 +524,8 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                 }
             }
             div { class: "mt-2",
-                // A native <select> (styled to match the editor's) — it renders the
-                // localized option labels correctly, which the dioxus-primitives
-                // Select does not for value != label, so it stays native by choice.
+                // A native <select> (styled to match the editor's), used because it
+                // renders localized option labels correctly when value != label.
                 select {
                     class: "editor-select",
                     "aria-label": t("common.type"),

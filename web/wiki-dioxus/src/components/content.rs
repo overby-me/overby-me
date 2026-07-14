@@ -280,8 +280,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                 }
             }
             if can_manage && !segments.is_empty() {
-                // Delete via an accessible modal confirm dialog (the custom Dialog;
-                // the primitives AlertDialog's controlled open never opened).
+                // Delete via the app's standard accessible confirm dialog.
                 super::widgets::Dialog {
                     open: confirm_open(),
                     on_dismiss: move |_| confirm_open.set(false),

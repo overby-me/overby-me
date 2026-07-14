@@ -384,8 +384,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
             }
         }
 
-        // Remove member confirm. Uses the custom Dialog (plain `bool` open): the
-        // primitives AlertDialog's controlled `open` prop never opened here.
+        // Remove-member confirm, via the app's standard Dialog.
         super::widgets::Dialog {
             open: remove_target.read().is_some(),
             on_dismiss: move |_| remove_target.set(None),

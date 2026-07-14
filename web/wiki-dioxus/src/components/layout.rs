@@ -1967,8 +1967,7 @@ fn InvitedContextItem(invite: graphql::InvitationFields) -> Element {
                 span { class: "material-icons", "close" }
             }
         }
-        // Confirm before rejecting an invitation (custom Dialog; the primitives
-        // AlertDialog's controlled open never opened).
+        // Confirm before rejecting an invitation, via the app's standard Dialog.
         super::widgets::Dialog {
             open: confirm_open(),
             on_dismiss: move |_| confirm_open.set(false),
