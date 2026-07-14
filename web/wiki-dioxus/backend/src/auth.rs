@@ -78,3 +78,32 @@ pub async fn caller(
         .to_string();
     Ok((uid, email))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::token_from;
+
+    #[test]
+    fn prefers_bearer_over_query() {
+        assert_eq!(
+            token_from(Some("token=from-query"), Some("from-header")),
+            Some("from-header".into())
+        );
+    }
+
+    #[test]
+    fn falls_back_to_query_token() {
+        // An empty Bearer is ignored (treated as absent), so the query wins.
+        assert_eq!(
+            token_from(Some("a=1&token=abc&b=2"), Some("")),
+            Some("abc".into())
+        );
+        assert_eq!(token_from(Some("token=abc"), None), Some("abc".into()));
+    }
+
+    #[test]
+    fn none_when_neither_present() {
+        assert_eq!(token_from(Some("a=1&b=2"), None), None);
+        assert_eq!(token_from(None, None), None);
+    }
+}

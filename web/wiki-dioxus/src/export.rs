@@ -648,6 +648,18 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_filename_keeps_safe_chars_and_falls_back() {
+        assert_eq!(sanitize_filename("My File 2024"), "My_File_2024");
+        assert_eq!(sanitize_filename("a/b\\c:d*e?"), "a_b_c_d_e_");
+        assert_eq!(sanitize_filename("keep-these_1"), "keep-these_1");
+        // Unicode letters count as alphanumeric and are preserved.
+        assert_eq!(sanitize_filename("Ærø"), "Ærø");
+        // Empty or all-separator names fall back to a safe default.
+        assert_eq!(sanitize_filename("   "), "document");
+        assert_eq!(sanitize_filename(""), "document");
+    }
+
+    #[test]
     fn odt_is_a_zip_with_mimetype_first() {
         let content = serde_json::json!([
             {"type": "paragraph", "children": [{"text": "Hello <world> & \"you\""}]},

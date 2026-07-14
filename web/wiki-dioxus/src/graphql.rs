@@ -3015,6 +3015,52 @@ mod tests {
         assert_eq!(json, r#"{"_eq":"wiki/event"}"#);
     }
 
+    /// `gql_escape` guards the hand-built subscription/where strings: a value
+    /// carrying `"` or `\` must be neutralised so it can't break out of the
+    /// string literal and rewrite the query filter (a GraphQL injection).
+    #[test]
+    fn gql_escape_neutralises_quotes_and_backslashes() {
+        assert_eq!(gql_escape("plain-id"), "plain-id");
+        assert_eq!(gql_escape(r#"a"b"#), r#"a\"b"#);
+        assert_eq!(gql_escape(r"a\b"), r"a\\b");
+        // A backslash must be doubled BEFORE quotes are escaped, so a crafted
+        // `\"` can't survive as an unescaped quote.
+        assert_eq!(gql_escape(r#"\""#), r#"\\\""#);
+        // A classic injection attempt stays inside the literal.
+        assert_eq!(
+            gql_escape(r#"" }, name: { _eq: "x"#),
+            r#"\" }, name: { _eq: \"x"#
+        );
+    }
+
+    /// The member-page `where` builder must escape the parent id + search term
+    /// and omit unset bool filters.
+    #[test]
+    fn members_where_escapes_and_omits_unset() {
+        let base = MemberPageFilter::default();
+        let clause = members_where("ctx-1", &base);
+        assert!(clause.contains(r#"parentId: { _eq: "ctx-1" }"#), "{clause}");
+        // No bool filters and empty search -> only the parentId clause.
+        assert!(!clause.contains("owner:"), "{clause}");
+        assert!(!clause.contains("_ilike"), "{clause}");
+
+        let filtered = MemberPageFilter {
+            owner: Some(true),
+            active: Some(false),
+            search: "  a\"b  ".to_string(),
+            ..Default::default()
+        };
+        let clause = members_where("ctx-1", &filtered);
+        assert!(clause.contains("owner: { _eq: true }"), "{clause}");
+        assert!(clause.contains("active: { _eq: false }"), "{clause}");
+        // Search is trimmed, wrapped in %..%, and the embedded quote is escaped.
+        assert!(clause.contains(r#"_ilike: "%a\"b%""#), "{clause}");
+        assert!(
+            !clause.contains("accepted:"),
+            "unset filter omitted: {clause}"
+        );
+    }
+
     /// The invitations filter must omit null fields and carry the pending +
     /// group/event + user/email conditions the home list depends on.
     #[test]

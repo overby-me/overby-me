@@ -38,8 +38,7 @@ struct PollConfig {
     max_vote: usize,
 }
 
-fn poll_config(node: &NodeWithChildren) -> PollConfig {
-    let data = node.data.as_ref().map(|d| &d.0);
+fn poll_config(data: Option<&serde_json::Value>) -> PollConfig {
     let options = data
         .and_then(|d| d.get("options"))
         .and_then(|o| o.as_array())
@@ -74,7 +73,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         options,
         min_vote,
         max_vote,
-    } = poll_config(&node);
+    } = poll_config(node.data.as_ref().map(|d| &d.0));
     let name = node.name.clone();
     let poll_id = node.id.0.clone();
     let context_id = node.context_id.clone().map(|c| c.0);
@@ -804,7 +803,40 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
 
 #[cfg(test)]
 mod tests {
-    use super::ballot_order;
+    use super::{ballot_order, poll_config};
+    use serde_json::json;
+
+    #[test]
+    fn poll_config_reads_options_and_bounds() {
+        let data = json!({
+            "options": ["Yes", "No", "Blank"],
+            "minVote": 1,
+            "maxVote": 2,
+        });
+        let cfg = poll_config(Some(&data));
+        assert_eq!(cfg.options, vec!["Yes", "No", "Blank"]);
+        assert_eq!(cfg.min_vote, 1);
+        assert_eq!(cfg.max_vote, 2);
+    }
+
+    #[test]
+    fn poll_config_defaults_when_absent_or_malformed() {
+        // No data at all -> no options, single-choice defaults (min=max=1).
+        let cfg = poll_config(None);
+        assert!(cfg.options.is_empty());
+        assert_eq!((cfg.min_vote, cfg.max_vote), (1, 1));
+
+        // Non-string option entries are dropped; missing bounds fall back to 1.
+        let data = json!({ "options": ["Yes", 42, null, "No"] });
+        let cfg = poll_config(Some(&data));
+        assert_eq!(cfg.options, vec!["Yes", "No"]);
+        assert_eq!((cfg.min_vote, cfg.max_vote), (1, 1));
+
+        // A negative/!u64 bound is ignored (falls back to the default).
+        let data = json!({ "options": [], "minVote": -3, "maxVote": 5 });
+        let cfg = poll_config(Some(&data));
+        assert_eq!((cfg.min_vote, cfg.max_vote), (1, 5));
+    }
 
     #[test]
     fn ballot_order_keeps_blank_last_and_is_a_permutation() {

@@ -606,21 +606,6 @@ async fn resolve_handle_wellknown(client: &reqwest::Client, handle: &str) -> Opt
     did.starts_with("did:").then(|| did.to_string())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::valid_handle;
-
-    #[test]
-    fn handle_validation() {
-        assert!(valid_handle("alice.bsky.social"));
-        assert!(valid_handle("my-handle.eurosky.social"));
-        assert!(!valid_handle("nodot"));
-        assert!(!valid_handle("bad/slash.com"));
-        assert!(!valid_handle(".leading.dot"));
-        assert!(!valid_handle("space here.com"));
-    }
-}
-
 async fn resolve_pds(client: &reqwest::Client, did: &str) -> Result<String, String> {
     let doc: Value = if let Some(rest) = did.strip_prefix("did:web:") {
         let domain = rest.replace("%3A", ":");
@@ -764,4 +749,64 @@ fn set_cookie(value: &str, max_age: u32) -> String {
 
 fn clear_cookie() -> String {
     format!("{COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clear_cookie, cookie, set_cookie, valid_handle, COOKIE_NAME};
+
+    #[test]
+    fn handle_validation() {
+        assert!(valid_handle("alice.bsky.social"));
+        assert!(valid_handle("my-handle.eurosky.social"));
+        assert!(!valid_handle("nodot"));
+        assert!(!valid_handle("bad/slash.com"));
+        assert!(!valid_handle(".leading.dot"));
+        assert!(!valid_handle("space here.com"));
+    }
+
+    #[test]
+    fn handle_validation_edge_cases() {
+        assert!(!valid_handle("")); // empty
+        assert!(!valid_handle("trailing.dot.")); // trailing '.'
+        assert!(!valid_handle("-leading.hyphen.com")); // leading '-'
+        assert!(!valid_handle("trailing.hyphen-")); // trailing '-'
+        assert!(!valid_handle("under_score.com")); // '_' is not allowed
+        assert!(!valid_handle("café.com")); // non-ASCII rejected
+                                            // 253 chars is the cap; 254 is too long.
+        let base = ".bsky.social"; // 12 chars
+        let ok = format!("{}{}", "a".repeat(253 - base.len()), base);
+        assert_eq!(ok.len(), 253);
+        assert!(valid_handle(&ok));
+        assert!(!valid_handle(&format!("a{ok}")));
+    }
+
+    #[test]
+    fn cookie_extracts_named_value() {
+        let header = format!("other=1; {COOKIE_NAME}=abc123; foo=bar");
+        assert_eq!(cookie(Some(&header), COOKIE_NAME), Some("abc123".into()));
+        // Whitespace around pairs is trimmed; a missing name yields None.
+        assert_eq!(cookie(Some("a=1;  b=2"), "b"), Some("2".into()));
+        assert_eq!(cookie(Some("a=1"), "missing"), None);
+        assert_eq!(cookie(None, COOKIE_NAME), None);
+    }
+
+    #[test]
+    fn set_and_clear_cookie_carry_security_attrs() {
+        let set = set_cookie("val", 600);
+        assert!(set.starts_with(&format!("{COOKIE_NAME}=val;")));
+        for attr in [
+            "HttpOnly",
+            "Secure",
+            "SameSite=Lax",
+            "Path=/",
+            "Max-Age=600",
+        ] {
+            assert!(set.contains(attr), "set-cookie missing {attr}: {set}");
+        }
+        // Clearing sets an immediate expiry so the browser drops it.
+        let cleared = clear_cookie();
+        assert!(cleared.contains("Max-Age=0"));
+        assert!(cleared.contains("HttpOnly") && cleared.contains("Secure"));
+    }
 }

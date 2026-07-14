@@ -33,6 +33,21 @@ struct PendingComment {
     text: String,
 }
 
+/// Reconcile optimistic comments against the fetched set: keep only the pending
+/// entries whose `key` has NOT yet come back from the server. Once the refetch
+/// includes a comment with the same key, its optimistic row is dropped — no
+/// duplicate, no flicker.
+fn reconcile_pending(
+    pending: &[PendingComment],
+    fetched_keys: &std::collections::HashSet<String>,
+) -> Vec<PendingComment> {
+    pending
+        .iter()
+        .filter(|p| !fetched_keys.contains(&p.key))
+        .cloned()
+        .collect()
+}
+
 /// An optimistic (not-yet-confirmed) comment row at `depth`, muted with a
 /// "sending" marker.
 #[component]
@@ -131,12 +146,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
         Some(Ok(list)) => list.iter().map(|c| c.key.clone()).collect(),
         _ => Default::default(),
     };
-    let pending_shown: Vec<PendingComment> = pending
-        .read()
-        .iter()
-        .filter(|p| !fetched_keys.contains(&p.key))
-        .cloned()
-        .collect();
+    let pending_shown = reconcile_pending(&pending.read(), &fetched_keys);
 
     rsx! {
         div { class: "card comment-section",
@@ -246,12 +256,7 @@ fn CommentThread(
     let reply_pending = use_signal(Vec::<PendingComment>::new);
     let reply_keys: std::collections::HashSet<String> =
         replies.iter().map(|c| c.key.clone()).collect();
-    let reply_pending_shown: Vec<PendingComment> = reply_pending
-        .read()
-        .iter()
-        .filter(|p| !reply_keys.contains(&p.key))
-        .cloned()
-        .collect();
+    let reply_pending_shown = reconcile_pending(&reply_pending.read(), &reply_keys);
 
     // Notify me when a new reply lands on a comment I wrote — not my own replies,
     // and not on first load. Only shows if notification permission was granted
@@ -519,5 +524,44 @@ fn CommentComposer(
                 span { class: "material-icons", "send" }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{reconcile_pending, PendingComment};
+    use std::collections::HashSet;
+
+    fn pending(key: &str) -> PendingComment {
+        PendingComment {
+            key: key.to_string(),
+            author: "Me".to_string(),
+            text: "hi".to_string(),
+        }
+    }
+
+    #[test]
+    fn keeps_only_unconfirmed_pending_comments() {
+        let pend = vec![pending("a"), pending("b"), pending("c")];
+        // "b" has come back from the server, so its optimistic row is dropped.
+        let fetched: HashSet<String> = ["b".to_string()].into_iter().collect();
+        let shown = reconcile_pending(&pend, &fetched);
+        assert_eq!(
+            shown.iter().map(|p| p.key.as_str()).collect::<Vec<_>>(),
+            vec!["a", "c"]
+        );
+    }
+
+    #[test]
+    fn empty_cases() {
+        // Nothing pending -> nothing shown.
+        assert!(reconcile_pending(&[], &HashSet::new()).is_empty());
+        // All confirmed -> nothing shown (no duplicate rows).
+        let pend = vec![pending("a")];
+        let fetched: HashSet<String> = ["a".to_string()].into_iter().collect();
+        assert!(reconcile_pending(&pend, &fetched).is_empty());
+        // None confirmed yet -> all shown, order preserved.
+        let shown = reconcile_pending(&pend, &HashSet::new());
+        assert_eq!(shown.len(), 1);
     }
 }

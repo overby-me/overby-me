@@ -53,6 +53,24 @@ pub async fn cast(
     }
 }
 
+/// Parse the `choices` query param ("0,2,3") into option indices. Whitespace is
+/// trimmed and non-integer / empty entries are dropped, so a malformed choice
+/// silently narrows the ballot rather than rejecting it (the tally only counts
+/// indices that exist).
+fn parse_choices(raw: &str) -> Vec<i64> {
+    raw.split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect()
+}
+
+/// A ballot node's `key`. Anonymity depends on this carrying NOTHING that
+/// correlates the ballot to the per-user `has_voted` marker: no owner, no user
+/// id, no timestamp — just a random suffix under the poll's `(parent_id, key)`
+/// uniqueness.
+fn ballot_key() -> String {
+    format!("ballot-{}", crate::util::random_token(16))
+}
+
 async fn cast_inner(
     cfg: &Config,
     client: &reqwest::Client,
@@ -67,11 +85,7 @@ async fn cast_inner(
             .map(|(_, v)| v.clone())
     };
     let poll = get("poll").ok_or("missing poll")?;
-    let choices: Vec<i64> = get("choices")
-        .unwrap_or_default()
-        .split(',')
-        .filter_map(|s| s.trim().parse().ok())
-        .collect();
+    let choices = parse_choices(&get("choices").unwrap_or_default());
     // Identify the caller (verifies the JWT and fetches their invite email).
     let (uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
 
@@ -149,7 +163,7 @@ async fn cast_inner(
     // voted how). All ballots for a poll therefore share one timestamp.
     let mut obj = json!({
         "name": "ballot",
-        "key": format!("ballot-{}", crate::util::random_token(16)),
+        "key": ballot_key(),
         "mimeId": "vote/vote",
         "parentId": poll,
         "contextId": poll_context,
@@ -205,4 +219,38 @@ async fn status_inner(
         .and_then(|a| a.as_array())
         .map(|a| !a.is_empty())
         .unwrap_or(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_choices_trims_and_drops_invalid() {
+        assert_eq!(parse_choices("0,2,3"), vec![0, 2, 3]);
+        assert_eq!(parse_choices(" 1 , 2 "), vec![1, 2]); // whitespace trimmed
+        assert_eq!(parse_choices("1,x,3"), vec![1, 3]); // non-integer dropped
+        assert_eq!(parse_choices("1,,2"), vec![1, 2]); // empty segment dropped
+    }
+
+    #[test]
+    fn parse_choices_empty_input_is_empty() {
+        assert!(parse_choices("").is_empty());
+        assert!(parse_choices(" ").is_empty());
+        assert!(parse_choices(",").is_empty());
+    }
+
+    #[test]
+    fn ballot_key_is_anonymous_and_unique() {
+        let uid = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+        let a = ballot_key();
+        let b = ballot_key();
+        assert!(a.starts_with("ballot-"), "keeps the ballot- prefix");
+        // The suffix must be a fresh random token, never derived from the voter:
+        // it carries no user id (so it can't be correlated to `has_voted`) and no
+        // two ballots collide on the poll's (parent_id, key) uniqueness.
+        assert!(!a.contains(uid), "key must not embed the user id");
+        assert_ne!(a, b, "each ballot key is unique");
+        assert_eq!(a.len(), "ballot-".len() + 22); // 16 random bytes -> 22 b64url chars
+    }
 }

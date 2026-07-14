@@ -170,6 +170,20 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn attr_escape_covers_quotes_and_html_metachars() {
+        // Inside a double-quoted attribute, `"` must become `&quot;` (else an
+        // attacker's href/src could break out of the attribute), on top of the
+        // usual `&`/`<`/`>` escaping html_escape already does.
+        assert_eq!(attr_escape(r#"a"b"#), "a&quot;b");
+        assert_eq!(attr_escape("a&b<c>"), "a&amp;b&lt;c&gt;");
+        assert_eq!(
+            attr_escape(r#"" onmouseover="x"#),
+            "&quot; onmouseover=&quot;x"
+        );
+        assert_eq!(attr_escape("plain"), "plain");
+    }
+
+    #[test]
     fn strips_a_leading_blank_paragraph_but_keeps_a_sole_one() {
         let empty = json!({"type": "paragraph", "children": [{"text": ""}]});
         let para = json!({"type": "paragraph", "children": [{"text": "hi"}]});

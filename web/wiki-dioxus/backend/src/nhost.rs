@@ -237,3 +237,82 @@ pub async fn update_user_avatar(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Mint an HS256 JWT the same way NHost does, so we can exercise every branch
+    /// of `verify_access_token` without a live token.
+    fn mint(secret: &str, header: &Value, claims: &Value) -> String {
+        let h = util::b64url(&serde_json::to_vec(header).unwrap());
+        let c = util::b64url(&serde_json::to_vec(claims).unwrap());
+        let signing_input = format!("{h}.{c}");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(signing_input.as_bytes());
+        let sig = util::b64url(&mac.finalize().into_bytes());
+        format!("{signing_input}.{sig}")
+    }
+
+    #[test]
+    fn accepts_a_valid_token_and_returns_sub() {
+        let far_future = util::now_secs() + 3600;
+        let tok = mint(
+            "s3cret",
+            &json!({ "alg": "HS256", "typ": "JWT" }),
+            &json!({ "sub": "user-123", "exp": far_future }),
+        );
+        assert_eq!(verify_access_token(&tok, "s3cret").unwrap(), "user-123");
+    }
+
+    #[test]
+    fn rejects_bad_signature() {
+        let tok = mint(
+            "right-secret",
+            &json!({ "alg": "HS256" }),
+            &json!({ "sub": "u" }),
+        );
+        assert_eq!(
+            verify_access_token(&tok, "wrong-secret"),
+            Err("bad jwt signature".into())
+        );
+    }
+
+    #[test]
+    fn rejects_non_hs256_alg() {
+        // A `none`/`RS256` alg must be refused even if the rest is well-formed
+        // (the classic alg-confusion downgrade).
+        for alg in ["none", "RS256", "HS384"] {
+            let tok = mint("s", &json!({ "alg": alg }), &json!({ "sub": "u" }));
+            assert_eq!(
+                verify_access_token(&tok, "s"),
+                Err("unexpected jwt alg".into()),
+                "alg {alg} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_expired_token() {
+        let past = util::now_secs() - 1;
+        let tok = mint(
+            "s",
+            &json!({ "alg": "HS256" }),
+            &json!({ "sub": "u", "exp": past }),
+        );
+        assert_eq!(verify_access_token(&tok, "s"), Err("token expired".into()));
+    }
+
+    #[test]
+    fn rejects_malformed_and_subless() {
+        assert_eq!(
+            verify_access_token("only.two", "s"),
+            Err("malformed jwt".into())
+        );
+        let no_sub = mint("s", &json!({ "alg": "HS256" }), &json!({ "foo": "bar" }));
+        assert_eq!(
+            verify_access_token(&no_sub, "s"),
+            Err("jwt has no sub".into())
+        );
+    }
+}

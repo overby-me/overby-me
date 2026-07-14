@@ -802,6 +802,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn is_email_accepts_and_rejects_precisely() {
+        assert!(is_email("niclas@overby.me"));
+        assert!(is_email("a.b+tag_1%x@sub.domain.co"));
+        // Exactly one '@', a non-empty alnum-ish local, and a 2+ letter TLD.
+        assert!(!is_email("no-at-sign.com"));
+        assert!(!is_email("two@@x.com"));
+        assert!(!is_email("a@b@c.com"));
+        assert!(!is_email("@overby.me")); // empty local
+        assert!(!is_email("a@b")); // no dot in domain
+        assert!(!is_email("a@b.c")); // 1-letter TLD
+        assert!(!is_email("a@b.c1")); // non-alpha TLD
+        assert!(!is_email("spa ce@x.com")); // space in local
+        assert!(!is_email("a@ b.com")); // space in domain host
+    }
+
+    #[test]
     fn autolink_links_urls_and_emails_conservatively() {
         // Explicit scheme, www., and emails link (with the right href prefix).
         assert_eq!(
