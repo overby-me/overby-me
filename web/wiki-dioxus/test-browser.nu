@@ -1364,6 +1364,100 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     { passed: $p, failed: $fl }
 }
 
+# Write-flow: create a throwaway vote/policy in an owned sandbox folder, start a
+# poll on it through the UI, cast a vote, post a comment, then delete the whole
+# subtree and restore the context's prior "active" relation — leaving the live
+# backend exactly as it was. Firefox-only (it needs real form input + a reactive
+# ballot); warn-skips on Servo. Setup/teardown use the app's own GraphQL via the
+# stored session token; the poll/vote/comment themselves go through the UI, and
+# each is verified against the backend (not just the DOM).
+def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
+    mut p = $passed; mut fl = $failed
+    log-info ""
+    log-info "── Poll create + vote + comment (write-flow) ────────────"
+    if (servo-skip "poll/vote/comment write-flow") {
+        return { passed: $p, failed: $fl }
+    }
+    # A vote/policy is created under this owned "Test" folder, in the dormant
+    # HB2 22/23 event context the test user owns and is an active member of.
+    let CTX = "5b1ed157-3198-4d8e-9976-cf416c83aafb"
+    let FOLDER = "b317d167-15c7-4077-b0d3-19e6d98c934f"
+    let FOLDER_PATH = "/radikal_ungdom/hb2/test"
+    let GQL = "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
+    # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
+    let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+
+    # ── Setup: capture the context's prior active relation, insert the policy ──
+    let setup_js = ($gql + 'var CTX="' + $CTX + '";var FOLDER="' + $FOLDER + '";var prior=gql("query($p:uuid!){relations(where:{parentId:{_eq:$p},name:{_eq:\"active\"}}){nodeId}}",{p:CTX});var pa=null;try{pa=prior.data.relations[0].nodeId}catch(e){}var key="e2e-policy-"+Date.now();var r=gql("mutation($o:nodes_insert_input!){insertNode(object:$o){id key}}",{o:{name:"E2E poll flow",key:key,mimeId:"vote/policy",parentId:FOLDER,contextId:CTX,mutable:true}});var id=null;try{id=r.data.insertNode.id}catch(e){}return JSON.stringify({id:id,key:key,priorActive:pa,err:r.errors?JSON.stringify(r.errors):null});')
+    let setup = (try { wd-execute $session_id $setup_js | from json } catch { {id: null, key: "", priorActive: null, err: "setup exec failed"} })
+    if ($setup.id | is-empty) {
+        log-fail $"could not create scaffold policy: ($setup.err)"; $fl = $fl + 1
+        return { passed: $p, failed: $fl }
+    }
+    log-ok "scaffold policy created in the Test sandbox"; $p = $p + 1
+    let pid = $setup.id
+    let pkey = $setup.key
+
+    # ── Add a poll (UI: the StartPollButton on the policy) ──
+    wd-navigate $session_id $"(base-url)($FOLDER_PATH)/($pkey)"
+    if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main .btn-icon.add-action")].some(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"})?"y":"n"' 8000) {
+        log-ok "poll-start control shown (owner)"; $p = $p + 1
+        wd-execute $session_id 'var b=[...document.querySelectorAll("#main .btn-icon.add-action")].find(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"});if(b)b.click();return 1' | ignore
+        sleep 700ms
+        wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
+        if (wd-wait-y $session_id 'return document.querySelector("#main .ballot-option, #main .btn-cast")?"y":"n"' 9000) {
+            log-ok "poll created and ballot rendered"; $p = $p + 1
+        } else {
+            log-fail "poll did not open a ballot"; $fl = $fl + 1
+        }
+    } else {
+        log-fail "poll-start control missing on the policy"; $fl = $fl + 1
+    }
+
+    # ── Cast a vote (UI), verified against the backend ──
+    wd-execute $session_id 'var os=[...document.querySelectorAll("#main .ballot-option")];var t=os.find(function(o){return /\bFor\b/.test(o.textContent)})||os[0];if(t)t.click();return 1' | ignore
+    sleep 500ms
+    wd-execute $session_id 'var b=document.querySelector("#main .btn-cast");if(b)b.click();return 1' | ignore
+    sleep 1800ms
+    let vres = (try { wd-execute $session_id ($gql + 'var PID="' + $pid + '";var pr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/poll\"}}){id}}",{p:PID});var poll=null;try{poll=pr.data.nodes[0].id}catch(e){}var vc=0;if(poll){var vr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/vote\"}}){id}}",{p:poll});try{vc=vr.data.nodes.length}catch(e){}}return JSON.stringify({poll:poll,votes:vc});') | from json } catch { {poll: null, votes: 0} })
+    if (($vres.votes | default 0) >= 1) {
+        log-ok $"vote cast and recorded on the poll \(votes=($vres.votes)\)"; $p = $p + 1
+    } else {
+        log-fail "vote not recorded on the poll"; $fl = $fl + 1
+    }
+
+    # ── Post a comment (UI, on the policy's CommentSection), verified via backend ──
+    wd-navigate $session_id $"(base-url)($FOLDER_PATH)/($pkey)"
+    if (wd-wait-y $session_id 'return document.querySelector("#main .comment-composer .comment-input")?"y":"n"' 8000) {
+        wd-execute $session_id 'var ta=document.querySelector("#main .comment-composer .comment-input");if(ta){ta.value="e2e comment "+Date.now();ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1' | ignore
+        sleep 500ms
+        wd-execute $session_id 'var b=document.querySelector("#main .comment-composer .comment-send");if(b)b.click();return 1' | ignore
+        sleep 1800ms
+        let cres = (try { wd-execute $session_id ($gql + 'var PID="' + $pid + '";var cr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/comment\"}}){id}}",{p:PID});var cc=0;try{cc=cr.data.nodes.length}catch(e){}return JSON.stringify({comments:cc});') | from json } catch { {comments: 0} })
+        if (($cres.comments | default 0) >= 1) {
+            log-ok $"comment posted and recorded on the policy \(comments=($cres.comments)\)"; $p = $p + 1
+        } else {
+            log-fail "comment not recorded on the policy"; $fl = $fl + 1
+        }
+    } else {
+        log-fail "comment composer missing on the policy"; $fl = $fl + 1
+    }
+
+    # ── Teardown (always runs): delete the whole scaffold subtree + the policy,
+    #    restore the context's prior active relation, and verify the policy is
+    #    gone — so a run leaves the live backend exactly as it found it. ──
+    let pa_lit = (if ($setup.priorActive | is-empty) { "null" } else { ('"' + $setup.priorActive + '"') })
+    let teardown_js = ($gql + 'var CTX="' + $CTX + '";var PID="' + $pid + '";var PA=' + $pa_lit + ';function ch(pid){var r=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p}}){id}}",{p:pid});var o=[];try{o=r.data.nodes.map(function(n){return n.id})}catch(e){}return o;}var all=[];var stack=[PID];var guard=0;while(stack.length&&guard<500){guard++;var id=stack.pop();var kids=ch(id);for(var i=0;i<kids.length;i++){all.push(kids[i]);stack.push(kids[i]);}}for(var i=0;i<all.length;i++){gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:all[i]});}gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:PID});gql("mutation($o:relations_insert_input!,$oc:relations_on_conflict!){insertRelation(object:$o,on_conflict:$oc){id}}",{o:{name:"active",parentId:CTX,nodeId:PA},oc:{constraint:"relations_parent_id_name_key",update_columns:["nodeId"]}});var chk=gql("query($i:uuid!){node(id:$i){id}}",{i:PID});var gone=true;try{gone=!chk.data.node}catch(e){}return JSON.stringify({deleted:all.length,policyGone:gone});')
+    let td = (try { wd-execute $session_id $teardown_js | from json } catch { {deleted: -1, policyGone: false} })
+    if ($td.policyGone == true) {
+        log-ok $"cleaned up scaffold \(($td.deleted) descendant nodes\) and restored active relation"; $p = $p + 1
+    } else {
+        log-fail $"cleanup incomplete, MANUAL CHECK: policy ($pid) deleted=($td.deleted) gone=($td.policyGone)"; $fl = $fl + 1
+    }
+
+    { passed: $p, failed: $fl }
+}
+
 # Component CSS contracts for the M3 carousel and content image/lightbox. These
 # render from data the harness may not have (candidate photos, content images),
 # so verify the styling by injecting the exact markup the components emit and
@@ -1548,6 +1642,9 @@ def main [
     let password = ($env | get -o WIKI_PASSWORD | default "")
     if ($email | is-not-empty) and ($password | is-not-empty) {
         let r = (test-auth $session_id $email $password $timeout $passed $failed); $passed = $r.passed; $failed = $r.failed
+        # Write-flow (create poll / vote / comment) needs the authed session and
+        # only runs for real under Firefox; it self-cleans on the live backend.
+        let r = (test-vote-flow $session_id $passed $failed); $passed = $r.passed; $failed = $r.failed
     } else {
         log-info ""
         log-info "Skipping authenticated tests (set WIKI_EMAIL / WIKI_PASSWORD to enable)."
