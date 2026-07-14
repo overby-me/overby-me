@@ -463,6 +463,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         // Inline marks.
                         button {
                             class: if st_bold() { "btn-icon active" } else { "btn-icon" },
+                            "aria-pressed": if st_bold() { "true" } else { "false" },
                             title: "{t(\"editor.bold\")}",
                             onmousedown: move |e| e.prevent_default(),
                             onclick: move |_| {
@@ -473,6 +474,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         }
                         button {
                             class: if st_italic() { "btn-icon active" } else { "btn-icon" },
+                            "aria-pressed": if st_italic() { "true" } else { "false" },
                             title: "{t(\"editor.italic\")}",
                             onmousedown: move |e| e.prevent_default(),
                             onclick: move |_| {
@@ -483,6 +485,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         }
                         button {
                             class: if st_underline() { "btn-icon active" } else { "btn-icon" },
+                            "aria-pressed": if st_underline() { "true" } else { "false" },
                             title: "{t(\"editor.underline\")}",
                             onmousedown: move |e| e.prevent_default(),
                             onclick: move |_| {
@@ -493,6 +496,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         }
                         button {
                             class: if st_strike() { "btn-icon active" } else { "btn-icon" },
+                            "aria-pressed": if st_strike() { "true" } else { "false" },
                             title: "{t(\"editor.strikethrough\")}",
                             onmousedown: move |e| e.prevent_default(),
                             onclick: move |_| {

@@ -531,6 +531,9 @@ pub fn UserPopover(
                 class: "user-pop-card",
                 role: "dialog",
                 aria_modal: "true",
+                // Name the popover by the user it describes, so a screen reader
+                // announces whose card this is rather than a bare "dialog".
+                aria_label: "{name}",
                 onclick: move |e| e.stop_propagation(),
                 div { class: "user-pop-head",
                     div { class: "avatar",

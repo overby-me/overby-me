@@ -878,6 +878,7 @@ fn NavigationRail(tree_open: bool, on_toggle: EventHandler<()>) -> Element {
                         key: "{mime_id}",
                         to,
                         class: if active { "nav-rail-item active state-layer" } else { "nav-rail-item state-layer" },
+                        "aria-current": if active { "page" } else { "false" },
                         title: "{label}",
                         span { class: "nav-rail-indicator",
                             span { class: "app-rail-icon", {super::loader::icon_el(mime_id)} }
@@ -925,6 +926,7 @@ fn NavigationBar() -> Element {
                     key: "{mime_id}",
                     to,
                     class: if active { "nav-bar-item active state-layer" } else { "nav-bar-item state-layer" },
+                    "aria-current": if active { "page" } else { "false" },
                     title: "{label}",
                     aria_label: "{label}",
                     span { class: "nav-bar-indicator",
@@ -1047,12 +1049,47 @@ fn NavigationDrawer(open: Signal<bool>) -> Element {
         .and_then(|c| c.mime_id.clone())
         .unwrap_or_default();
 
+    // Return focus to the menu trigger when the drawer closes (a11y), captured
+    // when the focus sentinel mounts on open.
+    let mut return_focus = use_signal(|| None::<web_sys::HtmlElement>);
+
     rsx! {
         div {
             class: if open() { "nav-drawer-scrim open" } else { "nav-drawer-scrim" },
-            onclick: move |_| open.set(false),
+            role: "presentation",
+            onclick: move |_| super::widgets::close_modal(open, return_focus),
         }
-        aside { class: if open() { "nav-drawer open" } else { "nav-drawer" },
+        aside {
+            class: if open() { "nav-drawer open" } else { "nav-drawer" },
+            // The compact drawer is the primary phone navigation: give it the same
+            // modal a11y (name, focus trap, Escape, return-focus) as the app's other
+            // overlays, which it previously lacked.
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": t("common.menu"),
+            tabindex: "-1",
+            onkeydown: move |e| {
+                match e.key() {
+                    Key::Escape => super::widgets::close_modal(open, return_focus),
+                    Key::Tab if super::widgets::trap_tab_focus(".nav-drawer.open", e.modifiers().shift()) => {
+                        e.prevent_default();
+                    }
+                    _ => {}
+                }
+            },
+            // Focus sentinel: capture the trigger + pull focus into the drawer on open.
+            if open() {
+                div {
+                    class: "sheet-focus-sentinel",
+                    tabindex: "-1",
+                    onmounted: move |e| {
+                        return_focus.set(super::widgets::active_html_element());
+                        spawn(async move {
+                            let _ = e.set_focus(true).await;
+                        });
+                    },
+                }
+            }
             div { class: "nav-drawer-header",
                 if segments.is_empty() {
                     Link {
@@ -1076,7 +1113,7 @@ fn NavigationDrawer(open: Signal<bool>) -> Element {
                 button {
                     class: "btn-icon state-layer",
                     aria_label: t("common.close"),
-                    onclick: move |_| open.set(false),
+                    onclick: move |_| super::widgets::close_modal(open, return_focus),
                     span { class: "material-icons", "close" }
                 }
             }
