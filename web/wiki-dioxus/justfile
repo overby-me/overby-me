@@ -8,6 +8,11 @@ build:
 
 check:
     cargo check --target wasm32-unknown-unknown
+    bash scripts/check-css-spacing.sh
+
+# Design-system lint: spacing/font-size must flow through tokens (ratchet gate).
+lint-css:
+    bash scripts/check-css-spacing.sh
 
 fmt:
     cargo fmt

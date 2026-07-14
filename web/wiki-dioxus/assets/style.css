@@ -3153,7 +3153,7 @@ h6,
 /* Stack */
 .stack {
 	display: flex;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 }
 
 .stack-v {
@@ -4360,46 +4360,21 @@ h6,
 	display: none;
 }
 
-.p-1 {
-	padding: 8px;
-}
-.p-2 {
-	padding: 16px;
-}
-.p-3 {
-	padding: 24px;
-}
-.m-1 {
-	margin: 8px;
-}
-.m-2 {
-	margin: 16px;
-}
+/* Spacing utilities routed through the --md-sys-spacing scale so a global spacing
+   change is one token edit, not a find-and-replace. NB the utility numeral is a
+   size STEP, not the token index: `-1` == one 8px step == spacing-2, `-2` == 16px
+   == spacing-4. The dead p-*/m-*/w-full utilities were removed (0 call sites). */
 .mt-1 {
-	margin-top: 8px;
+	margin-top: var(--md-sys-spacing-2);
 }
 .mt-2 {
-	margin-top: 16px;
+	margin-top: var(--md-sys-spacing-4);
 }
 .mb-1 {
-	margin-bottom: 8px;
+	margin-bottom: var(--md-sys-spacing-2);
 }
 .mb-2 {
-	margin-bottom: 16px;
-}
-.w-full {
-	width: 100%;
-}
-
-/* Mobile-only elements */
-.mobile-only {
-	display: inline-flex;
-}
-
-@media (min-width: 1200px) {
-	.mobile-only {
-		display: none;
-	}
+	margin-bottom: var(--md-sys-spacing-4);
 }
 
 /* Pending-invite count badge on the Home nav item (rail + mobile bar). */
