@@ -230,6 +230,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         let opts = options.clone();
         let min = min_vote;
         let max = max_vote;
+        let uid = user_id.clone();
         move |_| {
             let cur = selected.read().clone();
             let chosen: Vec<usize> = cur
@@ -255,8 +256,14 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
             let token = token.clone();
             let poll = poll.clone();
             let ctx = ctx.clone();
+            let uid = uid.clone();
             spawn(async move {
-                let suffix = format!("{:.0}", now_ms());
+                // Key the vote by the voter, so a second cast collides on the nodes
+                // (parent_id, key) UNIQUE constraint — the DB enforces one vote per
+                // member, not just the client-side check. Falls back to a timestamp
+                // only if somehow unauthenticated (which the normal path rejects).
+                // Secret ballots use the backend's has-voted dedup instead.
+                let suffix = uid.clone().unwrap_or_else(|| format!("{:.0}", now_ms()));
                 // A secret ballot goes through the backend (anonymous insert +
                 // has-voted marker); a normal cast inserts under the user's token.
                 let result = if poll_secret {
@@ -276,7 +283,16 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                         show_snackbar(&t("vote.hasVoted"));
                         refresh += 1;
                     }
-                    Err(e) if e == "already voted" => error.set(t("vote.hasVoted")),
+                    // "already voted" is the backend's secret-ballot signal; a
+                    // uniqueness violation is the normal path's DB-enforced
+                    // one-vote-per-member. Both mean the same to the voter.
+                    Err(e)
+                        if e == "already voted"
+                            || e.contains("niqueness")
+                            || e.contains("nodes_parent_id_namespace_key") =>
+                    {
+                        error.set(t("vote.hasVoted"))
+                    }
                     _ => error.set(t("error.somethingWentWrong")),
                 }
             });
