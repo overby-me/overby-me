@@ -827,6 +827,14 @@ pub fn Cardioid() -> Element {
     let mut settings = use_signal(|| Settings::from_query(&captured_query()));
     let state: Signal<Option<Rc<RefCell<Sim>>>> = use_signal(|| None);
     let mut paused = use_signal(|| false);
+    // The options panel covers most of a phone screen, so it starts hidden on
+    // narrow viewports and can be toggled from a floating button.
+    let mut panel_open = use_signal(|| {
+        web_sys::window()
+            .and_then(|w| w.inner_width().ok())
+            .and_then(|v| v.as_f64())
+            .is_none_or(|w| w >= 640.0)
+    });
 
     // Push setting changes into the running sim, clearing the trace when the
     // drawn figure (not just a cosmetic property) changed.
@@ -943,6 +951,7 @@ pub fn Cardioid() -> Element {
         ("⏸ Pause", "background:#8a5a1a;border-color:#c98a2a")
     };
     let is_tt = matches!(s.mode, Mode::TimesTable);
+    let panel_display = if panel_open() { "block" } else { "none" };
 
     rsx! {
         div {
@@ -993,15 +1002,41 @@ pub fn Cardioid() -> Element {
                 },
             }
 
+            if !panel_open() {
+                button {
+                    id: "cardioid-panel-toggle",
+                    style: "position:absolute;top:16px;left:16px;padding:8px 14px;border:1px solid #555;\
+                            border-radius:10px;background:rgba(20,20,20,.85);backdrop-filter:blur(4px);\
+                            box-shadow:0 4px 24px rgba(0,0,0,.5);color:#eee;cursor:pointer;\
+                            font:inherit;font-size:14px;",
+                    onclick: move |_| panel_open.set(true),
+                    "⚙ Options"
+                }
+            }
+
             div {
+                id: "cardioid-panel",
+                // Hidden via display:none (not unmounted) so slider positions and
+                // open <details> sections survive a hide/show round-trip.
                 style: "position:absolute;top:16px;left:16px;max-height:calc(100vh - 32px);\
                         overflow:auto;padding:14px 16px;border-radius:10px;\
                         background:rgba(20,20,20,.85);backdrop-filter:blur(4px);\
-                        box-shadow:0 4px 24px rgba(0,0,0,.5);width:300px;user-select:none;",
+                        box-shadow:0 4px 24px rgba(0,0,0,.5);user-select:none;\
+                        width:min(300px,calc(100vw - 32px));\
+                        display:{panel_display};",
 
                 div {
-                    style: "font-weight:700;font-size:18px;margin-bottom:2px;color:#ff4d8d;",
-                    "Cardioid"
+                    style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;",
+                    div {
+                        style: "font-weight:700;font-size:18px;color:#ff4d8d;",
+                        "Cardioid"
+                    }
+                    button {
+                        style: "padding:2px 9px;border:1px solid #555;border-radius:6px;background:#333;\
+                                color:#bbb;cursor:pointer;font:inherit;font-size:13px;",
+                        onclick: move |_| panel_open.set(false),
+                        "✕ Hide"
+                    }
                 }
                 div {
                     style: "font-size:11px;color:#777;margin-bottom:10px;",
