@@ -3439,7 +3439,9 @@ h6,
 	bottom: 84px;
 }
 .toc-item {
-	display: block;
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-3);
 	width: 100%;
 	text-align: left;
 	background: none;
@@ -3449,12 +3451,37 @@ h6,
 	font: inherit;
 	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
 	border-radius: var(--md-sys-shape-corner-small);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 }
 .toc-item:hover {
 	background: var(--md-surface-container-highest);
+}
+/* The card/section glyph mirrored from the page header, so the TOC reads like the
+   content it links to rather than a flat list of text. */
+.toc-icon {
+	flex-shrink: 0;
+	font-size: 1.125rem;
+	color: var(--md-primary);
+}
+/* A lettered avatar (a policy's A/B, a folder's initial) rendered as a tonal chip. */
+.toc-letter {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.125rem;
+	height: 1.125rem;
+	border-radius: 50%;
+	background: var(--md-primary);
+	color: var(--md-on-primary);
+	font-size: 0.625rem;
+	font-weight: 700;
+}
+.toc-text {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 .toc-level-1 {
 	font-weight: 600;

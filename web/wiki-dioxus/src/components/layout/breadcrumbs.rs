@@ -6,13 +6,41 @@ use crate::i18n::t;
 use crate::route::Route;
 
 /// A heading found on the page for the table of contents: (element id, text,
-/// level 1–6).
-type Heading = (String, String, u8);
+/// level 1–6, icon). The icon is a `material-icons` ligature, or a single letter
+/// prefixed with `@` for a lettered avatar (a policy's A/B, a folder's initial).
+type Heading = (String, String, u8, String);
+
+/// The icon/avatar for a TOC entry, reusing the card header's own glyph so the
+/// list mirrors the page. A heading that titles a card/section takes that card's
+/// avatar icon (or its letter avatar); an in-body document heading falls back to a
+/// generic per-level glyph.
+fn heading_icon(el: &web_sys::Element, level: u8) -> String {
+    if let Ok(Some(hdr)) = el.closest(".card-header, .content-hero-veil") {
+        // Prefer the avatar's icon over any incidental icon in the header (e.g. the
+        // small "schedule" date icon that sits next to the title).
+        for sel in [".avatar .material-icons", ".material-icons"] {
+            if let Ok(Some(mi)) = hdr.query_selector(sel) {
+                let lig = mi.text_content().unwrap_or_default().trim().to_string();
+                if !lig.is_empty() {
+                    return lig;
+                }
+            }
+        }
+        if let Ok(Some(lbl)) = hdr.query_selector(".avatar-label, .folder-letter") {
+            if let Some(c) = lbl.text_content().unwrap_or_default().trim().chars().next() {
+                return format!("@{c}");
+            }
+        }
+    }
+    // In-body document heading: a plain section glyph, weightier for top levels.
+    if level <= 2 { "segment" } else { "subject" }.to_string()
+}
 
 /// Scan the content pane for every heading (h1–h6) — document headers AND the
 /// section/card headers rendered by components (amendments, polls, comments, …).
 /// Ensures each has an id (assigning one when missing) so the TOC can scroll to
-/// it, and returns them in document order.
+/// it, and returns them in document order. Decorative/divider headings (a row of
+/// dashes, a rule — no letters or digits) are skipped.
 fn collect_headings() -> Vec<Heading> {
     let mut out = Vec::new();
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -31,7 +59,8 @@ fn collect_headings() -> Vec<Heading> {
             continue;
         };
         let text = el.text_content().unwrap_or_default().trim().to_string();
-        if text.is_empty() {
+        // Skip empty headings and decorative dividers (dashes/rules with no label).
+        if text.is_empty() || !text.chars().any(char::is_alphanumeric) {
             continue;
         }
         let level = el
@@ -45,7 +74,8 @@ fn collect_headings() -> Vec<Heading> {
             id = format!("toc-h{i}");
             el.set_id(&id);
         }
-        out.push((id, text, level));
+        let icon = heading_icon(&el, level);
+        out.push((id, text, level, icon));
     }
     out
 }
@@ -133,7 +163,7 @@ pub(super) fn TocPopover() -> Element {
             if items.is_empty() {
                 div { class: "toc-empty body-medium text-muted", "{t(\"toc.empty\")}" }
             } else {
-                for (id , text , level) in items.iter() {
+                for (id , text , level , icon) in items.iter() {
                     button {
                         key: "{id}",
                         class: "toc-item toc-level-{level}",
@@ -144,7 +174,12 @@ pub(super) fn TocPopover() -> Element {
                                 *TOC_OPEN.write() = false;
                             }
                         },
-                        "{text}"
+                        if let Some(letter) = icon.strip_prefix('@') {
+                            span { class: "toc-letter", "{letter}" }
+                        } else {
+                            span { class: "material-icons toc-icon", "{icon}" }
+                        }
+                        span { class: "toc-text", "{text}" }
                     }
                 }
             }

@@ -958,6 +958,21 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
             }
         }
     }
+    # Each entry carries a header icon/letter (not a dull line of text), and pure
+    # divider headings (dashes) are filtered out.
+    if $toc_open == "y" {
+        let toc_rich = (wd-execute $session_id 'var items=[...document.querySelectorAll(".toc-popover .toc-item")];if(!items.length)return "empty";var withIcon=items.filter(function(it){return it.querySelector(".toc-icon,.toc-letter")}).length;var dashOnly=items.filter(function(it){var t=(it.querySelector(".toc-text")||{}).textContent||"";return t.trim()&&!/[a-z0-9æøå]/i.test(t)}).length;return JSON.stringify({items:items.length,withIcon:withIcon,dashOnly:dashOnly})')
+        if $toc_rich == "empty" {
+            log-warn "TOC popover has no entries here — skipping icon check"
+        } else {
+            let tr = ($toc_rich | from json)
+            if ($tr.withIcon == $tr.items) and ($tr.dashOnly == 0) {
+                log-ok $"TOC entries carry header icons \(($tr.withIcon)/($tr.items), no divider rows)"; $p = $p + 1
+            } else {
+                log-fail $"TOC entries missing icons or show dividers: ($toc_rich)"; $fl = $fl + 1
+            }
+        }
+    }
     wd-execute $session_id 'var s=document.querySelector(".toc-scrim"); if(s)s.click(); return 1' | ignore
 
     # ── App rail switches apps via the ?app= route query (client-side) ────
