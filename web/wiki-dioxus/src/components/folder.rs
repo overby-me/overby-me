@@ -9,6 +9,16 @@ use super::loader::{icon_el, visible_sorted};
 
 const FOLDER_VIEW_KEY: &str = "wiki_folder_grid";
 
+/// A child shown optimistically the instant it is added, before the insert is
+/// confirmed. Reconciled by `key` (the node's slug key) against the fetched
+/// children.
+#[derive(Clone, PartialEq)]
+struct PendingChild {
+    key: String,
+    name: String,
+    mime: String,
+}
+
 /// The copy/paste clipboard: node ids the owner has selected to deep-duplicate.
 /// A GlobalSignal so a selection survives navigating to the paste target (React
 /// keeps it on the session).
@@ -167,6 +177,16 @@ pub fn FolderApp(
         .filter(|c| c.mime_id.as_deref() != Some("wiki/event"))
         .cloned()
         .collect();
+    // Optimistic add-child (FolderAdd pushes here): muted tiles shown at once and
+    // reconciled by key against the fetched children.
+    let pending = use_signal(Vec::<PendingChild>::new);
+    let child_keys: std::collections::HashSet<String> =
+        children.iter().map(|c| c.key.clone()).collect();
+    let pending_shown = crate::components::optimistic::reconcile_by_key(
+        &pending.read(),
+        |p| p.key.as_str(),
+        &child_keys,
+    );
 
     rsx! {
         div { class: "card",
@@ -479,6 +499,7 @@ pub fn FolderApp(
                     FolderAdd {
                         parent_id: node.id.0.clone(),
                         context_id: node.context_id.clone().map(|c| c.0),
+                        pending,
                     }
                 }
             }
@@ -523,6 +544,20 @@ pub fn FolderApp(
                     }
                 }
             }
+            // Optimistic new children (muted "sending" rows), dropped once confirmed.
+            if !pending_shown.is_empty() {
+                div { class: "list",
+                    for p in pending_shown.iter() {
+                        div { key: "{p.key}", class: "list-item is-pending",
+                            div { class: "avatar small", {icon_el(&p.mime)} }
+                            div { class: "list-item-text",
+                                div { class: "list-item-primary", "{p.name}" }
+                                div { class: "list-item-secondary", "{t(\"vote.sending\")}" }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Containers (group/event/folder) do not carry comments: the permission
@@ -538,7 +573,13 @@ pub fn FolderApp(
 /// it, and insert it. (dioxus-primitives has no FAB — it's a Material pattern —
 /// so it is a styled fixed button.)
 #[component]
-fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
+fn FolderAdd(
+    parent_id: String,
+    context_id: Option<String>,
+    /// Optimistic children owned by FolderApp: this dialog pushes the new node here
+    /// (shown at once), reconciled/rolled back there and here.
+    mut pending: Signal<Vec<PendingChild>>,
+) -> Element {
     let session = use_session();
     let mut open = use_signal(|| false);
     let mut title = use_signal(String::new);
@@ -626,11 +667,22 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
             let token = session.read().access_token.clone();
             let parent_id = parent_id.clone();
             let context_id = context_id.clone();
+            let key = crate::components::loader::slugify(&name);
+            // Optimistic: show the child tile now and close the dialog; reconciled by
+            // key against the fetched children, removed on error.
+            pending.write().push(PendingChild {
+                key: key.clone(),
+                name: name.clone(),
+                mime: mime.clone(),
+            });
+            title.set(String::new());
+            file_id.set(None);
+            file_name.set(String::new());
+            open.set(false);
             spawn(async move {
-                let key = crate::components::loader::slugify(&name);
                 let input = crate::graphql::NodesInsertInput {
                     name: Some(name),
-                    key: Some(key),
+                    key: Some(key.clone()),
                     mime_id: Some(mime),
                     parent_id: Some(crate::graphql::Uuid(parent_id)),
                     context_id: context_id.map(crate::graphql::Uuid),
@@ -638,16 +690,13 @@ fn FolderAdd(parent_id: String, context_id: Option<String>) -> Element {
                     mutable: Some(true),
                     index: None,
                 };
-                if crate::graphql::insert_node(token.as_deref(), input)
-                    .await
-                    .is_ok()
-                {
-                    // Refetch the folder to show the new child (no full reload).
-                    crate::session::bump_data_version();
-                    title.set(String::new());
-                    file_id.set(None);
-                    file_name.set(String::new());
-                    open.set(false);
+                match crate::graphql::insert_node(token.as_deref(), input).await {
+                    Ok(_) => crate::session::bump_data_version(),
+                    Err(e) => {
+                        pending.write().retain(|p| p.key != key);
+                        log::error!("add child failed: {e}");
+                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                    }
                 }
             });
         }

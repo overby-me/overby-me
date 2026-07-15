@@ -10,6 +10,15 @@ use crate::components::loader::{icon_el, visible_sorted};
 
 use super::*;
 
+/// A candidate shown optimistically the instant it is added, before the insert is
+/// confirmed. Reconciled by `key` against the fetched candidates.
+#[derive(Clone, PartialEq)]
+struct PendingCandidate {
+    key: String,
+    name: String,
+    photo_id: Option<String>,
+}
+
 /// PositionApp — a `vote/position` (candidate election): the position text (with
 /// its edit/delete affordances), a candidate photo gallery, the numbered
 /// questions list (add + owner delete), and any polls. Mirrors React PositionApp
@@ -40,6 +49,16 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let mut q_text = use_signal(String::new);
     // Optimistic questions: (key, text) rows shown at once, reconciled by key.
     let mut pending_q = use_signal(Vec::<(String, String)>::new);
+    // Optimistic candidates (owned here; AddCandidateButton pushes into it), shown in
+    // the carousel at once and reconciled by key against the fetched candidates.
+    let pending_cand = use_signal(Vec::<PendingCandidate>::new);
+    let cand_keys: std::collections::HashSet<String> =
+        candidates.iter().map(|c| c.key.clone()).collect();
+    let pending_cand_shown = crate::components::optimistic::reconcile_by_key(
+        &pending_cand.read(),
+        |p| p.key.as_str(),
+        &cand_keys,
+    );
     // Drop optimistic questions once the real node (same key) has come back.
     let q_keys: std::collections::HashSet<String> =
         questions.iter().map(|q| q.key.clone()).collect();
@@ -119,7 +138,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 
         // Candidate gallery (photos from `data.image`). Shown, with an empty state,
         // to members who can add a candidature so they can add the first one.
-        if !candidates.is_empty() || can_add_candidate {
+        if !candidates.is_empty() || !pending_cand_shown.is_empty() || can_add_candidate {
             div { class: "card mt-1",
                 div { class: "card-header",
                     div { class: "avatar small", {icon_el("vote/candidate")} }
@@ -129,17 +148,18 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                         AddCandidateButton {
                             parent_id: node_id.clone(),
                             context_id: context_id.clone(),
+                            pending: pending_cand,
                         }
                     }
                 }
-                if candidates.is_empty() {
+                if candidates.is_empty() && pending_cand_shown.is_empty() {
                     p { class: "body-medium text-muted", style: "padding: 0 16px 12px;",
                         "{t(\"vote.noCandidates\")}"
                     }
                 }
                 // Candidates in an M3 carousel: a snapping, horizontally scrollable
                 // strip of rounded photo tiles with the name overlaid.
-                if !candidates.is_empty() {
+                if !candidates.is_empty() || !pending_cand_shown.is_empty() {
                     crate::components::widgets::Carousel { label: t("vote.candidates"),
                     for cand in candidates.iter() {
                         {
@@ -179,6 +199,35 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                         }
                                     }
                                     div { class: "m3-carousel-label", "{cand.name}" }
+                                }
+                            }
+                        }
+                    }
+                    // Optimistic candidate cards (muted), dropped once confirmed.
+                    for p in pending_cand_shown.iter() {
+                        {
+                            let photo = p.photo_id.as_ref().map(|fid| {
+                                format!(
+                                    "{}/files/{fid}?token={}",
+                                    crate::nhost::storage_url(),
+                                    token.clone().unwrap_or_default()
+                                )
+                            });
+                            rsx! {
+                                div { key: "{p.key}", class: "m3-carousel-item is-pending",
+                                    if let Some(src) = photo {
+                                        img {
+                                            class: "m3-carousel-img",
+                                            src: "{src}",
+                                            alt: "{p.name}",
+                                            referrerpolicy: "no-referrer",
+                                        }
+                                    } else {
+                                        div { class: "m3-carousel-placeholder",
+                                            {icon_el("vote/candidate")}
+                                        }
+                                    }
+                                    div { class: "m3-carousel-label", "{p.name}" }
                                 }
                             }
                         }
@@ -311,13 +360,18 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 /// the "inline add-candidate" the position view was missing (the photo upload it
 /// depended on already exists as `nhost::upload_file`).
 #[component]
-fn AddCandidateButton(parent_id: String, context_id: Option<String>) -> Element {
+fn AddCandidateButton(
+    parent_id: String,
+    context_id: Option<String>,
+    /// Optimistic candidates owned by PositionApp: this button pushes the new
+    /// candidate here (shown at once), reconciled/rolled back there and here.
+    mut pending: Signal<Vec<PendingCandidate>>,
+) -> Element {
     let session = use_session();
     let mut open = use_signal(|| false);
     let mut name = use_signal(String::new);
     let mut photo_id = use_signal(|| Option::<String>::None);
     let mut uploading = use_signal(|| false);
-    let mut busy = use_signal(|| false);
 
     // Upload the chosen photo immediately; the Add button attaches its id.
     let on_pick = move |evt: FormEvent| {
@@ -358,24 +412,33 @@ fn AddCandidateButton(parent_id: String, context_id: Option<String>) -> Element 
         let context_id = context_id.clone();
         move |_| {
             let cname = name.read().trim().to_string();
-            if cname.is_empty() || *busy.read() || *uploading.read() {
+            if cname.is_empty() || *uploading.read() {
                 return;
             }
             let token = session.read().access_token.clone();
             let parent_id = parent_id.clone();
             let context_id = context_id.clone();
             let img = photo_id.read().clone();
-            busy.set(true);
+            let key = format!(
+                "{}-{}",
+                crate::components::loader::slugify(&cname),
+                js_sys::Date::now() as u64
+            );
+            // Optimistic: show the candidate card now and close the dialog; reconciled
+            // by key against the fetched candidates, removed on error.
+            pending.write().push(PendingCandidate {
+                key: key.clone(),
+                name: cname.clone(),
+                photo_id: img.clone(),
+            });
+            open.set(false);
+            name.set(String::new());
+            photo_id.set(None);
             spawn(async move {
-                let key = format!(
-                    "{}-{}",
-                    crate::components::loader::slugify(&cname),
-                    js_sys::Date::now() as u64
-                );
                 let data = img.map(|fid| graphql::Jsonb(serde_json::json!({ "image": fid })));
                 let input = graphql::NodesInsertInput {
                     name: Some(cname),
-                    key: Some(key),
+                    key: Some(key.clone()),
                     mime_id: Some("vote/candidate".to_string()),
                     parent_id: Some(graphql::Uuid(parent_id)),
                     context_id: context_id.map(graphql::Uuid),
@@ -384,15 +447,9 @@ fn AddCandidateButton(parent_id: String, context_id: Option<String>) -> Element 
                     index: None,
                 };
                 match graphql::insert_node(token.as_deref(), input).await {
-                    Ok(_) => {
-                        crate::session::bump_data_version();
-                        busy.set(false);
-                        open.set(false);
-                        name.set(String::new());
-                        photo_id.set(None);
-                    }
+                    Ok(_) => crate::session::bump_data_version(),
                     Err(e) => {
-                        busy.set(false);
+                        pending.write().retain(|p| p.key != key);
                         log::error!("add candidate failed: {e}");
                         crate::snackbar::show_snackbar(&e);
                     }
@@ -422,7 +479,7 @@ fn AddCandidateButton(parent_id: String, context_id: Option<String>) -> Element 
                 }
                 button {
                     class: "btn btn-primary",
-                    disabled: name.read().trim().is_empty() || *busy.read() || *uploading.read(),
+                    disabled: name.read().trim().is_empty() || *uploading.read(),
                     onclick: submit,
                     "{t(\"common.add\")}"
                 }
