@@ -41,20 +41,36 @@ pub fn ProfileApp() -> Element {
         });
     });
 
-    // The user's groups + events (same query the home list uses). Returns a
-    // Result so a failed load shows an error state, not an empty membership list.
+    // The user's most recent authored contributions (resolutions, amendments,
+    // candidacies, comments, questions), each linking to the item.
+    let contrib_token = access_token.clone();
+    let contrib_uid = user_id.clone();
+    let contributions = crate::use_data_resource!(|(contrib_token, contrib_uid)| async move {
+        match contrib_uid {
+            Some(uid) => {
+                graphql::query_user_contributions(contrib_token.as_deref(), &uid, 12).await
+            }
+            None => Vec::new(),
+        }
+    });
+
+    // The user's groups + events (same query the home list uses), returned as two
+    // separate lists. A Result so a failed load shows an error state, not an empty
+    // membership list.
     let memberships = crate::use_data_resource!(move || {
         let token = access_token.clone();
         let uid = user_id.clone();
         async move {
+            type Lists = (
+                Vec<graphql::ContextNodeFields>,
+                Vec<graphql::ContextNodeFields>,
+            );
             let Some(uid) = uid else {
-                return Ok::<Vec<graphql::ContextNodeFields>, String>(Vec::new());
+                return Ok::<Lists, String>((Vec::new(), Vec::new()));
             };
-            let mut out = Vec::new();
-            for mime in ["wiki/group", "wiki/event"] {
-                out.extend(graphql::query_contexts(token.as_deref(), &uid, mime).await?);
-            }
-            Ok(out)
+            let groups = graphql::query_contexts(token.as_deref(), &uid, "wiki/group").await?;
+            let events = graphql::query_contexts(token.as_deref(), &uid, "wiki/event").await?;
+            Ok((groups, events))
         }
     });
 
@@ -70,6 +86,7 @@ pub fn ProfileApp() -> Element {
     };
 
     let mem_state = memberships.read().clone();
+    let contrib_state = contributions.read().clone();
     let link = bsky_status.read().clone().unwrap_or_default();
     let show_linked = link.linked && !*just_unlinked.read();
 
@@ -223,13 +240,13 @@ pub fn ProfileApp() -> Element {
             }
         }
 
-        div { class: "card",
-            div { class: "card-header",
-                h3 { class: "title-medium", "{t(\"profile.memberships\")}" }
-            }
+        // Groups and Events as separate lists (mirroring the home page).
+        {
             match &mem_state {
                 None => rsx! {
-                    div { class: "card-content", crate::components::widgets::Spinner {} }
+                    div { class: "card",
+                        div { class: "card-content", crate::components::widgets::Spinner {} }
+                    }
                 },
                 Some(Err(e)) => {
                     log::error!("Loading memberships failed: {e}");
@@ -240,32 +257,125 @@ pub fn ProfileApp() -> Element {
                         }
                     }
                 }
-                Some(Ok(contexts)) if contexts.is_empty() => rsx! {
+                Some(Ok((groups, events))) => rsx! {
+                    div { class: "card",
+                        div { class: "card-header",
+                            div { class: "avatar small", span { class: "material-icons", "groups" } }
+                            h3 { class: "title-medium", "{t(\"layout.groups\")}" }
+                        }
+                        ContextList { contexts: groups.clone() }
+                    }
+                    div { class: "card",
+                        div { class: "card-header",
+                            div { class: "avatar small", span { class: "material-icons", "event" } }
+                            h3 { class: "title-medium", "{t(\"layout.events\")}" }
+                        }
+                        ContextList { contexts: events.clone() }
+                    }
+                },
+            }
+        }
+
+        // Latest contributions the user authored, each linking to the item.
+        div { class: "card",
+            div { class: "card-header",
+                div { class: "avatar small", span { class: "material-icons", "history_edu" } }
+                h3 { class: "title-medium", "{t(\"profile.contributions\")}" }
+            }
+            {match &contrib_state {
+                None => rsx! {
+                    div { class: "card-content", crate::components::widgets::Spinner {} }
+                },
+                Some(items) if items.is_empty() => rsx! {
                     div { class: "card-content",
-                        p {
-                            class: "body-medium",
-                            class: "text-muted",
-                            "{t(\"common.noContent\")}"
-                        }
+                        p { class: "body-medium", class: "text-muted", "{t(\"common.noContent\")}" }
                     }
                 },
-                Some(Ok(contexts)) => rsx! {
+                Some(items) => rsx! {
                     div { class: "list",
-                        for ctx in contexts.iter() {
-                            Link {
-                                key: "{ctx.id.0}",
-                                to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
-                                class: "list-link",
-                                super::widgets::ListItem {
-                                    headline: ctx.name.clone(),
-                                    leading: rsx! {
-                                        div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
-                                    },
-                                }
-                            }
+                        for node in items.iter() {
+                            ContributionItem { key: "{node.id.0}", node: node.clone() }
                         }
                     }
                 },
+            }}
+        }
+    }
+}
+
+/// A group/event list body for the profile: links into each context, or an empty
+/// hint. Shared by the Groups and Events cards.
+#[component]
+fn ContextList(contexts: Vec<graphql::ContextNodeFields>) -> Element {
+    if contexts.is_empty() {
+        return rsx! {
+            div { class: "card-content",
+                p { class: "body-medium", class: "text-muted", "{t(\"common.noContent\")}" }
+            }
+        };
+    }
+    rsx! {
+        div { class: "list",
+            for ctx in contexts.iter() {
+                Link {
+                    key: "{ctx.id.0}",
+                    to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
+                    class: "list-link",
+                    super::widgets::ListItem {
+                        headline: ctx.name.clone(),
+                        leading: rsx! {
+                            div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One authored contribution row: its mime icon, a primary line (the comment text
+/// for a comment, else the node name) and its parent as context. Clicking resolves
+/// the node's full path (like the home "Newest" list) and navigates to it.
+#[component]
+fn ContributionItem(node: graphql::ChildNodeFields) -> Element {
+    let session = use_session();
+    let nav = use_navigator();
+    let node_id = node.id.0.clone();
+    let mime = node.mime_id.clone().unwrap_or_default();
+    let primary = if mime == "vote/comment" {
+        node.data
+            .as_ref()
+            .and_then(|d| d.0.get("text"))
+            .and_then(|t| t.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| t("vote.comments"))
+    } else {
+        node.name.clone()
+    };
+    let parent_name = node.parent.as_ref().map(|p| p.name.clone());
+
+    rsx! {
+        div {
+            class: "list-item",
+            style: "cursor: pointer;",
+            onclick: move |_| {
+                let node_id = node_id.clone();
+                let token = session.read().access_token.clone();
+                spawn(async move {
+                    if let Ok(segments) = graphql::path_from_id(token.as_deref(), &node_id).await {
+                        if !segments.is_empty() {
+                            nav.push(Route::PathPage { segments, app: None });
+                        }
+                    }
+                });
+            },
+            div { class: "avatar small", {icon_el(&mime)} }
+            div { class: "list-item-text",
+                div { class: "list-item-primary", "{primary}" }
+                if let Some(pn) = parent_name {
+                    div { class: "list-item-secondary", "{pn}" }
+                }
             }
         }
     }

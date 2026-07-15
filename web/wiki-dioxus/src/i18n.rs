@@ -379,6 +379,7 @@ const EN_JSON: &str = r#"{
     "profile": {
         "memberships": "Your groups and events",
         "sharedMemberships": "Groups and events you share",
+        "contributions": "Your contributions",
         "signedInAs": "Signed in as",
         "viewProfile": "View profile",
         "userId": "User ID",
@@ -776,6 +777,7 @@ const DA_JSON: &str = r#"{
     "profile": {
         "memberships": "Dine grupper og begivenheder",
         "sharedMemberships": "Grupper og begivenheder I deler",
+        "contributions": "Dine bidrag",
         "signedInAs": "Logget ind som",
         "viewProfile": "Vis profil",
         "userId": "Bruger-ID",

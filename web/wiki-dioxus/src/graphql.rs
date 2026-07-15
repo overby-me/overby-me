@@ -2424,6 +2424,56 @@ pub async fn search_nodes(
     Ok(nodes)
 }
 
+/// The signed-in user's most recent contributions for the profile: the
+/// meaningful content THEY authored (`owner_id`) — resolutions, amendments,
+/// candidacies, comments and questions — newest first. Unlike
+/// [`query_recent_nodes`] (membership-scoped "Newest"), this is
+/// authorship-scoped.
+pub async fn query_user_contributions(
+    access_token: Option<&str>,
+    user_id: &str,
+    limit: i32,
+) -> Vec<ChildNodeFields> {
+    let where_clause = NodesBoolExp {
+        and: Some(vec![
+            NodesBoolExp {
+                owner_id: Some(UuidComparisonExp {
+                    eq: Some(Uuid(user_id.to_string())),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                mime_id: Some(StringComparisonExp {
+                    in_: Some(vec![
+                        "vote/policy".to_string(),
+                        "vote/change".to_string(),
+                        "vote/candidate".to_string(),
+                        "vote/comment".to_string(),
+                        "vote/question".to_string(),
+                    ]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    };
+    let order_by = vec![NodesOrderBy {
+        created_at: Some(OrderBy::Desc),
+        index: None,
+    }];
+    let op = RecentNodesQuery::build(RecentNodesVariables {
+        where_clause,
+        order_by: Some(order_by),
+        limit: Some(limit),
+    });
+    match execute(access_token, op).await {
+        Ok(d) => d.nodes,
+        Err(_) => Vec::new(),
+    }
+}
+
 /// The most recently created content nodes for the home "Newest" list (#34):
 /// submitted (immutable) content whose context (group/event) the user belongs
 /// to. Drafts and content from contexts the user is not part of are excluded.

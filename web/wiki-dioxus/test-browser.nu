@@ -1104,6 +1104,12 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     } else {
         log-warn "no .text-muted on profile — skipping class-merge check"
     }
+    # The profile has distinct Groups, Events and Contributions sections.
+    sleep 500ms
+    let sections = (wd-execute $session_id 'var hs=[...document.querySelectorAll("#main .card-header h3")].map(function(h){return h.textContent.trim()}); return JSON.stringify({groups:hs.indexOf("Groups")>=0,events:hs.indexOf("Events")>=0,contrib:hs.indexOf("Your contributions")>=0})')
+    let sec = ($sections | from json)
+    if $sec.groups and $sec.events { log-ok "profile has separate Groups and Events lists"; $p = $p + 1 } else { log-fail $"profile missing group/event split: ($sections)"; $fl = $fl + 1 }
+    if $sec.contrib { log-ok "profile shows a contributions section"; $p = $p + 1 } else { log-fail "profile missing the contributions section"; $fl = $fl + 1 }
 
     # ── Search resolves a result to its full node path (not just the key) ────
     wd-navigate $session_id $"(base-url)($ctx_path)"
