@@ -210,6 +210,19 @@
 	--md-sys-spacing-8: 32px;
 	--md-sys-spacing-10: 40px;
 	--md-sys-spacing-12: 48px;
+	/* Half-steps (a 2dp sub-grid the dense Expressive UI uses) and extended stops,
+	   so every spacing literal in style.css can flow through a token. Naming stays
+	   consistent with the scale above: token-N == N * 4px. */
+	--md-sys-spacing-0-25: 1px;
+	--md-sys-spacing-0-5: 2px;
+	--md-sys-spacing-1-5: 6px;
+	--md-sys-spacing-2-5: 10px;
+	--md-sys-spacing-3-5: 14px;
+	--md-sys-spacing-4-5: 18px;
+	--md-sys-spacing-7: 28px;
+	--md-sys-spacing-9: 36px;
+	--md-sys-spacing-16: 64px;
+	--md-sys-spacing-30: 120px;
 
 	--md-sys-margin: 16px; /* body/side margin (compact) */
 	--md-sys-gutter: 16px; /* space between grid columns (compact) */

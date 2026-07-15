@@ -85,8 +85,8 @@
    desktop without any device sniffing (everything keys off window WIDTH). */
 @media (min-width: 600px) {
 	:root {
-		--md-sys-margin: 24px;
-		--md-sys-gutter: 24px;
+		--md-sys-margin: var(--md-sys-spacing-6);
+		--md-sys-gutter: var(--md-sys-spacing-6);
 	}
 }
 @media (min-width: 840px) {
@@ -139,7 +139,7 @@
 	box-sizing: border-box;
 	min-width: 16px;
 	height: 16px;
-	padding: 0 4px;
+	padding: 0 var(--md-sys-spacing-1);
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -265,7 +265,7 @@ a:hover {
 
 .content-pane {
 	padding: var(--md-sys-margin);
-	padding-top: calc(64px + var(--md-sys-spacing-2));
+	padding-top: calc(var(--md-sys-spacing-16) + var(--md-sys-spacing-2));
 	min-height: 100vh;
 }
 /* Cap the reading column at ~A4 and centre it inside the pane, so content stays
@@ -325,17 +325,17 @@ html {
 .shortcut-list {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: var(--md-sys-spacing-2-5);
 }
 .shortcut-row {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 16px;
+	gap: var(--md-sys-spacing-4);
 }
 .shortcut-keys {
 	display: inline-flex;
-	gap: 4px;
+	gap: var(--md-sys-spacing-1);
 	flex: 0 0 auto;
 }
 .kbd {
@@ -344,12 +344,12 @@ html {
 	justify-content: center;
 	min-width: 24px;
 	height: 24px;
-	padding: 0 6px;
+	padding: 0 var(--md-sys-spacing-1-5);
 	border-radius: 6px;
 	background: var(--md-surface-container-highest);
 	box-shadow: inset 0 -1px 0 var(--md-outline-variant);
 	font-family: monospace;
-	font-size: 12px;
+	font-size: var(--md-sys-typescale-body-small-size);
 	font-weight: 700;
 	color: var(--md-on-surface);
 }
@@ -361,7 +361,7 @@ html {
 	top: 8px;
 	left: -9999px;
 	z-index: 400;
-	padding: 10px 18px;
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-4-5);
 	border-radius: var(--md-sys-shape-corner-full);
 	background: var(--md-primary);
 	color: var(--md-on-primary);
@@ -410,13 +410,13 @@ html {
 	}
 }
 .skeleton-card {
-	padding: 20px;
+	padding: var(--md-sys-spacing-5);
 }
 .skeleton-row {
 	display: flex;
 	align-items: center;
-	gap: 14px;
-	margin-bottom: 20px;
+	gap: var(--md-sys-spacing-3-5);
+	margin-bottom: var(--md-sys-spacing-5);
 }
 .skeleton-avatar {
 	width: 40px;
@@ -426,7 +426,7 @@ html {
 }
 .skeleton-line {
 	height: 14px;
-	margin-bottom: 10px;
+	margin-bottom: var(--md-sys-spacing-2-5);
 }
 
 /* DESIGN (functional: reading progress): a thin gradient bar across the very
@@ -523,9 +523,9 @@ html {
 	min-width: 0;
 	display: flex;
 	align-items: center;
-	gap: 2px;
+	gap: var(--md-sys-spacing-0-5);
 	height: 48px;
-	padding: 0 4px;
+	padding: 0 var(--md-sys-spacing-1);
 	background: var(--md-surface-container-high);
 	border-radius: var(--md-sys-shape-corner-full);
 }
@@ -553,7 +553,7 @@ html {
 /* With no leading button before them (medium+), the crumbs sit flush against the
    rounded container edge, so give them some breathing room there. */
 .expressive-search-crumbs:first-child {
-	padding-left: 10px;
+	padding-left: var(--md-sys-spacing-2-5);
 }
 .expressive-search-crumbs::-webkit-scrollbar {
 	display: none;
@@ -610,7 +610,7 @@ html {
 	text-decoration: none;
 	color: var(--md-on-surface-variant);
 	border-radius: var(--md-sys-shape-corner-large);
-	padding: 2px 0;
+	padding: var(--md-sys-spacing-0-5) 0;
 	width: 100%;
 }
 .nav-rail-indicator {
@@ -814,7 +814,7 @@ html {
 	min-height: 0;
 	overflow-y: auto;
 	scrollbar-width: none;
-	padding: 0 16px 16px;
+	padding: 0 var(--md-sys-spacing-4) var(--md-sys-spacing-4);
 }
 .drawer-scroll::-webkit-scrollbar {
 	display: none;
@@ -852,7 +852,7 @@ html {
 }
 .app-shell:not([data-size-class="compact"]) .content-pane {
 	margin-left: var(--md-sys-rail-width);
-	margin-top: 64px;
+	margin-top: var(--md-sys-spacing-16);
 	margin-right: var(--md-sys-margin);
 	min-height: calc(100vh - 64px);
 	/* margin-top clears the bar now, so the pane's own top padding is normal. */
@@ -939,7 +939,7 @@ html {
 	bottom: auto;
 	height: 56px;
 	background: transparent;
-	padding: 0 8px;
+	padding: 0 var(--md-sys-spacing-2);
 }
 /* The search pill drops its own surface — the dock IS the surface now, so the
    search/breadcrumbs blend into the single rectangle instead of being a pill. */
@@ -956,13 +956,13 @@ html {
 	border-top: 1px solid color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
 }
 .app-shell[data-size-class="compact"] .compact-dock .nav-bar-item {
-	padding: 4px 0;
+	padding: var(--md-sys-spacing-1) 0;
 }
 .app-shell[data-size-class="compact"] .content-pane {
 	/* No top padding on compact (no top bar); clear the single bottom dock
 	   (its two 56px rows + its 8px offset + a margin). */
 	padding-top: 0;
-	padding-bottom: calc(120px + var(--md-sys-margin));
+	padding-bottom: calc(var(--md-sys-spacing-30) + var(--md-sys-margin));
 	/* Drop the page's side padding so cards can go edge to edge. */
 	padding-left: 0;
 	padding-right: 0;
@@ -992,7 +992,7 @@ html {
 	width: 100%;
 	display: flex;
 	align-items: center;
-	padding: 4px;
+	padding: var(--md-sys-spacing-1);
 }
 
 /* Drawer's Home / current-context entry, styled like the top panel: a green
@@ -1002,10 +1002,10 @@ html {
 	   16px padding, sat on the same horizontal line (badge top ≈ y16) and divided
 	   from the tree list by a separator, so both side-panel headers match. The
 	   avatar's left edge still lines up with the tree rows' avatars below. */
-	gap: 12px;
-	padding: 16px 12px 16px 20px;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-4) var(--md-sys-spacing-3) var(--md-sys-spacing-4) var(--md-sys-spacing-5);
 	text-decoration: none;
-	margin-bottom: 8px;
+	margin-bottom: var(--md-sys-spacing-2);
 	/* No tonal fill — a header on the same surface. Overrides the .bar class's
 	   primary fill, shadow and pill rounding it also carries. */
 	border-radius: 0;
@@ -1024,11 +1024,11 @@ html {
 .drawer-context-bar .avatar.small {
 	width: 36px;
 	height: 36px;
-	font-size: 15px;
+	font-size: 0.9375rem;
 	flex-shrink: 0;
 }
 .drawer-context-bar .avatar.small .material-icons {
-	font-size: 20px;
+	font-size: 1.25rem;
 }
 
 .drawer-context-name {
@@ -1043,7 +1043,7 @@ html {
 }
 
 .bar-spacer {
-	padding: 32px;
+	padding: var(--md-sys-spacing-8);
 }
 
 /* Cards — M3 elevated card: surface-container-low tone, corner-medium, a
@@ -1057,7 +1057,7 @@ html {
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-1);
 	overflow: hidden;
-	margin-bottom: 16px;
+	margin-bottom: var(--md-sys-spacing-4);
 	/* Only shadow transition — NEVER transform/opacity on the card (that would trap
 	   the fixed FAB, tool sheets, dialogs and their scrims). */
 	transition: box-shadow var(--md-sys-motion-duration-short4)
@@ -1091,8 +1091,8 @@ html {
 .card-header {
 	display: flex;
 	align-items: center;
-	padding: 18px 20px 14px;
-	gap: 14px;
+	padding: var(--md-sys-spacing-4-5) var(--md-sys-spacing-5) var(--md-sys-spacing-3-5);
+	gap: var(--md-sys-spacing-3-5);
 	/* Faint accent wash: tints the identity zone from the accent, fading into the
 	   body — a soft brow instead of a hard divider. */
 	background: linear-gradient(
@@ -1123,34 +1123,34 @@ html {
 /* DESIGN (functional: compact density): tighten card/list spacing so more
    fits on screen. Toggled from the account menu (data-density on the shell). */
 .app-shell[data-density="compact"] .card {
-	margin-bottom: 10px;
+	margin-bottom: var(--md-sys-spacing-2-5);
 }
 .app-shell[data-density="compact"] .card-header {
-	padding: 12px 16px 8px;
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4) var(--md-sys-spacing-2);
 }
 .app-shell[data-density="compact"] .card-content {
-	padding: 12px 16px;
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 }
 .app-shell[data-density="compact"] .folder-item {
-	padding: 8px 14px;
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3-5);
 }
 .app-shell[data-density="compact"] .list-item {
-	padding: 8px 12px;
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
 }
 
 /* DESIGN (format-aware file card): tonal metadata chips under the file title. */
 .file-meta-chips {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 6px;
-	margin-top: 5px;
+	gap: var(--md-sys-spacing-1-5);
+	margin-top: var(--md-sys-spacing-1);
 }
 .file-chip {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: var(--md-sys-spacing-1);
 	height: 26px;
-	padding: 0 10px;
+	padding: 0 var(--md-sys-spacing-2-5);
 	border-radius: var(--md-sys-shape-corner-full);
 	background: var(--md-secondary-container);
 	color: var(--md-on-secondary-container);
@@ -1158,15 +1158,15 @@ html {
 	font-weight: 600;
 }
 .file-chip .material-icons {
-	font-size: 15px;
+	font-size: 0.9375rem;
 }
 
 /* DESIGN (profile hero): a bold identity header with a large tonal avatar. */
 .profile-hero {
 	display: flex;
 	align-items: center;
-	gap: 18px;
-	padding: 28px 24px;
+	gap: var(--md-sys-spacing-4-5);
+	padding: var(--md-sys-spacing-7) var(--md-sys-spacing-6);
 	background: linear-gradient(
 		135deg,
 		color-mix(in srgb, var(--md-primary) 20%, transparent),
@@ -1185,10 +1185,10 @@ html {
 	box-shadow: var(--md-sys-elevation-2);
 }
 .profile-hero-avatar .material-icons {
-	font-size: 44px;
+	font-size: 2.75rem;
 }
 .profile-hero-name {
-	margin: 0 0 8px;
+	margin: 0 0 var(--md-sys-spacing-2);
 	font-size: var(--md-sys-typescale-headline-medium-size);
 	line-height: var(--md-sys-typescale-headline-medium-line);
 	font-weight: 700;
@@ -1198,8 +1198,8 @@ html {
    map/graph media, so the viewport reads as a deliberate stage. */
 .viewport-frame {
 	position: relative;
-	margin: 4px 16px 16px;
-	padding: 8px;
+	margin: var(--md-sys-spacing-1) var(--md-sys-spacing-4) var(--md-sys-spacing-4);
+	padding: var(--md-sys-spacing-2);
 	border-radius: var(--md-sys-shape-corner-large);
 	overflow: hidden;
 	background: linear-gradient(
@@ -1213,8 +1213,8 @@ html {
 .home-hero-head {
 	display: flex;
 	align-items: center;
-	gap: 16px;
-	padding: 28px 24px 20px;
+	gap: var(--md-sys-spacing-4);
+	padding: var(--md-sys-spacing-7) var(--md-sys-spacing-6) var(--md-sys-spacing-5);
 	background: linear-gradient(
 		135deg,
 		color-mix(in srgb, var(--md-primary) 22%, transparent),
@@ -1233,7 +1233,7 @@ html {
 	box-shadow: var(--md-sys-elevation-1);
 }
 .home-hero-icon .material-icons {
-	font-size: 34px;
+	font-size: 2.125rem;
 	transform-origin: 70% 70%;
 	animation: home-wave 2.6s ease-in-out infinite;
 }
@@ -1265,7 +1265,7 @@ html {
 	letter-spacing: 0.08em;
 }
 .home-hero-title {
-	margin: 2px 0 0;
+	margin: var(--md-sys-spacing-0-5) 0 0;
 	font-size: var(--md-sys-typescale-headline-medium-size);
 	line-height: var(--md-sys-typescale-headline-medium-line);
 	font-weight: 700;
@@ -1279,7 +1279,7 @@ html {
 }
 
 .card-content {
-	padding: 16px;
+	padding: var(--md-sys-spacing-4);
 }
 
 /* Content hero: a full-bleed cover image with the document identity overlaid on a
@@ -1313,8 +1313,8 @@ html {
 	inset: 0;
 	display: flex;
 	align-items: flex-end;
-	gap: 14px;
-	padding: 20px;
+	gap: var(--md-sys-spacing-3-5);
+	padding: var(--md-sys-spacing-5);
 	/* Click-through so the image underneath still opens the zoom lightbox. */
 	pointer-events: none;
 	/* Legibility scrim: deep at the base where the identity sits, clear up top. */
@@ -1344,8 +1344,8 @@ html {
 	text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
 }
 .content-hero-date {
-	margin: 4px 0 0;
-	font-size: 13px;
+	margin: var(--md-sys-spacing-1) 0 0;
+	font-size: 0.8125rem;
 	color: rgba(255, 255, 255, 0.88);
 }
 
@@ -1357,7 +1357,7 @@ html {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: 18px;
+	font-size: 1.125rem;
 	line-height: 1;
 	/* Labels/abbreviations must never wrap to a second line inside the circle. */
 	white-space: nowrap;
@@ -1379,7 +1379,7 @@ html {
 /* Context (group/event) name abbreviation: smaller so 2-3 letters fit the
  * circle on one line (e.g. "EU", "KM", "HB"). */
 .avatar-abbr {
-	font-size: 11px;
+	font-size: var(--md-sys-typescale-label-small-size);
 	font-weight: 600;
 	letter-spacing: 0;
 }
@@ -1392,7 +1392,7 @@ html {
 .avatar.small {
 	width: 24px;
 	height: 24px;
-	font-size: 12px;
+	font-size: var(--md-sys-typescale-body-small-size);
 }
 
 /* Material Icons ligature rendering (exact old-wiki icon set). */
@@ -1400,7 +1400,7 @@ html {
 	font-family: "Material Icons";
 	font-weight: normal;
 	font-style: normal;
-	font-size: 22px;
+	font-size: var(--md-sys-typescale-title-large-size);
 	line-height: 1;
 	letter-spacing: normal;
 	text-transform: none;
@@ -1416,7 +1416,7 @@ html {
 
 /* Icons scale to their container (small avatars, the app rail). */
 .avatar.small .material-icons {
-	font-size: 16px;
+	font-size: var(--md-sys-typescale-body-large-size);
 }
 
 /* "Not submitted" badge overlaid on a node avatar (mutable draft nodes). */
@@ -1454,19 +1454,19 @@ html {
 }
 
 .avatar-badge .material-icons {
-	font-size: 11px;
+	font-size: var(--md-sys-typescale-label-small-size);
 }
 
 /* Letter/number avatars for policy (A, B, C…) and change proposals (1, 2, 3…). */
 .avatar-label {
 	font-weight: 700;
-	font-size: 16px;
+	font-size: var(--md-sys-typescale-body-large-size);
 	line-height: 1;
 }
 
 .avatar.small .avatar-label,
 .node-icon .avatar-label {
-	font-size: 13px;
+	font-size: 0.8125rem;
 }
 
 /* Folder avatar: the folder icon with the name's first letter overlaid. */
@@ -1484,7 +1484,7 @@ html {
 	left: 50%;
 	transform: translate(-50%, -50%);
 	font-weight: 700;
-	font-size: 10px;
+	font-size: 0.625rem;
 	/* The folder glyph is drawn in the avatar's on-primary colour (white in
        light mode, dark in dark mode). The primary-container "on" colour is its
        natural counterpart, so the letter always contrasts with the glyph it sits
@@ -1495,7 +1495,7 @@ html {
 
 .avatar.small .folder-letter,
 .node-icon .folder-letter {
-	font-size: 8px;
+	font-size: 0.5rem;
 }
 
 /* Floating action button (Material pattern; dioxus-primitives has no FAB). */
@@ -1549,7 +1549,7 @@ html {
 }
 
 .fab .material-icons {
-	font-size: 26px;
+	font-size: 1.625rem;
 	/* DESIGN: the tools "tune" icon spins a quarter-turn on hover — a small
 	   playful cue that the FAB opens a settings/tools surface. */
 	transition: transform var(--md-sys-motion-duration-medium1)
@@ -1581,7 +1581,7 @@ html {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: 16px;
+	padding: var(--md-sys-spacing-4);
 	backdrop-filter: blur(2px);
 	animation: m3-dialog-fade var(--md-sys-motion-duration-medium2)
 		var(--md-sys-motion-easing-standard);
@@ -1590,7 +1590,7 @@ html {
 	background: var(--md-surface-container-high);
 	color: var(--md-on-surface);
 	border-radius: var(--md-sys-shape-corner-extra-large);
-	padding: 24px;
+	padding: var(--md-sys-spacing-6);
 	width: 100%;
 	max-width: 420px;
 	box-shadow: var(--md-sys-elevation-3);
@@ -1603,17 +1603,17 @@ html {
 	place-items: center;
 	width: 56px;
 	height: 56px;
-	margin: 0 auto 16px;
+	margin: 0 auto var(--md-sys-spacing-4);
 	border-radius: var(--md-sys-shape-corner-full);
 	background: var(--md-secondary-container);
 	color: var(--md-on-secondary-container);
-	font-size: 28px;
+	font-size: var(--md-sys-typescale-headline-medium-size);
 }
 .m3-dialog-headline {
 	font-size: var(--md-sys-typescale-headline-small-size);
 	line-height: var(--md-sys-typescale-headline-small-line);
 	font-weight: 400;
-	margin-bottom: 16px;
+	margin-bottom: var(--md-sys-spacing-4);
 }
 .m3-dialog-content {
 	font-size: var(--md-sys-typescale-body-medium-size);
@@ -1623,8 +1623,8 @@ html {
 .m3-dialog-actions {
 	display: flex;
 	justify-content: flex-end;
-	gap: 8px;
-	margin-top: 24px;
+	gap: var(--md-sys-spacing-2);
+	margin-top: var(--md-sys-spacing-6);
 }
 @keyframes m3-dialog-fade {
 	from {
@@ -1650,9 +1650,9 @@ html {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 	min-height: 40px;
-	padding: 10px 24px;
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-6);
 	border-radius: var(--md-sys-shape-corner-full);
 	border: none;
 	cursor: pointer;
@@ -1693,7 +1693,7 @@ html {
 	box-shadow: var(--md-sys-elevation-1);
 	font-weight: 700;
 	min-height: 48px;
-	padding: 12px 28px;
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-7);
 	border-radius: var(--md-sys-shape-corner-large);
 }
 .btn-cast:hover {
@@ -1802,7 +1802,7 @@ html {
 .btn-text {
 	background: transparent;
 	color: var(--md-primary);
-	padding: 10px 12px;
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-3);
 }
 
 .btn-text:hover {
@@ -1835,7 +1835,7 @@ html {
    the icon sits comfortably inside the 40px target. Co-located with .btn-icon (it
    used to live far away near the bottom of the file). */
 .btn-icon .material-icons {
-	font-size: 20px;
+	font-size: 1.25rem;
 }
 
 .btn-icon:hover {
@@ -1915,7 +1915,7 @@ a.folder-item:focus-visible {
 
 .text-field input {
 	width: 100%;
-	padding: 15px;
+	padding: var(--md-sys-spacing-4);
 	/* M3 Expressive outlined text field: strong outline, medium corner, body-large. */
 	border: 1px solid var(--md-outline-strong);
 	border-radius: var(--md-sys-shape-corner-medium);
@@ -1939,7 +1939,7 @@ a.folder-item:focus-visible {
 .text-field input:focus {
 	border-color: var(--md-primary);
 	border-width: 2px;
-	padding: 14px;
+	padding: var(--md-sys-spacing-3-5);
 	border-radius: var(--md-sys-shape-corner-large);
 	background: color-mix(in srgb, var(--md-primary) 5%, transparent);
 	box-shadow: none;
@@ -1952,8 +1952,8 @@ a.folder-item:focus-visible {
  * out of flow). */
 .file-upload-label {
 	display: block;
-	margin-bottom: 6px;
-	font-size: 12px;
+	margin-bottom: var(--md-sys-spacing-1-5);
+	font-size: var(--md-sys-typescale-body-small-size);
 	color: var(--md-on-surface-variant);
 }
 
@@ -1964,8 +1964,8 @@ a.folder-item:focus-visible {
 .file-upload {
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 14px 16px;
+	gap: var(--md-sys-spacing-2-5);
+	padding: var(--md-sys-spacing-3-5) var(--md-sys-spacing-4);
 	border: 1.5px dashed var(--md-outline-strong);
 	border-radius: var(--md-sys-shape-corner-medium);
 	background: var(--md-surface-container-highest);
@@ -1995,7 +1995,7 @@ a.folder-item:focus-visible {
 }
 
 .file-upload-text {
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -2004,21 +2004,21 @@ a.folder-item:focus-visible {
 .file-upload-done {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	margin-top: 8px;
+	gap: var(--md-sys-spacing-1-5);
+	margin-top: var(--md-sys-spacing-2);
 	color: var(--md-secondary);
-	font-size: 13px;
+	font-size: 0.8125rem;
 }
 
 .file-upload-done .material-icons {
-	font-size: 18px;
+	font-size: 1.125rem;
 	color: var(--md-secondary);
 }
 
 /* Native <select> styled to match the text inputs (shadcn-ish), with a custom
  * chevron so it doesn't fall back to the browser's default look. */
 select {
-	padding: 10px 36px 10px 12px;
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-9) var(--md-sys-spacing-2-5) var(--md-sys-spacing-3);
 	border: 1px solid var(--md-outline);
 	border-radius: var(--md-sys-shape-corner-small);
 	font-size: var(--md-sys-typescale-body-large-size);
@@ -2054,14 +2054,14 @@ select:focus {
 	left: 16px;
 	top: -8px;
 	background: var(--md-background);
-	padding: 0 4px;
-	font-size: 12px;
+	padding: 0 var(--md-sys-spacing-1);
+	font-size: var(--md-sys-typescale-body-small-size);
 	color: var(--md-on-surface-variant);
 }
 
 .text-field .helper-text {
-	font-size: 12px;
-	padding: 4px 16px 0;
+	font-size: var(--md-sys-typescale-body-small-size);
+	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-4) 0;
 	color: var(--md-on-surface-variant);
 }
 
@@ -2073,11 +2073,11 @@ select:focus {
  * line, the content title, and the context it lives in. */
 .recent-item {
 	display: flex;
-	gap: 12px;
-	padding: 12px 16px;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	cursor: pointer;
 	border-radius: 12px;
-	margin: 2px 8px;
+	margin: var(--md-sys-spacing-0-5) var(--md-sys-spacing-2);
 	transition: background-color 0.15s;
 }
 
@@ -2090,7 +2090,7 @@ select:focus {
 	flex-shrink: 0;
 	background-color: var(--md-primary-container);
 	color: var(--md-on-primary-container);
-	font-size: 11px;
+	font-size: var(--md-sys-typescale-label-small-size);
 	font-weight: 600;
 }
 
@@ -2099,15 +2099,15 @@ select:focus {
 	min-width: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	gap: var(--md-sys-spacing-0-5);
 }
 
 .recent-meta {
 	display: flex;
 	align-items: baseline;
-	gap: 6px;
+	gap: var(--md-sys-spacing-1-5);
 	flex-wrap: wrap;
-	font-size: 12px;
+	font-size: var(--md-sys-typescale-body-small-size);
 	color: var(--md-on-surface-variant);
 }
 
@@ -2117,7 +2117,7 @@ select:focus {
 }
 
 .recent-title {
-	font-size: 15px;
+	font-size: 0.9375rem;
 	font-weight: 500;
 	color: var(--md-on-surface);
 	overflow-wrap: anywhere;
@@ -2126,14 +2126,14 @@ select:focus {
 .recent-context {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
-	margin-top: 2px;
-	font-size: 12px;
+	gap: var(--md-sys-spacing-1);
+	margin-top: var(--md-sys-spacing-0-5);
+	font-size: var(--md-sys-typescale-body-small-size);
 	color: var(--md-on-surface-variant);
 }
 
 .recent-context .material-icons {
-	font-size: 15px;
+	font-size: 0.9375rem;
 }
 
 /* List */
@@ -2145,11 +2145,11 @@ select:focus {
 	position: relative;
 	display: flex;
 	align-items: center;
-	gap: 12px;
-	padding: 8px 16px;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4);
 	cursor: pointer;
 	border-radius: var(--md-sys-shape-corner-medium);
-	margin: 2px 8px;
+	margin: var(--md-sys-spacing-0-5) var(--md-sys-spacing-2);
 }
 
 /* M3 state layer (hover 8% / focus 10% / pressed 10% of the on-surface colour),
@@ -2200,8 +2200,8 @@ select:focus {
 .menu-color-section {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
-	padding: 10px 16px 6px;
+	gap: var(--md-sys-spacing-2-5);
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-4) var(--md-sys-spacing-1-5);
 }
 
 .menu-color-title {
@@ -2215,7 +2215,7 @@ select:focus {
 .color-picker {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: var(--md-sys-spacing-1-5);
 }
 
 .color-picker-label {
@@ -2226,7 +2226,7 @@ select:focus {
 .color-swatches {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 	align-items: center;
 }
 
@@ -2257,7 +2257,7 @@ select:focus {
 }
 
 .color-swatch .material-icons {
-	font-size: 15px;
+	font-size: 0.9375rem;
 	color: #fff;
 	/* A dark halo keeps the check visible on light swatches too. */
 	text-shadow: 0 0 2px rgb(0 0 0 / 55%);
@@ -2327,14 +2327,14 @@ select:focus {
 }
 
 .list-item-primary {
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 	color: var(--md-on-surface);
 	word-break: break-word;
 	hyphens: auto;
 }
 
 .list-item-secondary {
-	font-size: 12px;
+	font-size: var(--md-sys-typescale-body-small-size);
 	color: var(--md-on-surface-variant);
 }
 
@@ -2344,7 +2344,7 @@ select:focus {
 	flex-shrink: 0;
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: var(--md-sys-spacing-1);
 }
 
 /* M3 supporting-pane scaffold (widgets::SupportingPaneLayout): the primary pane
@@ -2384,7 +2384,7 @@ select:focus {
 }
 .m3-data-table thead th {
 	text-align: left;
-	padding: 12px 16px;
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	background: var(--md-surface-container-high);
 	color: var(--md-on-surface-variant);
 	/* DESIGN: a crisper small-caps-ish column label. */
@@ -2394,7 +2394,7 @@ select:focus {
 	white-space: nowrap;
 }
 .m3-data-table tbody td {
-	padding: 12px 16px;
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	border-top: 1px solid var(--md-outline-variant);
 	color: var(--md-on-surface);
 	vertical-align: middle;
@@ -2405,10 +2405,10 @@ select:focus {
 .m3-cell-icon {
 	display: inline-flex;
 	align-items: center;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 }
 .m3-cell-icon .material-icons {
-	font-size: 20px;
+	font-size: 1.25rem;
 }
 /* DESIGN (permissions): granted flags become a tonal primary-container badge
    so grants scan at a glance across the roles x operations grid. */
@@ -2421,7 +2421,7 @@ select:focus {
 	border-radius: 50%;
 	background: var(--md-primary-container);
 	color: var(--md-on-primary-container);
-	font-size: 18px;
+	font-size: 1.125rem;
 }
 .m3-flag-off {
 	color: var(--md-on-surface-variant);
@@ -2431,7 +2431,7 @@ select:focus {
 .admin-results {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 }
 .admin-total {
 	font-weight: 600;
@@ -2462,17 +2462,17 @@ select:focus {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 12px;
-	padding: 8px 16px 12px;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4) var(--md-sys-spacing-3);
 }
 /* Pill search field: surface-container-highest with a leading icon. */
 .search-field {
 	display: inline-flex;
 	align-items: center;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 	flex: 1 1 220px;
 	min-width: 200px;
-	padding: 0 16px;
+	padding: 0 var(--md-sys-spacing-4);
 	height: 48px;
 	background: var(--md-surface-container-highest);
 	border-radius: var(--md-sys-shape-corner-full);
@@ -2495,14 +2495,14 @@ select:focus {
 .filter-chips {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 }
 .m3-filter-chip {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: var(--md-sys-spacing-1-5);
 	height: 36px;
-	padding: 0 16px;
+	padding: 0 var(--md-sys-spacing-4);
 	border: 1px solid var(--md-outline-strong);
 	border-radius: var(--md-sys-shape-corner-full);
 	background: transparent;
@@ -2521,10 +2521,10 @@ select:focus {
 	background: var(--md-secondary-container);
 	color: var(--md-on-secondary-container);
 	border-color: transparent;
-	padding-left: 8px;
+	padding-left: var(--md-sys-spacing-2);
 }
 .m3-filter-chip .material-icons {
-	font-size: 18px;
+	font-size: 1.125rem;
 }
 .member-row-hidden {
 	opacity: 0.55;
@@ -2535,7 +2535,7 @@ select:focus {
 .member-row-actions {
 	display: flex;
 	align-items: center;
-	gap: 2px;
+	gap: var(--md-sys-spacing-0-5);
 	/* DESIGN (expressive roster): actions rest quiet and fade in on row hover. */
 	opacity: 0.4;
 	transition: opacity var(--md-sys-motion-duration-short3)
@@ -2586,8 +2586,8 @@ select:focus {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 12px;
-	padding: 12px 16px;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	border-top: 1px solid var(--md-outline-variant);
 }
 .paginated-count {
@@ -2597,7 +2597,7 @@ select:focus {
 .pagination-controls {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 }
 .page-indicator {
 	font-variant-numeric: tabular-nums;
@@ -2704,8 +2704,8 @@ select:focus {
 	position: relative;
 	display: flex;
 	align-items: center;
-	gap: 12px;
-	padding: 16px;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-4);
 	border-bottom: 1px solid var(--md-outline-variant);
 }
 /* DESIGN (M3 bottom-sheet handle): a drag-handle pill on the compact bottom
@@ -2724,7 +2724,7 @@ select:focus {
 		z-index: 2;
 	}
 	.tool-sheet:not(.docked) .tool-sheet-header {
-		padding-top: 24px;
+		padding-top: var(--md-sys-spacing-6);
 	}
 }
 .tool-sheet-header h3 {
@@ -2742,7 +2742,7 @@ select:focus {
 	border-radius: var(--md-sys-shape-corner-full);
 	background: var(--md-tertiary-container);
 	color: var(--md-on-tertiary-container);
-	font-size: 20px;
+	font-size: 1.25rem;
 	flex: 0 0 auto;
 }
 .sheet-handle {
@@ -2763,18 +2763,18 @@ select:focus {
 .tool-sheet-body {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	padding: 12px;
+	gap: var(--md-sys-spacing-1);
+	padding: var(--md-sys-spacing-3);
 	overflow-y: auto;
 }
 /* A single action row inside a sheet: full-width icon + label. */
 .sheet-action {
 	display: flex;
 	align-items: center;
-	gap: 16px;
+	gap: var(--md-sys-spacing-4);
 	width: 100%;
 	min-height: 48px;
-	padding: 8px 12px;
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
 	border: none;
 	background: none;
 	color: var(--md-on-surface);
@@ -2818,7 +2818,7 @@ select:focus {
    post text, tokenised off the M3 shape scale. */
 .post-header {
 	display: flex;
-	gap: 10px;
+	gap: var(--md-sys-spacing-2-5);
 	align-items: center;
 }
 
@@ -2869,9 +2869,9 @@ select:focus {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 6px;
+	gap: var(--md-sys-spacing-1-5);
 	min-height: 36px;
-	padding: 6px 16px;
+	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-4);
 	border: none;
 	border-radius: 0;
 	background: transparent;
@@ -2901,14 +2901,14 @@ select:focus {
 	font-weight: 700;
 }
 .m3-segment-check {
-	font-size: 18px;
+	font-size: 1.125rem;
 }
 
 /* Member / author chips */
 .chip-row {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 6px;
+	gap: var(--md-sys-spacing-1-5);
 	align-items: center;
 }
 /* Outlined "secondary" chip, matching the old wiki's MUI
@@ -2917,9 +2917,9 @@ select:focus {
 .chip {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: var(--md-sys-spacing-1-5);
 	height: 32px;
-	padding: 0 12px 0 8px;
+	padding: 0 var(--md-sys-spacing-3) 0 var(--md-sys-spacing-2);
 	border: 1px solid var(--md-outline-strong);
 	/* DESIGN (expressive chips): full pill + a springy hover lift. */
 	border-radius: var(--md-sys-shape-corner-full);
@@ -2942,7 +2942,7 @@ select:focus {
 }
 
 .chip .material-icons {
-	font-size: 18px;
+	font-size: 1.125rem;
 	color: var(--md-primary);
 }
 
@@ -2955,13 +2955,13 @@ select:focus {
 /* Author autocomplete field (editor) */
 .author-field > label {
 	display: block;
-	font-size: 12px;
+	font-size: var(--md-sys-typescale-body-small-size);
 	color: var(--md-on-surface-variant);
-	margin-bottom: 4px;
+	margin-bottom: var(--md-sys-spacing-1);
 }
 
 .author-field .chip-row {
-	margin-bottom: 6px;
+	margin-bottom: var(--md-sys-spacing-1-5);
 }
 
 .chip-remove {
@@ -2973,11 +2973,11 @@ select:focus {
 	color: var(--md-primary);
 	cursor: pointer;
 	padding: 0;
-	margin-left: 2px;
+	margin-left: var(--md-sys-spacing-0-5);
 }
 
 .chip-remove .material-icons {
-	font-size: 16px;
+	font-size: var(--md-sys-typescale-body-large-size);
 }
 
 .author-input-wrap {
@@ -2987,13 +2987,13 @@ select:focus {
 .author-input-wrap > input {
 	width: 100%;
 	height: 40px;
-	padding: 0 12px;
+	padding: 0 var(--md-sys-spacing-3);
 	border: 1px solid var(--md-outline);
 	border-radius: 8px;
 	background: var(--md-surface);
 	color: var(--md-on-surface);
 	outline: none;
-	font-size: 15px;
+	font-size: 0.9375rem;
 	box-sizing: border-box;
 }
 
@@ -3018,15 +3018,15 @@ select:focus {
 .author-suggestion {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 	width: 100%;
-	padding: 8px 12px;
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
 	border: none;
 	background: transparent;
 	color: var(--md-on-surface);
 	cursor: pointer;
 	text-align: left;
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 }
 
 .author-suggestion:hover {
@@ -3034,7 +3034,7 @@ select:focus {
 }
 
 .author-suggestion .material-icons {
-	font-size: 18px;
+	font-size: 1.125rem;
 	color: var(--md-on-surface-variant);
 }
 
@@ -3048,7 +3048,7 @@ select:focus {
 	border-radius: var(--md-sys-shape-corner-full);
 	background: var(--md-surface-container-highest);
 	overflow: hidden;
-	margin: 6px 0;
+	margin: var(--md-sys-spacing-1-5) 0;
 }
 .vote-bar-fill {
 	height: 100%;
@@ -3075,8 +3075,8 @@ select:focus {
 .ballot-option {
 	border: 2px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-large);
-	padding: 12px 14px;
-	margin-bottom: 8px;
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-3-5);
+	margin-bottom: var(--md-sys-spacing-2);
 	background: var(--md-surface-container-low);
 	transition:
 		border-color var(--md-sys-motion-duration-short4)
@@ -3114,9 +3114,9 @@ select:focus {
 .ballot-verdict {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	margin-bottom: 10px;
-	padding: 10px 14px;
+	gap: var(--md-sys-spacing-2);
+	margin-bottom: var(--md-sys-spacing-2-5);
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-3-5);
 	border-radius: 14px;
 	background: var(--md-primary-container);
 	color: var(--md-on-primary-container);
@@ -3124,8 +3124,8 @@ select:focus {
 }
 .winner-badge {
 	color: var(--md-tertiary);
-	font-size: 18px;
-	margin-left: 6px;
+	font-size: 1.125rem;
+	margin-left: var(--md-sys-spacing-1-5);
 	vertical-align: middle;
 }
 /* DESIGN (voting-rights banner): a tonal status banner coloured by whether you
@@ -3133,10 +3133,10 @@ select:focus {
 .vote-rights-banner {
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 12px 16px;
+	gap: var(--md-sys-spacing-2-5);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	border-radius: var(--md-sys-shape-corner-large);
-	margin-bottom: 12px;
+	margin-bottom: var(--md-sys-spacing-3);
 	font-weight: 500;
 }
 .vote-rights-banner.can-vote {
@@ -3152,47 +3152,47 @@ select:focus {
 .tonal-banner {
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 12px 16px;
+	gap: var(--md-sys-spacing-2-5);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	border-radius: var(--md-sys-shape-corner-large);
 	background: var(--md-primary-container);
 	color: var(--md-on-primary-container);
-	margin-bottom: 12px;
+	margin-bottom: var(--md-sys-spacing-3);
 	font-weight: 500;
 }
 
 /* Typography */
 h1,
 .headline-large {
-	font-size: 32px;
+	font-size: var(--md-sys-typescale-headline-large-size);
 	font-weight: 400;
 	line-height: 40px;
 }
 
 h2,
 .headline-medium {
-	font-size: 28px;
+	font-size: var(--md-sys-typescale-headline-medium-size);
 	font-weight: 400;
 	line-height: 36px;
 }
 
 h3,
 .headline-small {
-	font-size: 24px;
+	font-size: var(--md-sys-typescale-headline-small-size);
 	font-weight: 400;
 	line-height: 32px;
 }
 
 h4,
 .title-large {
-	font-size: 22px;
+	font-size: var(--md-sys-typescale-title-large-size);
 	font-weight: 400;
 	line-height: 28px;
 }
 
 h5,
 .title-medium {
-	font-size: 16px;
+	font-size: var(--md-sys-typescale-body-large-size);
 	font-weight: 500;
 	line-height: 24px;
 	letter-spacing: 0.15px;
@@ -3200,26 +3200,26 @@ h5,
 
 h6,
 .title-small {
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 	font-weight: 500;
 	line-height: 20px;
 	letter-spacing: 0.1px;
 }
 
 .body-large {
-	font-size: 16px;
+	font-size: var(--md-sys-typescale-body-large-size);
 	line-height: 24px;
 	letter-spacing: 0.5px;
 }
 
 .body-medium {
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 	line-height: 20px;
 	letter-spacing: 0.25px;
 }
 
 .label-large {
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 	font-weight: 500;
 	line-height: 20px;
 	letter-spacing: 0.1px;
@@ -3228,7 +3228,7 @@ h6,
 /* Grid */
 .grid {
 	display: grid;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 }
 
 @media (min-width: 900px) {
@@ -3271,7 +3271,7 @@ h6,
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 	max-width: min(90vw, 480px);
 }
 
@@ -3281,7 +3281,7 @@ h6,
 	position: relative;
 	background: var(--md-surface-container-high);
 	color: var(--md-on-surface);
-	padding: 14px 18px;
+	padding: var(--md-sys-spacing-3-5) var(--md-sys-spacing-4-5);
 	border-radius: var(--md-sys-shape-corner-large);
 	z-index: 300;
 	box-shadow: var(--md-sys-elevation-3);
@@ -3349,7 +3349,7 @@ h6,
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: 32px;
+	padding: var(--md-sys-spacing-8);
 }
 
 /* DESIGN (expressive empty state): a centred "void portal" for not-found /
@@ -3359,8 +3359,8 @@ h6,
 	flex-direction: column;
 	align-items: center;
 	text-align: center;
-	gap: 12px;
-	padding: 48px 24px;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-12) var(--md-sys-spacing-6);
 }
 .empty-state-orb {
 	width: 120px;
@@ -3375,13 +3375,13 @@ h6,
 	);
 	color: var(--md-on-primary-container);
 	box-shadow: var(--md-sys-elevation-2);
-	margin-bottom: 8px;
+	margin-bottom: var(--md-sys-spacing-2);
 	animation:
 		empty-orb-float 5s ease-in-out infinite,
 		empty-orb-morph 8s ease-in-out infinite;
 }
 .empty-state-orb .material-icons {
-	font-size: 52px;
+	font-size: 3.25rem;
 }
 @keyframes empty-orb-float {
 	0%,
@@ -3414,15 +3414,15 @@ h6,
 }
 /* Compact variant for empty sections inside a card (e.g. an empty folder). */
 .empty-state.empty-state-sm {
-	padding: 28px 20px;
-	gap: 10px;
+	padding: var(--md-sys-spacing-7) var(--md-sys-spacing-5);
+	gap: var(--md-sys-spacing-2-5);
 }
 .empty-state-orb.empty-state-orb-sm {
 	width: 72px;
 	height: 72px;
 }
 .empty-state-orb-sm .material-icons {
-	font-size: 32px;
+	font-size: var(--md-sys-typescale-headline-large-size);
 }
 /* Error-tinted orb + left-aligned detail dump for expressive error states. */
 .empty-state-orb.error-orb {
@@ -3556,12 +3556,12 @@ h6,
 .breadcrumbs {
 	display: flex;
 	align-items: center;
-	gap: 2px;
+	gap: var(--md-sys-spacing-0-5);
 	flex: 1;
 	min-width: 0;
-	padding: 6px 12px;
+	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-3);
 	color: #fff;
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 	overflow-x: auto;
 	overflow-y: hidden;
 	scrollbar-width: none;
@@ -3585,7 +3585,7 @@ h6,
 	flex: 0 0 auto;
 	display: inline-flex;
 	align-items: center;
-	padding: 2px 4px;
+	padding: var(--md-sys-spacing-0-5) var(--md-sys-spacing-1);
 	border-radius: var(--md-sys-shape-corner-full);
 	/* DESIGN (spatial crumb rail): each crumb is a quiet tonal pill that
 	   springs up on hover; the current location stays filled. Transform is safe
@@ -3663,7 +3663,7 @@ h6,
 .crumb:hover .crumb-name {
 	max-width: 260px;
 	opacity: 1;
-	margin: 0 8px 0 4px;
+	margin: 0 var(--md-sys-spacing-2) 0 var(--md-sys-spacing-1);
 	/* Expressive: the current location is the top app bar's focal title, so give
 	   it title-medium emphasis against the calmer parent crumbs. */
 	font-size: var(--md-sys-typescale-title-medium-size);
@@ -3678,7 +3678,7 @@ h6,
 	max-width: 0;
 	opacity: 0;
 	margin: 0;
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 	font-weight: normal;
 }
 
@@ -3686,7 +3686,7 @@ h6,
 /* DESIGN (expressive reading): long-form content gets a slightly larger,
    airier measure than UI chrome for comfortable reading. */
 .slate-content {
-	padding: 8px 20px 20px;
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-5) var(--md-sys-spacing-5);
 	font-size: 1.05rem;
 	line-height: 1.7;
 	color: var(--md-on-surface);
@@ -3769,7 +3769,7 @@ h6,
 	display: block;
 	width: 2.5rem;
 	height: 3px;
-	margin-top: 6px;
+	margin-top: var(--md-sys-spacing-1-5);
 	border-radius: var(--md-sys-shape-corner-full);
 	background: linear-gradient(90deg, var(--md-primary), var(--md-tertiary));
 }
@@ -3790,7 +3790,7 @@ h6,
 .slate-content a[target="_blank"]::after {
 	content: "↗";
 	display: inline-block;
-	margin-left: 2px;
+	margin-left: var(--md-sys-spacing-0-5);
 	font-size: 0.85em;
 	opacity: 0.7;
 }
@@ -3818,7 +3818,7 @@ h6,
 .slate-content h4[id],
 .slate-content h5[id],
 .slate-content h6[id] {
-	scroll-margin-top: 80px;
+	scroll-margin-top: 5rem;
 }
 
 /* DESIGN (functional: print). A clean printout of the current page: hide all
@@ -3848,7 +3848,7 @@ h6,
 		box-shadow: none !important;
 		border: 1px solid #ccc;
 		break-inside: avoid;
-		margin-bottom: 12px;
+		margin-bottom: var(--md-sys-spacing-3);
 	}
 	.card::before {
 		display: none !important;
@@ -3861,7 +3861,7 @@ h6,
 
 .slate-content blockquote {
 	border-left: 4px solid var(--md-tertiary);
-	padding: 10px 16px;
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-4);
 	margin: 1rem 0;
 	color: var(--md-on-surface-variant);
 	background: color-mix(in srgb, var(--md-tertiary) 7%, transparent);
@@ -3872,7 +3872,7 @@ h6,
 
 .slate-content pre {
 	background: var(--md-surface-variant);
-	padding: 16px;
+	padding: var(--md-sys-spacing-4);
 	border-radius: 8px;
 	overflow-x: auto;
 	font-family: monospace;
@@ -3880,8 +3880,8 @@ h6,
 
 .slate-content ul,
 .slate-content ol {
-	padding-left: 24px;
-	margin: 8px 0;
+	padding-left: var(--md-sys-spacing-6);
+	margin: var(--md-sys-spacing-2) 0;
 }
 /* DESIGN (reading): airier list items and magenta-tinted markers. */
 .slate-content li {
@@ -3935,12 +3935,12 @@ h6,
    (civic magenta, display-size name), the on-deck one is subordinate and asked
    to get ready. Reads from across the room; no full queue. */
 .speak-projector {
-	gap: 16px;
+	gap: var(--md-sys-spacing-4);
 }
 .speak-projector .list-item {
-	padding: 24px;
+	padding: var(--md-sys-spacing-6);
 	border-radius: var(--md-sys-shape-corner-extra-large);
-	gap: 20px;
+	gap: var(--md-sys-spacing-5);
 }
 /* Current speaker = the focal civic card. DESIGN: a bold gradient stage with
    a glowing avatar and a display-scale name, for room-distance presence. */
@@ -3993,7 +3993,7 @@ h6,
 .chip-timer {
 	background: var(--md-primary);
 	color: var(--md-on-primary);
-	padding: 4px 14px;
+	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-3-5);
 	border-radius: 20px;
 	font-weight: 700;
 	font-variant-numeric: tabular-nums;
@@ -4022,7 +4022,7 @@ h6,
 
 /* Programme / agenda timeline (#60). */
 .program-timeline {
-	padding: 8px 0;
+	padding: var(--md-sys-spacing-2) 0;
 }
 
 /* An agenda-style M3 timeline row: a leading time column, a rail marker (dot over
@@ -4031,8 +4031,8 @@ h6,
 	display: grid;
 	grid-template-columns: 56px 32px 1fr;
 	align-items: center;
-	gap: 8px;
-	padding: 8px;
+	gap: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-2);
 	cursor: pointer;
 	border-radius: var(--md-sys-shape-corner-large);
 	transition: background-color var(--md-sys-motion-duration-short3)
@@ -4088,13 +4088,13 @@ h6,
 	align-items: center;
 	justify-content: center;
 	font-weight: 700;
-	font-size: 13px;
+	font-size: 0.8125rem;
 }
 
 .program-item-icon {
 	vertical-align: middle;
-	font-size: 18px;
-	margin-right: 6px;
+	font-size: 1.125rem;
+	margin-right: var(--md-sys-spacing-1-5);
 }
 
 /* Click-to-zoom images (#114). */
@@ -4138,7 +4138,7 @@ h6,
 }
 
 .image-error .material-icons {
-	font-size: 48px;
+	font-size: 3rem;
 }
 
 .image-lightbox {
@@ -4150,7 +4150,7 @@ h6,
 	align-items: center;
 	justify-content: center;
 	cursor: zoom-out;
-	padding: 24px;
+	padding: var(--md-sys-spacing-6);
 	outline: none;
 	/* M3 scrim fades in. */
 	animation: lightbox-scrim-in var(--md-sys-motion-duration-short4, 200ms)
@@ -4210,7 +4210,7 @@ h6,
 	scroll-snap-type: x mandatory;
 	scroll-behavior: smooth;
 	overscroll-behavior-x: contain;
-	padding: 4px 16px 16px;
+	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-4) var(--md-sys-spacing-4);
 	scrollbar-width: none;
 }
 .m3-carousel::-webkit-scrollbar {
@@ -4278,7 +4278,7 @@ h6,
 	color: var(--md-on-secondary-container);
 }
 .m3-carousel-placeholder .material-icons {
-	font-size: 56px;
+	font-size: 3.5rem;
 }
 /* Item label overlaid on the image bottom, over a legibility gradient (M3). */
 .m3-carousel-label {
@@ -4286,7 +4286,7 @@ h6,
 	left: 0;
 	right: 0;
 	bottom: 0;
-	padding: 28px 14px 12px;
+	padding: var(--md-sys-spacing-7) var(--md-sys-spacing-3-5) var(--md-sys-spacing-3);
 	background: linear-gradient(
 		transparent,
 		color-mix(in srgb, var(--md-sys-color-scrim) 72%, transparent)
@@ -4310,8 +4310,8 @@ h6,
 .folder-item {
 	display: flex;
 	align-items: center;
-	gap: 12px;
-	padding: 12px 16px;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	cursor: pointer;
 	position: relative;
 	border-radius: var(--md-sys-shape-corner-large);
@@ -4345,12 +4345,12 @@ h6,
 
 /* Child count badge in a folder header (#143). */
 .count-badge {
-	margin-left: 8px;
-	padding: 1px 10px;
+	margin-left: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-0-25) var(--md-sys-spacing-2-5);
 	border-radius: var(--md-sys-shape-corner-full);
 	background: var(--md-primary-container);
 	color: var(--md-on-primary-container);
-	font-size: 13px;
+	font-size: 0.8125rem;
 	font-weight: 700;
 }
 
@@ -4358,8 +4358,8 @@ h6,
 .folder-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-	gap: 10px;
-	padding: 12px 16px;
+	gap: var(--md-sys-spacing-2-5);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 }
 
 .folder-tile {
@@ -4367,8 +4367,8 @@ h6,
 	flex-direction: column;
 	align-items: center;
 	text-align: center;
-	gap: 8px;
-	padding: 16px 10px;
+	gap: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-4) var(--md-sys-spacing-2-5);
 	border: 1px solid var(--md-outline-variant);
 	/* M3 Expressive: larger corners + a springy hover-lift. */
 	border-radius: var(--md-sys-shape-corner-large);
@@ -4403,22 +4403,22 @@ h6,
 
 /* Error boundary */
 .error-fallback {
-	padding: 24px;
+	padding: var(--md-sys-spacing-6);
 }
 
 .error-fallback pre {
 	background: #ededed;
-	padding: 20px;
+	padding: var(--md-sys-spacing-5);
 	overflow-x: auto;
 	border-radius: 8px;
-	margin-top: 12px;
+	margin-top: var(--md-sys-spacing-3);
 }
 
 /* Auth form */
 .auth-container {
 	max-width: 420px;
 	margin: 0 auto;
-	padding: 24px;
+	padding: var(--md-sys-spacing-6);
 	position: relative;
 }
 /* DESIGN (auth hero): a soft radial brand wash glowing behind the auth card. */
@@ -4441,7 +4441,7 @@ h6,
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	gap: 16px;
+	gap: var(--md-sys-spacing-4);
 }
 /* DESIGN: a hero icon badge for the auth forms (matching home/profile heroes). */
 .auth-hero-icon {
@@ -4455,7 +4455,7 @@ h6,
 	box-shadow: var(--md-sys-elevation-2);
 }
 .auth-hero-icon .material-icons {
-	font-size: 36px;
+	font-size: var(--md-sys-typescale-display-small-size);
 }
 .auth-title {
 	margin: 0;
@@ -4466,7 +4466,7 @@ h6,
 .file-viewer {
 	width: 100%;
 	text-align: center;
-	padding: 16px;
+	padding: var(--md-sys-spacing-4);
 }
 
 .file-viewer img {
@@ -4541,7 +4541,7 @@ h6,
 	gap: var(--md-sys-pane-spacer);
 	min-height: 100vh;
 	box-sizing: border-box;
-	padding: 32px 48px;
+	padding: var(--md-sys-spacing-8) var(--md-sys-spacing-12);
 	align-items: start;
 }
 @media (min-width: 1600px) {
@@ -4574,7 +4574,7 @@ h6,
 }
 .projector-hero .title-medium,
 .projector-hero .content-hero-title {
-	font-size: clamp(30px, 3.4vw, 60px);
+	font-size: clamp(1.875rem, 3.4vw, 3.75rem);
 	line-height: 1.12;
 }
 .projector-hero .body-large,
@@ -4583,17 +4583,17 @@ h6,
 .projector-hero .slate-content p,
 .projector-hero .slate-content li,
 .projector-hero .ballot-verdict {
-	font-size: clamp(20px, 2vw, 38px);
+	font-size: clamp(1.25rem, 2vw, 2.375rem);
 	line-height: 1.4;
 }
 .projector-hero .slate-content h1 {
-	font-size: clamp(32px, 3.6vw, 64px);
+	font-size: clamp(2rem, 3.6vw, 4rem);
 }
 .projector-hero .slate-content h2 {
-	font-size: clamp(28px, 3vw, 52px);
+	font-size: clamp(1.75rem, 3vw, 3.25rem);
 }
 .projector-hero .slate-content h3 {
-	font-size: clamp(24px, 2.4vw, 44px);
+	font-size: clamp(1.5rem, 2.4vw, 2.75rem);
 }
 /* Strip interactive chrome that means nothing on a passive room screen. */
 .projector-hero .tool-sheet,
@@ -4614,7 +4614,7 @@ h6,
 }
 /* Owner-opt-in comment feed in the rail: read-only (inputs/buttons hidden), scrolls. */
 .projector-comments {
-	margin-top: 16px;
+	margin-top: var(--md-sys-spacing-4);
 	max-height: 46vh;
 	overflow-y: auto;
 }
@@ -4633,10 +4633,10 @@ h6,
 .follow-banner {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: var(--md-sys-spacing-2);
 	width: fit-content;
-	margin-bottom: 12px;
-	padding: 6px 14px;
+	margin-bottom: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-3-5);
 	border-radius: 999px;
 	font-weight: 600;
 	background: var(--md-sys-color-secondary-container, #d7e3d8);
@@ -4659,17 +4659,17 @@ h6,
 .console-actions {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 8px;
-	margin-bottom: 12px;
+	gap: var(--md-sys-spacing-2);
+	margin-bottom: var(--md-sys-spacing-3);
 }
 .agenda-item {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: var(--md-sys-spacing-2-5);
 }
 .agenda-icon {
 	color: var(--md-on-surface-variant, #43483e);
-	font-size: 22px;
+	font-size: var(--md-sys-typescale-title-large-size);
 }
 .agenda-name {
 	flex: 1;
@@ -4693,10 +4693,10 @@ h6,
 	color: var(--md-on-primary, #fff);
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: var(--md-sys-spacing-1);
 }
 .agenda-live .material-icons {
-	font-size: 16px;
+	font-size: var(--md-sys-typescale-body-large-size);
 }
 
 /* The groups/events list rendered in the Home main pane — mobile only; on desktop
@@ -4707,7 +4707,7 @@ h6,
 }
 /* Trim the year sub-headers' top padding inside the home section cards. */
 .home-section-body > div:first-child .label-medium {
-	padding-top: 8px;
+	padding-top: var(--md-sys-spacing-2);
 }
 
 @media (min-width: 1200px) {
@@ -4755,7 +4755,7 @@ a.list-item:hover {
 	max-height: 300px;
 	overflow-y: auto;
 	z-index: 300;
-	margin-bottom: 8px;
+	margin-bottom: var(--md-sys-spacing-2);
 	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
 }
 /* DESIGN (functional): a clear no-results row in the search dropdown. */
@@ -4763,8 +4763,8 @@ a.list-item:hover {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	gap: 10px;
-	padding: 18px 16px;
+	gap: var(--md-sys-spacing-2-5);
+	padding: var(--md-sys-spacing-4-5) var(--md-sys-spacing-4);
 	color: var(--md-on-surface-variant);
 }
 
@@ -4773,7 +4773,7 @@ a.list-item:hover {
 		bottom: auto;
 		top: 100%;
 		margin-bottom: 0;
-		margin-top: 8px;
+		margin-top: var(--md-sys-spacing-2);
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 	}
 }
@@ -4854,10 +4854,10 @@ a.list-item:hover {
 	z-index: 300;
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+	gap: var(--md-sys-spacing-3);
 	min-width: 240px;
 	max-width: min(320px, 90vw);
-	padding: 16px;
+	padding: var(--md-sys-spacing-4);
 	background: var(--md-surface-container-high, var(--md-surface));
 	border: 1px solid var(--md-outline-variant, var(--md-outline));
 	border-radius: 16px;
@@ -4867,7 +4867,7 @@ a.list-item:hover {
 .user-pop-head {
 	display: flex;
 	align-items: center;
-	gap: 12px;
+	gap: var(--md-sys-spacing-3);
 }
 
 .user-pop-name {
@@ -4890,7 +4890,7 @@ a.list-item:hover {
 	min-width: 240px;
 	max-width: 300px;
 	z-index: 300;
-	margin-bottom: 8px;
+	margin-bottom: var(--md-sys-spacing-2);
 	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
 	overflow: hidden;
 }
@@ -4899,11 +4899,11 @@ a.list-item:hover {
 .user-menu-header {
 	display: flex;
 	align-items: center;
-	gap: 12px;
-	padding: 12px 16px;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	border: none;
 	border-bottom: 1px solid var(--md-outline-variant);
-	margin-bottom: 4px;
+	margin-bottom: var(--md-sys-spacing-1);
 	width: 100%;
 	background: none;
 	font: inherit;
@@ -4949,7 +4949,7 @@ a.list-item:hover {
 		bottom: auto;
 		top: 100%;
 		margin-bottom: 0;
-		margin-top: 8px;
+		margin-top: var(--md-sys-spacing-2);
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 	}
 }
@@ -4961,7 +4961,7 @@ a.list-item:hover {
 	flex: 0 0 auto;
 	width: 100%;
 	position: relative;
-	padding: 6px 8px;
+	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-2);
 	/* Inherit the side panel's surface (surface-container) rather than painting an
 	   opaque surface fill, so the account footer reads as part of the sidebar. */
 	background: transparent;
@@ -4976,17 +4976,17 @@ a.list-item:hover {
 	top: auto;
 	min-width: 0;
 	max-width: none;
-	margin: 0 0 8px;
+	margin: 0 0 var(--md-sys-spacing-2);
 	box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.18);
 }
 /* The account row: avatar + name, like a drawer list item. */
 .drawer-account-trigger {
 	display: flex;
 	align-items: center;
-	gap: 12px;
+	gap: var(--md-sys-spacing-3);
 	width: 100%;
 	min-height: 48px;
-	padding: 8px 12px;
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
 	border: none;
 	background: none;
 	cursor: pointer;
@@ -5007,7 +5007,7 @@ a.list-item:hover {
 .user-menu-dropdown .list-item {
 	margin: 0;
 	border-radius: 0;
-	padding: 12px 16px;
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	/* These rows are <button>s: strip the native chrome and fill the width. */
 	width: 100%;
 	border: none;
@@ -5035,10 +5035,10 @@ a.list-item:hover {
 .sort-list .sort-item::before {
 	content: "drag_indicator";
 	font-family: "Material Icons";
-	font-size: 20px;
+	font-size: 1.25rem;
 	color: var(--md-on-surface-variant);
 	opacity: 0.5;
-	margin-right: 2px;
+	margin-right: var(--md-sys-spacing-0-5);
 	flex: 0 0 auto;
 }
 
@@ -5065,8 +5065,8 @@ a.list-item:hover {
 	top: 0;
 	z-index: 3;
 	background: var(--md-surface-container);
-	padding: 8px;
-	margin-bottom: 12px;
+	padding: var(--md-sys-spacing-2);
+	margin-bottom: var(--md-sys-spacing-3);
 	border-radius: var(--md-sys-shape-corner-large);
 }
 
@@ -5075,9 +5075,9 @@ a.list-item:hover {
 	min-height: 200px;
 	border: 1px solid var(--md-outline);
 	border-radius: 8px;
-	padding: 16px;
+	padding: var(--md-sys-spacing-4);
 	outline: none;
-	font-size: 16px;
+	font-size: var(--md-sys-typescale-body-large-size);
 	line-height: 1.6;
 	color: var(--md-on-surface);
 }
@@ -5085,7 +5085,7 @@ a.list-item:hover {
 .editor-area:focus {
 	border-color: var(--md-primary);
 	border-width: 2px;
-	padding: 15px;
+	padding: var(--md-sys-spacing-4);
 }
 
 /* Rich-text toolbar */
@@ -5095,9 +5095,9 @@ a.list-item:hover {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 4px;
-	margin-bottom: 12px;
-	padding: 6px;
+	gap: var(--md-sys-spacing-1);
+	margin-bottom: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-1-5);
 	background: var(--md-surface-container);
 	border-radius: var(--md-sys-shape-corner-large);
 	box-shadow: var(--md-sys-elevation-1);
@@ -5106,14 +5106,14 @@ a.list-item:hover {
 .editor-select {
 	height: 36px;
 	min-width: 130px;
-	margin-right: 4px;
+	margin-right: var(--md-sys-spacing-1);
 }
 
 .editor-divider {
 	width: 1px;
 	align-self: stretch;
 	min-height: 20px;
-	margin: 0 6px;
+	margin: 0 var(--md-sys-spacing-1-5);
 	background: var(--md-outline-variant);
 }
 
@@ -5129,9 +5129,9 @@ a.list-item:hover {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 8px;
-	padding: 8px;
-	margin-bottom: 8px;
+	gap: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-2);
+	margin-bottom: var(--md-sys-spacing-2);
 	border: 1px solid var(--md-outline);
 	border-radius: 8px;
 	background: var(--md-surface);
@@ -5140,7 +5140,7 @@ a.list-item:hover {
 .link-input {
 	flex: 1 1 200px;
 	height: 36px;
-	padding: 0 12px;
+	padding: 0 var(--md-sys-spacing-3);
 	border: 1px solid var(--md-outline);
 	border-radius: 8px;
 	background: var(--md-surface);
@@ -5148,8 +5148,8 @@ a.list-item:hover {
 }
 
 .btn-sm {
-	padding: 6px 12px;
-	font-size: 13px;
+	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-3);
+	font-size: 0.8125rem;
 }
 
 /* Rendered rich content inside the editing surface */
@@ -5224,14 +5224,14 @@ a.list-item:hover {
 
 .rich-editor blockquote {
 	margin: 0 0 0.5em;
-	padding-left: 12px;
+	padding-left: var(--md-sys-spacing-3);
 	border-left: 3px solid var(--md-outline);
 	color: var(--md-on-surface-variant);
 }
 
 .rich-editor pre {
 	margin: 0 0 0.5em;
-	padding: 12px;
+	padding: var(--md-sys-spacing-3);
 	border-radius: 6px;
 	background: var(--md-surface-variant);
 	font-family: "Courier New", monospace;
@@ -5239,7 +5239,7 @@ a.list-item:hover {
 }
 
 .rich-editor code {
-	padding: 1px 4px;
+	padding: var(--md-sys-spacing-0-25) var(--md-sys-spacing-1);
 	border-radius: 4px;
 	background: var(--md-surface-variant);
 	font-family: "Courier New", monospace;
@@ -5257,31 +5257,31 @@ a.list-item:hover {
 
 /* Comment system (nested, Bluesky-style) */
 .comment-section {
-	margin-top: 8px;
+	margin-top: var(--md-sys-spacing-2);
 }
 
 /* DESIGN (conversational thread): an inviting tertiary-tinted composer well. */
 .comment-composer {
 	display: flex;
-	gap: 10px;
+	gap: var(--md-sys-spacing-2-5);
 	align-items: flex-end;
-	margin-bottom: 16px;
+	margin-bottom: var(--md-sys-spacing-4);
 	background: color-mix(in srgb, var(--md-tertiary) 7%, transparent);
-	padding: 12px;
+	padding: var(--md-sys-spacing-3);
 	border-radius: var(--md-sys-shape-corner-large);
 }
 
 .comment-input {
 	flex: 1;
 	min-height: 40px;
-	padding: 10px 12px;
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-3);
 	border: 1px solid var(--md-outline);
 	border-radius: 12px;
 	background: var(--md-surface);
 	color: var(--md-on-surface);
 	outline: none;
 	font: inherit;
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 	resize: vertical;
 	box-sizing: border-box;
 }
@@ -5294,12 +5294,12 @@ a.list-item:hover {
 .comment-thread-list {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: var(--md-sys-spacing-1);
 }
 
 .comment {
 	position: relative;
-	padding-top: 8px;
+	padding-top: var(--md-sys-spacing-2);
 }
 
 /* An optimistic comment/reply awaiting server confirmation: dimmed until the
@@ -5311,17 +5311,17 @@ a.list-item:hover {
 /* Magenta thread line for nested replies (the civic discussion accent). */
 .comment .comment {
 	border-left: 2px solid var(--md-tertiary);
-	padding-left: 12px;
+	padding-left: var(--md-sys-spacing-3);
 }
 
 /* Each comment reads as a tonal M3 card that lifts on hover. */
 .comment-main {
 	display: flex;
-	gap: 10px;
+	gap: var(--md-sys-spacing-2-5);
 	align-items: flex-start;
 	background: var(--md-surface-container-low);
 	border-radius: var(--md-sys-shape-corner-medium);
-	padding: 12px;
+	padding: var(--md-sys-spacing-3);
 	transition: background-color var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-easing-standard);
 }
@@ -5334,7 +5334,7 @@ a.list-item:hover {
 	width: 38px;
 	height: 38px;
 	border-radius: var(--md-sys-shape-corner-medium);
-	font-size: 15px;
+	font-size: 0.9375rem;
 	box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-tertiary) 22%, transparent);
 }
 
@@ -5345,7 +5345,7 @@ a.list-item:hover {
 	justify-content: center;
 	background: var(--md-tertiary-container);
 	color: var(--md-on-tertiary-container);
-	font-size: 13px;
+	font-size: 0.8125rem;
 	font-weight: 600;
 	text-transform: uppercase;
 }
@@ -5358,26 +5358,26 @@ a.list-item:hover {
 .comment-meta {
 	display: flex;
 	align-items: baseline;
-	gap: 6px;
+	gap: var(--md-sys-spacing-1-5);
 	flex-wrap: wrap;
 }
 
 .comment-author {
 	font-weight: 700;
-	font-size: 14px;
+	font-size: var(--md-sys-typescale-body-medium-size);
 	color: var(--md-on-surface);
 	letter-spacing: 0.05px;
 }
 
 .comment-dot,
 .comment-time {
-	font-size: 13px;
+	font-size: 0.8125rem;
 	color: var(--md-on-surface-variant);
 }
 
 .comment-text {
-	margin: 2px 0 4px;
-	font-size: 14px;
+	margin: var(--md-sys-spacing-0-5) 0 var(--md-sys-spacing-1);
+	font-size: var(--md-sys-typescale-body-medium-size);
 	line-height: 1.5;
 	white-space: pre-wrap;
 	word-break: break-word;
@@ -5386,19 +5386,19 @@ a.list-item:hover {
 .comment-actions {
 	display: flex;
 	align-items: center;
-	gap: 12px;
+	gap: var(--md-sys-spacing-3);
 }
 
 .comment-action {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: var(--md-sys-spacing-1);
 	border: none;
 	background: transparent;
 	color: var(--md-on-surface-variant);
 	cursor: pointer;
-	font-size: 13px;
-	padding: 2px 0;
+	font-size: 0.8125rem;
+	padding: var(--md-sys-spacing-0-5) 0;
 }
 
 .comment-action:hover {
@@ -5411,11 +5411,11 @@ a.list-item:hover {
 }
 
 .comment-action .material-icons {
-	font-size: 16px;
+	font-size: var(--md-sys-typescale-body-large-size);
 }
 
 .comment-reply-count {
-	font-size: 13px;
+	font-size: 0.8125rem;
 	color: var(--md-on-surface-variant);
 }
 
@@ -5429,7 +5429,7 @@ a.list-item:hover {
 	place-items: center;
 	width: 40px;
 	height: 40px;
-	margin-top: 6px;
+	margin-top: var(--md-sys-spacing-1-5);
 	border-radius: 50%;
 	background: var(--md-surface-container-high, var(--md-surface));
 	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
@@ -5452,7 +5452,7 @@ a.list-item:hover {
 }
 
 .ptr-indicator .material-icons {
-	font-size: 22px;
+	font-size: var(--md-sys-typescale-title-large-size);
 	transition: transform 0.15s ease;
 }
 

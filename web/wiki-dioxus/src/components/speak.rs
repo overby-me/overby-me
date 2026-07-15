@@ -10,7 +10,8 @@ use crate::session::use_session;
 /// re-reads the queue), on failure surface an error instead of faking success. The
 /// live subscription does not re-fire on a failed write, so without this the UI
 /// would otherwise sit as if the change had happened.
-fn applied<T>(result: Result<T, String>, mut refresh: Signal<u32>) {
+fn applied<T>(result: Result<T, String>, mut refresh: Signal<u32>, mut busy: Signal<bool>) {
+    busy.set(false);
     match result {
         Ok(_) => refresh += 1,
         Err(e) => {
@@ -192,6 +193,10 @@ fn SpeakList(
     let mut time_box = use_signal(|| 120i32);
     // Guards the destructive "clear the whole queue" action behind a confirm dialog.
     let mut clear_confirm = use_signal(|| false);
+    // Disables the queue-mutation buttons while a write is in flight, so a fast
+    // double-click cannot fire two mutations (a double-move, or a remove racing a
+    // move). Reset by `applied`/`move_timer` when the write completes.
+    let mut busy = use_signal(|| false);
 
     // Live updates: subscribe to this list's entries over the Hasura WebSocket
     // so entries added/removed by anyone appear at once.
@@ -381,19 +386,20 @@ fn SpeakList(
                                         button {
                                             class: "btn-icon",
                                             title: "{t(\"speak.moveUp\")}",
-                                            disabled: i == 0,
+                                            disabled: i == 0 || busy(),
                                             onclick: {
                                                 let token = session.read().access_token.clone();
                                                 let id = speaker_id.clone();
                                                 move |_| {
                                                     let token = token.clone();
                                                     let id = id.clone();
+                                                    busy.set(true);
                                                     spawn(async move {
                                                         let set = NodesSetInput {
                                                             index: Some(min_index - 1),
                                                             ..Default::default()
                                                         };
-                                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh);
+                                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh, busy);
                                                     });
                                                 }
                                             },
@@ -402,19 +408,20 @@ fn SpeakList(
                                         button {
                                             class: "btn-icon",
                                             title: "{t(\"speak.moveDown\")}",
-                                            disabled: i + 1 == count,
+                                            disabled: i + 1 == count || busy(),
                                             onclick: {
                                                 let token = session.read().access_token.clone();
                                                 let id = speaker_id.clone();
                                                 move |_| {
                                                     let token = token.clone();
                                                     let id = id.clone();
+                                                    busy.set(true);
                                                     spawn(async move {
                                                         let set = NodesSetInput {
                                                             index: Some(max_index + 1),
                                                             ..Default::default()
                                                         };
-                                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh);
+                                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh, busy);
                                                     });
                                                 }
                                             },
@@ -425,14 +432,16 @@ fn SpeakList(
                                         button {
                                             class: "btn-icon",
                                             title: "{t(\"speak.removeFromList\")}",
+                                            disabled: busy(),
                                             onclick: {
                                                 let token = session.read().access_token.clone();
                                                 let id = speaker_id.clone();
                                                 move |_| {
                                                     let token = token.clone();
                                                     let id = id.clone();
+                                                    busy.set(true);
                                                     spawn(async move {
-                                                        applied(graphql::delete_node(token.as_deref(), &id).await, refresh);
+                                                        applied(graphql::delete_node(token.as_deref(), &id).await, refresh, busy);
                                                     });
                                                 }
                                             },
@@ -471,14 +480,14 @@ fn SpeakList(
                                         let current = current.clone();
                                         spawn(async move {
                                             if let Some(cur) = current {
-                                                applied(graphql::delete_node(del_token.as_deref(), &cur).await, refresh);
+                                                applied(graphql::delete_node(del_token.as_deref(), &cur).await, refresh, busy);
                                             } else {
                                                 refresh += 1;
                                             }
                                         });
                                         // Re-anchor the per-turn timer for the next speaker.
                                         if limit > 0 {
-                                            move_timer(token.clone(), list_id.clone(), limit, refresh);
+                                            move_timer(token.clone(), list_id.clone(), limit, refresh, busy);
                                         }
                                     }
                                 },
@@ -499,7 +508,7 @@ fn SpeakList(
                                             mutable: Some(!mutable),
                                             ..Default::default()
                                         };
-                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh);
+                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh, busy);
                                     });
                                 }
                             },
@@ -570,7 +579,7 @@ fn SpeakList(
                                     let id = id.clone();
                                     // Start sets the limit + a fresh timestamp; stop zeroes it.
                                     let secs = if running { 0 } else { *time_box.read() };
-                                    move_timer(token, id, secs, refresh);
+                                    move_timer(token, id, secs, refresh, busy);
                                 }
                             },
                             if running {
@@ -667,6 +676,7 @@ fn SpeakList(
                                                             )
                                                             .await,
                                                             refresh,
+                                                            busy,
                                                         );
                                                     });
                                                 },
@@ -686,7 +696,13 @@ fn SpeakList(
 
 /// Start/stop the speaking timer by writing `{ time, updatedAt }` to the list's
 /// data (updatedAt is the moment the clock started, used by the countdown).
-fn move_timer(token: Option<String>, list_id: String, secs: i32, refresh: Signal<u32>) {
+fn move_timer(
+    token: Option<String>,
+    list_id: String,
+    secs: i32,
+    refresh: Signal<u32>,
+    busy: Signal<bool>,
+) {
     spawn(async move {
         let data = serde_json::json!({ "time": secs, "updatedAt": now_iso() });
         let set = NodesSetInput {
@@ -696,6 +712,7 @@ fn move_timer(token: Option<String>, list_id: String, secs: i32, refresh: Signal
         applied(
             graphql::update_node(token.as_deref(), &list_id, set).await,
             refresh,
+            busy,
         );
     });
 }
