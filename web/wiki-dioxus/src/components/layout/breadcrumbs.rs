@@ -68,6 +68,56 @@ fn scroll_to_id(id: &str) {
 /// which would clip/trap the popover. The current-crumb trigger just sets these.
 pub(super) static TOC_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 static TOC_ITEMS: GlobalSignal<Vec<Heading>> = Signal::global(Vec::new);
+/// Inline position for the popover, computed from the trigger crumb's on-screen
+/// box when it opens (see `toc_anchor_style`). Overrides the CSS fallback so the
+/// popover sits under the crumb wherever the breadcrumbs bar is — not pinned to
+/// the far left, which is wrong once the nav rail + tree pane push the bar right.
+static TOC_STYLE: GlobalSignal<String> = Signal::global(String::new);
+
+/// Anchor the popover to the current-crumb trigger: align its left edge to the
+/// crumb (clamped into the viewport), and open below the crumb when it sits in the
+/// top half of the screen, or above it when the bar is docked at the bottom
+/// (compact). Returns an inline `style` string, empty if the trigger isn't found.
+fn toc_anchor_style() -> String {
+    let Some(win) = web_sys::window() else {
+        return String::new();
+    };
+    let Some(el) = win
+        .document()
+        .and_then(|d| d.query_selector(".crumb-toc").ok().flatten())
+    else {
+        return String::new();
+    };
+    let rect = el.get_bounding_client_rect();
+    let vw = win
+        .inner_width()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let vh = win
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let gap = 8.0;
+    // Keep the popover (max-width 340) fully on-screen with a 12px margin.
+    let width = 340.0_f64;
+    let mut left = rect.left();
+    if left + width + 12.0 > vw {
+        left = (vw - width - 12.0).max(12.0);
+    }
+    if rect.top() < vh / 2.0 {
+        format!(
+            "left: {left:.0}px; top: {:.0}px; bottom: auto;",
+            rect.bottom() + gap
+        )
+    } else {
+        format!(
+            "left: {left:.0}px; bottom: {:.0}px; top: auto;",
+            vh - rect.top() + gap
+        )
+    }
+}
 
 /// The page table-of-contents popover, rendered outside the (clipped, transformed)
 /// breadcrumbs bar so it is actually visible. Opened by clicking the current crumb.
@@ -79,7 +129,7 @@ pub(super) fn TocPopover() -> Element {
     let items = TOC_ITEMS();
     rsx! {
         div { class: "toc-scrim", onclick: move |_| { *TOC_OPEN.write() = false; } }
-        nav { class: "toc-popover", "aria-label": t("toc.title"),
+        nav { class: "toc-popover", style: "{TOC_STYLE()}", "aria-label": t("toc.title"),
             if items.is_empty() {
                 div { class: "toc-empty body-medium text-muted", "{t(\"toc.empty\")}" }
             } else {
@@ -248,6 +298,7 @@ pub(super) fn BreadcrumbCrumb(
                         let now = !TOC_OPEN();
                         if now {
                             *TOC_ITEMS.write() = collect_headings();
+                            *TOC_STYLE.write() = toc_anchor_style();
                         }
                         *TOC_OPEN.write() = now;
                     },

@@ -933,13 +933,31 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     let r = (assert-count $session_id "breadcrumbs render avatars" ".breadcrumbs .crumb-avatar" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
 
     # The current breadcrumb doubles as a page table-of-contents trigger: clicking
-    # it opens a popover listing the page's headings.
+    # it opens a popover listing the page's headings. Force a desktop width so the
+    # bar sits at the top (the alignment check below expects the popover BELOW it).
+    wd-window-rect $session_id 1280 900
+    sleep 300ms
     wd-navigate $session_id $"(base-url)($sel_ctx)"
     sleep 800ms
     wd-execute $session_id 'var c=document.querySelector(".breadcrumbs .crumb-toc .crumb-link"); if(c)c.click(); return 1' | ignore
     sleep 400ms
     let toc_open = (wd-execute $session_id 'return document.querySelector(".toc-popover")?"y":"n"')
     if $toc_open == "y" { log-ok "page TOC opens from the current breadcrumb"; $p = $p + 1 } else { log-fail "page TOC did not open from the breadcrumb"; $fl = $fl + 1 }
+    # The popover must anchor UNDER the trigger crumb, not pin to the far left (a
+    # regression once the nav rail + tree pane push the breadcrumbs bar right).
+    if $toc_open == "y" {
+        let algn = (wd-execute $session_id 'var p=document.querySelector(".toc-popover"),c=document.querySelector(".breadcrumbs .crumb-toc");if(!p||!c)return "nomatch";var pr=p.getBoundingClientRect(),cr=c.getBoundingClientRect();return JSON.stringify({dx:Math.round(Math.abs(pr.left-cr.left)),below:pr.top>=cr.top?1:0})')
+        if $algn == "nomatch" {
+            log-warn "could not measure TOC popover alignment"
+        } else {
+            let aj = ($algn | from json)
+            if ($aj.dx <= 24) and ($aj.below == 1) {
+                log-ok $"TOC popover anchors under the crumb \(dx=($aj.dx)px)"; $p = $p + 1
+            } else {
+                log-fail $"TOC popover mispositioned \(dx=($aj.dx)px, below=($aj.below))"; $fl = $fl + 1
+            }
+        }
+    }
     wd-execute $session_id 'var s=document.querySelector(".toc-scrim"); if(s)s.click(); return 1' | ignore
 
     # ── App rail switches apps via the ?app= route query (client-side) ────
