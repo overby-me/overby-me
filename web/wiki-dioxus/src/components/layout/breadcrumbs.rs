@@ -111,16 +111,28 @@ fn collect_headings() -> Vec<Heading> {
     out
 }
 
-/// Smooth-scroll the element with `id` into view (for a TOC click).
+/// Smooth-scroll the element with `id` into view (for a TOC click). When the
+/// heading titles a card/section, scroll the whole card so its top (the avatar and
+/// header padding *above* the title) is what lands under the sticky bar — not the
+/// title text, which would leave the card's head cut off. `scroll-margin-top` on
+/// the target (set in CSS) clears the sticky top bar.
 fn scroll_to_id(id: &str) {
     if let Some(el) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.get_element_by_id(id))
     {
+        let target = if matches!(el.closest(".card-header, .content-hero-veil"), Ok(Some(_))) {
+            el.closest(".card, .content-hero")
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| el.clone())
+        } else {
+            el.clone()
+        };
         let opts = web_sys::ScrollIntoViewOptions::new();
         opts.set_behavior(web_sys::ScrollBehavior::Smooth);
         opts.set_block(web_sys::ScrollLogicalPosition::Start);
-        el.scroll_into_view_with_scroll_into_view_options(&opts);
+        target.scroll_into_view_with_scroll_into_view_options(&opts);
     }
 }
 

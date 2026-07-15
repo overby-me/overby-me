@@ -974,6 +974,16 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         }
     }
     wd-execute $session_id 'var s=document.querySelector(".toc-scrim"); if(s)s.click(); return 1' | ignore
+    # A TOC jump to a card title must land the card's TOP below the sticky bar, not
+    # tuck it underneath — enforced by scroll-margin-top on the scroll targets.
+    let sm = (wd-execute $session_id 'var c=document.querySelector("#main-content .card");if(!c)return "nocard";return String(Math.round(parseFloat(getComputedStyle(c).scrollMarginTop)||0))')
+    if $sm == "nocard" {
+        log-warn "no card to check TOC scroll-margin — skipping"
+    } else if (($sm | into int) >= 64) {
+        log-ok $"TOC scroll target clears the sticky bar \(scroll-margin-top ($sm)px)"; $p = $p + 1
+    } else {
+        log-fail $"TOC scroll target would tuck under the bar \(scroll-margin-top ($sm)px)"; $fl = $fl + 1
+    }
 
     # ── App rail switches apps via the ?app= route query (client-side) ────
     # Go back to the SELECTED context (breadcrumb navigation above may have left

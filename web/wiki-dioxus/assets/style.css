@@ -3502,6 +3502,20 @@ h6,
 .toc-empty {
 	padding: var(--md-sys-spacing-3);
 }
+/* A TOC (or deep-link) jump must clear the sticky top bar, so the target lands
+   below it rather than tucked underneath. The bar is 64px on medium+ and docked
+   at the bottom on compact, where only a small gap is wanted. */
+#main-content {
+	--toc-scroll-margin: 5rem;
+}
+.app-shell[data-size-class="compact"] #main-content {
+	--toc-scroll-margin: 1rem;
+}
+#main-content .card,
+#main-content .content-hero,
+#main-content :is(h1, h2, h3, h4, h5, h6) {
+	scroll-margin-top: var(--toc-scroll-margin);
+}
 
 .breadcrumbs {
 	display: flex;
