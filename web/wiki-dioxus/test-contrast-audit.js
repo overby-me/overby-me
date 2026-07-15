@@ -5,7 +5,10 @@
 // below AA (4.5:1 normal text, 3:1 large text / icons) so the harness can fail.
 //
 // Blind spots (skipped, not failed): text over a background-image / gradient
-// (no single colour to measure).
+// (no single colour to measure), and a glyph-overlay letter — text absolutely
+// positioned on top of a sibling icon glyph (e.g. a folder avatar's initial sits
+// on the white folder glyph, not the tinted circle behind it), which the flat
+// background walk likewise cannot measure.
 
 function parseColor(s) {
     var m = (s || '').match(/[0-9.]+/g) || [];
@@ -73,6 +76,12 @@ for (var i = 0; i < all.length; i++) {
     var el = all[i];
     if (!hasOwnText(el) || !visible(el)) continue;
     var cs = getComputedStyle(el);
+    // Blind spot: a letter layered on top of an icon glyph (absolutely positioned,
+    // parent also directly holds a .material-icons glyph). The letter's real
+    // backing is the glyph, not the tinted circle the flat-bg walk finds.
+    if (cs.position === 'absolute' && el.parentElement
+        && el.parentElement.querySelector(':scope > .material-icons')
+        && !el.classList.contains('material-icons')) continue;
     var fg = parseColor(cs.color);
     var bg = effectiveBg(el);
     if (!bg) continue;

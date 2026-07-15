@@ -600,57 +600,94 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     let r = (assert-count $session_id "drawer shows group/event items" ".nav-rail-tree .avatar.secondary" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
 
     # ── In-context navigation (drawer node tree + app rail) ──────────────
-    # Click the first context; the app should route into it, render a node
-    # view, switch the drawer from the home list to the MenuList tree, and
-    # reveal the app rail.
-    # Open the first context that actually has content, so the in-context checks
-    # (child tree, apps, breadcrumbs) run against a populated node. Many groups
-    # are empty; blindly clicking the first avatar can land on an empty one and
-    # make every downstream check fail spuriously. Click each context's list-item
-    # (the avatar is a child span) until the view shows folder children.
-    let n_ctx_str = (wd-execute $session_id 'return String(document.querySelectorAll(".nav-rail-tree .avatar.secondary").length)')
-    let n_ctx = (try { $n_ctx_str | into int } catch { 0 })
-    if $n_ctx == 0 {
-        log-warn "no context to open — skipping in-context checks"
-        return { passed: $p, failed: $fl }
-    }
-    mut navigated = false
-    mut ci = 0
-    let max_try = ([$n_ctx 8] | math min)
-    while (not $navigated) and ($ci < $max_try) {
-        # Build the click JS with plain-string concat: a $"..." interpolation
-        # would try to evaluate the literal JS parens.
-        let click_js = ("var xs=document.querySelectorAll('.nav-rail-tree .avatar.secondary'); var e=xs[" + ($ci | into string) + "]; if(e){e.closest('.list-item').click(); return 'clicked'} return 'none'")
-        wd-execute $session_id $click_js | ignore
-        mut moved = false
-        for _ in 1..12 {
-            let path = (wd-execute $session_id 'return location.pathname')
-            if ($path != null) and ($path != "/") { $moved = true; break }
-            sleep 300ms
+    # Stand up a hermetic fixture of our own — a fresh GROUP (its own context, with
+    # the permission template seeded) that CONTAINS a fresh EVENT plus a folder and
+    # a policy — and run all the in-context checks against it. This makes the suite
+    # self-contained: it no longer depends on whatever pre-existing group happens to
+    # be first in the account (e.g. `/test`), and it tears the fixture down at the
+    # end. If the setup fails (e.g. Servo XHR quirks), fall back to discovering an
+    # existing populated context so the run still exercises the in-context views.
+    let GQL = "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
+    # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
+    let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+    # Per-context permission template (mirrors graphql::context_permission_objects),
+    # plus a wiki/event row so an event can be nested inside the group.
+    let perm_fn = 'function permObjs(cid){var R=[["vote/vote","member",["vote/poll"]],["vote/policy","member",["wiki/folder"]],["vote/candidate","member",["vote/position"]],["wiki/document","owner",["wiki/event","wiki/folder","wiki/group"]],["vote/poll","owner",["vote/policy","vote/change","vote/position"]],["vote/question","member",["vote/position","wiki/file"]],["vote/comment","member",["vote/policy","vote/change"]],["speak/speak","member",["speak/list"]],["vote/change","member",["vote/policy","vote/change","wiki/file"]],["wiki/folder","owner",["wiki/folder","wiki/group","wiki/event"]],["vote/position","owner",["wiki/folder"]],["wiki/file","owner",["wiki/event","wiki/folder","wiki/group"]],["wiki/event","owner",["wiki/group","wiki/folder"]]];return R.map(function(r){var m=r[0]!="vote/vote";return {contextId:cid,nodeId:cid,mimeId:r[0],role:r[1],parents:r[2],active:true,insert:true,select:true,update:m,delete:m};});}'
+    # Group (own context + perms) -> event (own context + perms) + folder -> policy.
+    let setup_js = ($gql + $perm_fn + 'var INS="mutation($o:nodes_insert_input!){insertNode(object:$o){id key}}";var UPD="mutation($id:uuid!,$s:nodes_set_input!){updateNode(pk_columns:{id:$id},_set:$s){id}}";var PERM="mutation($o:[permissions_insert_input!]!){insertPermissions(objects:$o){affected_rows}}";var rt=gql("query{nodes(where:{mimeId:{_eq:\"wiki/home\"}}){id contextId}}",{});var ROOT=null,RC=null;try{ROOT=rt.data.nodes[0].id;RC=rt.data.nodes[0].contextId}catch(e){}var out={group:null,groupKey:null,event:null,eventKey:null,folder:null,folderKey:null,policy:null,policyKey:null,member:0,err:null};if(!ROOT){out.err="root not found";return JSON.stringify(out);}var t=Date.now();var g=gql(INS,{o:{name:"E2E Suite "+t,key:"e2e-suite-"+t,mimeId:"wiki/group",parentId:ROOT,contextId:RC,mutable:true}});try{out.group=g.data.insertNode.id;out.groupKey=g.data.insertNode.key}catch(e){}if(!out.group){out.err=g.errors?JSON.stringify(g.errors):"group insert failed";return JSON.stringify(out);}gql(UPD,{id:out.group,s:{contextId:out.group,mutable:false}});var ps=gql(PERM,{o:permObjs(out.group)});if(ps.errors){out.err="perm seed: "+JSON.stringify(ps.errors);return JSON.stringify(out);}var ev=gql(INS,{o:{name:"E2E Event "+t,key:"e2e-evt-"+t,mimeId:"wiki/event",parentId:out.group,contextId:out.group,mutable:true}});try{out.event=ev.data.insertNode.id;out.eventKey=ev.data.insertNode.key}catch(e){}if(out.event){gql(UPD,{id:out.event,s:{contextId:out.event,mutable:false}});gql(PERM,{o:permObjs(out.event)});}else{out.err=ev.errors?("event: "+JSON.stringify(ev.errors)):"event insert failed";}var f=gql(INS,{o:{name:"E2E Docs",key:"e2e-fld-"+t,mimeId:"wiki/folder",parentId:out.group,contextId:out.group,mutable:true}});try{out.folder=f.data.insertNode.id;out.folderKey=f.data.insertNode.key}catch(e){}if(!out.folder){out.err=(out.err?out.err+"; ":"")+(f.errors?JSON.stringify(f.errors):"folder insert failed");return JSON.stringify(out);}var pl=gql(INS,{o:{name:"E2E policy",key:"e2e-pol-"+t,mimeId:"vote/policy",parentId:out.folder,contextId:out.group,mutable:true}});try{out.policy=pl.data.insertNode.id;out.policyKey=pl.data.insertNode.key}catch(e){}if(!out.policy){out.err=(out.err?out.err+"; ":"")+(pl.errors?JSON.stringify(pl.errors):"policy insert failed");}var mem=gql("mutation($o:[members_insert_input!]!){insertMembers(objects:$o){affected_rows}}",{o:[{parentId:out.group,name:"E2E Member",email:"e2e-member-"+t+"@example.com"}]});try{out.member=mem.data.insertMembers.affected_rows}catch(e){}return JSON.stringify(out);')
+    let setup = (try { wd-execute $session_id $setup_js | from json } catch { {group: null, groupKey: null, event: null, eventKey: null, folder: null, folderKey: null, policy: null, policyKey: null, err: "setup exec failed"} })
+
+    mut hermetic_gid = ""
+    mut sel_ctx = ""
+    if ($setup.group | is-not-empty) and ($setup.folder | is-not-empty) {
+        $hermetic_gid = $setup.group
+        $sel_ctx = $"/($setup.groupKey)"
+        log-ok "hermetic group + folder + policy created"; $p = $p + 1
+        if ($setup.event | is-not-empty) {
+            log-ok "event nested inside the hermetic group"; $p = $p + 1
+        } else {
+            log-fail $"could not nest an event in the hermetic group: ($setup.err)"; $fl = $fl + 1
         }
-        if $moved {
-            sleep 1500ms
-            let populated = (wd-execute $session_id 'return document.querySelector("#main .folder-tile, #main .list-link")?"y":"n"')
-            if $populated == "y" {
-                $navigated = true
-            } else {
-                # Empty context: back to the home list and try the next one.
-                wd-navigate $session_id $"(base-url)/"
-                sleep 900ms
+        if (($setup.member | default 0) >= 1) {
+            log-ok "member roster seeded in the hermetic group"; $p = $p + 1
+        } else {
+            log-fail $"could not seed a member in the hermetic group: ($setup.err)"; $fl = $fl + 1
+        }
+        wd-navigate $session_id $"(base-url)($sel_ctx)"
+        sleep 1500ms
+    } else {
+        # Fallback: open the first pre-existing context that actually has content, so
+        # the in-context checks run against a populated node. Many groups are empty;
+        # blindly clicking the first avatar can land on an empty one. Click each
+        # context's list-item until the view shows folder children.
+        log-warn $"hermetic setup failed \(($setup.err)) — falling back to an existing context"
+        let n_ctx_str = (wd-execute $session_id 'return String(document.querySelectorAll(".nav-rail-tree .avatar.secondary").length)')
+        let n_ctx = (try { $n_ctx_str | into int } catch { 0 })
+        if $n_ctx == 0 {
+            log-warn "no context to open — skipping in-context checks"
+            return { passed: $p, failed: $fl }
+        }
+        mut navigated = false
+        mut ci = 0
+        let max_try = ([$n_ctx 8] | math min)
+        while (not $navigated) and ($ci < $max_try) {
+            # Build the click JS with plain-string concat: a $"..." interpolation
+            # would try to evaluate the literal JS parens.
+            let click_js = ("var xs=document.querySelectorAll('.nav-rail-tree .avatar.secondary'); var e=xs[" + ($ci | into string) + "]; if(e){e.closest('.list-item').click(); return 'clicked'} return 'none'")
+            wd-execute $session_id $click_js | ignore
+            mut moved = false
+            for _ in 1..12 {
+                let path = (wd-execute $session_id 'return location.pathname')
+                if ($path != null) and ($path != "/") { $moved = true; break }
+                sleep 300ms
             }
+            if $moved {
+                sleep 1500ms
+                let populated = (wd-execute $session_id 'return document.querySelector("#main .folder-tile, #main .list-link")?"y":"n"')
+                if $populated == "y" {
+                    $navigated = true
+                } else {
+                    # Empty context: back to the home list and try the next one.
+                    wd-navigate $session_id $"(base-url)/"
+                    sleep 900ms
+                }
+            }
+            $ci = $ci + 1
         }
-        $ci = $ci + 1
+        if not $navigated {
+            log-warn "no populated context found — skipping in-context checks"
+            return { passed: $p, failed: $fl }
+        }
+        log-ok "navigated into a populated context"; $p = $p + 1
+        # Remember this context's top-level path; later sections re-enter it rather
+        # than trust wherever earlier breadcrumb navigation left the location.
+        $sel_ctx = (wd-execute $session_id 'return "/"+location.pathname.split("/")[1]')
     }
-    if not $navigated {
-        log-warn "no populated context found — skipping in-context checks"
+    if ($sel_ctx | is-empty) {
+        log-warn "no context available — skipping in-context checks"
         return { passed: $p, failed: $fl }
     }
-    log-ok "navigated into a populated context"; $p = $p + 1
     sleep 1sec
-    # Remember this context's top-level path; later sections (app rail, app
-    # switching) must re-enter it rather than trust wherever earlier breadcrumb
-    # navigation left the location.
-    let sel_ctx = (wd-execute $session_id 'return "/"+location.pathname.split("/")[1]')
 
     let r = (assert-exists $session_id "context view renders a card" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (check-contrast $session_id "context view (drawer + app rail + bar)" $p $fl); $p = $r.passed; $fl = $r.failed
@@ -1401,6 +1438,21 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         }
     } else {
         log-warn "no child node to open, skipping author-field presence check"
+    }
+
+    # ── Teardown: delete the hermetic group subtree + its permissions (only when
+    #    we created one; the discovery fallback touches nothing to clean up). The
+    #    group and its nested event are each their own context, so delete perms for
+    #    both. Leaves the live backend exactly as it was found. ──
+    if ($hermetic_gid | is-not-empty) {
+        let eid = ($setup.event | default "")
+        let teardown_js = ($gql + 'var GID="' + $hermetic_gid + '";var EID="' + $eid + '";function ch(pid){var r=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p}}){id}}",{p:pid});var o=[];try{o=r.data.nodes.map(function(n){return n.id})}catch(e){}return o;}var all=[];var stack=[GID];var guard=0;while(stack.length&&guard<800){guard++;var id=stack.pop();var kids=ch(id);for(var i=0;i<kids.length;i++){all.push(kids[i]);stack.push(kids[i]);}}for(var i=0;i<all.length;i++){gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:all[i]});}var ctxs=[GID];if(EID)ctxs.push(EID);gql("mutation($c:[uuid!]!){deletePermissions(where:{contextId:{_in:$c}}){affected_rows}}",{c:ctxs});gql("mutation($p:uuid!){deleteMembers(where:{parentId:{_eq:$p}}){affected_rows}}",{p:GID});gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:GID});var chk=gql("query($i:uuid!){node(id:$i){id}}",{i:GID});var gone=true;try{gone=!chk.data.node}catch(e){}return JSON.stringify({deleted:all.length,gone:gone});')
+        let td = (try { wd-execute $session_id $teardown_js | from json } catch { {deleted: -1, gone: false} })
+        if ($td.gone == true) {
+            log-ok $"cleaned up the hermetic group \(($td.deleted) descendant nodes\) + permissions"; $p = $p + 1
+        } else {
+            log-fail $"cleanup incomplete, MANUAL CHECK: group ($hermetic_gid) deleted=($td.deleted) gone=($td.gone)"; $fl = $fl + 1
+        }
     }
 
     { passed: $p, failed: $fl }
