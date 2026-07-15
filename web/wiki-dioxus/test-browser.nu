@@ -1126,6 +1126,16 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     sleep 800ms
     let on_profile = (wd-execute $session_id 'return [...document.querySelectorAll("#main .card-header h3")].some(function(h){return h.textContent.trim()=="Your contributions"})?"y":"n"')
     if $on_profile == "y" { log-ok "/?app=profile renders the profile \(not home)"; $p = $p + 1 } else { log-fail "/?app=profile did not render the profile"; $fl = $fl + 1 }
+    # Profile lists reveal more incrementally via "Show more".
+    let more = (wd-execute $session_id 'var b=[...document.querySelectorAll("#main .list-expand-toggle")].find(function(x){return x.textContent.indexOf("Show more")>=0}); if(!b) return "notoggle"; var before=document.querySelectorAll("#main .list-item, #main .list-link").length; b.click(); return JSON.stringify({before:before})')
+    if $more == "notoggle" {
+        log-warn "no show-more on profile (account has few items) — skipping"
+    } else {
+        sleep 400ms
+        let after = (wd-execute $session_id 'return document.querySelectorAll("#main .list-item, #main .list-link").length')
+        let b = (($more | from json).before)
+        if ($after > $b) { log-ok $"profile show-more reveals more \(($b) -> ($after))"; $p = $p + 1 } else { log-fail $"profile show-more did not reveal more \(($b) -> ($after))"; $fl = $fl + 1 }
+    }
 
     # ── Search resolves a result to its full node path (not just the key) ────
     wd-navigate $session_id $"(base-url)($ctx_path)"

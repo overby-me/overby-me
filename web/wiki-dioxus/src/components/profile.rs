@@ -286,27 +286,54 @@ pub fn ProfileApp() -> Element {
                 None => rsx! {
                     div { class: "card-content", crate::components::widgets::Spinner {} }
                 },
-                Some(items) if items.is_empty() => rsx! {
-                    div { class: "card-content",
-                        p { class: "body-medium", class: "text-muted", "{t(\"common.noContent\")}" }
-                    }
-                },
                 Some(items) => rsx! {
-                    div { class: "list",
-                        for node in items.iter() {
-                            ContributionItem { key: "{node.id.0}", node: node.clone() }
-                        }
-                    }
+                    ContributionList { items: items.clone() }
                 },
             }}
         }
     }
 }
 
+/// The profile's authored-contributions list, revealed a handful at a time via an
+/// incremental "show more".
+#[component]
+fn ContributionList(items: Vec<graphql::ChildNodeFields>) -> Element {
+    const STEP: usize = 5;
+    let mut shown = use_signal(|| STEP);
+    if items.is_empty() {
+        return rsx! {
+            div { class: "card-content",
+                p { class: "body-medium", class: "text-muted", "{t(\"common.noContent\")}" }
+            }
+        };
+    }
+    let n = (*shown.read()).min(items.len());
+    rsx! {
+        div { class: "list",
+            for node in items[..n].iter() {
+                ContributionItem { key: "{node.id.0}", node: node.clone() }
+            }
+        }
+        if items.len() > n {
+            button {
+                class: "btn btn-text list-expand-toggle",
+                onclick: move |_| {
+                    let s = *shown.read();
+                    shown.set(s + STEP);
+                },
+                "{t(\"layout.showMore\")}"
+            }
+        }
+    }
+}
+
 /// A group/event list body for the profile: links into each context, or an empty
-/// hint. Shared by the Groups and Events cards.
+/// hint. Shared by the Groups and Events cards. Reveals a handful at a time via
+/// an incremental "show more".
 #[component]
 fn ContextList(contexts: Vec<graphql::ContextNodeFields>) -> Element {
+    const STEP: usize = 5;
+    let mut shown = use_signal(|| STEP);
     if contexts.is_empty() {
         return rsx! {
             div { class: "card-content",
@@ -314,9 +341,10 @@ fn ContextList(contexts: Vec<graphql::ContextNodeFields>) -> Element {
             }
         };
     }
+    let n = (*shown.read()).min(contexts.len());
     rsx! {
         div { class: "list",
-            for ctx in contexts.iter() {
+            for ctx in contexts[..n].iter() {
                 Link {
                     key: "{ctx.id.0}",
                     to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
@@ -328,6 +356,16 @@ fn ContextList(contexts: Vec<graphql::ContextNodeFields>) -> Element {
                         },
                     }
                 }
+            }
+        }
+        if contexts.len() > n {
+            button {
+                class: "btn btn-text list-expand-toggle",
+                onclick: move |_| {
+                    let s = *shown.read();
+                    shown.set(s + STEP);
+                },
+                "{t(\"layout.showMore\")}"
             }
         }
     }

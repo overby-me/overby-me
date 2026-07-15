@@ -967,6 +967,9 @@ html {
 	border-radius: 0;
 	box-shadow: none;
 	margin-bottom: var(--md-sys-spacing-2);
+	/* Flat edge-to-edge cards blend together, so divide each from the next with a
+	   crisp line after its content. */
+	border-bottom: 1px solid var(--md-outline-variant);
 }
 
 /* Floating navigation bar — M3 primary container with a level-2 shadow (it
@@ -1098,6 +1101,14 @@ html {
 }
 .card.accent-error {
 	--card-accent: var(--md-error);
+}
+
+/* On compact (mobile) the header's soft gradient brow reads muddy against the
+   small flat card; drop it there. The flat, edge-to-edge cards are instead
+   separated by a crisp divider AFTER each card's content (see the compact .card
+   rule), not by a header wash. */
+.app-shell[data-size-class="compact"] .card-header {
+	background: none;
 }
 
 /* DESIGN (functional: compact density): tighten card/list spacing so more

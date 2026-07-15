@@ -258,8 +258,9 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     } else {
         rsx! {
             div { style: "margin-top: 16px;",
-                div { style: "display: flex; align-items: center; padding: 8px 16px;",
-                    h4 { class: "title-small", class: "text-muted", style: "flex: 1; margin: 0;",
+                div { style: "display: flex; align-items: center; gap: 12px; padding: 8px 16px;",
+                    div { class: "avatar small", span { class: "material-icons", "groups" } }
+                    h4 { class: "title-medium", style: "flex: 1; margin: 0; font-weight: 700;",
                         "{t(\"layout.groups\")}"
                     }
                     if can_group {
@@ -267,8 +268,9 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                     }
                 }
                 {groups_body}
-                div { style: "display: flex; align-items: center; padding: 8px 16px; margin-top: 8px;",
-                    h4 { class: "title-small", class: "text-muted", style: "flex: 1; margin: 0;",
+                div { style: "display: flex; align-items: center; gap: 12px; padding: 8px 16px; margin-top: 8px;",
+                    div { class: "avatar small", span { class: "material-icons", "event" } }
+                    h4 { class: "title-medium", style: "flex: 1; margin: 0; font-weight: 700;",
                         "{t(\"layout.events\")}"
                     }
                     if can_event {
