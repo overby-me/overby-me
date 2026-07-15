@@ -86,6 +86,12 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     let can_group = root_id.is_some() && root_mimes.iter().any(|m| m == "wiki/group");
     let can_event = root_id.is_some() && root_mimes.iter().any(|m| m == "wiki/event");
 
+    // Keep each list short by default (newest first) and let the user expand to
+    // the full list — the roster of past events especially can be long.
+    const LIST_LIMIT: usize = 4;
+    let mut groups_expanded = use_signal(|| false);
+    let mut events_expanded = use_signal(|| false);
+
     let state = contexts.read().clone();
     let hint_style = "padding: 4px 16px;";
     // Pending invitations, split into the list they belong to (group vs event) so
@@ -116,17 +122,40 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
             Some(Ok((groups, _, _))) if groups.is_empty() && invited_groups.is_empty() => rsx! {
                 p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noGroups\")}" }
             },
-            Some(Ok((groups, _, _))) => rsx! {
-                div { class: "list",
-                    // Invitations first — they need action.
-                    for inv in invited_groups.iter() {
-                        InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
+            Some(Ok((groups, _, _))) => {
+                let expanded = *groups_expanded.read();
+                let total = groups.len();
+                let visible: Vec<graphql::ContextNodeFields> = if expanded {
+                    groups.clone()
+                } else {
+                    groups.iter().take(LIST_LIMIT).cloned().collect()
+                };
+                rsx! {
+                    div { class: "list",
+                        // Invitations first — they need action.
+                        for inv in invited_groups.iter() {
+                            InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
+                        }
+                        for node in visible.iter() {
+                            ContextItem { key: "{node.id.0}", node: node.clone() }
+                        }
                     }
-                    for node in groups.iter() {
-                        ContextItem { key: "{node.id.0}", node: node.clone() }
+                    if total > LIST_LIMIT {
+                        button {
+                            class: "btn btn-text list-expand-toggle",
+                            onclick: move |_| {
+                                let e = *groups_expanded.read();
+                                groups_expanded.set(!e);
+                            },
+                            if expanded {
+                                "{t(\"layout.showLess\")}"
+                            } else {
+                                "{t_with(\"layout.showAll\", &[(\"count\", &total.to_string())])}"
+                            }
+                        }
                     }
                 }
-            },
+            }
         }}
     };
     let events_body = rsx! {
@@ -140,29 +169,57 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
             Some(Ok((_, events, _))) if events.is_empty() && invited_events.is_empty() => rsx! {
                 p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noEvents\")}" }
             },
-            Some(Ok((_, events, _))) => rsx! {
-                // Invited events first (no year bucket — they need action).
-                if !invited_events.is_empty() {
-                    div { class: "list",
-                        for inv in invited_events.iter() {
-                            InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
+            Some(Ok((_, events, _))) => {
+                let expanded = *events_expanded.read();
+                let total = events.len();
+                rsx! {
+                    // Invited events first (no year bucket — they need action).
+                    if !invited_events.is_empty() {
+                        div { class: "list",
+                            for inv in invited_events.iter() {
+                                InvitedContextItem { key: "inv-{inv.id.0}", invite: inv.clone() }
+                            }
                         }
                     }
-                }
-                for (year , items) in group_by_year(events) {
-                    div { key: "{year}",
-                        p { class: "label-medium",
-                            class: "text-muted", style: "padding: 4px 16px; font-weight: 600;",
-                            "{year}"
+                    // Collapsed: just the newest few, flat. Expanded: the full list
+                    // bucketed by year (the historical view).
+                    if expanded {
+                        for (year , items) in group_by_year(events) {
+                            div { key: "{year}",
+                                p { class: "label-medium",
+                                    class: "text-muted", style: "padding: 4px 16px; font-weight: 600;",
+                                    "{year}"
+                                }
+                                div { class: "list",
+                                    for node in items.iter() {
+                                        ContextItem { key: "{node.id.0}", node: node.clone() }
+                                    }
+                                }
+                            }
                         }
+                    } else {
                         div { class: "list",
-                            for node in items.iter() {
+                            for node in events.iter().take(LIST_LIMIT) {
                                 ContextItem { key: "{node.id.0}", node: node.clone() }
                             }
                         }
                     }
+                    if total > LIST_LIMIT {
+                        button {
+                            class: "btn btn-text list-expand-toggle",
+                            onclick: move |_| {
+                                let e = *events_expanded.read();
+                                events_expanded.set(!e);
+                            },
+                            if expanded {
+                                "{t(\"layout.showLess\")}"
+                            } else {
+                                "{t_with(\"layout.showAll\", &[(\"count\", &total.to_string())])}"
+                            }
+                        }
+                    }
                 }
-            },
+            }
         }}
     };
 
@@ -174,7 +231,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
             div { class: "card",
                 div { class: "card-header",
                     div { class: "avatar small", span { class: "material-icons", "groups" } }
-                    h3 { class: "title-medium", "{t(\"layout.groups\")}" }
+                    h3 { class: "title-large", "{t(\"layout.groups\")}" }
                     if can_group {
                         div { class: "flex-grow" }
                         NewContextButton { mime: "wiki/group".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
@@ -185,7 +242,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
             div { class: "card mt-1",
                 div { class: "card-header",
                     div { class: "avatar small", span { class: "material-icons", "event" } }
-                    h3 { class: "title-medium", "{t(\"layout.events\")}" }
+                    h3 { class: "title-large", "{t(\"layout.events\")}" }
                     if can_event {
                         div { class: "flex-grow" }
                         NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }

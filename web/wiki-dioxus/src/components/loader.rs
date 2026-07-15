@@ -83,6 +83,15 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
         }
     });
 
+    // Node-independent apps (profile, parent) take no node, so render them
+    // directly — otherwise the empty-path HomeApp short-circuit below would
+    // swallow `/?app=profile` and show the home page instead.
+    match app.as_deref() {
+        Some("profile") => return rsx! { super::profile::ProfileApp {} },
+        Some("parent") => return rsx! { super::parent::ParentApp {} },
+        _ => {}
+    }
+
     // `/` (empty path, no app) is the welcome page. Render HomeApp directly: it
     // fetches the root itself and still renders when logged out (or when the root
     // isn't readable), whereas resolving the root here would 404 for an anonymous
@@ -113,8 +122,8 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
                 Some("program") => {
                     rsx! { super::program::ProgramApp { node, path: segments.clone() } }
                 }
-                Some("profile") => rsx! { super::profile::ProfileApp {} },
-                Some("parent") => rsx! { super::parent::ParentApp {} },
+                // profile / parent are handled before node resolution (they need
+                // no node), so they don't appear here.
                 Some("redirect") => rsx! { super::redirect::RedirectApp { node } },
                 Some("social") => rsx! { super::social::SocialApp { node } },
                 Some("cow") => rsx! { super::cow::CowApp { node } },

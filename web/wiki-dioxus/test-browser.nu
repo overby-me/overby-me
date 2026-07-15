@@ -472,6 +472,17 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # root node -> wiki/home -> HomeApp).
     let htitle = (wd-execute $session_id 'var h=document.querySelector("#main .card .home-hero-title"); return h?h.innerText.trim():""')
     if ($htitle | is-not-empty) { log-ok "home welcome card renders with a title" ; $p = $p + 1 } else { log-fail "home welcome card title missing" ; $fl = $fl + 1 }
+    # Long group/event lists collapse to the newest few with a "Show all (N)"
+    # toggle; clicking it reveals the rest (the test account owns many events).
+    let toggle = (wd-execute $session_id 'var b=[...document.querySelectorAll(".list-expand-toggle")].find(function(x){return x.textContent.indexOf("Show all")>=0}); if(!b) return "notoggle"; var before=document.querySelectorAll(".list-item").length; b.click(); return JSON.stringify({before:before})')
+    if $toggle == "notoggle" {
+        log-warn "no show-all toggle (account has few contexts) — skipping"
+    } else {
+        sleep 400ms
+        let after = (wd-execute $session_id 'return document.querySelectorAll(".list-item").length')
+        let b = (($toggle | from json).before)
+        if ($after > $b) { log-ok $"show-all expands the list \(($b) -> ($after))"; $p = $p + 1 } else { log-fail $"show-all did not expand \(($b) -> ($after))"; $fl = $fl + 1 }
+    }
     let r = (check-contrast $session_id "home (authenticated)" $p $fl); $p = $r.passed; $fl = $r.failed
     capture-shots $session_id "home"
 
@@ -1112,6 +1123,11 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     let sec = ($sections | from json)
     if $sec.groups and $sec.events { log-ok "profile has separate Groups and Events lists"; $p = $p + 1 } else { log-fail $"profile missing group/event split: ($sections)"; $fl = $fl + 1 }
     if $sec.contrib { log-ok "profile shows a contributions section"; $p = $p + 1 } else { log-fail "profile missing the contributions section"; $fl = $fl + 1 }
+    # The root route /?app=profile must render the profile, not the home page.
+    wd-navigate $session_id $"(base-url)/?app=profile"
+    sleep 800ms
+    let on_profile = (wd-execute $session_id 'return [...document.querySelectorAll("#main .card-header h3")].some(function(h){return h.textContent.trim()=="Your contributions"})?"y":"n"')
+    if $on_profile == "y" { log-ok "/?app=profile renders the profile \(not home)"; $p = $p + 1 } else { log-fail "/?app=profile did not render the profile"; $fl = $fl + 1 }
 
     # ── Search resolves a result to its full node path (not just the key) ────
     wd-navigate $session_id $"(base-url)($ctx_path)"
