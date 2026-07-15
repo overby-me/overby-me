@@ -1364,42 +1364,45 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     { passed: $p, failed: $fl }
 }
 
-# Write-flow: create a throwaway vote/policy in an owned sandbox folder, start a
-# poll on it through the UI, cast a vote, post a comment, then delete the whole
-# subtree and restore the context's prior "active" relation — leaving the live
-# backend exactly as it was. Firefox-only (it needs real form input + a reactive
-# ballot); warn-skips on Servo. Setup/teardown use the app's own GraphQL via the
-# stored session token; the poll/vote/comment themselves go through the UI, and
-# each is verified against the backend (not just the DOM).
+# Hermetic write-flow: stand up a throwaway GROUP of its own (via the same
+# create-context path the home UI uses — insert under root, make it its own
+# context, seed the permission template), add a folder + policy under it, then
+# drive the full civic loop through the UI (start a poll, cast a vote, post a
+# comment), each verified against the backend. Teardown deletes the whole group
+# subtree + its permissions, so a run depends on NOTHING but the root and leaves
+# the live backend exactly as it found it. Firefox-only; warn-skips on Servo.
 def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
     mut p = $passed; mut fl = $failed
     log-info ""
-    log-info "── Poll create + vote + comment (write-flow) ────────────"
+    log-info "── Poll create + vote + comment (hermetic write-flow) ───"
     if (servo-skip "poll/vote/comment write-flow") {
         return { passed: $p, failed: $fl }
     }
-    # A vote/policy is created under this owned "Test" folder, in the dormant
-    # HB2 22/23 event context the test user owns and is an active member of.
-    let CTX = "5b1ed157-3198-4d8e-9976-cf416c83aafb"
-    let FOLDER = "b317d167-15c7-4077-b0d3-19e6d98c934f"
-    let FOLDER_PATH = "/radikal_ungdom/hb2/test"
     let GQL = "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
     # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
     let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+    # The per-context permission template (mirrors graphql::create_context), so the
+    # fresh group is usable (folder/policy/poll/vote/comment insertable via the
+    # owner's ownership of the context).
+    let perm_fn = 'function permObjs(cid){var R=[["vote/vote","member",["vote/poll"]],["vote/policy","member",["wiki/folder"]],["vote/candidate","member",["vote/position"]],["wiki/document","owner",["wiki/event","wiki/folder","wiki/group"]],["vote/poll","owner",["vote/policy","vote/change","vote/position"]],["vote/question","member",["vote/position","wiki/file"]],["vote/comment","member",["vote/policy","vote/change"]],["speak/speak","member",["speak/list"]],["vote/change","member",["vote/policy","vote/change","wiki/file"]],["wiki/folder","owner",["wiki/folder","wiki/group","wiki/event"]],["vote/position","owner",["wiki/folder"]],["wiki/file","owner",["wiki/event","wiki/folder","wiki/group"]]];return R.map(function(r){var m=r[0]!="vote/vote";return {contextId:cid,nodeId:cid,mimeId:r[0],role:r[1],parents:r[2],active:true,insert:true,select:true,update:m,delete:m};});}'
 
-    # ── Setup: capture the context's prior active relation, insert the policy ──
-    let setup_js = ($gql + 'var CTX="' + $CTX + '";var FOLDER="' + $FOLDER + '";var prior=gql("query($p:uuid!){relations(where:{parentId:{_eq:$p},name:{_eq:\"active\"}}){nodeId}}",{p:CTX});var pa=null;try{pa=prior.data.relations[0].nodeId}catch(e){}var key="e2e-policy-"+Date.now();var r=gql("mutation($o:nodes_insert_input!){insertNode(object:$o){id key}}",{o:{name:"E2E poll flow",key:key,mimeId:"vote/policy",parentId:FOLDER,contextId:CTX,mutable:true}});var id=null;try{id=r.data.insertNode.id}catch(e){}return JSON.stringify({id:id,key:key,priorActive:pa,err:r.errors?JSON.stringify(r.errors):null});')
-    let setup = (try { wd-execute $session_id $setup_js | from json } catch { {id: null, key: "", priorActive: null, err: "setup exec failed"} })
-    if ($setup.id | is-empty) {
-        log-fail $"could not create scaffold policy: ($setup.err)"; $fl = $fl + 1
+    # ── Setup: create group (own context + seeded perms) -> folder -> policy ──
+    let setup_js = ($gql + $perm_fn + 'var INS="mutation($o:nodes_insert_input!){insertNode(object:$o){id key}}";var rt=gql("query{nodes(where:{mimeId:{_eq:\"wiki/home\"}}){id contextId}}",{});var ROOT=null,RC=null;try{ROOT=rt.data.nodes[0].id;RC=rt.data.nodes[0].contextId}catch(e){}var out={group:null,groupKey:null,folder:null,folderKey:null,policy:null,policyKey:null,err:null};if(!ROOT){out.err="root not found";return JSON.stringify(out);}var t=Date.now();var g=gql(INS,{o:{name:"E2E hermetic "+t,key:"e2e-grp-"+t,mimeId:"wiki/group",parentId:ROOT,contextId:RC,mutable:true}});try{out.group=g.data.insertNode.id;out.groupKey=g.data.insertNode.key}catch(e){}if(!out.group){out.err=g.errors?JSON.stringify(g.errors):"group insert failed";return JSON.stringify(out);}gql("mutation($id:uuid!,$s:nodes_set_input!){updateNode(pk_columns:{id:$id},_set:$s){id}}",{id:out.group,s:{contextId:out.group,mutable:false}});var ps=gql("mutation($o:[permissions_insert_input!]!){insertPermissions(objects:$o){affected_rows}}",{o:permObjs(out.group)});if(ps.errors){out.err="perm seed: "+JSON.stringify(ps.errors);return JSON.stringify(out);}var f=gql(INS,{o:{name:"F",key:"e2e-fld-"+t,mimeId:"wiki/folder",parentId:out.group,contextId:out.group,mutable:true}});try{out.folder=f.data.insertNode.id;out.folderKey=f.data.insertNode.key}catch(e){}if(!out.folder){out.err=f.errors?JSON.stringify(f.errors):"folder insert failed";return JSON.stringify(out);}var pl=gql(INS,{o:{name:"E2E policy",key:"e2e-pol-"+t,mimeId:"vote/policy",parentId:out.folder,contextId:out.group,mutable:true}});try{out.policy=pl.data.insertNode.id;out.policyKey=pl.data.insertNode.key}catch(e){}if(!out.policy){out.err=pl.errors?JSON.stringify(pl.errors):"policy insert failed";}return JSON.stringify(out);')
+    let setup = (try { wd-execute $session_id $setup_js | from json } catch { {group: null, groupKey: null, folder: null, folderKey: null, policy: null, policyKey: null, err: "setup exec failed"} })
+    if ($setup.policy | is-empty) {
+        log-fail $"could not stand up hermetic group: ($setup.err)"; $fl = $fl + 1
+        # Best-effort cleanup if the group got as far as being created.
+        if ($setup.group | is-not-empty) {
+            wd-execute $session_id ($gql + 'var G="' + $setup.group + '";gql("mutation($c:uuid!){deletePermissions(where:{contextId:{_eq:$c}}){affected_rows}}",{c:G});gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:G});return 1') | ignore
+        }
         return { passed: $p, failed: $fl }
     }
-    log-ok "scaffold policy created in the Test sandbox"; $p = $p + 1
-    let pid = $setup.id
-    let pkey = $setup.key
+    log-ok "hermetic group + folder + policy created"; $p = $p + 1
+    let pid = $setup.policy
+    let ppath = $"/($setup.groupKey)/($setup.folderKey)/($setup.policyKey)"
 
     # ── Add a poll (UI: the StartPollButton on the policy) ──
-    wd-navigate $session_id $"(base-url)($FOLDER_PATH)/($pkey)"
+    wd-navigate $session_id $"(base-url)($ppath)"
     if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main .btn-icon.add-action")].some(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"})?"y":"n"' 8000) {
         log-ok "poll-start control shown (owner)"; $p = $p + 1
         wd-execute $session_id 'var b=[...document.querySelectorAll("#main .btn-icon.add-action")].find(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"});if(b)b.click();return 1' | ignore
@@ -1427,7 +1430,7 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
     }
 
     # ── Post a comment (UI, on the policy's CommentSection), verified via backend ──
-    wd-navigate $session_id $"(base-url)($FOLDER_PATH)/($pkey)"
+    wd-navigate $session_id $"(base-url)($ppath)"
     if (wd-wait-y $session_id 'return document.querySelector("#main .comment-composer .comment-input")?"y":"n"' 8000) {
         wd-execute $session_id 'var ta=document.querySelector("#main .comment-composer .comment-input");if(ta){ta.value="e2e comment "+Date.now();ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1' | ignore
         sleep 500ms
@@ -1443,16 +1446,15 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
         log-fail "comment composer missing on the policy"; $fl = $fl + 1
     }
 
-    # ── Teardown (always runs): delete the whole scaffold subtree + the policy,
-    #    restore the context's prior active relation, and verify the policy is
-    #    gone — so a run leaves the live backend exactly as it found it. ──
-    let pa_lit = (if ($setup.priorActive | is-empty) { "null" } else { ('"' + $setup.priorActive + '"') })
-    let teardown_js = ($gql + 'var CTX="' + $CTX + '";var PID="' + $pid + '";var PA=' + $pa_lit + ';function ch(pid){var r=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p}}){id}}",{p:pid});var o=[];try{o=r.data.nodes.map(function(n){return n.id})}catch(e){}return o;}var all=[];var stack=[PID];var guard=0;while(stack.length&&guard<500){guard++;var id=stack.pop();var kids=ch(id);for(var i=0;i<kids.length;i++){all.push(kids[i]);stack.push(kids[i]);}}for(var i=0;i<all.length;i++){gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:all[i]});}gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:PID});gql("mutation($o:relations_insert_input!,$oc:relations_on_conflict!){insertRelation(object:$o,on_conflict:$oc){id}}",{o:{name:"active",parentId:CTX,nodeId:PA},oc:{constraint:"relations_parent_id_name_key",update_columns:["nodeId"]}});var chk=gql("query($i:uuid!){node(id:$i){id}}",{i:PID});var gone=true;try{gone=!chk.data.node}catch(e){}return JSON.stringify({deleted:all.length,policyGone:gone});')
-    let td = (try { wd-execute $session_id $teardown_js | from json } catch { {deleted: -1, policyGone: false} })
-    if ($td.policyGone == true) {
-        log-ok $"cleaned up scaffold \(($td.deleted) descendant nodes\) and restored active relation"; $p = $p + 1
+    # ── Teardown (always runs): delete the whole group subtree + its permissions
+    #    and verify the group is gone. The group is a throwaway of our own, so
+    #    nothing needs restoring (its `active` relation cascades with the node). ──
+    let teardown_js = ($gql + 'var GID="' + $setup.group + '";function ch(pid){var r=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p}}){id}}",{p:pid});var o=[];try{o=r.data.nodes.map(function(n){return n.id})}catch(e){}return o;}var all=[];var stack=[GID];var guard=0;while(stack.length&&guard<800){guard++;var id=stack.pop();var kids=ch(id);for(var i=0;i<kids.length;i++){all.push(kids[i]);stack.push(kids[i]);}}for(var i=0;i<all.length;i++){gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:all[i]});}gql("mutation($c:uuid!){deletePermissions(where:{contextId:{_eq:$c}}){affected_rows}}",{c:GID});gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:GID});var chk=gql("query($i:uuid!){node(id:$i){id}}",{i:GID});var gone=true;try{gone=!chk.data.node}catch(e){}return JSON.stringify({deleted:all.length,gone:gone});')
+    let td = (try { wd-execute $session_id $teardown_js | from json } catch { {deleted: -1, gone: false} })
+    if ($td.gone == true) {
+        log-ok $"cleaned up the hermetic group \(($td.deleted) descendant nodes\) + permissions"; $p = $p + 1
     } else {
-        log-fail $"cleanup incomplete, MANUAL CHECK: policy ($pid) deleted=($td.deleted) gone=($td.policyGone)"; $fl = $fl + 1
+        log-fail $"cleanup incomplete, MANUAL CHECK: group ($setup.group) deleted=($td.deleted) gone=($td.gone)"; $fl = $fl + 1
     }
 
     { passed: $p, failed: $fl }
