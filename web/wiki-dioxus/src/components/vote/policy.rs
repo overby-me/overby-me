@@ -41,6 +41,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 
     let node_id = node.id.0.clone();
     let context_id = node.context_id.as_ref().map(|u| u.0.clone());
+    let is_ctx_owner = node.is_context_owner.unwrap_or(false);
 
     rsx! {
         // Main content. The comment thread renders at the end, below the
@@ -75,16 +76,44 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                         {
                             let mut full = path.clone();
                             full.push(item.key.clone());
+                            // Author byline: the creating user (a blank display name
+                            // means free-text, so it is treated as no identity).
+                            let owner = item.owner.as_ref().filter(|o| !o.display_name.is_empty());
+                            let author = owner.map(|o| o.display_name.clone());
+                            let author_id = owner.map(|o| o.id.0.clone());
+                            let author_avatar = owner.map(|o| o.avatar_url.clone()).unwrap_or_default();
+                            // Inline body preview, so an amendment can be read (and
+                            // its author seen) without opening it — matching the old
+                            // wiki's expandable ChangeList row.
+                            let body = item.data.as_ref().map(|d| d.0.clone());
+                            let has_body = crate::components::content::has_rich_content(body.as_ref());
                             rsx! {
-                                Link {
-                                    key: "{item.id.0}",
-                                    to: Route::PathPage { segments: full, app: None },
-                                    class: "folder-item",
-                                    div { class: "avatar small",
-                                        {crate::components::loader::node_avatar("vote/change", &item.name, Some(n))}
+                                div { key: "{item.id.0}", class: "amendment-item",
+                                    div {
+                                        class: "stack stack-h",
+                                        style: "align-items: center; gap: 8px;",
+                                        div { class: "avatar small",
+                                            {crate::components::loader::node_avatar("vote/change", &item.name, Some(n))}
+                                        }
+                                        div { class: "list-item-text flex-grow",
+                                            Link {
+                                                to: Route::PathPage { segments: full, app: None },
+                                                div { class: "list-item-primary", "{item.name}" }
+                                            }
+                                            if let Some(a) = author.clone() {
+                                                crate::components::loader::UserPopover {
+                                                    name: a.clone(),
+                                                    avatar_url: author_avatar.clone(),
+                                                    user_id: author_id.clone(),
+                                                    div { class: "list-item-secondary", "{a}" }
+                                                }
+                                            }
+                                        }
                                     }
-                                    div { class: "list-item-text",
-                                        div { class: "list-item-primary", "{item.name}" }
+                                    if has_body {
+                                        div { class: "amendment-preview",
+                                            crate::components::content::SlateRenderer { data: body }
+                                        }
                                     }
                                 }
                             }
@@ -107,15 +136,22 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                             let mut full = path.clone();
                             full.push(poll.key.clone());
                             rsx! {
-                                Link {
+                                div {
                                     key: "{poll.id.0}",
-                                    to: Route::PathPage { segments: full, app: None },
-                                    class: "folder-item",
-                                    div { class: "avatar small", {icon_el("vote/poll")} }
-                                    div { class: "list-item-text",
-                                        div { class: "list-item-primary", "{poll.name}" }
+                                    class: "stack stack-h",
+                                    style: "align-items: center;",
+                                    Link {
+                                        to: Route::PathPage { segments: full, app: None },
+                                        class: "folder-item flex-grow",
+                                        div { class: "avatar small", {icon_el("vote/poll")} }
+                                        div { class: "list-item-text",
+                                            div { class: "list-item-primary", "{poll.name}" }
+                                        }
+                                        PollVoteBadge { poll_id: poll.id.0.clone() }
                                     }
-                                    PollVoteBadge { poll_id: poll.id.0.clone() }
+                                    if is_ctx_owner {
+                                        DeletePollButton { poll_id: poll.id.0.clone() }
+                                    }
                                 }
                             }
                         }

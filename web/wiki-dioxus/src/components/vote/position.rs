@@ -28,6 +28,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     let token = session.read().access_token.clone();
+    let is_ctx_owner = node.is_context_owner.unwrap_or(false);
     let children = visible_sorted(&node.children);
     let children = &children;
 
@@ -333,15 +334,22 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                             let mut full = path.clone();
                             full.push(poll.key.clone());
                             rsx! {
-                                Link {
+                                div {
                                     key: "{poll.id.0}",
-                                    to: Route::PathPage { segments: full, app: None },
-                                    class: "folder-item",
-                                    div { class: "avatar small", {icon_el("vote/poll")} }
-                                    div { class: "list-item-text",
-                                        div { class: "list-item-primary", "{poll.name}" }
+                                    class: "stack stack-h",
+                                    style: "align-items: center;",
+                                    Link {
+                                        to: Route::PathPage { segments: full, app: None },
+                                        class: "folder-item flex-grow",
+                                        div { class: "avatar small", {icon_el("vote/poll")} }
+                                        div { class: "list-item-text",
+                                            div { class: "list-item-primary", "{poll.name}" }
+                                        }
+                                        PollVoteBadge { poll_id: poll.id.0.clone() }
                                     }
-                                    PollVoteBadge { poll_id: poll.id.0.clone() }
+                                    if is_ctx_owner {
+                                        DeletePollButton { poll_id: poll.id.0.clone() }
+                                    }
                                 }
                             }
                         }

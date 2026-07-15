@@ -31,6 +31,65 @@ pub(super) fn PollVoteBadge(poll_id: String) -> Element {
     }
 }
 
+/// Owner action on a poll row: delete the poll (behind a confirm), restoring the
+/// old wiki's PollList delete so a stray or mistaken poll can be removed.
+#[component]
+pub(super) fn DeletePollButton(poll_id: String) -> Element {
+    let session = use_session();
+    let mut confirm = use_signal(|| false);
+    let mut busy = use_signal(|| false);
+    rsx! {
+        button {
+            class: "btn-icon",
+            aria_label: t("common.delete"),
+            title: t("common.delete"),
+            // Sibling of the row Link, but stop propagation so a click never also
+            // navigates into the poll.
+            onclick: move |e: Event<MouseData>| {
+                e.stop_propagation();
+                confirm.set(true);
+            },
+            span { class: "material-icons", "delete" }
+        }
+        super::super::widgets::Dialog {
+            open: confirm(),
+            on_dismiss: move |_| confirm.set(false),
+            headline: t("content.confirmDelete"),
+            icon: "delete".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| confirm.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: busy(),
+                    onclick: {
+                        let poll_id = poll_id.clone();
+                        move |_| {
+                            let token = session.read().access_token.clone();
+                            let poll_id = poll_id.clone();
+                            busy.set(true);
+                            spawn(async move {
+                                match graphql::delete_node(token.as_deref(), &poll_id).await {
+                                    Ok(true) => {
+                                        crate::session::bump_data_version();
+                                        confirm.set(false);
+                                    }
+                                    _ => show_snackbar(&t("error.somethingWentWrong")),
+                                }
+                                busy.set(false);
+                            });
+                        }
+                    },
+                    "{t(\"common.delete\")}"
+                }
+            }
+        }
+    }
+}
+
 /// The options / min / max a poll's `data` describes.
 struct PollConfig {
     options: Vec<String>,

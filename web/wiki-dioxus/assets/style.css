@@ -2141,6 +2141,23 @@ select:focus {
 	list-style: none;
 }
 
+/* Amendment rows: a header (avatar + name + author) with the amendment body
+   inlined below it, so a change can be read without opening it (restores the
+   old wiki's expandable ChangeList row). */
+.amendment-item {
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
+	border-bottom: 1px solid var(--md-outline);
+}
+
+.amendment-item:last-child {
+	border-bottom: none;
+}
+
+.amendment-preview {
+	margin-top: var(--md-sys-spacing-2);
+	margin-left: var(--md-sys-spacing-9);
+}
+
 .list-item {
 	position: relative;
 	display: flex;

@@ -281,6 +281,32 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
             .unwrap_or_else(|| "<p><br></p>".to_string())
     });
 
+    // Content metadata (mirrors the old wiki's editor sidebar): an optional cover
+    // image stored as `data.image`, and — for context owners — the node's date
+    // (`createdAt`) so agenda items and minutes can be dated. The image file id is
+    // seeded from the node's data and replaced via the uploader; a fresh upload
+    // records its filename so the UI can confirm it before save.
+    let is_owner = node.is_context_owner.unwrap_or(false);
+    let initial_image = node
+        .data
+        .as_ref()
+        .and_then(|d| d.0.get("image"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let mut image_id = use_signal(|| initial_image.clone());
+    let mut image_name = use_signal(String::new);
+    let mut image_uploading = use_signal(|| false);
+    let mut created_date = use_signal(|| {
+        node.created_at
+            .as_ref()
+            .map(|t| t.0.chars().take(10).collect::<String>())
+            .unwrap_or_default()
+    });
+    // The existing cover thumbnail, resolved once on mount (a fresh upload shows a
+    // filename confirmation instead, since this hook does not re-fetch).
+    let existing_image_url =
+        super::loader::use_file_object_url(initial_image.clone().unwrap_or_default());
+
     // Toolbar active state (reflects the caret).
     let st_bold = use_signal(|| false);
     let st_italic = use_signal(|| false);
@@ -350,12 +376,33 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 let content_json = richtext::strip_leading_empty_paragraph(content_json);
                 let mut data_obj = base_data;
                 data_obj.insert("content".to_string(), content_json);
+                // Cover image: persist `data.image` when set, drop it when cleared.
+                match image_id.read().clone() {
+                    Some(id) => {
+                        data_obj.insert("image".to_string(), serde_json::Value::String(id));
+                    }
+                    None => {
+                        data_obj.remove("image");
+                    }
+                }
                 let data = serde_json::Value::Object(data_obj);
+                // Backdating: owners may set the node's date; others leave it.
+                let created_at = if is_owner {
+                    let d = created_date.read().trim().to_string();
+                    if d.is_empty() {
+                        None
+                    } else {
+                        Some(graphql::Timestamptz(d))
+                    }
+                } else {
+                    None
+                };
 
                 let set = graphql::NodesSetInput {
                     name: Some(title_val),
                     data: Some(graphql::Jsonb(data)),
                     mutable: Some(mutable),
+                    created_at,
                     ..Default::default()
                 };
 
@@ -421,6 +468,16 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 let content_json = richtext::strip_leading_empty_paragraph(content_json);
                 let mut data_obj = base_data;
                 data_obj.insert("content".to_string(), content_json);
+                // Carry the current cover image so an autosave between an image
+                // change and a manual save does not drop it (peek: no subscribe).
+                match image_id.peek().clone() {
+                    Some(id) => {
+                        data_obj.insert("image".to_string(), serde_json::Value::String(id));
+                    }
+                    None => {
+                        data_obj.remove("image");
+                    }
+                }
                 let set = graphql::NodesSetInput {
                     name: Some(title_val),
                     data: Some(graphql::Jsonb(serde_json::Value::Object(data_obj))),
@@ -456,6 +513,38 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     };
     let mut schedule_title = schedule_autosave.clone();
     let mut schedule_editor = schedule_autosave;
+
+    // Upload a chosen cover image to storage, then remember its id + filename so
+    // the next save writes `data.image`. Mirrors the folder file uploader.
+    let on_pick_image = move |evt: FormEvent| {
+        let files = evt.files();
+        let Some(fd) = files.into_iter().next() else {
+            return;
+        };
+        let name = fd.name();
+        let ctype = fd.content_type().unwrap_or_default();
+        let token = session.read().access_token.clone();
+        image_uploading.set(true);
+        spawn(async move {
+            match fd.read_bytes().await {
+                Ok(bytes) => {
+                    match crate::nhost::upload_file(token.as_deref(), bytes.to_vec(), &name, &ctype)
+                        .await
+                    {
+                        Ok(up) => {
+                            image_id.set(Some(up.id));
+                            image_name.set(name);
+                            dirty.set(true);
+                            set_editor_dirty(true);
+                        }
+                        Err(e) => show_snackbar(&format!("{}: {e}", t("error.somethingWentWrong"))),
+                    }
+                }
+                Err(_) => show_snackbar(&t("error.somethingWentWrong")),
+            }
+            image_uploading.set(false);
+        });
+    };
 
     if !is_auth {
         // DESIGN: an expressive locked-barrier state instead of a plain card.
@@ -494,6 +583,88 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 // Authors (members), content nodes only.
                 if takes_authors {
                     AuthorField { authors }
+                }
+
+                // Content metadata: an optional cover image, and (owners) the date.
+                if takes_authors {
+                    div { class: "mt-2 mb-2",
+                        div { class: "file-upload-label", "{t(\"content.coverImage\")}" }
+                        label { class: "file-upload",
+                            input {
+                                r#type: "file",
+                                accept: "image/*",
+                                class: "file-upload-input",
+                                onchange: on_pick_image,
+                            }
+                            span { class: "material-icons", "image" }
+                            span { class: "file-upload-text", "{t(\"content.uploadImage\")}" }
+                        }
+                        if *image_uploading.read() {
+                            div {
+                                class: "stack stack-h mt-1",
+                                style: "align-items: center; gap: 8px;",
+                                div { class: "spinner" }
+                                span { class: "body-small text-muted",
+                                    "{t(\"content.uploadImage\")}\u{2026}"
+                                }
+                            }
+                        } else if !image_name.read().is_empty() {
+                            div {
+                                class: "file-upload-done stack stack-h mt-1",
+                                style: "align-items: center; gap: 8px;",
+                                span { class: "material-icons", "check_circle" }
+                                span { class: "flex-grow", "{image_name}" }
+                                button {
+                                    class: "btn btn-text",
+                                    onclick: move |_| {
+                                        image_id.set(None);
+                                        image_name.set(String::new());
+                                        dirty.set(true);
+                                        set_editor_dirty(true);
+                                    },
+                                    "{t(\"content.removeImage\")}"
+                                }
+                            }
+                        } else if image_id.read().is_some() {
+                            div {
+                                class: "stack stack-h mt-1",
+                                style: "align-items: center; gap: 8px;",
+                                if let Some(url) = existing_image_url.clone() {
+                                    img {
+                                        src: "{url}",
+                                        alt: t("content.imageAlt"),
+                                        style: "width: 56px; height: 56px; object-fit: cover; border-radius: var(--md-sys-shape-corner-small, 8px);",
+                                    }
+                                }
+                                span { class: "flex-grow body-small text-muted",
+                                    "{t(\"content.coverImage\")}"
+                                }
+                                button {
+                                    class: "btn btn-text",
+                                    onclick: move |_| {
+                                        image_id.set(None);
+                                        dirty.set(true);
+                                        set_editor_dirty(true);
+                                    },
+                                    "{t(\"content.removeImage\")}"
+                                }
+                            }
+                        }
+                    }
+                    if is_owner {
+                        div { class: "text-field mb-2",
+                            label { "{t(\"content.date\")}" }
+                            input {
+                                r#type: "date",
+                                value: "{created_date}",
+                                oninput: move |e| {
+                                    created_date.set(e.value());
+                                    dirty.set(true);
+                                    set_editor_dirty(true);
+                                },
+                            }
+                        }
+                    }
                 }
 
                 // Sticky toolbar (#94): action buttons + formatting controls

@@ -60,6 +60,12 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     // owner may delete; editing also requires the node to still be mutable.
     let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
     let can_edit = can_manage && node.mutable;
+    // A context owner may reorder this node's children (candidates in an election,
+    // amendments on a motion, questions), when there is more than one to arrange.
+    // Restores the old per-list "sort" affordance the port had dropped, in one
+    // place: the sort app reorders all of a node's visible children.
+    let is_ctx_owner = node.is_context_owner.unwrap_or(false);
+    let reorderable_children = super::loader::visible_sorted(&node.children).len() > 1;
     // The context whose projector (Screen) this node can be pushed to; falls back
     // to the node itself when it is its own context (a top-level group/event).
     let node_context = node
@@ -239,6 +245,17 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         } else {
                             "{t(\"content.showCommentsScreen\")}"
                         }
+                    }
+                }
+                if is_ctx_owner && reorderable_children && !segments.is_empty() {
+                    Link {
+                        to: Route::PathPage {
+                            segments: segments.clone(),
+                            app: Some("sort".to_string()),
+                        },
+                        class: "sheet-action",
+                        {icon_el("app/sort")}
+                        "{t(\"mime.sort\")}"
                     }
                 }
                 if can_edit && !segments.is_empty() {
