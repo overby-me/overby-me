@@ -8,7 +8,7 @@
 <a href="https://www.linkedin.com/in/niclasoverby"><img src="./web/homepage/assets/icons/linkedin.avif" width="32" height="32" alt="LinkedIn"></a>
 <a href="https://github.com/overby-me"><img src="./web/homepage/assets/icons/github.avif" width="32" height="32" alt="GitHub"></a>
 <a href="https://tangled.org/@overby.me"><img src="./web/homepage/assets/icons/tangled.avif" width="32" height="32" alt="Tangled"></a>
-<a href="https://mas.to/@niclasoverby"><img src="./web/homepage/assets/icons/mastodon.avif" width="32" height="32" alt="Mastodon"></a>
+<a href="https://mas.to/@overby.me@bsky.brid.gy"><img src="./web/homepage/assets/icons/mastodon.avif" width="32" height="32" alt="Mastodon"></a>
 <a href="https://bsky.app/profile/overby.me"><img src="./web/homepage/assets/icons/bluesky.avif" width="32" height="32" alt="Bluesky"></a>
 <a href="https://pinkleap.app/@overby.me"><img src="./web/homepage/assets/icons/pinkleap.avif" width="32" height="32" alt="PinkLeap"></a>
 <a href="https://rocksky.app/profile/overby.me"><img src="./web/homepage/assets/icons/rocksky.avif" width="32" height="32" alt="Rocksky"></a>
@@ -716,7 +716,7 @@
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Discussion Forums | [Lemmy World 🌐🇪🇺](https://lemmy.world) | [Frontpage 🔒🇬🇧🌀](https://frontpage.fyi) | [AT Protocol 🌀](https://atproto.com) | [Reddit (Libred) 🔒🇺🇸](https://github.com/redlib-org/redlib), [Lemmy.ml 🌐🇪🇺](https://lemmy.ml) |
-| ✅ | Microblogging | [Eurosky 🌐🇪🇺🌀](https://eurosky.social), [Bluesky ⚖️🇺🇸🌀](https://bsky.app/profile/overby.me) | | [AT Protocol 🌀](https://atproto.com) | [Mastodon 🌐🇪🇺](https://mas.to/@niclasoverby), [X (X-cancel) 🔒🇺🇸](https://xcancel.com) |
+| ✅ | Microblogging | [Eurosky 🌐🇪🇺🌀](https://eurosky.social), [Bluesky ⚖️🇺🇸🌀](https://bsky.app/profile/overby.me) | | [AT Protocol 🌀](https://atproto.com) | [Mastodon 🌐🇪🇺](https://mas.to/@overby.me@bsky.brid.gy), [X (X-cancel) 🔒🇺🇸](https://xcancel.com) |
 | ✅ | Macroblogging | [Leaflet 🌀](https://leaflet.pub) | | [AT Protocol 🌀](https://atproto.com) | |
 
 #### Media Platforms
