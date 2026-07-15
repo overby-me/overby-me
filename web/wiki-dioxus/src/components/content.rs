@@ -688,7 +688,7 @@ fn is_email(w: &str) -> bool {
 /// them back into the inline emoji character. Returns None for ordinary images: it
 /// only fires when the URL is clearly an emoji one AND every filename segment parses
 /// as a codepoint.
-fn emoji_from_image_url(url: &str) -> Option<String> {
+pub(crate) fn emoji_from_image_url(url: &str) -> Option<String> {
     if !url.to_ascii_lowercase().contains("emoji") {
         return None;
     }

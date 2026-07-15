@@ -5,6 +5,8 @@
 //! Mirrors the reference app's DOCX export, but to ODT.
 
 use serde_json::Value;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// CRC-32 (IEEE, the ZIP variant) of `data`.
 fn crc32(data: &[u8]) -> u32 {
@@ -21,7 +23,7 @@ fn crc32(data: &[u8]) -> u32 {
 
 /// One file to place in the archive.
 struct ZipEntry {
-    name: &'static str,
+    name: String,
     data: Vec<u8>,
 }
 
@@ -244,8 +246,117 @@ fn list_to_odf(block: &Value, style: &str) -> String {
     format!("<text:list text:style-name=\"{style}\">{items}</text:list>")
 }
 
-/// A void `image` block: the old wiki drops images on export, but rather than
-/// lose the reference we emit the source as a link.
+/// One embedded picture in the ODT package: its in-package path (`Pictures/…`),
+/// media type, and bytes.
+struct Picture {
+    path: String,
+    media_type: &'static str,
+    data: Vec<u8>,
+}
+
+/// Detect an image's format from its magic bytes: returns (file extension, ODF
+/// media type, width px, height px). Covers PNG, JPEG and GIF — what the editor
+/// and paste flows produce. `None` if unrecognised or dimensions can't be read.
+fn image_info(bytes: &[u8]) -> Option<(&'static str, &'static str, u32, u32)> {
+    // PNG: 8-byte signature, then IHDR (width/height big-endian at offset 16).
+    if bytes.len() >= 24 && bytes[..8] == [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+        let w = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+        let h = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+        return Some(("png", "image/png", w, h));
+    }
+    // GIF: "GIF8", then width/height little-endian at offset 6.
+    if bytes.len() >= 10 && &bytes[..4] == b"GIF8" {
+        let w = u16::from_le_bytes([bytes[6], bytes[7]]) as u32;
+        let h = u16::from_le_bytes([bytes[8], bytes[9]]) as u32;
+        return Some(("gif", "image/gif", w, h));
+    }
+    // JPEG: starts FF D8; scan segments for a Start-Of-Frame marker (C0..CF,
+    // excluding the restart/APP markers), whose 5th+ bytes hold height then width.
+    if bytes.len() >= 4 && bytes[0] == 0xFF && bytes[1] == 0xD8 {
+        let mut i = 2;
+        while i + 9 < bytes.len() {
+            if bytes[i] != 0xFF {
+                i += 1;
+                continue;
+            }
+            let marker = bytes[i + 1];
+            // SOF0..SOF3, SOF5..SOF7, SOF9..SOF11, SOF13..SOF15 carry dimensions.
+            let is_sof = matches!(marker, 0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF);
+            if is_sof {
+                let h = u16::from_be_bytes([bytes[i + 5], bytes[i + 6]]) as u32;
+                let w = u16::from_be_bytes([bytes[i + 7], bytes[i + 8]]) as u32;
+                return Some(("jpg", "image/jpeg", w, h));
+            }
+            // Skip this segment (2-byte length after the marker).
+            let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+            i += 2 + len;
+        }
+    }
+    None
+}
+
+/// Convert pixel dimensions to the ODF frame's `svg:width`/`svg:height` in cm,
+/// assuming 96 DPI and capping the width to the page's text area (~16.5cm) so a
+/// large image doesn't overflow the margins.
+fn frame_size_cm(w: u32, h: u32) -> (f64, f64) {
+    const MAX_W: f64 = 16.5;
+    let px_to_cm = |px: u32| px as f64 / 96.0 * 2.54;
+    let (mut wc, mut hc) = (px_to_cm(w.max(1)), px_to_cm(h.max(1)));
+    if wc > MAX_W {
+        hc *= MAX_W / wc;
+        wc = MAX_W;
+    }
+    (wc, hc)
+}
+
+/// Fetch an image's bytes for embedding. Returns `None` on any error (network,
+/// CORS, etc.) so the caller can fall back to emitting the URL as a link.
+async fn fetch_image_bytes(url: &str) -> Option<Vec<u8>> {
+    let resp = reqwest::Client::new().get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.bytes().await.ok().map(|b| b.to_vec())
+}
+
+/// An `image` block, embedded into the ODT when its bytes can be fetched and
+/// decoded (recorded in `pics`), else falling back to [`image_to_odf`] (a link).
+/// Facebook-style emoji-image blocks are emitted as their character instead.
+async fn image_block_to_odf(block: &Value, pics: &RefCell<Vec<Picture>>) -> String {
+    let Some(url) = block
+        .get("url")
+        .and_then(|u| u.as_str())
+        .filter(|u| !u.is_empty())
+    else {
+        return String::new();
+    };
+    if let Some(emoji) = crate::components::content::emoji_from_image_url(url) {
+        return format!("<text:p>{}</text:p>", xml_escape(&emoji));
+    }
+    let Some(bytes) = fetch_image_bytes(url).await else {
+        return image_to_odf(block);
+    };
+    let Some((ext, media_type, w, h)) = image_info(&bytes) else {
+        return image_to_odf(block);
+    };
+    let idx = pics.borrow().len() + 1;
+    let path = format!("Pictures/image{idx}.{ext}");
+    pics.borrow_mut().push(Picture {
+        path: path.clone(),
+        media_type,
+        data: bytes,
+    });
+    let (wc, hc) = frame_size_cm(w, h);
+    format!(
+        "<text:p><draw:frame draw:name=\"img{idx}\" text:anchor-type=\"paragraph\" \
+svg:width=\"{wc:.2}cm\" svg:height=\"{hc:.2}cm\" draw:z-index=\"0\">\
+<draw:image xlink:href=\"{path}\" xlink:type=\"simple\" xlink:show=\"embed\" \
+xlink:actuate=\"onLoad\"/></draw:frame></text:p>"
+    )
+}
+
+/// A void `image` block: when the bytes can't be embedded, rather than lose the
+/// reference we emit the source as a link.
 fn image_to_odf(block: &Value) -> String {
     match block
         .get("url")
@@ -325,6 +436,8 @@ xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" \
 xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" \
 xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" \
 xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" \
+xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" \
+xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" \
 xmlns:xlink=\"http://www.w3.org/1999/xlink\" \
 office:version=\"1.2\">\
 {}\
@@ -442,37 +555,56 @@ text:list-tab-stop-position=\"1.5in\" fo:text-indent=\"-0.25in\" fo:margin-left=
 </text:list-style>\
 </office:styles></office:document-styles>";
 
-const MANIFEST_XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+/// The `META-INF/manifest.xml`, listing the parts plus every embedded picture.
+fn manifest_xml(pictures: &[Picture]) -> String {
+    let mut out = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
 <manifest:manifest \
 xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\" \
 manifest:version=\"1.2\">\
 <manifest:file-entry manifest:full-path=\"/\" manifest:version=\"1.2\" \
 manifest:media-type=\"application/vnd.oasis.opendocument.text\"/>\
 <manifest:file-entry manifest:full-path=\"content.xml\" manifest:media-type=\"text/xml\"/>\
-<manifest:file-entry manifest:full-path=\"styles.xml\" manifest:media-type=\"text/xml\"/>\
-</manifest:manifest>";
+<manifest:file-entry manifest:full-path=\"styles.xml\" manifest:media-type=\"text/xml\"/>",
+    );
+    for pic in pictures {
+        out.push_str(&format!(
+            "<manifest:file-entry manifest:full-path=\"{}\" manifest:media-type=\"{}\"/>",
+            pic.path, pic.media_type
+        ));
+    }
+    out.push_str("</manifest:manifest>");
+    out
+}
 
-/// Package a full `content.xml` string into a complete `.odt` archive.
-fn odt_from_content_xml(content: String) -> Vec<u8> {
-    let entries = [
+/// Package a full `content.xml` string (and any embedded `pictures`) into a
+/// complete `.odt` archive.
+fn odt_from_content_xml(content: String, pictures: &[Picture]) -> Vec<u8> {
+    let mut entries = vec![
         // The mimetype must be the first entry and stored uncompressed.
         ZipEntry {
-            name: "mimetype",
+            name: "mimetype".to_string(),
             data: b"application/vnd.oasis.opendocument.text".to_vec(),
         },
         ZipEntry {
-            name: "content.xml",
+            name: "content.xml".to_string(),
             data: content.into_bytes(),
         },
         ZipEntry {
-            name: "styles.xml",
+            name: "styles.xml".to_string(),
             data: STYLES_XML.as_bytes().to_vec(),
         },
         ZipEntry {
-            name: "META-INF/manifest.xml",
-            data: MANIFEST_XML.as_bytes().to_vec(),
+            name: "META-INF/manifest.xml".to_string(),
+            data: manifest_xml(pictures).into_bytes(),
         },
     ];
+    for pic in pictures {
+        entries.push(ZipEntry {
+            name: pic.path.clone(),
+            data: pic.data.clone(),
+        });
+    }
     build_zip(&entries)
 }
 
@@ -480,7 +612,7 @@ fn odt_from_content_xml(content: String) -> Vec<u8> {
 /// Test-only: `export_tree` builds multi-doc ODTs directly.
 #[cfg(test)]
 pub fn build_odt(title: &str, content: Option<&Value>) -> Vec<u8> {
-    odt_from_content_xml(content_xml(title, content))
+    odt_from_content_xml(content_xml(title, content), &[])
 }
 
 /// Trigger a browser download of `bytes` as `filename` with the given `mime`.
@@ -555,11 +687,14 @@ fn export_children(
 }
 
 /// The ODF body for a node and its structural subtree. Boxed: recursive future.
+/// Embedded pictures are collected into `pics` (shared across the recursion) for
+/// packaging alongside the document. `Rc` so the boxed `'static` future can own it.
 fn build_body(
     token: Option<String>,
     node_id: String,
     level: usize,
     prefix: String,
+    pics: Rc<RefCell<Vec<Picture>>>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = String>>> {
     Box::pin(async move {
         let Ok(Some(node)) = crate::graphql::query_node_by_id(token.as_deref(), &node_id).await
@@ -588,10 +723,15 @@ fn build_body(
             }
         }
 
-        // The node's own Slate content.
+        // The node's own Slate content. Image blocks are embedded (async fetch);
+        // everything else renders synchronously.
         if let Some(Value::Array(blocks)) = node.data.as_ref().and_then(|d| d.0.get("content")) {
             for block in blocks {
-                out.push_str(&block_to_odf(block));
+                if block.get("type").and_then(|t| t.as_str()) == Some("image") {
+                    out.push_str(&image_block_to_odf(block, &pics).await);
+                } else {
+                    out.push_str(&block_to_odf(block));
+                }
             }
         }
 
@@ -601,7 +741,14 @@ fn build_body(
         for (child, ordinal) in children.iter().zip(ordinals) {
             let child_prefix = heading_prefix(child.mime_id.as_deref(), ordinal);
             out.push_str(
-                &build_body(token.clone(), child.id.0.clone(), level + 1, child_prefix).await,
+                &build_body(
+                    token.clone(),
+                    child.id.0.clone(),
+                    level + 1,
+                    child_prefix,
+                    pics.clone(),
+                )
+                .await,
             );
         }
         out
@@ -611,8 +758,9 @@ fn build_body(
 /// Recursively export a node (document, policy or whole folder) and everything
 /// nested under it to a single `.odt`, then start the download.
 pub async fn export_tree(token: Option<String>, node_id: String, name: String) {
-    let body = build_body(token, node_id, 1, String::new()).await;
-    let odt = odt_from_content_xml(wrap_content(&body));
+    let pics = Rc::new(RefCell::new(Vec::new()));
+    let body = build_body(token, node_id, 1, String::new(), pics.clone()).await;
+    let odt = odt_from_content_xml(wrap_content(&body), &pics.borrow());
     let filename = format!("{}.odt", sanitize_filename(&name));
     download_bytes(&filename, "application/vnd.oasis.opendocument.text", &odt);
 }
@@ -645,6 +793,39 @@ mod tests {
     fn crc32_matches_known_vector() {
         // CRC-32 of "123456789" is 0xCBF43926.
         assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+    }
+
+    #[test]
+    fn image_info_reads_png_gif_jpeg_dimensions() {
+        // PNG: 8-byte signature, IHDR length + tag, then width/height big-endian.
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        png.extend_from_slice(&[0, 0, 0, 13]);
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&256u32.to_be_bytes());
+        png.extend_from_slice(&200u32.to_be_bytes());
+        assert_eq!(image_info(&png), Some(("png", "image/png", 256, 200)));
+
+        // GIF: "GIF89a" then width/height little-endian.
+        let mut gif = b"GIF89a".to_vec();
+        gif.extend_from_slice(&320u16.to_le_bytes());
+        gif.extend_from_slice(&300u16.to_le_bytes());
+        assert_eq!(image_info(&gif), Some(("gif", "image/gif", 320, 300)));
+
+        // JPEG: FFD8, then an SOF0 segment carrying height then width.
+        let jpg = vec![
+            0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x01, 0x2C, 0x02, 0x58, 0, 0,
+        ];
+        assert_eq!(image_info(&jpg), Some(("jpg", "image/jpeg", 600, 300)));
+
+        assert_eq!(image_info(b"not an image at all"), None);
+    }
+
+    #[test]
+    fn frame_size_caps_width_and_keeps_aspect() {
+        // A huge image is capped to the page text width, height scaled to match.
+        let (w, h) = frame_size_cm(9600, 4800);
+        assert!((w - 16.5).abs() < 0.01, "width capped: {w}");
+        assert!((h - 8.25).abs() < 0.05, "height keeps 2:1 aspect: {h}");
     }
 
     #[test]
