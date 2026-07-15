@@ -1820,6 +1820,8 @@ fn context_permission_objects(ctx_id: &str) -> serde_json::Value {
                 "wiki/file",
                 "vote/position",
                 "vote/candidate",
+                // Replies are a vote/comment under a vote/comment.
+                "vote/comment",
             ],
         ),
         ("speak/speak", "member", &["speak/list"]),

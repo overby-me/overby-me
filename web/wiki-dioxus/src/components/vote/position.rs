@@ -87,16 +87,31 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         // Owner-only: open a poll whose options are the candidates.
         StartPollButton { node: node.clone(), path: path.clone() }
 
-        // Candidate gallery (photos from `data.image`).
-        if !candidates.is_empty() {
+        // Candidate gallery (photos from `data.image`). Shown to authed users even
+        // when empty, so a member can add the first candidate (mirrors add-question,
+        // which is likewise member-insertable).
+        if !candidates.is_empty() || is_auth {
             div { class: "card mt-1",
                 div { class: "card-header",
                     div { class: "avatar small", {icon_el("vote/candidate")} }
                     h3 { class: "title-medium", "{t(\"vote.candidates\")}" }
+                    div { class: "flex-grow" }
+                    if is_auth {
+                        AddCandidateButton {
+                            parent_id: node_id.clone(),
+                            context_id: context_id.clone(),
+                        }
+                    }
+                }
+                if candidates.is_empty() {
+                    p { class: "body-medium text-muted", style: "padding: 0 16px 12px;",
+                        "{t(\"vote.noCandidates\")}"
+                    }
                 }
                 // Candidates in an M3 carousel: a snapping, horizontally scrollable
                 // strip of rounded photo tiles with the name overlaid.
-                crate::components::widgets::Carousel { label: t("vote.candidates"),
+                if !candidates.is_empty() {
+                    crate::components::widgets::Carousel { label: t("vote.candidates"),
                     for cand in candidates.iter() {
                         {
                             let mut full = path.clone();
@@ -139,6 +154,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                             }
                         }
                     }
+                    }
                 }
             }
         }
@@ -174,9 +190,8 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                             let author_id = owner.map(|o| o.id.0.clone());
                             let author_avatar =
                                 owner.map(|o| o.avatar_url.clone()).unwrap_or_default();
-                            let can_del =
-                                q.is_owner.unwrap_or(false) || q.is_context_owner.unwrap_or(false);
-                            let qid = q.id.0.clone();
+                            // Questions are part of the record and carry no delete
+                            // affordance (comments are the deletable discussion type).
                             rsx! {
                                 div { class: "list-item", key: "{q.id.0}",
                                     div { class: "avatar small", "{n + 1}" }
@@ -189,25 +204,6 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                                 user_id: author_id.clone(),
                                                 div { class: "list-item-secondary", "{author}" }
                                             }
-                                        }
-                                    }
-                                    if can_del {
-                                        button {
-                                            class: "btn-icon",
-                                            title: "{t(\"common.delete\")}",
-                                            onclick: move |_| {
-                                                let token = session.read().access_token.clone();
-                                                let qid = qid.clone();
-                                                spawn(async move {
-                                                    if graphql::delete_node(token.as_deref(), &qid)
-                                                        .await
-                                                        .unwrap_or(false)
-                                                    {
-                                                        crate::session::bump_data_version();
-                                                    }
-                                                });
-                                            },
-                                            span { class: "material-icons", "delete" }
                                         }
                                     }
                                 }
@@ -268,6 +264,149 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 
         // Discussion thread for the position, below the candidate gallery.
         crate::components::comments::CommentSection { node_id: node_id.clone(), context_id: context_id.clone() }
+    }
+}
+
+/// Owner control to add a candidate (`vote/candidate`) to an election: a name and
+/// an optional photo (uploaded to NHost storage, stored as `data.image`). This is
+/// the "inline add-candidate" the position view was missing (the photo upload it
+/// depended on already exists as `nhost::upload_file`).
+#[component]
+fn AddCandidateButton(parent_id: String, context_id: Option<String>) -> Element {
+    let session = use_session();
+    let mut open = use_signal(|| false);
+    let mut name = use_signal(String::new);
+    let mut photo_id = use_signal(|| Option::<String>::None);
+    let mut uploading = use_signal(|| false);
+    let mut busy = use_signal(|| false);
+
+    // Upload the chosen photo immediately; the Add button attaches its id.
+    let on_pick = move |evt: FormEvent| {
+        let Some(fd) = evt.files().into_iter().next() else {
+            return;
+        };
+        let fname = fd.name();
+        let ctype = fd.content_type().unwrap_or_default();
+        let token = session.read().access_token.clone();
+        uploading.set(true);
+        photo_id.set(None);
+        spawn(async move {
+            match fd.read_bytes().await {
+                Ok(bytes) => {
+                    match crate::nhost::upload_file(
+                        token.as_deref(),
+                        bytes.to_vec(),
+                        &fname,
+                        &ctype,
+                    )
+                    .await
+                    {
+                        Ok(up) => photo_id.set(Some(up.id)),
+                        Err(e) => crate::snackbar::show_snackbar(&format!(
+                            "{}: {e}",
+                            t("error.somethingWentWrong")
+                        )),
+                    }
+                }
+                Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+            }
+            uploading.set(false);
+        });
+    };
+
+    let submit = {
+        let parent_id = parent_id.clone();
+        let context_id = context_id.clone();
+        move |_| {
+            let cname = name.read().trim().to_string();
+            if cname.is_empty() || *busy.read() || *uploading.read() {
+                return;
+            }
+            let token = session.read().access_token.clone();
+            let parent_id = parent_id.clone();
+            let context_id = context_id.clone();
+            let img = photo_id.read().clone();
+            busy.set(true);
+            spawn(async move {
+                let key = format!(
+                    "{}-{}",
+                    crate::components::loader::slugify(&cname),
+                    js_sys::Date::now() as u64
+                );
+                let data = img.map(|fid| graphql::Jsonb(serde_json::json!({ "image": fid })));
+                let input = graphql::NodesInsertInput {
+                    name: Some(cname),
+                    key: Some(key),
+                    mime_id: Some("vote/candidate".to_string()),
+                    parent_id: Some(graphql::Uuid(parent_id)),
+                    context_id: context_id.map(graphql::Uuid),
+                    data,
+                    mutable: Some(true),
+                    index: None,
+                };
+                match graphql::insert_node(token.as_deref(), input).await {
+                    Ok(_) => {
+                        crate::session::bump_data_version();
+                        busy.set(false);
+                        open.set(false);
+                        name.set(String::new());
+                        photo_id.set(None);
+                    }
+                    Err(e) => {
+                        busy.set(false);
+                        log::error!("add candidate failed: {e}");
+                        crate::snackbar::show_snackbar(&e);
+                    }
+                }
+            });
+        }
+    };
+
+    rsx! {
+        button {
+            class: "btn-icon add-action state-layer",
+            title: "{t(\"vote.addCandidate\")}",
+            aria_label: "{t(\"vote.addCandidate\")}",
+            onclick: move |_| open.set(true),
+            span { class: "material-icons", "add" }
+        }
+        crate::components::widgets::Dialog {
+            open: open(),
+            on_dismiss: move |_| open.set(false),
+            headline: t("vote.addCandidate"),
+            icon: "person".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: name.read().trim().is_empty() || *busy.read() || *uploading.read(),
+                    onclick: submit,
+                    "{t(\"common.add\")}"
+                }
+            },
+            div { class: "text-field",
+                label { "{t(\"member.name\")}" }
+                input {
+                    r#type: "text",
+                    maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
+                    value: "{name}",
+                    oninput: move |e| name.set(e.value()),
+                }
+            }
+            div { class: "text-field mt-2",
+                label { "{t(\"vote.candidatePhoto\")}" }
+                input { r#type: "file", accept: "image/*", onchange: on_pick }
+                if *uploading.read() {
+                    span { class: "body-small text-muted", "{t(\"vote.sending\")}" }
+                } else if photo_id.read().is_some() {
+                    span { class: "body-small", "{t(\"vote.photoReady\")}" }
+                }
+            }
+        }
     }
 }
 

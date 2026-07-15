@@ -227,6 +227,34 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     }
 }
 
+/// Delete a comment and its whole reply subtree, deepest-first, so no orphaned
+/// replies are left pointing at a deleted parent. Best-effort: stops and reports on
+/// the first backend error.
+async fn delete_comment_subtree(token: Option<String>, root: String) -> Result<(), String> {
+    // Discover the subtree (root + all descendants) breadth-first.
+    let mut all = vec![root.clone()];
+    let mut stack = vec![root];
+    let mut guard = 0;
+    while let Some(cur) = stack.pop() {
+        guard += 1;
+        if guard > 500 {
+            break;
+        }
+        for child in graphql::query_comments(token.as_deref(), &cur)
+            .await
+            .unwrap_or_default()
+        {
+            all.push(child.id.0.clone());
+            stack.push(child.id.0.clone());
+        }
+    }
+    // Delete leaves before their parents.
+    for id in all.iter().rev() {
+        graphql::delete_node(token.as_deref(), id).await?;
+    }
+    Ok(())
+}
+
 /// One comment and its nested replies (recursive; each level fetches its own
 /// `vote/comment` children).
 #[component]
@@ -242,6 +270,9 @@ fn CommentThread(
     let is_auth = session.read().is_authenticated();
     let current_user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let mut replying = use_signal(|| false);
+    // The author or a context owner may delete a comment (and its replies).
+    let can_del = comment.is_owner.unwrap_or(false) || comment.is_context_owner.unwrap_or(false);
+    let mut del_confirm = use_signal(|| false);
 
     let cid = comment.id.0.clone();
     let rev = refresh();
@@ -371,6 +402,55 @@ fn CommentThread(
                             span { class: "comment-reply-count",
                                 "{replies.len()} {t(\"vote.replies\")}"
                             }
+                        }
+                        if can_del {
+                            button {
+                                class: "comment-action comment-action-danger",
+                                aria_label: "{t(\"common.delete\")}",
+                                onclick: move |_| del_confirm.set(true),
+                                span { class: "material-icons", "delete" }
+                            }
+                        }
+                    }
+                    if can_del {
+                        super::widgets::Dialog {
+                            open: del_confirm(),
+                            on_dismiss: move |_| del_confirm.set(false),
+                            headline: t("vote.confirmDeleteComment"),
+                            icon: "delete".to_string(),
+                            actions: rsx! {
+                                button {
+                                    class: "btn btn-outlined",
+                                    onclick: move |_| del_confirm.set(false),
+                                    "{t(\"common.cancel\")}"
+                                }
+                                button {
+                                    class: "btn btn-primary",
+                                    onclick: {
+                                        let del_id = comment.id.0.clone();
+                                        move |_| {
+                                            let token = session.read().access_token.clone();
+                                            let del_id = del_id.clone();
+                                            del_confirm.set(false);
+                                            spawn(async move {
+                                                match delete_comment_subtree(token, del_id).await {
+                                                    Ok(()) => {
+                                                        let mut refresh = refresh;
+                                                        refresh += 1;
+                                                        crate::session::bump_data_version();
+                                                    }
+                                                    Err(e) => {
+                                                        log::error!("delete comment failed: {e}");
+                                                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    },
+                                    "{t(\"common.delete\")}"
+                                }
+                            },
+                            p { class: "body-medium", "{t(\"vote.confirmDeleteComment\")}" }
                         }
                     }
                     if replying() {

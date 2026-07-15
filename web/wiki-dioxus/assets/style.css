@@ -5404,6 +5404,11 @@ a.list-item:hover {
 .comment-action:hover {
 	color: var(--md-primary);
 }
+/* The delete affordance tints toward the error colour on hover, so it reads as
+   destructive rather than a neutral action. */
+.comment-action-danger:hover {
+	color: var(--md-error);
+}
 
 .comment-action .material-icons {
 	font-size: 16px;
