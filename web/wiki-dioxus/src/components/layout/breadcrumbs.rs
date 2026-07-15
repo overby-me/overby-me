@@ -5,17 +5,19 @@ use super::*;
 use crate::i18n::t;
 use crate::route::Route;
 
-/// A heading found on the page for the table of contents: (element id, text,
-/// level 1–6, icon). The icon is a `material-icons` ligature, or a single letter
-/// prefixed with `@` for a lettered avatar (a policy's A/B, a folder's initial).
+/// A heading found on the page for the table of contents: (element id, text, TOC
+/// depth, icon). Depth 0 is a hard header (a section/card title or a top-level
+/// document heading — shown bold, flush-left); depth 1+ are nested subheaders,
+/// indented. The icon is a `material-icons` ligature, or a single letter prefixed
+/// with `@` for a lettered avatar (a policy's A/B, a folder's initial).
 type Heading = (String, String, u8, String);
 
 /// The icon/avatar for a TOC entry, reusing the card header's own glyph so the
 /// list mirrors the page. A heading that titles a card/section takes that card's
 /// avatar icon (or its letter avatar); an in-body document heading falls back to a
-/// generic per-level glyph.
-fn heading_icon(el: &web_sys::Element, level: u8) -> String {
-    if let Ok(Some(hdr)) = el.closest(".card-header, .content-hero-veil") {
+/// generic glyph (weightier for hard headers).
+fn heading_icon(hdr: Option<&web_sys::Element>, depth: u8) -> String {
+    if let Some(hdr) = hdr {
         // Prefer the avatar's icon over any incidental icon in the header (e.g. the
         // small "schedule" date icon that sits next to the title).
         for sel in [".avatar .material-icons", ".material-icons"] {
@@ -32,20 +34,30 @@ fn heading_icon(el: &web_sys::Element, level: u8) -> String {
             }
         }
     }
-    // In-body document heading: a plain section glyph, weightier for top levels.
-    if level <= 2 { "segment" } else { "subject" }.to_string()
+    if depth == 0 { "segment" } else { "subject" }.to_string()
 }
 
 /// Scan the content pane for every heading (h1–h6) — document headers AND the
 /// section/card headers rendered by components (amendments, polls, comments, …).
 /// Ensures each has an id (assigning one when missing) so the TOC can scroll to
-/// it, and returns them in document order. Decorative/divider headings (a row of
-/// dashes, a rule — no letters or digits) are skipped.
+/// it, and returns them in document order. Skipped: decorative dividers (dashes,
+/// rules — no letters or digits); UI chrome (the tools/"Actions" sheet, dialogs);
+/// and the page's own title, which just repeats the current breadcrumb.
 fn collect_headings() -> Vec<Heading> {
     let mut out = Vec::new();
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return out;
     };
+    // The open breadcrumb already names the current page; drop a heading that only
+    // repeats it (the document's own title card).
+    let crumb = doc
+        .query_selector(".breadcrumbs .crumb-name.open")
+        .ok()
+        .flatten()
+        .and_then(|e| e.text_content())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let sel = "#main-content h1, #main-content h2, #main-content h3, \
         #main-content h4, #main-content h5, #main-content h6";
     let Ok(nodes) = doc.query_selector_all(sel) else {
@@ -58,24 +70,43 @@ fn collect_headings() -> Vec<Heading> {
         else {
             continue;
         };
-        let text = el.text_content().unwrap_or_default().trim().to_string();
-        // Skip empty headings and decorative dividers (dashes/rules with no label).
-        if text.is_empty() || !text.chars().any(char::is_alphanumeric) {
+        // Skip UI chrome (the tools/"Actions" sheet, dialogs), not page content.
+        if matches!(el.closest(".tool-sheet, .m3-dialog"), Ok(Some(_))) {
             continue;
         }
-        let level = el
+        let text = el.text_content().unwrap_or_default().trim().to_string();
+        // Skip empty headings, decorative dividers, and the redundant page title.
+        if text.is_empty()
+            || !text.chars().any(char::is_alphanumeric)
+            || (!crumb.is_empty() && text == crumb)
+        {
+            continue;
+        }
+        let dom_level = el
             .tag_name()
             .to_lowercase()
             .strip_prefix('h')
             .and_then(|n| n.parse::<u8>().ok())
             .unwrap_or(3);
+        // A section/card header (Comments, a poll, …) is a hard header regardless of
+        // its DOM tag, as is a top-level document heading (h1/h2). Deeper document
+        // headings nest by their level.
+        let hdr = el
+            .closest(".card-header, .content-hero-veil")
+            .ok()
+            .flatten();
+        let depth = if hdr.is_some() || dom_level <= 2 {
+            0
+        } else {
+            (dom_level - 2).min(3)
+        };
         let mut id = el.id();
         if id.is_empty() {
             id = format!("toc-h{i}");
             el.set_id(&id);
         }
-        let icon = heading_icon(&el, level);
-        out.push((id, text, level, icon));
+        let icon = heading_icon(hdr.as_ref(), depth);
+        out.push((id, text, depth, icon));
     }
     out
 }
