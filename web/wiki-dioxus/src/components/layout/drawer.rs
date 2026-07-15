@@ -237,6 +237,9 @@ pub(super) fn DrawerNodeItem(
                 ordinal,
                 mutable: node.mutable,
                 small: true,
+                // The drawer tree reads as a plain icon list (like the old wiki),
+                // not a column of coloured avatar circles.
+                bare: true,
             }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{node.name}" }

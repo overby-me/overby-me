@@ -1423,6 +1423,17 @@ html {
 	flex: 0 0 auto;
 }
 
+/* Bare node icon (drawer tree): the plain mime icon in the avatar's footprint,
+   no coloured circle — a lighter, old-wiki-style icon list. */
+.node-tree-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	color: var(--md-on-surface-variant);
+}
+
 .avatar-badge {
 	position: absolute;
 	right: -3px;

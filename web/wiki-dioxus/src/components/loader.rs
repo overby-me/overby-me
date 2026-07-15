@@ -650,11 +650,26 @@ pub fn NodeAvatar(
     ordinal: Option<usize>,
     mutable: bool,
     small: bool,
+    /// Render just the bare mime icon (no avatar circle), as the old wiki's node
+    /// tree did — used in the drawer so the tree reads as a plain icon list.
+    #[props(default)]
+    bare: bool,
 ) -> Element {
-    let cls = if small { "avatar small" } else { "avatar" };
+    let inner = if bare {
+        icon_el(&mime)
+    } else {
+        node_avatar(&mime, &name, ordinal)
+    };
+    let cls = if bare {
+        "node-tree-icon"
+    } else if small {
+        "avatar small"
+    } else {
+        "avatar"
+    };
     rsx! {
         div { class: "avatar-badged",
-            div { class: "{cls}", {node_avatar(&mime, &name, ordinal)} }
+            div { class: "{cls}", {inner} }
             if mutable {
                 span { class: "avatar-badge", title: "{t(\"layout.notSubmitted\")}",
                     span { class: "material-icons", "lock_open" }
