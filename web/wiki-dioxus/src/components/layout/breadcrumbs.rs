@@ -95,6 +95,30 @@ pub(super) fn Breadcrumbs() -> Element {
                     app_crumb: true,
                 }
             }
+            // Copy a shareable link to the current content — universal across every
+            // node view (documents, folders, polls, positions, …), shown whenever
+            // the path points at a node. `decodeURI` keeps Unicode (æøå) literal
+            // rather than percent-encoded, which modern browsers handle fine.
+            if !segments.is_empty() {
+                button {
+                    class: "btn-icon crumb-copy state-layer",
+                    title: "{t(\"common.copyLink\")}",
+                    aria_label: "{t(\"common.copyLink\")}",
+                    onclick: move |_| {
+                        if let Some(win) = web_sys::window() {
+                            if let Ok(href) = win.location().href() {
+                                let link = js_sys::decode_uri(&href)
+                                    .ok()
+                                    .map(String::from)
+                                    .unwrap_or(href);
+                                let _ = win.navigator().clipboard().write_text(&link);
+                                crate::snackbar::show_snackbar(&t("common.linkCopied"));
+                            }
+                        }
+                    },
+                    span { class: "material-icons", "link" }
+                }
+            }
         }
     }
 }

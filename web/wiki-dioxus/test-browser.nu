@@ -642,6 +642,8 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     let sel_ctx = (wd-execute $session_id 'return "/"+location.pathname.split("/")[1]')
 
     let r = (assert-exists $session_id "context view renders a card" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+    # A copy-link action lives in the breadcrumbs bar on every content page.
+    let r = (assert-exists $session_id "copy-link action in breadcrumbs" ".breadcrumbs .crumb-copy" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (check-contrast $session_id "context view (drawer + app rail + bar)" $p $fl); $p = $r.passed; $fl = $r.failed
     capture-shots $session_id "context"
 
@@ -1450,6 +1452,26 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
         }
     } else {
         log-fail "comment composer missing on the policy"; $fl = $fl + 1
+    }
+
+    # ── Add a speaker list (UI: owner action in the speak app), verified via backend ──
+    wd-navigate $session_id $"(base-url)/($setup.groupKey)?app=speak"
+    if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main button")].some(function(b){return b.textContent.indexOf("New speaker list")>=0})?"y":"n"' 8000) {
+        log-ok "add-speaker-list control shown (owner)"; $p = $p + 1
+        wd-execute $session_id 'var b=[...document.querySelectorAll("#main button")].find(function(b){return b.textContent.indexOf("New speaker list")>=0});if(b)b.click();return 1' | ignore
+        sleep 500ms
+        wd-execute $session_id 'var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="Talerliste 1";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1' | ignore
+        sleep 400ms
+        wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
+        sleep 1800ms
+        let lres = (try { wd-execute $session_id ($gql + 'var G="' + $setup.group + '";var r=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"speak/list\"}}){id}}",{p:G});var n=0;try{n=r.data.nodes.length}catch(e){}return JSON.stringify({lists:n});') | from json } catch { {lists: 0} })
+        if (($lres.lists | default 0) >= 1) {
+            log-ok $"speaker list created \(lists=($lres.lists)\)"; $p = $p + 1
+        } else {
+            log-fail "speaker list not created"; $fl = $fl + 1
+        }
+    } else {
+        log-fail "add-speaker-list control missing in the speak app"; $fl = $fl + 1
     }
 
     # ── Teardown (always runs): delete the whole group subtree + its permissions

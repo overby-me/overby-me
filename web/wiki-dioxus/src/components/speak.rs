@@ -39,6 +39,10 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
         .cloned()
         .collect();
 
+    // The owner may create additional speaker lists (a context can hold several);
+    // never on the projector.
+    let can_add = is_owner && !screen;
+
     if lists.is_empty() {
         return rsx! {
             div { class: "card",
@@ -47,7 +51,12 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "record_voice_over" }
                     }
-                    p { class: "empty-state-body", "{t(\"speak.emptyList\")}" }
+                    p { class: "empty-state-body", "{t(\"speak.noLists\")}" }
+                    if can_add {
+                        div { class: "mt-2",
+                            AddSpeakerListButton { context_id: context_id.0.clone() }
+                        }
+                    }
                 }
             }
         };
@@ -55,6 +64,11 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
 
     rsx! {
         div { class: "stack stack-v",
+            if can_add {
+                div { class: "stack stack-h", style: "justify-content: flex-end;",
+                    AddSpeakerListButton { context_id: context_id.0.clone() }
+                }
+            }
             for list in lists {
                 SpeakList {
                     key: "{list.id.0}",
@@ -64,6 +78,80 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
                     is_owner,
                     screen,
                     current_user_id: user_id.clone(),
+                }
+            }
+        }
+    }
+}
+
+/// Owner-only: create a new speaker list in this context. Opens a name dialog and
+/// drives [`graphql::create_speaker_list`] (which grants the context the
+/// speak/list permission first if it lacks it). A context may hold several lists.
+#[component]
+fn AddSpeakerListButton(context_id: String) -> Element {
+    let session = use_session();
+    let mut open = use_signal(|| false);
+    let mut name = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+
+    let submit = move |_| {
+        let title = name.read().trim().to_string();
+        if title.is_empty() || *busy.read() {
+            return;
+        }
+        let key = crate::components::loader::slugify(&title);
+        let ctx = context_id.clone();
+        let token = session.read().access_token.clone();
+        busy.set(true);
+        spawn(async move {
+            match graphql::create_speaker_list(token.as_deref(), &ctx, &title, &key).await {
+                Ok(_) => {
+                    crate::session::bump_data_version();
+                    busy.set(false);
+                    open.set(false);
+                    name.set(String::new());
+                }
+                Err(e) => {
+                    busy.set(false);
+                    log::error!("create speaker list failed: {e}");
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                }
+            }
+        });
+    };
+
+    rsx! {
+        button {
+            class: "btn btn-tonal",
+            onclick: move |_| open.set(true),
+            span { class: "material-icons", "add" }
+            " {t(\"speak.newList\")}"
+        }
+        crate::components::widgets::Dialog {
+            open: open(),
+            on_dismiss: move |_| open.set(false),
+            headline: t("speak.newList"),
+            icon: "record_voice_over".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: name.read().trim().is_empty() || *busy.read(),
+                    onclick: submit,
+                    "{t(\"common.add\")}"
+                }
+            },
+            div { class: "text-field",
+                label { "{t(\"common.title\")}" }
+                input {
+                    r#type: "text",
+                    maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
+                    value: "{name}",
+                    oninput: move |e| name.set(e.value()),
                 }
             }
         }

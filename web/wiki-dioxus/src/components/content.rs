@@ -34,6 +34,16 @@ pub(crate) fn safe_href(url: &str) -> String {
 pub fn ContentApp(node: NodeWithChildren) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
+    // Whether the user has a linked Bluesky account — gates the "share to Bluesky"
+    // tools action so it only appears when sharing would actually work.
+    let link_token = session.read().access_token.clone();
+    let bsky_link = crate::use_data_resource!(|(link_token)| async move {
+        match link_token {
+            Some(t) => crate::nhost::atproto_status(&t).await.linked,
+            None => false,
+        }
+    });
+    let bsky_linked = (*bsky_link.read()).unwrap_or(false);
     let nav = use_navigator();
     let route = use_route::<Route>();
     let segments: Vec<String> = match &route {
@@ -155,23 +165,10 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     span { class: "material-icons", "download" }
                     "{t(\"folder.export\")}"
                 }
-                // DESIGN (functional): copy a shareable link to this page.
-                button {
-                    class: "sheet-action",
-                    onclick: move |_| {
-                        if let Some(win) = web_sys::window() {
-                            if let Ok(href) = win.location().href() {
-                                let _ = win.navigator().clipboard().write_text(&href);
-                                crate::snackbar::show_snackbar(&t("common.linkCopied"));
-                            }
-                        }
-                    },
-                    span { class: "material-icons", "link" }
-                    "{t(\"common.copyLink\")}"
-                }
-                // Share this page to the signed-in user's linked Bluesky account
-                // (posts the title + link; guides them to link if they haven't).
-                if is_auth {
+                // (Copy-link now lives universally in the breadcrumbs bar.)
+                // Share this page to the signed-in user's linked Bluesky account.
+                // Only shown once a Bluesky account is actually linked.
+                if is_auth && bsky_linked {
                     button {
                         class: "sheet-action",
                         onclick: {

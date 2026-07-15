@@ -1784,6 +1784,12 @@ fn context_permission_objects(ctx_id: &str) -> serde_json::Value {
             "owner",
             &["wiki/event", "wiki/folder", "wiki/group"],
         ),
+        // Speaker lists (talerlister): owner-managed, one or more per context.
+        (
+            "speak/list",
+            "owner",
+            &["wiki/event", "wiki/group", "wiki/folder"],
+        ),
     ];
     let objs: Vec<serde_json::Value> = rules
         .iter()
@@ -1856,6 +1862,56 @@ pub async fn create_context(
     )
     .await?;
     Ok(inserted)
+}
+
+/// Create a new speaker list (`speak/list`) under `context_id`. A context can hold
+/// several lists. Older contexts predate the speak/list permission, so — since the
+/// owner may seed permissions for their own context — this first grants speak/list
+/// there if it is missing, then inserts the list.
+pub async fn create_speaker_list(
+    access_token: Option<&str>,
+    context_id: &str,
+    name: &str,
+    key: &str,
+) -> Result<InsertedNode, String> {
+    let can_insert = node_insert_mimes(access_token, context_id)
+        .await
+        .iter()
+        .any(|m| m == "speak/list");
+    if !can_insert {
+        execute_raw_vars(
+            access_token,
+            "mutation($objs: [permissions_insert_input!]!) { insertPermissions(objects: $objs) { affected_rows } }",
+            serde_json::json!({ "objs": [{
+                "contextId": context_id,
+                "nodeId": context_id,
+                "mimeId": "speak/list",
+                "role": "owner",
+                "parents": ["wiki/event", "wiki/group", "wiki/folder"],
+                "active": true,
+                "insert": true,
+                "select": true,
+                "update": true,
+                "delete": true,
+            }] }),
+        )
+        .await?;
+    }
+    insert_node(
+        access_token,
+        NodesInsertInput {
+            name: Some(name.to_string()),
+            key: Some(key.to_string()),
+            mime_id: Some("speak/list".to_string()),
+            parent_id: Some(Uuid(context_id.to_string())),
+            context_id: Some(Uuid(context_id.to_string())),
+            data: None,
+            mutable: Some(true),
+            index: None,
+        },
+    )
+    .await?
+    .ok_or_else(|| "insert returned no list".to_string())
 }
 
 /// Recursively deep-copy a node and its whole subtree (data + members) under
