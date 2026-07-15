@@ -50,6 +50,41 @@ pub async fn atproto_status(token: &str) -> AtprotoLink {
     }
 }
 
+/// A Bluesky account suggestion for the link-handle typeahead.
+#[derive(Clone, PartialEq, Deserialize, Default)]
+pub struct BskyActor {
+    pub handle: String,
+    #[serde(rename = "displayName", default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub avatar: String,
+}
+
+/// Typeahead search for Bluesky accounts matching `query`, via the public AppView
+/// (no auth needed). Powers the preview of matching handles in the link-account
+/// field. Returns an empty list on any error or a too-short query.
+pub async fn search_bsky_actors(query: &str) -> Vec<BskyActor> {
+    let q = query.trim();
+    if q.len() < 2 {
+        return Vec::new();
+    }
+    let url = "https://public.api.bsky.app/xrpc/app.bsky.actor.searchActorsTypeahead";
+    match reqwest::Client::new()
+        .get(url)
+        .query(&[("q", q), ("limit", "6")])
+        .send()
+        .await
+    {
+        Ok(resp) => resp
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| serde_json::from_value(v.get("actors").cloned().unwrap_or_default()).ok())
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Unlink the caller's Bluesky account via the backend. Returns true on success.
 pub async fn atproto_unlink(token: &str) -> bool {
     let url = format!("{BACKEND_URL}/atproto/unlink");

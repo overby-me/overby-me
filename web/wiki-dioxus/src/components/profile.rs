@@ -32,6 +32,23 @@ pub fn ProfileApp() -> Element {
         }
     });
 
+    // Bluesky handle typeahead: preview matching accounts as the user types, so
+    // they can pick their handle instead of typing it exactly. Hidden once a
+    // suggestion is chosen (until they edit the field again).
+    let mut sug_dismissed = use_signal(|| false);
+    let suggestions = crate::use_data_resource!(move || {
+        let q = bsky_handle.read().trim().to_string();
+        async move {
+            if q.len() < 2 {
+                return Vec::new();
+            }
+            // Debounce: while the user keeps typing, this resource re-runs and the
+            // pending future is dropped before the request fires.
+            gloo_timers::future::TimeoutFuture::new(220).await;
+            crate::nhost::search_bsky_actors(&q).await
+        }
+    });
+
     // Background Web Push (#128): whether THIS browser is subscribed (None until
     // the async check resolves). Declared before the early return for hook order.
     let mut push_on = use_signal(|| None::<bool>);
@@ -159,8 +176,49 @@ pub fn ProfileApp() -> Element {
                         input {
                             r#type: "text",
                             placeholder: "alice.bsky.social",
+                            autocomplete: "off",
                             value: "{bsky_handle}",
-                            oninput: move |e| bsky_handle.set(e.value()),
+                            oninput: move |e| {
+                                bsky_handle.set(e.value());
+                                sug_dismissed.set(false);
+                            },
+                        }
+                    }
+                    // Live preview of matching Bluesky accounts — click to pick.
+                    {
+                        let items = suggestions.read().clone().unwrap_or_default();
+                        if !items.is_empty() && !*sug_dismissed.read() {
+                            rsx! {
+                                div { class: "list mt-1",
+                                    for actor in items.iter() {
+                                        {
+                                            let handle = actor.handle.clone();
+                                            rsx! {
+                                                div {
+                                                    key: "{actor.handle}",
+                                                    class: "list-item",
+                                                    style: "cursor: pointer;",
+                                                    onclick: move |_| {
+                                                        bsky_handle.set(handle.clone());
+                                                        sug_dismissed.set(true);
+                                                    },
+                                                    div { class: "avatar small",
+                                                        {user_avatar(&actor.avatar, icon_el("wiki/user"))}
+                                                    }
+                                                    div { class: "list-item-text",
+                                                        div { class: "list-item-primary", "@{actor.handle}" }
+                                                        if !actor.display_name.is_empty() {
+                                                            div { class: "list-item-secondary", "{actor.display_name}" }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {}
                         }
                     }
                     button {
