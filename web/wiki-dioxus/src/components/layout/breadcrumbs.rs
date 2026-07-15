@@ -63,6 +63,45 @@ fn scroll_to_id(id: &str) {
     }
 }
 
+/// Global TOC popover state. Rendered by `Layout` at the app-shell level, NOT
+/// inside the breadcrumbs bar — the bar has `overflow` + a `transform`, either of
+/// which would clip/trap the popover. The current-crumb trigger just sets these.
+pub(super) static TOC_OPEN: GlobalSignal<bool> = Signal::global(|| false);
+static TOC_ITEMS: GlobalSignal<Vec<Heading>> = Signal::global(Vec::new);
+
+/// The page table-of-contents popover, rendered outside the (clipped, transformed)
+/// breadcrumbs bar so it is actually visible. Opened by clicking the current crumb.
+#[component]
+pub(super) fn TocPopover() -> Element {
+    if !TOC_OPEN() {
+        return rsx! {};
+    }
+    let items = TOC_ITEMS();
+    rsx! {
+        div { class: "toc-scrim", onclick: move |_| { *TOC_OPEN.write() = false; } }
+        nav { class: "toc-popover", "aria-label": t("toc.title"),
+            if items.is_empty() {
+                div { class: "toc-empty body-medium text-muted", "{t(\"toc.empty\")}" }
+            } else {
+                for (id , text , level) in items.iter() {
+                    button {
+                        key: "{id}",
+                        class: "toc-item toc-level-{level}",
+                        onclick: {
+                            let id = id.clone();
+                            move |_| {
+                                scroll_to_id(&id);
+                                *TOC_OPEN.write() = false;
+                            }
+                        },
+                        "{text}"
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Breadcrumb navigation based on the current route. Mirrors the old wiki: a row
 /// of mime avatars (each path node); only the current node's name is shown, and
 /// hovering a crumb reveals its name (the whole bar resets on mouse-leave). The
@@ -197,50 +236,25 @@ pub(super) fn BreadcrumbCrumb(
     #[props(default)]
     toc_trigger: bool,
 ) -> Element {
-    let mut toc_open = use_signal(|| false);
-    let mut headings = use_signal(Vec::<Heading>::new);
-
     if toc_trigger {
+        // The current crumb toggles the page TOC; the popover itself is rendered by
+        // `Layout` (via `TocPopover`) OUTSIDE this overflow-clipped, transformed bar.
         return rsx! {
             div { class: if app_crumb { "crumb app-crumb crumb-toc" } else { "crumb crumb-toc" },
                 div {
                     class: "crumb-link",
                     style: "cursor: pointer;",
                     onclick: move |_| {
-                        let now = !*toc_open.read();
+                        let now = !TOC_OPEN();
                         if now {
-                            headings.set(collect_headings());
+                            *TOC_ITEMS.write() = collect_headings();
                         }
-                        toc_open.set(now);
+                        *TOC_OPEN.write() = now;
                     },
                     div { class: "avatar small crumb-avatar",
                         {crate::components::loader::node_avatar(&mime, &name, ordinal)}
                     }
                     span { class: "crumb-name open", "{name}" }
-                }
-                if toc_open() {
-                    // Click-away scrim + the popover of headings.
-                    div { class: "toc-scrim", onclick: move |_| toc_open.set(false) }
-                    nav { class: "toc-popover", "aria-label": t("toc.title"),
-                        if headings.read().is_empty() {
-                            div { class: "toc-empty body-medium text-muted", "{t(\"toc.empty\")}" }
-                        } else {
-                            for (id , text , level) in headings.read().iter() {
-                                button {
-                                    key: "{id}",
-                                    class: "toc-item toc-level-{level}",
-                                    onclick: {
-                                        let id = id.clone();
-                                        move |_| {
-                                            scroll_to_id(&id);
-                                            toc_open.set(false);
-                                        }
-                                    },
-                                    "{text}"
-                                }
-                            }
-                        }
-                    }
                 }
             }
         };

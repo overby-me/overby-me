@@ -318,6 +318,11 @@ pub fn Layout() -> Element {
                 }
             }
 
+            // Page table-of-contents popover (opened by clicking the current crumb).
+            // Rendered here, at the app-shell root, so it escapes the breadcrumbs bar's
+            // overflow clip and transform containing-block.
+            breadcrumbs::TocPopover {}
+
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
 

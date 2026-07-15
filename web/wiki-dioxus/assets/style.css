@@ -3414,10 +3414,14 @@ h6,
 	inset: 0;
 	z-index: 300;
 }
+/* Rendered at the app-shell root (not inside the breadcrumbs bar), because the bar
+   sets `overflow: auto/hidden` (to scroll long trails) AND its ancestor carries a
+   `transform` — either would clip/trap the popover. Anchored just under the top bar
+   on medium+, and above the bottom dock on compact. */
 .toc-popover {
-	position: absolute;
-	top: calc(100% + var(--md-sys-spacing-1));
-	left: 0;
+	position: fixed;
+	top: 64px;
+	left: 12px;
 	z-index: 301;
 	min-width: 220px;
 	max-width: 340px;
@@ -3429,6 +3433,10 @@ h6,
 	padding: var(--md-sys-spacing-1);
 	display: flex;
 	flex-direction: column;
+}
+.app-shell[data-size-class="compact"] .toc-popover {
+	top: auto;
+	bottom: 84px;
 }
 .toc-item {
 	display: block;
