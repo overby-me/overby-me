@@ -38,6 +38,16 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let node_id = node.id.0.clone();
     let context_id = node.context_id.clone().map(|c| c.0);
     let mut q_text = use_signal(String::new);
+    // Optimistic questions: (key, text) rows shown at once, reconciled by key.
+    let mut pending_q = use_signal(Vec::<(String, String)>::new);
+    // Drop optimistic questions once the real node (same key) has come back.
+    let q_keys: std::collections::HashSet<String> =
+        questions.iter().map(|q| q.key.clone()).collect();
+    let pending_q_shown = crate::components::optimistic::reconcile_by_key(
+        &pending_q.read(),
+        |p| p.0.as_str(),
+        &q_keys,
+    );
 
     // Anyone who is part of this group/event (a member) may add a candidature —
     // vote/candidate is member-insertable. Ask the permission resolver what the
@@ -70,10 +80,15 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
             let node_id = node_id.clone();
             let context_id = context_id.clone();
             let author = session.read().user.as_ref().map(|u| u.display_name.clone());
+            let key = format!("q{}", js_sys::Date::now() as u64);
+            // Optimistic: show the question now (a muted pending row) and clear the
+            // input; reconciled by key, restored on error.
+            pending_q.write().push((key.clone(), text.clone()));
+            q_text.set(String::new());
             spawn(async move {
                 let input = graphql::NodesInsertInput {
                     name: author,
-                    key: Some(format!("q{}", js_sys::Date::now() as u64)),
+                    key: Some(key.clone()),
                     mime_id: Some("vote/question".to_string()),
                     parent_id: Some(graphql::Uuid(node_id)),
                     context_id: context_id.map(graphql::Uuid),
@@ -81,14 +96,12 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     mutable: Some(false),
                     index: None,
                 };
-                // Only clear the field once the question is actually stored, so a
-                // failed insert does not silently discard the typed text.
                 match graphql::insert_node(token.as_deref(), input).await {
-                    Ok(_) => {
-                        q_text.set(String::new());
-                        crate::session::bump_data_version();
-                    }
+                    Ok(_) => crate::session::bump_data_version(),
                     Err(e) => {
+                        // Roll back the optimistic row and restore the typed text.
+                        pending_q.write().retain(|p| p.0 != key);
+                        q_text.set(text);
                         log::error!("add question failed: {e}");
                         crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                     }
@@ -181,7 +194,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                 div { class: "avatar small", {icon_el("vote/question")} }
                 h3 { class: "title-medium", "{t(\"vote.questions\")}" }
             }
-            if questions.is_empty() {
+            if questions.is_empty() && pending_q_shown.is_empty() {
                 div { class: "card-content",
                     p { class: "body-medium", class: "text-muted", "{t(\"vote.noQuestions\")}" }
                 }
@@ -223,6 +236,16 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                    // Optimistic questions (muted "sending" rows), dropped on confirm.
+                    for (i , p) in pending_q_shown.iter().enumerate() {
+                        div { key: "{p.0}", class: "list-item is-pending",
+                            div { class: "avatar small", "{questions.len() + i + 1}" }
+                            div { class: "list-item-text",
+                                div { class: "list-item-primary", "{p.1}" }
+                                div { class: "list-item-secondary", "{t(\"vote.sending\")}" }
                             }
                         }
                     }

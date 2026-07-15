@@ -50,7 +50,18 @@ pub fn FolderApp(
     // Owner-only admin (reorder), and the folder "lock": adding children is only
     // offered when the node is `attachable`. Mirrors React FolderDial/AddContentFab.
     let is_context_owner = node.is_context_owner.unwrap_or(false);
-    let attachable = node.attachable;
+    // Optimistic lock/unlock: flip the attachable state at once, reconcile against
+    // the refetched node, revert on error.
+    let mut attachable_opt = use_signal(|| None::<bool>);
+    {
+        let na = node.attachable;
+        use_effect(use_reactive!(|(na)| {
+            if *attachable_opt.peek() == Some(na) {
+                attachable_opt.set(None);
+            }
+        }));
+    }
+    let attachable = attachable_opt().unwrap_or(node.attachable);
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let access_token = session.read().access_token.clone();
     let name = node.name.clone();
@@ -296,17 +307,27 @@ pub fn FolderApp(
                                     move |_| {
                                         let token = session.read().access_token.clone();
                                         let id = id.clone();
+                                        let new_val = !attachable;
+                                        // Optimistic: flip the lock icon now.
+                                        attachable_opt.set(Some(new_val));
                                         spawn(async move {
-                                            let _ = graphql::update_node(
+                                            match graphql::update_node(
                                                 token.as_deref(),
                                                 &id,
                                                 graphql::NodesSetInput {
-                                                    attachable: Some(!attachable),
+                                                    attachable: Some(new_val),
                                                     ..Default::default()
                                                 },
                                             )
-                                            .await;
-                                            crate::session::bump_data_version();
+                                            .await
+                                            {
+                                                Ok(_) => crate::session::bump_data_version(),
+                                                Err(e) => {
+                                                    attachable_opt.set(None);
+                                                    log::error!("lock toggle failed: {e}");
+                                                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                }
+                                            }
                                         });
                                     }
                                 },

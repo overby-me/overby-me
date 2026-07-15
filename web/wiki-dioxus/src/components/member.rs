@@ -527,8 +527,23 @@ fn MemberTableRow(
     let session = use_session();
     let mid = member.id.0.clone();
     let owner = member.owner;
-    let active = member.active;
-    let hidden = member.hidden;
+    // Optimistic attendance/visibility toggles: flip the chip at once, reconcile
+    // against the refetched member, revert on error.
+    let mut active_opt = use_signal(|| None::<bool>);
+    let mut hidden_opt = use_signal(|| None::<bool>);
+    {
+        let (ma, mh) = (member.active, member.hidden);
+        use_effect(use_reactive!(|(ma, mh)| {
+            if *active_opt.peek() == Some(ma) {
+                active_opt.set(None);
+            }
+            if *hidden_opt.peek() == Some(mh) {
+                hidden_opt.set(None);
+            }
+        }));
+    }
+    let active = active_opt().unwrap_or(member.active);
+    let hidden = hidden_opt().unwrap_or(member.hidden);
     let (status_icon, status_label) = member_status(&member);
     let avatar_url = member
         .user
@@ -626,11 +641,21 @@ fn MemberTableRow(
                             title: if active { "{t(\"member.deactivate\")}" } else { "{t(\"member.activate\")}" },
                             onclick: {
                                 let mid = mid.clone();
-                                move |_| apply_member_update(
-                                    session.read().access_token.clone(),
-                                    mid.clone(),
-                                    MembersSetInput { active: Some(!active), ..Default::default() },
-                                )
+                                move |_| {
+                                    let new_val = !active;
+                                    let token = session.read().access_token.clone();
+                                    let id = mid.clone();
+                                    active_opt.set(Some(new_val));
+                                    spawn(async move {
+                                        match graphql::update_member(token.as_deref(), &id, MembersSetInput { active: Some(new_val), ..Default::default() }).await {
+                                            Ok(true) => crate::session::bump_data_version(),
+                                            _ => {
+                                                active_opt.set(None);
+                                                show_snackbar(&t("error.somethingWentWrong"));
+                                            }
+                                        }
+                                    });
+                                }
                             },
                             span { class: "material-icons",
                                 if active { "check_circle" } else { "radio_button_unchecked" }
@@ -642,11 +667,21 @@ fn MemberTableRow(
                             title: if hidden { "{t(\"member.show\")}" } else { "{t(\"member.hide\")}" },
                             onclick: {
                                 let mid = mid.clone();
-                                move |_| apply_member_update(
-                                    session.read().access_token.clone(),
-                                    mid.clone(),
-                                    MembersSetInput { hidden: Some(!hidden), ..Default::default() },
-                                )
+                                move |_| {
+                                    let new_val = !hidden;
+                                    let token = session.read().access_token.clone();
+                                    let id = mid.clone();
+                                    hidden_opt.set(Some(new_val));
+                                    spawn(async move {
+                                        match graphql::update_member(token.as_deref(), &id, MembersSetInput { hidden: Some(new_val), ..Default::default() }).await {
+                                            Ok(true) => crate::session::bump_data_version(),
+                                            _ => {
+                                                hidden_opt.set(None);
+                                                show_snackbar(&t("error.somethingWentWrong"));
+                                            }
+                                        }
+                                    });
+                                }
                             },
                             span { class: "material-icons", if hidden { "visibility" } else { "visibility_off" } }
                         }
