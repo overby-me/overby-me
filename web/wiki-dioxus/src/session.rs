@@ -188,6 +188,66 @@ pub fn expires_at_from(expires_in: Option<i64>) -> Option<f64> {
     expires_in.map(|secs| now_ms() + secs as f64 * 1000.0)
 }
 
+/// The client-to-server clock offset in ms (how far the server clock is ahead of
+/// this device's). Derived for free from the access token: the JWT's server-issued
+/// `exp` claim minus the client-computed `access_token_expires_at` (both captured at
+/// token receipt) cancels the token lifetime and leaves the clock skew. Used to
+/// align the speaker-list countdown across devices (the countdown is computed from a
+/// DB timestamp, so a device with a wrong clock would otherwise drift). Returns 0
+/// when the token or expiry is missing or unparseable, i.e. the previous
+/// device-clock behaviour.
+pub fn server_clock_offset_ms() -> f64 {
+    let s = SESSION.read();
+    let (Some(token), Some(expires_at)) = (s.access_token.as_ref(), s.access_token_expires_at)
+    else {
+        return 0.0;
+    };
+    match jwt_exp_ms(token) {
+        Some(exp_ms) => exp_ms - expires_at,
+        None => 0.0,
+    }
+}
+
+/// The `exp` claim (ms epoch) from a JWT's payload segment, or None if it cannot be
+/// decoded. Only reads the standard `exp` number; the signature is not verified (the
+/// server does that), this is purely to read the server's notion of time.
+fn jwt_exp_ms(token: &str) -> Option<f64> {
+    let payload = token.split('.').nth(1)?;
+    let bytes = b64url_decode(payload)?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    v.get("exp").and_then(|e| e.as_f64()).map(|s| s * 1000.0)
+}
+
+/// Minimal base64url decoder (no padding required), enough to read a JWT payload
+/// without pulling in a base64 crate.
+fn b64url_decode(input: &str) -> Option<Vec<u8>> {
+    fn val(c: u8) -> Option<u32> {
+        match c {
+            b'A'..=b'Z' => Some((c - b'A') as u32),
+            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
+            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
+            b'-' => Some(62),
+            b'_' => Some(63),
+            _ => None,
+        }
+    }
+    let mut buf = 0u32;
+    let mut bits = 0u8;
+    let mut out = Vec::new();
+    for c in input.bytes() {
+        if c == b'=' {
+            break;
+        }
+        buf = (buf << 6) | val(c)?;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
 /// Signal from the visibility listener that the tab just became visible.
 pub fn nudge_refresh() {
     VISIBILITY_NUDGE.store(true, Ordering::SeqCst);
@@ -343,5 +403,28 @@ pub async fn run_token_refresh() {
         if nudged || due_to_refresh() {
             refresh_access_token().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{b64url_decode, jwt_exp_ms};
+
+    #[test]
+    fn b64url_decodes_without_padding() {
+        assert_eq!(b64url_decode("aGVsbG8").as_deref(), Some(&b"hello"[..]));
+    }
+
+    #[test]
+    fn jwt_exp_reads_expiry_in_ms() {
+        // Payload {"exp":1700000000,"sub":"x"}; signature is irrelevant here.
+        let token = "aaa.eyJleHAiOjE3MDAwMDAwMDAsInN1YiI6IngifQ.sig";
+        assert_eq!(jwt_exp_ms(token), Some(1_700_000_000_000.0));
+    }
+
+    #[test]
+    fn jwt_exp_is_none_for_garbage() {
+        assert_eq!(jwt_exp_ms("not-a-jwt"), None);
+        assert_eq!(jwt_exp_ms("a.b.c"), None);
     }
 }

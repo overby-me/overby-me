@@ -291,9 +291,12 @@ fn SpeakList(
                 })
         });
     }
+    // Offset from this device's clock to the server's, so the countdown reads the
+    // same on every device regardless of local clock skew.
+    let clock_offset = crate::session::server_clock_offset_ms();
     let remaining = st.as_ref().map_or(0, |(_, time, updated_at, _)| {
         let _ = tick.read();
-        remaining_seconds(*time, updated_at)
+        remaining_seconds(*time, updated_at, clock_offset)
     });
     let running = st.as_ref().map(|s| s.1 > 0.0).unwrap_or(false);
     let min_index = speakers.iter().map(|s| s.index).min().unwrap_or(0);
@@ -595,7 +598,7 @@ fn SpeakList(
                                         });
                                         // Re-anchor the per-turn timer for the next speaker.
                                         if limit > 0 {
-                                            move_timer(token.clone(), list_id.clone(), limit, refresh, busy);
+                                            move_timer(token.clone(), list_id.clone(), limit, refresh, busy, clock_offset);
                                         }
                                     }
                                 },
@@ -687,7 +690,7 @@ fn SpeakList(
                                     let id = id.clone();
                                     // Start sets the limit + a fresh timestamp; stop zeroes it.
                                     let secs = if running { 0 } else { *time_box.read() };
-                                    move_timer(token, id, secs, refresh, busy);
+                                    move_timer(token, id, secs, refresh, busy, clock_offset);
                                 }
                             },
                             if running {
@@ -824,9 +827,11 @@ fn move_timer(
     secs: i32,
     refresh: Signal<u32>,
     busy: Signal<bool>,
+    offset_ms: f64,
 ) {
     spawn(async move {
-        let data = serde_json::json!({ "time": secs, "updatedAt": now_iso() });
+        // Anchor on the server clock so every device counts down consistently.
+        let data = serde_json::json!({ "time": secs, "updatedAt": server_iso(offset_ms) });
         let set = NodesSetInput {
             data: Some(Jsonb(data)),
             ..Default::default()
@@ -900,14 +905,26 @@ fn now_ms() -> String {
 }
 
 /// The current wall-clock time as an ISO 8601 string (for the timer start).
-fn now_iso() -> String {
-    String::from(js_sys::Date::new_0().to_iso_string())
+/// Server-aligned ISO timestamp: this device's clock plus its offset to the server
+/// clock, so the timer anchor is written on the server clock and every device reads
+/// the same remaining time regardless of local clock skew (the old React wiki had
+/// scaffolding for this via `session.timeDiff`, but it was disabled).
+fn server_iso(offset_ms: f64) -> String {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+        js_sys::Date::now() + offset_ms,
+    ));
+    String::from(d.to_iso_string())
 }
 
-/// Seconds left on the current speaker's turn: the `time` limit minus the wall
-/// clock elapsed since the list was last updated. Uses JS `Date` for the clock.
-fn remaining_seconds(time: f64, updated_at: &str) -> i64 {
-    remaining_seconds_at(time, js_sys::Date::parse(updated_at), js_sys::Date::now())
+/// Seconds left on the current speaker's turn: the `time` limit minus the elapsed
+/// time since the list was last updated. Both the anchor (`updated_at`) and "now"
+/// are on the server clock (via `offset_ms`), so devices with skewed clocks agree.
+fn remaining_seconds(time: f64, updated_at: &str, offset_ms: f64) -> i64 {
+    remaining_seconds_at(
+        time,
+        js_sys::Date::parse(updated_at),
+        js_sys::Date::now() + offset_ms,
+    )
 }
 
 /// Pure countdown maths (testable off-browser).
