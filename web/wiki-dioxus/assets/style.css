@@ -2399,6 +2399,20 @@ select:focus {
 	font-variant-numeric: tabular-nums;
 }
 
+/* Projector focus-section buttons: a plain full-width row, no button chrome. */
+.admin-focus-item {
+	width: 100%;
+	text-align: left;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--md-on-surface);
+	font: inherit;
+}
+.admin-focus-item:hover {
+	background: var(--md-surface-container-high);
+}
+
 /* M3 Expressive member table (member::MemberTable): search + filter-chip toolbar,
    a paginated DataTable, and a range/prev-next footer. */
 .paginated-table {

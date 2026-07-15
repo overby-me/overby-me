@@ -429,6 +429,30 @@ fn heading_anchor(index: usize, text: &str) -> String {
     format!("h{index}-{slug}")
 }
 
+/// The headings in a node's Slate `content`, as (anchor id, text, level), using
+/// the SAME index-based anchor the renderer applies — so a presenter's picks
+/// match the projector's heading ids. Powers the projector section-focus control.
+pub(crate) fn content_headings(data: Option<&serde_json::Value>) -> Vec<(String, String, u8)> {
+    let Some(blocks) = data
+        .and_then(|d| d.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return Vec::new();
+    };
+    blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| {
+            let level = heading_level(b.get("type").and_then(|t| t.as_str())?)?;
+            let raw = block_plain_text(b);
+            if raw.trim().is_empty() {
+                return None;
+            }
+            Some((heading_anchor(i, &raw), raw.trim().to_string(), level))
+        })
+        .collect()
+}
+
 #[component]
 fn SlateBlock(block: serde_json::Value, index: usize) -> Element {
     let block_type = block

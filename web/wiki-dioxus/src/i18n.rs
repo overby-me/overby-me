@@ -471,7 +471,9 @@ const EN_JSON: &str = r#"{
         "title": "Console",
         "agenda": "Agenda",
         "onScreen": "On screen",
-        "stopProjecting": "Stop projecting"
+        "stopProjecting": "Stop projecting",
+        "focusSection": "Focus a section on screen",
+        "focusWhole": "Show the whole document"
     },
     "mime": {
         "group": "Group",
@@ -879,7 +881,9 @@ const DA_JSON: &str = r#"{
         "title": "Konsol",
         "agenda": "Dagsorden",
         "onScreen": "På skærmen",
-        "stopProjecting": "Stop projektion"
+        "stopProjecting": "Stop projektion",
+        "focusSection": "Fokusér en sektion på skærmen",
+        "focusWhole": "Vis hele dokumentet"
     },
     "mime": {
         "group": "Gruppe",

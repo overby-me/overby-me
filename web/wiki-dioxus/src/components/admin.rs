@@ -60,6 +60,24 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     });
     let active_id = active.read().clone().flatten();
 
+    // The active document's headings, so the chair can bring the room to a section
+    // of a document too long to show whole on the projector (#projector-focus).
+    let hn_id = active_id.clone().unwrap_or_default();
+    let hn_token = access_token.clone();
+    let active_headings = crate::use_data_resource!(|(hn_id, hn_token, rev)| async move {
+        let _ = rev;
+        if hn_id.is_empty() {
+            return Vec::new();
+        }
+        match graphql::query_node_by_id(hn_token.as_deref(), &hn_id).await {
+            Ok(Some(n)) => {
+                crate::components::content::content_headings(n.data.as_ref().map(|d| &d.0))
+            }
+            _ => Vec::new(),
+        }
+    });
+    let active_headings = active_headings.read().clone().unwrap_or_default();
+
     // Agenda = the context's content children, in order.
     let mut agenda: Vec<_> = node
         .children
@@ -181,6 +199,69 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                                                 span { class: "material-icons", "cast" }
                                                 "{t(\"content.projectScreen\")}"
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Projector focus: for a long active document, scroll the room's screen
+            // to a chosen section (or back to the whole document).
+            if can_manage && !active_headings.is_empty() {
+                div { class: "card",
+                    div { class: "card-header",
+                        div { class: "avatar", span { class: "material-icons", "center_focus_strong" } }
+                        h3 { class: "title-medium", "{t(\"console.focusSection\")}" }
+                    }
+                    div { class: "list",
+                        button {
+                            class: "list-item admin-focus-item",
+                            onclick: {
+                                let ctx = context_id.clone();
+                                move |_| {
+                                    let ctx = ctx.clone();
+                                    let token = session.read().access_token.clone();
+                                    spawn(async move {
+                                        if let Err(e) = graphql::set_screen_focus(token.as_deref(), &ctx, None).await {
+                                            log::error!("clear screen focus failed: {e}");
+                                        }
+                                    });
+                                }
+                            },
+                            span { class: "material-icons", "fullscreen" }
+                            div { class: "list-item-text",
+                                div { class: "list-item-primary", "{t(\"console.focusWhole\")}" }
+                            }
+                        }
+                        for (anchor , text , level) in active_headings.iter() {
+                            {
+                                let indent = (*level as usize).saturating_sub(1) * 12 + 12;
+                                let anchor = anchor.clone();
+                                rsx! {
+                                    button {
+                                        key: "{anchor}",
+                                        class: "list-item admin-focus-item",
+                                        style: "padding-left: {indent}px;",
+                                        onclick: {
+                                            let ctx = context_id.clone();
+                                            let anchor = anchor.clone();
+                                            move |_| {
+                                                let ctx = ctx.clone();
+                                                let anchor = anchor.clone();
+                                                let token = session.read().access_token.clone();
+                                                spawn(async move {
+                                                    if let Err(e) = graphql::set_screen_focus(token.as_deref(), &ctx, Some(&anchor)).await {
+                                                        log::error!("set screen focus failed: {e}");
+                                                    }
+                                                });
+                                            }
+                                        },
+                                        span { class: "material-icons", "cast" }
+                                        div { class: "list-item-text",
+                                            div { class: "list-item-primary", "{text}" }
                                         }
                                     }
                                 }

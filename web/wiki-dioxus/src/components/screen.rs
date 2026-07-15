@@ -57,6 +57,47 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         });
     let show_comments = show_comments.read().unwrap_or(false);
 
+    // Live presenter focus: the section (heading anchor) the chair chose to bring
+    // the room's attention to, for documents too long to show whole. Scrolled into
+    // view on the projector when it (or the active node) changes.
+    let focus_refresh = use_signal(|| 0u32);
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _like: \"focus:%\" }} }}) {{ name }} }}"
+        ),
+        focus_refresh,
+    );
+    let frev = *focus_refresh.read();
+    let focus_ctx = context_id.clone();
+    let focus_token = access_token.clone();
+    let focus = crate::use_data_resource!(|(focus_ctx, focus_token, frev)| async move {
+        let _ = frev;
+        graphql::screen_focus_anchor(focus_token.as_deref(), &focus_ctx).await
+    });
+    let focus_anchor = focus.read().clone().flatten();
+    {
+        let anchor = focus_anchor.clone();
+        let active_id = active.as_ref().map(|n| n.id.0.clone());
+        use_effect(use_reactive!(|(anchor, active_id)| {
+            let _ = &active_id;
+            if let Some(a) = anchor.clone() {
+                spawn(async move {
+                    // Let the active node render before scrolling to its section.
+                    gloo_timers::future::TimeoutFuture::new(160).await;
+                    if let Some(el) = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|d| d.get_element_by_id(&a))
+                    {
+                        let opts = web_sys::ScrollIntoViewOptions::new();
+                        opts.set_behavior(web_sys::ScrollBehavior::Smooth);
+                        opts.set_block(web_sys::ScrollLogicalPosition::Start);
+                        el.scroll_into_view_with_scroll_into_view_options(&opts);
+                    }
+                });
+            }
+        }));
+    }
+
     rsx! {
         // Projector: a chromeless, room-distance 2-pane layout — a dominant hero
         // (the active content the room is looking at) + a supporting rail (the
