@@ -445,6 +445,9 @@ pub(super) fn ContextItem(node: graphql::ContextNodeFields) -> Element {
 pub(super) fn InvitedContextItem(invite: graphql::InvitationFields) -> Element {
     let session = use_session();
     let mut confirm_open = use_signal(|| false);
+    // Optimistic: accepting or declining hides the invite at once; the refetch then
+    // removes it for good. On failure the row is restored (dismissed back to false).
+    let mut dismissed = use_signal(|| false);
     let name = invite
         .parent
         .as_ref()
@@ -465,23 +468,31 @@ pub(super) fn InvitedContextItem(invite: graphql::InvitationFields) -> Element {
             let uid = session.read().user.as_ref().map(|u| u.id.clone());
             let member_id = member_id.clone();
             let parent_id = parent_id.clone();
+            // Optimistic: hide the invite immediately.
+            dismissed.set(true);
             spawn(async move {
+                let mut ok = false;
                 if let Some(uid) = uid {
                     let accepted = graphql::accept_invitation(token.as_deref(), &member_id, &uid)
                         .await
                         .unwrap_or(false);
-                    if !accepted {
-                        if let Some(pid) = parent_id {
-                            if graphql::accept_existing_member(token.as_deref(), &pid, &uid)
-                                .await
-                                .unwrap_or(false)
-                            {
-                                let _ =
-                                    graphql::decline_invitation(token.as_deref(), &member_id).await;
-                            }
+                    if accepted {
+                        ok = true;
+                    } else if let Some(pid) = parent_id {
+                        if graphql::accept_existing_member(token.as_deref(), &pid, &uid)
+                            .await
+                            .unwrap_or(false)
+                        {
+                            let _ = graphql::decline_invitation(token.as_deref(), &member_id).await;
+                            ok = true;
                         }
                     }
                     crate::session::bump_data_version();
+                }
+                if !ok {
+                    // Restore the row and report the failure.
+                    dismissed.set(false);
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                 }
             });
         }
@@ -492,12 +503,25 @@ pub(super) fn InvitedContextItem(invite: graphql::InvitationFields) -> Element {
             let token = session.read().access_token.clone();
             let member_id = member_id.clone();
             confirm_open.set(false);
+            // Optimistic: hide the invite immediately; restore on error.
+            dismissed.set(true);
             spawn(async move {
-                let _ = graphql::decline_invitation(token.as_deref(), &member_id).await;
-                crate::session::bump_data_version();
+                match graphql::decline_invitation(token.as_deref(), &member_id).await {
+                    Ok(_) => crate::session::bump_data_version(),
+                    Err(e) => {
+                        dismissed.set(false);
+                        log::error!("decline invitation failed: {e}");
+                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                    }
+                }
             });
         }
     };
+
+    // Optimistically removed: render nothing until the refetch drops it for good.
+    if dismissed() {
+        return rsx! {};
+    }
 
     rsx! {
         div { class: "list-item",

@@ -58,7 +58,25 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
             .ok()
             .flatten()
     });
-    let active_id = active.read().clone().flatten();
+    let server_active = active.read().clone().flatten();
+    // Optimistic projection: reflect a project/stop tap at once (the agenda highlight
+    // and the "on screen" chip), reconciled against the `active` subscription. None =
+    // no override; Some(None) = optimistically stopped; Some(Some(id)) = projecting id.
+    let mut projected_opt = use_signal(|| None::<Option<String>>);
+    // Drop the override once the server (subscription refetch) reflects it, so a
+    // concurrent chair's projection is not masked by a stale local override.
+    {
+        let sa = server_active.clone();
+        use_effect(use_reactive!(|(sa)| {
+            if projected_opt.peek().as_ref() == Some(&sa) {
+                projected_opt.set(None);
+            }
+        }));
+    }
+    let active_id = projected_opt
+        .read()
+        .clone()
+        .unwrap_or_else(|| server_active.clone());
 
     // The active document's headings, so the chair can bring the room to a section
     // of a document too long to show whole on the projector (#projector-focus).
@@ -134,10 +152,13 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                                 move |_| {
                                     let ctx = ctx.clone();
                                     let token = session.read().access_token.clone();
+                                    // Optimistic: clear the projection at once.
+                                    projected_opt.set(Some(None));
                                     spawn(async move {
                                         match graphql::set_active_relation(token.as_deref(), &ctx, None).await {
                                             Ok(true) => crate::session::bump_data_version(),
                                             other => {
+                                                projected_opt.set(None);
                                                 log::error!("stop projecting failed: {other:?}");
                                                 crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                             }
@@ -189,10 +210,15 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                                                     let ctx = proj_ctx.clone();
                                                     let item_id = item_id.clone();
                                                     let token = session.read().access_token.clone();
+                                                    // Optimistic: highlight this item as projected now.
+                                                    projected_opt.set(Some(Some(item_id.clone())));
                                                     spawn(async move {
                                                         match graphql::set_active_relation(token.as_deref(), &ctx, Some(&item_id)).await {
                                                             Ok(_) => crate::snackbar::show_snackbar(&t("content.projected")),
-                                                            Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                                            Err(_) => {
+                                                                projected_opt.set(None);
+                                                                crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                            }
                                                         }
                                                     });
                                                 },

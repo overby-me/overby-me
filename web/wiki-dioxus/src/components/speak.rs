@@ -21,6 +21,15 @@ fn applied<T>(result: Result<T, String>, mut refresh: Signal<u32>, mut busy: Sig
     }
 }
 
+/// A speaker shown optimistically the instant they join, before the insert is
+/// confirmed. Reconciled by `key` (the same client-side key the insert uses), so
+/// the pending row is dropped once the refetch returns the real entry.
+#[derive(Clone, PartialEq)]
+struct PendingSpeaker {
+    key: String,
+    name: String,
+}
+
 /// Where a speaker list is shown. On the projector (`Screen`) view the admin and
 /// join controls are hidden — it is read-only for the room.
 #[derive(Clone, Copy, PartialEq)]
@@ -197,6 +206,15 @@ fn SpeakList(
     // double-click cannot fire two mutations (a double-move, or a remove racing a
     // move). Reset by `applied`/`move_timer` when the write completes.
     let mut busy = use_signal(|| false);
+    // Optimistic joins: shown at once, reconciled by key against the fetched queue.
+    let mut pending = use_signal(Vec::<PendingSpeaker>::new);
+    // Optimistic removals (remove + next speaker): ids hidden until the delete
+    // lands; an id is dropped from the set on error to restore the row.
+    let mut removed = use_signal(std::collections::HashSet::<String>::new);
+    // Optimistic reorder: speaker_id -> its target index, applied to the sort so a
+    // move-up/down jumps at once. After success the fetched index matches (redundant,
+    // harmless); on error the entry is dropped to snap back.
+    let mut reorder = use_signal(std::collections::HashMap::<String, i32>::new);
 
     // Live updates: subscribe to this list's entries over the Hasura WebSocket
     // so entries added/removed by anyone appear at once.
@@ -247,7 +265,32 @@ fn SpeakList(
 
     let st = state.read().clone().flatten();
     let mutable = st.as_ref().map(|s| s.0).unwrap_or(false);
-    let speakers: Vec<ChildNodeFields> = st.as_ref().map(|s| s.3.clone()).unwrap_or_default();
+    // Optimistically hide speakers the user just removed or advanced past. The
+    // delete's refetch confirms the absence; on error the id is dropped from the set
+    // to restore the row. Filter before deriving count/current so the highlight and
+    // timer track the removal at once.
+    let mut speakers: Vec<ChildNodeFields> = st
+        .as_ref()
+        .map(|s| s.3.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| !removed.read().contains(&s.id.0))
+        .collect();
+    // Apply optimistic reorder overrides by re-sorting with the effective index.
+    let reord = reorder.read().clone();
+    if !reord.is_empty() {
+        speakers.sort_by(|a, b| {
+            let ai = reord.get(&a.id.0).copied().unwrap_or(a.index);
+            let bi = reord.get(&b.id.0).copied().unwrap_or(b.index);
+            ai.cmp(&bi)
+                .then_with(|| speaker_type(b).cmp(&speaker_type(a)))
+                .then_with(|| {
+                    let a_ts = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+                    let b_ts = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+                    a_ts.cmp(b_ts)
+                })
+        });
+    }
     let remaining = st.as_ref().map_or(0, |(_, time, updated_at, _)| {
         let _ = tick.read();
         remaining_seconds(*time, updated_at)
@@ -256,6 +299,14 @@ fn SpeakList(
     let min_index = speakers.iter().map(|s| s.index).min().unwrap_or(0);
     let max_index = speakers.iter().map(|s| s.index).max().unwrap_or(0);
     let count = speakers.len();
+    // Drop optimistic joins once the real entry (same key) has come back.
+    let fetched_keys: std::collections::HashSet<String> =
+        speakers.iter().map(|s| s.key.clone()).collect();
+    let pending_shown = crate::components::optimistic::reconcile_by_key(
+        &pending.read(),
+        |p| p.key.as_str(),
+        &fetched_keys,
+    );
     // Announced (screen-reader-only) whenever the person at the front of the
     // queue changes, so blind participants hear turn-changes like the room does.
     let now_speaking = speakers.first().map(|s| s.name.clone()).unwrap_or_default();
@@ -318,7 +369,7 @@ fn SpeakList(
                 }
             }
 
-            if speakers.is_empty() {
+            if speakers.is_empty() && (screen || pending_shown.is_empty()) {
                 // DESIGN: orb empty state for an empty speaker queue.
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
@@ -394,12 +445,25 @@ fn SpeakList(
                                                     let token = token.clone();
                                                     let id = id.clone();
                                                     busy.set(true);
+                                                    // Optimistic: jump to the front now.
+                                                    reorder.write().insert(id.clone(), min_index - 1);
                                                     spawn(async move {
                                                         let set = NodesSetInput {
                                                             index: Some(min_index - 1),
                                                             ..Default::default()
                                                         };
-                                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh, busy);
+                                                        match graphql::update_node(token.as_deref(), &id, set).await {
+                                                            Ok(_) => {
+                                                                busy.set(false);
+                                                                refresh += 1;
+                                                            }
+                                                            Err(e) => {
+                                                                reorder.write().remove(&id);
+                                                                busy.set(false);
+                                                                log::error!("reorder failed: {e}");
+                                                                crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                            }
+                                                        }
                                                     });
                                                 }
                                             },
@@ -416,12 +480,25 @@ fn SpeakList(
                                                     let token = token.clone();
                                                     let id = id.clone();
                                                     busy.set(true);
+                                                    // Optimistic: drop to the back now.
+                                                    reorder.write().insert(id.clone(), max_index + 1);
                                                     spawn(async move {
                                                         let set = NodesSetInput {
                                                             index: Some(max_index + 1),
                                                             ..Default::default()
                                                         };
-                                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh, busy);
+                                                        match graphql::update_node(token.as_deref(), &id, set).await {
+                                                            Ok(_) => {
+                                                                busy.set(false);
+                                                                refresh += 1;
+                                                            }
+                                                            Err(e) => {
+                                                                reorder.write().remove(&id);
+                                                                busy.set(false);
+                                                                log::error!("reorder failed: {e}");
+                                                                crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                            }
+                                                        }
                                                     });
                                                 }
                                             },
@@ -432,22 +509,41 @@ fn SpeakList(
                                         button {
                                             class: "btn-icon",
                                             title: "{t(\"speak.removeFromList\")}",
-                                            disabled: busy(),
                                             onclick: {
                                                 let token = session.read().access_token.clone();
                                                 let id = speaker_id.clone();
                                                 move |_| {
                                                     let token = token.clone();
                                                     let id = id.clone();
-                                                    busy.set(true);
+                                                    // Optimistic: hide the row now; restore on error.
+                                                    removed.write().insert(id.clone());
                                                     spawn(async move {
-                                                        applied(graphql::delete_node(token.as_deref(), &id).await, refresh, busy);
+                                                        match graphql::delete_node(token.as_deref(), &id).await {
+                                                            Ok(_) => refresh += 1,
+                                                            Err(e) => {
+                                                                removed.write().remove(&id);
+                                                                log::error!("remove speaker failed: {e}");
+                                                                crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                            }
+                                                        }
                                                     });
                                                 }
                                             },
                                             span { class: "material-icons", "close" }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                    // Optimistic joins (interactive view only): muted "sending" rows
+                    // at the tail, dropped by reconcile_by_key once confirmed.
+                    if !screen {
+                        for p in pending_shown.iter() {
+                            div { key: "{p.key}", class: "list-item is-pending",
+                                div { class: "list-item-text",
+                                    div { class: "list-item-primary", "{p.name}" }
+                                    div { class: "list-item-secondary", "{t(\"vote.sending\")}" }
                                 }
                             }
                         }
@@ -478,9 +574,21 @@ fn SpeakList(
                                     move |_| {
                                         let del_token = token.clone();
                                         let current = current.clone();
+                                        // Optimistic: advance the queue at once by hiding
+                                        // the current speaker; restore on error.
+                                        if let Some(cur) = current.clone() {
+                                            removed.write().insert(cur);
+                                        }
                                         spawn(async move {
                                             if let Some(cur) = current {
-                                                applied(graphql::delete_node(del_token.as_deref(), &cur).await, refresh, busy);
+                                                match graphql::delete_node(del_token.as_deref(), &cur).await {
+                                                    Ok(_) => refresh += 1,
+                                                    Err(e) => {
+                                                        removed.write().remove(&cur);
+                                                        log::error!("next speaker failed: {e}");
+                                                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                    }
+                                                }
                                             } else {
                                                 refresh += 1;
                                             }
@@ -657,27 +765,41 @@ fn SpeakList(
                                                     let ctx = context_id.clone();
                                                     let token = token.clone();
                                                     let type_val = type_key.to_string();
+                                                    // Optimistic: show the join at once (a
+                                                    // muted "sending" row), reconciled by key
+                                                    // once the refetch returns the real entry.
+                                                    pending.write().push(PendingSpeaker {
+                                                        key: key.clone(),
+                                                        name: name.clone(),
+                                                    });
                                                     spawn(async move {
-                                                        applied(
-                                                            graphql::insert_node(
-                                                                token.as_deref(),
-                                                                NodesInsertInput {
-                                                                    name: Some(name),
-                                                                    key: Some(key),
-                                                                    mime_id: Some("speak/speak".to_string()),
-                                                                    parent_id: Some(Uuid(parent)),
-                                                                    context_id: Some(ctx),
-                                                                    data: Some(
-                                                                        Jsonb(serde_json::Value::String(type_val)),
-                                                                    ),
-                                                                    mutable: None,
-                                                                    index: None,
-                                                                },
-                                                            )
-                                                            .await,
-                                                            refresh,
-                                                            busy,
-                                                        );
+                                                        match graphql::insert_node(
+                                                            token.as_deref(),
+                                                            NodesInsertInput {
+                                                                name: Some(name),
+                                                                key: Some(key.clone()),
+                                                                mime_id: Some("speak/speak".to_string()),
+                                                                parent_id: Some(Uuid(parent)),
+                                                                context_id: Some(ctx),
+                                                                data: Some(
+                                                                    Jsonb(serde_json::Value::String(type_val)),
+                                                                ),
+                                                                mutable: None,
+                                                                index: None,
+                                                            },
+                                                        )
+                                                        .await
+                                                        {
+                                                            Ok(_) => refresh += 1,
+                                                            Err(e) => {
+                                                                // Roll back the optimistic row.
+                                                                pending.write().retain(|p| p.key != key);
+                                                                log::error!("join speaker failed: {e}");
+                                                                crate::snackbar::show_snackbar(&t(
+                                                                    "error.somethingWentWrong",
+                                                                ));
+                                                            }
+                                                        }
                                                     });
                                                 },
                                                 "{label}"

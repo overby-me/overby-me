@@ -5308,6 +5308,19 @@ a.list-item:hover {
 	opacity: 0.55;
 }
 
+/* Shared "optimistic, not yet confirmed" row modifier (see components/optimistic.rs):
+   dimmed with a gentle pulse until the server confirms and the real row replaces
+   it. Reused by the speaker queue, roster, folder tiles, candidate cards, etc. */
+.is-pending {
+	opacity: 0.55;
+	animation: optimistic-pulse 1.3s ease-in-out infinite;
+}
+@keyframes optimistic-pulse {
+	50% {
+		opacity: 0.35;
+	}
+}
+
 /* Magenta thread line for nested replies (the civic discussion accent). */
 .comment .comment {
 	border-left: 2px solid var(--md-tertiary);

@@ -100,6 +100,15 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     let mut selected = use_signal(|| vec![false; options.len()]);
     let mut error = use_signal(String::new);
     let mut refresh = use_signal(|| 0u32);
+    // Optimistic cast: the chosen option indices, shown as voted + counted at once
+    // and dropped once the refetch confirms (`voted` flips true) or on error.
+    let mut cast_pending = use_signal(|| None::<Vec<usize>>);
+    // In-flight guard so a rapid double-click cannot fire two casts (the second
+    // would fail the one-vote uniqueness check).
+    let mut casting = use_signal(|| false);
+    // Optimistic close: flip the ballot to "results" at once when the owner stops
+    // the poll; reverted on error. The refetch confirms mutable=false.
+    let mut closed_opt = use_signal(|| false);
     // Randomise the ballot order once per mount (#27); Blank stays last.
     let order = use_hook(|| ballot_order(options.len(), js_sys::Math::random));
 
@@ -172,6 +181,29 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         (counts, votes.len())
     });
     let (counts, total_votes) = tally.read().clone().unwrap_or((vec![], 0));
+    // Fold the optimistic cast into the tally + voted state until the refetch
+    // reflects it (`voted` true), then drop the optimistic add so it is not counted
+    // twice. On error `cast_pending` is cleared, snapping the ballot back.
+    let show_opt = cast_pending.read().is_some() && !voted;
+    let counts = if show_opt {
+        let mut c = counts;
+        if let Some(chosen) = cast_pending.read().as_ref() {
+            for &i in chosen {
+                if let Some(x) = c.get_mut(i) {
+                    *x += 1;
+                }
+            }
+        }
+        c
+    } else {
+        counts
+    };
+    let total_votes = if show_opt {
+        total_votes + 1
+    } else {
+        total_votes
+    };
+    let voted = voted || cast_pending.read().is_some();
     // Eligible voters = active members of the poll's context, for the turnout /
     // quorum line the room reads off the projector.
     let el_ctx = context_id.clone();
@@ -199,7 +231,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
             .flatten()
             .map(|n| n.mutable)
     });
-    let open = (*poll_open_res.read()).flatten().unwrap_or(open);
+    let open = (*poll_open_res.read()).flatten().unwrap_or(open) && !closed_opt();
     // The trailing option is always the "Blank" abstention (see StartPollButton /
     // ballot_order): it is shown as a distinct muted row and excluded from the
     // winner, and the For/Imod split is computed on the non-blank cast votes.
@@ -281,6 +313,9 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
             let poll = poll.clone();
             let ctx = ctx.clone();
             let uid = uid.clone();
+            // Optimistic: show the ballot as cast and move the tally bars at once.
+            casting.set(true);
+            cast_pending.set(Some(chosen.clone()));
             spawn(async move {
                 // Key the vote by the voter, so a second cast collides on the nodes
                 // (parent_id, key) UNIQUE constraint — the DB enforces one vote per
@@ -302,9 +337,12 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                         .await
                         .map(|_| ())
                 };
+                casting.set(false);
                 match result {
                     Ok(()) => {
                         show_snackbar(&t("vote.hasVoted"));
+                        // Leave cast_pending: `voted` will flip true on refetch and the
+                        // optimistic add drops itself (show_opt gates on !voted).
                         refresh += 1;
                     }
                     // "already voted" is the backend's secret-ballot signal; a
@@ -315,9 +353,16 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                             || e.contains("niqueness")
                             || e.contains("nodes_parent_id_namespace_key") =>
                     {
+                        // The voter had already voted: keep the "voted" state (it is
+                        // true on the server), just drop the double-count.
+                        cast_pending.set(None);
                         error.set(t("vote.hasVoted"))
                     }
-                    _ => error.set(t("error.somethingWentWrong")),
+                    _ => {
+                        // Genuine failure: roll the ballot back so they can retry.
+                        cast_pending.set(None);
+                        error.set(t("error.somethingWentWrong"))
+                    }
                 }
             });
         }
@@ -348,6 +393,8 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                             move |_| {
                                 let token = session.read().access_token.clone();
                                 let poll_id = poll_id.clone();
+                                // Optimistic: show results at once; revert on error.
+                                closed_opt.set(true);
                                 spawn(async move {
                                     match graphql::update_node(
                                         token.as_deref(),
@@ -361,6 +408,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                                     {
                                         Ok(true) => crate::session::bump_data_version(),
                                         other => {
+                                            closed_opt.set(false);
                                             log::error!("stop poll failed: {other:?}");
                                             show_snackbar(&t("error.somethingWentWrong"));
                                         }
@@ -467,6 +515,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                     // so it gets the magenta tertiary emphasis, not plain primary.
                     button {
                         class: "btn btn-cast mt-1",
+                        disabled: casting(),
                         onclick: submit,
                         span { class: "material-icons", "how_to_vote" }
                         " {t(\"vote.castVote\")}"

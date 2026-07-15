@@ -14,6 +14,7 @@ pub mod loader;
 pub mod map;
 pub mod member;
 pub mod node;
+pub mod optimistic;
 pub mod parent;
 pub mod perm;
 pub mod profile;
