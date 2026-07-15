@@ -1501,13 +1501,50 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     { passed: $p, failed: $fl }
 }
 
-# Hermetic write-flow: stand up a throwaway GROUP of its own (via the same
-# create-context path the home UI uses — insert under root, make it its own
-# context, seed the permission template), add a folder + policy under it, then
-# drive the full civic loop through the UI (start a poll, cast a vote, post a
-# comment), each verified against the backend. Teardown deletes the whole group
-# subtree + its permissions, so a run depends on NOTHING but the root and leaves
-# the live backend exactly as it found it. Firefox-only; warn-skips on Servo.
+# Create a child node through the folder "Add content" dialog, exactly as a user
+# would: open the dialog, pick the given mime from the (permission-derived) type
+# menu, name it, and submit. This is the same control that offers motions
+# (vote/policy) and elections (vote/position) once the parent allows them. Returns
+# true if it drove the dialog to submit. Verification is left to the caller (query
+# the backend for the created node).
+def wd-folder-add [session_id: string, mime: string, name: string]: nothing -> bool {
+    if not (wd-wait-y $session_id 'return [...document.querySelectorAll("#main button.add-action")].some(function(b){return b.getAttribute("aria-label")=="Add content"})?"y":"n"' 8000) {
+        return false
+    }
+    wd-execute $session_id 'var b=[...document.querySelectorAll("#main button.add-action")].find(function(b){return b.getAttribute("aria-label")=="Add content"});if(b)b.click();return 1' | ignore
+    sleep 500ms
+    # The type menu is populated from node_insert_mimes, so wait for the option we
+    # want before selecting it (proves the mime is genuinely offered by the UI).
+    if not (wd-wait-y $session_id ('return document.querySelector(".m3-dialog select option[value=\"' + $mime + '\"]")?"y":"n"') 8000) {
+        return false
+    }
+    wd-execute $session_id ('var s=document.querySelector(".m3-dialog select");if(s){s.value="' + $mime + '";s.dispatchEvent(new Event("change",{bubbles:true}))}return 1') | ignore
+    sleep 300ms
+    wd-execute $session_id ('var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="' + $name + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
+    sleep 300ms
+    wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
+    sleep 1700ms
+    true
+}
+
+# Delete a context node's whole subtree (depth-first), then its permissions and
+# the node itself, via GraphQL. Returns { deleted, gone }. Used to tear down the
+# throwaway write-flow fixtures so a run leaves the live backend exactly as found.
+def wd-teardown-context [session_id: string, gql: string, node_id: string]: nothing -> record<deleted: int, gone: bool> {
+    let js = ($gql + 'var GID="' + $node_id + '";function ch(pid){var r=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p}}){id}}",{p:pid});var o=[];try{o=r.data.nodes.map(function(n){return n.id})}catch(e){}return o;}var all=[];var stack=[GID];var guard=0;while(stack.length&&guard<800){guard++;var id=stack.pop();var kids=ch(id);for(var i=0;i<kids.length;i++){all.push(kids[i]);stack.push(kids[i]);}}for(var i=0;i<all.length;i++){gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:all[i]});}gql("mutation($c:uuid!){deletePermissions(where:{contextId:{_eq:$c}}){affected_rows}}",{c:GID});gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:GID});var chk=gql("query($i:uuid!){node(id:$i){id}}",{i:GID});var gone=true;try{gone=!chk.data.node}catch(e){}return JSON.stringify({deleted:all.length,gone:gone});')
+    (try { wd-execute $session_id $js | from json } catch { {deleted: -1, gone: false} })
+}
+
+# Hermetic write-flow, driven end to end through the real UI. Create a throwaway
+# GROUP and an EVENT from the home "New group"/"New event" controls, then add a
+# folder, a motion (vote/policy) and an election (vote/position) through the folder
+# "Add content" dialog, and run the full civic loop on them (start polls, cast
+# votes, post a comment, add candidates, create a speaker list) — each verified
+# against the backend. Nothing is seeded through GraphQL: every node is made by
+# clicking the app's own controls, so the test also guards that those creation
+# paths exist. Teardown deletes the whole group subtree + the event + their
+# permissions, so a run depends on NOTHING but the root and leaves the live
+# backend exactly as it found it. Firefox-only; warn-skips on Servo.
 def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
     mut p = $passed; mut fl = $failed
     log-info ""
@@ -1518,23 +1555,91 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
     let GQL = "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
     # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
     let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
-    # The per-context permission template (mirrors graphql::create_context), so the
-    # fresh group is usable (folder/policy/poll/vote/comment insertable via the
-    # owner's ownership of the context).
-    let perm_fn = 'function permObjs(cid){var R=[["vote/vote","member",["vote/poll"]],["vote/policy","member",["wiki/folder"]],["vote/candidate","member",["vote/position"]],["wiki/document","owner",["wiki/event","wiki/folder","wiki/group"]],["vote/poll","owner",["vote/policy","vote/change","vote/position"]],["vote/question","member",["vote/position","wiki/file"]],["vote/comment","member",["vote/policy","vote/change"]],["speak/speak","member",["speak/list"]],["vote/change","member",["vote/policy","vote/change","wiki/file"]],["wiki/folder","owner",["wiki/folder","wiki/group","wiki/event"]],["vote/position","owner",["wiki/folder"]],["wiki/file","owner",["wiki/event","wiki/folder","wiki/group"]]];return R.map(function(r){var m=r[0]!="vote/vote";return {contextId:cid,nodeId:cid,mimeId:r[0],role:r[1],parents:r[2],active:true,insert:true,select:true,update:m,delete:m};});}'
+    let t = (date now | format date '%Y%m%d%H%M%S')
+    let gname = $"E2E hermetic ($t)"
+    let ename = $"E2E event ($t)"
+    let fname = $"E2E folder ($t)"
+    let plname = $"E2E policy ($t)"
+    let poname = $"E2E election ($t)"
 
-    # ── Setup: create group (own context + seeded perms) -> folder -> policy ──
-    let setup_js = ($gql + $perm_fn + 'var INS="mutation($o:nodes_insert_input!){insertNode(object:$o){id key}}";var rt=gql("query{nodes(where:{mimeId:{_eq:\"wiki/home\"}}){id contextId}}",{});var ROOT=null,RC=null;try{ROOT=rt.data.nodes[0].id;RC=rt.data.nodes[0].contextId}catch(e){}var out={group:null,groupKey:null,folder:null,folderKey:null,policy:null,policyKey:null,err:null};if(!ROOT){out.err="root not found";return JSON.stringify(out);}var t=Date.now();var g=gql(INS,{o:{name:"E2E hermetic "+t,key:"e2e-grp-"+t,mimeId:"wiki/group",parentId:ROOT,contextId:RC,mutable:true}});try{out.group=g.data.insertNode.id;out.groupKey=g.data.insertNode.key}catch(e){}if(!out.group){out.err=g.errors?JSON.stringify(g.errors):"group insert failed";return JSON.stringify(out);}gql("mutation($id:uuid!,$s:nodes_set_input!){updateNode(pk_columns:{id:$id},_set:$s){id}}",{id:out.group,s:{contextId:out.group,mutable:false}});var ps=gql("mutation($o:[permissions_insert_input!]!){insertPermissions(objects:$o){affected_rows}}",{o:permObjs(out.group)});if(ps.errors){out.err="perm seed: "+JSON.stringify(ps.errors);return JSON.stringify(out);}var f=gql(INS,{o:{name:"F",key:"e2e-fld-"+t,mimeId:"wiki/folder",parentId:out.group,contextId:out.group,mutable:true}});try{out.folder=f.data.insertNode.id;out.folderKey=f.data.insertNode.key}catch(e){}if(!out.folder){out.err=f.errors?JSON.stringify(f.errors):"folder insert failed";return JSON.stringify(out);}var pl=gql(INS,{o:{name:"E2E policy",key:"e2e-pol-"+t,mimeId:"vote/policy",parentId:out.folder,contextId:out.group,mutable:true}});try{out.policy=pl.data.insertNode.id;out.policyKey=pl.data.insertNode.key}catch(e){}if(!out.policy){out.err=pl.errors?JSON.stringify(pl.errors):"policy insert failed";}return JSON.stringify(out);')
-    let setup = (try { wd-execute $session_id $setup_js | from json } catch { {group: null, groupKey: null, folder: null, folderKey: null, policy: null, policyKey: null, err: "setup exec failed"} })
-    if ($setup.policy | is-empty) {
-        log-fail $"could not stand up hermetic group: ($setup.err)"; $fl = $fl + 1
-        # Best-effort cleanup if the group got as far as being created.
-        if ($setup.group | is-not-empty) {
-            wd-execute $session_id ($gql + 'var G="' + $setup.group + '";gql("mutation($c:uuid!){deletePermissions(where:{contextId:{_eq:$c}}){affected_rows}}",{c:G});gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:G});return 1') | ignore
-        }
+    # ── Setup, driven entirely through the app's own controls ─────────────────
+    # 1) Create the group from the home "New group" control (the create flow
+    #    navigates into it); read its id/key back from the backend to confirm it
+    #    was made as its own context.
+    wd-navigate $session_id $"(base-url)/"
+    sleep 1sec
+    if not (wd-wait-y $session_id 'return [...document.querySelectorAll("button.add-action")].some(function(b){return b.getAttribute("aria-label")=="New group"})?"y":"n"' 8000) {
+        log-fail "no add-group control on home (owner)"; $fl = $fl + 1
         return { passed: $p, failed: $fl }
     }
-    log-ok "hermetic group + folder + policy created"; $p = $p + 1
+    wd-execute $session_id 'var b=[...document.querySelectorAll("button.add-action")].find(function(b){return b.getAttribute("aria-label")=="New group"});if(b)b.click();return 1' | ignore
+    sleep 500ms
+    wd-execute $session_id ('var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="' + $gname + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
+    sleep 400ms
+    wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
+    for _ in 1..20 { let path = (wd-execute $session_id 'return location.pathname'); if ($path != "/") and ($path != null) { break }; sleep 300ms }
+    let grp = (try { wd-execute $session_id ($gql + 'var r=gql("query($n:String!){nodes(where:{name:{_eq:$n},mimeId:{_eq:\"wiki/group\"}}){id key contextId}}",{n:"' + $gname + '"});var o={id:null,key:null,self:false};try{o.id=r.data.nodes[0].id;o.key=r.data.nodes[0].key;o.self=(o.id==r.data.nodes[0].contextId)}catch(e){}return JSON.stringify(o);') | from json } catch { {id: null, key: null, self: false} })
+    if ($grp.id | is-empty) {
+        log-fail "group not created via the home UI"; $fl = $fl + 1
+        return { passed: $p, failed: $fl }
+    }
+    if ($grp.self == true) { log-ok "group created via home UI (its own context)"; $p = $p + 1 } else { log-ok "group created via home UI"; $p = $p + 1 }
+
+    # 2) Create an event from the home "New event" control (soft: logged but not
+    #    fatal), verified as its own context.
+    wd-navigate $session_id $"(base-url)/"
+    sleep 800ms
+    mut evt_id = ""
+    if (wd-wait-y $session_id 'return [...document.querySelectorAll("button.add-action")].some(function(b){return b.getAttribute("aria-label")=="New event"})?"y":"n"' 8000) {
+        wd-execute $session_id 'var b=[...document.querySelectorAll("button.add-action")].find(function(b){return b.getAttribute("aria-label")=="New event"});if(b)b.click();return 1' | ignore
+        sleep 500ms
+        wd-execute $session_id ('var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="' + $ename + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
+        sleep 400ms
+        wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
+        for _ in 1..20 { let path = (wd-execute $session_id 'return location.pathname'); if ($path != "/") and ($path != null) { break }; sleep 300ms }
+        let evt = (try { wd-execute $session_id ($gql + 'var r=gql("query($n:String!){nodes(where:{name:{_eq:$n},mimeId:{_eq:\"wiki/event\"}}){id contextId}}",{n:"' + $ename + '"});var o={id:null,self:false};try{o.id=r.data.nodes[0].id;o.self=(o.id==r.data.nodes[0].contextId)}catch(e){}return JSON.stringify(o);') | from json } catch { {id: null, self: false} })
+        if (($evt.id | is-not-empty) and ($evt.self == true)) {
+            log-ok "event created via home UI (its own context)"; $p = $p + 1
+            $evt_id = $evt.id
+        } else {
+            log-fail "event not created via the home UI"; $fl = $fl + 1
+        }
+    } else {
+        log-fail "no add-event control on home (owner)"; $fl = $fl + 1
+    }
+
+    # 3) Add a folder inside the group through the "Add content" dialog.
+    wd-navigate $session_id $"(base-url)/($grp.key)"
+    sleep 800ms
+    wd-folder-add $session_id "wiki/folder" $fname | ignore
+    let fld = (try { wd-execute $session_id ($gql + 'var P="' + $grp.id + '";var r=gql("query($p:uuid!,$n:String!){nodes(where:{parentId:{_eq:$p},name:{_eq:$n},mimeId:{_eq:\"wiki/folder\"}}){id key}}",{p:P,n:"' + $fname + '"});var o={id:null,key:null};try{o.id=r.data.nodes[0].id;o.key=r.data.nodes[0].key}catch(e){}return JSON.stringify(o);') | from json } catch { {id: null, key: null} })
+    if ($fld.id | is-empty) {
+        log-fail "folder not created via the Add-content UI"; $fl = $fl + 1
+        wd-teardown-context $session_id $gql $grp.id | ignore
+        if ($evt_id | is-not-empty) { wd-teardown-context $session_id $gql $evt_id | ignore }
+        return { passed: $p, failed: $fl }
+    }
+    log-ok "folder created via the Add-content UI"; $p = $p + 1
+
+    # 4) Add a motion (vote/policy) and an election (vote/position) inside the
+    #    folder — the type-menu entries the old wiki offered and this port had
+    #    dropped, now restored. The election feeds the candidate flow below.
+    wd-navigate $session_id $"(base-url)/($grp.key)/($fld.key)"
+    sleep 800ms
+    wd-folder-add $session_id "vote/policy" $plname | ignore
+    let pol = (try { wd-execute $session_id ($gql + 'var P="' + $fld.id + '";var r=gql("query($p:uuid!,$n:String!){nodes(where:{parentId:{_eq:$p},name:{_eq:$n},mimeId:{_eq:\"vote/policy\"}}){id key}}",{p:P,n:"' + $plname + '"});var o={id:null,key:null};try{o.id=r.data.nodes[0].id;o.key=r.data.nodes[0].key}catch(e){}return JSON.stringify(o);') | from json } catch { {id: null, key: null} })
+    if ($pol.id | is-empty) {
+        log-fail "motion (vote/policy) not creatable via the Add-content UI"; $fl = $fl + 1
+        wd-teardown-context $session_id $gql $grp.id | ignore
+        if ($evt_id | is-not-empty) { wd-teardown-context $session_id $gql $evt_id | ignore }
+        return { passed: $p, failed: $fl }
+    }
+    log-ok "motion created via the Add-content UI"; $p = $p + 1
+    wd-folder-add $session_id "vote/position" $poname | ignore
+    let pos = (try { wd-execute $session_id ($gql + 'var P="' + $fld.id + '";var r=gql("query($p:uuid!,$n:String!){nodes(where:{parentId:{_eq:$p},name:{_eq:$n},mimeId:{_eq:\"vote/position\"}}){id key}}",{p:P,n:"' + $poname + '"});var o={id:null,key:null};try{o.id=r.data.nodes[0].id;o.key=r.data.nodes[0].key}catch(e){}return JSON.stringify(o);') | from json } catch { {id: null, key: null} })
+    if ($pos.id | is-not-empty) { log-ok "election created via the Add-content UI"; $p = $p + 1 } else { log-fail "election (vote/position) not creatable via the Add-content UI"; $fl = $fl + 1 }
+
+    let setup = { group: $grp.id, groupKey: $grp.key, folder: $fld.id, folderKey: $fld.key, policy: $pol.id, policyKey: $pol.key, position: ($pos.id | default ""), positionKey: ($pos.key | default ""), event: $evt_id }
     let pid = $setup.policy
     let ppath = $"/($setup.groupKey)/($setup.folderKey)/($setup.policyKey)"
 
@@ -1603,15 +1708,75 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
         log-fail "add-speaker-list control missing in the speak app"; $fl = $fl + 1
     }
 
-    # ── Teardown (always runs): delete the whole group subtree + its permissions
-    #    and verify the group is gone. The group is a throwaway of our own, so
-    #    nothing needs restoring (its `active` relation cascades with the node). ──
-    let teardown_js = ($gql + 'var GID="' + $setup.group + '";function ch(pid){var r=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p}}){id}}",{p:pid});var o=[];try{o=r.data.nodes.map(function(n){return n.id})}catch(e){}return o;}var all=[];var stack=[GID];var guard=0;while(stack.length&&guard<800){guard++;var id=stack.pop();var kids=ch(id);for(var i=0;i<kids.length;i++){all.push(kids[i]);stack.push(kids[i]);}}for(var i=0;i<all.length;i++){gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:all[i]});}gql("mutation($c:uuid!){deletePermissions(where:{contextId:{_eq:$c}}){affected_rows}}",{c:GID});gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:GID});var chk=gql("query($i:uuid!){node(id:$i){id}}",{i:GID});var gone=true;try{gone=!chk.data.node}catch(e){}return JSON.stringify({deleted:all.length,gone:gone});')
-    let td = (try { wd-execute $session_id $teardown_js | from json } catch { {deleted: -1, gone: false} })
+    # ── Person election: add 2 candidates (UI) -> start poll -> vote -> verify ──
+    # The policy flow above covers a For/Against/Blank poll; this covers a candidate
+    # election: the inline AddCandidateButton, the candidate carousel, StartPollButton
+    # on a vote/position (whose options are the candidates), and casting a ballot.
+    if ($setup.position | is-not-empty) {
+        let pospath = $"/($setup.groupKey)/($setup.folderKey)/($setup.positionKey)"
+        wd-navigate $session_id $"(base-url)($pospath)"
+        # Add two candidates through the inline add-candidate dialog (name only; the
+        # photo is optional).
+        for cname in ["Alice E2E" "Bob E2E"] {
+            if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main button[aria-label]")].some(function(b){return b.getAttribute("aria-label")=="Add candidate"})?"y":"n"' 8000) {
+                wd-execute $session_id 'var b=[...document.querySelectorAll("#main button[aria-label]")].find(function(x){return x.getAttribute("aria-label")=="Add candidate"});if(b)b.click();return 1' | ignore
+                sleep 500ms
+                wd-execute $session_id ('var ta=document.querySelector(".m3-dialog input[type=text]");if(ta){ta.value="' + $cname + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
+                sleep 300ms
+                wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
+                sleep 1600ms
+            }
+        }
+        let cand = (try { wd-execute $session_id ($gql + 'var P="' + $setup.position + '";var r=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/candidate\"}}){id}}",{p:P});var n=0;try{n=r.data.nodes.length}catch(e){}return JSON.stringify({candidates:n});') | from json } catch { {candidates: 0} })
+        if (($cand.candidates | default 0) >= 2) {
+            log-ok $"two candidates added to the election \(candidates=($cand.candidates))"; $p = $p + 1
+        } else {
+            log-fail $"election: expected 2 candidates, got ($cand.candidates)"; $fl = $fl + 1
+        }
+        # Start a poll on the position (options are the candidates), then vote.
+        wd-navigate $session_id $"(base-url)($pospath)"
+        if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main .btn-icon.add-action")].some(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"})?"y":"n"' 8000) {
+            wd-execute $session_id 'var b=[...document.querySelectorAll("#main .btn-icon.add-action")].find(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"});if(b)b.click();return 1' | ignore
+            sleep 700ms
+            wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
+            if (wd-wait-y $session_id 'return document.querySelector("#main .ballot-option, #main .btn-cast")?"y":"n"' 9000) {
+                log-ok "election poll created and candidate ballot rendered"; $p = $p + 1
+                wd-execute $session_id 'var o=document.querySelector("#main .ballot-option");if(o)o.click();return 1' | ignore
+                sleep 500ms
+                wd-execute $session_id 'var b=document.querySelector("#main .btn-cast");if(b)b.click();return 1' | ignore
+                sleep 2000ms
+                let evres = (try { wd-execute $session_id ($gql + 'var P="' + $setup.position + '";var pr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/poll\"}}){id}}",{p:P});var poll=null;try{poll=pr.data.nodes[0].id}catch(e){}var vc=0;if(poll){var vr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/vote\"}}){id}}",{p:poll});try{vc=vr.data.nodes.length}catch(e){}}return JSON.stringify({poll:poll,votes:vc});') | from json } catch { {poll: null, votes: 0} })
+                if (($evres.votes | default 0) >= 1) {
+                    log-ok $"vote cast on the candidate election \(votes=($evres.votes))"; $p = $p + 1
+                } else {
+                    log-fail "election vote not recorded"; $fl = $fl + 1
+                }
+            } else {
+                log-fail "election poll did not open a ballot"; $fl = $fl + 1
+            }
+        } else {
+            log-fail "poll-start control missing on the position"; $fl = $fl + 1
+        }
+    } else {
+        log-warn "no hermetic position — skipping election flow"
+    }
+
+    # ── Teardown (always runs): delete the whole group subtree + the event and
+    #    their permissions, then verify the group is gone. Both are throwaways of
+    #    our own, so nothing needs restoring (the `active` relation cascades). ──
+    let td = (wd-teardown-context $session_id $gql $setup.group)
     if ($td.gone == true) {
         log-ok $"cleaned up the hermetic group \(($td.deleted) descendant nodes\) + permissions"; $p = $p + 1
     } else {
         log-fail $"cleanup incomplete, MANUAL CHECK: group ($setup.group) deleted=($td.deleted) gone=($td.gone)"; $fl = $fl + 1
+    }
+    if ($setup.event | is-not-empty) {
+        let etd = (wd-teardown-context $session_id $gql $setup.event)
+        if ($etd.gone == true) {
+            log-ok "cleaned up the hermetic event + permissions"; $p = $p + 1
+        } else {
+            log-fail $"cleanup incomplete, MANUAL CHECK: event ($setup.event) gone=($etd.gone)"; $fl = $fl + 1
+        }
     }
 
     { passed: $p, failed: $fl }

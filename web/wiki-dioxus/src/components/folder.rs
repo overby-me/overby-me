@@ -593,6 +593,49 @@ fn FolderAdd(
 
     let is_file = *kind.read() == "wiki/file";
 
+    // Which content types may be created here, derived from the permission system
+    // (like the old wiki's add-content dialog) rather than a fixed list. This is
+    // what restores creating motions (`vote/policy`) and elections
+    // (`vote/position`) through the UI, not only documents/folders/files: the
+    // dropdown lists exactly the mimes the server would accept under this node.
+    let add_nid = parent_id.clone();
+    let add_tok = session.read().access_token.clone();
+    let insertable_res = crate::use_data_resource!(|(add_nid, add_tok)| async move {
+        crate::graphql::node_insert_mimes(add_tok.as_deref(), &add_nid).await
+    });
+    // The creatable content mimes offered here, in display order, each paired with
+    // its label key. Types with a dedicated add button (speaker lists, amendments,
+    // candidacies, questions, comments, polls) are intentionally omitted.
+    const CONTENT_MIMES: &[(&str, &str)] = &[
+        ("wiki/document", "mime.document"),
+        ("vote/policy", "mime.policy"),
+        ("vote/position", "mime.position"),
+        ("wiki/folder", "mime.folder"),
+        ("wiki/file", "mime.file"),
+    ];
+    let insertable = insertable_res.read().clone().unwrap_or_default();
+    let options: Vec<(&str, &str)> = CONTENT_MIMES
+        .iter()
+        .copied()
+        .filter(|(m, _)| insertable.iter().any(|i| i == m))
+        .collect();
+    // Keep the chosen kind valid once permissions load: if the current selection
+    // is not among the offered options, snap to the first one so a plain "Add"
+    // click can never submit a mime the server will reject. Reads the resource
+    // inside the effect so it re-runs when the insertable list actually resolves.
+    use_effect(move || {
+        let insertable = insertable_res.read().clone().unwrap_or_default();
+        let opts: Vec<&str> = CONTENT_MIMES
+            .iter()
+            .map(|(m, _)| *m)
+            .filter(|m| insertable.iter().any(|i| i == m))
+            .collect();
+        let valid = opts.iter().any(|m| *m == *kind.read());
+        if !opts.is_empty() && !valid {
+            kind.set(opts[0].to_string());
+        }
+    });
+
     // Upload the chosen file to NHost storage, then remember its id/type so the
     // Add button can attach it. Mirrors React's FileUploader (upload on select).
     let on_pick_file = move |evt: FormEvent| {
@@ -790,9 +833,9 @@ fn FolderAdd(
                     "aria-label": t("common.type"),
                     value: "{kind}",
                     onchange: move |e| kind.set(e.value()),
-                    option { value: "wiki/document", "{t(\"mime.document\")}" }
-                    option { value: "wiki/folder", "{t(\"mime.folder\")}" }
-                    option { value: "wiki/file", "{t(\"mime.file\")}" }
+                    for (mime , label_key) in options.iter().copied() {
+                        option { key: "{mime}", value: "{mime}", "{t(label_key)}" }
+                    }
                 }
             }
         }
