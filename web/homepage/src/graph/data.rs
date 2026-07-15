@@ -221,6 +221,15 @@ impl GraphData {
                 false,
             ),
             node(
+                "Mastodon",
+                "Mastodon\nProfile",
+                "mastodon.avif",
+                None,
+                None,
+                Some("https://mas.to/@overby.me@bsky.brid.gy"),
+                false,
+            ),
+            node(
                 "Bluesky",
                 "Bluesky\nProfile",
                 "bluesky.avif",
@@ -313,6 +322,7 @@ impl GraphData {
             link("Connect", "Matrix"),
             link("Connect", "LinkedIn"),
             link("Connect", "Bridgy Fed"),
+            link("Connect", "Mastodon"),
             link("Connect", "PinkLeap"),
             link("Connect", "Bluesky"),
             link("Connect", "Signal"),
