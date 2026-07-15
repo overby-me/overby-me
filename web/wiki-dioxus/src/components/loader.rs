@@ -650,18 +650,18 @@ pub fn NodeAvatar(
     ordinal: Option<usize>,
     mutable: bool,
     small: bool,
-    /// Render just the bare mime icon (no avatar circle), as the old wiki's node
-    /// tree did — used in the drawer so the tree reads as a plain icon list.
+    /// Render without the coloured avatar circle — just the node's representation
+    /// (icon, or the policy/change letter, or the folder+letter) on a bare icon
+    /// footprint, as the old wiki's node tree did.
     #[props(default)]
     bare: bool,
 ) -> Element {
-    let inner = if bare {
-        icon_el(&mime)
-    } else {
-        node_avatar(&mime, &name, ordinal)
-    };
+    // Always the shared node representation (icon / letter / folder+letter), so the
+    // icon-vs-letter-vs-folder logic lives in ONE place ([`node_avatar`]) for every
+    // avatar in the app; `bare` only changes the container, not the content.
+    let inner = node_avatar(&mime, &name, ordinal);
     let cls = if bare {
-        "node-tree-icon"
+        "node-icon"
     } else if small {
         "avatar small"
     } else {

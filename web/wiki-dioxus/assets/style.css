@@ -1423,9 +1423,10 @@ html {
 	flex: 0 0 auto;
 }
 
-/* Bare node icon (drawer tree): the plain mime icon in the avatar's footprint,
-   no coloured circle — a lighter, old-wiki-style icon list. */
-.node-tree-icon {
+/* Bare node representation: the same node content (icon / policy-change letter /
+   folder+letter) as the avatar circle, but on a plain footprint with no coloured
+   circle — a lighter, old-wiki-style icon (used in the drawer tree). */
+.node-icon {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -1460,7 +1461,8 @@ html {
 	line-height: 1;
 }
 
-.avatar.small .avatar-label {
+.avatar.small .avatar-label,
+.node-icon .avatar-label {
 	font-size: 13px;
 }
 
@@ -1488,7 +1490,8 @@ html {
 	text-shadow: none;
 }
 
-.avatar.small .folder-letter {
+.avatar.small .folder-letter,
+.node-icon .folder-letter {
 	font-size: 8px;
 }
 
