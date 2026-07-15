@@ -75,11 +75,8 @@ fn collect_headings() -> Vec<Heading> {
             continue;
         }
         let text = el.text_content().unwrap_or_default().trim().to_string();
-        // Skip empty headings, decorative dividers, and the redundant page title.
-        if text.is_empty()
-            || !text.chars().any(char::is_alphanumeric)
-            || (!crumb.is_empty() && text == crumb)
-        {
+        // Skip empty headings and decorative dividers (dashes/rules with no label).
+        if text.is_empty() || !text.chars().any(char::is_alphanumeric) {
             continue;
         }
         let dom_level = el
@@ -95,6 +92,12 @@ fn collect_headings() -> Vec<Heading> {
             .closest(".card-header, .content-hero-veil")
             .ok()
             .flatten();
+        // Skip the page's own TITLE card when it just repeats the current breadcrumb.
+        // Only a card/hero TITLE is dropped — a document body heading that happens to
+        // match the node's name is real content and stays.
+        if hdr.is_some() && !crumb.is_empty() && text == crumb {
+            continue;
+        }
         let depth = if hdr.is_some() || dom_level <= 2 {
             0
         } else {
