@@ -895,6 +895,16 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # Breadcrumbs show a mime avatar per crumb (home + each segment).
     let r = (assert-count $session_id "breadcrumbs render avatars" ".breadcrumbs .crumb-avatar" 1 -p $p -f $fl); $p = $r.passed; $fl = $r.failed
 
+    # The current breadcrumb doubles as a page table-of-contents trigger: clicking
+    # it opens a popover listing the page's headings.
+    wd-navigate $session_id $"(base-url)($sel_ctx)"
+    sleep 800ms
+    wd-execute $session_id 'var c=document.querySelector(".breadcrumbs .crumb-toc .crumb-link"); if(c)c.click(); return 1' | ignore
+    sleep 400ms
+    let toc_open = (wd-execute $session_id 'return document.querySelector(".toc-popover")?"y":"n"')
+    if $toc_open == "y" { log-ok "page TOC opens from the current breadcrumb"; $p = $p + 1 } else { log-fail "page TOC did not open from the breadcrumb"; $fl = $fl + 1 }
+    wd-execute $session_id 'var s=document.querySelector(".toc-scrim"); if(s)s.click(); return 1' | ignore
+
     # ── App rail switches apps via the ?app= route query (client-side) ────
     # Go back to the SELECTED context (breadcrumb navigation above may have left
     # us at home), then click the Vote rail item and confirm the URL gains

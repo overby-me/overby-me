@@ -125,6 +125,10 @@ const EN_JSON: &str = r#"{
         "addLink": "Apply",
         "removeLink": "Remove link"
     },
+    "toc": {
+        "title": "On this page",
+        "empty": "No sections on this page"
+    },
     "common": {
         "add": "Add",
         "cancel": "Cancel",
@@ -529,6 +533,10 @@ const DA_JSON: &str = r#"{
         "linkUrl": "Link-URL",
         "addLink": "Anvend",
         "removeLink": "Fjern link"
+    },
+    "toc": {
+        "title": "P\u00e5 denne side",
+        "empty": "Ingen sektioner p\u00e5 denne side"
     },
     "common": {
         "add": "Tilf\u00f8j",

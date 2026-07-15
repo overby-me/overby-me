@@ -1,8 +1,67 @@
 use dioxus::prelude::*;
+use wasm_bindgen::JsCast;
 
 use super::*;
 use crate::i18n::t;
 use crate::route::Route;
+
+/// A heading found on the page for the table of contents: (element id, text,
+/// level 1–6).
+type Heading = (String, String, u8);
+
+/// Scan the content pane for every heading (h1–h6) — document headers AND the
+/// section/card headers rendered by components (amendments, polls, comments, …).
+/// Ensures each has an id (assigning one when missing) so the TOC can scroll to
+/// it, and returns them in document order.
+fn collect_headings() -> Vec<Heading> {
+    let mut out = Vec::new();
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return out;
+    };
+    let sel = "#main-content h1, #main-content h2, #main-content h3, \
+        #main-content h4, #main-content h5, #main-content h6";
+    let Ok(nodes) = doc.query_selector_all(sel) else {
+        return out;
+    };
+    for i in 0..nodes.length() {
+        let Some(el) = nodes
+            .item(i)
+            .and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+        else {
+            continue;
+        };
+        let text = el.text_content().unwrap_or_default().trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        let level = el
+            .tag_name()
+            .to_lowercase()
+            .strip_prefix('h')
+            .and_then(|n| n.parse::<u8>().ok())
+            .unwrap_or(3);
+        let mut id = el.id();
+        if id.is_empty() {
+            id = format!("toc-h{i}");
+            el.set_id(&id);
+        }
+        out.push((id, text, level));
+    }
+    out
+}
+
+/// Smooth-scroll the element with `id` into view (for a TOC click).
+fn scroll_to_id(id: &str) {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(id))
+    {
+        let opts = web_sys::ScrollIntoViewOptions::new();
+        opts.set_behavior(web_sys::ScrollBehavior::Smooth);
+        opts.set_block(web_sys::ScrollLogicalPosition::Start);
+        el.scroll_into_view_with_scroll_into_view_options(&opts);
+    }
+}
 
 /// Breadcrumb navigation based on the current route. Mirrors the old wiki: a row
 /// of mime avatars (each path node); only the current node's name is shown, and
@@ -79,6 +138,8 @@ pub(super) fn Breadcrumbs() -> Element {
                             name,
                             ordinal,
                             open: last_id == i + 1,
+                            // The current node's crumb doubles as the page TOC trigger.
+                            toc_trigger: last_id == i + 1,
                         }
                     }
                 }
@@ -131,7 +192,60 @@ pub(super) fn BreadcrumbCrumb(
     /// so it is tinted with the accent instead of the node/path colour.
     #[props(default)]
     app_crumb: bool,
+    /// This (current) crumb doubles as the page table-of-contents trigger: clicking
+    /// it opens a popover of every heading on the page, each scrolling to it.
+    #[props(default)]
+    toc_trigger: bool,
 ) -> Element {
+    let mut toc_open = use_signal(|| false);
+    let mut headings = use_signal(Vec::<Heading>::new);
+
+    if toc_trigger {
+        return rsx! {
+            div { class: if app_crumb { "crumb app-crumb crumb-toc" } else { "crumb crumb-toc" },
+                div {
+                    class: "crumb-link",
+                    style: "cursor: pointer;",
+                    onclick: move |_| {
+                        let now = !*toc_open.read();
+                        if now {
+                            headings.set(collect_headings());
+                        }
+                        toc_open.set(now);
+                    },
+                    div { class: "avatar small crumb-avatar",
+                        {crate::components::loader::node_avatar(&mime, &name, ordinal)}
+                    }
+                    span { class: "crumb-name open", "{name}" }
+                }
+                if toc_open() {
+                    // Click-away scrim + the popover of headings.
+                    div { class: "toc-scrim", onclick: move |_| toc_open.set(false) }
+                    nav { class: "toc-popover", "aria-label": t("toc.title"),
+                        if headings.read().is_empty() {
+                            div { class: "toc-empty body-medium text-muted", "{t(\"toc.empty\")}" }
+                        } else {
+                            for (id , text , level) in headings.read().iter() {
+                                button {
+                                    key: "{id}",
+                                    class: "toc-item toc-level-{level}",
+                                    onclick: {
+                                        let id = id.clone();
+                                        move |_| {
+                                            scroll_to_id(&id);
+                                            toc_open.set(false);
+                                        }
+                                    },
+                                    "{text}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+
     rsx! {
         div {
             class: if app_crumb { "crumb app-crumb" } else { "crumb" },
