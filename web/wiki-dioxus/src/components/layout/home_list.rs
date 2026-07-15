@@ -58,6 +58,34 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
         }
     });
 
+    // The root node backs the owner-only "add group / add event" actions: its id
+    // and own context, plus which context mimes the signed-in user may create
+    // there. Non-owners get an empty mime list (server-side `inserts` gate), so
+    // the buttons never appear.
+    let root_token = session.read().access_token.clone();
+    let root = crate::use_data_resource!(|(root_token)| async move {
+        let Some(node) = graphql::query_root_node(root_token.as_deref())
+            .await
+            .ok()
+            .flatten()
+        else {
+            return (None, None, Vec::<String>::new());
+        };
+        let id = node.id.0.clone();
+        let ctx = node
+            .context_id
+            .clone()
+            .map(|c| c.0)
+            .unwrap_or_else(|| id.clone());
+        let mimes = graphql::node_insert_mimes(root_token.as_deref(), &id).await;
+        (Some(id), Some(ctx), mimes)
+    });
+    let (root_id, root_ctx, root_mimes) = root.read().clone().unwrap_or((None, None, Vec::new()));
+    let rid = root_id.clone().unwrap_or_default();
+    let rctx = root_ctx.unwrap_or_else(|| rid.clone());
+    let can_group = root_id.is_some() && root_mimes.iter().any(|m| m == "wiki/group");
+    let can_event = root_id.is_some() && root_mimes.iter().any(|m| m == "wiki/event");
+
     let state = contexts.read().clone();
     let hint_style = "padding: 4px 16px;";
     // Pending invitations, split into the list they belong to (group vs event) so
@@ -147,6 +175,10 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                 div { class: "card-header",
                     div { class: "avatar small", span { class: "material-icons", "groups" } }
                     h3 { class: "title-medium", "{t(\"layout.groups\")}" }
+                    if can_group {
+                        div { class: "flex-grow" }
+                        NewContextButton { mime: "wiki/group".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
+                    }
                 }
                 div { class: "home-section-body", {groups_body} }
             }
@@ -154,6 +186,10 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                 div { class: "card-header",
                     div { class: "avatar small", span { class: "material-icons", "event" } }
                     h3 { class: "title-medium", "{t(\"layout.events\")}" }
+                    if can_event {
+                        div { class: "flex-grow" }
+                        NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
+                    }
                 }
                 div { class: "home-section-body", {events_body} }
             }
@@ -161,14 +197,133 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     } else {
         rsx! {
             div { style: "margin-top: 16px;",
-                h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px;",
-                    "{t(\"layout.groups\")}"
+                div { style: "display: flex; align-items: center; padding: 8px 16px;",
+                    h4 { class: "title-small", class: "text-muted", style: "flex: 1; margin: 0;",
+                        "{t(\"layout.groups\")}"
+                    }
+                    if can_group {
+                        NewContextButton { mime: "wiki/group".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
+                    }
                 }
                 {groups_body}
-                h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px; margin-top: 8px;",
-                    "{t(\"layout.events\")}"
+                div { style: "display: flex; align-items: center; padding: 8px 16px; margin-top: 8px;",
+                    h4 { class: "title-small", class: "text-muted", style: "flex: 1; margin: 0;",
+                        "{t(\"layout.events\")}"
+                    }
+                    if can_event {
+                        NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
+                    }
                 }
                 {events_body}
+            }
+        }
+    }
+}
+
+/// A per-list "add group" / "add event" action, rendered in a list header for
+/// the root owner (the caller gates on the root's `inserts`). It opens a name
+/// dialog and drives [`graphql::create_context`], which creates the node under
+/// the root, makes it its own context, and seeds the permission template — so the
+/// new group/event is usable immediately. On success it jumps into it.
+#[component]
+fn NewContextButton(mime: String, root_id: String, root_context_id: String) -> Element {
+    let session = use_session();
+    let nav = use_navigator();
+    let is_group = mime == "wiki/group";
+    let label = if is_group {
+        t("layout.newGroup")
+    } else {
+        t("layout.newEvent")
+    };
+
+    let mut open = use_signal(|| false);
+    let mut name = use_signal(String::new);
+    let mut error = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+
+    let submit = move |_| {
+        let title = name.read().trim().to_string();
+        if title.is_empty() || *busy.read() {
+            return;
+        }
+        let key = crate::components::loader::slugify(&title);
+        let mime = mime.clone();
+        let root_id = root_id.clone();
+        let root_context_id = root_context_id.clone();
+        let token = session.read().access_token.clone();
+        busy.set(true);
+        error.set(String::new());
+        spawn(async move {
+            match graphql::create_context(
+                token.as_deref(),
+                &root_id,
+                &root_context_id,
+                &mime,
+                &title,
+                &key,
+            )
+            .await
+            {
+                Ok(inserted) => {
+                    crate::session::bump_data_version();
+                    busy.set(false);
+                    open.set(false);
+                    name.set(String::new());
+                    nav.push(Route::PathPage {
+                        segments: vec![inserted.key],
+                        app: None,
+                    });
+                }
+                Err(e) => {
+                    busy.set(false);
+                    log::error!("create context failed: {e}");
+                    error.set(t("layout.createFailed"));
+                }
+            }
+        });
+    };
+
+    rsx! {
+        button {
+            class: "btn-icon add-action state-layer",
+            title: "{label}",
+            aria_label: "{label}",
+            onclick: move |_| open.set(true),
+            span { class: "material-icons", "add" }
+        }
+        crate::components::widgets::Dialog {
+            open: open(),
+            on_dismiss: move |_| open.set(false),
+            headline: label.clone(),
+            icon: (if is_group { "group_add" } else { "event" }).to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: name.read().trim().is_empty() || *busy.read(),
+                    onclick: submit,
+                    "{t(\"common.add\")}"
+                }
+            },
+            div { class: "text-field",
+                label { "{t(\"common.title\")}" }
+                input {
+                    r#type: "text",
+                    maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
+                    value: "{name}",
+                    oninput: move |e| name.set(e.value()),
+                }
+            }
+            if !error.read().is_empty() {
+                p {
+                    class: "body-medium mt-1",
+                    style: "color: var(--md-error, #b3261e);",
+                    "{error}"
+                }
             }
         }
     }

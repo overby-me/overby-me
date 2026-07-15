@@ -1476,18 +1476,20 @@ def test-create-context [session_id: string, passed: int, failed: int]: nothing 
     let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
     let gname = $"E2E Group (date now | format date '%Y%m%d%H%M%S')"
 
-    # Home: open the owner-only "new group/event" dialog from the hero header.
+    # Home: open the owner-only "add group" dialog from the Groups list header
+    # (found by its aria-label, so it works whether it renders in the home card or
+    # the desktop drawer).
     wd-navigate $session_id $"(base-url)/"
     sleep 1sec
-    if not (wd-wait-y $session_id 'return document.querySelector("#main .home-hero-head .add-action")?"y":"n"' 8000) {
-        log-fail "no create-context control on home (owner)"; $fl = $fl + 1
+    if not (wd-wait-y $session_id 'return [...document.querySelectorAll("button.add-action")].some(function(b){return b.getAttribute("aria-label")=="New group"})?"y":"n"' 8000) {
+        log-fail "no add-group control on the groups list (owner)"; $fl = $fl + 1
         return { passed: $p, failed: $fl }
     }
-    log-ok "create-context control shown on home (owner)"; $p = $p + 1
-    wd-execute $session_id 'document.querySelector("#main .home-hero-head .add-action").click(); return 1' | ignore
+    log-ok "add-group control shown on the groups list (owner)"; $p = $p + 1
+    wd-execute $session_id 'var b=[...document.querySelectorAll("button.add-action")].find(function(b){return b.getAttribute("aria-label")=="New group"});if(b)b.click();return 1' | ignore
     sleep 500ms
-    # Fill the name, pick "group" if a selector is offered, then create.
-    wd-execute $session_id ('var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="' + $gname + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}var sel=document.querySelector(".m3-dialog select");if(sel){sel.value="wiki/group";sel.dispatchEvent(new Event("change",{bubbles:true}))}return 1') | ignore
+    # Fill the name and create (the per-list dialog has no type selector).
+    wd-execute $session_id ('var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="' + $gname + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
     sleep 400ms
     wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
     # Wait to navigate into the freshly created group (the URL leaves "/").
