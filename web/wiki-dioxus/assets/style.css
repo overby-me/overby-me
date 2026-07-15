@@ -728,6 +728,12 @@ html {
 	color: var(--md-on-surface-variant);
 	border-radius: var(--md-sys-shape-corner-large);
 	padding: var(--md-sys-spacing-2) 0;
+	/* The "apps" entry is a <button> (the others are <a>): strip the browser's
+	   default button chrome so it matches the anchor items. */
+	background: none;
+	border: none;
+	cursor: pointer;
+	font: inherit;
 }
 .nav-bar-indicator {
 	position: relative;
