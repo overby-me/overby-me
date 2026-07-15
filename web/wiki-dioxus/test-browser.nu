@@ -1708,48 +1708,66 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
         log-fail "add-speaker-list control missing in the speak app"; $fl = $fl + 1
     }
 
-    # ── Person election: add 2 candidates (UI) -> start poll -> vote -> verify ──
-    # The policy flow above covers a For/Against/Blank poll; this covers a candidate
-    # election: the inline AddCandidateButton, the candidate carousel, StartPollButton
-    # on a vote/position (whose options are the candidates), and casting a ballot.
+    # ── Person election: add 10 candidates (UI) -> poll allowing 5 selections ──
+    # -> cast a five-candidate ballot -> verify. Exercises the inline
+    # AddCandidateButton at volume, the multi-select ballot (maxVote>1 renders a
+    # checkbox per candidate, capped at 5 with over-vote blocked), and that the
+    # recorded vote carries exactly the five chosen options.
     if ($setup.position | is-not-empty) {
         let pospath = $"/($setup.groupKey)/($setup.folderKey)/($setup.positionKey)"
         wd-navigate $session_id $"(base-url)($pospath)"
-        # Add two candidates through the inline add-candidate dialog (name only; the
-        # photo is optional).
-        for cname in ["Alice E2E" "Bob E2E"] {
+        # Add ten candidates through the inline add-candidate dialog (name only).
+        for i in 1..10 {
+            let cname = $"Candidate ($i)"
             if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main button[aria-label]")].some(function(b){return b.getAttribute("aria-label")=="Add candidate"})?"y":"n"' 8000) {
                 wd-execute $session_id 'var b=[...document.querySelectorAll("#main button[aria-label]")].find(function(x){return x.getAttribute("aria-label")=="Add candidate"});if(b)b.click();return 1' | ignore
-                sleep 500ms
+                sleep 450ms
                 wd-execute $session_id ('var ta=document.querySelector(".m3-dialog input[type=text]");if(ta){ta.value="' + $cname + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
-                sleep 300ms
+                sleep 250ms
                 wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
-                sleep 1600ms
+                sleep 1300ms
             }
         }
         let cand = (try { wd-execute $session_id ($gql + 'var P="' + $setup.position + '";var r=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/candidate\"}}){id}}",{p:P});var n=0;try{n=r.data.nodes.length}catch(e){}return JSON.stringify({candidates:n});') | from json } catch { {candidates: 0} })
-        if (($cand.candidates | default 0) >= 2) {
-            log-ok $"two candidates added to the election \(candidates=($cand.candidates))"; $p = $p + 1
+        if (($cand.candidates | default 0) >= 10) {
+            log-ok $"ten candidates added to the election \(candidates=($cand.candidates))"; $p = $p + 1
         } else {
-            log-fail $"election: expected 2 candidates, got ($cand.candidates)"; $fl = $fl + 1
+            log-fail $"election: expected 10 candidates, got ($cand.candidates)"; $fl = $fl + 1
         }
-        # Start a poll on the position (options are the candidates), then vote.
+        # Start a poll and allow voting for up to 5 of the candidates: the dialog
+        # shows two vote-range sliders (min, max) once there are >2 options; drag
+        # the max (second) slider to 5.
         wd-navigate $session_id $"(base-url)($pospath)"
         if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main .btn-icon.add-action")].some(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"})?"y":"n"' 8000) {
             wd-execute $session_id 'var b=[...document.querySelectorAll("#main .btn-icon.add-action")].find(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"});if(b)b.click();return 1' | ignore
             sleep 700ms
+            let maxset = (wd-execute $session_id 'var rs=[...document.querySelectorAll(".m3-dialog input[type=range]")];if(rs.length<2)return rs.length.toString();var mx=rs[1];mx.value="5";mx.dispatchEvent(new Event("input",{bubbles:true}));return rs.length.toString()')
+            if ($maxset == "2") { log-ok "poll dialog exposes min/max vote sliders for a multi-candidate election"; $p = $p + 1 } else { log-fail $"expected two vote-range sliders, saw ($maxset)"; $fl = $fl + 1 }
+            sleep 350ms
             wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
-            if (wd-wait-y $session_id 'return document.querySelector("#main .ballot-option, #main .btn-cast")?"y":"n"' 9000) {
-                log-ok "election poll created and candidate ballot rendered"; $p = $p + 1
-                wd-execute $session_id 'var o=document.querySelector("#main .ballot-option");if(o)o.click();return 1' | ignore
+            if (wd-wait-y $session_id 'return document.querySelector("#main .ballot-option")?"y":"n"' 9000) {
+                # maxVote>1 makes the ballot multi-select: a checkbox per candidate.
+                let ischk = (wd-execute $session_id 'return document.querySelector("#main .ballot-option button[role=checkbox]")?"y":"n"')
+                if ($ischk == "y") { log-ok "election poll created, multi-select candidate ballot rendered"; $p = $p + 1 } else { log-fail "ballot did not render candidate checkboxes"; $fl = $fl + 1 }
+                # Select five candidates (Blank is always last, so the first five
+                # checkboxes are candidates); confirm five register as checked.
+                wd-execute $session_id 'var bx=[...document.querySelectorAll("#main .ballot-option button[role=checkbox]")];for(var i=0;i<5;i++){if(bx[i])bx[i].click();}return 1' | ignore
+                sleep 700ms
+                let nchk = (wd-execute $session_id 'return [...document.querySelectorAll("#main .ballot-option button[role=checkbox]")].filter(function(b){return b.getAttribute("data-state")=="checked"}).length.toString()')
+                if ($nchk == "5") { log-ok "selected five candidates on the ballot"; $p = $p + 1 } else { log-fail $"expected 5 selections, got ($nchk)"; $fl = $fl + 1 }
+                # A sixth selection must be refused (over-vote guard holds at max=5).
+                wd-execute $session_id 'var bx=[...document.querySelectorAll("#main .ballot-option button[role=checkbox]")];for(var i=0;i<bx.length;i++){if(bx[i].getAttribute("data-state")!="checked"){bx[i].click();break;}}return 1' | ignore
                 sleep 500ms
+                let sixth = (wd-execute $session_id 'return [...document.querySelectorAll("#main .ballot-option button[role=checkbox]")].filter(function(b){return b.getAttribute("data-state")=="checked"}).length.toString()')
+                if ($sixth == "5") { log-ok "over-vote blocked: a sixth selection is refused (cap held at 5)"; $p = $p + 1 } else { log-fail $"over-vote not blocked \(checked=($sixth))"; $fl = $fl + 1 }
+                # Cast the five-candidate ballot; verify the recorded vote lists 5 choices.
                 wd-execute $session_id 'var b=document.querySelector("#main .btn-cast");if(b)b.click();return 1' | ignore
-                sleep 2000ms
-                let evres = (try { wd-execute $session_id ($gql + 'var P="' + $setup.position + '";var pr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/poll\"}}){id}}",{p:P});var poll=null;try{poll=pr.data.nodes[0].id}catch(e){}var vc=0;if(poll){var vr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/vote\"}}){id}}",{p:poll});try{vc=vr.data.nodes.length}catch(e){}}return JSON.stringify({poll:poll,votes:vc});') | from json } catch { {poll: null, votes: 0} })
-                if (($evres.votes | default 0) >= 1) {
-                    log-ok $"vote cast on the candidate election \(votes=($evres.votes))"; $p = $p + 1
+                sleep 2200ms
+                let evres = (try { wd-execute $session_id ($gql + 'var P="' + $setup.position + '";var pr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/poll\"}}){id}}",{p:P});var poll=null;try{poll=pr.data.nodes[0].id}catch(e){}var votes=0,choices=-1;if(poll){var vr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/vote\"}}){id data}}",{p:poll});try{votes=vr.data.nodes.length;var d=vr.data.nodes[0].data;if(Array.isArray(d))choices=d.length;}catch(e){}}return JSON.stringify({poll:poll,votes:votes,choices:choices});') | from json } catch { {poll: null, votes: 0, choices: -1} })
+                if ((($evres.votes | default 0) >= 1) and (($evres.choices | default (-1)) == 5)) {
+                    log-ok $"cast a five-candidate ballot; the vote records 5 choices \(votes=($evres.votes))"; $p = $p + 1
                 } else {
-                    log-fail "election vote not recorded"; $fl = $fl + 1
+                    log-fail $"five-candidate vote not recorded correctly \(votes=($evres.votes) choices=($evres.choices))"; $fl = $fl + 1
                 }
             } else {
                 log-fail "election poll did not open a ballot"; $fl = $fl + 1
