@@ -30,6 +30,8 @@
   packages.wiki-dioxus-frontend = {
     lib,
     rustPlatform,
+    just,
+    which,
     dioxus-cli,
     wasm-bindgen-cli,
     binaryen,
@@ -46,6 +48,7 @@
           ./Cargo.toml
           ./Cargo.lock
           ./Dioxus.toml
+          ./justfile
           ./src
           ./assets
           ./graphql
@@ -63,6 +66,10 @@
       };
 
       nativeBuildInputs = [
+        # `just build` drives the build; `which` resolves the dioxus `dx` binary
+        # the way the justfile expects.
+        just
+        which
         dioxus-cli
         wasm-bindgen-cli
         binaryen
@@ -70,17 +77,18 @@
         lld
       ];
 
+      # Run the same `just build` as a local build, so the SPA `_redirects` +
+      # root-scoped `sw.js` copies have a single source of truth (the justfile).
       buildPhase = ''
-        dx build --release
+        runHook preBuild
+        just build
+        runHook postBuild
       '';
 
       installPhase = ''
+        runHook preInstall
         cp -r target/dx/wiki-dioxus/release/web/public $out
-        # Serve the service worker from the site ROOT so its scope is `/` (not the
-        # hashed `/assets/` path, whose scope is only `/assets/`). statichost.eu
-        # serves $out at the domain root, so $out/sw.js is reachable at /sw.js and
-        # can control the whole app (/, /wasm/*) for offline use.
-        cp ${./assets/sw.js} $out/sw.js
+        runHook postInstall
       '';
 
       # Unit tests run separately (`just test`); the nix build only produces the
