@@ -1458,6 +1458,65 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
     { passed: $p, failed: $fl }
 }
 
+# Create-group-from-home write-flow: the owner-only "new group/event" control on
+# the home hero (bound to the root node). Drives the dialog through the UI, then
+# verifies against the backend that the node was created as its OWN context with
+# the permission template seeded (so it is actually usable), and deletes it again.
+# Firefox-only; warn-skips on Servo. Self-cleaning on the live backend.
+def test-create-context [session_id: string, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
+    mut p = $passed; mut fl = $failed
+    log-info ""
+    log-info "── Create group from home (write-flow) ──────────────────"
+    if (servo-skip "create-group-from-home") {
+        return { passed: $p, failed: $fl }
+    }
+    let GQL = "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
+    let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+    let gname = $"E2E Group (date now | format date '%Y%m%d%H%M%S')"
+
+    # Home: open the owner-only "new group/event" dialog from the hero header.
+    wd-navigate $session_id $"(base-url)/"
+    sleep 1sec
+    if not (wd-wait-y $session_id 'return document.querySelector("#main .home-hero-head .add-action")?"y":"n"' 8000) {
+        log-fail "no create-context control on home (owner)"; $fl = $fl + 1
+        return { passed: $p, failed: $fl }
+    }
+    log-ok "create-context control shown on home (owner)"; $p = $p + 1
+    wd-execute $session_id 'document.querySelector("#main .home-hero-head .add-action").click(); return 1' | ignore
+    sleep 500ms
+    # Fill the name, pick "group" if a selector is offered, then create.
+    wd-execute $session_id ('var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="' + $gname + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}var sel=document.querySelector(".m3-dialog select");if(sel){sel.value="wiki/group";sel.dispatchEvent(new Event("change",{bubbles:true}))}return 1') | ignore
+    sleep 400ms
+    wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
+    # Wait to navigate into the freshly created group (the URL leaves "/").
+    mut navigated = false
+    for _ in 1..20 {
+        let path = (wd-execute $session_id 'return location.pathname')
+        if ($path != "/") and ($path != null) { $navigated = true; break }
+        sleep 300ms
+    }
+    if $navigated { log-ok "navigated into the new group"; $p = $p + 1 } else { log-fail "did not navigate into the new group"; $fl = $fl + 1 }
+    sleep 800ms
+
+    # Verify against the backend: the node exists as wiki/group, is its own
+    # context, and carries the seeded permission template.
+    let chk = (try { wd-execute $session_id ($gql + 'var r=gql("query($n:String!){nodes(where:{name:{_eq:$n},mimeId:{_eq:\"wiki/group\"}}){id contextId}}",{n:"' + $gname + '"});var id=null,ctx=null;try{id=r.data.nodes[0].id;ctx=r.data.nodes[0].contextId}catch(e){}var perms=0;if(id){var pr=gql("query($c:uuid!){permissions(where:{contextId:{_eq:$c}}){id}}",{c:id});try{perms=pr.data.permissions.length}catch(e){}}return JSON.stringify({id:id,selfCtx:(id!=null&&id==ctx),perms:perms});') | from json } catch { {id: null, selfCtx: false, perms: 0} })
+    if ($chk.id | is-empty) {
+        log-fail "group not found in backend after create"; $fl = $fl + 1
+    } else {
+        if ($chk.selfCtx == true) { log-ok "new group is its own context"; $p = $p + 1 } else { log-fail "new group context not set to self"; $fl = $fl + 1 }
+        if ($chk.perms >= 10) { log-ok $"permission template seeded \(($chk.perms) rows\)"; $p = $p + 1 } else { log-fail $"permission template not seeded \(($chk.perms) rows\)"; $fl = $fl + 1 }
+    }
+
+    # Teardown: delete the group's permissions + the node (it has no children yet).
+    if ($chk.id | is-not-empty) {
+        let td = (try { wd-execute $session_id ($gql + 'var ID="' + $chk.id + '";gql("mutation($c:uuid!){deletePermissions(where:{contextId:{_eq:$c}}){affected_rows}}",{c:ID});gql("mutation($i:uuid!){deleteNode(id:$i){id}}",{i:ID});var chk=gql("query($i:uuid!){node(id:$i){id}}",{i:ID});var gone=true;try{gone=!chk.data.node}catch(e){}return JSON.stringify({gone:gone});') | from json } catch { {gone: false} })
+        if ($td.gone == true) { log-ok "cleaned up the created group + permissions"; $p = $p + 1 } else { log-fail $"cleanup incomplete, MANUAL CHECK: group ($chk.id)"; $fl = $fl + 1 }
+    }
+
+    { passed: $p, failed: $fl }
+}
+
 # Component CSS contracts for the M3 carousel and content image/lightbox. These
 # render from data the harness may not have (candidate photos, content images),
 # so verify the styling by injecting the exact markup the components emit and
@@ -1645,6 +1704,8 @@ def main [
         # Write-flow (create poll / vote / comment) needs the authed session and
         # only runs for real under Firefox; it self-cleans on the live backend.
         let r = (test-vote-flow $session_id $passed $failed); $passed = $r.passed; $failed = $r.failed
+        # Create group/event from home (owner-only) — also Firefox-only + self-cleaning.
+        let r = (test-create-context $session_id $passed $failed); $passed = $r.passed; $failed = $r.failed
     } else {
         log-info ""
         log-info "Skipping authenticated tests (set WIKI_EMAIL / WIKI_PASSWORD to enable)."

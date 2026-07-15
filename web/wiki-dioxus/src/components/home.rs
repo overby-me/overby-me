@@ -24,6 +24,12 @@ pub fn HomeApp() -> Element {
         .as_ref()
         .map(|n| n.is_owner.unwrap_or(false) || n.is_context_owner.unwrap_or(false))
         .unwrap_or(false);
+    // Root identity for the owner-only "new group/event" action (the root is its
+    // own context, so fall back to its id when context_id is absent).
+    let root_id = root_node.as_ref().map(|n| n.id.0.clone());
+    let root_ctx = root_node
+        .as_ref()
+        .and_then(|n| n.context_id.as_ref().map(|c| c.0.clone()));
     let welcome_data = root_node.as_ref().and_then(|n| n.data.clone()).map(|d| d.0);
     let has_welcome = welcome_data
         .as_ref()
@@ -71,6 +77,15 @@ pub fn HomeApp() -> Element {
                             h3 { class: "home-hero-title", "{title}" }
                         }
                         div { class: "flex-grow" }
+                        // Owner-only: create a new group or event (bound to root).
+                        if can_edit {
+                            if let Some(rid) = root_id.clone() {
+                                NewContextButton {
+                                    root_id: rid.clone(),
+                                    root_context_id: root_ctx.clone().unwrap_or(rid),
+                                }
+                            }
+                        }
                         // Owner-only: edit the welcome text (root node content).
                         if can_edit {
                             Link {
@@ -137,6 +152,149 @@ pub fn HomeApp() -> Element {
                 // (HomeList), so there is no separate invitations card.
                 if is_auth {
                     RecentContents {}
+                }
+            }
+        }
+    }
+}
+
+/// Owner-only: create a new group or event from the home page, bound to the root
+/// node — the port's equivalent of the old wiki's home AddContentFab. It renders
+/// only when the root's `inserts` actually offer a context mime (i.e. the signed-in
+/// user owns the root), and drives [`graphql::create_context`], which seeds the
+/// new context's permission template so it is usable immediately.
+#[component]
+fn NewContextButton(root_id: String, root_context_id: String) -> Element {
+    let session = use_session();
+    let nav = use_navigator();
+    let token = session.read().access_token.clone();
+
+    // Which context mimes (group / event) may this user create under the root?
+    // Empty for non-owners (the server-side `inserts` gate returns nothing), so
+    // the whole control disappears.
+    let mimes_root = root_id.clone();
+    let mimes_res = crate::use_data_resource!(|(mimes_root, token)| async move {
+        graphql::node_insert_mimes(token.as_deref(), &mimes_root)
+            .await
+            .into_iter()
+            .filter(|m| m == "wiki/group" || m == "wiki/event")
+            .collect::<Vec<String>>()
+    });
+    let mimes = mimes_res.read().clone().unwrap_or_default();
+    if mimes.is_empty() {
+        return rsx! {};
+    }
+
+    let mut open = use_signal(|| false);
+    let mut name = use_signal(String::new);
+    let mut kind = use_signal(|| mimes[0].clone());
+    let mut error = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+
+    let submit = {
+        let root_id = root_id.clone();
+        let root_context_id = root_context_id.clone();
+        move |_| {
+            let title = name.read().trim().to_string();
+            if title.is_empty() || *busy.read() {
+                return;
+            }
+            let key = crate::components::loader::slugify(&title);
+            let mime = kind.read().clone();
+            let root_id = root_id.clone();
+            let root_context_id = root_context_id.clone();
+            let token = session.read().access_token.clone();
+            busy.set(true);
+            error.set(String::new());
+            spawn(async move {
+                match graphql::create_context(
+                    token.as_deref(),
+                    &root_id,
+                    &root_context_id,
+                    &mime,
+                    &title,
+                    &key,
+                )
+                .await
+                {
+                    Ok(inserted) => {
+                        crate::session::bump_data_version();
+                        busy.set(false);
+                        open.set(false);
+                        name.set(String::new());
+                        // Jump straight into the freshly created group/event.
+                        nav.push(Route::PathPage {
+                            segments: vec![inserted.key],
+                            app: None,
+                        });
+                    }
+                    Err(e) => {
+                        busy.set(false);
+                        log::error!("create context failed: {e}");
+                        error.set(t("layout.createFailed"));
+                    }
+                }
+            });
+        }
+    };
+
+    rsx! {
+        button {
+            class: "btn-icon add-action state-layer",
+            title: "{t(\"layout.newContext\")}",
+            "aria-label": "{t(\"layout.newContext\")}",
+            onclick: move |_| open.set(true),
+            span { class: "material-icons", "add" }
+        }
+        super::widgets::Dialog {
+            open: open(),
+            on_dismiss: move |_| open.set(false),
+            headline: t("layout.newContext"),
+            icon: "group_add".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: name.read().trim().is_empty() || *busy.read(),
+                    onclick: submit,
+                    "{t(\"common.add\")}"
+                }
+            },
+            div { class: "text-field",
+                label { "{t(\"common.title\")}" }
+                input {
+                    r#type: "text",
+                    maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
+                    value: "{name}",
+                    oninput: move |e| name.set(e.value()),
+                }
+            }
+            // Only offer the picker when both kinds are creatable here.
+            if mimes.len() > 1 {
+                div { class: "mt-2",
+                    select {
+                        class: "editor-select",
+                        "aria-label": t("common.type"),
+                        value: "{kind}",
+                        onchange: move |e| kind.set(e.value()),
+                        for m in mimes.iter() {
+                            {
+                                let label = if m == "wiki/group" { t("mime.group") } else { t("mime.event") };
+                                rsx! { option { value: "{m}", "{label}" } }
+                            }
+                        }
+                    }
+                }
+            }
+            if !error.read().is_empty() {
+                p {
+                    class: "body-medium mt-1",
+                    style: "color: var(--md-error, #b3261e);",
+                    "{error}"
                 }
             }
         }

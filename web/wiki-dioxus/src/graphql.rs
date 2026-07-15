@@ -1502,6 +1502,44 @@ pub async fn execute_raw(
     }
 }
 
+async fn execute_raw_vars_once(
+    access_token: Option<&str>,
+    query: &str,
+    variables: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::new();
+    let mut req = client.post(graphql_url());
+    if let Some(token) = access_token {
+        req = req.bearer_auth(token);
+    }
+    let body = serde_json::json!({ "query": query, "variables": variables });
+    let resp = req.json(&body).send().await.map_err(|e| e.to_string())?;
+    let result: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(errors) = result.get("errors") {
+        return Err(errors.to_string());
+    }
+    Ok(result.get("data").cloned().unwrap_or_default())
+}
+
+/// Like [`execute_raw`] but with GraphQL `variables` (for mutations that pass
+/// structured input, e.g. seeding a new context's permission template), with the
+/// same JWT refresh-and-retry.
+pub async fn execute_raw_vars(
+    access_token: Option<&str>,
+    query: &str,
+    variables: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    match execute_raw_vars_once(access_token, query, &variables).await {
+        Err(msg) if is_jwt_error(&msg) => match crate::session::ensure_fresh_token().await {
+            Some(fresh) if Some(fresh.as_str()) != access_token => {
+                execute_raw_vars_once(Some(&fresh), query, &variables).await
+            }
+            _ => Err(msg),
+        },
+        other => other,
+    }
+}
+
 // --- High-level query functions ---
 
 pub async fn query_node_by_key(
@@ -1702,6 +1740,122 @@ pub async fn insert_node(
     let operation = InsertNodeMutation::build(InsertNodeVariables { object: input });
     let result = execute(access_token, operation).await?;
     Ok(result.insert_node)
+}
+
+/// The per-context permission template seeded when a new group/event is created,
+/// mirroring the old wiki's `contextPerm`. Each row is stamped with the new
+/// context's id (as both `contextId` and `nodeId`). Without these rows the
+/// context is an empty shell: nothing (documents, polls, votes, comments, …) can
+/// be inserted under it, since the server-side `insert` gate reads this table.
+/// Every rule is insertable + selectable; only `vote/vote` is immutable (a cast
+/// ballot is never edited or deleted by a member).
+fn context_permission_objects(ctx_id: &str) -> serde_json::Value {
+    // (child mime, role, parent mimes it may be created under)
+    let rules: &[(&str, &str, &[&str])] = &[
+        ("vote/vote", "member", &["vote/poll"]),
+        ("vote/policy", "member", &["wiki/folder"]),
+        ("vote/candidate", "member", &["vote/position"]),
+        (
+            "wiki/document",
+            "owner",
+            &["wiki/event", "wiki/folder", "wiki/group"],
+        ),
+        (
+            "vote/poll",
+            "owner",
+            &["vote/policy", "vote/change", "vote/position"],
+        ),
+        ("vote/question", "member", &["vote/position", "wiki/file"]),
+        ("vote/comment", "member", &["vote/policy", "vote/change"]),
+        ("speak/speak", "member", &["speak/list"]),
+        (
+            "vote/change",
+            "member",
+            &["vote/policy", "vote/change", "wiki/file"],
+        ),
+        (
+            "wiki/folder",
+            "owner",
+            &["wiki/folder", "wiki/group", "wiki/event"],
+        ),
+        ("vote/position", "owner", &["wiki/folder"]),
+        (
+            "wiki/file",
+            "owner",
+            &["wiki/event", "wiki/folder", "wiki/group"],
+        ),
+    ];
+    let objs: Vec<serde_json::Value> = rules
+        .iter()
+        .map(|(mime, role, parents)| {
+            let mutable_row = *mime != "vote/vote";
+            serde_json::json!({
+                "contextId": ctx_id,
+                "nodeId": ctx_id,
+                "mimeId": mime,
+                "role": role,
+                "parents": parents,
+                "active": true,
+                "insert": true,
+                "select": true,
+                "update": mutable_row,
+                "delete": mutable_row,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(objs)
+}
+
+/// Create a new context node — a group (`wiki/group`) or event (`wiki/event`) —
+/// under `parent_id`, mirroring the old wiki's create-context flow. First it
+/// inserts the node in the *parent's* context, so the server-side `insert`
+/// permission (which gates on `node.context_id = permission.context_id`) passes;
+/// then it flips the node to be its own context and locks it (`mutable = false`);
+/// finally it seeds the per-context permission template so content can be added
+/// under it. Returns the new node's id + key.
+pub async fn create_context(
+    access_token: Option<&str>,
+    parent_id: &str,
+    parent_context_id: &str,
+    mime_id: &str,
+    name: &str,
+    key: &str,
+) -> Result<InsertedNode, String> {
+    let inserted = insert_node(
+        access_token,
+        NodesInsertInput {
+            name: Some(name.to_string()),
+            key: Some(key.to_string()),
+            mime_id: Some(mime_id.to_string()),
+            parent_id: Some(Uuid(parent_id.to_string())),
+            context_id: Some(Uuid(parent_context_id.to_string())),
+            data: None,
+            mutable: Some(true),
+            index: None,
+        },
+    )
+    .await?
+    .ok_or("insert returned no node")?;
+    let id = inserted.id.0.clone();
+    // Become its own context (locked, like the old wiki's create).
+    update_node(
+        access_token,
+        &id,
+        NodesSetInput {
+            context_id: Some(Uuid(id.clone())),
+            mutable: Some(false),
+            ..Default::default()
+        },
+    )
+    .await?;
+    // Seed the permission template so the context is actually usable.
+    execute_raw_vars(
+        access_token,
+        "mutation($objs: [permissions_insert_input!]!) { insertPermissions(objects: $objs) { affected_rows } }",
+        serde_json::json!({ "objs": context_permission_objects(&id) }),
+    )
+    .await?;
+    Ok(inserted)
 }
 
 /// Recursively deep-copy a node and its whole subtree (data + members) under
