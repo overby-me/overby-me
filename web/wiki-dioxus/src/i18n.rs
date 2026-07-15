@@ -296,10 +296,12 @@ const EN_JSON: &str = r#"{
         "replyNotifyTitle": "New reply",
         "replyNotifyBody": "Someone replied to your comment",
         "question": "Question",
-        "noAmendments": "No amendments",
         "noComments": "No comments yet",
         "noQuestions": "No questions",
         "noAmendments": "No amendments yet",
+        "blankOnlyAlone": "Blank cannot be combined with other choices",
+        "selectAtLeast": "Select at least {{count}}",
+        "selectAtMost": "Select at most {{count}}",
         "amendments": "Amendments",
         "questions": "Questions",
         "candidates": "Candidates",
@@ -351,6 +353,7 @@ const EN_JSON: &str = r#"{
         "noLists": "No speaker lists yet",
         "newList": "New speaker list",
         "clear": "Clear",
+        "confirmClear": "Clear the whole speaker list?",
         "start": "Start",
         "stop": "Stop",
         "speakingTime": "Speaking time (s)",
@@ -427,6 +430,7 @@ const EN_JSON: &str = r#"{
         "noInvitations": "No invitations",
         "invitations": "Invitations",
         "invite": "Invite",
+        "sent": "Invitation sent",
         "nameOrEmail": "Name or Email",
         "acceptInvitation": "Accept invitation to {{name}}",
         "invited": "Invited",
@@ -502,6 +506,8 @@ const EN_JSON: &str = r#"{
         "profile": "Profile",
         "social": "Social wall",
         "parent": "Missing parents",
+        "redirect": "Redirect",
+        "cow": "Cow",
         "unknown": "Unknown"
     }
 }"#;
@@ -710,6 +716,9 @@ const DA_JSON: &str = r#"{
         "noAmendments": "Ingen \u00e6ndringsforslag",
         "noComments": "Ingen kommentarer endnu",
         "noQuestions": "Ingen sp\u00f8rgsm\u00e5l",
+        "blankOnlyAlone": "Blank kan ikke kombineres med andre valg",
+        "selectAtLeast": "V\u00e6lg mindst {{count}}",
+        "selectAtMost": "V\u00e6lg h\u00f8jst {{count}}",
         "amendments": "\u00c6ndringsforslag",
         "questions": "Sp\u00f8rgsm\u00e5l",
         "candidates": "Kandidater",
@@ -761,6 +770,7 @@ const DA_JSON: &str = r#"{
         "noLists": "Ingen talerlister endnu",
         "newList": "Ny talerliste",
         "clear": "Ryd",
+        "confirmClear": "Ryd hele talerlisten?",
         "start": "Start",
         "stop": "Stop",
         "speakingTime": "Taletid (s)",
@@ -837,6 +847,7 @@ const DA_JSON: &str = r#"{
         "noInvitations": "Ingen invitationer",
         "invitations": "Invitationer",
         "invite": "Inviter",
+        "sent": "Invitation sendt",
         "nameOrEmail": "Navn eller Email",
         "acceptInvitation": "Accepter invitation til {{name}}",
         "invited": "Inviteret",
@@ -912,6 +923,8 @@ const DA_JSON: &str = r#"{
         "profile": "Profil",
         "social": "Social væg",
         "parent": "Manglende forældre",
+        "redirect": "Omdirigering",
+        "cow": "Ko",
         "unknown": "Ukendt"
     }
 }"#;

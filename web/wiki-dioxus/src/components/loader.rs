@@ -190,7 +190,7 @@ pub fn MimeLoader(
     let mime_id = node.mime_id.as_deref().unwrap_or("");
 
     match mime_id {
-        "wiki/folder" => rsx! { FolderApp { node: node.clone(), parent_path: path } },
+        "wiki/folder" => rsx! { FolderApp { node: node.clone(), parent_path: path, projector } },
         "wiki/document" if projector => rsx! { ContentApp { node: node.clone() } },
         "wiki/document" => rsx! {
             super::widgets::SupportingPaneLayout {
@@ -208,7 +208,7 @@ pub fn MimeLoader(
         "wiki/file" => rsx! { FileApp { node: node.clone() } },
         "wiki/home" => rsx! { HomeApp {} },
         "wiki/group" | "wiki/event" => {
-            rsx! { FolderApp { node: node.clone(), parent_path: path } }
+            rsx! { FolderApp { node: node.clone(), parent_path: path, projector } }
         }
         "vote/policy" | "vote/change" => {
             rsx! { PolicyApp { node: node.clone(), path } }

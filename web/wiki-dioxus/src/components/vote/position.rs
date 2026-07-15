@@ -53,7 +53,6 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
             let node_id = node_id.clone();
             let context_id = context_id.clone();
             let author = session.read().user.as_ref().map(|u| u.display_name.clone());
-            q_text.set(String::new());
             spawn(async move {
                 let input = graphql::NodesInsertInput {
                     name: author,
@@ -65,8 +64,17 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     mutable: Some(false),
                     index: None,
                 };
-                if graphql::insert_node(token.as_deref(), input).await.is_ok() {
-                    crate::session::bump_data_version();
+                // Only clear the field once the question is actually stored, so a
+                // failed insert does not silently discard the typed text.
+                match graphql::insert_node(token.as_deref(), input).await {
+                    Ok(_) => {
+                        q_text.set(String::new());
+                        crate::session::bump_data_version();
+                    }
+                    Err(e) => {
+                        log::error!("add question failed: {e}");
+                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                    }
                 }
             });
         }
@@ -304,15 +312,24 @@ pub(super) fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Elem
                     mutable: Some(true),
                     index: None,
                 };
-                if graphql::insert_node(token.as_deref(), input).await.is_ok() {
-                    crate::session::bump_data_version();
-                    // Redirect to the new amendment's editor to write its body.
-                    let mut full = path.clone();
-                    full.push(key);
-                    nav.push(Route::PathPage {
-                        segments: full,
-                        app: Some("editor".to_string()),
-                    });
+                match graphql::insert_node(token.as_deref(), input).await {
+                    Ok(_) => {
+                        crate::session::bump_data_version();
+                        // Redirect to the new amendment's editor to write its body.
+                        let mut full = path.clone();
+                        full.push(key);
+                        nav.push(Route::PathPage {
+                            segments: full,
+                            app: Some("editor".to_string()),
+                        });
+                    }
+                    Err(e) => {
+                        // Close the dialog and surface the error instead of leaving
+                        // the user staring at an open dialog with no feedback.
+                        log::error!("add amendment failed: {e}");
+                        open.set(false);
+                        crate::snackbar::show_snackbar(&e);
+                    }
                 }
             });
         }

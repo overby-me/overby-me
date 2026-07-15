@@ -73,6 +73,9 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let mut edit_name = use_signal(String::new);
     let mut edit_email = use_signal(String::new);
     let mut remove_target = use_signal(|| Option::<(String, String)>::None);
+    // Pending owner promote/demote, confirmed via a dialog: (member id, make-owner,
+    // label). Ownership changes are as consequential as removal, so they confirm too.
+    let mut owner_target = use_signal(|| Option::<(String, bool, String)>::None);
     // Invite-by-name autocomplete: matching users, and a monotonic request id so
     // out-of-order search responses don't clobber a newer one.
     let mut user_matches = use_signal(Vec::<graphql::Author>::new);
@@ -186,6 +189,9 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                 on_remove: move |mm: MemberFields| {
                                     remove_target.set(Some((mm.id.0.clone(), mm.label())));
                                 },
+                                on_owner_change: move |(id, make_owner, label): (String, bool, String)| {
+                                    owner_target.set(Some((id, make_owner, label)));
+                                },
                             }
                         }
                     }
@@ -256,7 +262,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                                         spawn(async move {
                                                             match graphql::invite_member_by_node(token.as_deref(), &parent, &nid, &uname).await {
                                                                 Ok(true) => {
-                                                                    show_snackbar(&t("invite.invite"));
+                                                                    show_snackbar(&t("invite.sent"));
                                                                     crate::session::bump_data_version();
                                                                 }
                                                                 _ => show_snackbar(&t("error.somethingWentWrong")),
@@ -291,7 +297,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                         spawn(async move {
                                             match graphql::invite_member(token.as_deref(), &node_id, &email).await {
                                                 Ok(true) => {
-                                                    show_snackbar(&t("invite.invite"));
+                                                    show_snackbar(&t("invite.sent"));
                                                     crate::session::bump_data_version();
                                                 }
                                                 _ => show_snackbar(&t("error.somethingWentWrong")),
@@ -364,7 +370,14 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                     onclick: move |_| edit_id.set(None),
                     "{t(\"common.cancel\")}"
                 }
-                button { class: "btn btn-primary", onclick: save_edit, "{t(\"common.save\")}" }
+                button {
+                    class: "btn btn-primary",
+                    // A member needs at least a name or an email; do not let save
+                    // persist a blank-on-both row (the invite button gates the same way).
+                    disabled: edit_name.read().trim().is_empty() && edit_email.read().trim().is_empty(),
+                    onclick: save_edit,
+                    "{t(\"common.save\")}"
+                }
             },
             div { class: "text-field",
                 label { "{t(\"member.name\")}" }
@@ -418,6 +431,46 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                 p { class: "body-medium", "{label}" }
             }
         }
+
+        // Promote / demote owner confirm.
+        super::widgets::Dialog {
+            open: owner_target.read().is_some(),
+            on_dismiss: move |_| owner_target.set(None),
+            headline: match owner_target.read().as_ref() {
+                Some((_, true, _)) => t("member.promote"),
+                _ => t("member.demote"),
+            },
+            icon: "star".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| owner_target.set(None),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    onclick: move |_| {
+                        let Some((id, make_owner, _)) = owner_target.read().clone() else {
+                            return;
+                        };
+                        owner_target.set(None);
+                        apply_member_update(
+                            session.read().access_token.clone(),
+                            id,
+                            MembersSetInput { owner: Some(make_owner), ..Default::default() },
+                        );
+                    },
+                    if owner_target.read().as_ref().map(|t| t.1).unwrap_or(false) {
+                        "{t(\"member.promote\")}"
+                    } else {
+                        "{t(\"member.demote\")}"
+                    }
+                }
+            },
+            if let Some((_, _, label)) = owner_target.read().clone() {
+                p { class: "body-medium", "{label}" }
+            }
+        }
     }
 }
 
@@ -467,6 +520,9 @@ fn MemberTableRow(
     can_manage: bool,
     on_edit: EventHandler<MemberFields>,
     on_remove: EventHandler<MemberFields>,
+    /// Request an owner promote/demote: (member id, make-owner, label). The parent
+    /// confirms it via a dialog rather than mutating immediately.
+    on_owner_change: EventHandler<(String, bool, String)>,
 ) -> Element {
     let session = use_session();
     let mid = member.id.0.clone();
@@ -553,17 +609,14 @@ fn MemberTableRow(
                                 span { class: "material-icons", "person_add" }
                             }
                         }
-                        // Promote / demote owner.
+                        // Promote / demote owner (confirmed via a dialog).
                         button {
                             class: "btn-icon",
                             title: if owner { "{t(\"member.demote\")}" } else { "{t(\"member.promote\")}" },
                             onclick: {
                                 let mid = mid.clone();
-                                move |_| apply_member_update(
-                                    session.read().access_token.clone(),
-                                    mid.clone(),
-                                    MembersSetInput { owner: Some(!owner), ..Default::default() },
-                                )
+                                let label = member_name.clone();
+                                move |_| on_owner_change.call((mid.clone(), !owner, label.clone()))
                             },
                             span { class: "material-icons", if owner { "star" } else { "star_outline" } }
                         }

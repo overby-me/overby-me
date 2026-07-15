@@ -6,6 +6,20 @@ use crate::graphql::{
 use crate::i18n::t;
 use crate::session::use_session;
 
+/// Apply the result of a speaker-queue mutation: on success bump `refresh` (which
+/// re-reads the queue), on failure surface an error instead of faking success. The
+/// live subscription does not re-fire on a failed write, so without this the UI
+/// would otherwise sit as if the change had happened.
+fn applied<T>(result: Result<T, String>, mut refresh: Signal<u32>) {
+    match result {
+        Ok(_) => refresh += 1,
+        Err(e) => {
+            log::error!("speak mutation failed: {e}");
+            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+        }
+    }
+}
+
 /// Where a speaker list is shown. On the projector (`Screen`) view the admin and
 /// join controls are hidden — it is read-only for the room.
 #[derive(Clone, Copy, PartialEq)]
@@ -29,7 +43,10 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let screen = mode == SpeakMode::Screen;
     // The context owner may manage the list(s); Hasura still enforces the rest.
-    let is_owner = user_id.is_some() && node.owner_id.as_ref().map(|o| o.0.clone()) == user_id;
+    // Match member.rs: managing capability is node-owner OR context-owner, not just
+    // the node's own owner_id (otherwise the chair running the assembly is locked out).
+    let is_node_owner = user_id.is_some() && node.owner_id.as_ref().map(|o| o.0.clone()) == user_id;
+    let is_owner = is_node_owner || node.is_context_owner.unwrap_or(false);
 
     let context_id = node.context_id.clone().unwrap_or_else(|| node.id.clone());
     let lists: Vec<ChildNodeFields> = node
@@ -173,6 +190,8 @@ fn SpeakList(
     let is_auth = session.read().is_authenticated();
     let mut refresh = use_signal(|| 0u32);
     let mut time_box = use_signal(|| 120i32);
+    // Guards the destructive "clear the whole queue" action behind a confirm dialog.
+    let mut clear_confirm = use_signal(|| false);
 
     // Live updates: subscribe to this list's entries over the Hasura WebSocket
     // so entries added/removed by anyone appear at once.
@@ -374,8 +393,7 @@ fn SpeakList(
                                                             index: Some(min_index - 1),
                                                             ..Default::default()
                                                         };
-                                                        let _ = graphql::update_node(token.as_deref(), &id, set).await;
-                                                        refresh += 1;
+                                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh);
                                                     });
                                                 }
                                             },
@@ -396,8 +414,7 @@ fn SpeakList(
                                                             index: Some(max_index + 1),
                                                             ..Default::default()
                                                         };
-                                                        let _ = graphql::update_node(token.as_deref(), &id, set).await;
-                                                        refresh += 1;
+                                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh);
                                                     });
                                                 }
                                             },
@@ -415,8 +432,7 @@ fn SpeakList(
                                                     let token = token.clone();
                                                     let id = id.clone();
                                                     spawn(async move {
-                                                        let _ = graphql::delete_node(token.as_deref(), &id).await;
-                                                        refresh += 1;
+                                                        applied(graphql::delete_node(token.as_deref(), &id).await, refresh);
                                                     });
                                                 }
                                             },
@@ -455,9 +471,10 @@ fn SpeakList(
                                         let current = current.clone();
                                         spawn(async move {
                                             if let Some(cur) = current {
-                                                let _ = graphql::delete_node(del_token.as_deref(), &cur).await;
+                                                applied(graphql::delete_node(del_token.as_deref(), &cur).await, refresh);
+                                            } else {
+                                                refresh += 1;
                                             }
-                                            refresh += 1;
                                         });
                                         // Re-anchor the per-turn timer for the next speaker.
                                         if limit > 0 {
@@ -482,8 +499,7 @@ fn SpeakList(
                                             mutable: Some(!mutable),
                                             ..Default::default()
                                         };
-                                        let _ = graphql::update_node(token.as_deref(), &id, set).await;
-                                        refresh += 1;
+                                        applied(graphql::update_node(token.as_deref(), &id, set).await, refresh);
                                     });
                                 }
                             },
@@ -498,22 +514,51 @@ fn SpeakList(
                         button {
                             class: "btn btn-outlined",
                             disabled: count == 0,
-                            onclick: {
-                                let token = session.read().access_token.clone();
-                                let ids: Vec<String> = speakers.iter().map(|s| s.id.0.clone()).collect();
-                                move |_| {
-                                    let token = token.clone();
-                                    let ids = ids.clone();
-                                    spawn(async move {
-                                        for id in ids {
-                                            let _ = graphql::delete_node(token.as_deref(), &id).await;
-                                        }
-                                        refresh += 1;
-                                    });
-                                }
-                            },
+                            // Clearing the queue is destructive; confirm first.
+                            onclick: move |_| clear_confirm.set(true),
                             span { class: "material-icons", "delete" }
                             " {t(\"speak.clear\")}"
+                        }
+                        crate::components::widgets::Dialog {
+                            open: clear_confirm(),
+                            on_dismiss: move |_| clear_confirm.set(false),
+                            headline: t("speak.clear"),
+                            icon: "delete".to_string(),
+                            actions: rsx! {
+                                button {
+                                    class: "btn btn-outlined",
+                                    onclick: move |_| clear_confirm.set(false),
+                                    "{t(\"common.cancel\")}"
+                                }
+                                button {
+                                    class: "btn btn-primary",
+                                    onclick: {
+                                        let token = session.read().access_token.clone();
+                                        let ids: Vec<String> = speakers.iter().map(|s| s.id.0.clone()).collect();
+                                        move |_| {
+                                            let token = token.clone();
+                                            let ids = ids.clone();
+                                            clear_confirm.set(false);
+                                            spawn(async move {
+                                                let mut ok = true;
+                                                for id in ids {
+                                                    if let Err(e) = graphql::delete_node(token.as_deref(), &id).await {
+                                                        log::error!("clear queue failed: {e}");
+                                                        ok = false;
+                                                        break;
+                                                    }
+                                                }
+                                                if !ok {
+                                                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                }
+                                                refresh += 1;
+                                            });
+                                        }
+                                    },
+                                    "{t(\"speak.clear\")}"
+                                }
+                            },
+                            p { class: "body-medium", "{t(\"speak.confirmClear\")}" }
                         }
                         button {
                             class: "btn btn-primary",
@@ -604,7 +649,8 @@ fn SpeakList(
                                                     let token = token.clone();
                                                     let type_val = type_key.to_string();
                                                     spawn(async move {
-                                                        let _ = graphql::insert_node(
+                                                        applied(
+                                                            graphql::insert_node(
                                                                 token.as_deref(),
                                                                 NodesInsertInput {
                                                                     name: Some(name),
@@ -619,8 +665,9 @@ fn SpeakList(
                                                                     index: None,
                                                                 },
                                                             )
-                                                            .await;
-                                                        refresh += 1;
+                                                            .await,
+                                                            refresh,
+                                                        );
                                                     });
                                                 },
                                                 "{label}"
@@ -639,15 +686,17 @@ fn SpeakList(
 
 /// Start/stop the speaking timer by writing `{ time, updatedAt }` to the list's
 /// data (updatedAt is the moment the clock started, used by the countdown).
-fn move_timer(token: Option<String>, list_id: String, secs: i32, mut refresh: Signal<u32>) {
+fn move_timer(token: Option<String>, list_id: String, secs: i32, refresh: Signal<u32>) {
     spawn(async move {
         let data = serde_json::json!({ "time": secs, "updatedAt": now_iso() });
         let set = NodesSetInput {
             data: Some(Jsonb(data)),
             ..Default::default()
         };
-        let _ = graphql::update_node(token.as_deref(), &list_id, set).await;
-        refresh += 1;
+        applied(
+            graphql::update_node(token.as_deref(), &list_id, set).await,
+            refresh,
+        );
     });
 }
 

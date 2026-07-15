@@ -40,17 +40,28 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
             spawn(async move {
                 saving.set(true);
 
-                // Persist each child's new index.
+                // Persist each child's new index. Only claim success and navigate
+                // away when every update lands; a failed write must not read as a
+                // saved reorder (the folder subscription won't refire on failure).
+                let mut ok = true;
                 for (i, item) in current_items.iter().enumerate() {
                     let set = graphql::NodesSetInput {
                         index: Some(i32::try_from(i).unwrap_or(0)),
                         ..Default::default()
                     };
-                    let _ = graphql::update_node(token.as_deref(), &item.id.0, set).await;
+                    if let Err(e) = graphql::update_node(token.as_deref(), &item.id.0, set).await {
+                        log::error!("sort: update_node failed: {e}");
+                        ok = false;
+                        break;
+                    }
+                }
+                saving.set(false);
+                if !ok {
+                    show_snackbar(&t("error.somethingWentWrong"));
+                    return;
                 }
 
                 show_snackbar(&t("sort.saveSorting"));
-                saving.set(false);
                 // Invalidate the cached folder so the new order shows on return.
                 crate::session::bump_data_version();
                 // Return to the folder's rendered (non-app) view.

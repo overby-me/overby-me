@@ -343,6 +343,17 @@ pub(super) fn app_crumb_label(app: &str) -> String {
         "screen" => t("mime.screen"),
         "follow" => t("mime.follow"),
         "admin" => t("console.title"),
+        // The remaining URL-only apps: still labelled so a deep link shows a name
+        // rather than its raw key.
+        "program" => t("mime.program"),
+        "graph" => t("mime.graph"),
+        "social" => t("mime.social"),
+        "map" => t("mime.map"),
+        "perm" => t("mime.permissions"),
+        "parent" => t("mime.parent"),
+        "profile" => t("mime.profile"),
+        "redirect" => t("mime.redirect"),
+        "cow" => t("mime.cow"),
         other => other.to_string(),
     }
 }
@@ -512,9 +523,9 @@ pub(super) fn context_apps(
             },
             current_app.as_deref() == Some("admin"),
         ));
-        // The other apps (screen, admin, program, graph, social, map, profile,
-        // perm, parent) are still reachable via their `?app=` URL but hidden
-        // from these nav surfaces until they are ready to show.
+        // The other apps (screen, program, graph, social, map, profile, perm,
+        // parent) are still reachable via their `?app=` URL but hidden from these
+        // nav surfaces until they are ready to show. (admin IS shown, just above.)
     }
     apps
 }

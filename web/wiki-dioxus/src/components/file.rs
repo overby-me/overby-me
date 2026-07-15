@@ -190,10 +190,22 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                                 let parent = parent.clone();
                                                 confirm_open.set(false);
                                                 spawn(async move {
-                                                    let _ = graphql::delete_node_members(token.as_deref(), &node_id).await;
-                                                    if graphql::delete_node(token.as_deref(), &node_id).await.unwrap_or(false) {
-                                                        crate::session::bump_data_version();
-                                                        nav.push(Route::PathPage { segments: parent, app: None });
+                                                    // Abort if member cleanup fails, so we never orphan
+                                                    // member rows by deleting the node anyway.
+                                                    if let Err(e) = graphql::delete_node_members(token.as_deref(), &node_id).await {
+                                                        log::error!("delete_node_members failed: {e}");
+                                                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                        return;
+                                                    }
+                                                    match graphql::delete_node(token.as_deref(), &node_id).await {
+                                                        Ok(true) => {
+                                                            crate::session::bump_data_version();
+                                                            nav.push(Route::PathPage { segments: parent, app: None });
+                                                        }
+                                                        other => {
+                                                            log::error!("delete_node failed: {other:?}");
+                                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                        }
                                                     }
                                                 });
                                             }

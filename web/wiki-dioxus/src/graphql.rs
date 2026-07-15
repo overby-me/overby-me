@@ -1805,7 +1805,23 @@ fn context_permission_objects(ctx_id: &str) -> serde_json::Value {
             &["vote/policy", "vote/change", "vote/position"],
         ),
         ("vote/question", "member", &["vote/position", "wiki/file"]),
-        ("vote/comment", "member", &["vote/policy", "vote/change"]),
+        // Comments belong on CONTENT nodes (motions, amendments, documents, files,
+        // election posts and candidacies), not on containers (folders/groups/events).
+        // The UI mounts a CommentSection on every content type above, so allow the
+        // insert everywhere it is shown, keeping the affordance honest. (Seeded per
+        // context at creation, so it applies to newly created contexts.)
+        (
+            "vote/comment",
+            "member",
+            &[
+                "vote/policy",
+                "vote/change",
+                "wiki/document",
+                "wiki/file",
+                "vote/position",
+                "vote/candidate",
+            ],
+        ),
         ("speak/speak", "member", &["speak/list"]),
         (
             "vote/change",

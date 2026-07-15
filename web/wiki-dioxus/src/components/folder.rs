@@ -37,7 +37,14 @@ fn write_grid_pref(grid: bool) {
 }
 
 #[component]
-pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
+pub fn FolderApp(
+    node: NodeWithChildren,
+    parent_path: Vec<String>,
+    /// Set only by the Screen/projector view: renders a lean, read-only card (no
+    /// tools sheet, no add/lock/paste chrome) for the room-facing screen.
+    #[props(default)]
+    projector: bool,
+) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     // Owner-only admin (reorder), and the folder "lock": adding children is only
@@ -52,6 +59,52 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
         .clone()
         .unwrap_or_else(|| "wiki/folder".to_string());
     let node_id = node.id.0.clone();
+    let nav = use_navigator();
+
+    // Parity with ContentApp: a group/event/folder is content too, so it gets the
+    // same tools (project, edit, delete, share, comments-on-screen). A node/context
+    // owner may manage; editing also requires the node to still be mutable. The
+    // projector context is the node's context (or itself when it is its own).
+    let can_manage = node.is_owner.unwrap_or(false) || is_context_owner;
+    let can_edit = can_manage && node.mutable;
+    let node_context = node
+        .context_id
+        .as_ref()
+        .map(|c| c.0.clone())
+        .unwrap_or_else(|| node.id.0.clone());
+    let mut confirm_open = use_signal(|| false);
+    // Bluesky link status gates the share action (like ContentApp).
+    let link_token = access_token.clone();
+    let bsky_link = crate::use_data_resource!(|(link_token)| async move {
+        match link_token {
+            Some(t) => crate::nhost::atproto_status(&t).await.linked,
+            None => false,
+        }
+    });
+    let bsky_linked = (*bsky_link.read()).unwrap_or(false);
+    // Owner toggle state for showing this context's comments on the projector.
+    let mut screen_comments = use_signal(|| None::<bool>);
+    {
+        let token = access_token.clone();
+        let ctx = node_context.clone();
+        let can = can_manage;
+        use_hook(move || {
+            if can {
+                spawn(async move {
+                    let on = crate::graphql::screen_comments_on(token.as_deref(), &ctx)
+                        .await
+                        .unwrap_or(false);
+                    screen_comments.set(Some(on));
+                });
+            }
+        });
+    }
+    // The path to return to after deleting this node (its parent).
+    let delete_parent: Vec<String> = if parent_path.is_empty() {
+        vec![]
+    } else {
+        parent_path[..parent_path.len() - 1].to_vec()
+    };
 
     // Live children: subscribe to this folder's child nodes so additions and
     // removals (by anyone) show up immediately, filtered + ordered like React.
@@ -111,15 +164,116 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 h3 { class: "title-medium", "{name}" }
                 div { class: "flex-grow" }
                 // Secondary/admin folder actions live in the M3 tools sheet
-                // (bottom sheet on mobile, right side sheet on desktop).
-                if (is_auth && count > 0) || is_context_owner {
+                // (bottom sheet on mobile, right side sheet on desktop). Hidden on
+                // the projector, which is read-only for the room.
+                if !projector {
                     super::widgets::ToolSheet {
                         title: t("common.tools"),
                         // Copy a shareable link to this folder (keeps æøå literal).
+                        // Unconditional, like ContentApp: a read-only action anyone
+                        // may use (a document link was already ungated).
                         super::widgets::CopyLinkAction {}
-                        // Export the folder and everything nested under it to an .odt.
-                        if is_auth && count > 0 {
-                            super::widgets::ExportAction { node_id: node.id.0.clone(), name: name.to_string() }
+                        // Export the folder and everything nested under it to an .odt,
+                        // aligned with the document export (unconditional).
+                        super::widgets::ExportAction { node_id: node.id.0.clone(), name: name.to_string() }
+                        // Share this page to the signed-in user's linked Bluesky account.
+                        if is_auth && bsky_linked {
+                            button {
+                                class: "sheet-action",
+                                onclick: {
+                                    let share_name = name.to_string();
+                                    move |_| {
+                                        let token = session.read().access_token.clone();
+                                        let title = share_name.clone();
+                                        spawn(async move {
+                                            let Some(token) = token else { return };
+                                            let href = web_sys::window()
+                                                .and_then(|w| w.location().href().ok())
+                                                .unwrap_or_default();
+                                            let title: String = title.chars().take(200).collect();
+                                            let text = format!("{title}\n\n{href}");
+                                            crate::snackbar::show_snackbar(&t("content.sharing"));
+                                            match crate::nhost::atproto_post(&token, &text, &href, &title).await {
+                                                Ok(()) => crate::snackbar::show_snackbar(&t("content.shared")),
+                                                Err(e) if e.contains("no linked") => {
+                                                    crate::snackbar::show_snackbar(&t("content.shareNoLink"))
+                                                }
+                                                Err(_) => crate::snackbar::show_snackbar(&t("content.shareErr")),
+                                            }
+                                        });
+                                    }
+                                },
+                                {icon_el("app/social")}
+                                "{t(\"content.shareBluesky\")}"
+                            }
+                        }
+                        // Owner: project this container onto the context's Screen.
+                        if can_manage {
+                            button {
+                                class: "sheet-action",
+                                onclick: {
+                                    let target = node.id.0.clone();
+                                    let ctx = node_context.clone();
+                                    move |_| {
+                                        let target = target.clone();
+                                        let ctx = ctx.clone();
+                                        let token = session.read().access_token.clone();
+                                        spawn(async move {
+                                            match crate::graphql::set_active_relation(token.as_deref(), &ctx, Some(&target)).await {
+                                                Ok(_) => crate::snackbar::show_snackbar(&t("content.projected")),
+                                                Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                            }
+                                        });
+                                    }
+                                },
+                                span { class: "material-icons", "cast" }
+                                "{t(\"content.projectScreen\")}"
+                            }
+                            // Owner: also show this context's comments on the Screen.
+                            button {
+                                class: "sheet-action",
+                                onclick: {
+                                    let ctx = node_context.clone();
+                                    move |_| {
+                                        let ctx = ctx.clone();
+                                        let token = session.read().access_token.clone();
+                                        let next = !(*screen_comments.read()).unwrap_or(false);
+                                        spawn(async move {
+                                            match crate::graphql::set_screen_comments(token.as_deref(), &ctx, next).await {
+                                                Ok(_) => {
+                                                    screen_comments.set(Some(next));
+                                                    crate::snackbar::show_snackbar(&t(if next {
+                                                        "content.commentsOnScreen"
+                                                    } else {
+                                                        "content.commentsOffScreen"
+                                                    }));
+                                                }
+                                                Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
+                                            }
+                                        });
+                                    }
+                                },
+                                span { class: "material-icons",
+                                    if (*screen_comments.read()).unwrap_or(false) { "speaker_notes_off" } else { "forum" }
+                                }
+                                if (*screen_comments.read()).unwrap_or(false) {
+                                    "{t(\"content.hideCommentsScreen\")}"
+                                } else {
+                                    "{t(\"content.showCommentsScreen\")}"
+                                }
+                            }
+                        }
+                        // Owner: edit this container's own rich-text description.
+                        if can_edit && !parent_path.is_empty() {
+                            Link {
+                                to: Route::PathPage {
+                                    segments: parent_path.clone(),
+                                    app: Some("editor".to_string()),
+                                },
+                                class: "sheet-action",
+                                {icon_el("app/editor")}
+                                "{t(\"mime.editor\")}"
+                            }
                         }
                         // Reorder children (the sort app), for owners with >1 child.
                         if is_context_owner && count > 1 && !parent_path.is_empty() {
@@ -204,7 +358,64 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                                 "{t(\"folder.paste\")} ({SELECTED.read().len()})"
                             }
                         }
+                        // Owner: delete this container (with a confirm dialog).
+                        if can_manage && !parent_path.is_empty() {
+                            button {
+                                class: "sheet-action danger",
+                                onclick: move |_| confirm_open.set(true),
+                                span { class: "material-icons", "delete" }
+                                "{t(\"common.delete\")}"
+                            }
+                        }
                     }
+                }
+            }
+            // Delete confirm dialog (owner action), mirroring ContentApp.
+            if can_manage && !parent_path.is_empty() {
+                super::widgets::Dialog {
+                    open: confirm_open(),
+                    on_dismiss: move |_| confirm_open.set(false),
+                    headline: t("content.confirmDelete"),
+                    icon: "delete".to_string(),
+                    actions: rsx! {
+                        button {
+                            class: "btn btn-outlined",
+                            onclick: move |_| confirm_open.set(false),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            onclick: {
+                                let node_del = node.id.0.clone();
+                                let dest = delete_parent.clone();
+                                move |_| {
+                                    let token = session.read().access_token.clone();
+                                    let node_del = node_del.clone();
+                                    let dest = dest.clone();
+                                    confirm_open.set(false);
+                                    spawn(async move {
+                                        if let Err(e) = graphql::delete_node_members(token.as_deref(), &node_del).await {
+                                            log::error!("delete_node_members failed: {e}");
+                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                            return;
+                                        }
+                                        match graphql::delete_node(token.as_deref(), &node_del).await {
+                                            Ok(true) => {
+                                                crate::session::bump_data_version();
+                                                nav.push(Route::PathPage { segments: dest, app: None });
+                                            }
+                                            other => {
+                                                log::error!("delete_node failed: {other:?}");
+                                                crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            "{t(\"common.delete\")}"
+                        }
+                    },
+                    p { class: "body-medium", "{name}" }
                 }
             }
             // The node's own description: groups, events and folders can carry
@@ -242,8 +453,8 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 }
                 // Create a document or subfolder here — the add action lives in this
                 // section's header (only when the folder accepts children; the
-                // backend permissions gate which mimes).
-                if is_auth && attachable {
+                // backend permissions gate which mimes). Never on the projector.
+                if is_auth && attachable && !projector {
                     FolderAdd {
                         parent_id: node.id.0.clone(),
                         context_id: node.context_id.clone().map(|c| c.0),
@@ -272,7 +483,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                             parent_path: parent_path.clone(),
                             grid: false,
                             ordinal: None,
-                            selectable: is_context_owner,
+                            selectable: is_context_owner && !projector,
                         }
                     }
                 }
@@ -286,21 +497,18 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                             parent_path: parent_path.clone(),
                             grid: is_grid,
                             ordinal,
-                            selectable: is_context_owner,
+                            selectable: is_context_owner && !projector,
                         }
                     }
                 }
             }
         }
 
-        // A group/event context also carries a discussion below its listing,
-        // mirroring React's ContentApp(hideMembers) stacked above the FolderApp.
-        if matches!(mime_id, "wiki/group" | "wiki/event") {
-            super::comments::CommentSection {
-                node_id: node.id.0.clone(),
-                context_id: node.context_id.clone().map(|c| c.0),
-            }
-        }
+        // Containers (group/event/folder) do not carry comments: the permission
+        // model puts vote/comment on CONTENT nodes (motions, amendments, documents,
+        // …), not on the container. Dropping the dead section here makes the three
+        // FolderApp types consistent (folder never had one) rather than showing a
+        // comment box on group/event that could never accept a post.
     }
 }
 
