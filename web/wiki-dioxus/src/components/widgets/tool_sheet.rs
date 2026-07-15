@@ -37,6 +37,42 @@ pub fn CopyLinkAction() -> Element {
     }
 }
 
+/// An export-to-ODT tools-sheet action with a built-in busy state. Generating the
+/// ODT (fetching the whole content subtree plus embedded images) can take a
+/// moment, so while it runs the action shows a spinner and disables, and a
+/// "generating" snackbar appears — clear feedback that an export is in progress.
+#[component]
+pub fn ExportAction(node_id: String, name: String) -> Element {
+    let session = crate::session::use_session();
+    let mut exporting = use_signal(|| false);
+    rsx! {
+        button {
+            class: "sheet-action",
+            disabled: *exporting.read(),
+            onclick: move |_| {
+                if *exporting.read() {
+                    return;
+                }
+                let token = session.read().access_token.clone();
+                let id = node_id.clone();
+                let name = name.clone();
+                exporting.set(true);
+                crate::snackbar::show_snackbar(&crate::i18n::t("folder.exporting"));
+                spawn(async move {
+                    crate::export::export_tree(token, id, name).await;
+                    exporting.set(false);
+                });
+            },
+            if *exporting.read() {
+                div { class: "spinner", style: "width: 18px; height: 18px;" }
+            } else {
+                span { class: "material-icons", "download" }
+            }
+            "{crate::i18n::t(\"folder.export\")}"
+        }
+    }
+}
+
 /// An M3 tools/actions sheet holding the current view's actions and admin tools.
 /// Two modes only:
 ///

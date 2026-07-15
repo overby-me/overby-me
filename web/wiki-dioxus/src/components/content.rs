@@ -148,23 +148,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             super::widgets::ToolSheet {
                 title: t("common.tools"),
                 // Export this document (and any nested content) to an .odt file.
-                button {
-                    class: "sheet-action",
-                    onclick: {
-                        let export_name = name.clone();
-                        let export_id = node_id.clone();
-                        move |_| {
-                            let token = session.read().access_token.clone();
-                            let id = export_id.clone();
-                            let name = export_name.clone();
-                            spawn(async move {
-                                crate::export::export_tree(token, id, name).await;
-                            });
-                        }
-                    },
-                    span { class: "material-icons", "download" }
-                    "{t(\"folder.export\")}"
-                }
+                super::widgets::ExportAction { node_id: node_id.clone(), name: name.clone() }
                 // Copy a shareable link to this page (keeps æøå literal).
                 super::widgets::CopyLinkAction {}
                 // Share this page to the signed-in user's linked Bluesky account.

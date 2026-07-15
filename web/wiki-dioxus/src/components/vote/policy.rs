@@ -61,8 +61,13 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                 AddChangeButton { node: node.clone(), path: path.clone() }
             }
             if amendments.is_empty() {
-                div { class: "card-content",
-                    p { class: "body-medium", class: "text-muted", "{t(\"vote.noAmendments\")}" }
+                // DESIGN: the expressive orb empty state, matching the other
+                // "no X" states, instead of a plain muted line.
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "difference" }
+                    }
+                    p { class: "empty-state-body", "{t(\"vote.noAmendments\")}" }
                 }
             } else {
                 div { class: "list",

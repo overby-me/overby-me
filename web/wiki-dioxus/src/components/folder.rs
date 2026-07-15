@@ -119,23 +119,7 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                         super::widgets::CopyLinkAction {}
                         // Export the folder and everything nested under it to an .odt.
                         if is_auth && count > 0 {
-                            button {
-                                class: "sheet-action",
-                                onclick: {
-                                    let id = node.id.0.clone();
-                                    let fname = name.to_string();
-                                    move |_| {
-                                        let token = session.read().access_token.clone();
-                                        let id = id.clone();
-                                        let fname = fname.clone();
-                                        spawn(async move {
-                                            crate::export::export_tree(token, id, fname).await;
-                                        });
-                                    }
-                                },
-                                span { class: "material-icons", "download" }
-                                "{t(\"folder.export\")}"
-                            }
+                            super::widgets::ExportAction { node_id: node.id.0.clone(), name: name.to_string() }
                         }
                         // Reorder children (the sort app), for owners with >1 child.
                         if is_context_owner && count > 1 && !parent_path.is_empty() {
