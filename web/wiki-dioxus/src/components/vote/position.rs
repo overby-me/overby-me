@@ -39,6 +39,23 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let context_id = node.context_id.clone().map(|c| c.0);
     let mut q_text = use_signal(String::new);
 
+    // Anyone who is part of this group/event (a member) may add a candidature —
+    // vote/candidate is member-insertable. Ask the permission resolver what the
+    // current user can actually insert here, so the button shows to members (and
+    // owners), not to signed-in non-members (mirrors the comment composer's gate).
+    let cand_nid = node_id.clone();
+    let cand_tok = session.read().access_token.clone();
+    let can_add_candidate_res = crate::use_data_resource!(|(cand_nid, cand_tok)| async move {
+        if cand_tok.is_none() {
+            return false;
+        }
+        graphql::node_insert_mimes(cand_tok.as_deref(), &cand_nid)
+            .await
+            .iter()
+            .any(|m| m == "vote/candidate")
+    });
+    let can_add_candidate = (*can_add_candidate_res.read()).unwrap_or(false);
+
     // Add a question (a `vote/question` child carrying `data.text`), mirroring
     // React AddQuestionButton. The node is immutable; its name records the author.
     let add_question = {
@@ -87,16 +104,15 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         // Owner-only: open a poll whose options are the candidates.
         StartPollButton { node: node.clone(), path: path.clone() }
 
-        // Candidate gallery (photos from `data.image`). Shown to authed users even
-        // when empty, so a member can add the first candidate (mirrors add-question,
-        // which is likewise member-insertable).
-        if !candidates.is_empty() || is_auth {
+        // Candidate gallery (photos from `data.image`). Shown, with an empty state,
+        // to members who can add a candidature so they can add the first one.
+        if !candidates.is_empty() || can_add_candidate {
             div { class: "card mt-1",
                 div { class: "card-header",
                     div { class: "avatar small", {icon_el("vote/candidate")} }
                     h3 { class: "title-medium", "{t(\"vote.candidates\")}" }
                     div { class: "flex-grow" }
-                    if is_auth {
+                    if can_add_candidate {
                         AddCandidateButton {
                             parent_id: node_id.clone(),
                             context_id: context_id.clone(),
