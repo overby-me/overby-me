@@ -21,6 +21,11 @@ motion/election one) plus a cluster of UX-richness reductions.
 The motion/election gap that triggered this audit is already fixed
 (`folder.rs:596`, deriving the type menu from `node_insert_mimes`).
 
+> **Status (2026-07-15): all five regressions below (#1-#5) are now fixed** in
+> commit "Restore cover images, backdating, amendment previews, reorder and poll
+> delete", verified by the browser E2E (115/115). This document is kept as the
+> audit record; the per-finding fix locations are noted inline.
+
 ## Regressions, by severity
 
 ### HIGH
