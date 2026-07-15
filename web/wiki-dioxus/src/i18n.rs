@@ -477,7 +477,8 @@ const EN_JSON: &str = r#"{
         "onScreen": "On screen",
         "stopProjecting": "Stop projecting",
         "focusSection": "Focus a section on screen",
-        "focusWhole": "Show the whole document"
+        "focusWhole": "Show the whole document",
+        "focusNoSections": "This item has no sections to focus."
     },
     "mime": {
         "group": "Group",
@@ -894,7 +895,8 @@ const DA_JSON: &str = r#"{
         "onScreen": "På skærmen",
         "stopProjecting": "Stop projektion",
         "focusSection": "Fokusér en sektion på skærmen",
-        "focusWhole": "Vis hele dokumentet"
+        "focusWhole": "Vis hele dokumentet",
+        "focusNoSections": "Dette element har ingen sektioner at fokusere på."
     },
     "mime": {
         "group": "Gruppe",

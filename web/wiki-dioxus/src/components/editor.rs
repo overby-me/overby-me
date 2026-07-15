@@ -101,9 +101,19 @@ fn refresh_toolbar(
 /// Whether a node type carries authors (members). Contexts and a few vote types
 /// do not, matching the React editor.
 fn node_takes_authors(mime_id: Option<&str>) -> bool {
+    // wiki/file is excluded too: FileApp never displays author chips, so collecting
+    // authors on files only created hidden member rows (an inconsistency with how
+    // ContentApp both stores and shows them).
     !matches!(
         mime_id,
-        Some("wiki/group" | "wiki/event" | "vote/position" | "vote/candidate" | "wiki/folder")
+        Some(
+            "wiki/group"
+                | "wiki/event"
+                | "vote/position"
+                | "vote/candidate"
+                | "wiki/folder"
+                | "wiki/file"
+        )
     )
 }
 

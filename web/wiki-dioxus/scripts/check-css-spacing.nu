@@ -11,7 +11,7 @@
 # Wire into CI / pre-commit:  nu web/wiki-dioxus/scripts/check-css-spacing.nu
 
 # The current sanctioned ceiling. Lower this as literals are migrated to tokens.
-const BASELINE = 327
+const BASELINE = 326
 
 let css = ($env.FILE_PWD | path join ".." "assets" "style.css")
 let pattern = '(padding|margin|margin-top|margin-bottom|margin-left|margin-right|gap|font-size)[^;:]*:[^;]*[0-9]+px'

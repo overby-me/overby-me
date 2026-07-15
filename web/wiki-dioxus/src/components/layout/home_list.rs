@@ -116,9 +116,15 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
             None => rsx! {
                 p { class: "body-medium text-muted", style: "{hint_style}", "…" }
             },
-            Some(Err(e)) => rsx! {
-                p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
-            },
+            Some(Err(e)) => {
+                log::error!("home groups load failed: {e}");
+                rsx! {
+                    crate::components::widgets::ErrorState {
+                        title: t("error.somethingWentWrong"),
+                        small: true,
+                    }
+                }
+            }
             Some(Ok((groups, _, _))) if groups.is_empty() && invited_groups.is_empty() => rsx! {
                 p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noGroups\")}" }
             },
@@ -166,9 +172,15 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
             None => rsx! {
                 p { class: "body-medium text-muted", style: "{hint_style}", "…" }
             },
-            Some(Err(e)) => rsx! {
-                p { class: "body-medium text-muted", style: "{hint_style}", "{e}" }
-            },
+            Some(Err(e)) => {
+                log::error!("home events load failed: {e}");
+                rsx! {
+                    crate::components::widgets::ErrorState {
+                        title: t("error.somethingWentWrong"),
+                        small: true,
+                    }
+                }
+            }
             Some(Ok((_, events, _))) if events.is_empty() && invited_events.is_empty() => rsx! {
                 p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noEvents\")}" }
             },

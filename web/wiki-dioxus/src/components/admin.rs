@@ -209,8 +209,10 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
             }
 
             // Projector focus: for a long active document, scroll the room's screen
-            // to a chosen section (or back to the whole document).
-            if can_manage && !active_headings.is_empty() {
+            // to a chosen section (or back to the whole document). Shown whenever
+            // something is projected; when the item has no sections, the card stays
+            // (with a note) rather than silently vanishing.
+            if can_manage && active_id.is_some() {
                 div { class: "card",
                     div { class: "card-header",
                         div { class: "avatar", span { class: "material-icons", "center_focus_strong" } }
@@ -234,6 +236,11 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                             span { class: "material-icons", "fullscreen" }
                             div { class: "list-item-text",
                                 div { class: "list-item-primary", "{t(\"console.focusWhole\")}" }
+                            }
+                        }
+                        if active_headings.is_empty() {
+                            p { class: "body-small text-muted", style: "padding: 8px 16px;",
+                                "{t(\"console.focusNoSections\")}"
                             }
                         }
                         for (anchor , text , level) in active_headings.iter() {

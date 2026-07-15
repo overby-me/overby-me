@@ -210,7 +210,11 @@ pub(super) fn DrawerNodeItem(
     }));
 
     let node_id = node.id.0.clone();
-    let indent = format!("padding-left: {}px;", 12 + depth * 14);
+    // Indent by depth from the spacing scale's base (so a global density change
+    // retunes it) plus a fixed per-level step, rather than a hard-coded pixel sum.
+    let indent = format!(
+        "padding-left: calc(var(--md-sys-spacing-3) + {depth} * var(--nav-indent-step, 14px));"
+    );
     let nav_path = full_path.clone();
 
     rsx! {

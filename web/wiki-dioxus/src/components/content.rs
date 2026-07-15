@@ -347,7 +347,18 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                 }
             }
             div { class: "card-content",
-                SlateRenderer { data: data.clone() }
+                // Render the body when there is one; otherwise a compact orb empty
+                // state (matching FileApp/FolderApp) instead of a bare empty paragraph.
+                if has_rich_content(data.as_ref()) {
+                    SlateRenderer { data: data.clone() }
+                } else {
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "description" }
+                        }
+                        p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+                    }
+                }
             }
         }
     }

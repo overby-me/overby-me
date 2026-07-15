@@ -21,6 +21,9 @@
 @import url("https://fonts.googleapis.com/icon?family=Material+Icons");
 
 :root {
+	/* Per-level indentation step for the drawer node tree (see drawer.rs), kept
+	   here so the nesting rhythm is tuned in one place. */
+	--nav-indent-step: 14px;
 	/* App semantic tokens — thin aliases over the generated M3 system colours
        (assets/m3-theme.css). Light/dark is handled there, so these are defined
        once. Regenerate that file to re-skin; nothing here changes. */
@@ -1723,6 +1726,32 @@ html {
 	cursor: not-allowed;
 }
 
+/* Shared disabled treatment for the remaining variants (previously only
+   .btn-primary had one, so disabled secondary/tonal/outlined/text/icon buttons
+   looked identical to enabled ones). M3 pattern: filled variants get a 12%
+   on-surface fill, all get 38% on-surface content, no elevation, no hover morph. */
+.btn-secondary:disabled,
+.btn-tonal:disabled,
+.btn-icon.add-action:disabled {
+	background-color: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+	color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+	box-shadow: none;
+	cursor: not-allowed;
+	transform: none;
+}
+.btn-outlined:disabled {
+	color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+	border-color: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+	cursor: not-allowed;
+	transform: none;
+}
+.btn-text:disabled,
+.btn-icon:disabled {
+	color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+	cursor: not-allowed;
+	transform: none;
+}
+
 /* DESIGN (button morph): filled buttons lift on hover and squish to a squarer
    corner on press — the M3 2025 expressive button feel. Plus a tonal variant. */
 .btn-primary:hover,
@@ -1800,6 +1829,13 @@ html {
 	color: var(--md-on-surface);
 	transition: background-color var(--md-sys-motion-duration-short4)
 		var(--md-sys-motion-easing-standard);
+}
+
+/* Icon-button glyphs are intentionally a touch smaller than the 22px default, so
+   the icon sits comfortably inside the 40px target. Co-located with .btn-icon (it
+   used to live far away near the bottom of the file). */
+.btn-icon .material-icons {
+	font-size: 20px;
 }
 
 .btn-icon:hover {
@@ -1984,8 +2020,8 @@ a.folder-item:focus-visible {
 select {
 	padding: 10px 36px 10px 12px;
 	border: 1px solid var(--md-outline);
-	border-radius: 8px;
-	font-size: 15px;
+	border-radius: var(--md-sys-shape-corner-small);
+	font-size: var(--md-sys-typescale-body-large-size);
 	font-family: inherit;
 	line-height: 1.4;
 	background-color: var(--md-surface);
@@ -5086,10 +5122,6 @@ a.list-item:hover {
        light-gray app rail (the container tint would be too subtle there). */
 	background: var(--md-primary);
 	color: var(--md-on-primary);
-}
-
-.btn-icon .material-icons {
-	font-size: 20px;
 }
 
 /* Link popover */

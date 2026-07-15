@@ -116,9 +116,13 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
             rsx! { PollApp { node: active } }
         }
         Some(_) => no_vote,
+        // Wrap the loading spinner in the same card the empty/poll states use, so
+        // the app does not visibly jump from a bare overlay to a card on load.
         None => rsx! {
-            div { class: "spinner-overlay",
-                div { class: "spinner" }
+            div { class: "card",
+                div { class: "spinner-overlay",
+                    div { class: "spinner" }
+                }
             }
         },
     };
