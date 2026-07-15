@@ -10,6 +10,33 @@ use super::focus::{active_html_element, close_modal, trap_tab_focus};
 /// the sheet unmounts (e.g. navigating to a view with no tools).
 pub static TOOLS_DOCKED: GlobalSignal<bool> = Signal::global(|| false);
 
+/// A copy-link tools-sheet action, shared by every content view's [`ToolSheet`]
+/// so copy-link is available on all content. Copies a shareable link to the
+/// current page, keeping Unicode (æøå) literal (`decodeURI`) rather than
+/// percent-encoded — modern browsers handle it fine.
+#[component]
+pub fn CopyLinkAction() -> Element {
+    rsx! {
+        button {
+            class: "sheet-action",
+            onclick: move |_| {
+                if let Some(win) = web_sys::window() {
+                    if let Ok(href) = win.location().href() {
+                        let link = js_sys::decode_uri(&href)
+                            .ok()
+                            .map(String::from)
+                            .unwrap_or(href);
+                        let _ = win.navigator().clipboard().write_text(&link);
+                        crate::snackbar::show_snackbar(&crate::i18n::t("common.linkCopied"));
+                    }
+                }
+            },
+            span { class: "material-icons", "link" }
+            "{crate::i18n::t(\"common.copyLink\")}"
+        }
+    }
+}
+
 /// An M3 tools/actions sheet holding the current view's actions and admin tools.
 /// Two modes only:
 ///

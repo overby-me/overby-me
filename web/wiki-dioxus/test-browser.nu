@@ -653,8 +653,6 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     let sel_ctx = (wd-execute $session_id 'return "/"+location.pathname.split("/")[1]')
 
     let r = (assert-exists $session_id "context view renders a card" "#main .card" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
-    # A copy-link action lives in the breadcrumbs bar on every content page.
-    let r = (assert-exists $session_id "copy-link action in breadcrumbs" ".breadcrumbs .crumb-copy" -p $p -f $fl); $p = $r.passed; $fl = $r.failed
     let r = (check-contrast $session_id "context view (drawer + app rail + bar)" $p $fl); $p = $r.passed; $fl = $r.failed
     capture-shots $session_id "context"
 

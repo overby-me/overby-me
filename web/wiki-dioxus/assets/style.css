@@ -1495,6 +1495,14 @@ html {
 		var(--md-sys-motion-easing-standard);
 }
 
+/* Hide the focal FAB while any modal sheet (tools or the apps switcher) is open:
+   the FAB sits in the transformed content area's stacking context, so it can
+   otherwise paint ON TOP of the sheet regardless of z-index. */
+.app-shell:has(.tool-sheet.open) .fab {
+	opacity: 0;
+	pointer-events: none;
+}
+
 .fab:hover {
 	transform: scale(1.06);
 	box-shadow: var(--md-sys-elevation-4);

@@ -165,7 +165,8 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     span { class: "material-icons", "download" }
                     "{t(\"folder.export\")}"
                 }
-                // (Copy-link now lives universally in the breadcrumbs bar.)
+                // Copy a shareable link to this page (keeps æøå literal).
+                super::widgets::CopyLinkAction {}
                 // Share this page to the signed-in user's linked Bluesky account.
                 // Only shown once a Bluesky account is actually linked.
                 if is_auth && bsky_linked {

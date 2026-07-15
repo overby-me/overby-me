@@ -115,20 +115,8 @@ pub fn FolderApp(node: NodeWithChildren, parent_path: Vec<String>) -> Element {
                 if (is_auth && count > 0) || is_context_owner {
                     super::widgets::ToolSheet {
                         title: t("common.tools"),
-                        // DESIGN (functional): copy a shareable link to this folder.
-                        button {
-                            class: "sheet-action",
-                            onclick: move |_| {
-                                if let Some(win) = web_sys::window() {
-                                    if let Ok(href) = win.location().href() {
-                                        let _ = win.navigator().clipboard().write_text(&href);
-                                        crate::snackbar::show_snackbar(&t("common.linkCopied"));
-                                    }
-                                }
-                            },
-                            span { class: "material-icons", "link" }
-                            "{t(\"common.copyLink\")}"
-                        }
+                        // Copy a shareable link to this folder (keeps æøå literal).
+                        super::widgets::CopyLinkAction {}
                         // Export the folder and everything nested under it to an .odt.
                         if is_auth && count > 0 {
                             button {

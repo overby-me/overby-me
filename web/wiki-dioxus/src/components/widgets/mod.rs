@@ -23,7 +23,7 @@ pub use feedback::{EmptyState, ErrorState};
 pub use image::ZoomableImage;
 pub use segmented_button::SegmentedButton;
 pub use table::{DataTable, PaginatedTable};
-pub use tool_sheet::{ToolSheet, TOOLS_DOCKED};
+pub use tool_sheet::{CopyLinkAction, ToolSheet, TOOLS_DOCKED};
 
 // Modal-accessibility helpers, reused by the layout's AppSwitcher.
 pub(crate) use focus::{active_html_element, close_modal, trap_tab_focus};
