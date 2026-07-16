@@ -63,19 +63,57 @@ pub fn use_focus_refresh(mut refresh: Signal<u32>) {
     });
 }
 
+/// Per-subscription connection state: the live socket, the retry counter, and
+/// whether the owning component is still mounted. Deliberately per-socket (NO
+/// shared connection manager): the rewrite's single multiplexed WebSocket lifts
+/// this state machine wholesale, and multiplexing stays a rewrite concern.
+struct SubState {
+    ws: Option<WebSocket>,
+    /// Consecutive failed attempts since the last `connection_ack` (drives the
+    /// exponential backoff); reset to 0 once a connection acks.
+    attempts: u32,
+    /// Cleared on unmount so a straggling onclose/timeout never reconnects.
+    alive: bool,
+    /// Handle of a scheduled reconnect, so unmount can cancel it.
+    timeout: Option<i32>,
+}
+
 /// Subscribe to `query` and return a signal holding the latest `data` payload.
-/// The socket is opened once for the component and closed when it unmounts.
+/// The socket opens when the component mounts, RECONNECTS with capped
+/// exponential backoff if it drops (server restart, venue wifi blip: without
+/// this, a long-lived view like the projector silently freezes, because the
+/// only other recovery path is the window-focus refresh and a projector tab
+/// never refocuses), and closes for good when the component unmounts.
+/// Resubscribing after a reconnect makes Hasura push the current result as the
+/// first `next`, so dependent views refetch without any extra bookkeeping.
 pub fn use_graphql_subscription(query: String) -> Signal<Option<serde_json::Value>> {
-    let session = use_session();
-    let token = session.read().access_token.clone();
+    // Subscribing to the session hook keeps this component in the reactive
+    // graph; the fresh token itself is re-read at each (re)connect below.
+    let _session = use_session();
     let data = use_signal(|| None::<serde_json::Value>);
 
-    let socket = use_hook(|| open_subscription(query.clone(), token.clone(), data));
+    let state = use_hook(|| {
+        let state = Rc::new(std::cell::RefCell::new(SubState {
+            ws: None,
+            attempts: 0,
+            alive: true,
+            timeout: None,
+        }));
+        connect(query.clone(), data, Runtime::current(), state.clone());
+        state
+    });
 
     use_drop({
-        let socket = socket.clone();
+        let state = state.clone();
         move || {
-            if let Some(ws) = &socket {
+            let mut st = state.borrow_mut();
+            st.alive = false;
+            if let Some(id) = st.timeout.take() {
+                if let Some(win) = web_sys::window() {
+                    win.clear_timeout_with_handle(id);
+                }
+            }
+            if let Some(ws) = st.ws.take() {
                 let _ = ws.close();
             }
         }
@@ -84,27 +122,37 @@ pub fn use_graphql_subscription(query: String) -> Signal<Option<serde_json::Valu
     data
 }
 
-/// Open the socket, wire the handshake/subscribe/data flow, and return it (so
-/// the caller can close it). Returns None if the socket cannot be created.
-fn open_subscription(
+/// Open the socket and wire the handshake/subscribe/data flow. On close (any
+/// reason but unmount) schedules a reconnect via [`schedule_reconnect`].
+fn connect(
     query: String,
-    token: Option<String>,
     mut data: Signal<Option<serde_json::Value>>,
-) -> Option<WebSocket> {
+    runtime: Rc<Runtime>,
+    state: Rc<std::cell::RefCell<SubState>>,
+) {
     let ws_url = graphql_url()
         .replacen("https://", "wss://", 1)
         .replacen("http://", "ws://", 1);
-    let ws = WebSocket::new_with_str(&ws_url, "graphql-transport-ws").ok()?;
+    let Ok(ws) = WebSocket::new_with_str(&ws_url, "graphql-transport-ws") else {
+        // Could not even create the socket (e.g. offline): retry later.
+        schedule_reconnect(query, data, runtime, state);
+        return;
+    };
+    state.borrow_mut().ws = Some(ws.clone());
 
-    // The onmessage callback runs outside the Dioxus runtime; capture it so
-    // signal writes are legal there (a RuntimeGuard restores the context).
-    let runtime = Runtime::current();
-
-    // onopen -> connection_init (with the bearer token in the payload headers).
+    // onopen -> connection_init. The bearer token is re-read from the session
+    // at every (re)connect: a token captured at mount goes stale within minutes
+    // (NHost tokens live ~15 min), so a reconnect hours in must not reuse it.
     let on_open = {
         let ws = ws.clone();
-        let token = token.clone();
+        let runtime = runtime.clone();
         Closure::<dyn FnMut()>::new(move || {
+            let token = {
+                // The callback runs outside the Dioxus runtime; the guard makes
+                // reading the SESSION global legal here.
+                let _guard = RuntimeGuard::new(runtime.clone());
+                crate::session::SESSION.peek().access_token.clone()
+            };
             let payload = match &token {
                 Some(t) => json!({ "headers": { "Authorization": format!("Bearer {t}") } }),
                 None => json!({}),
@@ -115,9 +163,14 @@ fn open_subscription(
     };
     ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
 
-    // connection_ack -> subscribe; next -> push the data into the signal.
+    // connection_ack -> subscribe (and reset the backoff); next -> push the
+    // data into the signal. The onmessage callback runs outside the Dioxus
+    // runtime; a RuntimeGuard restores the context for signal writes.
     let on_message = {
         let ws = ws.clone();
+        let query = query.clone();
+        let runtime = runtime.clone();
+        let state = state.clone();
         Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
             let Some(txt) = e.data().as_string() else {
                 return;
@@ -127,6 +180,7 @@ fn open_subscription(
             };
             match msg.get("type").and_then(|t| t.as_str()) {
                 Some("connection_ack") => {
+                    state.borrow_mut().attempts = 0;
                     let sub = json!({
                         "id": "1",
                         "type": "subscribe",
@@ -150,10 +204,59 @@ fn open_subscription(
     };
     ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
 
-    // The socket owns these callbacks for its lifetime; leak them (the component
-    // opens at most one subscription and closes the socket on unmount).
+    // onclose -> reconnect (unless the component unmounted). Errors also end in
+    // onclose, so scheduling only here avoids double reconnects.
+    let on_close = {
+        let state = state.clone();
+        Closure::<dyn FnMut()>::new(move || {
+            if state.borrow().alive {
+                schedule_reconnect(query.clone(), data, runtime.clone(), state.clone());
+            }
+        })
+    };
+    ws.set_onclose(Some(on_close.as_ref().unchecked_ref()));
+
+    // The socket owns these callbacks for its lifetime; leak them (a few small
+    // closures per (re)connect, bounded by reconnect frequency).
     on_open.forget();
     on_message.forget();
+    on_close.forget();
+}
 
-    Some(ws)
+/// Schedule the next [`connect`] attempt with capped exponential backoff
+/// (1s, 2s, 4s, ... capped at 30s), storing the timeout handle so unmount can
+/// cancel it.
+fn schedule_reconnect(
+    query: String,
+    data: Signal<Option<serde_json::Value>>,
+    runtime: Rc<Runtime>,
+    state: Rc<std::cell::RefCell<SubState>>,
+) {
+    let delay_ms = {
+        let mut st = state.borrow_mut();
+        st.ws = None;
+        let exp = st.attempts.min(5); // 2^5 * 1s = 32s pre-cap
+        st.attempts = st.attempts.saturating_add(1);
+        ((1u32 << exp) * 1_000).min(30_000) as i32
+    };
+    let cb = {
+        let state = state.clone();
+        Closure::once_into_js(move || {
+            let pending = {
+                let mut st = state.borrow_mut();
+                st.timeout = None;
+                st.alive
+            };
+            if pending {
+                connect(query, data, runtime, state);
+            }
+        })
+    };
+    if let Some(win) = web_sys::window() {
+        if let Ok(id) =
+            win.set_timeout_with_callback_and_timeout_and_arguments_0(cb.unchecked_ref(), delay_ms)
+        {
+            state.borrow_mut().timeout = Some(id);
+        }
+    }
 }
