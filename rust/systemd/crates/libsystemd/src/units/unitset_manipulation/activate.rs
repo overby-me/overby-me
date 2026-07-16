@@ -936,6 +936,18 @@ fn find_startable_units(
     let mut startable = Vec::new();
 
     for id in ids {
+        // `.device` units are activated exclusively by udev (see udev_event.rs
+        // marking them Started(Plugged) when the kernel announces the device),
+        // never by the job machinery. Force-starting one here would mark it
+        // Started before its /dev node/symlink exists, so a unit that
+        // BindsTo=/After= it — systemd-fsck@<dev>.service, the by-label mount —
+        // would run against a missing device (fsck exits 1, the root never
+        // mounts). Leave devices out of the startable set; a unit depending on a
+        // device waits (unstarted_deps) until the udev event plugs it and
+        // re-activates the dependents.
+        if matches!(id.kind, crate::units::UnitIdKind::Device) {
+            continue;
+        }
         if unstarted_deps(id, run_info, activation_set).is_empty() {
             startable.push(id.clone());
         }
