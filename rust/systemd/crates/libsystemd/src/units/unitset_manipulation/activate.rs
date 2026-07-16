@@ -847,30 +847,77 @@ pub fn activate_needed_units_with_source(
     // These can be started and the the graph can be traversed and other units can be started as soon as
     // all other units they depend on are started. This works because the units form an DAG if only
     // the 'after' relations are considered for traversal.
-    let root_units =
-        { find_startable_units(&needed_ids, &run_info.read_poisoned(), Some(&needed_ids)) };
-    let root_names: Vec<&str> = root_units.iter().map(|id| id.name.as_str()).collect();
-    trace!(
-        "activate_needed_units: root units count={}: {:?}",
-        root_units.len(),
-        root_names
-    );
-
     // Use a generous thread pool so that slow-starting notify services
     // (which block a thread while waiting for READY=1) don't starve
     // oneshot/target activations that could complete immediately.
     let tpool = ThreadPool::new(32);
     let errors = Arc::new(Mutex::new(Vec::new()));
-    activate_units_recursive(
-        root_units,
-        Arc::new(needed_ids),
-        run_info.clone(),
-        tpool.clone(),
-        errors.clone(),
-        source,
-    );
+    let needed_ids = Arc::new(needed_ids);
 
-    tpool.join();
+    // Fixpoint sweep: re-run the forward walk until a full pass starts no new
+    // unit. rust-systemd's activation propagates a "before-chain" as each unit
+    // completes, but a unit with several ordering dependencies can be reached
+    // (and dropped as not-yet-startable) before its LAST dependency completes,
+    // and that last dependency only re-dispatches its own before-chain. Without
+    // a fixpoint sweep, the tail of a fan-in chain — e.g. the /nix/store overlay
+    // mount that waits on the ro-store mount, the rw-store mount, AND the
+    // upper/work mkdir service — is nondeterministically left NeverStarted, so
+    // the initrd never finishes and switch-root never fires. Re-walking until no
+    // progress closes that systemic gap. activate_unit is idempotent for
+    // already-Started/Starting/failed units (it early-returns with an empty
+    // before-chain), so extra passes are cheap and cannot double-start anything.
+    let count_started = |ids: &[UnitId]| -> usize {
+        let ri = run_info.read_poisoned();
+        ids.iter()
+            .filter(|id| {
+                ri.unit_table
+                    .get(id)
+                    .map(|u| u.common.status.read_poisoned().is_started())
+                    .unwrap_or(false)
+            })
+            .count()
+    };
+
+    let max_passes = needed_ids.len() + 2;
+    for pass in 0..max_passes {
+        let started_before = count_started(&needed_ids);
+
+        let root_units =
+            { find_startable_units(&needed_ids, &run_info.read_poisoned(), Some(&needed_ids)) };
+        if pass == 0 {
+            let root_names: Vec<&str> = root_units.iter().map(|id| id.name.as_str()).collect();
+            trace!(
+                "activate_needed_units: root units count={}: {:?}",
+                root_units.len(),
+                root_names
+            );
+        }
+
+        activate_units_recursive(
+            root_units,
+            needed_ids.clone(),
+            run_info.clone(),
+            tpool.clone(),
+            errors.clone(),
+            source,
+        );
+        tpool.join();
+
+        let started_after = count_started(&needed_ids);
+        if started_after == started_before {
+            // Fixpoint reached: this pass started nothing new. Any remaining
+            // not-started units are either blocked on async completions handled
+            // elsewhere (Type=notify deferred waits, udev device events) or
+            // genuinely unsatisfiable.
+            break;
+        }
+        if pass + 1 == max_passes {
+            warn!(
+                "activate_needed_units: hit max passes ({}) for target {} without reaching a fixpoint",
+                max_passes, target_id.name
+            );
+        }
+    }
     info!("activate_needed_units: activation complete, all jobs dispatched");
 
     // Post-activation: check for upheld units that failed to start.
