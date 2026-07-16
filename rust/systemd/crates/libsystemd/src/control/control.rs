@@ -180,6 +180,10 @@ pub enum Command {
     /// make it `/`, and exec the new init there. Used to leave the initrd and
     /// hand off to the real system manager. Args: (new_root, optional init).
     SwitchRoot(String, Option<String>),
+    /// `switch-root --no-block [NEWROOT] [INIT]` — like `SwitchRoot` but returns
+    /// immediately and performs the switch on a background thread.
+    /// `initrd-switch-root.service` invokes it with `--no-block`.
+    SwitchRootNoBlock(String, Option<String>),
     /// `isolate TARGET` — start TARGET and stop every unit not wanted by it.
     /// Used by the initrd to reach `initrd-switch-root.target`.
     Isolate(String),
@@ -625,7 +629,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 Command::Isolate(target)
             }
         }
-        "switch-root" => {
+        "switch-root" | "switch-root-noblock" => {
             // switch-root NEWROOT [INIT]
             let args: Vec<String> = match &call.params {
                 Some(Value::Array(arr)) => arr
@@ -640,7 +644,11 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 .cloned()
                 .unwrap_or_else(|| "/sysroot".to_string());
             let init = args.get(1).cloned();
-            Command::SwitchRoot(new_root, init)
+            if call.method == "switch-root-noblock" {
+                Command::SwitchRootNoBlock(new_root, init)
+            } else {
+                Command::SwitchRoot(new_root, init)
+            }
         }
         "log-level" => {
             let level = match &call.params {
@@ -5382,6 +5390,22 @@ pub fn execute_command(
                     return Err(e);
                 }
             }
+        }
+        Command::SwitchRootNoBlock(new_root, init) => {
+            // --no-block: reply immediately and switch root on a background
+            // thread. initrd-switch-root.service runs
+            // `systemctl --no-block switch-root`; the synchronous SwitchRoot
+            // never returns (PID 1 is replaced by the new init via execve), so
+            // the reply would never be delivered and the calling service would
+            // hang. On success the execve replaces the whole process image
+            // (all threads), so the background thread doing it is fine.
+            info!("switch-root: switching to {new_root} (--no-block)");
+            std::thread::spawn(move || {
+                if let Err(e) = crate::signal_handler::switch_root(&new_root, init.as_deref()) {
+                    log::error!("switch-root (--no-block) failed: {e}");
+                }
+            });
+            return Ok(serde_json::json!(null));
         }
         Command::LogLevel(level) => {
             match level {
