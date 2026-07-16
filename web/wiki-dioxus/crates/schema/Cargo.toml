@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+wiki-domain-types = { path = "../domain-types" }
 
 [dev-dependencies]
 # Real SQLite (bundled, hermetic) validates the SQLite-dialect claim and the

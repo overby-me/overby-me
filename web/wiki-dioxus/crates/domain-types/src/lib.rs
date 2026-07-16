@@ -14,6 +14,9 @@
 
 use serde::{Deserialize, Serialize};
 
+mod ddl;
+pub use ddl::DDL;
+
 /// A DID (the durable identity), or an unbound author fallback. The census
 /// found 42 percent of author chips are free-text with only a third
 /// name-recoverable, so an author is NOT always a DID: model that honestly.
@@ -26,6 +29,26 @@ pub enum Author {
     /// A free-text author name with no account (the 42 percent). Kept as a
     /// display string so authorship is not silently dropped at import.
     FreeText { display: String },
+}
+
+impl Author {
+    /// The author's DID, if they are a resolved account (maps to `author_did`).
+    pub fn did(&self) -> Option<&str> {
+        match self {
+            Author::User { did } => Some(did),
+            Author::FreeText { .. } => None,
+        }
+    }
+
+    /// The author's free-text display, if they have no account (maps to
+    /// `author_text`). Exactly one of `did()`/`text()` is `Some`, matching the
+    /// `author_did IS NOT NULL OR author_text IS NOT NULL` CHECK.
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Author::FreeText { display } => Some(display),
+            Author::User { .. } => None,
+        }
+    }
 }
 
 /// A person. `did` is the primary identity post-migration; during import it

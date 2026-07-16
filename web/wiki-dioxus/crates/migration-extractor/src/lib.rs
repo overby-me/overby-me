@@ -59,6 +59,21 @@ pub struct InterimMember {
     pub claim_token: Option<String>,
 }
 
+/// An interim `users` row (the account behind a `node_id`). Realized into a
+/// domain `User` so the FK targets every author/member/comment references
+/// actually exist. During migration `did` holds the interim user id until the
+/// atproto DID binding runs (0 DIDs are linked today).
+#[derive(Debug, Clone, Deserialize)]
+pub struct InterimUser {
+    pub id: String,
+    #[serde(rename = "displayName", default)]
+    pub display_name: Option<String>,
+    #[serde(rename = "avatarUrl", default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub handle: Option<String>,
+}
+
 const CONTEXT_MIMES: &[&str] = &["wiki/group", "wiki/event"];
 const CONTENT_MIMES: &[&str] = &[
     "wiki/document",
@@ -118,6 +133,7 @@ impl FieldGapReport {
 /// The extracted domain rows plus the gap report.
 #[derive(Debug, Default, Serialize)]
 pub struct Extraction {
+    pub users: Vec<User>,
     pub contexts: Vec<Context>,
     pub documents: Vec<Document>,
     pub members: Vec<Member>,
@@ -125,9 +141,29 @@ pub struct Extraction {
     pub report: FieldGapReport,
 }
 
-/// Map interim rows into the canonical content/membership domain types.
-pub fn extract(nodes: &[InterimNode], members: &[InterimMember]) -> Extraction {
-    let mut out = Extraction::default();
+/// Map interim rows into the canonical content/membership domain types. `users`
+/// realizes the accounts every author/member/comment DID references, so the
+/// loader's FK targets exist (during migration `User.did` holds the interim user
+/// id until the DID binding runs).
+pub fn extract(
+    nodes: &[InterimNode],
+    members: &[InterimMember],
+    users: &[InterimUser],
+) -> Extraction {
+    let realized_users = users
+        .iter()
+        .map(|u| User {
+            did: u.id.clone(),
+            handle: u.handle.clone(),
+            display_name: u.display_name.clone(),
+            avatar_url: u.avatar_url.clone(),
+            legacy_id: Some(u.id.clone()),
+        })
+        .collect();
+    let mut out = Extraction {
+        users: realized_users,
+        ..Default::default()
+    };
 
     // Author chips: member rows hung on CONTENT nodes become that document's
     // authors, keyed by the content node id. Roster members hang on contexts.

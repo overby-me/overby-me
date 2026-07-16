@@ -37,7 +37,7 @@ fn context_and_roster_member_map() {
         .unwrap(),
     ];
     let members = vec![member("m1", "ctx1", Some("did:x"), Some("  Alice@X.DK "))];
-    let ex = extract(&nodes, &members);
+    let ex = extract(&nodes, &members, &[]);
 
     assert_eq!(ex.contexts.len(), 1);
     assert_eq!(ex.contexts[0].kind, ContextKind::Group);
@@ -59,7 +59,7 @@ fn document_collects_multiple_authors_including_free_text() {
         member("a1", "d1", Some("did:bound"), None), // bound author chip
         member("a2", "d1", None, None),              // free-text author chip
     ];
-    let ex = extract(&nodes, &members);
+    let ex = extract(&nodes, &members, &[]);
 
     assert_eq!(ex.documents.len(), 1);
     let doc = &ex.documents[0];
@@ -97,7 +97,7 @@ fn non_content_data_keys_and_unknown_mimes_hit_the_report() {
         node("x1", "conference/conference", json!(null)), // legacy one-off
         node("p1", "vote/poll", json!({"options": ["a"], "voters": []})), // excluded, not unknown
     ];
-    let ex = extract(&nodes, &[]);
+    let ex = extract(&nodes, &[], &[]);
 
     // The candidate's `image` and the file's `fileId`/`type` are flagged.
     assert!(
@@ -129,7 +129,7 @@ fn comment_text_extracted_from_data() {
         "createdAt": "2026-01-01T00:00:00Z"
     }))
     .unwrap()];
-    let ex = extract(&nodes, &[]);
+    let ex = extract(&nodes, &[], &[]);
     assert_eq!(ex.comments.len(), 1);
     assert_eq!(ex.comments[0].text, "nice work");
     assert!(matches!(ex.comments[0].author, Author::User { .. }));
@@ -144,7 +144,7 @@ fn extraction_round_trips_through_serde() {
         "wiki/document",
         json!({"content": {"ok": true}}),
     )];
-    let ex = extract(&nodes, &[member("a1", "d1", None, None)]);
+    let ex = extract(&nodes, &[member("a1", "d1", None, None)], &[]);
     let s = serde_json::to_string(&ex.documents).unwrap();
     let back: Vec<Document> = serde_json::from_str(&s).unwrap();
     assert_eq!(back, ex.documents);

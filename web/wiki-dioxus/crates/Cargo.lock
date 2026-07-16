@@ -3496,6 +3496,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "turso",
+ "wiki-domain-types",
 ]
 
 [[package]]

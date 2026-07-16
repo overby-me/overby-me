@@ -31,15 +31,25 @@ fn seed(conn: &rusqlite::Connection) {
 fn ddl_executes_and_rows_round_trip_on_sqlite() {
     let conn = sqlite_mem();
     seed(&conn);
-    // One row per remaining table, exercising defaults and FKs.
+    // One row per remaining table, exercising defaults and FKs. Authorship is
+    // via the document_author join, not a scalar document.author_did.
     conn.execute_batch(
-        "INSERT INTO document (id, context_id, kind, title, content, author_did)
-           VALUES ('d1', 'c1', 'document', 'Doc', '{\"blocks\":[{\"text\":\"hi\"}]}', 'did:plc:alice');
+        "INSERT INTO document (id, context_id, kind, title, content)
+           VALUES ('d1', 'c1', 'document', 'Doc', '{\"blocks\":[{\"text\":\"hi\"}]}');
+         INSERT INTO document_author (document_id, author_did, ord) VALUES ('d1', 'did:plc:alice', 0);
          INSERT INTO post (id, author_did, group_id, text) VALUES ('p1', 'did:plc:alice', 'c1', 'hello');
          INSERT INTO member (id, user_did, context_id, role) VALUES ('m1', 'did:plc:alice', 'c1', 'owner');
          INSERT INTO comment (id, on_id, context_id, author_did, text) VALUES ('k1', 'd1', 'c1', 'did:plc:alice', 'nice');",
     )
     .expect("inserts");
+    let authors: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM document_author WHERE document_id = 'd1'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("author count");
+    assert_eq!(authors, 1, "document author join row round-trips");
 
     // Round trip: read each row back.
     for (table, id_col, id) in [
@@ -79,6 +89,55 @@ fn ddl_executes_and_rows_round_trip_on_sqlite() {
         .expect("content");
     let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON back");
     assert_eq!(parsed["blocks"][0]["text"], "hi");
+}
+
+#[test]
+fn multi_author_and_free_text_authorship_on_sqlite() {
+    // The reconciliation this schema exists to prove: a document with MANY
+    // authors (census: up to 8), mixing an account (DID) and a free-text name
+    // (42% of author chips), which the old scalar document.author_did could not
+    // represent and no free-text authorship could survive.
+    let conn = sqlite_mem();
+    seed(&conn);
+    conn.execute_batch(
+        "INSERT INTO document (id, context_id, kind, title) VALUES ('d1', 'c1', 'policy', 'Motion');
+         INSERT INTO document_author (document_id, author_did, ord) VALUES ('d1', 'did:plc:alice', 0);
+         INSERT INTO document_author (document_id, author_text, ord) VALUES ('d1', 'Anonymous Delegate', 1);",
+    )
+    .expect("multi-author + free-text insert");
+    let n: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM document_author WHERE document_id = 'd1'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count");
+    assert_eq!(n, 2, "both authors (one DID, one free-text) round-trip");
+
+    // The scalar column the old schema.sql carried is GONE: this is what makes
+    // multi-author and free-text representable at all.
+    assert!(
+        conn.execute("SELECT author_did FROM document LIMIT 1", [])
+            .is_err(),
+        "document.author_did no longer exists (authorship is in document_author)"
+    );
+
+    // A free-text comment (no account) is now valid; the old NOT NULL author_did
+    // would have rejected it.
+    conn.execute(
+        "INSERT INTO comment (id, on_id, context_id, author_text, text) VALUES ('k1', 'd1', 'c1', 'A Guest', 'nice')",
+        [],
+    )
+    .expect("free-text comment insert");
+    // But a comment with NEITHER a DID nor a text author is rejected by the CHECK.
+    assert!(
+        conn.execute(
+            "INSERT INTO comment (id, on_id, context_id, text) VALUES ('k2', 'd1', 'c1', 'orphan')",
+            [],
+        )
+        .is_err(),
+        "a comment with no author (neither did nor text) is rejected by the CHECK"
+    );
 }
 
 #[test]

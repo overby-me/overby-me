@@ -6,7 +6,7 @@
 //!
 //! Usage: extract <snapshot.json>  (writes extraction.json + report.json)
 
-use migration_extractor::{InterimMember, InterimNode, extract};
+use migration_extractor::{InterimMember, InterimNode, InterimUser, extract};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -15,6 +15,8 @@ struct Snapshot {
     nodes: Vec<InterimNode>,
     #[serde(default)]
     members: Vec<InterimMember>,
+    #[serde(default)]
+    users: Vec<InterimUser>,
 }
 
 fn main() {
@@ -24,10 +26,11 @@ fn main() {
     });
     let raw = std::fs::read_to_string(&path).expect("read snapshot");
     let snap: Snapshot = serde_json::from_str(&raw).expect("parse snapshot");
-    let ex = extract(&snap.nodes, &snap.members);
+    let ex = extract(&snap.nodes, &snap.members, &snap.users);
 
     eprintln!(
-        "extracted: {} contexts, {} documents, {} members, {} comments",
+        "extracted: {} users, {} contexts, {} documents, {} members, {} comments",
+        ex.users.len(),
         ex.contexts.len(),
         ex.documents.len(),
         ex.members.len(),

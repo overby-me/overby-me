@@ -216,6 +216,15 @@ foreign keys), indexes, and the always-private tables (ballots, dedup, roster). 
 also exist as published records. SQL is shown in the SQLite dialect (Turso's primary frontend); arrays and
 Slate content are JSON columns and timestamps are text.
 
+The **canonical** entity-subset DDL is now *generated* from the Rust domain types
+(`crates/domain-types/src/ddl.rs`, re-exported as `wiki_schema::ENTITY_SCHEMA`) and validated on both
+engines by `crates/schema/tests/roundtrip.rs`, so schema and types can no longer drift. The SQL below is the
+illustrative narrative of that artifact; where it differs, the generated DDL wins. Two reconciliations the
+census forced are reflected here: authorship is **DID-or-free-text** everywhere (42 percent of author chips
+are free-text), and a document has **many** authors (up to 8), so authorship is a `document_author` join
+table, not a scalar `document.author_did`. Every entity table also carries `legacy_id TEXT UNIQUE` for the
+idempotent big-bang import (elided below for readability).
+
 ```sql
 -- Identity: the DID IS the person (primary key = the DID).
 CREATE TABLE user (
@@ -246,23 +255,35 @@ CREATE TABLE document (
   kind          TEXT NOT NULL,                           -- document|folder|file|policy|position|candidate|change
   title         TEXT NOT NULL,
   content       TEXT,                                    -- Slate JSON (carries over)
-  author_did    TEXT REFERENCES user(did),
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
   published_uri TEXT,                                    -- the at-uri, once published
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX document_context ON document(context_id, parent_id);
 
+-- A document's authors: many per document (census: up to 8), each a DID (an
+-- account) OR a free-text display name (no account), never a scalar author_did.
+CREATE TABLE document_author (
+  document_id TEXT NOT NULL REFERENCES document(id),
+  author_did  TEXT REFERENCES user(did),
+  author_text TEXT,                                      -- free-text name (no account)
+  ord         INTEGER NOT NULL DEFAULT 0,
+  CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
+);
+CREATE INDEX document_author_by_doc ON document_author(document_id);
+
 -- Feed posts: the social unit. visibility='public' -> mirrored to a repo.
 CREATE TABLE post (
   id            TEXT PRIMARY KEY,
-  author_did    TEXT NOT NULL REFERENCES user(did),
+  author_did    TEXT REFERENCES user(did),              -- DID-or-free-text (a migrated
+  author_text   TEXT,                                   --   post may have no account)
   group_id      TEXT REFERENCES context(id),            -- posted in a group/event
   reply_to      TEXT REFERENCES post(id),               -- thread parent
   text          TEXT NOT NULL,
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
   published_uri TEXT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
 );
 CREATE INDEX post_feed ON post(group_id, created_at);   -- feed by group + time
 
@@ -294,12 +315,14 @@ CREATE INDEX member_by_context ON member(context_id, active);
 
 -- Comments: internal discussion, threaded via on_id.
 CREATE TABLE comment (
-  id         TEXT PRIMARY KEY,
-  on_id      TEXT NOT NULL,                              -- document/comment it replies to
-  context_id TEXT NOT NULL REFERENCES context(id),
-  author_did TEXT NOT NULL REFERENCES user(did),
-  text       TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  id          TEXT PRIMARY KEY,
+  on_id       TEXT NOT NULL,                             -- document/comment it replies to
+  context_id  TEXT NOT NULL REFERENCES context(id),
+  author_did  TEXT REFERENCES user(did),                -- DID-or-free-text (a migrated
+  author_text TEXT,                                     --   comment may have no account)
+  text        TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
 );
 
 -- === Voting: the decided E2E-V scheme (blind-signature UNIT tokens, PER-POLL
