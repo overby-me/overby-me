@@ -73,6 +73,19 @@ in
           if grep -q 'systemctl' "$rule" \
              || grep -q 'IMPORT{builtin}' "$rule" \
              || [ "$name" = "99-systemd.rules" ]; then
+            # Skip rules that IMPORT{program}= a relative-path helper the
+            # systemd package doesn't ship as a standalone binary — e.g.
+            # 60-tpm2-id.rules calls `tpm2_id`, whose logic now lives only in
+            # the udevadm builtin, not a program file. NixOS's udev-rules
+            # builder rejects such references ("<prog> is called in udev rules
+            # but not installed by udev"), which would fail the whole system
+            # build. NixOS itself ships none of these rules and no integration
+            # test needs them, so drop them here.
+            missing=""
+            for prog in $(sed -nE 's/.*IMPORT\{program\}="([^/$][^ "]*).*/\1/p' "$rule"); do
+              [ -x "${config.systemd.package}/lib/udev/$prog" ] || missing=1
+            done
+            [ -n "$missing" ] && continue
             cp "$rule" "$out/lib/udev/rules.d/$name"
           fi
         done
