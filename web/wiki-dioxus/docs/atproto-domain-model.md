@@ -88,8 +88,8 @@ records.
 | statement | personal public statement | **public** | member repo |
 | `wiki/folder` | organising structure | private | — (DB) |
 | `vote/poll` | a poll | optional (a *public* poll may be announced) | org repo (announcement only) |
-| `vote/vote` ballot | a cast ballot | **always-private** | — (never a record; anonymised in DB) |
-| `has_voted` | one-vote dedup | **always-private** | — |
+| `vote/vote` ballot | a cast ballot | **split** | the org-side row (eligibility, issuance) is always-private; the ANONYMISED board entry (token + choices, no voter) IS a public record (custody: pending owner call) |
+| token issuance / dedup | one-issuance-per-voter marker | **always-private** | — (dedup itself is public token uniqueness on the board) |
 | members | roster + roles | **private** (opt-in "member of public group X" only) | member repo (only if the member opts in) |
 | `speak/*`, relations (`active`, `screenComments`) | ephemeral coordination | private | — (DB) |
 
@@ -268,14 +268,28 @@ CREATE INDEX post_feed ON post(group_id, created_at);   -- feed by group + time
 
 -- Membership as a join table (user <-> context), indexed both ways. Replaces
 -- Hasura's per-row RLS subqueries with a plain indexed join.
+--
+-- Keyed by a surrogate id, NOT (user_did, context_id): the DID audit found 83
+-- percent of members are email-only roster rows that import with user_did NULL,
+-- and NULL primary-key parts are each distinct in SQLite (dedup silently
+-- unenforced) and rejected outright in stricter dialects. Partial unique
+-- indexes enforce each state's real invariant instead: one bound row per
+-- (context, DID), one PENDING invite per (context, email). Once a row binds a
+-- DID it leaves the email index's scope BY DESIGN; re-inviting that email then
+-- creates a fresh pending row, and the application (not the schema) must first
+-- check "already an active member?" to avoid duplicate memberships. That check
+-- is the same is_active_member predicate the AppView authz core already needs.
 CREATE TABLE member (
-  user_did   TEXT REFERENCES user(did),
-  context_id TEXT NOT NULL REFERENCES context(id),
-  role       TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member','owner')),
-  active     INTEGER NOT NULL DEFAULT 1,
-  email      TEXT,                                       -- the invite (roster) address
-  PRIMARY KEY (user_did, context_id)
+  id          TEXT PRIMARY KEY,
+  user_did    TEXT REFERENCES user(did),                  -- NULL until the invite is claimed
+  context_id  TEXT NOT NULL REFERENCES context(id),
+  role        TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member','owner')),
+  active      INTEGER NOT NULL DEFAULT 1,
+  email       TEXT,                                       -- the invite (roster) address
+  claim_token TEXT UNIQUE                                 -- secret for mismatched-email claims
 );
+CREATE UNIQUE INDEX member_bound   ON member(context_id, user_did) WHERE user_did IS NOT NULL;
+CREATE UNIQUE INDEX member_pending ON member(context_id, email)    WHERE user_did IS NULL;
 CREATE INDEX member_by_context ON member(context_id, active);
 
 -- Comments: internal discussion, threaded via on_id.
@@ -288,50 +302,94 @@ CREATE TABLE comment (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- === Voting (carries the interim anonymity hardening as first-class schema) ===
+-- === Voting: the decided E2E-V scheme (blind-signature UNIT tokens, PER-POLL
+-- issuer keys, a public bulletin board; see atproto-open-decisions.md). This
+-- replaces the interim voter_did dedup + cast_bucket design: dedup is now
+-- token-uniqueness on the board, and nothing in the store links a ballot to a
+-- DID. Crypto field encodings (token bytes, signature format) are PROVISIONAL
+-- until the ballot-math spec crate pins the message format, and the board's
+-- custody (voter-published vs org-published records) is a pending owner call.
 CREATE TABLE poll (
-  id         TEXT PRIMARY KEY,
-  context_id TEXT NOT NULL REFERENCES context(id),
-  question   TEXT NOT NULL,
-  options    TEXT NOT NULL,                              -- JSON array of strings
-  open       INTEGER NOT NULL DEFAULT 1,
-  secret     INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  id            TEXT PRIMARY KEY,
+  context_id    TEXT NOT NULL REFERENCES context(id),
+  question      TEXT NOT NULL,
+  options       TEXT NOT NULL,                           -- JSON array of strings
+  open          INTEGER NOT NULL DEFAULT 1,
+  secret        INTEGER NOT NULL DEFAULT 0,
+  -- Per-poll RSA issuer keypair: the pubkey is published to the board BEFORE
+  -- the poll opens (verifiability); the private key is dropped at close.
+  issuer_pubkey TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- WHO voted (dedup) — no choice stored. One row per (poll, voter).
-CREATE TABLE voted (
+-- WHO MAY vote, org-authoritative and always-private. base_weight is the
+-- voter's own weight; resolved_weight = base plus incoming delegations, FROZEN
+-- when the poll opens (delegation changes after open do not move weight).
+CREATE TABLE eligibility (
+  poll_id         TEXT NOT NULL REFERENCES poll(id),
+  did             TEXT NOT NULL REFERENCES user(did),
+  base_weight     INTEGER NOT NULL DEFAULT 1,
+  resolved_weight INTEGER,                               -- set at open; NULL until frozen
+  PRIMARY KEY (poll_id, did)
+);
+
+-- Delegations: a signed assignment moving a voter's weight to a delegate,
+-- resolved into eligibility.resolved_weight BEFORE the poll opens. Visible to
+-- the org, never on the public board (the delegation-vs-anonymity resolution).
+CREATE TABLE delegation (
+  poll_id        TEXT NOT NULL REFERENCES poll(id),
+  from_did       TEXT NOT NULL REFERENCES user(did),
+  to_did         TEXT NOT NULL REFERENCES user(did),
+  assignment_sig TEXT NOT NULL,                          -- the delegator's signature
+  PRIMARY KEY (poll_id, from_did)                        -- one outgoing delegation per voter
+);
+
+-- THAT a voter was issued their tokens (never the tokens themselves: storing a
+-- token would link its later spend back to the DID and break unlinkability).
+-- A voter with resolved_weight N is blind-issued N identical unit tokens.
+CREATE TABLE token_issued (
   poll_id   TEXT NOT NULL REFERENCES poll(id),
-  voter_did TEXT NOT NULL REFERENCES user(did),
-  PRIMARY KEY (poll_id, voter_did)                       -- the UNIQUE key rejects a second vote
+  did       TEXT NOT NULL REFERENCES user(did),
+  issued_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (poll_id, did)                             -- issuance happens once per voter
 );
 
--- WHAT was chosen — no voter, append-only, coarse timestamp (poll's, not cast time).
--- Nothing links a `ballot` to a `voted` row: same anonymity design as the interim
--- fix, now enforced by the schema itself.
-CREATE TABLE ballot (
-  poll_id     TEXT NOT NULL REFERENCES poll(id),
-  choices     TEXT NOT NULL,                             -- JSON array of option indices
-  cast_bucket TEXT NOT NULL                              -- = poll.created_at, NOT the real cast time
+-- The org-side MIRROR of the public bulletin board, for tally and serving.
+-- Append-only; one row per spent unit token; carries NO voter identity. The
+-- UNIQUE token IS the double-vote rejection (a reused token collides here and
+-- publicly on the board). Every entry weighs exactly 1 (unit tokens), so the
+-- tally is a plain count and no weight column exists to shrink the anonymity
+-- set. entry_ref points at the public board record once published.
+CREATE TABLE board_entry (
+  poll_id   TEXT NOT NULL REFERENCES poll(id),
+  token     TEXT NOT NULL UNIQUE,                        -- the unblinded unit token
+  token_sig TEXT NOT NULL,                               -- RSA-PSS sig under poll.issuer_pubkey
+  choices   TEXT NOT NULL,                               -- JSON array of option indices
+  entry_ref TEXT                                         -- at-uri/CID of the public record
 );
-CREATE INDEX ballot_by_poll ON ballot(poll_id);
+CREATE INDEX board_by_poll ON board_entry(poll_id);
 ```
 
-**Casting a secret ballot** (atomic; robust regardless of isolation guarantees, the de-risking from the port
-doc). `BEGIN IMMEDIATE` takes the write lock up front; the dedup insert and the ballot insert commit together:
+**Casting** (atomic; robust regardless of isolation guarantees). `BEGIN IMMEDIATE` takes the write lock up
+front; the UNIQUE token constraint rejects a double spend in the same statement that records the ballot:
 
 ```sql
 BEGIN IMMEDIATE;
-  INSERT INTO voted (poll_id, voter_did) VALUES (:poll, :me);   -- PK rejects a second vote
-  INSERT INTO ballot (poll_id, choices, cast_bucket)
-    VALUES (:poll, :choices, (SELECT created_at FROM poll WHERE id = :poll));
+  -- fails on a reused token: that IS the one-vote-per-token rule
+  INSERT INTO board_entry (poll_id, token, token_sig, choices)
+    VALUES (:poll, :token, :sig, :choices);
 COMMIT;
 ```
 
-**Tally** — always recomputed by aggregation, never a mutable counter:
+(The signature is verified against `poll.issuer_pubkey` before the insert; the transaction shape, a
+unique-constrained dedup insert plus an append-only ballot insert under `BEGIN IMMEDIATE`, is the same one
+the Turso crash harness exercises.)
+
+**Tally** — always recomputed by aggregation, never a mutable counter; unit tokens make it a plain count,
+and anyone can recompute the same count from the public board (universal verifiability):
 
 ```sql
-SELECT choices, count(*) AS n FROM ballot WHERE poll_id = :poll GROUP BY choices;
+SELECT choices, count(*) AS n FROM board_entry WHERE poll_id = :poll GROUP BY choices;
 ```
 
 **Membership checks** (replace Hasura's `is_context_owner` subqueries with an indexed join):
@@ -353,10 +411,13 @@ is transient.
 
 The roster constraint is unchanged (Excel, keyed by email). Flow:
 
-1. Import roster → `member` edges with `email` set, `active=false`, no `user`.
+1. Import roster → `member` rows with `email` and a fresh `claim_token` set,
+   `active=0`, `user_did` NULL (the pending-invite state the partial unique
+   `member_pending` deduplicates).
 2. A person authenticates with their **DID** (atproto OAuth).
-3. Bind: match the pending `member` by email (or a claim-token for
-   mismatched-email cases, as today), set its `in = user:<did>`, `active=true`.
+3. Bind: match the pending `member` by email (or by `claim_token` for
+   mismatched-email cases, as today), set `user_did = :did`, `active=1` (the row
+   moves from the `member_pending` unique into `member_bound`).
 
 `member.email` stays the invite address; the DID is the durable identity. This is
 the current `members.node_id` pattern, re-pointed at DIDs.
