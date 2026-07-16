@@ -929,6 +929,21 @@ html {
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-2);
 	overflow: hidden;
+	/* Hide-on-scroll slide. A transform is safe here (unlike on .card): the dock
+	   hosts no position:fixed descendants, so it establishes no harmful
+	   containing block. */
+	transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
+}
+/* Scrolled away: slide the whole dock (both tiers) below the viewport edge,
+   clearing its shadow, so a long page reclaims the full two-row footprint. */
+.compact-dock.dock-hidden {
+	transform: translateY(calc(100% + var(--md-sys-spacing-4)));
+}
+/* Reduced motion: still hide, just without the slide. */
+@media (prefers-reduced-motion: reduce) {
+	.compact-dock {
+		transition: none;
+	}
 }
 /* Inside the dock, the two bars become static, EQUAL-HEIGHT, transparent tiers
    sharing the one surface (override their standalone positioning + chrome). */

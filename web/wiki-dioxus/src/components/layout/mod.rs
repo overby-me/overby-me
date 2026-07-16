@@ -412,7 +412,10 @@ pub fn Layout() -> Element {
             // vertical space a second free-floating bar would cost; on medium+ it is
             // the top bar as before.
             if size_class.is_compact() {
-                div { class: "compact-dock",
+                // The whole dock (both tiers) hides on scroll-down and returns on
+                // scroll-up, so it does not permanently eat two rows on a phone.
+                div {
+                    class: if super::back_to_top::dock_hidden() { "compact-dock dock-hidden" } else { "compact-dock" },
                     TopAppBar { search_mode, search_input, search_results, open_drawer }
                     NavigationBar {}
                 }
