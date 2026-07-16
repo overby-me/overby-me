@@ -44487,6 +44487,81 @@ fn test_mount_unit_loaded_from_directory() {
 }
 
 #[test]
+fn test_instance_symlink_to_different_template_preserves_instance() {
+    // TEST-15-DROPIN.testcase_template_dropins: bar-alias@2.service is an
+    // instance-level symlink to yup@.service (a DIFFERENT template than the
+    // bar-alias@.service -> bar@.service template alias). So bar-alias@2 must
+    // resolve to yup@2 — carrying its own instance number across — not collapse
+    // onto another yup instance (e.g. yup@0).
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+
+    std::fs::write(p.join("yup@.service"), "[Service]\nExecStart=/bin/true\n").unwrap();
+    std::fs::write(p.join("bar@.service"), "[Service]\nExecStart=/bin/true\n").unwrap();
+
+    // Template alias (bar-alias@ -> bar@) plus per-instance symlinks, two of
+    // which point at a DIFFERENT template/instance (yup).
+    std::os::unix::fs::symlink("bar@.service", p.join("bar-alias@.service")).unwrap();
+    std::os::unix::fs::symlink("bar@1.service", p.join("bar-alias@1.service")).unwrap();
+    std::os::unix::fs::symlink("yup@.service", p.join("bar-alias@2.service")).unwrap();
+    std::os::unix::fs::symlink("yup@3.service", p.join("bar-alias@3.service")).unwrap();
+
+    // .requires/ dirs for every template and instance, exactly as the upstream
+    // testcase creates them.
+    let mut reqs: Vec<(String, String)> = Vec::new();
+    reqs.push(("bar@.service".into(), "bar-template-requires.device".into()));
+    reqs.push(("yup@.service".into(), "yup-template-requires.device".into()));
+    reqs.push((
+        "bar-alias@.service".into(),
+        "bar-alias-template-requires.device".into(),
+    ));
+    for i in 0..=3 {
+        reqs.push((
+            format!("bar@{i}.service"),
+            format!("bar-{i}-requires.device"),
+        ));
+        reqs.push((
+            format!("yup@{i}.service"),
+            format!("yup-{i}-requires.device"),
+        ));
+        reqs.push((
+            format!("bar-alias@{i}.service"),
+            format!("bar-alias-{i}-requires.device"),
+        ));
+    }
+    for (host, dev) in &reqs {
+        let reqdir = p.join(format!("{host}.requires"));
+        std::fs::create_dir_all(&reqdir).unwrap();
+        std::os::unix::fs::symlink(format!("../{dev}"), reqdir.join(dev)).unwrap();
+    }
+
+    let paths = vec![p.to_path_buf()];
+    let unit_table = crate::units::load_all_units_no_prune(&paths, "default.target").unwrap();
+
+    let unit = unit_table
+        .values()
+        .find(|u| {
+            u.id.name == "bar-alias@2.service"
+                || u.common
+                    .unit
+                    .aliases
+                    .iter()
+                    .any(|a| a == "bar-alias@2.service")
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no unit carries bar-alias@2.service; units: {:?}",
+                unit_table.keys().map(|id| &id.name).collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(
+        unit.id.name, "yup@2.service",
+        "bar-alias@2 (symlink to yup@.service) must resolve to yup@2, got {}",
+        unit.id.name
+    );
+}
+
+#[test]
 fn test_mount_unit_loaded_with_wants_dependency() {
     let dir = tempfile::tempdir().unwrap();
 

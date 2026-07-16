@@ -9,6 +9,42 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 Run the whole tree's checks: `just check` (never plain `nix flake check`,
 which OOMs on this repo's check count).
 
+## 2026-07-16 — nixpkgs-drift boot recovery (branch `rust-systemd-complete`)
+
+Merging onto current `main` (nixpkgs bumped to systemd 260 / kernel 6.18)
+broke the whole VM suite at the boot level. Fixed on `rust-systemd-complete`:
+
+- **udev-rules build** — testsuite's udev override swept in systemd 260's
+  `60-tpm2-id.rules`, which `IMPORT{program}=`s a `tpm2_id` helper that is now
+  only a udevadm builtin (no standalone binary), failing NixOS's udev-rules
+  existence check. The override now skips rules whose relative-path helper is
+  absent.
+- **stage-2 boot override** — nixpkgs renamed the `@distroName@` placeholder to
+  a computed `@stage2Greeting@`; the `bootStage2` override now mirrors the
+  module's `inherit (config.boot) stage2Greeting`.
+- **PID 1 dispatch** — nixpkgs now execs PID 1 as `/init`; rust-systemd only
+  ran the manager when `argv[0]` ended in `systemd`. It now runs the manager
+  whenever it is PID 1, like upstream systemd (a genuine drop-in fix).
+- **systemd-in-initrd** — nixpkgs flipped `boot.initrd.systemd.enable` to
+  default `true`, making the *initramfs* PID 1 be rust-systemd, which has no
+  initrd/stage-1 mode. Phase 1: the tests boot the traditional bash stage-1
+  initrd (`boot.initrd.systemd.enable = false`) and switch_root into
+  rust-systemd as the stage-2 manager. **Phase 2 (TODO): implement rust-systemd
+  initrd mode** (mount API filesystems, mount `/sysroot`, `switch_root`, exec
+  stage-2) so systemd-in-initrd can be re-enabled — a substantial subsystem.
+- **set-property / revert** — now load the target unit from disk on demand
+  (like upstream), instead of only checking the in-memory table.
+
+With these, **15-DROPIN boots as stage-2 and passes every subtest except
+`testcase_template_dropins`'s `bar-alias@2`/`bar-alias@3` cases** — an
+instance-level symlink to a *different* template (`bar-alias@2` → `yup@.service`)
+resolves to `yup@0` instead of `yup@2` after `daemon-reload`. Initial-load
+(`load_all_units`) handles this correctly (see the
+`test_instance_symlink_to_different_template_preserves_instance` unit test); the
+bug is in `daemon-reload`'s `LoadAllNew` merge reconciling fresh units against
+prior on-demand/reload state. This is the "single-path unit identity" refactor
+the notes below flag — still open.
+
 ## Test Status Summary
 
 | Status | Count | Description |
