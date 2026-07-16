@@ -21,13 +21,19 @@ use tokio_tungstenite::tungstenite::Message;
 
 /// The wiki record collections the consumer subscribes to and acts on.
 pub const WIKI_COLLECTIONS: &[&str] = &[
+    "com.example.wiki.group",
+    "com.example.wiki.event",
     "com.example.wiki.post",
     "com.example.wiki.comment",
     "com.example.wiki.resolution",
     "com.example.wiki.reaction",
 ];
 
+const GROUP_COLLECTION: &str = "com.example.wiki.group";
+const EVENT_COLLECTION: &str = "com.example.wiki.event";
 const POST_COLLECTION: &str = "com.example.wiki.post";
+const COMMENT_COLLECTION: &str = "com.example.wiki.comment";
+const RESOLUTION_COLLECTION: &str = "com.example.wiki.resolution";
 const REACTION_COLLECTION: &str = "com.example.wiki.reaction";
 
 /// Live firehose status for `/healthz`: whether the socket is connected and how
@@ -96,11 +102,13 @@ impl From<serde_json::Error> for FirehoseError {
 /// commit, materialize it into the Turso view and return the change [`Delta`] to
 /// broadcast. Non-wiki / non-commit events return `None`.
 ///
-/// Materialization depth: the public `post` and `reaction` records map cleanly
-/// to entity tables (they carry the author/reactor DID + at-uri subjects), so
-/// they are upserted/deleted here. `comment` and `resolution` need subject->
-/// context resolution (a NOT NULL context) and are broadcast-only for now (a
-/// delta still fires so clients refetch); their materialization is a later slice.
+/// Materialization: every public record type is materialized into the view where
+/// possible. group/event -> context, post -> post, reaction -> reaction,
+/// comment -> comment (its context resolved from the subject's materialized
+/// record), resolution -> a `resolution`-kind document (its context is the
+/// record's `context` at-uri). A record whose context cannot be resolved (e.g. a
+/// comment on a not-yet-materialized subject) stays broadcast-only; a delta still
+/// fires so clients refetch.
 pub async fn ingest(store: &Store, raw: &str) -> Result<Option<Delta>, FirehoseError> {
     let event: JetstreamEvent = serde_json::from_str(raw)?;
     if event.kind != "commit" {
@@ -114,50 +122,20 @@ pub async fn ingest(store: &Store, raw: &str) -> Result<Option<Delta>, FirehoseE
     }
 
     let uri = format!("at://{}/{}/{}", event.did, commit.collection, commit.rkey);
+    let did = &event.did;
 
     match commit.operation.as_str() {
-        "create" | "update" => match commit.collection.as_str() {
-            POST_COLLECTION => {
-                if let Some(rec) = &commit.record {
-                    let text = rec.get("text").and_then(|v| v.as_str());
-                    let created = rec.get("createdAt").and_then(|v| v.as_str());
-                    // The lexicon requires text + createdAt; skip a malformed
-                    // record's materialization but still emit the delta.
-                    if let (Some(text), Some(created)) = (text, created) {
-                        let group = rec.get("group").and_then(|v| v.as_str());
-                        let reply = rec
-                            .get("reply")
-                            .and_then(|r| r.get("uri"))
-                            .and_then(|v| v.as_str());
-                        store.upsert_user_min(&event.did).await?;
-                        store
-                            .upsert_public_post(&uri, &event.did, text, group, reply, created)
-                            .await?;
-                    }
-                }
+        "create" | "update" => {
+            if let Some(rec) = &commit.record {
+                materialize(store, did, &commit.collection, &uri, rec).await?;
             }
-            REACTION_COLLECTION => {
-                if let Some(rec) = &commit.record {
-                    let subject = rec
-                        .get("subject")
-                        .and_then(|s| s.get("uri"))
-                        .and_then(|v| v.as_str());
-                    let emoji = rec.get("emoji").and_then(|v| v.as_str());
-                    let created = rec.get("createdAt").and_then(|v| v.as_str());
-                    if let (Some(subject), Some(emoji), Some(created)) = (subject, emoji, created) {
-                        store.upsert_user_min(&event.did).await?;
-                        store
-                            .upsert_reaction(&uri, subject, &event.did, emoji, created)
-                            .await?;
-                    }
-                }
-            }
-            // comment / resolution: broadcast-only (deferred materialization).
-            _ => {}
-        },
+        }
         "delete" => match commit.collection.as_str() {
             POST_COLLECTION => store.delete_public_post(&uri).await?,
             REACTION_COLLECTION => store.delete_reaction(&uri).await?,
+            GROUP_COLLECTION | EVENT_COLLECTION => store.delete_public_context(&uri).await?,
+            COMMENT_COLLECTION => store.delete_public_comment(&uri).await?,
+            RESOLUTION_COLLECTION => store.delete_public_resolution(&uri).await?,
             _ => {}
         },
         _ => return Ok(None),
@@ -169,6 +147,82 @@ pub async fn ingest(store: &Store, raw: &str) -> Result<Option<Delta>, FirehoseE
         did: event.did,
         uri,
     }))
+}
+
+/// Materialize a create/update record into the view (best-effort; a record whose
+/// required fields or context are missing is skipped, leaving it broadcast-only).
+async fn materialize(
+    store: &Store,
+    did: &str,
+    collection: &str,
+    uri: &str,
+    rec: &serde_json::Value,
+) -> Result<(), FirehoseError> {
+    let s = |k: &str| rec.get(k).and_then(|v| v.as_str());
+    let ref_uri = |k: &str| {
+        rec.get(k)
+            .and_then(|r| r.get("uri"))
+            .and_then(|v| v.as_str())
+    };
+
+    match collection {
+        POST_COLLECTION => {
+            if let (Some(text), Some(created)) = (s("text"), s("createdAt")) {
+                store.upsert_user_min(did).await?;
+                store
+                    .upsert_public_post(uri, did, text, s("group"), ref_uri("reply"), created)
+                    .await?;
+            }
+        }
+        REACTION_COLLECTION => {
+            if let (Some(subject), Some(emoji), Some(created)) =
+                (ref_uri("subject"), s("emoji"), s("createdAt"))
+            {
+                store.upsert_user_min(did).await?;
+                store
+                    .upsert_reaction(uri, subject, did, emoji, created)
+                    .await?;
+            }
+        }
+        GROUP_COLLECTION | EVENT_COLLECTION => {
+            if let (Some(name), Some(slug), Some(created)) = (s("name"), s("slug"), s("createdAt"))
+            {
+                let kind = if collection == EVENT_COLLECTION {
+                    "event"
+                } else {
+                    "group"
+                };
+                store
+                    .upsert_public_context(uri, kind, name, slug, ref_uri("parent"), created)
+                    .await?;
+            }
+        }
+        COMMENT_COLLECTION => {
+            if let (Some(subject), Some(text), Some(created)) =
+                (ref_uri("subject"), s("text"), s("createdAt"))
+            {
+                // Only materializable once the commented-on record is in the view.
+                if let Some(ctx) = store.resolve_subject_context(subject).await? {
+                    store.upsert_user_min(did).await?;
+                    store
+                        .upsert_public_comment(uri, subject, &ctx, did, text, created)
+                        .await?;
+                }
+            }
+        }
+        RESOLUTION_COLLECTION => {
+            if let (Some(title), Some(status), Some(created), Some(context)) =
+                (s("title"), s("status"), s("createdAt"), s("context"))
+            {
+                store.upsert_user_min(did).await?;
+                store
+                    .upsert_public_resolution(uri, context, title, s("body"), status, did, created)
+                    .await?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// The Jetstream subscribe URL with server-side collection filtering.
@@ -422,6 +476,119 @@ mod tests {
             count_reactions(&db, "SELECT count(*) FROM reaction WHERE id = ?1", uri).await,
             0
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn group_and_event_materialize_as_contexts() {
+        let (store, db) = store_with_db().await;
+        let rec = |coll: &str, rkey: &str, name: &str, slug: &str| {
+            format!(
+                r#"{{"did":"did:plc:org","kind":"commit","commit":{{"operation":"create","collection":"{coll}","rkey":"{rkey}","record":{{"name":"{name}","slug":"{slug}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
+            )
+        };
+        ingest(&store, &rec("com.example.wiki.group", "g1", "Reds", "reds"))
+            .await
+            .unwrap();
+        ingest(
+            &store,
+            &rec("com.example.wiki.event", "e1", "Congress", "congress"),
+        )
+        .await
+        .unwrap();
+        let conn = db.acquire().await.unwrap();
+        let mut rows = conn
+            .query(
+                "SELECT kind, name FROM context WHERE id = ?1",
+                ["at://did:plc:org/com.example.wiki.group/g1"],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().expect("group context");
+        assert_eq!(row.get::<String>(0).unwrap(), "group");
+        assert_eq!(row.get::<String>(1).unwrap(), "Reds");
+        let mut e = conn
+            .query(
+                "SELECT kind FROM context WHERE id = ?1",
+                ["at://did:plc:org/com.example.wiki.event/e1"],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            e.next().await.unwrap().unwrap().get::<String>(0).unwrap(),
+            "event"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn comment_materializes_only_when_subject_resolves() {
+        let (store, db) = store_with_db().await;
+        let conn = db.acquire().await.unwrap();
+        conn.execute_batch(
+            "INSERT INTO context (id, kind, name, slug, legacy_id) VALUES ('c1','group','G','g',NULL);
+             INSERT INTO document (id, context_id, kind, title, published_uri, legacy_id) \
+               VALUES ('doc1','c1','document','Doc','doc1',NULL);",
+        )
+        .await
+        .unwrap();
+        let comment = |rkey: &str, subject: &str| {
+            format!(
+                r#"{{"did":"did:plc:alice","kind":"commit","commit":{{"operation":"create","collection":"com.example.wiki.comment","rkey":"{rkey}","record":{{"subject":{{"uri":"{subject}","cid":"bafy"}},"text":"Agreed","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
+            )
+        };
+        // Subject is the materialized document -> the comment lands with its context.
+        ingest(&store, &comment("k1", "doc1")).await.unwrap();
+        let mut rows = conn
+            .query(
+                "SELECT on_id, context_id FROM comment WHERE id = ?1",
+                ["at://did:plc:alice/com.example.wiki.comment/k1"],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().expect("comment row");
+        assert_eq!(row.get::<String>(0).unwrap(), "doc1");
+        assert_eq!(row.get::<String>(1).unwrap(), "c1");
+        // A comment on an unknown subject is NOT materialized (broadcast-only).
+        ingest(&store, &comment("k2", "nope")).await.unwrap();
+        let mut c = conn
+            .query("SELECT count(*) FROM comment", ())
+            .await
+            .unwrap();
+        assert_eq!(
+            c.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
+            1,
+            "orphan comment not materialized"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resolution_materializes_as_a_document() {
+        let (store, db) = store_with_db().await;
+        let raw = r#"{"did":"did:plc:org","kind":"commit","commit":{"operation":"create","collection":"com.example.wiki.resolution","rkey":"r1","record":{"title":"Vedtaegt","status":"carried","context":"at://did:plc:org/com.example.wiki.group/g1","body":"the text","createdAt":"2026-07-16T12:00:00.000Z"}}}"#;
+        ingest(&store, raw).await.unwrap();
+        let uri = "at://did:plc:org/com.example.wiki.resolution/r1";
+        let conn = db.acquire().await.unwrap();
+        let mut rows = conn
+            .query(
+                "SELECT kind, title, context_id FROM document WHERE id = ?1",
+                [uri],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().expect("resolution doc");
+        assert_eq!(row.get::<String>(0).unwrap(), "resolution");
+        assert_eq!(row.get::<String>(1).unwrap(), "Vedtaegt");
+        assert_eq!(
+            row.get::<String>(2).unwrap(),
+            "at://did:plc:org/com.example.wiki.group/g1"
+        );
+        let mut a = conn
+            .query(
+                "SELECT count(*) FROM document_author WHERE document_id = ?1",
+                [uri],
+            )
+            .await
+            .unwrap();
+        assert_eq!(a.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 1);
     }
 
     #[test]

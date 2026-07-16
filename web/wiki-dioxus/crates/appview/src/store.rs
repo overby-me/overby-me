@@ -840,6 +840,174 @@ impl Store {
         .await?;
         Ok(())
     }
+
+    // -- Firehose depth-2 materialization: public container contexts (group/
+    //    event), comments, and resolutions, keyed by the record's at-uri. --
+
+    /// Materialize a public `group`/`event` record into the `context` view.
+    pub async fn upsert_public_context(
+        &self,
+        uri: &str,
+        kind: &str,
+        name: &str,
+        slug: &str,
+        parent_uri: Option<&str>,
+        created_at: &str,
+    ) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        let updated = conn
+            .execute(
+                "UPDATE context SET kind = ?1, name = ?2, slug = ?3, parent_id = ?4, \
+                 visibility = 'public', published_uri = ?5, created_at = ?6 WHERE id = ?5",
+                vec![
+                    Value::Text(kind.to_string()),
+                    Value::Text(name.to_string()),
+                    Value::Text(slug.to_string()),
+                    opt_str_val(parent_uri),
+                    Value::Text(uri.to_string()),
+                    Value::Text(created_at.to_string()),
+                ],
+            )
+            .await?;
+        if updated == 0 {
+            conn.execute(
+                "INSERT INTO context \
+                 (id, kind, name, slug, parent_id, visibility, published_uri, created_at, legacy_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'public', ?1, ?6, NULL)",
+                vec![
+                    Value::Text(uri.to_string()),
+                    Value::Text(kind.to_string()),
+                    Value::Text(name.to_string()),
+                    Value::Text(slug.to_string()),
+                    opt_str_val(parent_uri),
+                    Value::Text(created_at.to_string()),
+                ],
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete a public context from the view by its at-uri.
+    pub async fn delete_public_context(&self, uri: &str) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("DELETE FROM context WHERE id = ?1", [uri])
+            .await?;
+        Ok(())
+    }
+
+    /// The context a subject at-uri belongs to, resolved through the view (a
+    /// materialized document, comment, or post). `None` if the subject is not (yet)
+    /// materialized, in which case a comment on it stays broadcast-only.
+    pub async fn resolve_subject_context(
+        &self,
+        subject_uri: &str,
+    ) -> Result<Option<String>, DbError> {
+        let conn = self.db.acquire().await?;
+        for sql in [
+            "SELECT context_id FROM document WHERE id = ?1 OR published_uri = ?1 LIMIT 1",
+            "SELECT context_id FROM comment WHERE id = ?1 LIMIT 1",
+            "SELECT group_id FROM post WHERE id = ?1 LIMIT 1",
+        ] {
+            let mut rows = conn.query(sql, [subject_uri]).await?;
+            if let Some(row) = rows.next().await?
+                && let Some(ctx) = opt_text(&row, 0)
+            {
+                return Ok(Some(ctx));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Materialize a public `comment` record into the `comment` view.
+    pub async fn upsert_public_comment(
+        &self,
+        uri: &str,
+        on_id: &str,
+        context_id: &str,
+        author_did: &str,
+        text: &str,
+        created_at: &str,
+    ) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        let updated = conn
+            .execute(
+                "UPDATE comment SET on_id = ?1, context_id = ?2, author_did = ?3, text = ?4, \
+                 created_at = ?5 WHERE id = ?6",
+                [on_id, context_id, author_did, text, created_at, uri],
+            )
+            .await?;
+        if updated == 0 {
+            conn.execute(
+                "INSERT INTO comment \
+                 (id, on_id, context_id, author_did, author_text, text, created_at, legacy_id) \
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL)",
+                [uri, on_id, context_id, author_did, text, created_at],
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete a public comment from the view by its at-uri.
+    pub async fn delete_public_comment(&self, uri: &str) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("DELETE FROM comment WHERE id = ?1", [uri])
+            .await?;
+        Ok(())
+    }
+
+    /// Materialize a public `resolution` record as a `document` (kind
+    /// `resolution`), its body + status folded into the content JSON, authored by
+    /// the org DID. `context_id` is the resolution's context at-uri.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upsert_public_resolution(
+        &self,
+        uri: &str,
+        context_id: &str,
+        title: &str,
+        body: Option<&str>,
+        status: &str,
+        author_did: &str,
+        created_at: &str,
+    ) -> Result<(), DbError> {
+        let content = serde_json::json!({ "body": body, "status": status }).to_string();
+        let conn = self.db.acquire().await?;
+        let updated = conn
+            .execute(
+                "UPDATE document SET context_id = ?1, kind = 'resolution', title = ?2, \
+                 content = ?3, visibility = 'public', published_uri = ?4, created_at = ?5 \
+                 WHERE id = ?4",
+                [context_id, title, content.as_str(), uri, created_at],
+            )
+            .await?;
+        if updated == 0 {
+            conn.execute(
+                "INSERT INTO document \
+                 (id, context_id, parent_id, kind, title, content, visibility, published_uri, created_at, legacy_id) \
+                 VALUES (?1, ?2, NULL, 'resolution', ?3, ?4, 'public', ?1, ?5, NULL)",
+                [uri, context_id, title, content.as_str(), created_at],
+            )
+            .await?;
+            conn.execute(
+                "INSERT INTO document_author (document_id, author_did, author_text, ord) \
+                 VALUES (?1, ?2, NULL, 0)",
+                [uri, author_did],
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete a public resolution (document + its author rows) by its at-uri.
+    pub async fn delete_public_resolution(&self, uri: &str) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("DELETE FROM document_author WHERE document_id = ?1", [uri])
+            .await?;
+        conn.execute("DELETE FROM document WHERE id = ?1", [uri])
+            .await?;
+        Ok(())
+    }
 }
 
 /// A nullable TEXT param: `Value::Text` or SQL NULL.
