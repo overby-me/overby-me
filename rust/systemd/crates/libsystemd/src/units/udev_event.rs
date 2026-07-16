@@ -772,6 +772,22 @@ fn apply_device_active(
         let run_info = run_info.clone();
         let first_name = unit_names[0].clone();
         std::thread::spawn(move || {
+            // In the initrd, re-drive the boot target once the device is
+            // announced. rust-systemd's activation is a forward walk with no
+            // global "re-evaluate waiters" pass, so activating the direct
+            // device dependents (fsck, mount) below does not cascade *up* to
+            // their own waiters (initrd-root-fs.target → initrd-parse-etc → …).
+            // Re-driving initrd.target re-evaluates the whole graph now that the
+            // device is Started: idempotent for already-active units, it starts
+            // whatever just became reachable. This is what makes the
+            // device → fsck → sysroot.mount → switch-root chain deterministic
+            // instead of racing the initial activation.
+            if crate::config::in_initrd() {
+                let target_name = run_info.read_poisoned().config.target_unit.clone();
+                if let Ok(target_id) = crate::control::find_or_load_unit(&target_name, &run_info) {
+                    let _ = crate::units::activate_needed_units(target_id, run_info.clone());
+                }
+            }
             for dep in deps_to_activate {
                 trace!(
                     "udev-event: activating dependency {} of device unit {}",
