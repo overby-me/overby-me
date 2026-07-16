@@ -74,7 +74,10 @@ pub fn prune_units(
                     .conf
                     .sockets
                     .iter()
-                    .filter(|id| ids_to_keep.contains(id))
+                    .filter(|id| {
+                        ids_to_keep.contains(id)
+                            || matches!(id.kind, crate::units::UnitIdKind::Device)
+                    })
                     .cloned()
                     .collect();
             }
@@ -83,7 +86,10 @@ pub fn prune_units(
                     .conf
                     .services
                     .iter()
-                    .filter(|id| ids_to_keep.contains(id))
+                    .filter(|id| {
+                        ids_to_keep.contains(id)
+                            || matches!(id.kind, crate::units::UnitIdKind::Device)
+                    })
                     .cloned()
                     .collect();
             }
@@ -101,7 +107,9 @@ pub fn prune_units(
             .dependencies
             .before
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -110,7 +118,9 @@ pub fn prune_units(
             .dependencies
             .after
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -119,7 +129,9 @@ pub fn prune_units(
             .dependencies
             .requires
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -128,7 +140,9 @@ pub fn prune_units(
             .dependencies
             .wants
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -137,7 +151,9 @@ pub fn prune_units(
             .dependencies
             .required_by
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -146,7 +162,9 @@ pub fn prune_units(
             .dependencies
             .wanted_by
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -155,7 +173,9 @@ pub fn prune_units(
             .dependencies
             .conflicts
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -164,7 +184,9 @@ pub fn prune_units(
             .dependencies
             .conflicted_by
             .iter()
-            .filter(|id| ids_to_keep.contains(id))
+            .filter(|id| {
+                ids_to_keep.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+            })
             .cloned()
             .collect();
 
@@ -327,20 +349,45 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
     let existing_ids: std::collections::HashSet<UnitId> = units.keys().cloned().collect();
     for unit in units.values_mut() {
         let deps = &mut unit.common.dependencies;
-        deps.wants.retain(|id| existing_ids.contains(id));
-        deps.wanted_by.retain(|id| existing_ids.contains(id));
-        deps.requires.retain(|id| existing_ids.contains(id));
-        deps.required_by.retain(|id| existing_ids.contains(id));
-        deps.conflicts.retain(|id| existing_ids.contains(id));
-        deps.conflicted_by.retain(|id| existing_ids.contains(id));
-        deps.part_of.retain(|id| existing_ids.contains(id));
-        deps.part_of_by.retain(|id| existing_ids.contains(id));
-        deps.binds_to.retain(|id| existing_ids.contains(id));
-        deps.bound_by.retain(|id| existing_ids.contains(id));
-        deps.upholds.retain(|id| existing_ids.contains(id));
-        deps.upheld_by.retain(|id| existing_ids.contains(id));
-        deps.propagates_stop_to
-            .retain(|id| existing_ids.contains(id));
+        deps.wants.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.wanted_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.requires.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.required_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.conflicts.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.conflicted_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.part_of.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.part_of_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.binds_to.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.bound_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.upholds.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.upheld_by.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
+        deps.propagates_stop_to.retain(|id| {
+            existing_ids.contains(id) || matches!(id.kind, crate::units::UnitIdKind::Device)
+        });
         // Keep refs_by_name un-pruned: it preserves the original dependency
         // references from the unit file so that on-demand loading (e.g.
         // `systemctl restart` of a target whose Wants= service didn't exist
