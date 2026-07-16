@@ -1,0 +1,9 @@
+[package]
+name = "durability-harness"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+turso = "0.2"
+tokio = { version = "1", features = ["macros", "rt"] }

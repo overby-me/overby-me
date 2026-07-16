@@ -27,6 +27,17 @@ optional firehose-fed query cache in the Dioxus WASM client.
   is unacceptable even as a bridge). One-vote-per-member is a UNIQUE-constrained insert, the ballot is an
   opaque encrypted blob, the tally is an aggregation; a poll's dedup marker and ballot are written in one
   transaction.
+- Gate measurement (2026-07-16, `crates/durability-harness` + `crates/schema`, turso crate 0.2.2,
+  pre-1.0): the exact BEGIN IMMEDIATE dedup-plus-ballot transaction survives repeated `kill -9` ATOMICALLY
+  on both engines (no orphan marker or ballot rows, `integrity_check` clean), and a Turso-written file
+  opens unmodified in stock SQLite with the same assertions holding, confirming the lossless bridge.
+  Recorded dialect gaps to re-test at the 1.0 gate: turso 0.2.2 rejects an INSERT that omits a nullable
+  UNIQUE column (explicit NULL works, NULL-uniqueness semantics otherwise correct, partial unique indexes
+  work); the harness's hardened pragmas (WAL + synchronous FULL, readback-verified) run on the SQLite side
+  only, turso's durability configuration is its own and was exercised at defaults. Honest limits: kill -9
+  proves process-crash atomicity, not power loss; Antithesis coverage is upstream's claim, recorded not
+  locally reproduced. VERDICT: the gate stays CLOSED pre-1.0 (ballot core launches on the SQLite bridge),
+  and the harness transfers unchanged as the core's permanent durability suite.
 - Load-bearing integrity control (engine-independent): mandatory off-node replication of the append-only
   ballot log, which does not exist in the backend yet and is the real work. Run the core with SQLite/Turso
   hardened durability (WAL + synchronous FULL + fullfsync, verified via PRAGMA readback) on power-loss-

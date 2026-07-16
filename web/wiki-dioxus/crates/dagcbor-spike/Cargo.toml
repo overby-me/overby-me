@@ -1,0 +1,21 @@
+[package]
+name = "dagcbor-spike"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# The decided encode stack (atproto-stack-decisions.md, DRISL/DAG-CBOR row):
+# serde_ipld_dagcbor + ipld-core as the primary encoder, cid/multihash for
+# addressing. This spike's passing vectors become the publish seam's
+# permanent conformance tests.
+serde_ipld_dagcbor = "0.6"
+ipld-core = "0.4"
+cid = "0.11"
+multihash = "0.19"
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+hex = "0.4"
+
+[dev-dependencies]
+serde_json = "1.0.150"

@@ -13,6 +13,15 @@ workspace when the rewrite starts.
   scheme (RFC 9474 blind signatures, unit tokens, per-poll issuer keys, the
   abstract bulletin board) with its property-test conformance suite. See its
   `DECISIONS.md` for the semantics it pins.
+- `schema`: the entity-subset target DDL as an executable `schema.sql`,
+  round-trip tested on real SQLite AND the turso crate (dialect findings
+  recorded in the tests).
+- `dagcbor-spike`: known-answer and round-trip vectors for the DAG-CBOR +
+  CIDv1 encode path (the exact path that becomes the AppView publish seam).
+- `durability-harness`: the ballot-core kill -9 crash harness (BEGIN
+  IMMEDIATE dedup + ballot transaction) on both engines, plus the
+  Turso-to-stock-SQLite file-format bridge assertion. Verdict recorded in
+  `docs/atproto-stack-decisions.md` (Gate measurement).
 
 ## Checks
 
