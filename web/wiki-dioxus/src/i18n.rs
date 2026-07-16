@@ -429,7 +429,9 @@ const EN_JSON: &str = r#"{
     "parent": {
         "title": "Missing parents",
         "description": "Nodes that have lost their parent (orphans).",
-        "none": "No orphaned nodes."
+        "none": "No orphaned nodes.",
+        "purge": "Delete",
+        "purgeWarning": "Permanently delete this orphaned node? This cannot be undone."
     },
     "sort": {
         "saveSorting": "Save sorting"
@@ -455,6 +457,9 @@ const EN_JSON: &str = r#"{
         "claimErr": "Could not claim this invitation"
     },
     "member": {
+        "linkNudgeTitle": "Link your Bluesky account",
+        "linkNudgeBody": "Link your atproto identity now so you are ready for the move to the new platform.",
+        "linkNudgeAction": "Link account",
         "name": "Name",
         "email": "Email",
         "hidden": "Hidden",
@@ -856,7 +861,9 @@ const DA_JSON: &str = r#"{
     "parent": {
         "title": "Manglende forældre",
         "description": "Noder der har mistet deres forælder (forældreløse).",
-        "none": "Ingen forældreløse noder."
+        "none": "Ingen forældreløse noder.",
+        "purge": "Slet",
+        "purgeWarning": "Slet denne forældreløse node permanent? Dette kan ikke fortrydes."
     },
     "sort": {
         "saveSorting": "Gem sortering"
@@ -882,6 +889,9 @@ const DA_JSON: &str = r#"{
         "claimErr": "Kunne ikke tilmelde denne invitation"
     },
     "member": {
+        "linkNudgeTitle": "Forbind din Bluesky-konto",
+        "linkNudgeBody": "Forbind din atproto-identitet nu, så du er klar til skiftet til den nye platform.",
+        "linkNudgeAction": "Forbind konto",
         "name": "Navn",
         "email": "EMail",
         "hidden": "Skjult",

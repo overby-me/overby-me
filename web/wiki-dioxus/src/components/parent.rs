@@ -24,6 +24,11 @@ pub fn ParentApp() -> Element {
         }
     });
 
+    // Purge (#149): delete a selected orphan (its members first, then the node);
+    // the server RLS still gates whether this caller may actually delete it.
+    let mut confirm = use_signal(|| None::<(String, String)>);
+    let mut busy = use_signal(|| false);
+
     rsx! {
         div { class: "card",
             div { class: "card-header",
@@ -51,6 +56,18 @@ pub fn ParentApp() -> Element {
                                         "{node.mime_id.clone().unwrap_or_default()} · {node.id.0}"
                                     }
                                 }
+                                div { class: "flex-grow" }
+                                button {
+                                    class: "btn-icon",
+                                    aria_label: t("parent.purge"),
+                                    title: t("parent.purge"),
+                                    onclick: {
+                                        let id = node.id.0.clone();
+                                        let name = node.name.clone();
+                                        move |_| confirm.set(Some((id.clone(), name.clone())))
+                                    },
+                                    span { class: "material-icons", "delete" }
+                                }
                             }
                         }
                     }
@@ -71,6 +88,50 @@ pub fn ParentApp() -> Element {
                     }
                 },
                 None => rsx! { super::widgets::Spinner {} },
+            }
+
+            if let Some((id, name)) = confirm() {
+                super::widgets::Dialog {
+                    open: true,
+                    on_dismiss: move |_| confirm.set(None),
+                    headline: t("content.confirmDelete"),
+                    icon: "delete".to_string(),
+                    actions: rsx! {
+                        button {
+                            class: "btn btn-outlined",
+                            onclick: move |_| confirm.set(None),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            disabled: busy(),
+                            onclick: {
+                                let id = id.clone();
+                                move |_| {
+                                    let token = session.read().access_token.clone();
+                                    let id = id.clone();
+                                    busy.set(true);
+                                    spawn(async move {
+                                        let _ = graphql::delete_node_members(token.as_deref(), &id).await;
+                                        match graphql::delete_node(token.as_deref(), &id).await {
+                                            Ok(true) => {
+                                                crate::session::bump_data_version();
+                                                confirm.set(None);
+                                            }
+                                            _ => crate::snackbar::show_snackbar(
+                                                &t("error.somethingWentWrong"),
+                                            ),
+                                        }
+                                        busy.set(false);
+                                    });
+                                }
+                            },
+                            "{t(\"common.delete\")}"
+                        }
+                    },
+                    p { class: "body-medium", "{t(\"parent.purgeWarning\")}" }
+                    p { class: "body-small text-muted", "{name}" }
+                }
             }
         }
     }

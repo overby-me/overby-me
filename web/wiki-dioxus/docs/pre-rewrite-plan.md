@@ -9,8 +9,9 @@ Done: #1 (authz-predicate consolidation into `auth::is_active_member`/`is_active
 present-tense bug where the notify paths ignored the durable node_id binding), #5 (`statecookie.rs` hardened to
 HKDF-SHA256 + XChaCha20-Poly1305, with a legacy-decrypt fallback so at-rest sessions survive), #6 (blind-sig
 crate spike: `blind-rsa-signatures` / RFC 9474 confirmed pure-Rust and fit for purpose), #7 (public wiki.radikal.* lexicons drafted under lexicons/), #10 (SurrealQL domain-model doc
-converted to SQL on Turso), #3 (DID-reachability audit run). Remaining: #2 (graphql.rs seam), #4 (DID link
-nudge), #8 (orphan purge), #9 (fonts + PWA).
+converted to SQL on Turso), #3 (DID-reachability audit run), #4 (atproto-link nudge in the member roster),
+#8 (orphan purge action in the Missing-Parent admin). Remaining: #2 (graphql.rs seam, deliberately deferred),
+#9 (self-host fonts + finish PWA offline).
 
 ### #3 audit result (2026-07-16, live read-only)
 

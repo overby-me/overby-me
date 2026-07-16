@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 
 use crate::graphql::{self, MemberFields, MembersSetInput, NodeWithChildren};
 use crate::i18n::{t, t_with};
+use crate::route::Route;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
@@ -20,6 +21,21 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     // only see the non-hidden members.
     let is_owner = user_id.is_some() && node.owner_id.as_ref().map(|o| o.0.clone()) == user_id;
     let can_manage = is_owner || node.is_context_owner.unwrap_or(false);
+
+    // atproto-link nudge (#4): the DID map is empty today (0 members linked), so
+    // prompt a signed-in member who has not linked their atproto identity to do so,
+    // filling the future member->DID migration map one login at a time. Dismissible.
+    let nav = use_navigator();
+    let is_auth = session.read().is_authenticated();
+    let nudge_token = session.read().access_token.clone();
+    let atproto_linked = crate::use_data_resource!(|(nudge_token)| async move {
+        match nudge_token {
+            Some(t) => crate::nhost::atproto_status(&t).await.linked,
+            None => true,
+        }
+    });
+    let show_link_nudge = is_auth && !(*atproto_linked.read()).unwrap_or(true);
+    let mut nudge_dismissed = use_signal(|| false);
 
     // Roster paging: a search box + a single-select filter + a page, all resolved
     // SERVER-SIDE (Hasura limit/offset/where + an aggregate count) so the roster
@@ -107,6 +123,33 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     rsx! {
         super::widgets::SupportingPaneLayout {
             primary: rsx! {
+                if show_link_nudge && !nudge_dismissed() {
+                    div { class: "card mb-1",
+                        div {
+                            class: "card-content stack stack-h",
+                            style: "align-items: center; gap: 12px;",
+                            span { class: "material-icons", "cloud_off" }
+                            div { class: "flex-grow",
+                                div { class: "title-small", "{t(\"member.linkNudgeTitle\")}" }
+                                div { class: "body-small text-muted", "{t(\"member.linkNudgeBody\")}" }
+                            }
+                            button {
+                                class: "btn btn-primary",
+                                onclick: move |_| {
+                                    nav.push(Route::Home { app: Some("profile".to_string()) });
+                                },
+                                "{t(\"member.linkNudgeAction\")}"
+                            }
+                            button {
+                                class: "btn-icon",
+                                aria_label: t("common.close"),
+                                title: t("common.close"),
+                                onclick: move |_| nudge_dismissed.set(true),
+                                span { class: "material-icons", "close" }
+                            }
+                        }
+                    }
+                }
                 div { class: "card",
                     div { class: "card-header",
                         div { class: "avatar", span { class: "material-icons", "group" } }
