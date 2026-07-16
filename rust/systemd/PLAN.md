@@ -36,19 +36,114 @@ broke the whole VM suite at the boot level. Fixed on `rust-systemd-complete`:
   (b) `mount_api_filesystems()` — the `mount_setup` real systemd does at PID 1
   start (mounts `/proc`, `/sys`, `/dev`, `/run`, `/dev/pts`, `/dev/shm`,
   `/sys/fs/cgroup` idempotently), which **cleared the bare-PID-1 kernel panic**;
-  (c) `/dev/kmsg` early-boot logging. With `boot.initrd.systemd.enable = true`,
-  rust-systemd now boots cleanly as the initramfs PID 1 — the kmsg trace shows
-  `in_initrd=true`, `target=initrd.target`, target activated, signal loop
-  entered, no panic. **Remaining:** it then idles — nothing drives the initrd
-  filesystem/switch-root chain, so the real root never comes up. TODO:
-  (1) ensure the initrd units load/activate (`sysroot.mount`,
-  `initrd-root-fs.target` → `initrd-fs.target` → `initrd-switch-root.target`);
-  (2) implement `systemctl switch-root <newroot> [init]` end to end — a control
-  command + systemctl subcommand + the PID-1 switch_root operation (mount --move
-  `/proc`,`/sys`,`/dev`,`/run` into `/sysroot`; `chdir /sysroot`; mount --move
-  `.` `/`; `chroot .`; exec the stage-2 init). Then commit the
-  `boot.initrd.systemd.enable = true` flip (removing the bash-initrd Phase-1
-  workaround) as the Phase-2 win.
+  (c) `/dev/kmsg` early-boot logging. rust-systemd boots cleanly as the
+  initramfs PID 1 (`in_initrd=true`, `target=initrd.target`, signal loop, no
+  panic). The switch-root chain is implemented end to end: `systemctl
+  switch-root <newroot> [init]` and `systemctl isolate` (control commands +
+  systemctl subcommands + `signal_handler::switch_root`), plus the fstab wiring
+  so the initrd fstab's root becomes `sysroot.mount` under `initrd-root-fs.target`.
+
+  **Boot-chain bugs found and fixed while bringing the initrd up (2026-07-16):**
+  1. **ManagerEnvironment not applied to PID 1's env.** NixOS's systemd-initrd
+     passes the real root's fstab to the fstab-generator *only* via
+     `ManagerEnvironment=SYSTEMD_SYSROOT_FSTAB=…` in `system.conf`. rust-systemd
+     parsed it into a table but never into its process environment, so the
+     generator never saw it and never emitted `sysroot.mount`. Now applied to the
+     process env before generators run (`apply_manager_environment_to_process`),
+     and the real `systemd-fstab-generator` is no longer skipped in the initrd
+     (the native `generate_fstab_mount_units` only reads `/etc/fstab`, empty in
+     the initrd).
+  2. **`x-initrd.mount` / `x-*` / `comment=` options leaked into `mount(2)`.**
+     The mount executor passed unrecognized options to the kernel as mount data;
+     ext4/tmpfs reject `x-initrd.mount` ("Unknown parameter"), failing the mount.
+     Now the whole userspace `x-*` namespace + `comment=` are stripped before
+     `mount(2)`.
+  3. **`udevadm` panicked on a duplicate `--version` flag.** It declared its own
+     `-V/--version` bool while also enabling clap's auto `--version`; clap's
+     debug_assert aborted `Cli::command()`, so every `udevadm` invocation
+     panicked. That killed `systemd-udev-trigger.service`'s coldplug, so udevd
+     processed no block-device uevents. Fixed with `disable_version_flag = true`.
+  4. **`udevadm info` panicked on a duplicate `-d` short.** The global `--debug`
+     flag used `short = 'd'` (global) which collides with `info`'s
+     `-d/--device-id-of-file`; clap aborts constructing the command. Dropped the
+     short from `--debug` (upstream's global option is long-only).
+  5. **udevd's `blkid` builtin shelled out to a `blkid` binary that the initrd
+     doesn't ship.** rust-systemd runs its own udevd; `IMPORT{builtin}="blkid"`
+     exec'd `blkid`, which upstream links as libblkid, so NixOS's systemd-initrd
+     has no standalone binary. The exec failed silently → no `ID_FS_TYPE/LABEL/
+     UUID` → no `/dev/disk/by-label/nixos` symlink. Added a native superblock
+     prober (ext2/3/4, xfs, btrfs, swap, vfat) in `crates/udevd` that returns the
+     same `ID_FS_*` udev properties libblkid would; the builtin uses it first.
+     With this the by-label symlink and `ID_FS_LABEL=nixos` appear (verified).
+  6. **`.device` dependency refs were pruned at load, and device-bound units
+     started before udev announced the device.** `dependency_resolving.rs`
+     dropped every dep ref to a unit not in the table at load time, but
+     `.device` units are created asynchronously by udev — so
+     `systemd-fsck@<dev>.service`'s `BindsTo=/After=%i.device` (and the mount's
+     device ordering) were stripped, and fsck ran at ~1.8s before the device
+     existed and exited 1. Fixes: `prune_units` + the activation-dep retain now
+     keep `.device` refs; `unstarted_deps` (activate.rs) blocks a *required* dep
+     on a not-yet-loaded `.device`; and `udev_event.rs` re-activates the units
+     ordered `After=/Requires=/BindsTo=` a device when it is announced. With
+     these, fsck correctly retains `binds_to=[dev-disk-by\x2dlabel-nixos.device]`
+     and a manual `fsck` on the root exits 0.
+
+  Diagnosed via an `in_initrd`-gated unit-state + environment dump in the signal
+  loop (temporary; remove before final).
+
+  **Remaining (`.device` units are force-started by the job machinery).** With
+  fixes 1–6 the root fs is probeable and fsck's dependencies are correct, but the
+  boot is **not yet deterministically green**: across identical VM runs the
+  `initrd-root-fs.target → sysroot.mount → systemd-fsck@<dev>.service →
+  dev-disk-by\x2dlabel-nixos.device` chain sometimes activates (fsck runs) and
+  sometimes stays entirely `NeverStarted`, so the initrd hangs before
+  switch-root.
+
+  **Root cause (identified, fix pending):** `Unit::activate` at
+  `units/unit.rs:1486` treats `LockedState::Device(_)` exactly like a target or
+  slice and immediately sets the status to `Started(Running)`. But a `.device`
+  unit must **only** be activated by udev (via `udev_event.rs` marking it
+  `Started(Plugged)` when the kernel/udev announces the device). Because the job
+  machinery force-starts it, `dev-disk-by\x2dlabel-nixos.device` is marked
+  `Started` around 1.7s — *before* udev has created `/dev/disk/by-label/nixos` —
+  so `systemd-fsck@…`'s `BindsTo=…device` is satisfied prematurely, fsck runs
+  against a missing device and exits 1, and the ad-hoc `udev_event.rs`
+  re-activation scan races the initial activation (explaining the
+  nondeterminism). The verified good news: a manual `fsck -a -T
+  /dev/disk/by-label/nixos` in the hung initrd exits 0 (`nixos: clean`), so the
+  fs and the by-label symlink are correct.
+
+  **Fixed (fix 7):** `.device` units are excluded from `find_startable_units`, so
+  the job machinery no longer force-starts them — a device becomes `Started` only
+  via the udev event, and `systemd-fsck@…` correctly *defers* until the device is
+  plugged, then runs and completes (`fsck` exits 0, `nixos: clean`).
+
+  **Remaining (last link — no "unit became active → re-check waiters" step).**
+  With all seven fixes, in a hung run the observed state at t+10s is:
+  `systemd-fsck@dev-disk-by\x2dlabel-nixos.service = Started(Running)` (the
+  oneshot completed) but `sysroot.mount = NeverStarted`, even though
+  `sysroot.mount`'s `Requires=/After=` fsck and `After=` the device are all
+  satisfied. The gap: rust-systemd's activation is a forward walk
+  (`activate_needed_units` → `find_startable_units` → recurse), with **no global
+  "a unit just became active, re-evaluate everything waiting on it" pass**. fsck
+  is started via the `udev_event.rs` side-path (re-activating device dependents),
+  so when it completes nothing re-attempts the *original* waiter `sysroot.mount`
+  from the initial `initrd.target` activation. Compounding this, the udev-event
+  re-activation runs on spawned threads concurrently with the initial activation
+  and races (hence the run-to-run nondeterminism — sometimes fsck runs, sometimes
+  the whole chain stays `NeverStarted`).
+
+  **NEXT (activation-machinery work, needs care + tests):** give a completing
+  oneshot (and a device becoming `Started` via udev) a reliable re-check of its
+  reverse deps — e.g. on successful oneshot exit, re-run `activate_needed_units`
+  for its `required_by`; and/or have the udev event re-drive a stable high point
+  of the chain (`initrd-root-fs.target`) in a single `activate_needed_units` call
+  that cascades fsck→mount with proper ordering, instead of activating each
+  dependent separately. Also serialize the udev-event activations so they don't
+  race the initial transaction. Once `sysroot.mount` reliably mounts, the rest of
+  the chain (`initrd-parse-etc` → `initrd-cleanup` → isolate → `switch-root`) is
+  already implemented; then commit the `boot.initrd.systemd.enable = true` flip as
+  the Phase-2 win.
 - **set-property / revert** — now load the target unit from disk on demand
   (like upstream), instead of only checking the in-memory table.
 
