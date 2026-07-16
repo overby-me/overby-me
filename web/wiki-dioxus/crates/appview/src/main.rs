@@ -42,7 +42,14 @@ async fn main() {
         }
     };
     let addr = format!("0.0.0.0:{}", config.port);
-    let app = router(AppState::new(db, config).with_oauth(oauth));
+    let state = AppState::new(db, config).with_oauth(oauth);
+
+    // The firehose consumer runs for the life of the process, materializing
+    // public records into the view and broadcasting deltas to /ws clients. It
+    // reconnects on its own, so a failed connection never blocks serving.
+    tokio::spawn(appview::firehose::run(state.clone()));
+
+    let app = router(state);
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,

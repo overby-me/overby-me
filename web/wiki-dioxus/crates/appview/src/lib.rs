@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod db;
+pub mod firehose;
 pub mod oauth;
 pub mod schema;
 pub mod statecookie;
@@ -26,6 +27,7 @@ use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tokio::sync::broadcast;
 
 /// Shared application state handed to every handler.
@@ -38,6 +40,8 @@ pub struct AppState {
     /// The atproto OAuth client, present when the AppView is built with identity
     /// wired (the default in tests is `None`, so `/callback` reports 503).
     pub oauth: Option<Arc<oauth::WikiOAuth>>,
+    /// Live firehose status (updated by the consumer task, read by `/healthz`).
+    pub firehose: Arc<firehose::FirehoseStatus>,
 }
 
 impl AppState {
@@ -50,6 +54,7 @@ impl AppState {
             deltas,
             config,
             oauth: None,
+            firehose: Arc::new(firehose::FirehoseStatus::default()),
         }
     }
 
@@ -79,8 +84,11 @@ async fn healthz(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "ok": db_ok,
         "db": db_ok,
-        // The firehose consumer is a later item; report whether it is configured.
         "firehose_configured": !state.config.firehose_url.is_empty(),
+        // Real liveness from the consumer task: connected + events seen (a stalled
+        // firehose is connected-but-not-advancing).
+        "firehose_connected": state.firehose.connected.load(Ordering::Relaxed),
+        "firehose_events": state.firehose.events_seen.load(Ordering::Relaxed),
         "clients": state.deltas.receiver_count(),
     }))
 }

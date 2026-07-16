@@ -295,6 +295,90 @@ impl Store {
         }
         Ok(out)
     }
+
+    // -- Firehose materialization (public records mirrored into the view) --
+
+    /// Upsert a MINIMAL user row (just the DID) so an author FK target exists for
+    /// a firehose-materialized public record. No-op if the user already exists.
+    /// The nullable-UNIQUE `legacy_id` is passed as an explicit NULL (turso
+    /// rejects omitting it).
+    pub async fn upsert_user_min(&self, did: &str) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query("SELECT 1 FROM user WHERE did = ?1 LIMIT 1", [did])
+            .await?;
+        if rows.next().await?.is_some() {
+            return Ok(());
+        }
+        conn.execute("INSERT INTO user (did, legacy_id) VALUES (?1, NULL)", [did])
+            .await?;
+        Ok(())
+    }
+
+    /// Materialize a public `com.example.wiki.post` record into the `post` view,
+    /// keyed by its at-uri (also its `published_uri` and `legacy_id`). Upsert via
+    /// UPDATE-then-INSERT (turso has no `ON CONFLICT`). `group`/`reply` are the
+    /// record's at-uris, stored as-is (resolving them to local ids is depth-3).
+    pub async fn upsert_public_post(
+        &self,
+        uri: &str,
+        author_did: &str,
+        text: &str,
+        group: Option<&str>,
+        reply: Option<&str>,
+        created_at: &str,
+    ) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        let group = opt_str_val(group);
+        let reply = opt_str_val(reply);
+        let updated = conn
+            .execute(
+                "UPDATE post SET author_did = ?1, text = ?2, group_id = ?3, reply_to = ?4, \
+                 visibility = 'public', published_uri = ?5, created_at = ?6 WHERE id = ?5",
+                vec![
+                    Value::Text(author_did.to_string()),
+                    Value::Text(text.to_string()),
+                    group.clone(),
+                    reply.clone(),
+                    Value::Text(uri.to_string()),
+                    Value::Text(created_at.to_string()),
+                ],
+            )
+            .await?;
+        if updated == 0 {
+            conn.execute(
+                "INSERT INTO post \
+                 (id, author_did, text, group_id, reply_to, visibility, published_uri, created_at, legacy_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'public', ?1, ?6, ?1)",
+                vec![
+                    Value::Text(uri.to_string()),
+                    Value::Text(author_did.to_string()),
+                    Value::Text(text.to_string()),
+                    group,
+                    reply,
+                    Value::Text(created_at.to_string()),
+                ],
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete a public post from the view by its at-uri (a firehose delete op).
+    pub async fn delete_public_post(&self, uri: &str) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("DELETE FROM post WHERE id = ?1", [uri])
+            .await?;
+        Ok(())
+    }
+}
+
+/// A nullable TEXT param: `Value::Text` or SQL NULL.
+fn opt_str_val(s: Option<&str>) -> Value {
+    match s {
+        Some(v) => Value::Text(v.to_string()),
+        None => Value::Null,
+    }
 }
 
 /// `?1, ?2, ..., ?n` for an `IN (...)` clause of `n` positional params.
