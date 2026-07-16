@@ -2722,6 +2722,13 @@ pub fn apply_manager_environment_to_process() {
 fn run_isolate(target: &str, run_info: &ArcMutRuntimeInfo) -> Result<(), String> {
     info!("isolate: {target}");
     let target_id = find_or_load_unit(target, run_info).map_err(|e| format!("{e:?}"))?;
+    // Load the target's dependency closure on-demand before activating it.
+    // Isolate targets and their deps are typically pruned at boot because they
+    // are only reachable via `isolate`, not from the default target — e.g.
+    // `initrd-switch-root.target` Wants=`initrd-switch-root.service` (which runs
+    // `systemctl --no-block switch-root`). Without this the target activates but
+    // its Wants= service is never loaded, so the switch-root never happens.
+    load_dependency_units(&target_id, run_info);
     // Start the target and everything it pulls in.
     let errs = crate::units::activate_needed_units(target_id.clone(), run_info.clone());
     // Isolation: stop units that are neither the target nor reachable from it
