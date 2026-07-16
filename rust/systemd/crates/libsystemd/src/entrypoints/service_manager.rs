@@ -14,8 +14,24 @@ use crate::signal_handler;
 use crate::socket_activation;
 use crate::units;
 
+/// Emit an early-boot progress line to `/dev/kmsg`, the way upstream systemd
+/// logs before journald/console are up. Invaluable in the initrd, where normal
+/// logging has nowhere to go yet — these lines show up in `dmesg`/console.
+/// Best-effort: silently ignored if `/dev/kmsg` isn't available.
+pub fn kmsg(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+        let _ = writeln!(f, "<6>rust-systemd[1]: {msg}");
+    }
+}
+
 pub fn run_service_manager() {
     pid1_specific_setup();
+    kmsg(&format!(
+        "service manager starting (pid={}, in_initrd={})",
+        std::process::id(),
+        config::in_initrd()
+    ));
 
     let cli_args = CliArgs::try_parse().unwrap_or_else(|e| {
         unrecoverable_error(e.to_string());
@@ -28,6 +44,11 @@ pub fn run_service_manager() {
     let _ = std::fs::create_dir_all("/run/systemd/transient");
 
     let (log_conf, mut conf) = config::load_config();
+    kmsg(&format!(
+        "config loaded: target={}, {} unit dir(s)",
+        conf.target_unit,
+        conf.unit_dirs.len()
+    ));
 
     logging::setup_logging(&log_conf).unwrap();
 
@@ -202,9 +223,11 @@ pub fn run_service_manager() {
         // from notify services that already sent it to the old instance.
         info!("daemon-reexec: skipped full activation, statuses restored from state file");
     } else {
+        kmsg(&format!("activating target {}", target_id.name));
         units::activate_needed_units(target_id, run_info);
     }
 
+    kmsg("initial activation returned; entering signal loop");
     handle.join().unwrap();
 }
 
