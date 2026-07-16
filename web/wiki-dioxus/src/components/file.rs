@@ -3,7 +3,6 @@ use dioxus::prelude::*;
 use crate::graphql::{self};
 use crate::i18n::t;
 use crate::model::NodeWithChildren;
-use crate::nhost::storage_url;
 use crate::route::Route;
 use crate::session::use_session;
 
@@ -107,7 +106,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
 
     let file_url = if !file_id.is_empty() {
         let token = session.read().access_token.clone().unwrap_or_default();
-        format!("{}/files/{file_id}?token={token}", storage_url())
+        crate::backend_api::file_url(file_id, &token)
     } else {
         String::new()
     };

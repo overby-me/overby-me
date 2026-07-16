@@ -447,13 +447,11 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
         }
         spawn(async move {
             let Some(token) = token else { return };
-            let url = format!("{}/files/{}", crate::nhost::storage_url(), file_id);
-            let Ok(resp) = reqwest::Client::new()
-                .get(&url)
-                .bearer_auth(&token)
-                .send()
-                .await
-            else {
+            // The file-blob URL is built through the one seam (backend_api), so
+            // the cutover blob-path swap is a one-line change there. The JWT
+            // rides in `?token=` (accepted by the same endpoint the img sites use).
+            let url = crate::backend_api::file_url(&file_id, &token);
+            let Ok(resp) = reqwest::Client::new().get(&url).send().await else {
                 return;
             };
             if !resp.status().is_success() {

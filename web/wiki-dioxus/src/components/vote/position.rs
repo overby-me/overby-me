@@ -175,10 +175,9 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                 .and_then(|v| v.as_str())
                                 .filter(|s| !s.is_empty())
                                 .map(|fid| {
-                                    format!(
-                                        "{}/files/{fid}?token={}",
-                                        crate::nhost::storage_url(),
-                                        token.clone().unwrap_or_default()
+                                    crate::backend_api::file_url(
+                                        fid,
+                                        &token.clone().unwrap_or_default(),
                                     )
                                 });
                             rsx! {
@@ -210,10 +209,9 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     for p in pending_cand_shown.iter() {
                         {
                             let photo = p.photo_id.as_ref().map(|fid| {
-                                format!(
-                                    "{}/files/{fid}?token={}",
-                                    crate::nhost::storage_url(),
-                                    token.clone().unwrap_or_default()
+                                crate::backend_api::file_url(
+                                    fid,
+                                    &token.clone().unwrap_or_default(),
                                 )
                             });
                             rsx! {

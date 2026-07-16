@@ -1,6 +1,7 @@
 {
   imports = [
     ./backend
+    ./crates/appview
   ];
 
   devShells.wiki-dioxus = pkgs: let

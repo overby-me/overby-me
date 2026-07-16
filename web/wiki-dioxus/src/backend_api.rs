@@ -27,6 +27,20 @@ pub fn atproto_start_url(handle: &str, token: &str) -> String {
     format!("{BACKEND_URL}/atproto/start?handle={handle}&token={token}")
 }
 
+/// The URL to fetch a stored file's bytes, with the session JWT in the `?token=`
+/// query (the backend accepts it there for both `<img src>` and `fetch`). This
+/// is the ONE place file-blob URLs are built, so the NHost-Storage -> AppView
+/// blob swap at cutover is a one-line change to this function's body rather than
+/// a scavenger hunt across component call sites. It still routes through
+/// `nhost::storage_url()` today; that reference is the exact seam the cutover
+/// repoints (NHost Storage dies, the AppView serves blobs from a different path).
+pub fn file_url(file_id: &str, token: &str) -> String {
+    format!(
+        "{}/files/{file_id}?token={token}",
+        crate::nhost::storage_url()
+    )
+}
+
 /// The caller's Bluesky (atproto) link status, from the backend `/atproto/status`
 /// endpoint. Defaults to "not linked" so a failed lookup just shows the link form.
 #[derive(Deserialize, Clone, PartialEq, Debug, Default)]
