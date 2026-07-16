@@ -4,6 +4,7 @@
 //! `token_from` and `admin_gql`, and near-duplicate caller-identity resolvers;
 //! centralising them here keeps token handling and the admin POST consistent.
 
+use crate::error::AppError;
 use crate::oauth::Config;
 use serde_json::{json, Value};
 
@@ -20,38 +21,43 @@ pub fn token_from(query: Option<&str>, bearer: Option<&str>) -> Option<String> {
 }
 
 /// POST a GraphQL body to Hasura with the admin secret (bypasses row-level
-/// permissions). Returns the parsed response or a `hasura error: ...` string.
+/// permissions). Every failure mode here is an UPSTREAM failure (network,
+/// non-JSON body, Hasura errors), so it maps to 502, never a client 400.
 pub async fn admin_gql(
     cfg: &Config,
     client: &reqwest::Client,
     body: Value,
-) -> Result<Value, String> {
+) -> Result<Value, AppError> {
     let resp = client
         .post(&cfg.hasura_url)
         .header("x-hasura-admin-secret", &cfg.admin_secret)
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
-    let v: Value = resp.json().await.map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::Upstream(format!("backend query failed: {e}")))?;
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|_| AppError::Upstream("backend query failed".into()))?;
     if let Some(errors) = v.get("errors") {
         // Log the Hasura detail server-side, but return a generic error so query
-        // internals (schema, constraint names) never reach the client via
-        // `error_json`. Handler-level domain errors are unaffected.
-        eprintln!("hasura error: {errors}");
-        return Err("backend query failed".into());
+        // internals (schema, constraint names) never reach the client.
+        // Handler-level domain errors are unaffected.
+        tracing::error!("hasura error: {errors}");
+        return Err(AppError::Upstream("backend query failed".into()));
     }
     Ok(v)
 }
 
-/// Verify the caller's JWT and return their user id (`sub`).
+/// Verify the caller's JWT and return their user id (`sub`). A missing or
+/// invalid token is 401, not 400: the request is well-formed, the caller isn't.
 pub fn caller_uid(
     cfg: &Config,
     query: Option<&str>,
     bearer: Option<&str>,
-) -> Result<String, String> {
-    let token = token_from(query, bearer).ok_or("missing token")?;
-    crate::nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)
+) -> Result<String, AppError> {
+    let token = token_from(query, bearer).ok_or(AppError::Unauthorized("missing token".into()))?;
+    crate::nhost::verify_access_token(&token, &cfg.nhost_jwt_secret).map_err(AppError::Unauthorized)
 }
 
 /// The signed-in caller's uuid + email (email is how membership is keyed).
@@ -60,7 +66,7 @@ pub async fn caller(
     client: &reqwest::Client,
     query: Option<&str>,
     bearer: Option<&str>,
-) -> Result<(String, String), String> {
+) -> Result<(String, String), AppError> {
     let uid = caller_uid(cfg, query, bearer)?;
     let v = admin_gql(
         cfg,
@@ -74,7 +80,7 @@ pub async fn caller(
     let email = v
         .pointer("/data/user/email")
         .and_then(|e| e.as_str())
-        .ok_or("no email for user")?
+        .ok_or(AppError::Unauthorized("no email for user".into()))?
         .to_string();
     Ok((uid, email))
 }
@@ -104,7 +110,7 @@ pub async fn is_active_member(
     client: &reqwest::Client,
     context: &str,
     p: &Principal,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let v = admin_gql(cfg, client, json!({
         "query": "query($c: uuid!, $u: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, active: {_eq: true}, _or: [{nodeId: {_eq: $u}}, {email: {_eq: $e}}]}, limit: 1) { id } }",
         "variables": { "c": context, "u": p.uid, "e": p.email },
@@ -121,7 +127,7 @@ pub async fn is_active_owner(
     client: &reqwest::Client,
     context: &str,
     p: &Principal,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let v = admin_gql(cfg, client, json!({
         "query": "query($c: uuid!, $u: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, active: {_eq: true}, owner: {_eq: true}, _or: [{nodeId: {_eq: $u}}, {email: {_eq: $e}}]}, limit: 1) { id } node(id: $c) { ownerId } }",
         "variables": { "c": context, "u": p.uid, "e": p.email },

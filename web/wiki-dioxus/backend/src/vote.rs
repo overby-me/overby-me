@@ -14,6 +14,7 @@
 //!   POST /vote/cast?poll=&choices=0,2   (Authorization: Bearer <jwt>)
 //!   GET  /vote/status?poll=             -> {"voted": bool}
 
+use crate::error::AppError;
 use crate::oauth::Config;
 use axum::{body::Body, response::Response};
 use http::StatusCode;
@@ -27,29 +28,10 @@ pub async fn cast(
 ) -> Response<Body> {
     match cast_inner(cfg, client, query, bearer).await {
         Ok(()) => crate::json(StatusCode::OK, "{\"ok\":true}".into()),
-        Err(e) if e == "already voted" => crate::json(
-            StatusCode::CONFLICT,
-            json!({ "ok": false, "error": e }).to_string(),
-        ),
-        // Authorization/state failures carry a safe, user-facing message and a
-        // 403, so they reach the voter instead of being genericised by
-        // `error_json` (which is reserved for internal errors).
-        Err(e)
-            if matches!(
-                e.as_str(),
-                "not a poll"
-                    | "poll closed"
-                    | "poll not found"
-                    | "poll has no context"
-                    | "not a member of this context"
-            ) =>
-        {
-            crate::json(
-                StatusCode::FORBIDDEN,
-                json!({ "ok": false, "error": e }).to_string(),
-            )
-        }
-        Err(e) => crate::error_json("vote cast", e),
+        // The typed variants carry their status (409 already-voted, 403
+        // authorization/poll-state, 401 missing token, 502 upstream), replacing
+        // the hand-matched string arms that used to reconstruct them here.
+        Err(e) => e.respond("vote cast"),
     }
 }
 
@@ -76,7 +58,7 @@ async fn cast_inner(
     client: &reqwest::Client,
     query: Option<&str>,
     bearer: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let params = crate::util::parse_query(query);
     let get = |k: &str| {
         params
@@ -84,7 +66,7 @@ async fn cast_inner(
             .find(|(pk, _)| pk == k)
             .map(|(_, v)| v.clone())
     };
-    let poll = get("poll").ok_or("missing poll")?;
+    let poll = get("poll").ok_or(AppError::BadRequest("missing poll".into()))?;
     let choices = parse_choices(&get("choices").unwrap_or_default());
     // Identify the caller (verifies the JWT and fetches their invite email).
     let (uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
@@ -94,36 +76,21 @@ async fn cast_inner(
     // target must be an OPEN `vote/poll`, and the caller an active member of that
     // poll's context. The context is read from the poll itself (authoritative),
     // never trusted from the client.
-    let poll_v = crate::auth::admin_gql(
-        cfg,
-        client,
-        json!({
-            "query": "query($p: uuid!) { node(id: $p) { mimeId mutable contextId createdAt } }",
-            "variables": { "p": poll },
-        }),
-    )
-    .await?;
-    let pnode = poll_v
-        .pointer("/data/node")
-        .filter(|n| !n.is_null())
-        .ok_or("poll not found")?;
-    if pnode.get("mimeId").and_then(|m| m.as_str()) != Some("vote/poll") {
-        return Err("not a poll".into());
+    let meta = crate::store::poll_meta(cfg, client, &poll)
+        .await?
+        .ok_or(AppError::Forbidden("poll not found".into()))?;
+    if meta.mime_id.as_deref() != Some("vote/poll") {
+        return Err(AppError::Forbidden("not a poll".into()));
     }
-    if pnode.get("mutable").and_then(|m| m.as_bool()) != Some(true) {
-        return Err("poll closed".into());
+    if meta.mutable != Some(true) {
+        return Err(AppError::Forbidden("poll closed".into()));
     }
-    let poll_context = pnode
-        .get("contextId")
-        .and_then(|c| c.as_str())
+    let poll_context = meta
+        .context_id
         .filter(|c| !c.is_empty())
-        .ok_or("poll has no context")?
-        .to_string();
+        .ok_or(AppError::Forbidden("poll has no context".into()))?;
     // The poll's own creation time, used to coarsen the ballot's timestamps below.
-    let poll_created = pnode
-        .get("createdAt")
-        .and_then(|c| c.as_str())
-        .map(str::to_string);
+    let poll_created = meta.created_at;
 
     // Active membership in the poll's context (the shared predicate).
     let principal = crate::auth::Principal {
@@ -131,10 +98,13 @@ async fn cast_inner(
         email: email.clone(),
     };
     if !crate::auth::is_active_member(cfg, client, &poll_context, &principal).await? {
-        return Err("not a member of this context".into());
+        return Err(AppError::Forbidden("not a member of this context".into()));
     }
 
     // Dedup first: insert the has_voted marker. A conflict (0 rows) = already voted.
+    // INTERIM-PROTOCOL query, deliberately inline (not in store.rs): the marker
+    // plus anonymous-node scheme is replaced wholesale by blind-signature tokens
+    // plus the public board at the rewrite; wrapping it would seam doomed code.
     let marker = json!({
         "query": "mutation($p: uuid!, $u: uuid!) { insert_has_voted(objects: [{poll_id: $p, user_id: $u}], on_conflict: {constraint: has_voted_pkey, update_columns: []}) { affected_rows } }",
         "variables": { "p": poll, "u": uid },
@@ -146,7 +116,7 @@ async fn cast_inner(
         .unwrap_or(0)
         > 0;
     if !inserted {
-        return Err("already voted".into());
+        return Err(AppError::Conflict("already voted".into()));
     }
 
     // Insert the ANONYMOUS vote node (no owner_id). Anonymity depends on the
@@ -167,6 +137,7 @@ async fn cast_inner(
         obj["createdAt"] = json!(ts);
         obj["updatedAt"] = json!(ts);
     }
+    // INTERIM-PROTOCOL insert, deliberately inline (see the marker note above).
     let insert = json!({
         "query": "mutation($obj: nodes_insert_input!) { insertNode(object: $obj) { id } }",
         "variables": { "obj": obj },
@@ -184,7 +155,9 @@ pub async fn status(
     match status_inner(cfg, client, query, bearer).await {
         Ok(voted) => crate::json(StatusCode::OK, json!({ "voted": voted }).to_string()),
         Err(e) => {
-            eprintln!("vote status error: {e}");
+            // Deliberate: a status probe never errors client-side; it degrades
+            // to "not voted" so the ballot stays available.
+            tracing::error!("vote status error: {}", e.message());
             crate::json(StatusCode::OK, "{\"voted\":false}".into())
         }
     }
@@ -195,15 +168,16 @@ async fn status_inner(
     client: &reqwest::Client,
     query: Option<&str>,
     bearer: Option<&str>,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let params = crate::util::parse_query(query);
     let poll = params
         .iter()
         .find(|(k, _)| k == "poll")
         .map(|(_, v)| v.clone())
-        .ok_or("missing poll")?;
-    let token = crate::auth::token_from(query, bearer).ok_or("missing token")?;
-    let uid = crate::nhost::verify_access_token(&token, &cfg.nhost_jwt_secret)?;
+        .ok_or(AppError::BadRequest("missing poll".into()))?;
+    let uid = crate::auth::caller_uid(cfg, query, bearer)?;
+    // INTERIM-PROTOCOL query, deliberately inline: the has_voted marker dies
+    // with the interim secret-ballot scheme at the rewrite.
     let q = json!({
         "query": "query($p: uuid!, $u: uuid!) { has_voted(where: {poll_id: {_eq: $p}, user_id: {_eq: $u}}, limit: 1) { poll_id } }",
         "variables": { "p": poll, "u": uid },

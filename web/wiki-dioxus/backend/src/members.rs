@@ -11,6 +11,7 @@
 //!   POST /members/claim?token=        bind the token's member to the caller
 //!   POST /members/claim-link?member=  (owner) fetch a member's claim token
 
+use crate::error::AppError;
 use crate::oauth::Config;
 use axum::{body::Body, response::Response};
 use http::StatusCode;
@@ -29,7 +30,7 @@ pub async fn claim(
             StatusCode::OK,
             json!({ "ok": true, "context": context }).to_string(),
         ),
-        Err(e) => crate::error_json("member claim", e),
+        Err(e) => e.respond("member claim"),
     }
 }
 
@@ -40,52 +41,38 @@ async fn claim_inner(
     client: &reqwest::Client,
     query: Option<&str>,
     bearer: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let params = crate::util::parse_query(query);
     let claim_token = params
         .iter()
         .find(|(k, _)| k == "claim" || k == "member_token")
         .map(|(_, v)| v.clone())
         .filter(|s| !s.is_empty())
-        .ok_or("missing claim token")?;
+        .ok_or(AppError::BadRequest("missing claim token".into()))?;
     let uid = crate::auth::caller_uid(cfg, query, bearer)?;
 
-    let m = crate::auth::admin_gql(cfg, client, json!({
-        "query": "query($t: String!) { members(where: {claim_token: {_eq: $t}}, limit: 1) { id nodeId parentId } }",
-        "variables": { "t": claim_token },
-    })).await?;
-    let member = m
-        .pointer("/data/members/0")
-        .ok_or("invalid or expired claim link")?;
-    let member_id = member
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or("no member id")?;
+    let member = crate::store::member_by_claim_token(cfg, client, &claim_token)
+        .await?
+        .ok_or(AppError::BadRequest("invalid or expired claim link".into()))?;
     let context = member
-        .get("parentId")
-        .and_then(|v| v.as_str())
-        .ok_or("member has no context")?
-        .to_string();
+        .parent_id
+        .ok_or(AppError::BadRequest("member has no context".into()))?;
 
     // Already claimed? Idempotent for the same user; refuse for anyone else.
-    if let Some(existing) = member.get("nodeId").and_then(|v| v.as_str()) {
-        if existing == uid {
+    if let Some(existing) = &member.node_id {
+        if *existing == uid {
             return Ok(context);
         }
-        return Err("this invitation has already been claimed".into());
+        return Err(AppError::Conflict(
+            "this invitation has already been claimed".into(),
+        ));
     }
 
     // Bind (guarded on nodeId still null, so a race can't double-claim).
-    let updated = crate::auth::admin_gql(cfg, client, json!({
-        "query": "mutation($id: uuid!, $u: uuid!) { updateMembers(where: {id: {_eq: $id}, nodeId: {_is_null: true}}, _set: {nodeId: $u, accepted: true}) { affected_rows } }",
-        "variables": { "id": member_id, "u": uid },
-    })).await?;
-    let rows = updated
-        .pointer("/data/updateMembers/affected_rows")
-        .and_then(|n| n.as_i64())
-        .unwrap_or(0);
-    if rows == 0 {
-        return Err("this invitation has already been claimed".into());
+    if !crate::store::bind_member_to_user(cfg, client, &member.id, &uid).await? {
+        return Err(AppError::Conflict(
+            "this invitation has already been claimed".into(),
+        ));
     }
     Ok(context)
 }
@@ -103,7 +90,7 @@ pub async fn claim_link(
             StatusCode::OK,
             json!({ "ok": true, "token": token }).to_string(),
         ),
-        Err(e) => crate::error_json("member claim-link", e),
+        Err(e) => e.respond("member claim-link"),
     }
 }
 
@@ -114,36 +101,31 @@ async fn claim_link_inner(
     client: &reqwest::Client,
     query: Option<&str>,
     bearer: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let params = crate::util::parse_query(query);
     let member_id = params
         .iter()
         .find(|(k, _)| k == "member")
         .map(|(_, v)| v.clone())
         .filter(|s| !s.is_empty())
-        .ok_or("missing member id")?;
+        .ok_or(AppError::BadRequest("missing member id".into()))?;
     let (uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
 
-    let m = crate::auth::admin_gql(cfg, client, json!({
-        "query": "query($id: uuid!) { members(where: {id: {_eq: $id}}, limit: 1) { parentId claim_token } }",
-        "variables": { "id": member_id },
-    })).await?;
-    let member = m.pointer("/data/members/0").ok_or("member not found")?;
+    let member = crate::store::member_claim_token(cfg, client, &member_id)
+        .await?
+        .ok_or(AppError::BadRequest("member not found".into()))?;
     let context = member
-        .get("parentId")
-        .and_then(|v| v.as_str())
-        .ok_or("member has no context")?;
+        .parent_id
+        .ok_or(AppError::BadRequest("member has no context".into()))?;
     let claim_token = member
-        .get("claim_token")
-        .and_then(|v| v.as_str())
-        .ok_or("member has no claim token")?
-        .to_string();
+        .claim_token
+        .ok_or(AppError::BadRequest("member has no claim token".into()))?;
 
     // Owner check via the shared predicate: an active owner (by node_id OR email) or
     // the context node's own owner. Now also requires the owner member to be active.
     let principal = crate::auth::Principal { uid, email };
-    if !crate::auth::is_active_owner(cfg, client, context, &principal).await? {
-        return Err("not a context owner".into());
+    if !crate::auth::is_active_owner(cfg, client, &context, &principal).await? {
+        return Err(AppError::Forbidden("not a context owner".into()));
     }
     Ok(claim_token)
 }

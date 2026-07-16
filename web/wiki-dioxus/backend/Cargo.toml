@@ -30,6 +30,10 @@ futures = { version = "0.3", default-features = false, features = ["std", "async
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+# Structured logging: handlers emit tracing events (replacing eprintln); main.rs
+# installs the minimal fmt subscriber so they reach the container's stdout logs.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
 tower = { version = "0.5", features = ["util"] }
 
 # Background Web Push (RFC 8291 message encryption + RFC 8292 VAPID) is hand-rolled

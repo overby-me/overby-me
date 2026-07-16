@@ -64,10 +64,11 @@ pub fn seal<T: Serialize>(secret: &str, state: &T) -> Result<String, String> {
     Ok(util::b64url(&out))
 }
 
-/// Decrypt a blob produced by [`seal`]. Tries the v1 format (24-byte XChaCha20 nonce
-/// + HKDF key) first, then the legacy v0 format (12-byte ChaCha20 nonce + SHA-256
-/// key), so sessions sealed before the hardening still open. AEAD authentication
-/// makes the trial unambiguous: only the matching format decrypts.
+/// Decrypt a blob produced by [`seal`]. Tries the v1 format (24-byte XChaCha20
+/// nonce with the HKDF key) first, then the legacy v0 format (12-byte ChaCha20
+/// nonce with the SHA-256 key), so sessions sealed before the hardening still
+/// open. AEAD authentication makes the trial unambiguous: only the matching
+/// format decrypts.
 pub fn open<T: DeserializeOwned>(secret: &str, blob: &str) -> Result<T, String> {
     let raw = util::b64url_decode(blob)?;
     let pt = open_v1(secret, &raw)

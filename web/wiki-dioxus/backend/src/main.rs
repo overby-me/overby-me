@@ -12,6 +12,9 @@ use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() {
+    // Minimal fmt subscriber so the handlers' tracing events reach the
+    // container's stdout logs (Scaleway captures stdout/stderr).
+    tracing_subscriber::fmt().with_target(false).init();
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
