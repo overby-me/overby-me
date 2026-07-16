@@ -25,7 +25,22 @@ pub fn kmsg(msg: &str) {
     }
 }
 
+/// Install a panic hook that routes the panic message and location to
+/// `/dev/kmsg` before chaining to the default hook. As PID 1 in early boot,
+/// and especially in stage-2 right after switch-root, stderr is not connected
+/// to `/dev/console`, so a panic on the main thread would otherwise vanish and
+/// surface only as the kernel's "Attempted to kill init" panic with no cause.
+/// Routing panics to kmsg makes a PID 1 crash diagnosable from the boot log.
+fn install_kmsg_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        kmsg(&format!("PANIC: {info}"));
+        default_hook(info);
+    }));
+}
+
 pub fn run_service_manager() {
+    install_kmsg_panic_hook();
     pid1_specific_setup();
     let in_initrd = config::in_initrd();
     kmsg(&format!(
