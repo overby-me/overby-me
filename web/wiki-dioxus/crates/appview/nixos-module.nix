@@ -10,11 +10,14 @@
 #   };
 #
 # It runs the binary as a hardened, auto-restarting service with a persistent
-# StateDirectory for the Turso file, and expects a Caddy (or other) reverse proxy
-# in front terminating TLS and forwarding to 127.0.0.1:<port>. `/healthz` reports
-# DB-reachable (+ firehose-configured) for the proxy/uptime check. Structured
-# JSON logs go to stdout -> journald; set BETTERSTACK_SOURCE_TOKEN to also ship
-# them to the existing sink.
+# StateDirectory for the Turso file, behind a bundled Ferron reverse proxy that
+# terminates TLS and forwards to 127.0.0.1:<port>. `/healthz` reports DB-reachable
+# (+ firehose-connected) for the proxy/uptime check. Structured JSON logs go to
+# stdout -> journald; set BETTERSTACK_SOURCE_TOKEN to also ship them to the
+# existing sink.
+#
+# Ferron (nixpkgs `ferron`, a Rust web server) has no upstream NixOS module, so
+# this module defines its systemd unit directly with a generated KDL config.
 {
   config,
   lib,
@@ -22,6 +25,22 @@
   ...
 }: let
   cfg = config.services.wiki-appview;
+  # The Ferron host block: a catch-all `:80` (plain HTTP) until a domain is
+  # chosen; a domain name switches Ferron to automatic HTTPS (Let's Encrypt).
+  ferronHost =
+    if cfg.proxyDomain == null
+    then ":80"
+    else cfg.proxyDomain;
+  ferronConfig = pkgs.writeText "ferron.kdl" ''
+    globals {
+      log "/var/log/wiki-appview-proxy/access.log"
+      error_log "/var/log/wiki-appview-proxy/error.log"
+    }
+
+    ${ferronHost} {
+      proxy "http://127.0.0.1:${toString cfg.port}/"
+    }
+  '';
 in {
   options.services.wiki-appview = {
     enable = lib.mkEnableOption "the RadikalWiki atproto AppView";
@@ -35,6 +54,23 @@ in {
       type = lib.types.port;
       default = 8080;
       description = "TCP port the AppView binds on 0.0.0.0 (proxy to this).";
+    };
+
+    reverseProxy = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Run the bundled Ferron reverse proxy in front of the AppView.";
+    };
+
+    proxyDomain = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        The domain Ferron serves. `null` keeps a plain-HTTP catch-all on :80
+        (no TLS) — the sensible default until the domain/name is chosen; setting
+        it switches Ferron to automatic HTTPS (which also needs :443 reachable
+        and a writable ACME cache — verify the state dir when a domain lands).
+      '';
     };
 
     firehoseUrl = lib.mkOption {
@@ -103,10 +139,36 @@ in {
       };
     };
 
-    # Reverse proxy: TLS-terminate and forward to the local AppView. Kept as a
-    # documented default; a host may substitute its own edge.
-    services.caddy = lib.mkDefault {
-      enable = true;
+    # The bundled Ferron reverse proxy: TLS-terminate (once a domain is set) and
+    # forward to the local AppView. A host may set `reverseProxy = false` to use
+    # its own edge.
+    systemd.services.wiki-appview-proxy = lib.mkIf cfg.reverseProxy {
+      description = "Ferron reverse proxy for the RadikalWiki AppView";
+      wantedBy = ["multi-user.target"];
+      after = ["network-online.target" "wiki-appview.service"];
+      wants = ["network-online.target"];
+
+      serviceConfig = {
+        ExecStart = "${lib.getExe pkgs.ferron} -c ${ferronConfig}";
+        Restart = "always";
+        RestartSec = 2;
+
+        # Access/error logs land here; the ACME cert cache (when a domain is set)
+        # wants a writable state dir too.
+        LogsDirectory = "wiki-appview-proxy";
+        StateDirectory = "wiki-appview-proxy";
+
+        # Bind the privileged :80 (and :443 with TLS) as an unprivileged
+        # DynamicUser via the one capability that allows it.
+        DynamicUser = true;
+        AmbientCapabilities = ["CAP_NET_BIND_SERVICE"];
+        CapabilityBoundingSet = ["CAP_NET_BIND_SERVICE"];
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        RestrictAddressFamilies = ["AF_INET" "AF_INET6"];
+      };
     };
   };
 }

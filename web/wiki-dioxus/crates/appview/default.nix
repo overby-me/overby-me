@@ -3,7 +3,7 @@
 # AppView is a SINGLE STATEFUL always-on process: it holds the Turso core+view,
 # a live firehose connection, the in-process broadcast channel, and the WebSocket
 # server. It therefore needs a persistent-process host (a VM/bare-metal systemd
-# unit behind Caddy), not serverless. This file provides the native binary
+# unit behind Ferron), not serverless. This file provides the native binary
 # package; `./nixos-module.nix` is the systemd/NixOS unit that runs it.
 {
   # The native appview binary, built from the `crates/` workspace. Depends on the
@@ -65,7 +65,7 @@
   nixosModules.wiki-appview = ./nixos-module.nix;
 
   # End-to-end VM test: the acceptance harness for the always-on process, too big
-  # for a derivation check (it boots a real VM behind Caddy and soaks a restart).
+  # for a derivation check (it boots a real VM behind Ferron and soaks a restart).
   # `nix build .#checks.<system>.wiki-appview-e2e`.
   checks.wiki-appview-e2e = pkgs:
     import ./nixos-test.nix {

@@ -103,7 +103,7 @@ Concrete edits to the monorepo-root `README.md`, pending approval:
 
 ## Engineering defaults taken (override if you disagree)
 
-- TLS terminated at the Caddy edge; stay on the `ring` rustls provider until PQ-hybrid KEX or FIPS forces
+- TLS terminated at the Ferron edge; stay on the `ring` rustls provider until PQ-hybrid KEX or FIPS forces
   aws-lc-rs. HTTP/2 + TCP primary; HTTP/3 optional edge only.
 - Realtime via one multiplexed axum WebSocket fed by an in-process broadcast channel (the AppView is one
   persistent process holding the Turso core and view, plus the firehose).

@@ -1,10 +1,10 @@
 # End-to-end NixOS VM test for the stateful AppView (rewrite kickoff item 11's
-# acceptance). Boots a real VM running `services.wiki-appview` behind Caddy and
-# asserts the properties a persistent process needs but a plain derivation check
-# cannot exercise: the service starts, `/healthz` reports liveness + DB-reachable
-# (direct and through the reverse-proxy edge), the Turso StateDirectory survives a
-# restart intact, structured JSON logs reach journald, and the systemd hardening
-# is applied.
+# acceptance). Boots a real VM running `services.wiki-appview` behind the bundled
+# Ferron reverse proxy and asserts the properties a persistent process needs but a
+# plain derivation check cannot exercise: the service starts, `/healthz` reports
+# liveness + DB-reachable (direct and through the reverse-proxy edge), the Turso
+# StateDirectory survives a restart intact, structured JSON logs reach journald,
+# and the systemd hardening is applied.
 #
 # Run with: nix build .#checks.x86_64-linux.wiki-appview-e2e
 {
@@ -21,18 +21,14 @@ pkgs.testers.nixosTest {
       enable = true;
       package = wiki-appview;
       port = 8080;
+      # The bundled Ferron proxy is on by default (proxyDomain = null -> a
+      # plain-HTTP :80 catch-all forwarding to the AppView), which is exactly the
+      # end-to-end edge path this test exercises.
     };
 
-    # The reverse-proxy edge the always-on process sits behind. The module only
-    # enables caddy by default; the test configures the vhost to prove the
-    # end-to-end path through it.
-    services.caddy.virtualHosts."http://localhost".extraConfig = ''
-      reverse_proxy 127.0.0.1:8080
-    '';
-
     # curl for the checks; the VM has no internet, which is fine: startup and
-    # /healthz are offline (the firehose consumer is a later item and only its
-    # configuration is reported, not a live connection).
+    # /healthz are offline (the firehose consumer connects best-effort with a
+    # bounded timeout and only its status is reported, not required).
     environment.systemPackages = [pkgs.curl];
   };
 
@@ -46,11 +42,11 @@ pkgs.testers.nixosTest {
     assert '"ok":true' in health, f"healthz not ok: {health}"
     assert '"db":true' in health, f"db not reachable: {health}"
 
-    # The same endpoint through the Caddy reverse-proxy edge.
-    machine.wait_for_unit("caddy.service")
+    # The same endpoint through the bundled Ferron reverse-proxy edge.
+    machine.wait_for_unit("wiki-appview-proxy.service")
     machine.wait_for_open_port(80)
     proxied = machine.succeed("curl -sf http://localhost/healthz")
-    assert '"ok":true' in proxied, f"healthz via caddy not ok: {proxied}"
+    assert '"ok":true' in proxied, f"healthz via ferron not ok: {proxied}"
 
     # The Turso file lives in the persistent StateDirectory.
     machine.succeed("test -d /var/lib/wiki-appview")

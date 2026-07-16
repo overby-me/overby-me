@@ -32,7 +32,7 @@ tested.
 - **Deploy target**: `crates/appview/default.nix` (the `wiki-appview`
   `buildRustPackage`) + `crates/appview/nixos-module.nix` (the stateful systemd
   unit with a persistent `StateDirectory` for the Turso file, restart-on-failure,
-  and `/healthz`). Acceptance (`nixos-rebuild build-vm` behind Caddy, restart
+  and `/healthz`). Acceptance (`nixos-rebuild build-vm` behind Ferron, restart
   soak) is the operator step.
 - **TO-BE-BUILT**: the AppView read/write handlers behind the env seams (the
   Store seam port in `crates/appview` is started, the read/write XRPC handlers are

@@ -152,7 +152,7 @@ inbound TLS and frame the crypto-provider choice explicitly.
 - Adoption: the current build resolves to the `ring` provider (reqwest 0.12's `rustls-tls` hardcodes ring;
   the Cargo.lock files contain zero aws-lc entries), which keeps cross-compile/musl builds trivial. There is
   NO FIPS path today, contrary to the original "aws-lc-rs default" assumption.
-- Extension: prefer terminating inbound TLS at the Caddy/Moella edge over adding new in-process ACME
+- Extension: prefer terminating inbound TLS at the Ferron edge over adding new in-process ACME
   lifecycle and private-key custody surface via tokio-rustls/rustls-acme; if post-quantum hybrid key
   exchange (X25519MLKEM768, aws-lc-rs-only) or FIPS ever becomes a requirement, that is a deliberate switch
   to aws-lc-rs, at which point NASM/CMake/musl cross-compile pinning becomes a live concern. Note the
