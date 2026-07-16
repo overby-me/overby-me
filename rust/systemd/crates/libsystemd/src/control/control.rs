@@ -180,6 +180,9 @@ pub enum Command {
     /// make it `/`, and exec the new init there. Used to leave the initrd and
     /// hand off to the real system manager. Args: (new_root, optional init).
     SwitchRoot(String, Option<String>),
+    /// `isolate TARGET` — start TARGET and stop every unit not wanted by it.
+    /// Used by the initrd to reach `initrd-switch-root.target`.
+    Isolate(String),
     /// `log-level [LEVEL]` — get or set the service manager log level.
     LogLevel(Option<String>),
     /// `log-target [TARGET]` — get or set the service manager log target.
@@ -600,6 +603,20 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             }
         }
         "daemon-reexec" => Command::DaemonReexec,
+        "isolate" => {
+            let target = match &call.params {
+                Some(Value::String(s)) if !s.is_empty() => s.clone(),
+                Some(Value::Array(arr)) if !arr.is_empty() => {
+                    arr[0].as_str().unwrap_or_default().to_string()
+                }
+                _ => {
+                    return Err(ParseError::ParamsInvalid(
+                        "isolate requires a target unit".to_string(),
+                    ));
+                }
+            };
+            Command::Isolate(target)
+        }
         "switch-root" => {
             // switch-root NEWROOT [INIT]
             let args: Vec<String> = match &call.params {
@@ -5236,6 +5253,62 @@ pub fn execute_command(
             crate::signal_handler::daemon_reexec(&run_info);
             // If we get here, execve failed — daemon_reexec logs the error.
             return Err("daemon-reexec failed".to_string());
+        }
+        Command::Isolate(target) => {
+            info!("isolate: {target}");
+            let target_id = find_or_load_unit(&target, &run_info)?;
+            // Start the target and everything it pulls in.
+            let errs = crate::units::activate_needed_units(target_id.clone(), run_info.clone());
+            // Isolation: stop units that are neither the target nor reachable
+            // from it via Wants/Requires/BindsTo/After (i.e. not part of the new
+            // target's transaction), skipping units that opt out with
+            // IgnoreOnIsolate=. This is what lets the initrd tear down its
+            // startup units when switching to initrd-switch-root.target.
+            let keep: std::collections::HashSet<UnitId> = {
+                let ri = run_info.read_poisoned();
+                let mut keep = std::collections::HashSet::new();
+                let mut stack = vec![target_id.clone()];
+                while let Some(id) = stack.pop() {
+                    if !keep.insert(id.clone()) {
+                        continue;
+                    }
+                    if let Some(u) = ri.unit_table.get(&id) {
+                        for dep in u
+                            .common
+                            .dependencies
+                            .wants
+                            .iter()
+                            .chain(u.common.dependencies.requires.iter())
+                            .chain(u.common.dependencies.binds_to.iter())
+                        {
+                            stack.push(dep.clone());
+                        }
+                    }
+                }
+                keep
+            };
+            let to_stop: Vec<UnitId> = {
+                let ri = run_info.read_poisoned();
+                ri.unit_table
+                    .values()
+                    .filter(|u| {
+                        !keep.contains(&u.id)
+                            && !u.common.unit.ignore_on_isolate
+                            && matches!(
+                                &*u.common.status.read_poisoned(),
+                                UnitStatus::Started(_) | UnitStatus::Starting
+                            )
+                    })
+                    .map(|u| u.id.clone())
+                    .collect()
+            };
+            for id in to_stop {
+                let _ = crate::units::deactivate_unit(&id, &run_info.read_poisoned());
+            }
+            if errs.is_empty() {
+                return Ok(serde_json::json!(null));
+            }
+            return Err(format!("isolate {target} failed: {errs:?}"));
         }
         Command::SwitchRoot(new_root, init) => {
             info!("switch-root: switching to {new_root}");
