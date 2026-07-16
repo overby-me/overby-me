@@ -18,6 +18,7 @@ pub mod statecookie;
 pub mod store;
 pub mod util;
 pub mod ws;
+pub mod xrpc;
 
 pub use config::Config;
 pub use db::{Db, DbError};
@@ -72,6 +73,12 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/ws", get(ws::ws_handler))
         .route("/callback", get(oauth::callback_handler))
+        // The native XRPC read surface (identity-free content lookups).
+        .route(
+            "/xrpc/com.example.wiki.getDocument",
+            get(xrpc::get_document),
+        )
+        .route("/xrpc/com.example.wiki.getContext", get(xrpc::get_context))
         .with_state(state)
 }
 

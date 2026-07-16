@@ -25,6 +25,13 @@
 
 use crate::db::{Db, DbError};
 use turso::Value;
+use wiki_domain_types::{Author, Context, ContextKind, Document, DocumentKind};
+
+/// Parse a snake_case DB enum value (e.g. `"document"`, `"private"`) into a
+/// `#[serde(rename_all = "snake_case")]` domain enum; `None` on an unknown value.
+fn parse_enum<T: serde::de::DeserializeOwned>(s: &str) -> Option<T> {
+    serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
+}
 
 /// Read a nullable TEXT column as an `Option<String>`. turso's `FromValue` has
 /// no blanket `Option` impl, so a SQL NULL is matched on the raw `Value`.
@@ -421,6 +428,115 @@ impl Store {
         conn.execute("DELETE FROM reaction WHERE id = ?1", [uri])
             .await?;
         Ok(())
+    }
+
+    // -- Read side of the native serving layer (returns the canonical domain
+    //    types, which the XRPC handlers serve as JSON). Identity-free reads. --
+
+    /// The authors of a document (from the `document_author` join, in `ord`),
+    /// each a DID (an account) or a free-text display name.
+    async fn document_authors(&self, document_id: &str) -> Result<Vec<Author>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT author_did, author_text FROM document_author \
+                 WHERE document_id = ?1 ORDER BY ord",
+                [document_id],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            if let Some(did) = opt_text(&row, 0) {
+                out.push(Author::User { did });
+            } else if let Some(text) = opt_text(&row, 1) {
+                out.push(Author::FreeText { display: text });
+            }
+        }
+        Ok(out)
+    }
+
+    /// A content node (document / folder / file / proposal) by id, with its
+    /// authors. `None` if no such document.
+    pub async fn read_document(&self, id: &str) -> Result<Option<Document>, DbError> {
+        // Extract the row fields first (releasing the query) before the authors
+        // sub-query on a fresh connection.
+        let fields = {
+            let conn = self.db.acquire().await?;
+            let mut rows = conn
+                .query(
+                    "SELECT id, context_id, parent_id, kind, title, content, visibility, \
+                     published_uri, created_at FROM document WHERE id = ?1",
+                    [id],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => (
+                    row.get::<String>(0)?,
+                    row.get::<String>(1)?,
+                    opt_text(&row, 2),
+                    row.get::<String>(3)?,
+                    row.get::<String>(4)?,
+                    opt_text(&row, 5),
+                    opt_text(&row, 6),
+                    opt_text(&row, 7),
+                    opt_text(&row, 8),
+                ),
+                None => return Ok(None),
+            }
+        };
+        let (
+            id,
+            context_id,
+            parent_id,
+            kind,
+            title,
+            content,
+            visibility,
+            published_uri,
+            created_at,
+        ) = fields;
+        let authors = self.document_authors(&id).await?;
+        Ok(Some(Document {
+            id,
+            context_id,
+            parent_id,
+            kind: parse_enum(&kind).unwrap_or(DocumentKind::Document),
+            title,
+            content: content.and_then(|s| serde_json::from_str(&s).ok()),
+            authors,
+            visibility: visibility.and_then(|s| parse_enum(&s)).unwrap_or_default(),
+            published_uri,
+            created_at,
+            legacy_id: None,
+        }))
+    }
+
+    /// A context (group / event) by id. `None` if no such context.
+    pub async fn read_context(&self, id: &str) -> Result<Option<Context>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT id, kind, name, slug, parent_id, visibility, published_uri, created_at \
+                 FROM context WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(Context {
+            id: row.get::<String>(0)?,
+            kind: parse_enum(&row.get::<String>(1)?).unwrap_or(ContextKind::Group),
+            name: row.get::<String>(2)?,
+            slug: row.get::<String>(3)?,
+            parent_id: opt_text(&row, 4),
+            visibility: opt_text(&row, 5)
+                .and_then(|s| parse_enum(&s))
+                .unwrap_or_default(),
+            published_uri: opt_text(&row, 6),
+            created_at: opt_text(&row, 7),
+            legacy_id: None,
+        }))
     }
 }
 
