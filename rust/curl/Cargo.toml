@@ -10,12 +10,22 @@ name = "curl"
 path = "src/main.rs"
 
 [dependencies]
+brotli-decompressor = "5"
+cipher = "0.4"
+des = "0.8"
+flate2 = "1"
+idna = "1"
+md-5 = "0.10"
+md4 = "0.10"
 rustls = { version = "0.23", default-features = false, features = [
   "ring",
   "std",
+  "tls12",
 ] }
 rustls-native-certs = "0.8"
 rustls-pemfile = "2"
+ruzstd = "0.8"
+sha2 = "0.10"
 webpki-roots = "0.26"
 
 [profile.release]

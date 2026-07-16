@@ -24,4 +24,11 @@ exclude = [
   "https://console.mistral.ai/",
   "https://startpage.com/",
   "https://x.com/",
+  # Placeholder URLs in rust/curl comments and test fixtures: the literal
+  # hosts "host"/"proxy.example", the literal port ":port", and ellipsis
+  # paths are examples, not real links.
+  "^https?://(user1@)?host(/|$)",
+  'proxy\.example',
+  ":port",
+  "%E2%80%A6",
 ]
