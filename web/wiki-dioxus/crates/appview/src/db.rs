@@ -41,16 +41,21 @@ impl Db {
     }
 
     /// Create the schema on a fresh database: the migrated entity subset
-    /// (`wiki_schema::ENTITY_SCHEMA`) followed by this crate's runtime infra
-    /// tables (`crate::schema::RUNTIME_DDL`). Guarded so an already-initialized
-    /// persistent file (where the plain `CREATE TABLE` entity DDL would error on
-    /// re-run) is left untouched; the runtime DDL is `IF NOT EXISTS` regardless.
+    /// (`wiki_schema::ENTITY_SCHEMA`), this crate's runtime infra tables
+    /// (`crate::schema::RUNTIME_DDL`), and the ballot service's board + roster
+    /// tables (`crate::ballot::init_ballot_schema`). Guarded so an
+    /// already-initialized persistent file (where the plain `CREATE TABLE` entity
+    /// DDL would error on re-run) is left untouched; the runtime and ballot DDL
+    /// are `IF NOT EXISTS` regardless.
     pub async fn init_schema(&self) -> Result<(), DbError> {
         let conn = self.acquire().await?;
         if !table_exists(&conn, "context").await {
             conn.execute_batch(wiki_schema::ENTITY_SCHEMA).await?;
         }
         conn.execute_batch(crate::schema::RUNTIME_DDL).await?;
+        // The ballot service's durable tables (public board + private roster),
+        // both IF NOT EXISTS, so they live in the same datastore as the entities.
+        crate::ballot::init_ballot_schema(self).await?;
         Ok(())
     }
 }

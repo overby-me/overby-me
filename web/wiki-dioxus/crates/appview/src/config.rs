@@ -16,6 +16,10 @@ pub struct Config {
     /// disables remote shipping.
     pub betterstack_host: String,
     pub betterstack_token: String,
+    /// Off-node ballot replica-log path. When set, every committed cast is
+    /// appended here and shipped to an independent node (the E2E-V integrity
+    /// control); empty disables replication (dev/tests). See `crate::ballot`.
+    pub ballot_replica_log: String,
 }
 
 impl Config {
@@ -32,6 +36,7 @@ impl Config {
             betterstack_host: std::env::var("BETTERSTACK_INGEST_HOST")
                 .unwrap_or_else(|_| "in.logs.betterstack.com".to_string()),
             betterstack_token: env("BETTERSTACK_SOURCE_TOKEN"),
+            ballot_replica_log: env("BALLOT_REPLICA_LOG"),
         }
     }
 }
@@ -44,6 +49,7 @@ impl Default for Config {
             firehose_url: String::new(),
             betterstack_host: "in.logs.betterstack.com".to_string(),
             betterstack_token: String::new(),
+            ballot_replica_log: String::new(),
         }
     }
 }

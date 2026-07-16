@@ -35,6 +35,9 @@ atrium-common = "0.1.4"
 wiki-domain-types = { path = "../domain-types" }
 wiki-schema = { path = "../schema" }
 ballot-spec = { path = "../ballot-spec" }
+# The durable ballot service: the public board (kill-9-proven atomic cast) + the
+# private roster DDL, plus the off-node replica sink wired into this datastore.
+ballot-store = { path = "../ballot-store" }
 
 [[bin]]
 name = "appview"

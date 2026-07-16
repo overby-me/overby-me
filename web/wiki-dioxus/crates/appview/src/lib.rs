@@ -9,6 +9,7 @@
 //! connection, the broadcast channel, the WebSocket server), so it CANNOT run
 //! on scale-to-zero serverless like the interim backend; see the deploy item.
 
+pub mod ballot;
 pub mod config;
 pub mod db;
 pub mod firehose;
