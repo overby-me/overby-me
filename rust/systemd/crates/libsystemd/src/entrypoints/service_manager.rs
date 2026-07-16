@@ -266,9 +266,8 @@ pub fn run_service_manager() {
         // units on the switch-root critical path so a hung boot reveals exactly
         // what sysroot.mount is waiting on. Gated on in_initrd; remove before
         // final. Clone run_info here since activate_needed_units consumes it.
-        if in_initrd {
-            spawn_initrd_state_dump(run_info.clone());
-        }
+        let _ = in_initrd;
+        spawn_initrd_state_dump(run_info.clone());
         units::activate_needed_units(target_id, run_info);
     }
 
@@ -303,11 +302,62 @@ fn spawn_initrd_state_dump(ri_dbg: runtime_info::ArcMutRuntimeInfo) {
         for (n, st) in entries {
             kmsg(&format!("  {n} = {st}"));
         }
+        // Device diagnostic (Rust fs reads — the shell probe lacks grep/PATH in
+        // the initrd). List every .device unit actually in the table, the
+        // by-label symlinks udev created, and the udev db entries, to decide
+        // whether the .device units are missing because udev never detected the
+        // label (no by-label symlink / empty db) or because the udev-event RPC
+        // that creates them never reached PID 1 (symlink+db present, unit absent).
+        {
+            let devs: Vec<&str> = ri
+                .unit_table
+                .keys()
+                .filter(|id| matches!(id.kind, crate::units::UnitIdKind::Device))
+                .map(|id| id.name.as_str())
+                .collect();
+            kmsg(&format!("  [devunits] {} in table: {:?}", devs.len(), devs));
+        }
+        for dir in ["/dev/disk/by-label", "/dev/disk/by-uuid", "/run/udev/data"] {
+            match std::fs::read_dir(dir) {
+                Ok(rd) => {
+                    let names: Vec<String> = rd
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect();
+                    kmsg(&format!("  [ls {dir}] {names:?}"));
+                }
+                Err(e) => kmsg(&format!("  [ls {dir}] err: {e}")),
+            }
+        }
+        // Dump the udev db entries that mention the root label or a tty/console,
+        // to see what properties udevd recorded (ID_FS_LABEL, SYMLINK, TAGS).
+        if let Ok(rd) = std::fs::read_dir("/run/udev/data") {
+            for e in rd.filter_map(|e| e.ok()) {
+                if let Ok(content) = std::fs::read_to_string(e.path())
+                    && (content.contains("nixos")
+                        || content.contains("ttyS0")
+                        || content.contains("hvc0"))
+                {
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    for line in content.lines().filter(|l| {
+                        l.contains("DEVNAME")
+                            || l.contains("FS_LABEL")
+                            || l.contains("SYMLINK")
+                            || l.starts_with("G:")
+                    }) {
+                        kmsg(&format!("  [udevdb {name}] {line}"));
+                    }
+                }
+            }
+        }
         // Dump exact (Debug) status + deps of fsck and sysroot.mount to see
         // where the chain is stuck: fsck completed but sysroot.mount not
         // re-attempted, vs fsck still activating.
         for (id, unit) in ri.unit_table.iter() {
-            if id.name.contains("fsck@") || id.name == "sysroot.mount" {
+            if id.name.contains("fsck@")
+                || id.name == "sysroot.mount"
+                || id.name == "backdoor.service"
+            {
                 let d = &unit.common.dependencies;
                 let fmt = |v: &[crate::units::UnitId]| {
                     v.iter()
@@ -328,6 +378,14 @@ fn spawn_initrd_state_dump(ri_dbg: runtime_info::ArcMutRuntimeInfo) {
             "initrd-cleanup.service",
             "initrd-switch-root.target",
             "initrd-switch-root.service",
+            "backdoor.service",
+            "multi-user.target",
+            "basic.target",
+            "sysinit.target",
+            "dev-hvc0.device",
+            "dev-ttyS0.device",
+            "systemd-udevd.service",
+            "systemd-udev-trigger.service",
         ] {
             match ri.unit_table.values().find(|u| u.id.name == name) {
                 Some(u) => {
@@ -365,9 +423,11 @@ fn spawn_initrd_state_dump(ri_dbg: runtime_info::ArcMutRuntimeInfo) {
         let probe = std::process::Command::new("sh")
             .arg("-c")
             .arg(
-                "echo '[.rw-store]'; ls -la /sysroot/nix/.rw-store/ 2>&1; \
-                 echo '[upper]'; ls -la /sysroot/nix/.rw-store/upper 2>&1; \
-                 for p in /proc/[0-9]*/comm; do c=$(cat $p 2>/dev/null); case $c in mkdir) d=$(dirname $p); echo \"mkdir-alive $d cmd=$(tr '\\0' ' ' < $d/cmdline 2>/dev/null)\";; esac; done",
+                "echo '[notify-sock]'; ls -la /run/systemd/rust-systemd-notify/ 2>&1; \
+                 echo '[devs]'; ls -la /dev/ttyS0 /dev/hvc0 2>&1; \
+                 echo '[udevadm ttyS0]'; udevadm info /dev/ttyS0 2>&1 | grep -iE 'TAGS|SYSTEMD|E: DEVNAME' | head; \
+                 echo '[udevadm hvc0]'; udevadm info /dev/hvc0 2>&1 | grep -iE 'TAGS|SYSTEMD|E: DEVNAME' | head; \
+                 echo '[.rw-store]'; ls -la /sysroot/nix/.rw-store/ 2>&1",
             )
             .output();
         if let Ok(o) = probe {

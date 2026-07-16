@@ -178,7 +178,7 @@ fn ensure_device_units_exist(
     params: &UdevEventParams,
     unit_names: &[String],
 ) {
-    let mut ri = run_info.write_poisoned();
+    let mut ri = run_info.write_poisoned_nonblocking();
     for name in unit_names {
         let id = UnitId {
             kind: UnitIdKind::Device,
@@ -653,7 +653,7 @@ fn apply_device_active(
     // events.
     let new_wants = parse_systemd_wants(params);
     {
-        let mut ri = run_info.write_poisoned();
+        let mut ri = run_info.write_poisoned_nonblocking();
         for name in unit_names {
             let id = UnitId {
                 kind: UnitIdKind::Device,
@@ -928,7 +928,7 @@ fn apply_device_inactive(run_info: &ArcMutRuntimeInfo, unit_names: &[String]) {
     // pulled them in disappears.
     let mut candidates: Vec<UnitId> = Vec::new();
     {
-        let mut ri = run_info.write_poisoned();
+        let mut ri = run_info.write_poisoned_nonblocking();
         for (device_id, wants) in &former_wants {
             for want_id in wants {
                 if let Some(target) = ri.unit_table.get_mut(want_id) {
