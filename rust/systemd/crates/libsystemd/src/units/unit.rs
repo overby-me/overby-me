@@ -1955,6 +1955,14 @@ fn activate_mount(
                 | "nofail" => {
                     // These are fstab-only options, not passed to mount(2)
                 }
+                _ if opt.is_empty() || opt.starts_with("x-") || opt.starts_with("comment=") => {
+                    // Userspace-only options (the whole `x-*` namespace:
+                    // x-initrd.mount, x-systemd.*, x-mount.*, x-gvfs-*, …) and
+                    // `comment=` are consumed by systemd/fstab, never passed to
+                    // mount(2). The kernel rejects them (e.g. ext4/tmpfs report
+                    // "Unknown parameter 'x-initrd.mount'"), which would fail the
+                    // mount — including sysroot.mount in the initrd.
+                }
                 _ => {
                     // Pass unknown options through as data for the filesystem driver
                     filtered_options.push(opt.to_owned());
