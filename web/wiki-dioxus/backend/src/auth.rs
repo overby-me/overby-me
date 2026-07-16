@@ -79,6 +79,59 @@ pub async fn caller(
     Ok((uid, email))
 }
 
+/// The authenticated caller as an authorization principal: the durable `node_id`
+/// binding (`uid`) plus the invite/roster `email` fallback. This is the one shape
+/// every authz check consumes; the atproto rewrite swaps its innards for a DID while
+/// [`is_active_member`] / [`is_active_owner`] keep their signatures.
+pub struct Principal {
+    pub uid: String,
+    pub email: String,
+}
+
+impl From<(String, String)> for Principal {
+    fn from((uid, email): (String, String)) -> Self {
+        Self { uid, email }
+    }
+}
+
+/// Is `p` an ACTIVE member of `context`? Matches the durable `node_id` binding OR
+/// (fallback) the invite email, so a mismatched-email roster entry that has been
+/// claim-bound by node_id still authorizes. THE membership predicate: every handler
+/// must call this rather than inlining a divergent members `where` clause (which is
+/// how the vote and notify paths silently disagreed before).
+pub async fn is_active_member(
+    cfg: &Config,
+    client: &reqwest::Client,
+    context: &str,
+    p: &Principal,
+) -> Result<bool, String> {
+    let v = admin_gql(cfg, client, json!({
+        "query": "query($c: uuid!, $u: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, active: {_eq: true}, _or: [{nodeId: {_eq: $u}}, {email: {_eq: $e}}]}, limit: 1) { id } }",
+        "variables": { "c": context, "u": p.uid, "e": p.email },
+    })).await?;
+    Ok(v.pointer("/data/members/0").is_some())
+}
+
+/// Is `p` an ACTIVE OWNER of `context`? An active member flagged `owner` (matched by
+/// node_id OR email), or the owner of the context node itself (its `ownerId`). THE
+/// owner predicate; unifies the previously-divergent notify (email-only) and members
+/// (node_id-only) owner checks and adds the active requirement.
+pub async fn is_active_owner(
+    cfg: &Config,
+    client: &reqwest::Client,
+    context: &str,
+    p: &Principal,
+) -> Result<bool, String> {
+    let v = admin_gql(cfg, client, json!({
+        "query": "query($c: uuid!, $u: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, active: {_eq: true}, owner: {_eq: true}, _or: [{nodeId: {_eq: $u}}, {email: {_eq: $e}}]}, limit: 1) { id } node(id: $c) { ownerId } }",
+        "variables": { "c": context, "u": p.uid, "e": p.email },
+    })).await?;
+    let member_owner = v.pointer("/data/members/0").is_some();
+    let node_owner =
+        v.pointer("/data/node/ownerId").and_then(Value::as_str) == Some(p.uid.as_str());
+    Ok(member_owner || node_owner)
+}
+
 #[cfg(test)]
 mod tests {
     use super::token_from;

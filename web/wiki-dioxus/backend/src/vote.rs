@@ -125,18 +125,12 @@ async fn cast_inner(
         .and_then(|c| c.as_str())
         .map(str::to_string);
 
-    // Active membership in the poll's context, matched by the durable node_id
-    // binding or (fallback) the invite email.
-    let mem_v = crate::auth::admin_gql(
-        cfg,
-        client,
-        json!({
-            "query": "query($c: uuid!, $u: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, active: {_eq: true}, _or: [{nodeId: {_eq: $u}}, {email: {_eq: $e}}]}, limit: 1) { id } }",
-            "variables": { "c": poll_context, "u": uid, "e": email },
-        }),
-    )
-    .await?;
-    if mem_v.pointer("/data/members/0").is_none() {
+    // Active membership in the poll's context (the shared predicate).
+    let principal = crate::auth::Principal {
+        uid: uid.clone(),
+        email: email.clone(),
+    };
+    if !crate::auth::is_active_member(cfg, client, &poll_context, &principal).await? {
         return Err("not a member of this context".into());
     }
 

@@ -238,16 +238,12 @@ async fn reply_inner(
         .unwrap_or_else(|| parent.clone());
 
     // Anti-abuse: only an active member of the node's context may ping its author.
-    let member = crate::auth::admin_gql(cfg, client, json!({
-        "query": "query($c: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, email: {_eq: $e}, active: {_eq: true}}, limit: 1) { id } }",
-        "variables": { "c": ctx, "e": email },
-    })).await?;
-    if member
-        .pointer("/data/members")
-        .and_then(|a| a.as_array())
-        .map(|a| a.is_empty())
-        .unwrap_or(true)
-    {
+    // Shared predicate: now honours the durable node_id binding, not just the email.
+    let principal = crate::auth::Principal {
+        uid: uid.clone(),
+        email: email.clone(),
+    };
+    if !crate::auth::is_active_member(cfg, client, &ctx, &principal).await? {
         return Err("not a member of this context".into());
     }
 
@@ -306,19 +302,14 @@ async fn notify_inner(
     let body = get("body").unwrap_or_default();
     let url = get("url").unwrap_or_default();
 
-    let (_uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
+    let (uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
 
-    // Only a context owner may notify its members (anti-spam).
-    let owner = crate::auth::admin_gql(cfg, client, json!({
-        "query": "query($c: uuid!, $e: String!) { members(where: {parentId: {_eq: $c}, email: {_eq: $e}, owner: {_eq: true}}, limit: 1) { id } }",
-        "variables": { "c": context, "e": email },
-    })).await?;
-    let is_owner = owner
-        .pointer("/data/members")
-        .and_then(|a| a.as_array())
-        .map(|a| !a.is_empty())
-        .unwrap_or(false);
-    if !is_owner {
+    // Only an active context owner may notify its members (anti-spam) — shared predicate.
+    let principal = crate::auth::Principal {
+        uid,
+        email: email.clone(),
+    };
+    if !crate::auth::is_active_owner(cfg, client, &context, &principal).await? {
         return Err("not a context owner".into());
     }
 

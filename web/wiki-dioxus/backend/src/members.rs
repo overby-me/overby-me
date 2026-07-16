@@ -122,7 +122,7 @@ async fn claim_link_inner(
         .map(|(_, v)| v.clone())
         .filter(|s| !s.is_empty())
         .ok_or("missing member id")?;
-    let uid = crate::auth::caller_uid(cfg, query, bearer)?;
+    let (uid, email) = crate::auth::caller(cfg, client, query, bearer).await?;
 
     let m = crate::auth::admin_gql(cfg, client, json!({
         "query": "query($id: uuid!) { members(where: {id: {_eq: $id}}, limit: 1) { parentId claim_token } }",
@@ -139,19 +139,10 @@ async fn claim_link_inner(
         .ok_or("member has no claim token")?
         .to_string();
 
-    // Owner = a member of the context flagged owner, or the context node's owner.
-    let owner = crate::auth::admin_gql(cfg, client, json!({
-        "query": "query($c: uuid!, $u: uuid!) { members(where: {parentId: {_eq: $c}, nodeId: {_eq: $u}, owner: {_eq: true}}, limit: 1) { id } node(id: $c) { ownerId } }",
-        "variables": { "c": context, "u": uid },
-    })).await?;
-    let is_member_owner = owner
-        .pointer("/data/members")
-        .and_then(|a| a.as_array())
-        .map(|a| !a.is_empty())
-        .unwrap_or(false);
-    let is_node_owner =
-        owner.pointer("/data/node/ownerId").and_then(|v| v.as_str()) == Some(uid.as_str());
-    if !is_member_owner && !is_node_owner {
+    // Owner check via the shared predicate: an active owner (by node_id OR email) or
+    // the context node's own owner. Now also requires the owner member to be active.
+    let principal = crate::auth::Principal { uid, email };
+    if !crate::auth::is_active_owner(cfg, client, context, &principal).await? {
         return Err("not a context owner".into());
     }
     Ok(claim_token)
