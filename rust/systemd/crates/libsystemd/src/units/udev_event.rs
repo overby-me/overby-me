@@ -292,6 +292,95 @@ pub fn rebuild_device_units_from_udev_db(run_info: &ArcMutRuntimeInfo) {
     }
 }
 
+/// Coldplug fallback: synthesize a plugged `.device` unit for every device a
+/// loaded unit references (via `After=`/`Requires=`/`BindsTo=`/`Wants=`) that
+/// is not yet in the table but whose device node already exists on disk.
+///
+/// Real systemd creates a `.device` unit for any device a unit refers to and
+/// enumerates `/sys` itself at startup; rust-systemd otherwise depends entirely
+/// on systemd-udevd pushing `udev-event` notifications, which can be delayed or
+/// dropped (e.g. a stalled `systemd-udev-trigger` in stage-2 leaves the udev db
+/// empty and no notifications arrive). That leaves referenced `.device` units
+/// absent, so their dependents (the console `backdoor.service` in the NixOS
+/// test, a by-label mount's fsck) never start.
+///
+/// Checking the referenced device names against the filesystem gives a
+/// race-free coldplug that needs no udevd round-trip: after switch-root the
+/// real root's `/dev` is already fully populated (moved over from the initrd),
+/// so `dev-ttyS0.device` → `/dev/ttyS0`, `dev-hvc0.device` → `/dev/hvc0`, and
+/// `dev-disk-by\x2dlabel-nixos.device` → `/dev/disk/by-label/nixos` all resolve
+/// immediately. Runs at PID 1 startup before activation; the normal udev-event
+/// RPC path still handles devices that appear later.
+pub fn synthesize_referenced_present_devices(run_info: &ArcMutRuntimeInfo) {
+    // Collect referenced-but-absent `.device` unit names.
+    let mut wanted: Vec<String> = Vec::new();
+    {
+        let ri = run_info.read_poisoned();
+        for unit in ri.unit_table.values() {
+            let deps = &unit.common.dependencies;
+            for id in deps
+                .after
+                .iter()
+                .chain(deps.requires.iter())
+                .chain(deps.binds_to.iter())
+                .chain(deps.wants.iter())
+            {
+                if matches!(id.kind, UnitIdKind::Device)
+                    && !ri.unit_table.contains_key(id)
+                    && !wanted.contains(&id.name)
+                {
+                    wanted.push(id.name.clone());
+                }
+            }
+        }
+    }
+
+    // Reverse each unit name to a device path and keep the ones that exist.
+    let mut present: Vec<(String, String)> = Vec::new();
+    for name in &wanted {
+        let stem = name.strip_suffix(".device").unwrap_or(name);
+        if let Some(path) = crate::unit_name::unit_name_path_unescape(stem)
+            && std::path::Path::new(&path).exists()
+        {
+            present.push((name.clone(), path));
+        }
+    }
+    if present.is_empty() {
+        return;
+    }
+
+    let mut ri = run_info.write_poisoned_nonblocking();
+    for (name, path) in &present {
+        let id = UnitId {
+            kind: UnitIdKind::Device,
+            name: name.clone(),
+        };
+        if ri.unit_table.contains_key(&id) {
+            continue;
+        }
+        let params = UdevEventParams {
+            action: "add".to_owned(),
+            sysfs_path: String::new(),
+            devname: path.clone(),
+            subsystem: String::new(),
+            env: std::collections::HashMap::new(),
+            tags: vec!["systemd".to_owned()],
+            symlinks: Vec::new(),
+        };
+        match build_device_unit(name, &params) {
+            Ok(unit) => {
+                crate::units::insert_new_unit_lenient(unit, &mut ri);
+                if let Some(u) = ri.unit_table.get(&id) {
+                    let mut status = u.common.status.write_poisoned();
+                    *status = UnitStatus::Started(StatusStarted::Running);
+                }
+                debug!("coldplug: synthesized plugged device unit {name} ({path})");
+            }
+            Err(e) => warn!("coldplug: failed to synthesize device unit {name}: {e}"),
+        }
+    }
+}
+
 /// Read the reexec status file and collect the names of `.device`
 /// units that were in `Started` state before the re-exec.  Used by
 /// `rebuild_device_units_from_udev_db` to preserve `plugged` state
