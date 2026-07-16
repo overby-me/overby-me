@@ -467,6 +467,9 @@ const EN_JSON: &str = r#"{
         "noRosterRows": "No rows with an email found in the file",
         "copyClaimLink": "Copy claim link",
         "claimLinkCopied": "Claim link copied — send it to this person",
+        "resendInvitation": "Resend invitation",
+        "emailSubject": "Your invitation",
+        "emailBody": "Hi,\n\nYou have been invited. Accept it here:\n{{link}}\n\nSee you there!",
         "claimedOk": "Invitation claimed",
         "claimErr": "Could not claim this invitation"
     },
@@ -913,6 +916,9 @@ const DA_JSON: &str = r#"{
         "noRosterRows": "Ingen rækker med en email fundet i filen",
         "copyClaimLink": "Kopiér tilmeldingslink",
         "claimLinkCopied": "Tilmeldingslink kopieret — send det til personen",
+        "resendInvitation": "Send invitation igen",
+        "emailSubject": "Din invitation",
+        "emailBody": "Hej,\n\nDu er blevet inviteret. Tilmeld dig her:\n{{link}}\n\nVi ses!",
         "claimedOk": "Invitation tilmeldt",
         "claimErr": "Kunne ikke tilmelde denne invitation"
     },

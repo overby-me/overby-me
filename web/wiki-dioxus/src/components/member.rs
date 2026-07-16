@@ -668,6 +668,43 @@ fn MemberTableRow(
                                 span { class: "material-icons", "person_add" }
                             }
                         }
+                        // Resend a pending invitation: compose a ready-to-send email
+                        // (subject + body carrying a fresh claim link) to the invitee.
+                        // This backend sends no mail, so "resend" hands the owner the
+                        // message to send themselves. Only for not-yet-accepted rows
+                        // that carry an email address.
+                        if !member.accepted && member.email.is_some() {
+                            button {
+                                class: "btn-icon",
+                                title: "{t(\"invite.resendInvitation\")}",
+                                onclick: {
+                                    let mid = mid.clone();
+                                    let email = member.email.clone().unwrap_or_default();
+                                    move |_| {
+                                        let mid = mid.clone();
+                                        let email = email.clone();
+                                        let token = session.read().access_token.clone();
+                                        spawn(async move {
+                                            let Some(token) = token else { return };
+                                            match crate::backend_api::member_claim_link(&token, &mid).await {
+                                                Ok(ct) => {
+                                                    let origin = web_sys::window()
+                                                        .and_then(|w| w.location().origin().ok())
+                                                        .unwrap_or_default();
+                                                    let link = format!("{origin}/?claim={ct}");
+                                                    let subject = t("invite.emailSubject");
+                                                    let body = t_with("invite.emailBody", &[("link", &link)]);
+                                                    open_mailto(&email, &subject, &body);
+                                                    show_snackbar(&t("invite.sent"));
+                                                }
+                                                Err(_) => show_snackbar(&t("error.somethingWentWrong")),
+                                            }
+                                        });
+                                    }
+                                },
+                                span { class: "material-icons", "forward_to_inbox" }
+                            }
+                        }
                         // Promote / demote owner (confirmed via a dialog).
                         button {
                             class: "btn-icon",
@@ -753,6 +790,29 @@ fn MemberTableRow(
                 }
             }
         }
+    }
+}
+
+/// Open the user's mail client with a pre-composed message (an `<a mailto:>`
+/// clicked, so the SPA never navigates). Used to "resend" a pending invitation as
+/// a ready-to-send email: this interim backend sends no mail itself, so the owner
+/// gets a composed invite (with the claim link) to send from their own account.
+fn open_mailto(to: &str, subject: &str, body: &str) {
+    use wasm_bindgen::JsCast;
+    let enc = |s: &str| String::from(&js_sys::encode_uri_component(s));
+    let href = format!("mailto:{to}?subject={}&body={}", enc(subject), enc(body));
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    let Ok(el) = document.create_element("a") else {
+        return;
+    };
+    let _ = el.set_attribute("href", &href);
+    if let Ok(anchor) = el.dyn_into::<web_sys::HtmlElement>() {
+        anchor.click();
     }
 }
 
