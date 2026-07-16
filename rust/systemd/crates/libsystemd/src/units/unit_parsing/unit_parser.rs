@@ -168,12 +168,20 @@ fn parse_environment(raw_line: &str) -> Result<EnvVars, ParsingErrorReason> {
 /// - `/var/log` → `var-log.mount`
 #[allow(dead_code)]
 pub(crate) fn path_to_mount_unit_name(path: &str) -> String {
-    let trimmed = path.trim_matches('/');
-    if trimmed.is_empty() {
-        "-.mount".to_owned()
+    // Use systemd's path escaping (`/` → `-`, `-` → `\x2d`, leading `.` →
+    // `\x2e`, etc.), not a naive `/`→`-` replace. Otherwise a path with a `-` in
+    // a component — e.g. `/sysroot/nix/.rw-store` — produces
+    // `sysroot-nix-.rw-store.mount` instead of the real unit name
+    // `sysroot-nix-.rw\x2dstore.mount`, so RequiresMountsFor= deps (and the
+    // native fstab mount units) reference a nonexistent unit and are ignored —
+    // which let rw-sysroot-nix-store.service's mkdir run before the rw-store was
+    // mounted, breaking the /nix/store overlay in the initrd.
+    let abs = if path.starts_with('/') {
+        path.to_owned()
     } else {
-        format!("{}.mount", trimmed.replace('/', "-"))
-    }
+        format!("/{path}")
+    };
+    format!("{}.mount", crate::unit_name::unit_name_path_escape(&abs))
 }
 
 /// Return mount unit names for every prefix of the given absolute path,
@@ -187,13 +195,15 @@ pub(crate) fn mount_units_for_path(path: &str) -> Vec<String> {
     if trimmed.is_empty() {
         return units;
     }
-    let mut accumulated = String::new();
+    // Build each path prefix and escape it into the real mount unit name (so
+    // `/sysroot/nix/.rw-store/upper` yields the actual
+    // `sysroot-nix-.rw\x2dstore.mount` for the covering rw-store mount, which
+    // this unit then Requires=/After=).
+    let mut prefix = String::new();
     for component in trimmed.split('/') {
-        if !accumulated.is_empty() {
-            accumulated.push('-');
-        }
-        accumulated.push_str(component);
-        let name = format!("{accumulated}.mount");
+        prefix.push('/');
+        prefix.push_str(component);
+        let name = path_to_mount_unit_name(&prefix);
         if !units.contains(&name) {
             units.push(name);
         }
