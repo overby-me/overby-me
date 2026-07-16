@@ -372,6 +372,12 @@ fn parse_root_from_cmdline() -> Option<String> {
             if v.is_empty() {
                 return None;
             }
+            // `root=fstab` / `root=gpt-auto` are not devices: they tell the
+            // initrd to take the root mount from /etc/fstab or gpt-auto-generator
+            // instead. Don't synthesize a bogus sysroot.mount for them.
+            if v == "fstab" || v == "gpt-auto" {
+                return None;
+            }
             // Accept raw paths, LABEL=, UUID=, PARTUUID=, PARTLABEL=.
             if let Some(s) = v.strip_prefix("LABEL=") {
                 return Some(format!("/dev/disk/by-label/{s}"));
@@ -615,7 +621,13 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     // the initrd target is what `initrd-switch-root` waits on.
     let is_sysroot_prefixed =
         effective_where == "/sysroot" || effective_where.starts_with("/sysroot/");
-    let target_fs = if in_initrd && is_sysroot_prefixed {
+    let target_fs = if in_initrd && effective_where == "/sysroot" {
+        // The real root mount itself gates the whole initrd → switch-root
+        // sequence: initrd-parse-etc.service Requires initrd-root-fs.target,
+        // which must pull in sysroot.mount. Children (/sysroot/usr, /sysroot/
+        // nix/store, …) hang off initrd-fs.target instead.
+        "initrd-root-fs.target"
+    } else if in_initrd && is_sysroot_prefixed {
         "initrd-fs.target"
     } else if is_network_fs(&entry.fstype) || has_opt(&systemd_opts, "_netdev") {
         "remote-fs.target"
