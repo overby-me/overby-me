@@ -31,6 +31,12 @@ const SERVE_PORT = 8134
 
 def wd-url [] { $"http://127.0.0.1:($WD_PORT)" }
 def base-url [] { $"http://127.0.0.1:($SERVE_PORT)" }
+# The Hasura GraphQL endpoint the setup/teardown helpers talk to. Env-overridable
+# (WIKI_GRAPHQL_URL) so the suite can point at a local or staging backend, matching
+# the app's own compile-time override in src/nhost.rs.
+def gql-url [] {
+    $env.WIKI_GRAPHQL_URL? | default "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
+}
 
 # ── Logging ────────────────────────────────────────────────────────────────
 
@@ -607,7 +613,7 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # be first in the account (e.g. `/test`), and it tears the fixture down at the
     # end. If the setup fails (e.g. Servo XHR quirks), fall back to discovering an
     # existing populated context so the run still exercises the in-context views.
-    let GQL = "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
+    let GQL = (gql-url)
     # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
     let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
     # Per-context permission template (mirrors graphql::context_permission_objects),
@@ -1552,7 +1558,7 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
     if (servo-skip "poll/vote/comment write-flow") {
         return { passed: $p, failed: $fl }
     }
-    let GQL = "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
+    let GQL = (gql-url)
     # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
     let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
     let t = (date now | format date '%Y%m%d%H%M%S')
@@ -1812,7 +1818,7 @@ def test-create-context [session_id: string, passed: int, failed: int]: nothing 
     if (servo-skip "create-group-from-home") {
         return { passed: $p, failed: $fl }
     }
-    let GQL = "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
+    let GQL = (gql-url)
     let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
     let gname = $"E2E Group (date now | format date '%Y%m%d%H%M%S')"
 

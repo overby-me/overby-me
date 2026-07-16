@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::graphql::{self};
 use crate::i18n::{t, t_with};
-use crate::model::{MemberFields, MembersSetInput, NodeWithChildren};
+use crate::model::{self, MemberFields, MembersSetInput, NodeWithChildren};
 use crate::route::Route;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
@@ -31,7 +31,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let nudge_token = session.read().access_token.clone();
     let atproto_linked = crate::use_data_resource!(|(nudge_token)| async move {
         match nudge_token {
-            Some(t) => crate::nhost::atproto_status(&t).await.linked,
+            Some(t) => crate::backend_api::atproto_status(&t).await.linked,
             None => true,
         }
     });
@@ -47,7 +47,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let page = use_signal(|| 0usize);
 
     let member_filter = {
-        let mut mf = graphql::MemberPageFilter {
+        let mut mf = model::MemberPageFilter {
             search: search.read().clone(),
             ..Default::default()
         };
@@ -95,7 +95,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let mut owner_target = use_signal(|| Option::<(String, bool, String)>::None);
     // Invite-by-name autocomplete: matching users, and a monotonic request id so
     // out-of-order search responses don't clobber a newer one.
-    let mut user_matches = use_signal(Vec::<graphql::Author>::new);
+    let mut user_matches = use_signal(Vec::<model::Author>::new);
     let mut search_seq = use_signal(|| 0u32);
 
     let save_edit = move |_| {
@@ -181,7 +181,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                                 let (all, _) = graphql::query_members_page(
                                                     token.as_deref(),
                                                     &export_id,
-                                                    &graphql::MemberPageFilter::default(),
+                                                    &model::MemberPageFilter::default(),
                                                     100_000,
                                                     0,
                                                 )
@@ -375,7 +375,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                                     return;
                                                 };
                                                 let roster: Vec<(String, String)> =
-                                                    crate::nhost::parse_roster(token.as_deref(), bytes.to_vec())
+                                                    crate::backend_api::parse_roster(token.as_deref(), bytes.to_vec())
                                                         .await;
                                                 if roster.is_empty() {
                                                     show_snackbar(&t("invite.noRosterRows"));
@@ -649,7 +649,7 @@ fn MemberTableRow(
                                         let token = session.read().access_token.clone();
                                         spawn(async move {
                                             let Some(token) = token else { return };
-                                            match crate::nhost::member_claim_link(&token, &mid).await {
+                                            match crate::backend_api::member_claim_link(&token, &mid).await {
                                                 Ok(ct) => {
                                                     let origin = web_sys::window()
                                                         .and_then(|w| w.location().origin().ok())

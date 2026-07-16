@@ -121,10 +121,10 @@ fn node_takes_authors(mime_id: Option<&str>) -> bool {
 
 /// Append an author (deduped) and clear the input + suggestions.
 fn add_author(
-    mut authors: Signal<Vec<graphql::Author>>,
+    mut authors: Signal<Vec<model::Author>>,
     mut input: Signal<String>,
-    mut suggestions: Signal<Vec<graphql::Author>>,
-    author: graphql::Author,
+    mut suggestions: Signal<Vec<model::Author>>,
+    author: model::Author,
 ) {
     let exists = authors
         .read()
@@ -141,11 +141,11 @@ fn add_author(
 /// free-text author with Enter), shown as removable chips. Mirrors the React
 /// `AuthorTextField`; the list is persisted as the node's members on save.
 #[component]
-fn AuthorField(authors: Signal<Vec<graphql::Author>>) -> Element {
+fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
     let session = use_session();
     let mut authors = authors;
     let mut input = use_signal(String::new);
-    let mut suggestions = use_signal(Vec::<graphql::Author>::new);
+    let mut suggestions = use_signal(Vec::<model::Author>::new);
     // Monotonic id so out-of-order search responses don't clobber newer ones.
     let mut seq = use_signal(|| 0u32);
 
@@ -202,7 +202,7 @@ fn AuthorField(authors: Signal<Vec<graphql::Author>>) -> Element {
                         if evt.key().to_string() == "Enter" {
                             evt.prevent_default();
                             let name = input.read().trim().to_string();
-                            add_author(authors, input, suggestions, graphql::Author { name, node_id: None, avatar_url: String::new(), user_id: None });
+                            add_author(authors, input, suggestions, model::Author { name, node_id: None, avatar_url: String::new(), user_id: None });
                         }
                     },
                 }
@@ -260,7 +260,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
         node.members
             .iter()
             .filter(|m| !m.hidden)
-            .map(|m| graphql::Author {
+            .map(|m| model::Author {
                 name: m.label(),
                 node_id: m.node_id.as_ref().map(|u| u.0.clone()),
                 avatar_url: m

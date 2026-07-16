@@ -203,7 +203,7 @@ pub async fn subscribe_push(token: &str) -> Result<(), String> {
     let p256dh = reflect_str(&keys, "p256dh")?;
     let auth = reflect_str(&keys, "auth")?;
 
-    crate::nhost::push_subscribe(token, &endpoint, &p256dh, &auth).await
+    crate::backend_api::push_subscribe(token, &endpoint, &p256dh, &auth).await
 }
 
 /// Remove this browser's push subscription (both locally and at the backend).
@@ -222,7 +222,7 @@ pub async fn unsubscribe_push(token: &str) -> Result<(), String> {
     if let Ok(p) = sub.unsubscribe() {
         let _ = wasm_bindgen_futures::JsFuture::from(p).await;
     }
-    crate::nhost::push_unsubscribe(token, &endpoint).await
+    crate::backend_api::push_unsubscribe(token, &endpoint).await
 }
 
 /// Show a native notification, if the user granted permission.

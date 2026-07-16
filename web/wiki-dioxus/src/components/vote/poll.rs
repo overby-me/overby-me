@@ -209,7 +209,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
             if av_secret {
                 // Anonymous votes have no owner_id, so ask the backend's has-voted marker.
                 match &av_token {
-                    Some(t) => crate::nhost::vote_status(t, &av_poll).await,
+                    Some(t) => crate::backend_api::vote_status(t, &av_poll).await,
                     None => false,
                 }
             } else {
@@ -389,7 +389,8 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                 let result = if poll_secret {
                     match token.as_deref() {
                         Some(t) => {
-                            crate::nhost::vote_cast_secret(t, &poll, ctx.as_deref(), &chosen).await
+                            crate::backend_api::vote_cast_secret(t, &poll, ctx.as_deref(), &chosen)
+                                .await
                         }
                         None => Err("not signed in".to_string()),
                     }
@@ -811,7 +812,7 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
                                     &options,
                                     mn,
                                     mx,
-                                    graphql::BallotRules {
+                                    model::BallotRules {
                                         hide_tally: hidden,
                                         secret,
                                     },
@@ -835,7 +836,7 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
                                             };
                                             let link = format!("/{}", poll_path.join("/"));
                                             spawn(async move {
-                                                let _ = crate::nhost::push_notify(
+                                                let _ = crate::backend_api::push_notify(
                                                     &tok, &ctx, &title, &body, &link,
                                                 )
                                                 .await;

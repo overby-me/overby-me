@@ -566,7 +566,7 @@ fn CommentComposer(
                         } else {
                             author.clone()
                         };
-                        let _ = crate::nhost::push_reply(
+                        let _ = crate::backend_api::push_reply(
                             tok,
                             &parent_id,
                             &t("vote.replyNotifyTitle"),

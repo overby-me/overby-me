@@ -248,9 +248,66 @@ pub struct PollSummaryFields {
     pub mutable: bool,
 }
 
-// NOTE: `Author`, `Crumb` and `BallotRules` are already plain cynic-free serde
-// structs and stay in `graphql.rs` (the plan's existing precedent); they are not
-// part of this seam because they never carried a cynic derive.
+// --- Plain component-facing types (moved from graphql.rs: they never carried a
+// cynic derive, but graphql.rs is the throwaway mapping layer deleted at cutover,
+// and these are domain types components consume, so they live here). ---
+
+/// An author option: a group/user (carrying its node id) or a free-text name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Author {
+    pub name: String,
+    pub node_id: Option<String>,
+    /// The user's avatar URL (empty for groups / when none). Lets the invite
+    /// autocomplete show the same Bluesky/gravatar picture used elsewhere.
+    pub avatar_url: String,
+    /// The user's id when this author is a person (None for groups / free text),
+    /// so editor author chips can open the identity popover / profile.
+    pub user_id: Option<String>,
+}
+
+/// A resolved breadcrumb segment: its display name, mime, and (for policy /
+/// change nodes) its 0-based ordinal among same-type siblings, so the crumb
+/// avatar can show the same letter/number label as elsewhere.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Crumb {
+    pub name: String,
+    pub mime_id: Option<String>,
+    pub ordinal: Option<usize>,
+    /// A file crumb's content `type`, so it shows a format-specific icon.
+    pub data: Option<Jsonb>,
+}
+
+/// How many leading path segments belong to the current node's context: the
+/// depth of the deepest group/event in the crumbs (the node's `contextId` in the
+/// React app). 0 means the path has no context (the groups/events home applies).
+pub fn deepest_context_depth(crumbs: &[Crumb]) -> usize {
+    crumbs
+        .iter()
+        .rposition(|c| matches!(c.mime_id.as_deref(), Some("wiki/group" | "wiki/event")))
+        .map(|i| i + 1)
+        .unwrap_or(0)
+}
+
+/// The two independent visibility choices for a new poll's ballot.
+#[derive(Clone, Copy, Default)]
+pub struct BallotRules {
+    /// Hide the running tally from non-owners while the poll is open.
+    pub hide_tally: bool,
+    /// Anonymous (secret) ballot: casts route through the backend with no owner_id.
+    pub secret: bool,
+}
+
+/// A server-side page filter for a node's members: each `Option<bool>` narrows the
+/// query when `Some`, plus a free-text `search` matched case-insensitively against
+/// name or email. Plain data so the UI never has to touch GraphQL.
+#[derive(Default, Clone, PartialEq)]
+pub struct MemberPageFilter {
+    pub owner: Option<bool>,
+    pub active: Option<bool>,
+    pub accepted: Option<bool>,
+    pub hidden: Option<bool>,
+    pub search: String,
+}
 
 // --- Write-side inputs (mirrors of the GraphQL `*_set_input` / `*_insert_input`
 // objects; `graphql.rs` maps these to its cynic input types). Unset `None`

@@ -2,6 +2,7 @@ use cynic::QueryBuilder;
 use serde::{Deserialize, Serialize};
 
 use crate::model;
+use crate::model::{Author, BallotRules, Crumb, MemberPageFilter};
 use crate::nhost::graphql_url;
 
 mod schema {
@@ -1116,15 +1117,6 @@ pub async fn set_screen_comments(
     Ok(result.insert_relation.is_some())
 }
 
-/// The two independent visibility choices for a new poll's ballot.
-#[derive(Clone, Copy, Default)]
-pub struct BallotRules {
-    /// Hide the running tally from non-owners while the poll is open.
-    pub hide_tally: bool,
-    /// Anonymous (secret) ballot: casts route through the backend with no owner_id.
-    pub secret: bool,
-}
-
 /// Open a poll on `parent_id` (a policy/change/position): close any prior active
 /// poll, insert a `vote/poll` node with the ballot config, and set the context's
 /// `active` relation to it. Mirrors React's PollDialog.
@@ -1353,18 +1345,6 @@ pub async fn invite_members(
     Ok(r.insert_members
         .map(|m| m.affected_rows.max(0) as usize)
         .unwrap_or(0))
-}
-
-/// A server-side page filter for a node's members: each `Option<bool>` narrows the
-/// query when `Some`, plus a free-text `search` matched case-insensitively against
-/// name or email. Plain data so the UI never has to touch GraphQL.
-#[derive(Default, Clone, PartialEq)]
-pub struct MemberPageFilter {
-    pub owner: Option<bool>,
-    pub active: Option<bool>,
-    pub accepted: Option<bool>,
-    pub hidden: Option<bool>,
-    pub search: String,
 }
 
 /// Fetch one page of a node's members from Hasura with server-side filtering,
@@ -1968,29 +1948,6 @@ pub async fn resolve_path(
     }
 
     Ok(None)
-}
-
-/// A resolved breadcrumb segment: its display name, mime, and (for policy /
-/// change nodes) its 0-based ordinal among same-type siblings, so the crumb
-/// avatar can show the same letter/number label as elsewhere.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Crumb {
-    pub name: String,
-    pub mime_id: Option<String>,
-    pub ordinal: Option<usize>,
-    // A file crumb's content `type`, so it shows a format-specific icon.
-    pub data: Option<model::Jsonb>,
-}
-
-/// How many leading path segments belong to the current node's context: the
-/// depth of the deepest group/event in the crumbs (the node's `contextId` in the
-/// React app). 0 means the path has no context (the groups/events home applies).
-pub fn deepest_context_depth(crumbs: &[Crumb]) -> usize {
-    crumbs
-        .iter()
-        .rposition(|c| matches!(c.mime_id.as_deref(), Some("wiki/group" | "wiki/event")))
-        .map(|i| i + 1)
-        .unwrap_or(0)
 }
 
 /// Resolve each path segment to its `(name, mime_id)`, walking from the root like
@@ -2911,19 +2868,6 @@ pub async fn query_recent_nodes(
 }
 
 // --- Authors: search + replace a node's members ---
-
-/// An author option: a group/user (carrying its node id) or a free-text name.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Author {
-    pub name: String,
-    pub node_id: Option<String>,
-    /// The user's avatar URL (empty for groups / when none). Lets the invite
-    /// autocomplete show the same Bluesky/gravatar picture used elsewhere.
-    pub avatar_url: String,
-    /// The user's id when this author is a person (None for groups / free text),
-    /// so editor author chips can open the identity popover / profile.
-    pub user_id: Option<String>,
-}
 
 #[derive(cynic::InputObject, Debug, Default)]
 #[cynic(

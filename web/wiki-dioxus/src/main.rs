@@ -1,3 +1,4 @@
+mod backend_api;
 mod components;
 mod density;
 mod export;
@@ -223,7 +224,7 @@ fn App() -> Element {
                 let token = session_sig.read().access_token.clone();
                 spawn(async move {
                     let Some(token) = token else { return };
-                    match nhost::claim_membership(&token, &claim).await {
+                    match backend_api::claim_membership(&token, &claim).await {
                         Ok(context) => {
                             session::bump_data_version();
                             snackbar::show_snackbar(&i18n::t("invite.claimedOk"));

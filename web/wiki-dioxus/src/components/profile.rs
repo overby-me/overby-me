@@ -27,8 +27,8 @@ pub fn ProfileApp() -> Element {
         let token = status_token.clone();
         async move {
             match token {
-                Some(t) => crate::nhost::atproto_status(&t).await,
-                None => crate::nhost::AtprotoLink::default(),
+                Some(t) => crate::backend_api::atproto_status(&t).await,
+                None => crate::backend_api::AtprotoLink::default(),
             }
         }
     });
@@ -46,7 +46,7 @@ pub fn ProfileApp() -> Element {
             // Debounce: while the user keeps typing, this resource re-runs and the
             // pending future is dropped before the request fires.
             gloo_timers::future::TimeoutFuture::new(220).await;
-            crate::nhost::search_bsky_actors(&q).await
+            crate::backend_api::search_bsky_actors(&q).await
         }
     });
 
@@ -156,7 +156,7 @@ pub fn ProfileApp() -> Element {
                             let tok = session.read().access_token.clone();
                             spawn(async move {
                                 let Some(tok) = tok else { return };
-                                if crate::nhost::atproto_unlink(&tok).await {
+                                if crate::backend_api::atproto_unlink(&tok).await {
                                     just_unlinked.set(true);
                                     crate::snackbar::show_snackbar(&t("profile.unlinkedOk"));
                                 } else {
@@ -227,10 +227,7 @@ pub fn ProfileApp() -> Element {
                             let token = session.read().access_token.clone();
                             if let (false, Some(token)) = (handle.is_empty(), token) {
                                 // handle (a domain) and the base64url JWT are URL-safe.
-                                let url = format!(
-                                    "{}/atproto/start?handle={handle}&token={token}",
-                                    crate::nhost::BACKEND_URL
-                                );
+                                let url = crate::backend_api::atproto_start_url(&handle, &token);
                                 if let Some(w) = web_sys::window() {
                                     let _ = w.location().set_href(&url);
                                 }

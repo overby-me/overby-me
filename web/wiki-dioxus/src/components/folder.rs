@@ -100,7 +100,7 @@ pub fn FolderApp(
     let link_token = access_token.clone();
     let bsky_link = crate::use_data_resource!(|(link_token)| async move {
         match link_token {
-            Some(t) => crate::nhost::atproto_status(&t).await.linked,
+            Some(t) => crate::backend_api::atproto_status(&t).await.linked,
             None => false,
         }
     });
@@ -226,7 +226,7 @@ pub fn FolderApp(
                                             let title: String = title.chars().take(200).collect();
                                             let text = format!("{title}\n\n{href}");
                                             crate::snackbar::show_snackbar(&t("content.sharing"));
-                                            match crate::nhost::atproto_post(&token, &text, &href, &title).await {
+                                            match crate::backend_api::atproto_post(&token, &text, &href, &title).await {
                                                 Ok(()) => crate::snackbar::show_snackbar(&t("content.shared")),
                                                 Err(e) if e.contains("no linked") => {
                                                     crate::snackbar::show_snackbar(&t("content.shareNoLink"))

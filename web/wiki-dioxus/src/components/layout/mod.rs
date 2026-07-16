@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::graphql::{self};
 use crate::i18n::t;
-use crate::model::NodeFields;
+use crate::model::{self, NodeFields};
 use crate::route::Route;
 use crate::session::SESSION;
 
@@ -25,9 +25,9 @@ use usermenu::*;
 /// Per-navigation chrome state, resolved once in [`Layout`]: the breadcrumb
 /// crumbs for the current path and the current context depth (how many leading
 /// segments belong to the nearest group/event, per
-/// [`graphql::deepest_context_depth`]). The breadcrumbs, drawer and app rail all
+/// [`model::deepest_context_depth`]). The breadcrumbs, drawer and app rail all
 /// read these so they agree on the context without each re-querying the path.
-pub(super) static NAV_CRUMBS: GlobalSignal<Vec<graphql::Crumb>> = Signal::global(Vec::new);
+pub(super) static NAV_CRUMBS: GlobalSignal<Vec<model::Crumb>> = Signal::global(Vec::new);
 
 pub(super) static CONTEXT_DEPTH: GlobalSignal<usize> = Signal::global(|| 0);
 
@@ -169,7 +169,7 @@ pub fn Layout() -> Element {
             let crumbs = graphql::path_crumbs(token.as_deref(), &segments)
                 .await
                 .unwrap_or_default();
-            *CONTEXT_DEPTH.write() = graphql::deepest_context_depth(&crumbs);
+            *CONTEXT_DEPTH.write() = model::deepest_context_depth(&crumbs);
             // Reflect the current node in the browser tab title.
             let title = match crumbs.last() {
                 Some(c) => format!("{} · RadikalWiki", c.name),
