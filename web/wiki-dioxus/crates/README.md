@@ -22,6 +22,10 @@ workspace when the rewrite starts.
   IMMEDIATE dedup + ballot transaction) on both engines, plus the
   Turso-to-stock-SQLite file-format bridge assertion. Verdict recorded in
   `docs/atproto-stack-decisions.md` (Gate measurement).
+- `oauth-spike`: the mandated thin wrapper over `atrium-oauth`, proving
+  PDS-agnostic server-side login (handle to DID to PDS resolution, PAR, DPoP,
+  PKCE) against independent non-Bluesky PDSes. Its network test is `#[ignore]`
+  (run with `--ignored`); findings in `oauth-spike/FINDINGS.md`.
 
 ## Checks
 

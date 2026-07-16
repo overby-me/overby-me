@@ -61,6 +61,15 @@ the Turso view + tantivy index, the firehose connection, and the WebSocket serve
   (Jetstream has no missed-event backfill); consider self-hosting a Jetstream/tap instance for sovereignty.
 - Rationale: the firehose, not a DB-vendor feature, is the vendor-neutral long-lived sync substrate, which
   is why binding realtime to SurrealDB LIVE queries was rejected.
+- Spike result (2026-07-16, `crates/oauth-spike`): `atrium-oauth` 0.1.7 + `atrium-identity` 0.1.9 behind the
+  mandated one-file wrapper completes the full server-side pre-redirect flow (handle to DID to PDS
+  resolution, protected-resource + auth-server metadata, PAR with a fresh DPoP key and PKCE challenge, then
+  the authorization URL) against INDEPENDENT non-Bluesky PDSes, confirmed live: `bnewbold.net` resolved to
+  `pds.robocracy.org` and `pds.witchcraft.systems` acted as its own auth server, alongside the bsky.social
+  path. The PDS-agnostic identity assumption HOLDS, and the crate supersedes the hand-rolled
+  `backend/src/oauth.rs` / `dpop.rs` / `pkce.rs`. Not yet exercised (needs a browser redirect, proposed with
+  item 16): the interactive token exchange + refresh via `callback`, and durable state/session stores in
+  place of the spike's in-memory ones. Full findings in `crates/oauth-spike/FINDINGS.md`.
 
 ## Signing curves and the repo integrity layer
 
