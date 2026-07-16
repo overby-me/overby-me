@@ -127,6 +127,20 @@ Start with the two things that unblock or invalidate everything else: the blind-
 
 ## Round 2 (2026-07-16)
 
+> ALL 22 round-2 items are COMPLETE (2026-07-16). Owner calls made (unit tokens, per-poll keys,
+> boundary-only lexicons); NSID neutralized to the `com.example.wiki.*` placeholder. The `crates/`
+> workspace holds the ballot-math spec (property-tested), the entity schema (validated on SQLite and
+> Turso), the DAG-CBOR/CID vectors, the Turso kill-9 durability harness, the atrium-oauth PDS-agnostic
+> spike, and the canonical domain-types crate plus the migration extractor with its field-gap report.
+> The member DDL and voting SQL are reconciled; the custody memo, verify-UX paper, onboarding script,
+> extended lexicons, and the live censuses are landed. Remaining owner sign-offs (not blockers, tracked
+> in `atproto-open-decisions.md` Open): the ballot-spec D1 to D8 semantics, the board-custody
+> recommendation, the NSID domain, and running the onboarding walkthrough with real members. The rewrite
+> can now start: stand up the AppView service crate in `crates/` against the reconciled schema, move the
+> transferable backend modules (push, dpop, pkce, statecookie, oauth, util) into the workspace, wire
+> atrium-oauth behind the spike's wrapper, and run the extractor's importer front half against a staging
+> Turso database, repointing the interim app via the item-21 env knobs for the cutover rehearsal.
+
 Round 1 is fully landed: all 10 do-now items are done. Three facts changed the board. The blind-signature spike PASSED (`blind-rsa-signatures`, RFC 9474, pure Rust), which unlocks deferral (a), the executable ballot-math spec. The frontend anti-corruption seam exists (`src/model.rs`), and the domain-model doc now carries SQL on Turso, which together unlock the coupled deferrals (b)+(c)+(d), the canonical types and the migration extractor. The DID audit came back brutal: 0 DIDs linked system-wide, 20516 members of which 83 percent are email-only roster rows, so the migration join is empty and the target member DDL cannot even represent its dominant case. Round 2's theme follows: close the small set of paper decisions that gate everything (weight encoding, lexicon scope, NSID authority, ballot custody), turn the decided E2E-V ballot scheme into executable, property-tested artifacts in a new `crates/` workspace, retire the four remaining load-bearing unknowns by spike (DAG-CBOR/CID, atrium-oauth, Turso durability, member onboarding reality), and graduate the extractor for the stable content/membership half only. Every item below passed adversarial verification; trims from that verification are folded in as the actual scope.
 
 Status: items 1 and 2 are DONE (owner calls made 2026-07-16: UNIT tokens, PER-POLL issuer keys, and
