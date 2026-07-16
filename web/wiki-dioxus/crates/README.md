@@ -26,6 +26,13 @@ workspace when the rewrite starts.
   PDS-agnostic server-side login (handle to DID to PDS resolution, PAR, DPoP,
   PKCE) against independent non-Bluesky PDSes. Its network test is `#[ignore]`
   (run with `--ignored`); findings in `oauth-spike/FINDINGS.md`.
+- `domain-types`: the canonical backend serde types for the content and
+  membership half (user, context, document, post, member, comment). Voting
+  entities excluded until the ballot spec and voting SQL settle.
+- `migration-extractor`: the read-only interim-to-domain-types mapping with a
+  field-gap report. Pure and hermetic (tested on synthetic fixtures; a live
+  dump is an owner-approved separate step). The `extract` binary reads a
+  dumped snapshot and emits fixtures + `report.json`.
 
 ## Checks
 

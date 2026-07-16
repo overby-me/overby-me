@@ -5,4 +5,4 @@
 # statecookie, oauth, util) migrate INTO this workspace at the rewrite.
 [workspace]
 resolver = "2"
-members = ["ballot-spec", "schema", "dagcbor-spike", "durability-harness", "oauth-spike"]
+members = ["ballot-spec", "schema", "dagcbor-spike", "durability-harness", "oauth-spike", "domain-types", "migration-extractor"]
