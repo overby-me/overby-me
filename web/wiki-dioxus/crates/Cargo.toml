@@ -1,0 +1,8 @@
+# The rewrite workspace: crates that BECOME the atproto AppView, kept separate
+# from the throwaway interim manifests (the frontend package is Nix-FOD-pinned
+# and the backend container build must stay minimal, so neither can host new
+# crates without churn). The transferable backend modules (push, dpop, pkce,
+# statecookie, oauth, util) migrate INTO this workspace at the rewrite.
+[workspace]
+resolver = "2"
+members = ["ballot-spec"]

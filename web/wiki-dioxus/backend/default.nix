@@ -17,9 +17,10 @@ let
         ];
       };
       cargoLock.lockFile = ./Cargo.lock;
-      # Unit tests run in the devshell / CI; the package build just produces the
-      # container binary.
-      doCheck = false;
+      # Run the unit tests as part of the package build: there is no separate
+      # CI executor for them (the tangled microVM cannot compile this dep
+      # tree), so the Nix build is where they actually run.
+      doCheck = true;
     };
 in {
   devenvConfigurations.wiki-backend = {

@@ -59,6 +59,12 @@ choices that need a human call.
 
 ## Open (need a call)
 
+- **ballot-spec pinned semantics (D1 to D8)**: the executable ballot spec
+  (`crates/ballot-spec/DECISIONS.md`) pins eight semantics no design doc had decided, notably: delegation
+  chains are transitive; cycles and hops to ineligible DIDs void the delegation (weight stays with the
+  voter); on a token double spend the FIRST board entry stands; an invalid ballot does not burn its token;
+  RSABSSA-SHA384-PSS-Randomized with a 32-byte random nullifier as the token message. Each is enforced by
+  property tests and cheap to change now; they await owner sign-off (or objection) as a batch.
 - **NSID authority domain**: NOT decided (owner, 2026-07-16: no domain picked yet). All lexicons and docs
   use the reserved placeholder `com.example.wiki.*` (RFC 2606 `example.com`, cannot collide, obviously a
   placeholder) so nothing is accidentally minted under a name the org may not keep. Requirements for the
