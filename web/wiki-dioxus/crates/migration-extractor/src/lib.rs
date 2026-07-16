@@ -152,6 +152,9 @@ pub struct Extraction {
     pub documents: Vec<Document>,
     pub members: Vec<Member>,
     pub comments: Vec<Comment>,
+    /// The migratable voting entity: poll metadata. Cast ballots (`vote/vote`) are
+    /// unmigratable and only reported.
+    pub polls: Vec<Poll>,
     pub report: FieldGapReport,
 }
 
@@ -291,11 +294,45 @@ pub fn extract(
                 created_at: n.created_at.clone(),
                 legacy_id: Some(n.id.clone()),
             });
+        } else if mime == "vote/poll" {
+            // The one migratable voting entity: the poll's question/options/state.
+            let obj = n.data.as_ref().and_then(|d| d.as_object());
+            let str_key = |k: &str| {
+                obj.and_then(|m| m.get(k))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            };
+            let bool_key = |k: &str| obj.and_then(|m| m.get(k)).and_then(|v| v.as_bool());
+            let options = obj
+                .and_then(|m| m.get("options"))
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|o| o.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.polls.push(Poll {
+                id: n.id.clone(),
+                context_id: n.context_id.clone().unwrap_or_default(),
+                question: str_key("question").unwrap_or_default(),
+                options,
+                open: bool_key("open").unwrap_or(false),
+                secret: bool_key("secret").unwrap_or(false),
+                created_at: n.created_at.clone(),
+                legacy_id: Some(n.id.clone()),
+            });
         } else if !mime.is_empty() {
-            // Poll/vote/speak nodes are voting/ephemeral (excluded this phase);
-            // anything else is an unknown mime for the report.
             match mime {
-                "vote/poll" | "vote/vote" | "speak/list" | "speak/speak" => {}
+                // A cast ballot is unmigratable: the eligibility/tokens that gave
+                // it weight and anonymity do not survive, so it is reported, never
+                // carried.
+                "vote/vote" => out.report.note_source(
+                    "nodes(vote/vote)",
+                    "historical cast ballot: unmigratable (no eligibility/tokens survive)",
+                ),
+                // Speaker lists/entries are ephemeral projector state, dropped.
+                "speak/list" | "speak/speak" => {}
                 other => out.report.note_mime(other),
             }
         }

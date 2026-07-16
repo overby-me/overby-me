@@ -18,12 +18,13 @@ fn main() {
     let ex = extract(&snap.nodes, &snap.members, &snap.users);
 
     eprintln!(
-        "extracted: {} users, {} contexts, {} documents, {} members, {} comments",
+        "extracted: {} users, {} contexts, {} documents, {} members, {} comments, {} polls",
         ex.users.len(),
         ex.contexts.len(),
         ex.documents.len(),
         ex.members.len(),
-        ex.comments.len()
+        ex.comments.len(),
+        ex.polls.len()
     );
     eprintln!(
         "field-gap report: {} unmapped source fields, {} unknown mimes, {} unfilled required",

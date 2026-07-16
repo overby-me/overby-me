@@ -193,6 +193,22 @@ pub struct Comment {
     pub legacy_id: Option<String>,
 }
 
+/// A poll (the question + options + open/secret state). The ONLY voting entity
+/// that migrates: a `vote/poll` node carries reconstructable metadata, whereas a
+/// cast ballot (`vote/vote`) is unmigratable (no eligibility/tokens survive). The
+/// per-poll issuer key is minted fresh at open, not carried, so it is absent here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Poll {
+    pub id: String,
+    pub context_id: String,
+    pub question: String,
+    pub options: Vec<String>,
+    pub open: bool,
+    pub secret: bool,
+    pub created_at: Option<String>,
+    pub legacy_id: Option<String>,
+}
+
 /// An emoji reaction to a content item, addressed by the subject's at-uri.
 /// Net-new (no interim source); one per `(subject_uri, reactor_did, emoji)`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

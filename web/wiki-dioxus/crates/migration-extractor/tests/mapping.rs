@@ -27,6 +27,38 @@ fn member(id: &str, parent: &str, node_id: Option<&str>, email: Option<&str>) ->
 }
 
 #[test]
+fn poll_extracts_and_cast_ballot_is_reported() {
+    let nodes = vec![
+        node(
+            "p1",
+            "vote/poll",
+            json!({"question": "Farve?", "options": ["Rod", "Gron"], "open": true, "secret": false}),
+        ),
+        node("v1", "vote/vote", json!({})),
+    ];
+    let ex = extract(&nodes, &[], &[]);
+    assert_eq!(
+        ex.polls.len(),
+        1,
+        "the poll is the one migratable voting entity"
+    );
+    let poll = &ex.polls[0];
+    assert_eq!(poll.question, "Farve?");
+    assert_eq!(poll.options, vec!["Rod".to_string(), "Gron".to_string()]);
+    assert!(poll.open);
+    assert!(!poll.secret);
+    assert_eq!(poll.context_id, "ctx1");
+    // The cast ballot is reported as unmigratable, not extracted.
+    assert!(
+        ex.report
+            .unmapped_source
+            .keys()
+            .any(|k| k.contains("vote/vote")),
+        "the cast ballot is reported unmigratable"
+    );
+}
+
+#[test]
 fn context_and_roster_member_map() {
     let nodes = vec![
         serde_json::from_value::<InterimNode>(json!({
