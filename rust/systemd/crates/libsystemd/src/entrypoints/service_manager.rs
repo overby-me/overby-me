@@ -73,7 +73,15 @@ pub fn run_service_manager() {
 
     #[cfg(feature = "cgroups")]
     {
-        platform::cgroups::move_to_own_cgroup(&std::path::PathBuf::from("/sys/fs/cgroup")).unwrap();
+        // Non-fatal: PID 1 must not die if the cgroup move fails (e.g. the
+        // cgroup2 hierarchy could not be mounted). mount_api_filesystems()
+        // mounts /sys/fs/cgroup during pid1_specific_setup, so this normally
+        // succeeds.
+        if let Err(e) =
+            platform::cgroups::move_to_own_cgroup(&std::path::PathBuf::from("/sys/fs/cgroup"))
+        {
+            log::warn!("could not move to own cgroup: {e}");
+        }
     }
 
     // TODO make configurable
@@ -266,11 +274,85 @@ fn move_to_new_session() -> bool {
     }
 }
 
+/// Mount the core API filesystems the way upstream systemd's `mount_setup()`
+/// does, so rust-systemd works when the kernel execs it as PID 1 in an
+/// otherwise-bare environment — notably systemd-in-initrd, where nothing has
+/// mounted `/proc`, `/sys`, `/dev`, `/run` or the cgroup hierarchy yet.
+///
+/// Idempotent: each mount is skipped if something is already mounted there
+/// (`EBUSY`), so this is a no-op on a normal boot where stage-1 already set
+/// these up, and any other failure is logged rather than fatal (PID 1 must not
+/// die). The order matters — `/proc`, `/sys` and `/dev` first, then the mounts
+/// that live under them.
+#[cfg(target_os = "linux")]
+fn mount_api_filesystems() {
+    use nix::mount::{MsFlags, mount};
+
+    let nsdev = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
+    // (source, target, fstype, flags, data)
+    let table: &[(&str, &str, &str, MsFlags, Option<&str>)] = &[
+        ("proc", "/proc", "proc", nsdev, None),
+        ("sysfs", "/sys", "sysfs", nsdev, None),
+        (
+            "devtmpfs",
+            "/dev",
+            "devtmpfs",
+            MsFlags::MS_NOSUID,
+            Some("mode=755"),
+        ),
+        (
+            "tmpfs",
+            "/run",
+            "tmpfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+            Some("mode=755"),
+        ),
+        (
+            "devpts",
+            "/dev/pts",
+            "devpts",
+            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
+            Some("mode=620,gid=5"),
+        ),
+        (
+            "tmpfs",
+            "/dev/shm",
+            "tmpfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+            Some("mode=1777"),
+        ),
+        (
+            "cgroup2",
+            "/sys/fs/cgroup",
+            "cgroup2",
+            nsdev,
+            Some("nsdelegate"),
+        ),
+    ];
+
+    for (source, target, fstype, flags, data) in table {
+        // Create the mount point. Entries under /dev and /sys come after their
+        // parent in the table, so the parent is mounted by the time we get here.
+        let _ = std::fs::create_dir_all(target);
+        match mount(Some(*source), *target, Some(*fstype), *flags, *data) {
+            Ok(()) => {}
+            Err(nix::errno::Errno::EBUSY) => {} // already mounted — fine
+            Err(e) => log::warn!("mount_api_filesystems: {target} ({fstype}): {e}"),
+        }
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn pid1_specific_setup() {
     if nix::unistd::getpid().as_raw() != 1 {
         return;
     }
+
+    // Ensure the API filesystems are mounted before we touch /dev/console,
+    // /proc, /sys or the cgroup tree below. On a normal boot stage-1 already
+    // mounted them (this is then a no-op); in the initrd we are the first init
+    // and must do it ourselves, like upstream systemd.
+    mount_api_filesystems();
 
     // When running as PID 1, the inherited stdin/stdout/stderr may be broken
     // pipes (e.g. the NixOS stage-2 init script redirects stdout through a
