@@ -164,6 +164,52 @@ impl PersistentBoard {
         Ok(position)
     }
 
+    /// Restore a replicated entry at its ORIGINAL board position. Used by
+    /// rebuild-from-replica (`crate::replica`): the entry is an already-verified,
+    /// already-committed cast shipped from a trusted replica of THIS board, so
+    /// restoration re-materializes the dedup + body rows WITHOUT re-checking the
+    /// signature or ballot validity (those were checked when it was first cast).
+    /// The atomic dedup+append shape is the same as `cast`, so `UNIQUE(token)`
+    /// still rejects a duplicate (an idempotent re-run of a rebuild is safe).
+    pub async fn restore_entry(
+        &self,
+        position: u64,
+        token: &[u8],
+        body: &[u8],
+    ) -> Result<(), BoardError> {
+        let token = Value::Blob(token.to_vec());
+        self.conn.execute("BEGIN IMMEDIATE", ()).await?;
+        if let Err(e) = self.append_locked(&token, position, body).await {
+            self.conn.execute("ROLLBACK", ()).await.ok();
+            return Err(e);
+        }
+        self.conn.execute("COMMIT", ()).await?;
+        Ok(())
+    }
+
+    /// The board's entries as `(position, token)` in board order (the tally +
+    /// audit read; the body is opaque and not returned here).
+    pub async fn entries(&self) -> Result<Vec<(u64, Vec<u8>)>, BoardError> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT position, token FROM board_nullifier ORDER BY position",
+                (),
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let position = row.get::<i64>(0)? as u64;
+            let token = match row.get_value(1)? {
+                Value::Blob(b) => b,
+                Value::Integer(i) => i.to_string().into_bytes(),
+                _ => Vec::new(),
+            };
+            out.push((position, token));
+        }
+        Ok(out)
+    }
+
     async fn next_position(&self) -> Result<u64, BoardError> {
         let mut rows = self
             .conn

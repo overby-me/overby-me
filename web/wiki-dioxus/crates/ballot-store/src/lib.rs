@@ -13,7 +13,9 @@
 //! already-property-tested D1-D3 rules (overturning one is a code+test change).
 
 pub mod board;
+pub mod replica;
 pub mod roster;
 
 pub use board::{BOARD_DDL, BoardError, PersistentBoard, ReplicationSink};
+pub use replica::{RebuildError, ReplicaLog, rebuild_from_replica};
 pub use roster::{BALLOT_DDL, freeze_at_open};
