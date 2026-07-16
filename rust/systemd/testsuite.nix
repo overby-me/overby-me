@@ -140,7 +140,12 @@ in
               nixStoreMountOpts = lib.concatStringsSep " " (
                 map lib.escapeShellArg config.boot.nixStoreMountOpts
               );
-              inherit (config.system.nixos) distroName;
+              # Mirror the stage-2 module's own `inherit (config.boot) …
+              # stage2Greeting`. Newer nixpkgs replaced the `@distroName@`
+              # placeholder with a precomputed `@stage2Greeting@`, so passing
+              # distroName now makes the strict replaceVarsWith fail ("pattern
+              # @distroName@ doesn't match anything").
+              inherit (config.boot) stage2Greeting;
               useHostResolvConf =
                 config.networking.resolvconf.enable
                 && config.networking.useHostResolvConf;
