@@ -426,6 +426,15 @@ fn execute_generator(path: &Path, output: &GeneratorOutput) -> Result<(), Genera
     // some key variables are set.
     cmd.env("SYSTEMD_LOG_LEVEL", "info");
 
+    // In the initrd, tell generators so — upstream systemd sets this. The
+    // fstab-generator keys its whole initrd behaviour (synthesizing/wiring
+    // sysroot.mount into initrd-root-fs.target, x-initrd.mount handling) on it;
+    // without it the real root is never mounted and the initrd can't switch
+    // root.
+    if crate::config::in_initrd() {
+        cmd.env("SYSTEMD_IN_INITRD", "1");
+    }
+
     // Use /dev/null for stdin; let stdout/stderr pass through for debugging
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
