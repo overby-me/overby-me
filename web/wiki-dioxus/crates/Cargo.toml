@@ -5,4 +5,4 @@
 # statecookie, oauth, util) migrate INTO this workspace at the rewrite.
 [workspace]
 resolver = "2"
-members = ["ballot-spec"]
+members = ["ballot-spec", "schema"]
