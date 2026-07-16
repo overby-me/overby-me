@@ -889,7 +889,7 @@ fn main() {
         "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" => &positional[0],
         // Timer, property, edit, revert, clean commands — pass through
         "list-timers" | "list-sockets" | "list-paths" | "list-jobs" | "set-property" | "edit"
-        | "revert" | "clean" | "bind" => &positional[0],
+        | "revert" | "clean" | "bind" | "switch-root" => &positional[0],
         // log-level, log-target, service-watchdogs — get or set manager properties
         "log-level" | "log-target" | "service-watchdogs" => &positional[0],
         // is-failed with no unit = is-system-running (system state check)
@@ -1469,6 +1469,12 @@ fn main() {
             arr.push(Value::String("--runtime".to_string()));
         }
         Some(Value::Array(arr))
+    } else if method == "switch-root" {
+        // switch-root [NEWROOT [INIT]] — forward the (optional) args to PID 1,
+        // which performs the mount moves + chroot + exec of the new init.
+        Some(Value::Array(
+            positional[1..].iter().cloned().map(Value::String).collect(),
+        ))
     } else if method == "revert" {
         // revert <unit>
         if positional.len() < 2 {

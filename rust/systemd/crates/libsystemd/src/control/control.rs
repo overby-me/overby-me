@@ -176,6 +176,10 @@ pub enum Command {
     StartTransient(TransientUnitParams),
     /// `daemon-reexec` — re-execute the service manager binary in-place.
     DaemonReexec,
+    /// `switch-root NEWROOT [INIT]` — move the API filesystems into NEWROOT,
+    /// make it `/`, and exec the new init there. Used to leave the initrd and
+    /// hand off to the real system manager. Args: (new_root, optional init).
+    SwitchRoot(String, Option<String>),
     /// `log-level [LEVEL]` — get or set the service manager log level.
     LogLevel(Option<String>),
     /// `log-target [TARGET]` — get or set the service manager log target.
@@ -596,6 +600,23 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             }
         }
         "daemon-reexec" => Command::DaemonReexec,
+        "switch-root" => {
+            // switch-root NEWROOT [INIT]
+            let args: Vec<String> = match &call.params {
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect(),
+                Some(Value::String(s)) if !s.is_empty() => vec![s.clone()],
+                _ => Vec::new(),
+            };
+            let new_root = args
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "/sysroot".to_string());
+            let init = args.get(1).cloned();
+            Command::SwitchRoot(new_root, init)
+        }
         "log-level" => {
             let level = match &call.params {
                 Some(Value::String(s)) => Some(s.clone()),
@@ -5215,6 +5236,18 @@ pub fn execute_command(
             crate::signal_handler::daemon_reexec(&run_info);
             // If we get here, execve failed — daemon_reexec logs the error.
             return Err("daemon-reexec failed".to_string());
+        }
+        Command::SwitchRoot(new_root, init) => {
+            info!("switch-root: switching to {new_root}");
+            // On success this never returns (the process is replaced by the new
+            // init). If it returns, it failed.
+            match crate::signal_handler::switch_root(&new_root, init.as_deref()) {
+                Ok(()) => return Ok(serde_json::json!(null)),
+                Err(e) => {
+                    log::error!("switch-root failed: {e}");
+                    return Err(e);
+                }
+            }
         }
         Command::LogLevel(level) => {
             match level {

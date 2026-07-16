@@ -386,6 +386,76 @@ pub fn daemon_reexec(run_info: &ArcMutRuntimeInfo) {
     error!("execve failed during daemon-reexec: {err:?}");
 }
 
+/// Leave the initrd: make `new_root` the root filesystem and exec the new init
+/// there, mirroring upstream systemd's `switch_root` (src/shared/switch-root.c)
+/// and the `switch_root(8)` utility.
+///
+/// The API filesystems (`/dev`, `/proc`, `/sys`, `/run`) are moved into
+/// `new_root` so they survive the transition, then `new_root` is moved onto
+/// `/` and we `chroot` into it and `execve` the new init. As PID 1, exec'ing
+/// the new init makes it the real system manager. Only returns (with `Err`) on
+/// failure; on success it never returns.
+pub fn switch_root(new_root: &str, init: Option<&str>) -> Result<(), String> {
+    use nix::mount::{MsFlags, mount};
+    use std::path::Path;
+
+    crate::entrypoints::kmsg(&format!("switch-root: switching to {new_root}"));
+
+    let new_root_path = Path::new(new_root);
+    if !new_root_path.is_dir() {
+        return Err(format!("switch-root: {new_root} is not a directory"));
+    }
+
+    // Resolve the init to exec in the new root (same candidate list systemd
+    // probes when no init is given).
+    let init = init.map(String::from).unwrap_or_else(|| {
+        for cand in ["/sbin/init", "/etc/init", "/bin/init", "/bin/sh"] {
+            if new_root_path.join(cand.trim_start_matches('/')).exists() {
+                return cand.to_string();
+            }
+        }
+        "/sbin/init".to_string()
+    });
+
+    // Move the API filesystems into the new root so they survive the switch.
+    for m in ["/dev", "/proc", "/sys", "/run"] {
+        let target = new_root_path.join(m.trim_start_matches('/'));
+        let _ = std::fs::create_dir_all(&target);
+        if let Err(e) = mount(
+            Some(m),
+            &target,
+            None::<&str>,
+            MsFlags::MS_MOVE,
+            None::<&str>,
+        ) {
+            // Non-fatal: some may not be mounted; log and continue.
+            warn!(
+                "switch-root: could not move {m} -> {}: {e}",
+                target.display()
+            );
+        }
+    }
+
+    // Make new_root the root filesystem: cd into it, move it onto /, chroot.
+    nix::unistd::chdir(new_root_path).map_err(|e| format!("switch-root: chdir {new_root}: {e}"))?;
+    mount(Some("."), "/", None::<&str>, MsFlags::MS_MOVE, None::<&str>)
+        .map_err(|e| format!("switch-root: mount --move . /: {e}"))?;
+    nix::unistd::chroot(".").map_err(|e| format!("switch-root: chroot: {e}"))?;
+    nix::unistd::chdir("/").map_err(|e| format!("switch-root: chdir /: {e}"))?;
+
+    crate::entrypoints::kmsg(&format!("switch-root: exec {init}"));
+
+    // Exec the new init. We are PID 1, so it becomes the real system manager.
+    let c_path = std::ffi::CString::new(init.as_bytes())
+        .map_err(|e| format!("switch-root: invalid init path: {e}"))?;
+    let c_argv = vec![c_path.clone()];
+    let c_envp: Vec<std::ffi::CString> = std::env::vars()
+        .filter_map(|(k, v)| std::ffi::CString::new(format!("{k}={v}")).ok())
+        .collect();
+    let err = nix::unistd::execve(&c_path, &c_argv, &c_envp);
+    Err(format!("switch-root: execve {init} failed: {err:?}"))
+}
+
 /// Serialize the current running-service state to a file.
 ///
 /// Format: one line per running service, `unit_name\tpid\tServiceType\n`.
