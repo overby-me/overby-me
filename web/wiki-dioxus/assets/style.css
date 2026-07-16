@@ -5537,11 +5537,49 @@ a.list-item:hover {
 	left: 0;
 	z-index: 10;
 	display: flex;
-	gap: var(--md-sys-spacing-0-5);
+	flex-direction: column;
+	gap: var(--md-sys-spacing-1);
 	padding: var(--md-sys-spacing-1);
 	border-radius: var(--md-sys-shape-corner-medium);
 	background: var(--md-surface-container-highest);
 	box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+}
+
+.reaction-picker-tabs {
+	display: flex;
+	gap: var(--md-sys-spacing-0-5);
+	padding-bottom: var(--md-sys-spacing-1);
+	border-bottom: 1px solid var(--md-outline-variant);
+}
+
+.reaction-picker-tab {
+	border: none;
+	background: transparent;
+	cursor: pointer;
+	font-size: 1.1rem;
+	line-height: 1;
+	padding: var(--md-sys-spacing-0-5);
+	border-radius: var(--md-sys-shape-corner-small);
+	opacity: 0.65;
+}
+
+.reaction-picker-tab:hover {
+	background: var(--md-surface-container-high);
+	opacity: 1;
+}
+
+.reaction-picker-tab.is-active {
+	background: var(--md-secondary-container);
+	opacity: 1;
+}
+
+.reaction-picker-grid {
+	display: grid;
+	grid-template-columns: repeat(8, 1fr);
+	gap: var(--md-sys-spacing-0-5);
+	max-width: 17rem;
+	max-height: 11rem;
+	overflow-y: auto;
 }
 
 .reaction-picker-item {

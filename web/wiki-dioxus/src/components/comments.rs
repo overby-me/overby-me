@@ -494,8 +494,49 @@ fn CommentThread(
     }
 }
 
-/// The quick-react emoji set shown in the add-reaction popover.
+/// The quick-react emoji set: the first tab of the picker and the default row.
 const QUICK_REACTIONS: &[&str] = &["👍", "❤️", "😂", "🎉", "😮", "😢", "🙏", "🚀"];
+
+/// The full add-reaction picker, grouped into tabs. Kept as a curated set (no
+/// giant Unicode table shipped to the client): a few dozen common reactions
+/// across the categories members actually reach for, with `QUICK_REACTIONS`
+/// first so the common case is one tap.
+const EMOJI_CATEGORIES: &[(&str, &[&str])] = &[
+    ("Quick", QUICK_REACTIONS),
+    (
+        "Smileys",
+        &[
+            "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😊", "🙂", "😉", "😍", "🥰", "😘", "😜",
+            "🤪", "🤔", "🤨", "😐", "😴", "😮", "😯", "🥳", "😎", "🤩", "😢", "😭", "😤", "😠",
+            "🤯", "😱", "🤗", "🤭",
+        ],
+    ),
+    (
+        "Gestures",
+        &[
+            "👍", "👎", "👌", "🤌", "✌️", "🤞", "🤟", "🤙", "👏", "🙌", "🙏", "💪", "👊", "✊",
+            "🤝", "👋", "🫶",
+        ],
+    ),
+    (
+        "Hearts",
+        &[
+            "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔", "💯", "💖", "💕", "💗",
+        ],
+    ),
+    (
+        "Celebration",
+        &[
+            "🎉", "🎊", "🥳", "🎁", "🎈", "✨", "🔥", "🚀", "⭐", "🌟", "💫", "🏆", "🥇", "👑",
+        ],
+    ),
+    (
+        "Symbols",
+        &[
+            "✅", "❌", "⚠️", "❓", "❗", "💡", "📌", "🔔", "👀", "💬", "♻️", "🕊️", "⚖️", "📣",
+        ],
+    ),
+];
 
 /// The emoji stored on a `vote/reaction` node (`data.emoji`).
 fn reaction_emoji(node: &ChildNodeFields) -> String {
@@ -517,7 +558,9 @@ async fn toggle_reaction(
     my_id: Option<String>,
 ) -> Result<(), String> {
     match my_id {
-        Some(id) => graphql::delete_node(token.as_deref(), &id).await.map(|_| ()),
+        Some(id) => graphql::delete_node(token.as_deref(), &id)
+            .await
+            .map(|_| ()),
         None => {
             graphql::insert_reaction(token.as_deref(), &parent_id, context_id.as_deref(), &emoji)
                 .await
@@ -561,8 +604,8 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
         if emoji.is_empty() {
             continue;
         }
-        let mine =
-            current_user_id.is_some() && r.owner_id.as_ref().map(|o| o.0.clone()) == current_user_id;
+        let mine = current_user_id.is_some()
+            && r.owner_id.as_ref().map(|o| o.0.clone()) == current_user_id;
         if let Some(g) = groups.iter_mut().find(|(e, _, _)| *e == emoji) {
             g.1 += 1;
             if mine {
@@ -574,6 +617,7 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
     }
 
     let mut picker_open = use_signal(|| false);
+    let mut picker_cat = use_signal(|| 0usize);
     // Nothing to show and no permission to add: render nothing.
     if groups.is_empty() && !can_react {
         return rsx! {};
@@ -629,42 +673,55 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
                     }
                     if picker_open() {
                         div { class: "reaction-picker",
-                            for e in QUICK_REACTIONS.iter() {
-                                button {
-                                    key: "{e}",
-                                    class: "reaction-picker-item",
-                                    onclick: {
-                                        let emoji = e.to_string();
-                                        let existing = groups
-                                            .iter()
-                                            .find(|(em, _, _)| em == &emoji)
-                                            .and_then(|(_, _, mid)| mid.clone());
-                                        let parent_id = comment_id.clone();
-                                        let context_id = context_id.clone();
-                                        move |_| {
-                                            picker_open.set(false);
-                                            let token = session.read().access_token.clone();
-                                            let (emoji, existing, parent_id, context_id) = (
-                                                emoji.clone(),
-                                                existing.clone(),
-                                                parent_id.clone(),
-                                                context_id.clone(),
-                                            );
-                                            spawn(async move {
-                                                match toggle_reaction(token, parent_id, context_id, emoji, existing).await {
-                                                    Ok(()) => {
-                                                        let mut refresh = refresh;
-                                                        refresh += 1;
+                            div { class: "reaction-picker-tabs",
+                                for (i , (label , _)) in EMOJI_CATEGORIES.iter().enumerate() {
+                                    button {
+                                        key: "{label}",
+                                        class: if picker_cat() == i { "reaction-picker-tab is-active" } else { "reaction-picker-tab" },
+                                        title: "{label}",
+                                        onclick: move |_| picker_cat.set(i),
+                                        span { class: "reaction-picker-tab-emoji", "{EMOJI_CATEGORIES[i].1[0]}" }
+                                    }
+                                }
+                            }
+                            div { class: "reaction-picker-grid",
+                                for e in EMOJI_CATEGORIES[picker_cat().min(EMOJI_CATEGORIES.len() - 1)].1.iter() {
+                                    button {
+                                        key: "{e}",
+                                        class: "reaction-picker-item",
+                                        onclick: {
+                                            let emoji = e.to_string();
+                                            let existing = groups
+                                                .iter()
+                                                .find(|(em, _, _)| em == &emoji)
+                                                .and_then(|(_, _, mid)| mid.clone());
+                                            let parent_id = comment_id.clone();
+                                            let context_id = context_id.clone();
+                                            move |_| {
+                                                picker_open.set(false);
+                                                let token = session.read().access_token.clone();
+                                                let (emoji, existing, parent_id, context_id) = (
+                                                    emoji.clone(),
+                                                    existing.clone(),
+                                                    parent_id.clone(),
+                                                    context_id.clone(),
+                                                );
+                                                spawn(async move {
+                                                    match toggle_reaction(token, parent_id, context_id, emoji, existing).await {
+                                                        Ok(()) => {
+                                                            let mut refresh = refresh;
+                                                            refresh += 1;
+                                                        }
+                                                        Err(e) => {
+                                                            log::error!("reaction failed: {e}");
+                                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                        }
                                                     }
-                                                    Err(e) => {
-                                                        log::error!("reaction failed: {e}");
-                                                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
-                                                    }
-                                                }
-                                            });
-                                        }
-                                    },
-                                    "{e}"
+                                                });
+                                            }
+                                        },
+                                        "{e}"
+                                    }
                                 }
                             }
                         }
