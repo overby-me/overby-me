@@ -168,8 +168,14 @@ pub fn run_generators_to(unit_dirs: &[PathBuf], output: GeneratorOutput) -> Gene
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| generator.display().to_string());
 
-        // Skip built-in generators
-        if is_builtin_generator(&name) {
+        // Skip built-in generators — except run the real systemd-fstab-generator
+        // in the initrd. The native generate_fstab_mount_units only reads
+        // /etc/fstab (empty in the initrd); the initrd's sysroot.mount comes
+        // exclusively from the external binary's SYSTEMD_SYSROOT_FSTAB /
+        // x-initrd.mount / root= handling, which the native path lacks.
+        if is_builtin_generator(&name)
+            && !(name == "systemd-fstab-generator" && crate::config::in_initrd())
+        {
             debug!("generators: skipping built-in generator: {name}");
             skipped += 1;
             continue;

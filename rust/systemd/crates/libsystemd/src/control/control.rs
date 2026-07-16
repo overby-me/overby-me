@@ -2616,10 +2616,11 @@ fn unit_id_from_name(name: &str) -> UnitId {
     }
 }
 
-/// Parse ManagerEnvironment= from system.conf and drop-ins, updating the
-/// manager environment. Called during daemon-reload to pick up changes to
-/// /run/systemd/system.conf or /etc/systemd/system.conf.
-fn parse_manager_environment(run_info: &ArcMutRuntimeInfo) {
+/// Read `ManagerEnvironment=` KEY=VALUE pairs from system.conf and its drop-ins,
+/// in priority order (last wins). Shared by the daemon-reload path (which stores
+/// them in the manager environment table) and the early boot path (which applies
+/// them to PID 1's process environment so generators/services inherit them).
+pub fn read_manager_environment_vars() -> Vec<(String, String)> {
     let mut env_vars: Vec<(String, String)> = Vec::new();
 
     // Read from main system.conf files (in priority order, last wins)
@@ -2672,6 +2673,32 @@ fn parse_manager_environment(run_info: &ArcMutRuntimeInfo) {
             }
         }
     }
+
+    env_vars
+}
+
+/// Apply `ManagerEnvironment=` from system.conf to PID 1's own process
+/// environment. Upstream systemd sets these variables in the manager's
+/// environment block early, before running generators, so tools like the
+/// fstab-generator inherit them (NixOS passes `SYSTEMD_SYSROOT_FSTAB` this way
+/// in the initrd). Existing environment variables are not overwritten.
+pub fn apply_manager_environment_to_process() {
+    for (k, v) in read_manager_environment_vars() {
+        if std::env::var_os(&k).is_none() {
+            // SAFETY: called early during PID 1 startup, before the threads
+            // that read the environment are spawned.
+            unsafe {
+                std::env::set_var(&k, &v);
+            }
+        }
+    }
+}
+
+/// Parse ManagerEnvironment= from system.conf and drop-ins, updating the
+/// manager environment. Called during daemon-reload to pick up changes to
+/// /run/systemd/system.conf or /etc/systemd/system.conf.
+fn parse_manager_environment(run_info: &ArcMutRuntimeInfo) {
+    let env_vars = read_manager_environment_vars();
 
     if !env_vars.is_empty() {
         let ri = run_info.read_poisoned();

@@ -42,6 +42,20 @@ pub fn run_service_manager() {
         unsafe { std::env::set_var("SYSTEMD_IN_INITRD", "1") };
     }
 
+    // Apply ManagerEnvironment= from system.conf to PID 1's own environment,
+    // like upstream systemd, so generators and services inherit it. NixOS's
+    // systemd-initrd passes SYSTEMD_SYSROOT_FSTAB (the real root's fstab) to the
+    // fstab-generator exclusively through this directive; without it the
+    // generator never emits sysroot.mount and the initrd can't mount the real
+    // root. Safe here: still single-threaded this early in PID 1 startup.
+    crate::control::apply_manager_environment_to_process();
+    if let (true, Some(v)) = (in_initrd, std::env::var_os("SYSTEMD_SYSROOT_FSTAB")) {
+        kmsg(&format!(
+            "ManagerEnvironment: SYSTEMD_SYSROOT_FSTAB={}",
+            v.to_string_lossy()
+        ));
+    }
+
     let cli_args = CliArgs::try_parse().unwrap_or_else(|e| {
         unrecoverable_error(e.to_string());
         unreachable!();
