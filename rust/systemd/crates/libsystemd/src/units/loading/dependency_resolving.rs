@@ -32,6 +32,35 @@ pub fn prune_units(
     let mut ids_to_keep = vec![startunit_id];
     crate::units::collect_unit_start_subgraph(&mut ids_to_keep, unit_table);
 
+    // Also keep the full closure of every AllowIsolate=yes target. Such targets
+    // (e.g. initrd-switch-root.target) are never part of the boot target's
+    // subgraph — they are reached only later via `systemctl isolate` — but their
+    // dependency closure must stay loaded AND fully wired here, while the
+    // multi-pass loader still has every unit in the table. Pruning them and
+    // reloading on demand at isolate time loses the dependencies that only the
+    // full load computes: .requires//.wants/ directory dependencies and the
+    // reverse ordering edges from inline Before=/After=. Concretely,
+    // initrd-switch-root.service Requires= initrd-nixos-activation.service via a
+    // .requires/ directory and is ordered after it; that service runs the NixOS
+    // activation that populates /etc in the real root. Losing it lets switch-root
+    // run before /etc exists, so stage-2 PID 1 finds no default.target and dies.
+    let isolate_target_ids: Vec<UnitId> = unit_table
+        .values()
+        .filter(|u| u.common.unit.allow_isolate)
+        .map(|u| u.id.clone())
+        .collect();
+    let mut added_isolate_root = false;
+    for iso_id in isolate_target_ids {
+        if !ids_to_keep.contains(&iso_id) {
+            ids_to_keep.push(iso_id);
+            added_isolate_root = true;
+        }
+    }
+    if added_isolate_root {
+        // Expand the newly-added isolate targets' subgraphs into ids_to_keep.
+        crate::units::collect_unit_start_subgraph(&mut ids_to_keep, unit_table);
+    }
+
     // Also keep services that are socket-activation targets of surviving sockets.
     // These services are not in the initial start subgraph (they start on-demand
     // when a connection arrives on the socket), but they must remain in the unit
