@@ -9,8 +9,20 @@ Done: #1 (authz-predicate consolidation into `auth::is_active_member`/`is_active
 present-tense bug where the notify paths ignored the durable node_id binding), #5 (`statecookie.rs` hardened to
 HKDF-SHA256 + XChaCha20-Poly1305, with a legacy-decrypt fallback so at-rest sessions survive), #6 (blind-sig
 crate spike: `blind-rsa-signatures` / RFC 9474 confirmed pure-Rust and fit for purpose), #7 (public wiki.radikal.* lexicons drafted under lexicons/), #10 (SurrealQL domain-model doc
-converted to SQL on Turso). Remaining: #2 (graphql.rs seam), #3/#4 (DID audit + nudge), #8 (orphan purge),
-#9 (fonts + PWA).
+converted to SQL on Turso), #3 (DID-reachability audit run). Remaining: #2 (graphql.rs seam), #4 (DID link
+nudge), #8 (orphan purge), #9 (fonts + PWA).
+
+### #3 audit result (2026-07-16, live read-only)
+
+- 0 atproto DIDs linked system-wide: the member-to-DID map is EMPTY. The link flow has never been used, so the
+  migration join resolves to nothing today. This makes #4 (the link nudge) the only way to start filling it.
+- 1728 contexts, 20516 members, but only 3508 (17%) have a `node_id` (an account); the other 83% are
+  roster-only email invites who never logged in.
+- 20515 active members, 3507 active + bound; 76 active owners, 0 DID-linked; 0/1728 contexts have any
+  DID-linked member.
+- Migration implication: the big-bang cutover cannot lean on existing DID bindings (there are none), and most
+  "members" are email rows, not accounts, so they migrate as pending invites, not as users. Re-run this near
+  cutover to watch the DID number climb as the nudge takes effect.
 
 ## Do now (prioritized)
 
