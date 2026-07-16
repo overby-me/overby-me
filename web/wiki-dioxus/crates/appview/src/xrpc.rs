@@ -5,6 +5,13 @@
 //! (`document`, `context`, ...) and the frontend seam that consumes them is a
 //! separate, deferred change (nothing here touches the frontend).
 //!
+//! Single-item reads return the entity object directly; LIST reads wrap the
+//! array in a named field (`{ documents: [...] }`, `{ contexts: [...] }`, ...) so
+//! the output has an atproto-expressible object schema (a bare top-level array is
+//! not a valid lexicon `output.schema`) and leaves room for a future cursor. The
+//! method lexicons in `lexicons/com/example/wiki/` are the contract for exactly
+//! these shapes.
+//!
 //! These are the IDENTITY-FREE reads (public content lookups, no auth). The
 //! membership/authz-gated reads and the write procedures wait on the DID-binding
 //! flow (see `store.rs`); this is the buildable-now slice of the serving layer.
@@ -97,7 +104,11 @@ pub async fn list_children(
 ) -> Response {
     let store = crate::Store::new(state.db.clone());
     match store.list_children(&p.parent).await {
-        Ok(docs) => (StatusCode::OK, Json(docs)).into_response(),
+        Ok(docs) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "documents": docs })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("listChildren failed: {e}");
             err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
@@ -109,7 +120,11 @@ pub async fn list_children(
 pub async fn list_contexts(State(state): State<AppState>) -> Response {
     let store = crate::Store::new(state.db.clone());
     match store.list_root_contexts().await {
-        Ok(ctxs) => (StatusCode::OK, Json(ctxs)).into_response(),
+        Ok(ctxs) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "contexts": ctxs })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("listContexts failed: {e}");
             err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
@@ -129,7 +144,11 @@ pub async fn list_recent(State(state): State<AppState>, Query(p): Query<RecentPa
     let limit = p.limit.unwrap_or(20).clamp(1, 200);
     let store = crate::Store::new(state.db.clone());
     match store.list_recent(limit).await {
-        Ok(docs) => (StatusCode::OK, Json(docs)).into_response(),
+        Ok(docs) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "documents": docs })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("listRecent failed: {e}");
             err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
@@ -147,7 +166,11 @@ pub struct SearchParam {
 pub async fn search(State(state): State<AppState>, Query(p): Query<SearchParam>) -> Response {
     let store = crate::Store::new(state.db.clone());
     match store.search_documents(&p.q).await {
-        Ok(docs) => (StatusCode::OK, Json(docs)).into_response(),
+        Ok(docs) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "documents": docs })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("search failed: {e}");
             err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
@@ -165,7 +188,11 @@ pub struct OnParam {
 pub async fn get_comments(State(state): State<AppState>, Query(p): Query<OnParam>) -> Response {
     let store = crate::Store::new(state.db.clone());
     match store.get_comments(&p.on).await {
-        Ok(comments) => (StatusCode::OK, Json(comments)).into_response(),
+        Ok(comments) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "comments": comments })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("getComments failed: {e}");
             err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
@@ -186,7 +213,11 @@ pub async fn get_reactions(
 ) -> Response {
     let store = crate::Store::new(state.db.clone());
     match store.get_reactions(&p.subject).await {
-        Ok(reactions) => (StatusCode::OK, Json(reactions)).into_response(),
+        Ok(reactions) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "reactions": reactions })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("getReactions failed: {e}");
             err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
@@ -487,7 +518,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        let docs = v.as_array().expect("array");
+        let docs = v["documents"].as_array().expect("array");
         assert!(docs.iter().any(|d| d["id"] == "d2"));
 
         let (status, v) = get(
@@ -496,18 +527,24 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert!(v.as_array().unwrap().iter().any(|d| d["id"] == "d1"));
+        assert!(
+            v["documents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["id"] == "d1")
+        );
 
         let (status, v) = get(seeded_router().await, "/xrpc/com.example.wiki.listRecent").await;
         assert_eq!(status, StatusCode::OK);
-        assert!(v.as_array().unwrap().len() >= 2);
+        assert!(v["documents"].as_array().unwrap().len() >= 2);
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn list_contexts_returns_only_roots() {
         let (status, v) = get(seeded_router().await, "/xrpc/com.example.wiki.listContexts").await;
         assert_eq!(status, StatusCode::OK);
-        let ctxs = v.as_array().expect("array");
+        let ctxs = v["contexts"].as_array().expect("array");
         // c1 is a root; c2 has a parent and is excluded.
         assert!(ctxs.iter().any(|c| c["id"] == "c1"));
         assert!(!ctxs.iter().any(|c| c["id"] == "c2"));
@@ -521,7 +558,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        let comments = v.as_array().expect("array");
+        let comments = v["comments"].as_array().expect("array");
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0]["text"], "Nice motion");
         assert_eq!(comments[0]["author"]["did"], "did:plc:alice");
@@ -532,7 +569,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        let reactions = v.as_array().expect("array");
+        let reactions = v["reactions"].as_array().expect("array");
         assert_eq!(reactions.len(), 1);
         assert_eq!(reactions[0]["emoji"], "👍");
         assert_eq!(reactions[0]["reactor_did"], "did:plc:bob");
@@ -597,7 +634,7 @@ mod tests {
             "/xrpc/com.example.wiki.getComments?on=d1",
         )
         .await;
-        let comments = v.as_array().expect("array");
+        let comments = v["comments"].as_array().expect("array");
         // The seed comment plus the new one.
         assert!(comments.iter().any(|c| c["text"] == "Seconded"));
         assert!(
@@ -631,7 +668,7 @@ mod tests {
             &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
         )
         .await;
-        assert_eq!(v.as_array().unwrap().len(), 1);
+        assert_eq!(v["reactions"].as_array().unwrap().len(), 1);
 
         // Remove it.
         let (status, _) = post(
@@ -647,6 +684,6 @@ mod tests {
             &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
         )
         .await;
-        assert_eq!(v.as_array().unwrap().len(), 0);
+        assert_eq!(v["reactions"].as_array().unwrap().len(), 0);
     }
 }

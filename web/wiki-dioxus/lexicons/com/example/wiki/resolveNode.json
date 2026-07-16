@@ -1,0 +1,27 @@
+{
+  "lexicon": 1,
+  "id": "com.example.wiki.resolveNode",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Resolve a slash-separated context slug path (e.g. `group-one/sub`) to a context. Identity-free.",
+      "parameters": {
+        "type": "params",
+        "required": ["path"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "A slash-separated path of context slugs; empty segments are ignored."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": { "type": "ref", "ref": "com.example.wiki.defs#contextView" }
+      },
+      "errors": [
+        { "name": "NotFound", "description": "No node exists at that slug path." }
+      ]
+    }
+  }
+}

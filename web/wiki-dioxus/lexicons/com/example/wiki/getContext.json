@@ -1,0 +1,24 @@
+{
+  "lexicon": 1,
+  "id": "com.example.wiki.getContext",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Fetch a group/event context by id. Identity-free.",
+      "parameters": {
+        "type": "params",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "description": "The context id." }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": { "type": "ref", "ref": "com.example.wiki.defs#contextView" }
+      },
+      "errors": [
+        { "name": "NotFound", "description": "No context has that id." }
+      ]
+    }
+  }
+}

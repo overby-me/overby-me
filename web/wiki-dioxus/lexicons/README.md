@@ -1,11 +1,18 @@
 # com.example.wiki.* lexicons (placeholder NSID)
 
-atproto Lexicon schemas for the PUBLIC subset of the app's data, drafted for the atproto rewrite
-(pre-rewrite plan #7). These define the wire format of records the app publishes to atproto repos so
-other AppViews can read them. They are the federation-boundary contract only; the private,
-org-authoritative half (ballots, roster, delegation, eligibility, internal deliberation) is owned by
-Rust serde types in the backend and never becomes a record. See `docs/atproto-stack-decisions.md`
-(Lexicon-to-atrium codegen pipeline) and `docs/atproto-domain-model.md`.
+atproto Lexicon schemas for the app, drafted for the atproto rewrite (pre-rewrite plan #7). They come
+in two categories:
+
+- **Record lexicons** define the wire format of records the app publishes to atproto repos so other
+  AppViews can read them. They are the federation-boundary contract only; the private,
+  org-authoritative half (ballots, roster, delegation, eligibility, internal deliberation) is owned by
+  Rust serde types in the backend and never becomes a record.
+- **Method lexicons** (`query` / `procedure`) define the AppView's own XRPC API: the read/write
+  methods the AppView serves at `/xrpc/{nsid}` over its canonical DOMAIN entities. These are NOT
+  published records; they are the contract the frontend seam will consume. See the Methods section.
+
+See `docs/atproto-stack-decisions.md` (Lexicon-to-atrium codegen pipeline) and
+`docs/atproto-domain-model.md`.
 
 ## Scope
 
@@ -32,6 +39,30 @@ projector/speaker) deliberately have NO lexicon. The ballot is SPLIT, not simply
 org-side ballot row (eligibility, token issuance, resolved weights) is always-private and has no
 lexicon, while the public ANONYMIZED board entry (token + choices, no voter identity) is exactly
 what `com.example.wiki.ballotEntry` describes.
+
+## Methods (the AppView's XRPC serving layer)
+
+These describe the AppView's own read/write API (`crates/appview/src/xrpc.rs`), served at
+`/xrpc/{nsid}`. They return the AppView's canonical DOMAIN entities (the reconciled internal shapes),
+NOT the published repo records above; `com.example.wiki.defs` holds the shared view objects
+(`documentView`, `contextView`, `commentView`, `reactionView`, `authorView`) they reference. This is
+why a `documentView` exists even though the `document` RECORD is excluded: the served entity shape is
+settled, but its public rich-text record shape is not.
+
+Queries (GET, identity-free public reads):
+
+- `getDocument` / `getContext` return a single entity; `resolveNode` walks a slug path to a context.
+- `listChildren`, `listContexts`, `listRecent`, `search`, `getComments`, `getReactions` return an
+  object wrapping a named array (`{ documents: [...] }`, `{ contexts: [...] }`, ...). Lists are
+  wrapped, never a bare top-level array, because a bare array is not a valid lexicon `output.schema`
+  and the wrapper leaves room for a future `cursor`.
+
+Procedures (POST, authenticated; the caller's DID comes from the request authorization, not the body):
+
+- `createDocument` and `postComment` return `{ id }`; `addReaction` returns `{ id }` (idempotent) and
+  `removeReaction` returns `{ ok: true }` (idempotent toggle-off).
+
+The membership/authz-gated reads and richer write procedures are deferred with the DID-binding flow.
 
 ## NSID
 
