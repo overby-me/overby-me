@@ -307,9 +307,11 @@ dependencies = [
 name = "ballot-spec"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "blind-rsa-signatures",
  "proptest",
  "rand 0.10.2",
+ "serde",
  "sha2 0.11.0",
 ]
 

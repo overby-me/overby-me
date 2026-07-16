@@ -20,6 +20,9 @@ pub use blind_rsa_signatures::{
 use blind_rsa_signatures::{KeyPair, PublicKey, Randomized, SecretKey, Sha384};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// PROVISIONAL board-entry wire encoding (base64url), pending decision D7.
+pub mod provisional;
+
 /// A voter's decentralized identifier. Ordered so rosters iterate
 /// deterministically (proptest shrinking and tally reproducibility).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
