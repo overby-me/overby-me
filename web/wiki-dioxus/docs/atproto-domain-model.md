@@ -41,30 +41,31 @@ lexicon surface is consequently **substantial** (posts, groups, events, …), no
 tiny, and the backend DB is still the source of truth (public items are mirrored
 out as records; see the visibility model below).
 
-## Lexicons as the canonical model (not just the public surface)
+## Lexicon scope: boundary-only (decided 2026-07-16, closes OPEN-1)
 
 atproto earns its place on two counts, independent of how public the app is:
 
-1. **Identity.** The DID is the primary identity; atproto OAuth is the login —
-   portable, password-less, and it de-risks the hardest migration (member → DID).
+1. **Identity.** The DID is the primary identity; atproto OAuth is the login:
+   portable, password-less, and it de-risks the hardest migration (member to DID).
    True even for a mostly-private app.
-2. **Lexicons model ALL the data — public *and* private.** A lexicon is a
-   schema/IDL. Define one per entity (user, post, group, event, document, poll,
-   ballot, comment, membership…) and it is the single canonical contract:
-   `atrium` codegens Rust types from it, so *one* type model drives both the
-   record wire-format (public items) AND the DB rows (private items). Visibility
-   decides only **publication**, not schema:
-   - **public** instance → published as a record in a repo (governed by its lexicon);
-   - **private** instance → the *same* lexicon shape, kept in the DB, validated but
-     never broadcast.
+2. **Lexicons are canonical at the federation boundary ONLY.** The public subset
+   (post, statement, resolution, public group/event/document, comment) is governed
+   by `wiki.radikal.*` lexicons: `atrium` codegens the Rust record types, and the
+   lexicon is the published, versioned contract every federated record must obey.
+   The always-private entities (ballot, eligibility/delegation, voted-dedup,
+   membership-as-affiliation, projector/speaker state) get NO lexicon: hand-authored
+   Rust serde types are their canonical schema, and the DB DDL derives from those
+   types. Genuinely dual-form entities carry a public lexicon plus a separate
+   private Rust type, mapped at an explicit publish/materialize seam.
 
-Precision worth keeping: atproto-the-network is public-by-default, so for the
-private half this is **"lexicons as the schema language"** (one canonical model +
-validation + codegen), not "private atproto records" (which don't exist on the
-public network). Private instances live in your store; the lexicon is the shared
-shape. **Turso then *realises* these entities** as SQL tables, adding the relational
-structure (membership and references as join tables + foreign keys), indexes, and the
-always-private tables, while the lexicons stay the source of truth for entity *shape*.
+This supersedes the "lexicons model ALL the data" stance this section previously
+documented. The losing rationale, recorded: one uniform codegen pipeline was
+attractive, but Lexicon cannot express the private half's uniqueness, cross-field,
+and anonymity invariants, has only closed string enums (no algebraic sum types),
+and would publish schema contracts for records that never federate, taxing
+private-side iteration with versioning ceremony. **Turso then realises the private
+entities** as SQL tables (join tables, foreign keys, indexes) derived from the Rust
+types, while the lexicons stay the source of truth for the public record shapes.
 
 ## Source-of-truth split, per entity
 

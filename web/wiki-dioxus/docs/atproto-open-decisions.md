@@ -28,22 +28,39 @@ choices that need a human call.
   dropped" note). Delegation resolves into the weight before a poll opens.
 - **Tally audit**: tallies must be independently auditable by users (universal verifiability).
 - **Secret-ballot scheme**: blind-signature eligibility tokens + a public bulletin board that IS atproto
-  records (free public audit trail). The org blind-signs one weighted eligibility token per eligible voter;
-  the voter casts anonymously with it to the board; a double vote collides on token uniqueness. Delegation is
-  resolved to vote-weights server-side BEFORE token issuance, so delegation is visible to the org but never on
-  the public board (this is how the delegation-vs-anonymity tension is resolved).
+  records (free public audit trail). The voter casts anonymously with the token(s) to the board; a double
+  vote collides on token uniqueness. Delegation is resolved to vote-weights server-side BEFORE token
+  issuance, so delegation is visible to the org but never on the public board (this is how the
+  delegation-vs-anonymity tension is resolved).
+- **Token encoding + issuer-key scoping** (decided 2026-07-16; supersedes the earlier "one weighted
+  eligibility token per voter" phrasing above and in `atproto-stack-decisions.md`): UNIT tokens and
+  PER-POLL issuer keys. A voter with resolved weight N is issued N identical unit tokens, so every board
+  entry looks the same: weight never appears on the public board (a weight-carrying token would make a
+  lone weight-5 delegate uniquely identifiable, shrinking the anonymity set exactly where delegation
+  concentrates power) and the tally stays a plain count, at the cost of board size growing with total
+  weight. The org mints a fresh RSA issuer keypair per poll and publishes the pubkey to the board before
+  the poll opens: blinding hides the message from the issuer, so per-poll keys are what cryptographically
+  bind a token to its poll (a token for poll A cannot spend on poll B), give natural expiry, and cap a key
+  compromise at one poll. The two sub-decisions interact: weight-carrying tokens would have required a
+  separate issuer key per weight class anyway (the blind signer never sees the message), a second reason
+  unit tokens win.
 - **Visibility**: public by default (opt-out), with an explicit per-group/event toggle so a group or event
   can set its content public or private. Ballots, roster, and membership-as-affiliation stay always-private
   regardless of the toggle.
 - **Migration**: big-bang cutover, accepted as low-risk because the old wiki will be stable by then.
+- **Lexicon scope** (decided 2026-07-16, closes the OPEN-1 entry that used to sit below): lexicons are
+  canonical at the federation boundary ONLY; hand-authored Rust serde types are canonical for the private
+  half, and the DB DDL derives from the Rust types. This is what the shipped `lexicons/` already implement
+  de facto (always-private entities deliberately have no lexicon). The losing option (lexicons for all
+  entities, one codegen pipeline for everything) was rejected because Lexicon cannot express the private
+  half's uniqueness, cross-field, and anonymity invariants, has only closed string enums (no algebraic sum
+  types), and would publish schema contracts for records that never federate, taxing private-side iteration
+  with versioning ceremony. `atproto-domain-model.md` is reconciled to this stance.
 
 ## Open (need a call)
 
 - **README P-256 atproto-exception row**: expanded into the concrete before/after rows below (owner asked to
   see the edits before deciding). Awaiting go-ahead to apply to the monorepo-root README.
-- **Lexicon scope**: NOT settled yet. The question stands: adopt "Lexicon at the federation boundary only,
-  Rust as source of truth for the private half" (contradicts the documented "lexicons as the canonical model
-  for all entities"), or keep lexicons-for-all-entities? Left open pending the owner.
 
 ## Proposed README edits (for the "expand on this" ask)
 

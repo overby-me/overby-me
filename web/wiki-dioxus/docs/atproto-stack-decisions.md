@@ -188,19 +188,25 @@ atproto records.
 - Eligibility + delegation (org-authoritative, Turso ballot core): the org maintains a per-poll eligibility roster
   with a weight per eligible voter; a delegation is a signed assignment that moves a voter's weight to a
   delegate, resolved into the weight column BEFORE a poll opens. This is authoritative state, so it lives in
-  redb, never as a public record. Resolving delegation to weights server-side before token issuance is how the
-  delegation-vs-anonymity tension is settled: delegation is visible to the org, never on the public board.
-- The scheme (blind-signature tokens + atproto board): the org blind-signs one eligibility token per eligible
-  voter, carrying that voter's resolved weight; the voter unblinds it and casts anonymously, publishing the
-  ballot to an append-only public board that IS atproto records (CID-addressed, firehose-visible, immutable),
-  which gives universal verifiability for free. A double vote collides on token uniqueness. The token unlinks
-  the ballot from the voter's DID, so the public audit trail carries no voter identity.
+  the Turso ballot core, never as a public record. Resolving delegation to weights server-side before token
+  issuance is how the delegation-vs-anonymity tension is settled: delegation is visible to the org, never on
+  the public board.
+- The scheme (blind-signature tokens + atproto board; encoding decided 2026-07-16): the org mints a fresh
+  issuer keypair per poll (pubkey published to the board before the poll opens) and blind-signs N identical
+  UNIT tokens for a voter with resolved weight N; the voter unblinds them and casts anonymously, publishing
+  the ballot entries to an append-only public board that IS atproto records (CID-addressed, firehose-visible,
+  immutable), which gives universal verifiability for free. A double vote collides on token uniqueness, and
+  per-poll keys are what bind a token to its poll (blinding hides the message from the issuer, so a
+  long-lived key could not stop cross-poll spending cryptographically). Weight never appears on the public
+  board: every entry is identical, the tally is a plain count, and rare weights cannot shrink the anonymity
+  set. The token unlinks the ballot from the voter's DID, so the public audit trail carries no voter
+  identity.
 - Anonymity + audit: eligibility is separated from the ballot so the tally is publicly recomputable from the
   board without linking a ballot to a voter (individual verifiability: the voter finds their ballot on the
   board; universal verifiability: anyone re-tallies the board).
 - Crypto primitive (spike done, pre-rewrite plan #6): use `blind-rsa-signatures` (jedisct1 / Frank Denis),
   the maintained pure-Rust implementation of RFC 9474 RSA blind signatures. The org blind-signs the voter's
-  weighted eligibility token; the voter unblinds it and casts anonymously; the unblinded signature verifies as
+  unit eligibility tokens; the voter unblinds them and casts anonymously; the unblinded signature verifies as
   RSA-PSS against the org's public key and cannot be linked back to the blinded request. Pure Rust, no OpenSSL,
   IETF-standardized. This clears the biggest ballot-design unknown: the E2E scheme is buildable in pure Rust.
 - Rationale: a public election tool must be independently auditable AND ballot-secret; server-trust is not

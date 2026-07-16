@@ -129,6 +129,12 @@ Start with the two things that unblock or invalidate everything else: the blind-
 
 Round 1 is fully landed: all 10 do-now items are done. Three facts changed the board. The blind-signature spike PASSED (`blind-rsa-signatures`, RFC 9474, pure Rust), which unlocks deferral (a), the executable ballot-math spec. The frontend anti-corruption seam exists (`src/model.rs`), and the domain-model doc now carries SQL on Turso, which together unlock the coupled deferrals (b)+(c)+(d), the canonical types and the migration extractor. The DID audit came back brutal: 0 DIDs linked system-wide, 20516 members of which 83 percent are email-only roster rows, so the migration join is empty and the target member DDL cannot even represent its dominant case. Round 2's theme follows: close the small set of paper decisions that gate everything (weight encoding, lexicon scope, NSID authority, ballot custody), turn the decided E2E-V ballot scheme into executable, property-tested artifacts in a new `crates/` workspace, retire the four remaining load-bearing unknowns by spike (DAG-CBOR/CID, atrium-oauth, Turso durability, member onboarding reality), and graduate the extractor for the stable content/membership half only. Every item below passed adversarial verification; trims from that verification are folded in as the actual scope.
 
+Status: items 1 and 2 are DONE (owner calls made 2026-07-16: UNIT tokens, PER-POLL issuer keys, and
+boundary-only lexicon scope; recorded in `atproto-open-decisions.md` under Decided, with the weighted-token
+phrasing superseded in `atproto-stack-decisions.md` and the "lexicons model ALL data" section of
+`atproto-domain-model.md` rewritten to boundary-only). Item 3 stays open pending the domain-control check.
+The crypto track (items 5, 8, 9, 10) and the types track behind item 2 are now unblocked.
+
 ### Do now (prioritized)
 
 #### 1. Issuer-key lifecycle and weight-encoding decision entry: per-poll RSA keys plus unit tokens vs weight-carrying tokens
