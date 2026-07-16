@@ -113,37 +113,47 @@ broke the whole VM suite at the boot level. Fixed on `rust-systemd-complete`:
   /dev/disk/by-label/nixos` in the hung initrd exits 0 (`nixos: clean`), so the
   fs and the by-label symlink are correct.
 
-  **Fixed (fix 7):** `.device` units are excluded from `find_startable_units`, so
-  the job machinery no longer force-starts them — a device becomes `Started` only
-  via the udev event, and `systemd-fsck@…` correctly *defers* until the device is
-  plugged, then runs and completes (`fsck` exits 0, `nixos: clean`).
+  Fixes 7–12 then took the chain most of the way to switch-root:
+  7. **`.device` units excluded from `find_startable_units`** — the job machinery
+     no longer force-starts them, so a device becomes `Started` only via the udev
+     event and `systemd-fsck@…` defers until the device is plugged, then runs.
+  8. **A completing `RemainAfterExit` oneshot re-drives the boot target** — on
+     clean exit, if a direct waiter is still inactive, re-run
+     `activate_needed_units(config.target_unit)`. rust-systemd's activation is a
+     forward walk with no global "unit became active → re-check waiters" pass, so
+     the completed fsck oneshot did not re-attempt `sysroot.mount`; re-driving the
+     boot target re-evaluates the whole graph and cascades
+     `sysroot.mount → initrd-root-fs.target → initrd-parse-etc → initrd-cleanup`.
+  9. **`systemctl isolate` honors `--no-block`** — a new `isolate-noblock` method
+     runs the shared `run_isolate()` on a background thread. `initrd-cleanup.
+     service` runs `systemctl --no-block isolate initrd-switch-root.target`, and
+     that isolate stops initrd-cleanup itself; running it synchronously deadlocked
+     to `emergency.target`. Now the isolate proceeds and
+     `initrd-switch-root.service` activates.
 
-  **Remaining (last link — no "unit became active → re-check waiters" step).**
-  With all seven fixes, in a hung run the observed state at t+10s is:
-  `systemd-fsck@dev-disk-by\x2dlabel-nixos.service = Started(Running)` (the
-  oneshot completed) but `sysroot.mount = NeverStarted`, even though
-  `sysroot.mount`'s `Requires=/After=` fsck and `After=` the device are all
-  satisfied. The gap: rust-systemd's activation is a forward walk
-  (`activate_needed_units` → `find_startable_units` → recurse), with **no global
-  "a unit just became active, re-evaluate everything waiting on it" pass**. fsck
-  is started via the `udev_event.rs` side-path (re-activating device dependents),
-  so when it completes nothing re-attempts the *original* waiter `sysroot.mount`
-  from the initial `initrd.target` activation. Compounding this, the udev-event
-  re-activation runs on spawned threads concurrently with the initial activation
-  and races (hence the run-to-run nondeterminism — sometimes fsck runs, sometimes
-  the whole chain stays `NeverStarted`).
-
-  **NEXT (activation-machinery work, needs care + tests):** give a completing
-  oneshot (and a device becoming `Started` via udev) a reliable re-check of its
-  reverse deps — e.g. on successful oneshot exit, re-run `activate_needed_units`
-  for its `required_by`; and/or have the udev event re-drive a stable high point
-  of the chain (`initrd-root-fs.target`) in a single `activate_needed_units` call
-  that cascades fsck→mount with proper ordering, instead of activating each
-  dependent separately. Also serialize the udev-event activations so they don't
-  race the initial transaction. Once `sysroot.mount` reliably mounts, the rest of
-  the chain (`initrd-parse-etc` → `initrd-cleanup` → isolate → `switch-root`) is
-  already implemented; then commit the `boot.initrd.systemd.enable = true` flip as
-  the Phase-2 win.
+  **Remaining (final two links to stage-2).** The boot now reaches
+  `initrd-switch-root.service`. Two issues left, both observed in the same run:
+  1. **The NixOS store child mounts fail with `ENOENT`:**
+     `mount(nix-store, /sysroot/nix/.ro-store, 9p)` and the `/sysroot/nix/store`
+     overlay both `ENOENT`, and `overlayfs: failed to resolve
+     '/sysroot/nix/.ro-store'`. The stage-2 init lives in `/nix/store`, so these
+     must mount. `activate_mount` does `create_dir_all` the mount point, so this
+     is most likely an **ordering** problem — the `/sysroot/nix/*` child mounts
+     race `sysroot.mount` (they must be `After=sysroot.mount`, i.e. the fstab
+     generator/mount ordering for nested `/sysroot/...` mounts) or the 9p source
+     tag isn't ready. Check the child mounts' ordering + the 9p mount data.
+  2. **`systemctl switch-root` never reaches PID 1's handler:**
+     `initrd-switch-root.service` (`ExecStart=systemctl --no-block switch-root`)
+     activates but the `SwitchRoot` handler's "switch-root: switching to" is never
+     logged. `switch-root` isn't in systemctl's `--no-block` async dispatch (so it
+     runs sync and PID 1 would `execve`, breaking the reply) and, more likely, the
+     concurrent isolate has torn down what `systemctl` needs to reach PID 1's
+     control socket. NEXT: verify `systemctl --no-block switch-root` actually
+     reaches the `SwitchRoot` command (add it to the `--no-block` dispatch and/or
+     confirm the control socket survives the isolate), then confirm
+     `signal_handler::switch_root` moves the API mounts into `/sysroot` and
+     `execve`s the stage-2 init. Once switch-root reaches stage-2, commit the
+     `boot.initrd.systemd.enable = true` flip as the Phase-2 win.
 - **set-property / revert** — now load the target unit from disk on demand
   (like upstream), instead of only checking the in-memory table.
 
