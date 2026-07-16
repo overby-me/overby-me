@@ -29,9 +29,26 @@ broke the whole VM suite at the boot level. Fixed on `rust-systemd-complete`:
   default `true`, making the *initramfs* PID 1 be rust-systemd, which has no
   initrd/stage-1 mode. Phase 1: the tests boot the traditional bash stage-1
   initrd (`boot.initrd.systemd.enable = false`) and switch_root into
-  rust-systemd as the stage-2 manager. **Phase 2 (TODO): implement rust-systemd
-  initrd mode** (mount API filesystems, mount `/sysroot`, `switch_root`, exec
-  stage-2) so systemd-in-initrd can be re-enabled — a substantial subsystem.
+  rust-systemd as the stage-2 manager.
+
+  **Phase 2 — in progress (initrd mode).** Landed so far: (a) initrd detection
+  via `/etc/initrd-release` + `initrd.target` default (config.rs `in_initrd()`);
+  (b) `mount_api_filesystems()` — the `mount_setup` real systemd does at PID 1
+  start (mounts `/proc`, `/sys`, `/dev`, `/run`, `/dev/pts`, `/dev/shm`,
+  `/sys/fs/cgroup` idempotently), which **cleared the bare-PID-1 kernel panic**;
+  (c) `/dev/kmsg` early-boot logging. With `boot.initrd.systemd.enable = true`,
+  rust-systemd now boots cleanly as the initramfs PID 1 — the kmsg trace shows
+  `in_initrd=true`, `target=initrd.target`, target activated, signal loop
+  entered, no panic. **Remaining:** it then idles — nothing drives the initrd
+  filesystem/switch-root chain, so the real root never comes up. TODO:
+  (1) ensure the initrd units load/activate (`sysroot.mount`,
+  `initrd-root-fs.target` → `initrd-fs.target` → `initrd-switch-root.target`);
+  (2) implement `systemctl switch-root <newroot> [init]` end to end — a control
+  command + systemctl subcommand + the PID-1 switch_root operation (mount --move
+  `/proc`,`/sys`,`/dev`,`/run` into `/sysroot`; `chdir /sysroot`; mount --move
+  `.` `/`; `chroot .`; exec the stage-2 init). Then commit the
+  `boot.initrd.systemd.enable = true` flip (removing the bash-initrd Phase-1
+  workaround) as the Phase-2 win.
 - **set-property / revert** — now load the target unit from disk on demand
   (like upstream), instead of only checking the in-memory table.
 
