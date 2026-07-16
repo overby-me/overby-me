@@ -93,6 +93,19 @@ in
     in {
       system.stateVersion = "25.11";
 
+      # Boot the traditional bash stage-1 initrd rather than systemd-in-initrd.
+      #
+      # Newer nixpkgs flipped `boot.initrd.systemd.enable` to default true, which
+      # makes the *initramfs* PID 1 be the systemd binary (here rust-systemd).
+      # rust-systemd implements the stage-2 system manager, not the initrd
+      # stage-1 (mount API filesystems, mount /sysroot, switch_root, exec
+      # stage-2), so it cannot yet run as the initrd init. The bash stage-1
+      # initrd mounts the API filesystems and switch_roots into rust-systemd as
+      # the stage-2 manager — the role it is designed for, and the setup these
+      # integration tests exercise. Re-enabling systemd-in-initrd is tracked as
+      # future work once rust-systemd grows an initrd mode (see PLAN.md).
+      boot.initrd.systemd.enable = lib.mkIf (!useUpstreamSystemd) false;
+
       # Use rust-systemd as the systemd package (or upstream C systemd for baseline)
       systemd.package =
         if useUpstreamSystemd
