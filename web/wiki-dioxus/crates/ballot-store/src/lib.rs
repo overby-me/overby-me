@@ -15,7 +15,9 @@
 pub mod board;
 pub mod replica;
 pub mod roster;
+pub mod transport;
 
 pub use board::{BOARD_DDL, BoardError, PersistentBoard, ReplicationSink};
 pub use replica::{RebuildError, ReplicaLog, rebuild_from_replica};
 pub use roster::{BALLOT_DDL, freeze_at_open};
+pub use transport::{ShipBatch, ShipCursor, ship};

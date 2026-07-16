@@ -10,9 +10,10 @@
 //! [`ReplicaLog`] is an append-only JSONL file — one record per committed cast,
 //! written synchronously in the fire-and-forget hook — which IS the shippable
 //! artifact: an independent node mirrors this file (rsync / WAL-style shipping).
-//! That TRANSPORT is deliberately out of scope here (no wire format is frozen);
-//! the integrity mechanism (an append-only replica + a proven rebuild) is what
-//! this module provides.
+//! The concrete incremental TRANSPORT of this file (a byte-offset cursor, ship
+//! only whole records) lives in the sibling [`crate::transport`] module; this
+//! module provides the integrity mechanism it ships: an append-only replica plus
+//! a proven rebuild.
 
 use crate::board::{BoardError, PersistentBoard, ReplicationSink};
 use serde::{Deserialize, Serialize};
