@@ -873,6 +873,45 @@ pub(crate) fn service_exit_handler(
                     );
                     crate::units::execute_unit_action(success_action, name);
                 }
+                // Same re-drive as the RemainAfterExit=yes branch, but for the
+                // default RemainAfterExit=no oneshot: rw-sysroot-nix-store.service
+                // (mkdir of the /nix/store overlay's upper/work dirs) is
+                // Before=sysroot-nix-store.mount and does not remain active, so
+                // its completion must still retry the overlay mount, which ran
+                // and failed ENOENT before the dirs existed. Reset the failed
+                // mounts we are Before= to NeverStarted, then re-drive the boot
+                // target so activate_needed_units retries them.
+                let before_units: Vec<crate::units::UnitId> =
+                    unit.common.dependencies.before.clone();
+                if !before_units.is_empty() {
+                    let arc = arc_run_info.clone();
+                    std::thread::spawn(move || {
+                        {
+                            let ri = arc.read_poisoned();
+                            for id in &before_units {
+                                if let Some(u) = ri.unit_table.get(id)
+                                    && matches!(u.specific, crate::units::Specific::Mount(_))
+                                {
+                                    let mut st = u.common.status.write_poisoned();
+                                    if matches!(
+                                        &*st,
+                                        crate::units::UnitStatus::Stopped(
+                                            crate::units::StatusStopped::StoppedUnexpected,
+                                            _
+                                        )
+                                    ) {
+                                        *st = crate::units::UnitStatus::NeverStarted;
+                                    }
+                                }
+                            }
+                        }
+                        let target_name = arc.read_poisoned().config.target_unit.clone();
+                        if let Ok(target_id) = crate::control::find_or_load_unit(&target_name, &arc)
+                        {
+                            let _ = crate::units::activate_needed_units(target_id, arc.clone());
+                        }
+                    });
+                }
             } else if *failure_action != UnitAction::None {
                 info!(
                     "Service {} failed ({:?}), triggering FailureAction={:?}",
