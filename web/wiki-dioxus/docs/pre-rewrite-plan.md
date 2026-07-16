@@ -141,6 +141,27 @@ This achieves item 3's irreversibility guard (nothing can be accidentally minted
 deferring the actual domain call. The crypto track (items 5, 8, 9, 10) and the types track behind item 2
 are now unblocked.
 
+Item 6 census results (2026-07-16, live read-only, aggregates only):
+
+- Author provenance: 2345 author-chip member rows on content nodes; 975 (42 percent) are FREE-TEXT
+  (nodeId null), 1370 bound. 195 distinct free-text names, of which only 67 match a `users.displayName`
+  (a name-join recovers about a third). Multi-author is real: 272 nodes have 2 authors, tails up to 8.
+  CONSEQUENCE for item 17 and the DDL: the single nullable `author_did` column cannot represent this;
+  the extractor needs an author join table (did-or-display-string per author) or an explicit
+  display-string fallback next to `author_did`. Folded into item 17's mapping.
+- Email identity: 17655 member rows carry an email but only 1962 distinct emails (case-insensitive):
+  the same people are invited across many contexts (fan-out mode around 4 to 6 contexts, tail beyond 8).
+  11 emails exist in case/whitespace variant clusters, so the importer must normalize (lowercase, trim)
+  before keying. ZERO violations of the proposed `UNIQUE(context_id, email) WHERE user_did IS NULL`
+  against real data: the item-4 member DDL is safe to freeze.
+- Constraint/shape preflight: 0 nodes with NULL contextId; 1 node with a DANGLING contextId (junk sweep
+  of one row); 3 mimeIds with no target kind, one node each (`wiki/home` is the root, `conference/
+  conference` and `map/map` are legacy one-offs: extractor mapping rules or explicit drops). JSONB
+  top-level key sets are finite and clean per mime (content / content+image / null-or-empty dominate);
+  notable: `vote/poll.data` carries an undocumented `voters` key in 7 of 8 polls, `speak/speak.data` is
+  a bare string, `vote/vote.data` a bare array. Every shape is enumerable: the importer edge-case list
+  is a finite checklist, not an unknown.
+
 ### Do now (prioritized)
 
 #### 1. Issuer-key lifecycle and weight-encoding decision entry: per-poll RSA keys plus unit tokens vs weight-carrying tokens
