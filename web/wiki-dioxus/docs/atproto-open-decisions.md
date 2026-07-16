@@ -75,6 +75,16 @@ choices that need a human call.
   NSID. Until then the placeholder is safe everywhere, including the spec crate and lexicon drafts.
 - **README P-256 atproto-exception row**: expanded into the concrete before/after rows below (owner asked to
   see the edits before deciding). Awaiting go-ahead to apply to the monorepo-root README.
+- **Board custody (who publishes the board-entry records)**: options memo in `docs/ballot-board-custody.md`.
+  (a) Voter-published is fatal for a secret ballot: records live in DID-owned repos, so repo ownership
+  deanonymizes, and throwaway repos are unrealistic for this membership. (b) Org-published preserves
+  anonymity (the org already learns nothing from a blind-signed token) but could silently censor, so it
+  needs signed inclusion receipts (receipt plus missing entry = public censorship evidence), a signed
+  close-out digest, and an independent mirror. (c) A dedicated board DID only moves the trust.
+  RECOMMENDED: org-published plus receipts. Sub-calls the owner must make: receipt signing key, publication
+  latency (per-cast vs batched vs at-close), receipt scope (token only vs plus choices), digest mandatory or
+  not, mirror commitment, board account. Draft lexicons landed: `poll.json`, `ballotEntry.json` (crypto
+  encodings PROVISIONAL pending the spec crate's serialization).
 
 ## Proposed README edits (for the "expand on this" ask)
 

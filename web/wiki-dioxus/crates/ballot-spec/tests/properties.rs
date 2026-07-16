@@ -103,7 +103,7 @@ fn double_spend_always_collides() {
     let mut board = Board::default();
     assert_eq!(
         board.cast(issuer().public_key(), &rules, entry.clone()),
-        Ok(())
+        Ok(0)
     );
     // Same token, same choices: rejected. Same token, DIFFERENT choices: still
     // rejected (the first entry stands, DECISIONS.md D4).

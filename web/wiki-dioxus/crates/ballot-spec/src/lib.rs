@@ -334,15 +334,18 @@ pub struct Board {
 }
 
 impl Board {
-    /// Verify and append a cast. Order of checks: signature, then double
-    /// spend, then ballot validity, so a forged token can never probe the
-    /// spent-set and an invalid ballot does not burn the token.
+    /// Verify and append a cast, returning the entry's POSITION on the board.
+    /// The position is a protocol output, not a convenience: the voter's
+    /// inclusion receipt (see docs/ballot-verify-ux.md) needs a stable
+    /// reference to the appended entry. Order of checks: signature, then
+    /// double spend, then ballot validity, so a forged token can never probe
+    /// the spent-set and an invalid ballot does not burn the token.
     pub fn cast(
         &mut self,
         pk: &IssuerPublicKey,
         rules: &BallotRules,
         entry: BoardEntry,
-    ) -> Result<(), CastError> {
+    ) -> Result<usize, CastError> {
         pk.verify(&entry.signature, entry.msg_randomizer, &entry.token)
             .map_err(|_| CastError::BadSignature)?;
         if self.entries.iter().any(|e| e.token == entry.token) {
@@ -350,7 +353,7 @@ impl Board {
         }
         rules.validate(&entry.choices).map_err(CastError::Invalid)?;
         self.entries.push(entry);
-        Ok(())
+        Ok(self.entries.len() - 1)
     }
 
     /// The board's entries, in cast order.

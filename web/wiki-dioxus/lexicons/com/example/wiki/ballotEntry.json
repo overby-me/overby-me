@@ -1,0 +1,50 @@
+{
+  "lexicon": 1,
+  "id": "com.example.wiki.ballotEntry",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "One spent unit token on the public bulletin board: the anonymized ballot. Published by the BOARD CUSTODIAN (the org DID, per the custody decision in docs/ballot-board-custody.md), never by the voter: an atproto record lives in a DID-owned repo, so voter publication would deanonymize the ballot by repo ownership. This record deliberately has NO voter identity field, and every entry weighs exactly 1 (unit tokens), so the tally is a plain count of entries per choice. Token uniqueness on the board is the double-vote rejection; on a reused token the FIRST entry stands. Crypto field encodings are PROVISIONAL pending the ballot-spec crate's pinned serialization.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["pollRef", "token", "signature", "choices", "createdAt"],
+        "properties": {
+          "pollRef": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The poll this ballot belongs to. The strongRef's CID pins the exact poll version (question, options, rules, issuerPubkey) the entry was validated against."
+          },
+          "token": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "PROVISIONAL encoding: the unblinded unit token's message, a 32-byte voter-generated random nullifier, as base64url (unpadded). Carries no structure and no identity; its uniqueness on the board is the dedup."
+          },
+          "msgRandomizer": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "PROVISIONAL encoding: the RFC 9474 message randomizer from blinding (the RSABSSA Randomized variant), base64url (unpadded). Optional per the spec crate's shape; required by verification when present at signing."
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "PROVISIONAL encoding: the unblinded RSA-PSS signature over token, base64url (unpadded). Verifies under the referenced poll's published issuerPubkey; per-poll keys make cross-poll spends unverifiable."
+          },
+          "choices": {
+            "type": "array",
+            "maxLength": 20,
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Selected option indices into the poll's options array, subject to the poll's minVote, maxVote, and blank rules."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

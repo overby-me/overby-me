@@ -1,0 +1,87 @@
+{
+  "lexicon": 1,
+  "id": "com.example.wiki.poll",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "The public announcement of a poll, authored by the org's DID. Publishes the question, options, ballot rules, and the per-poll issuer pubkey BEFORE the poll opens (the pre-open publication rule of the E2E-V scheme). The eligibility roster, delegation, resolved weights, and token issuance stay private in the org store and are never records. Lifecycle is a monotonic state field on this one record (announced, open, closed) rather than a separate close record: a close record would split one poll across two records every verifier must join and would need its own authority rule, while a single record makes each state transition a firehose-visible update event. Only state may change after creation; any other mutation is tamper-evident via the record's update history and voids the poll. Only closingAuthority may move state to closed.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": [
+          "question",
+          "options",
+          "state",
+          "closingAuthority",
+          "issuerPubkey",
+          "minVote",
+          "maxVote",
+          "blank",
+          "openAt",
+          "createdAt"
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 3000,
+            "maxGraphemes": 300,
+            "description": "The question being voted on."
+          },
+          "options": {
+            "type": "array",
+            "maxLength": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 640,
+              "maxGraphemes": 64
+            },
+            "description": "The choices, in ballot order. When blank is true the LAST element is the trailing Blank abstention (excluded from winning)."
+          },
+          "state": {
+            "type": "string",
+            "knownValues": ["announced", "open", "closed"],
+            "description": "Lifecycle state, monotonic: announced, then open, then closed. Ballots verify only against entries cast while open."
+          },
+          "closingAuthority": {
+            "type": "string",
+            "format": "did",
+            "description": "The org DID that may close the poll (move state to closed)."
+          },
+          "issuerPubkey": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "PROVISIONAL encoding pending the ballot-spec crate's pinned serialization: the poll's RSA issuer public key as base64url (unpadded) DER SPKI. Per-poll keys are the cryptographic poll binding (RFC 9474 blinding hides the message from the issuer); required at creation so publication strictly precedes open."
+          },
+          "minVote": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Minimum selections for a non-blank ballot. A lone blank abstention bypasses this minimum."
+          },
+          "maxVote": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum selections per ballot."
+          },
+          "blank": {
+            "type": "boolean",
+            "description": "Whether the last element of options is the trailing Blank abstention: valid only alone on a ballot, excluded from winning in the tally."
+          },
+          "openAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When the poll opens (state moves to open). Resolved weights are frozen at this instant."
+          },
+          "closesAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional: the scheduled close. Closure still requires the closingAuthority's state transition."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

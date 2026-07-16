@@ -12,13 +12,22 @@ Rust serde types in the backend and never becomes a record. See `docs/atproto-st
 Only entities that are meaningfully and safely publishable get a lexicon:
 
 - `com.example.wiki.post`: a member's feed post (the social unit).
+- `com.example.wiki.statement`: a member's personal public statement.
 - `com.example.wiki.resolution`: the org's published outcome of a motion/election.
 - `com.example.wiki.comment`: a public comment on a public item.
-- (later) `com.example.wiki.group` / `com.example.wiki.event` / `com.example.wiki.document` for the opt-in-public
-  container/content records.
+- `com.example.wiki.group` / `com.example.wiki.event`: the opt-in-public container contexts. The
+  group/event kind split is carried by the two NSIDs; a record exists only while the context is public.
+- `com.example.wiki.poll` / `com.example.wiki.ballotEntry`: the public poll announcement and the
+  anonymized bulletin-board entry (repo custody pending an owner call).
+- `com.example.wiki.document` is EXCLUDED for now: documents store Slate JSON internally, and the
+  public rich-text representation (what a document record's body looks like on the wire) is a
+  rewrite-time decision that has not been made yet. No lexicon until it is.
 
-Always-private entities (`ballot`, `voted`, membership-as-affiliation, projector/speaker) deliberately
-have NO lexicon.
+Always-private entities (`voted`, roster/eligibility/delegation, membership-as-affiliation,
+projector/speaker) deliberately have NO lexicon. The ballot is SPLIT, not simply private: the
+org-side ballot row (eligibility, token issuance, resolved weights) is always-private and has no
+lexicon, while the public ANONYMIZED board entry (token + choices, no voter identity) is exactly
+what `com.example.wiki.ballotEntry` describes.
 
 ## NSID
 
@@ -54,3 +63,17 @@ PUBLIC record shape only; the private types are hand-authored Rust, mapped at an
 - Numbers are integers only (atproto has no float/decimal); enums are closed `knownValues` strings
   (extend by adding values, never by a breaking change).
 - String limits use both `maxLength` (bytes) and `maxGraphemes` so client validation matches enforcement.
+
+## Versioning and evolution
+
+Published records stay readable forever, so a lexicon may only ever grow compatibly:
+
+- New fields are OPTIONAL only. A field added after first publish can never become required,
+  because records minted before it exist without it.
+- Never retype a field and never promote an optional field to required; both would invalidate
+  records already published under the schema.
+- Enums (`knownValues` strings) extend only by ADDING values; readers must tolerate values they
+  do not know. Removing or renaming a value is a breaking change.
+- Any breaking change (a retype, a new required field, a semantic change to an existing field)
+  mints a NEW NSID instead of mutating the old one. The old lexicon keeps validating the records
+  already published under it, forever.

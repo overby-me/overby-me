@@ -1,0 +1,38 @@
+{
+  "lexicon": 1,
+  "id": "com.example.wiki.group",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A group: an org-owned container context. This record exists only while the context is public; private groups stay in the org store and are never records. The group/event kind split is carried by the NSID itself (com.example.wiki.group vs com.example.wiki.event), not by a field.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["name", "slug", "createdAt"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 640,
+            "maxGraphemes": 64,
+            "description": "The group's display name."
+          },
+          "slug": {
+            "type": "string",
+            "maxLength": 640,
+            "maxGraphemes": 64,
+            "description": "URL-safe identifier, unique among siblings under the same parent."
+          },
+          "parent": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "Optional: the parent context (a com.example.wiki.group or com.example.wiki.event record). Set only when the parent context is itself public; a private parent is simply omitted."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

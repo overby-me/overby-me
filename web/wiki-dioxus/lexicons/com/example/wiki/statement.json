@@ -1,0 +1,38 @@
+{
+  "lexicon": 1,
+  "id": "com.example.wiki.statement",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A personal public statement authored by a member, published from the member's own repo. Unlike a post it is a standalone declaration rather than a feed/thread unit; it may point back at the internal artifact it was published from.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["text", "createdAt"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 30000,
+            "maxGraphemes": 3000,
+            "description": "The statement body, in plain text."
+          },
+          "topic": {
+            "type": "string",
+            "maxLength": 2000,
+            "maxGraphemes": 200,
+            "description": "Optional: a short free-text topic the statement addresses."
+          },
+          "canonicalUri": {
+            "type": "string",
+            "format": "uri",
+            "description": "Optional: link to the internal artifact this statement was published from."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}
