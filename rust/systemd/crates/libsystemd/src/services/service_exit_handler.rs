@@ -770,19 +770,55 @@ pub(crate) fn service_exit_handler(
                 // `sysroot.mount → initrd-root-fs.target → initrd-parse-etc → …
                 // switch-root` proceed. Only bother if a direct waiter is still
                 // inactive, to avoid needless re-drives during normal boot.
+                // Units waiting on this oneshot: things that Require=/Want= it
+                // (reverse deps) OR that this unit is Before= (ordered after it).
+                // The initrd overlay case is the latter:
+                // rw-sysroot-nix-store.service has Before=sysroot-nix-store.mount
+                // and mkdir's the overlay's upper/work dirs.
+                let before_units: Vec<crate::units::UnitId> =
+                    unit.common.dependencies.before.clone();
                 let has_waiting_dep = {
                     let d = &unit.common.dependencies;
-                    d.required_by.iter().chain(d.wanted_by.iter()).any(|id| {
-                        run_info
-                            .unit_table
-                            .get(id)
-                            .map(|u| !u.common.status.read_poisoned().is_started())
-                            .unwrap_or(false)
-                    })
+                    d.required_by
+                        .iter()
+                        .chain(d.wanted_by.iter())
+                        .chain(d.before.iter())
+                        .any(|id| {
+                            run_info
+                                .unit_table
+                                .get(id)
+                                .map(|u| !u.common.status.read_poisoned().is_started())
+                                .unwrap_or(false)
+                        })
                 };
                 if has_waiting_dep {
                     let arc = arc_run_info.clone();
                     std::thread::spawn(move || {
+                        // A mount ordered After= this oneshot may have already run
+                        // and *failed* before the oneshot created what it needed
+                        // (e.g. the overlay mount failed ENOENT because its
+                        // upper/work dirs did not exist yet). Failed units are not
+                        // retried by activate_needed_units, so reset the mounts we
+                        // are Before= back to NeverStarted first, then re-drive.
+                        {
+                            let ri = arc.read_poisoned();
+                            for id in &before_units {
+                                if let Some(u) = ri.unit_table.get(id)
+                                    && matches!(u.specific, crate::units::Specific::Mount(_))
+                                {
+                                    let mut st = u.common.status.write_poisoned();
+                                    if matches!(
+                                        &*st,
+                                        crate::units::UnitStatus::Stopped(
+                                            crate::units::StatusStopped::StoppedUnexpected,
+                                            _
+                                        )
+                                    ) {
+                                        *st = crate::units::UnitStatus::NeverStarted;
+                                    }
+                                }
+                            }
+                        }
                         let target_name = arc.read_poisoned().config.target_unit.clone();
                         match crate::control::find_or_load_unit(&target_name, &arc) {
                             Ok(target_id) => {
