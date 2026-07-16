@@ -34,6 +34,17 @@ const M3_THEME_CSS: Asset = asset!("/assets/m3-theme.css");
 // state-layer opacities, motion) — hand-authored from the M3 spec.
 const M3_TOKENS_CSS: Asset = asset!("/assets/m3-tokens.css");
 
+// Self-hosted fonts (privacy + offline + sovereignty: no Google Fonts CDN). The
+// body face (Atkinson Hyperlegible, latin subset) and the Material Icons ligature
+// font are bundled via asset!() and declared with @font-face at mount, replacing
+// the two CDN @imports style.css used to carry. Bundling them means the service
+// worker's cache-first /assets rule also caches them, so they work offline.
+const FONT_ATK_400: Asset = asset!("/assets/fonts/atkinson-400.woff2");
+const FONT_ATK_700: Asset = asset!("/assets/fonts/atkinson-700.woff2");
+const FONT_ATK_400I: Asset = asset!("/assets/fonts/atkinson-400i.woff2");
+const FONT_ATK_700I: Asset = asset!("/assets/fonts/atkinson-700i.woff2");
+const FONT_MATERIAL: Asset = asset!("/assets/fonts/material-icons.woff2");
+
 fn main() {
     // Print real panic messages (with a JS stack trace) to the console instead
     // of a bare `unreachable executed` wasm trap — the single highest-value
@@ -236,7 +247,22 @@ fn App() -> Element {
     // Keep the NHost access token fresh (renew before expiry / on return).
     use_future(session::run_token_refresh);
 
+    // @font-face for the self-hosted (asset-bundled) fonts. Built here so the src
+    // URLs are the content-hashed asset paths, avoiding any CSS url() rewriting
+    // dependency. `block` display for icons prevents a flash of ligature text.
+    let font_face = format!(
+        concat!(
+            "@font-face{{font-family:'Atkinson Hyperlegible';font-style:normal;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Atkinson Hyperlegible';font-style:normal;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Atkinson Hyperlegible';font-style:italic;font-weight:400;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Atkinson Hyperlegible';font-style:italic;font-weight:700;font-display:swap;src:url({}) format('woff2')}}",
+            "@font-face{{font-family:'Material Icons';font-style:normal;font-weight:400;font-display:block;src:url({}) format('woff2')}}",
+        ),
+        FONT_ATK_400, FONT_ATK_700, FONT_ATK_400I, FONT_ATK_700I, FONT_MATERIAL
+    );
+
     rsx! {
+        style { dangerous_inner_html: font_face }
         document::Stylesheet { href: DX_THEME_CSS }
         document::Stylesheet { href: M3_THEME_CSS }
         document::Stylesheet { href: M3_TOKENS_CSS }

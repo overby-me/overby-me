@@ -9,16 +9,11 @@
  * with its background (see the COLOR SYSTEM block), so contrast holds in both
  * light and dark. */
 
-/* Atkinson Hyperlegible — a high-legibility face designed for low-vision
- * readers (#37). Loaded from Google Fonts; if the fetch is blocked the
- * body font-family falls back to the system stack below. @import must precede
- * every rule set, so it stays at the very top. */
-@import url("https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap");
-
-/* Material Icons (filled) — the exact icon set the reference React app uses via
- * @mui/icons-material. Rendered as ligatures: <span class="material-icons">home
- * </span>. Kept identical to the old wiki's IconId map. */
-@import url("https://fonts.googleapis.com/icon?family=Material+Icons");
+/* Atkinson Hyperlegible (a high-legibility face for low-vision readers, #37) and
+ * the Material Icons ligature font are now SELF-HOSTED: bundled via asset!() and
+ * declared with @font-face in main.rs (no Google Fonts CDN, so no third-party
+ * request, and the service worker caches them for offline use). The body
+ * font-family falls back to the system stack below if a face fails to load. */
 
 :root {
 	/* Per-level indentation step for the drawer node tree (see drawer.rs), kept

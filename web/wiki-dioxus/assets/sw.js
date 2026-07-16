@@ -8,7 +8,7 @@
 //   everything else same-origin (/, /wasm/*) → stale-while-revalidate: serve the
 //     cached copy instantly, refresh it in the background; fall back to the
 //     network, then to the cached app shell (/) when offline.
-const CACHE = "radikalwiki-v3";
+const CACHE = "radikalwiki-v4";
 
 self.addEventListener("install", () => self.skipWaiting());
 
