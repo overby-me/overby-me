@@ -58,6 +58,21 @@
 
 ## Nix flake rules
 
+- **Never run `nix flake check`: it gets OOM-killed in this repo.** The tree
+  has thousands of check derivations (hundreds of them NixOS VM tests), and
+  `nix flake check` instantiates all of them in a single evaluator whose peak
+  memory exceeds 30 GiB. `--max-jobs`/`--no-build` do not help. Run
+  `just check` instead: it invokes the bounded-memory `flake-check` tool
+  (`nix/pkgs/flake-check.nix`), which evaluates attributes in memory-capped
+  `nix-eval-jobs` workers and then builds only the uncached checks, one job at
+  a time. Tune it via environment variables: `CHECK_FRAGMENT` (evaluate a
+  different fragment, e.g. `CHECK_FRAGMENT=devShells.x86_64-linux`), `WORKERS`
+  (default 2), `MAX_MEMORY_MB` (default 5120), `BATCH` (default 20), and
+  `OUT_PATHS_FILE` (record built store paths for a cache push). To run a
+  single known check, prefer a direct
+  `nix build .#checks.x86_64-linux.<name>`, which is cheap and needs no
+  special handling. Expect a full `just check` to take on the order of an
+  hour; do not start it casually.
 - **Run any `jj` command (e.g. `jj status`) before Nix flake operations when you've created new files.** Nix flakes only see files tracked by git. In a jj colocated repo, jj automatically snapshots the working directory (updating the git index) on every `jj` command. Unlike plain git, you do NOT need to manually `git add` files — just ensure at least one `jj` command has run since creating the file.
 - **Run `touch .envrc && direnv export json` after changing devshell modules or configs.** Files in `nix/devshell/modules/` and `nix/devshell/modules/configs/` are evaluated on devshell entry. Changes to these files (e.g. the config `shellHook`, git-hooks, packages) won't take effect until you run `touch .envrc && direnv export json`. Note: `direnv reload` only touches `.envrc` and defers to a shell prompt hook that doesn't fire in non-interactive contexts. `direnv export json` directly triggers the full re-evaluation.
 
