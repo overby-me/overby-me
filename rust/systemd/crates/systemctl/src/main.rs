@@ -1707,7 +1707,9 @@ fn main() {
 
     // --no-block: use a separate method so the server can run it asynchronously
     // --wait: use a separate method so the server blocks until units deactivate
-    let method = if no_block && (method == "start" || method == "restart" || method == "stop") {
+    let method = if no_block
+        && (method == "start" || method == "restart" || method == "stop" || method == "isolate")
+    {
         format!("{method}-noblock")
     } else if wait && method == "start" {
         "start-wait".to_string()

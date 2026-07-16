@@ -183,6 +183,10 @@ pub enum Command {
     /// `isolate TARGET` — start TARGET and stop every unit not wanted by it.
     /// Used by the initrd to reach `initrd-switch-root.target`.
     Isolate(String),
+    /// `isolate --no-block TARGET` — like `Isolate` but returns immediately and
+    /// runs the isolation on a background thread. `initrd-cleanup.service` uses
+    /// this so it can exit before the isolate tears it down.
+    IsolateNoBlock(String),
     /// `log-level [LEVEL]` — get or set the service manager log level.
     LogLevel(Option<String>),
     /// `log-target [TARGET]` — get or set the service manager log target.
@@ -603,7 +607,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             }
         }
         "daemon-reexec" => Command::DaemonReexec,
-        "isolate" => {
+        "isolate" | "isolate-noblock" => {
             let target = match &call.params {
                 Some(Value::String(s)) if !s.is_empty() => s.clone(),
                 Some(Value::Array(arr)) if !arr.is_empty() => {
@@ -615,7 +619,11 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                     ));
                 }
             };
-            Command::Isolate(target)
+            if call.method == "isolate-noblock" {
+                Command::IsolateNoBlock(target)
+            } else {
+                Command::Isolate(target)
+            }
         }
         "switch-root" => {
             // switch-root NEWROOT [INIT]
@@ -2691,6 +2699,71 @@ pub fn apply_manager_environment_to_process() {
                 std::env::set_var(&k, &v);
             }
         }
+    }
+}
+
+/// Perform an `isolate TARGET`: start TARGET and its transaction, then stop
+/// every currently-active unit that is neither TARGET nor reachable from it via
+/// Wants/Requires/BindsTo (unless it sets IgnoreOnIsolate=). Shared by the
+/// blocking `isolate` command and the `--no-block` variant, which runs this on
+/// a background thread so the caller can exit first — essential in the initrd,
+/// where `initrd-cleanup.service` runs `systemctl --no-block isolate
+/// initrd-switch-root.target` and this very isolate then stops
+/// initrd-cleanup.service. Running it synchronously deadlocks (the caller waits
+/// for the isolate that is waiting to stop the caller).
+fn run_isolate(target: &str, run_info: &ArcMutRuntimeInfo) -> Result<(), String> {
+    info!("isolate: {target}");
+    let target_id = find_or_load_unit(target, run_info).map_err(|e| format!("{e:?}"))?;
+    // Start the target and everything it pulls in.
+    let errs = crate::units::activate_needed_units(target_id.clone(), run_info.clone());
+    // Isolation: stop units that are neither the target nor reachable from it
+    // via Wants/Requires/BindsTo (i.e. not part of the new target's
+    // transaction), skipping units that opt out with IgnoreOnIsolate=.
+    let keep: std::collections::HashSet<UnitId> = {
+        let ri = run_info.read_poisoned();
+        let mut keep = std::collections::HashSet::new();
+        let mut stack = vec![target_id.clone()];
+        while let Some(id) = stack.pop() {
+            if !keep.insert(id.clone()) {
+                continue;
+            }
+            if let Some(u) = ri.unit_table.get(&id) {
+                for dep in u
+                    .common
+                    .dependencies
+                    .wants
+                    .iter()
+                    .chain(u.common.dependencies.requires.iter())
+                    .chain(u.common.dependencies.binds_to.iter())
+                {
+                    stack.push(dep.clone());
+                }
+            }
+        }
+        keep
+    };
+    let to_stop: Vec<UnitId> = {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .values()
+            .filter(|u| {
+                !keep.contains(&u.id)
+                    && !u.common.unit.ignore_on_isolate
+                    && matches!(
+                        &*u.common.status.read_poisoned(),
+                        UnitStatus::Started(_) | UnitStatus::Starting
+                    )
+            })
+            .map(|u| u.id.clone())
+            .collect()
+    };
+    for id in to_stop {
+        let _ = crate::units::deactivate_unit(&id, &run_info.read_poisoned());
+    }
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("isolate {target} failed: {errs:?}"))
     }
 }
 
@@ -5282,60 +5355,21 @@ pub fn execute_command(
             return Err("daemon-reexec failed".to_string());
         }
         Command::Isolate(target) => {
-            info!("isolate: {target}");
-            let target_id = find_or_load_unit(&target, &run_info)?;
-            // Start the target and everything it pulls in.
-            let errs = crate::units::activate_needed_units(target_id.clone(), run_info.clone());
-            // Isolation: stop units that are neither the target nor reachable
-            // from it via Wants/Requires/BindsTo/After (i.e. not part of the new
-            // target's transaction), skipping units that opt out with
-            // IgnoreOnIsolate=. This is what lets the initrd tear down its
-            // startup units when switching to initrd-switch-root.target.
-            let keep: std::collections::HashSet<UnitId> = {
-                let ri = run_info.read_poisoned();
-                let mut keep = std::collections::HashSet::new();
-                let mut stack = vec![target_id.clone()];
-                while let Some(id) = stack.pop() {
-                    if !keep.insert(id.clone()) {
-                        continue;
-                    }
-                    if let Some(u) = ri.unit_table.get(&id) {
-                        for dep in u
-                            .common
-                            .dependencies
-                            .wants
-                            .iter()
-                            .chain(u.common.dependencies.requires.iter())
-                            .chain(u.common.dependencies.binds_to.iter())
-                        {
-                            stack.push(dep.clone());
-                        }
-                    }
+            run_isolate(&target, &run_info)?;
+            return Ok(serde_json::json!(null));
+        }
+        Command::IsolateNoBlock(target) => {
+            // --no-block: enqueue the isolate and return immediately, like
+            // upstream. Running it on a background thread lets the caller (e.g.
+            // initrd-cleanup.service, which the isolate stops) exit first
+            // instead of deadlocking against its own teardown.
+            let run_info = run_info.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = run_isolate(&target, &run_info) {
+                    log::warn!("isolate --no-block failed: {e}");
                 }
-                keep
-            };
-            let to_stop: Vec<UnitId> = {
-                let ri = run_info.read_poisoned();
-                ri.unit_table
-                    .values()
-                    .filter(|u| {
-                        !keep.contains(&u.id)
-                            && !u.common.unit.ignore_on_isolate
-                            && matches!(
-                                &*u.common.status.read_poisoned(),
-                                UnitStatus::Started(_) | UnitStatus::Starting
-                            )
-                    })
-                    .map(|u| u.id.clone())
-                    .collect()
-            };
-            for id in to_stop {
-                let _ = crate::units::deactivate_unit(&id, &run_info.read_poisoned());
-            }
-            if errs.is_empty() {
-                return Ok(serde_json::json!(null));
-            }
-            return Err(format!("isolate {target} failed: {errs:?}"));
+            });
+            return Ok(serde_json::json!(null));
         }
         Command::SwitchRoot(new_root, init) => {
             info!("switch-root: switching to {new_root}");
