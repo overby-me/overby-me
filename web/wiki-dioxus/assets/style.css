@@ -1048,7 +1048,16 @@ html {
 
 /* Cards — M3 elevated card: surface-container-low tone, corner-medium, a
    level-1 tonal shadow, no outline. Content fades + rises in on mount (an M3
-   emphasized-decelerate entrance) so page/list changes feel motionful. */
+   emphasized-decelerate entrance) so page/list changes feel motionful.
+
+   INVARIANT: .card must never get transform / opacity / filter / will-change /
+   contain. Each of those establishes a containing block for position: fixed, and
+   the FAB, tool sheets, dialogs and their scrims render INSIDE cards, so under a
+   transformed card they would clip or mis-position. Do card-level "motion" with
+   box-shadow / border-radius / pseudo-elements only; child elements of a card may
+   transform freely. Per-card accenting rides the reusable --card-accent custom
+   property (default primary; .accent-tertiary / .accent-secondary / .accent-error
+   retint it). */
 .card {
 	background: var(--md-surface-container-low);
 	/* Accent colour for the header wash; retinted per card via the accent classes. */
