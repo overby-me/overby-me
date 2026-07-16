@@ -11,14 +11,21 @@
 
 pub mod config;
 pub mod db;
+pub mod oauth;
+pub mod schema;
+pub mod statecookie;
+pub mod store;
+pub mod util;
 pub mod ws;
 
 pub use config::Config;
 pub use db::{Db, DbError};
+pub use store::Store;
 
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
 /// Shared application state handed to every handler.
@@ -28,21 +35,38 @@ pub struct AppState {
     /// Authoritative deltas broadcast to all connected clients over `/ws`.
     pub deltas: broadcast::Sender<String>,
     pub config: Config,
+    /// The atproto OAuth client, present when the AppView is built with identity
+    /// wired (the default in tests is `None`, so `/callback` reports 503).
+    pub oauth: Option<Arc<oauth::WikiOAuth>>,
 }
 
 impl AppState {
-    /// Build state around an open database, with a fresh broadcast channel.
+    /// Build state around an open database, with a fresh broadcast channel and
+    /// no OAuth client (see [`AppState::with_oauth`]).
     pub fn new(db: Db, config: Config) -> Self {
         let (deltas, _rx) = broadcast::channel::<String>(1024);
-        Self { db, deltas, config }
+        Self {
+            db,
+            deltas,
+            config,
+            oauth: None,
+        }
+    }
+
+    /// Attach the atproto OAuth client (enables the `/callback` slice).
+    pub fn with_oauth(mut self, oauth: Arc<oauth::WikiOAuth>) -> Self {
+        self.oauth = Some(oauth);
+        self
     }
 }
 
-/// The AppView router: liveness plus the multiplexed client WebSocket.
+/// The AppView router: liveness, the multiplexed client WebSocket, and the
+/// atproto OAuth callback.
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/ws", get(ws::ws_handler))
+        .route("/callback", get(oauth::callback_handler))
         .with_state(state)
 }
 

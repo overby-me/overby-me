@@ -1,7 +1,9 @@
 //! AppView entrypoint: open the Turso datastore, build the router, and serve on
 //! `$PORT` as a long-running process (NOT scale-to-zero serverless).
 
+use appview::oauth::WikiOAuth;
 use appview::{AppState, Config, Db, router};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -23,8 +25,24 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    // Create the entity + runtime schema on a fresh db (idempotent on an
+    // already-initialized persistent file).
+    if let Err(e) = db.init_schema().await {
+        tracing::error!("failed to initialize schema: {e}");
+        std::process::exit(1);
+    }
+    // The atproto OAuth client (durable SQLite stores). A build failure here is
+    // fatal: identity is load-bearing, so the process must not serve `/callback`
+    // silently misconfigured.
+    let oauth = match WikiOAuth::new(db.clone()) {
+        Ok(o) => Arc::new(o),
+        Err(e) => {
+            tracing::error!("failed to build the OAuth client: {e}");
+            std::process::exit(1);
+        }
+    };
     let addr = format!("0.0.0.0:{}", config.port);
-    let app = router(AppState::new(db, config));
+    let app = router(AppState::new(db, config).with_oauth(oauth));
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,

@@ -39,6 +39,35 @@ impl Db {
         let _ = conn.execute("PRAGMA foreign_keys=ON", ()).await;
         Ok(conn)
     }
+
+    /// Create the schema on a fresh database: the migrated entity subset
+    /// (`wiki_schema::ENTITY_SCHEMA`) followed by this crate's runtime infra
+    /// tables (`crate::schema::RUNTIME_DDL`). Guarded so an already-initialized
+    /// persistent file (where the plain `CREATE TABLE` entity DDL would error on
+    /// re-run) is left untouched; the runtime DDL is `IF NOT EXISTS` regardless.
+    pub async fn init_schema(&self) -> Result<(), DbError> {
+        let conn = self.acquire().await?;
+        if !table_exists(&conn, "context").await {
+            conn.execute_batch(wiki_schema::ENTITY_SCHEMA).await?;
+        }
+        conn.execute_batch(crate::schema::RUNTIME_DDL).await?;
+        Ok(())
+    }
+}
+
+/// Whether a table named `name` already exists (so schema init is idempotent on
+/// a persistent file).
+async fn table_exists(conn: &Connection, name: &str) -> bool {
+    match conn
+        .query(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",
+            [name],
+        )
+        .await
+    {
+        Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
+        Err(_) => false,
+    }
 }
 
 /// Whether foreign keys are ACTUALLY enforced on `conn`: true on SQLite once the
