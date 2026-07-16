@@ -27,11 +27,20 @@ pub fn kmsg(msg: &str) {
 
 pub fn run_service_manager() {
     pid1_specific_setup();
+    let in_initrd = config::in_initrd();
     kmsg(&format!(
-        "service manager starting (pid={}, in_initrd={})",
+        "service manager starting (pid={}, in_initrd={in_initrd})",
         std::process::id(),
-        config::in_initrd()
     ));
+
+    // Put SYSTEMD_IN_INITRD in PID 1's own environment, like upstream systemd,
+    // so every child inherits it: generators AND services. The initrd's
+    // initrd-parse-etc.service runs systemd-sysroot-fstab-check, which refuses
+    // to run (exit 1 → emergency.target) unless SYSTEMD_IN_INITRD=1 is set.
+    // Safe here: still single-threaded this early in PID 1 startup.
+    if in_initrd {
+        unsafe { std::env::set_var("SYSTEMD_IN_INITRD", "1") };
+    }
 
     let cli_args = CliArgs::try_parse().unwrap_or_else(|e| {
         unrecoverable_error(e.to_string());
