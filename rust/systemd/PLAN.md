@@ -131,28 +131,43 @@ broke the whole VM suite at the boot level. Fixed on `rust-systemd-complete`:
      to `emergency.target`. Now the isolate proceeds and
      `initrd-switch-root.service` activates.
 
-  **Remaining (final two links to stage-2).** The boot now reaches
-  `initrd-switch-root.service`. Two issues left, both observed in the same run:
-  1. **The NixOS store child mounts fail with `ENOENT`:**
-     `mount(nix-store, /sysroot/nix/.ro-store, 9p)` and the `/sysroot/nix/store`
-     overlay both `ENOENT`, and `overlayfs: failed to resolve
-     '/sysroot/nix/.ro-store'`. The stage-2 init lives in `/nix/store`, so these
-     must mount. `activate_mount` does `create_dir_all` the mount point, so this
-     is most likely an **ordering** problem — the `/sysroot/nix/*` child mounts
-     race `sysroot.mount` (they must be `After=sysroot.mount`, i.e. the fstab
-     generator/mount ordering for nested `/sysroot/...` mounts) or the 9p source
-     tag isn't ready. Check the child mounts' ordering + the 9p mount data.
-  2. **`systemctl switch-root` never reaches PID 1's handler:**
-     `initrd-switch-root.service` (`ExecStart=systemctl --no-block switch-root`)
-     activates but the `SwitchRoot` handler's "switch-root: switching to" is never
-     logged. `switch-root` isn't in systemctl's `--no-block` async dispatch (so it
-     runs sync and PID 1 would `execve`, breaking the reply) and, more likely, the
-     concurrent isolate has torn down what `systemctl` needs to reach PID 1's
-     control socket. NEXT: verify `systemctl --no-block switch-root` actually
-     reaches the `SwitchRoot` command (add it to the `--no-block` dispatch and/or
-     confirm the control socket survives the isolate), then confirm
-     `signal_handler::switch_root` moves the API mounts into `/sysroot` and
-     `execve`s the stage-2 init. Once switch-root reaches stage-2, commit the
+  10. **`/sysroot/*` child mounts ordered after `sysroot.mount`** — the
+  fstab-generator now emits `After=sysroot.mount` + `RequiresMountsFor=/sysroot`
+  for nested initrd mounts (systemd's implicit parent-mount ordering). This
+  fixed the 9p `/sysroot/nix/.ro-store` and `/sysroot/nix/.rw-store` mounts,
+  which now succeed.
+  11. **udev announcing a device re-drives the boot target (initrd)** — mirrors
+  fix 8, killing the run-to-run nondeterminism where the
+  `device → fsck → sysroot.mount` chain sometimes stayed entirely
+  `NeverStarted`. The chain now deterministically reaches
+  `initrd-switch-root.service`.
+
+  **Remaining (same activation-machinery class — two links to stage-2).** Both
+  are instances of "rust-systemd's forward-walk activation neither reliably
+  honors ordering for units outside the current subgraph nor re-checks/retries a
+  deferred-or-failed unit when its dependency later completes":
+  1. **The `/nix/store` overlay mount fails `ENOENT`.**
+     `sysroot-nix-store.mount` (overlay: lower=`…/.ro-store`, upper/work under
+     `…/.rw-store`) runs *before* `rw-sysroot-nix-store.service`
+     (`Before=sysroot-nix-store.mount`, `ExecStart=mkdir -p …/.rw-store/{upper,work}`)
+     has created the dirs, so `overlayfs: failed to resolve
+     '/sysroot/nix/.rw-store/upper'`. Its `After=rw-sysroot-nix-store.service` is a
+     *pure ordering* dep, which `unstarted_deps` treats as "ready" when the
+     service is `NeverStarted` and outside the activation subgraph — so the mount
+     runs early, *fails*, and is never retried. The stage-2 init lives in
+     `/nix/store`, so this must succeed. NEXT: make an `After=` on a not-yet-run
+     unit that *is* reachable/pulled defer the mount (or make the overlay mount
+     `Requires=`/pull its setup service), and/or retry failed mounts when an
+     ordering dep completes.
+  2. **`systemctl --no-block switch-root` never reaches PID 1's handler.**
+     `initrd-switch-root.service` activates but the `SwitchRoot` handler's
+     "switch-root: switching to" is never logged. `switch-root` isn't in
+     systemctl's `--no-block` async dispatch, and the concurrent isolate may tear
+     down what `systemctl` needs to reach PID 1's control socket. NEXT: verify the
+     `SwitchRoot` command is reached (add a `switch-root-noblock` server method +
+     systemctl dispatch, and/or confirm the socket survives the isolate), then
+     confirm `signal_handler::switch_root` moves the API mounts into `/sysroot`
+     and `execve`s the stage-2 init. Once switch-root reaches stage-2, commit the
      `boot.initrd.systemd.enable = true` flip as the Phase-2 win.
 - **set-property / revert** — now load the target unit from disk on demand
   (like upstream), instead of only checking the in-memory table.
