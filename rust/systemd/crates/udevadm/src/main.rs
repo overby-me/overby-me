@@ -67,7 +67,16 @@ use clap::{Parser, Subcommand};
 
 /// udevadm — udev management tool
 #[derive(Parser, Debug)]
-#[command(name = "udevadm", version, about = "udev management tool")]
+// `disable_version_flag`: udevadm defines its own `-V/--version` bool below
+// (also accepted by subcommands via `global = true`); without this, clap's
+// auto-generated `--version` collides with it and Cli::command() panics at
+// startup. That aborted `udevadm trigger` in the initrd, so no coldplug ran
+// and no /dev/disk/by-* symlinks were ever created.
+#[command(
+    name = "udevadm",
+    disable_version_flag = true,
+    about = "udev management tool"
+)]
 struct Cli {
     /// Enable debug output
     #[arg(long, short = 'd', global = true)]
