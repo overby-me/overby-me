@@ -111,6 +111,13 @@ social — groups/events/feeds — plus AI = vector/semantic search).
 
 ### Database — leaning SurrealDB (project is not correctness-critical)
 
+> SUPERSEDED (2026-07-16): the datastore decision is now **Turso Database** (see
+> `atproto-stack-decisions.md` and `atproto-open-decisions.md`). SurrealDB was
+> rejected (BSL license, not MIT/Apache; an auth-bypass CVE), and realtime is
+> now one multiplexed axum WebSocket fed by an in-process broadcast channel plus
+> the atproto firehose, not SurrealDB LIVE queries. This section is retained as
+> the original exploration; do not treat its SurrealDB recommendation as current.
+
 - **SurrealDB** (pure Rust; one binary): document + first-class **graph** +
   **vector** search + **realtime LIVE queries**. For a non-critical, self-hosted,
   pure-Rust project it's attractive as the **primary store** because it collapses
@@ -204,9 +211,10 @@ embeddings + content.
 2. **Run your own PDS, or ride users' existing PDSes?** Own PDS if you need
    private/org-controlled records or members without Bluesky accounts; skip it if
    atproto is just identity + public publishing.
-3. **SurrealDB primary, or Postgres primary?** The recommendation above leans
-   SurrealDB for the non-critical project (its live queries are the sync engine),
-   with Postgres + Rust extensions as the conservative fallback.
+3. **SurrealDB primary, or Postgres primary?** RESOLVED (2026-07-16): neither.
+   The datastore is Turso Database (MIT, mostly-pure-Rust, SQLite-compatible); the
+   original SurrealDB-vs-Postgres framing here is superseded (see the note under
+   the Database section above).
 
 ## 9. Transition-easing steps (do during the interim)
 
