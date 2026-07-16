@@ -1368,6 +1368,45 @@ html {
 	color: rgba(255, 255, 255, 0.88);
 }
 
+/* Group/event context header (folder.rs FolderApp). With a cover image it reuses
+   .content-hero (the same full-bleed hero documents and candidates get); with no
+   cover it is a tonal banner with a larger icon and title, so a group/event reads
+   as a header instead of the plain icon + title row it used to be. */
+.context-header {
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-4);
+	padding: var(--md-sys-spacing-5);
+	background: linear-gradient(
+		135deg,
+		var(--md-secondary-container),
+		color-mix(in srgb, var(--md-secondary-container) 40%, var(--md-surface-container-high))
+	);
+}
+.context-header.has-cover {
+	display: block;
+	padding: 0;
+	background: none;
+}
+.context-header-icon {
+	flex: 0 0 auto;
+	width: 56px;
+	height: 56px;
+	background: var(--md-surface);
+	color: var(--md-on-secondary-container);
+}
+.context-header-icon .material-icons {
+	font-size: 1.9rem;
+}
+.context-header-title {
+	margin: 0;
+	min-width: 0;
+	font-size: var(--md-sys-typescale-headline-small-size);
+	line-height: var(--md-sys-typescale-headline-small-line);
+	font-weight: 700;
+	color: var(--md-on-secondary-container);
+}
+
 /* Avatar */
 .avatar {
 	width: 40px;

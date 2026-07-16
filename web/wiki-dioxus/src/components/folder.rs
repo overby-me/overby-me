@@ -83,6 +83,18 @@ pub fn FolderApp(
         .unwrap_or_else(|| "wiki/folder".to_string());
     let node_id = node.id.0.clone();
     let nav = use_navigator();
+    // Cover image (data.image, the same field ContentApp uses): resolve the file
+    // id to a token-authenticated blob URL so the header can render it as a
+    // full-bleed hero. The JWT stays in the Authorization header, never an <img>.
+    let cover_id = node
+        .data
+        .as_ref()
+        .and_then(|d| d.0.get("image"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let has_cover = cover_id.is_some();
+    let cover_url = super::loader::use_file_object_url(cover_id.unwrap_or_default());
 
     // Parity with ContentApp: a group/event/folder is content too, so it gets the
     // same tools (project, edit, delete, share, comments-on-screen). A node/context
@@ -191,11 +203,27 @@ pub fn FolderApp(
     );
 
     rsx! {
-        div { class: "card",
-            div { class: "card-header",
-                div { class: "avatar", {icon_el(mime_id)} }
-                h3 { class: "title-medium", "{name}" }
-                div { class: "flex-grow" }
+        div { class: if has_cover { "card has-hero" } else { "card" },
+            div { class: if has_cover { "context-header has-cover" } else { "context-header" },
+                // Identity: the cover image (data.image) as a full-bleed hero with
+                // the title on a legibility veil, the same treatment ContentApp
+                // gives documents and candidates. Without a cover, a tonal icon +
+                // title banner, so a group/event header reads as a header rather
+                // than the plain icon + title row it used to be.
+                if let Some(url) = cover_url.clone() {
+                    div { class: "content-hero",
+                        super::widgets::ZoomableImage { src: url, alt: name.to_string() }
+                        div { class: "content-hero-veil",
+                            div { class: "avatar content-hero-avatar", {icon_el(mime_id)} }
+                            div { class: "content-hero-meta",
+                                h3 { class: "content-hero-title", "{name}" }
+                            }
+                        }
+                    }
+                } else {
+                    div { class: "avatar context-header-icon", {icon_el(mime_id)} }
+                    h3 { class: "context-header-title", "{name}" }
+                }
                 // Secondary/admin folder actions live in the M3 tools sheet
                 // (bottom sheet on mobile, right side sheet on desktop). Hidden on
                 // the projector, which is read-only for the room.
