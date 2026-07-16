@@ -6,59 +6,55 @@ artifact it is grounded in, and a one-line rationale tied to the future-proofing
 
 ## Database engine
 
-Decision: SPLIT the datastore. Use redb 4.1.x (pure Rust, dual MIT/Apache-2.0) as the authoritative
-ballot/tally/roster core, and PostgreSQL 18 accessed through `sqlx` (compile-checked queries, no ORM) as the
-rebuildable firehose-materialized view. Track Turso/Limbo as the eventual Rust-native replacement for the view.
-This supersedes the earlier "Postgres for everything" pick: it moves the one correctness-critical component
-where the Rust-native ethos and the crown-jewel data coincide onto pure Rust, and concedes C only on the
-disposable, recomputable half.
+Decision: FULLY Rust-native datastore, no Postgres. Use redb 4.1.x (pure Rust, dual MIT/Apache-2.0) for BOTH
+the authoritative ballot/tally/roster core AND the rebuildable firehose-materialized view, with tantivy (pure
+Rust) for full-text search. Turso/Limbo (the pure-Rust SQLite rewrite) is an OPTIONAL SQL convenience layer
+for the view only, acceptable now because the view is rebuildable. This supersedes both the "Postgres for
+everything" and the "redb core + Postgres view" picks: the view being rebuildable removes the only reason
+(query ergonomics) a C engine was ever considered, so nothing links C.
 
 - Adoption (the core, redb): depend on `redb = "4.1"`. Store the authoritative state in a single redb file with
-  a few typed tables. Ballots go in a table keyed by `(poll_id, voter_did)` whose key uniqueness IS the
-  one-vote-per-member invariant: an insert that collides is the rejected duplicate vote, so no SQL `UNIQUE`
-  constraint is needed. The ballot value is the opaque `ChaCha20-Poly1305` sealed blob (the engine never sees
-  plaintext, matching the crypto-decoupling in the crypto cluster). The official tally is a pure fold over the
-  poll's ballot range, not a SQL aggregation. Roster and roles live in their own keyed tables. The core never
-  performs a join, a recursive query, or any SQL. Run every write transaction with two-phase-commit durability,
+  a few typed tables. Ballots go in a table keyed by `(poll_id, ballot_token)` whose key uniqueness IS the
+  one-vote invariant: a colliding insert is the rejected duplicate, so no SQL `UNIQUE` is needed. The ballot
+  value is opaque (the engine never sees plaintext). The official tally is a pure fold over the poll's ballot
+  range, not a SQL aggregation. Roster, roles, and per-poll eligibility/weight live in their own keyed tables.
+  The core never joins, recurses, or runs SQL. Run every write transaction with two-phase-commit durability,
   NOT redb's 1PC+C default: redb's own `design.md` recommends 2PC for adversarial/malicious input, and a public
-  election is exactly that threat model; the cost is one extra fsync per commit, negligible at hundreds to
-  low-thousands of members.
-- Adoption (the view, Postgres 18 + sqlx): materialize the firehose into normal tables keyed by
-  `(did, collection, rkey)`; codegen'd lexicon serde structs map to `sqlx` typed columns or `jsonb`; the
-  membership hierarchy is a recursive CTE and membership edges are join tables. `sqlx` speaks the Postgres wire
-  protocol in Rust, so the Rust process links no C client, though the Postgres server itself is C. This is the
-  README's own "C now / Rust when ready" pattern; the correct tracked Rust migration for the VIEW is Turso/Limbo
-  (pure-Rust SQLite dialect), a near-drop-in future swap, not TiKV (its mandatory Go Placement Driver cluster
-  violates the single-node constraint and is not pure Rust).
+  election is exactly that threat model; the cost is one extra fsync per commit, negligible at this member count.
+- Adoption (the view, also redb + tantivy): materialize the firehose into redb tables keyed by
+  `(did, collection, rkey)`; the node hierarchy is a `parent_id`-keyed table (children via a prefix range scan,
+  ancestors/membership via a short recursive walk in Rust); feed/filter views are secondary redb tables
+  maintained on write. Full-text search, the one thing a KV does poorly, goes to `tantivy` (pure Rust), not SQL
+  LIKE. The view is small (one civic org, thousands of nodes) so hand-written key/range queries are fast and
+  bounded. If SQL ergonomics for the view ever get painful, add Turso/Limbo (pure-Rust SQLite) for the view
+  ONLY; its officially-experimental durability is fine there because a crash just triggers a firehose replay,
+  and it is disqualifying only for the tally, which stays on redb-2PC.
 - Extension (durability and operations, load-bearing): run redb with `Durability::Immediate` plus 2PC on the
   ballot core; pin the exact redb version and vendor the source; add a per-commit crash-injection test in CI
-  (redb's own fuzzer diffs a recovered DB against a `BTreeMap` reference model, so mirror that shape for the
-  ballot table); deploy on an enterprise SSD with power-loss protection (or with the volatile write cache
-  disabled), because fsync durability is only as strong as the disk. Price the two-datastore operational cost
-  honestly: two backup and restore regimes, no cross-store joins by rule (authoritative-plus-view questions are
-  two lookups in application code), a documented redb copy-on-quiesce backup and a tested restore drill, and a
-  warm Postgres-fallback migration script so the tiny opaque-blob core stays portable in days if redb is ever
-  abandoned.
+  (mirror redb's own fuzzer, which diffs a recovered DB against a `BTreeMap` reference model, for the ballot
+  table); deploy on an enterprise SSD with power-loss protection (or with the volatile write cache disabled),
+  because fsync durability is only as strong as the disk. One engine means one backup regime; keep the core and
+  the view in separate redb files (or separate tables) so a view rebuild never touches ballots, and keep a
+  documented copy-on-quiesce backup + a tested restore drill for the core.
 - Rationale: the authoritative core needs durable, serializable, all-or-nothing commits on a single node and
-  nothing else, and redb is the only pure-Rust engine that delivers election-grade durability for a store this
-  small (COW B+trees, serializable single-writer MVCC, fsync-by-default, checksum-validated crash recovery to
-  the last durable commit, a stable on-disk format, and empirical crash fuzzing). Its permissive MIT/Apache-2.0
-  license makes bus-factor-1 a fork-if-abandoned risk rather than a vendor-death risk, and the tiny replaceable
-  core keeps Postgres as a real fallback. The rebuildable view is recomputable from Jetstream and query-shaped,
-  so the Rust-native criterion is far weaker there and Postgres 18's ACID, healthy governance, and
-  recursive-CTE/JSONB fit win now, with Turso/Limbo the tracked pure-Rust endgame once its MVCC path leaves
-  experimental status and libSQL is no longer the production path.
+  nothing else, and redb delivers exactly that in pure Rust (COW B+trees, serializable single-writer MVCC,
+  fsync-by-default, checksum-validated crash recovery, a stable on-disk format, empirical crash fuzzing) with a
+  permissive MIT/Apache-2.0 license that makes bus-factor-1 a fork-if-abandoned risk, not a vendor-death risk.
+  The view is recomputable from the firehose and small, so its query needs are met by ordered-KV scans plus a
+  Rust graph walk plus tantivy, and paying a C dependency to buy SQL sugar on disposable data would violate the
+  Rust-native priority for no correctness gain.
 
 ## Realtime and the firehose consumer
 
 Decision: consume Jetstream (JSON over WebSocket, filtered to `app.radikal.*` collections and member DIDs)
 as the change-feed; push local authoritative deltas over one axum WebSocket fed by an in-process broadcast
 channel (`tokio::sync::broadcast`), since the AppView is a single persistent process holding the redb core,
-the Postgres view, the firehose connection, and the WebSocket server. No DB LISTEN/NOTIFY is required.
+the redb view + tantivy index, the firehose connection, and the WebSocket server. No DB LISTEN/NOTIFY is required.
 
 - Adoption: use `microcosm-rs`/`atproto-jetstream` for the Jetstream client with cursor handling and
-  auto-reconnect; materialize records into the Postgres view; broadcast authoritative deltas (poll open/close,
-  projector focus, roster changes) from the redb write path directly onto the in-process channel.
+  auto-reconnect; materialize records into the redb view (and the tantivy index); broadcast authoritative
+  deltas (poll open/close, projector focus, roster changes) from the redb write path directly onto the
+  in-process channel.
 - Extension: persist the Jetstream cursor and implement refetch-on-reconnect plus PDS backfill-on-gap
   (Jetstream has no missed-event backfill); consider self-hosting a Jetstream/tap instance for sovereignty.
 - Rationale: the firehose, not a DB-vendor feature, is the vendor-neutral long-lived sync substrate, which
@@ -195,22 +191,24 @@ not by server-side sealing alone; these AEAD primitives cover the session blob a
 Decision: move from the interim "authenticated insert, no owner_id" secret ballot to a FULL cryptographic
 end-to-end-verifiable (E2E-V) scheme, with per-poll voting eligibility (only selected members may vote),
 delegation rules (proxy/weighted voting is IN, reversing the earlier "dropped" note), and INDEPENDENTLY
-auditable tallies. The specific E2E-V scheme is an open sub-decision (see below and the open-decisions doc).
+auditable tallies. Scheme chosen (owner): blind-signature eligibility tokens + a public bulletin board of
+atproto records.
 
 - Eligibility + delegation (org-authoritative, redb core): the org maintains a per-poll eligibility roster
   with a weight per eligible voter; a delegation is a signed assignment that moves a voter's weight to a
-  delegate, resolved into the weight column before a poll opens. This is authoritative state, so it lives in
-  redb, never as a public record.
-- Anonymity + audit (the E2E-V layer): eligibility is separated from the ballot so the tally is publicly
-  verifiable without linking a ballot to a voter. The atproto angle is the natural fit for the public audit
-  trail: the append-only public bulletin board of cast ballots can BE atproto records (CID-addressed,
-  firehose-visible, immutable), giving universal verifiability for free, while a blind-signature or
-  homomorphic layer provides the anonymity + eligibility.
-- Open sub-decision (the scheme): blind-signature tokens + public board (simplest; org blind-signs one
-  weighted eligibility token per voter, cast anonymously to the board, double-vote blocked by token) vs
-  homomorphic tally (Helios-style exponential ElGamal + threshold decryption; strongest privacy-preserving
-  universal verifiability) vs a verifiable mixnet. Note the hard tension: delegation/liquid-democracy is in
-  fundamental conflict with unlinkability (a resolved delegation chain can re-identify), so the scheme must
-  fix HOW much delegation is exposed. To be settled before implementation.
+  delegate, resolved into the weight column BEFORE a poll opens. This is authoritative state, so it lives in
+  redb, never as a public record. Resolving delegation to weights server-side before token issuance is how the
+  delegation-vs-anonymity tension is settled: delegation is visible to the org, never on the public board.
+- The scheme (blind-signature tokens + atproto board): the org blind-signs one eligibility token per eligible
+  voter, carrying that voter's resolved weight; the voter unblinds it and casts anonymously, publishing the
+  ballot to an append-only public board that IS atproto records (CID-addressed, firehose-visible, immutable),
+  which gives universal verifiability for free. A double vote collides on token uniqueness. The token unlinks
+  the ballot from the voter's DID, so the public audit trail carries no voter identity.
+- Anonymity + audit: eligibility is separated from the ballot so the tally is publicly recomputable from the
+  board without linking a ballot to a voter (individual verifiability: the voter finds their ballot on the
+  board; universal verifiability: anyone re-tallies the board).
+- Crypto to select at implementation time (a smaller follow-up, not a blocker): the blind-signature primitive
+  (RSA blind signatures per RFC 9474, or blind BLS/Schnorr), preferring a maintained pure-Rust implementation.
 - Rationale: a public election tool must be independently auditable AND ballot-secret; server-trust is not
-  sufficient, which is why the owner chose the full cryptographic route.
+  sufficient, which is why the owner chose the full cryptographic route, and the atproto public board makes
+  the audit trail native rather than a bolted-on bulletin board.

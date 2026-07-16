@@ -12,10 +12,10 @@ verification confirmed a verdict, that is stated plainly.
 
 | Component | Current | Verdict | Why | Action |
 |-|-|-|-|-|
-| Meta Database / authoritative store | Hasura to SurrealDB (BSL 1.1) | change | Correctness of the official tally + secret-ballot dedup demands real ACID and a store the owner's own ethos allows; SurrealDB is unverified (no public Jepsen, self-attested snapshot isolation, single-node LIVE queries) and BSL-flagged. Re-weighted for the Rust-native preference, the answer splits by workload | Split the store (see crux 1): redb 4.1 (pure Rust, MIT/Apache, two-phase-commit durability) for the ballot/tally/roster core; PostgreSQL 18 + sqlx for the rebuildable firehose view; Turso/Limbo tracked as the view's Rust replacement |
-| Database | Postgres to TiKV | change | TiKV is healthy (CNCF-graduated, Apache-2.0) but is distributed cluster infra with a mandatory Go Placement Driver; enormous ops overhead for one self-hosted instance, and not even pure Rust | Drop TiKV; keep Postgres+sqlx for the rebuildable view only; the view's tracked Rust migration is Turso/Limbo, not TiKV |
+| Meta Database / authoritative store | Hasura to SurrealDB (BSL 1.1) | change | The Rust-native preference is first-class, so no C engine anywhere: SurrealDB is BSL + unverified, and Postgres is C. The view being rebuildable removes the only reason a C engine was ever considered | Fully Rust (see crux 1): redb 4.1 (pure Rust, MIT/Apache, 2PC) for BOTH the ballot/tally/roster core AND the rebuildable firehose view (hand-written indexes + tantivy for search); Turso/Limbo an optional pure-Rust SQL layer for the view. Postgres dropped |
+| Database | Postgres to TiKV | change | TiKV is distributed cluster infra (mandatory Go Placement Driver, not pure Rust) and Postgres is C; neither fits the Rust-native single-node target | Drop both TiKV and Postgres; the view is redb too (optionally Turso/Limbo for SQL ergonomics), all pure Rust |
 | Storage Engine | Sled / Fjall (R&D), RocksDB (legacy) | change (to N/A-for-AppView) | The AppView workload is relational (uniqueness, joins, aggregation); a raw KV is the wrong abstraction. Only relevant under a self-hosted PDS | Prefer Fjall or redb over Sled if an embedded engine is ever needed under a query engine or PDS; never Sled for durability-critical ballots |
-| Realtime / sync transport | SurrealDB LIVE queries | keep-and-extend | The real change-feed is the atproto firehose, not a DB-vendor feature; binding realtime to SurrealDB LIVE re-creates the Hasura lock-in being unwound | Consume Jetstream filtered to `app.radikal.*`; push authoritative deltas over one axum WS fed by an in-process broadcast channel (the AppView is a single process holding redb + the Postgres view + the firehose, so no DB LISTEN/NOTIFY is needed) |
+| Realtime / sync transport | SurrealDB LIVE queries | keep-and-extend | The real change-feed is the atproto firehose, not a DB-vendor feature; binding realtime to SurrealDB LIVE re-creates the Hasura lock-in being unwound | Consume Jetstream filtered to `app.radikal.*`; push authoritative deltas over one axum WS fed by an in-process broadcast channel (the AppView is a single process holding redb for both core and view plus the firehose, so no DB LISTEN/NOTIFY is needed) |
 | API surface | GraphQL (Hasura) | change | GraphQL was Hasura's auto-generated surface, not a chosen contract; atproto's native convention is XRPC, and lexicons already drive the types | Expose XRPC query/procedure lexicons + typed axum handlers; drop GraphQL and cynic |
 | Web Server | Caddy to Moella | keep (Caddy) / R&D-only (Moella) | Moella/Kvarn is single-maintainer, hobby-scale, WS/reverse-proxy paths only recently stabilized; wrong bet for a tool running elections | Keep Caddy (or terminate TLS directly in axum); pilot Moella on a non-critical surface before promoting |
 
@@ -75,148 +75,62 @@ verification confirmed a verdict, that is stated plainly.
 | Firehose / Jetstream consumer | not in README | keep-and-extend | Rust Jetstream ecosystem (microcosm-rs, atproto-jetstream) is production-proven at this scale; avoids raw CBOR subscribeRepos + MST | Consume Jetstream filtered to your collections/DIDs; persist cursor; refetch-on-reconnect + PDS backfill-on-gap; keep authoritative state out of the firehose |
 | XRPC / axum + WebSocket | not in README; interim axum 0.8 | keep-and-extend | axum is already in the tree (zero migration); XRPC is JSON/CBOR over HTTP; one axum WS replaces the 9-sockets-per-page problem | One `/ws` per client multiplexing all live channels, driven by the DB change-feed; run as a persistent process |
 
-## Crux decision 1: the data DB (a Rust-preference-weighted re-decision)
+## Crux decision 1: the data DB (fully Rust-native, no Postgres)
 
-Recommended decision: SPLIT the datastore. Adopt redb 4.1.x (pure Rust, dual MIT/Apache-2.0) as the
-authoritative ballot/tally/roster core, and keep PostgreSQL 18 + sqlx as the rebuildable firehose-materialized
-view. Track Turso/Limbo (pure-Rust SQLite dialect) as the eventual Rust-native replacement for the view, not
-for the tally. Drop SurrealDB and TiKV from the R&D column for this tool.
+Recommended decision: redb 4.1 (pure Rust, MIT/Apache-2.0) is the ONLY datastore, for BOTH the authoritative
+core and the rebuildable firehose view, with tantivy (pure Rust) for full-text search. Postgres is dropped
+entirely. Turso/Limbo (the pure-Rust SQLite rewrite) is an optional SQL convenience layer for the view only,
+acceptable now precisely because the view is rebuildable. SurrealDB (BSL) and TiKV (Go Placement Driver) stay
+out.
 
-This supersedes the prior "PostgreSQL + sqlx for everything" pick. The prior verdict was correct on
-correctness but under-weighted the owner's first-class Rust-native criterion. The re-decision honors that
-criterion exactly where correctness permits, and concedes C only on the disposable half.
+This supersedes both prior picks ("Postgres for everything", then "redb core plus Postgres view"). Both
+under-weighted the owner's first-class Rust-native criterion by keeping a C engine (Postgres) for the view.
+The view being rebuildable removes the only objection (query correctness/ergonomics) that justified Postgres,
+so nothing is left that requires linking C.
 
-Why split. The workload has two halves with opposite priorities, and the project's own design docs already
-draw the seam. The correctness-critical core (see `atproto-stack-decisions.md` and the crypto cluster above)
-is deliberately storage-agnostic: secret ballots are opaque `BYTEA`/blob the engine never inspects (crypto
-decoupled from the DB choice), one-vote-per-member is a single unique-key insert, and the official tally is a
-pure aggregation over a small append-only set for one civic org (hundreds to low-thousands of members, modest
-write concurrency). That shape needs durable, serializable, all-or-nothing commits on a single node. It does
-NOT need SQL, joins, or recursion. The other half, the firehose-materialized view, is read-heavy,
-query-shaped, wants recursive-CTE membership hierarchy and JSONB atproto records, and is correctness-TOLERANT
-because it can be recomputed by replaying Jetstream.
+Why redb serves the view too. The view materializes atproto records (JSON keyed by did/collection/rkey), the
+node hierarchy (parent to children), and the roster/roles, for ONE small civic org (thousands of nodes,
+hundreds to low-thousands of members). Those are ordered-key lookups, prefix range scans (a node's children),
+and a short recursive walk (ancestors and the membership hierarchy), which is exactly what an ordered-KV
+B-tree store does natively. The SQL conveniences Postgres offered (recursive CTE, JSONB operators) are
+ergonomics, not necessities at this scale: the recursive hierarchy is a small Rust graph walk, and the
+handful of feed/filter views are secondary indexes maintained on write in redb. Full-text search, the one
+thing a plain KV does poorly, goes to tantivy (pure Rust), not a SQL LIKE.
 
-### The core: redb 4.1.x, pure Rust
+The honest tradeoff. You trade Postgres's query engine for hand-written Rust query and index code over redb.
+That is more application code and a few hand-maintained secondary indexes instead of free SQL indexes, and it
+is real work, but bounded and testable because the dataset is small and the query set is fixed and known. In
+exchange the entire datastore is pure Rust with zero C linked (a musl/EU server links no database C at all),
+which is the stated priority. Because the view is rebuildable from the firehose, any view bug or corruption
+is recoverable by replay, so the correctness bar there is low, which is exactly why a C engine was never
+actually required for it.
 
-redb 4.1.0 (2026-04-19, latest; the on-disk format is declared stable with an upgrade path) is the only
-pure-Rust store that delivers election-grade durability for a store this small, verified against redb's
-`design.md`, its docs.rs API, and its actual fuzz-harness source:
+The core is unchanged. redb with two-phase-commit durability (redb's own design.md recommends 2PC for
+adversarial input, and a public election is adversarial), on power-loss-protected disk, ballots stored as
+opaque encrypted bytes, one-vote-per-member as a single unique-key insert, the tally as a fold. No SQL,
+joins, or recursion are needed there either.
 
-1. Durability: `WriteTransaction` defaults to `Durability::Immediate`, i.e. an fsync completes before
-   `commit()` returns. Crash recovery is empirically fuzz-verified, not merely asserted: the fuzzer's
-   `FuzzerBackend` wraps the file and forces `write`/`sync_data`/`set_len` to fail on a countdown (simulated
-   power loss at or around fsync), then drops and reopens the database, asserts the recovery god-byte, and
-   DIFFS the recovered database against a `BTreeMap` reference model to prove every committed key survives and
-   partial writes roll back to the last durable commit via XXH3-128 Merkle-tree checksums. That is exactly the
-   no-lost, no-double, no-torn-ballot property a public election requires.
-2. Isolation: a single serializable level, with one writer plus MVCC copy-on-write B+trees. Concurrent writes
-   cannot torn or double-count a ballot by construction, and the one-vote unique-key insert is atomic within
-   the single writer.
+Turso/Limbo, if you want SQL for the view. If hand-written redb queries for the view get painful, Turso/Limbo
+(the pure-Rust SQLite rewrite) is acceptable for the VIEW now, not merely "tracked", precisely because the
+view is rebuildable: Limbo's MVCC and durability being officially experimental does not matter when a crash
+just triggers a firehose replay. Do NOT put the tally on Limbo (that needs the bulletproof durability only
+redb-2PC gives today). So the fully-Rust menu is: redb-only (most ethos-pure, more query code) or redb-core
+plus Limbo-view (SQL ergonomics for the disposable half). Either way there is no Postgres.
 
-Verification (lens 1) confirmed the pick HOLDS, but corrected the prose and named required, non-architectural
-fixes. Fold these in exactly:
+Ranking (Rust-preference first):
 
-- Honest mechanism: redb's DEFAULT commit path is 1PC+C (one fsync, then a single god-byte flip validated by a
-  NON-CRYPTOGRAPHIC XXH3-128 checksum), NOT the "two-slot header swap" a two-phase commit would imply. redb's
-  own `design.md` warns that under 1PC+C an attacker could in theory make a partially committed transaction
-  look complete, and explicitly recommends 2PC "for users who need to accept malicious input." A public civic
-  election is the canonical adversarial threat model. Therefore run the ballot/tally core with two-phase-commit
-  durability, not the 1PC+C default. The cost is one extra fsync per commit, trivial at this member count.
-- Honest fuzzing claim: describe it as per-commit CI crash fuzzing (the `fuzz_ci` job on PR/push), NOT
-  "continuous"; there is no cron/OSS-Fuzz job. And there is no independent Jepsen for redb (conceded below).
-- Hardware requirement (not a redb defect, applies equally to Postgres/SQLite): fsync durability is only as
-  strong as the disk. Require an enterprise SSD with power-loss protection, or disable the volatile write
-  cache, so a power cut cannot lose an already-acknowledged ballot.
-
-With 2PC durability set and power-loss-protected hardware, the residual risk is purely evidentiary and
-governance (bus-factor-1, no third-party Jepsen), not an architectural lost/double/torn-ballot risk.
-
-### The view: PostgreSQL 18 + sqlx now, Turso/Limbo as the tracked Rust migration
-
-For the rebuildable view the priorities invert. It is read-heavy and query-shaped, wants recursive-CTE
-membership hierarchy and JSONB atproto records, and is recomputable from the firehose, so the Rust-native
-criterion is far weaker here: paying a hand-rolled-Rust-KV correctness and ergonomics premium to avoid C on
-disposable data would be misplaced zeal. Keep Postgres 18 + sqlx: gold-standard ACID, the healthiest-governance
-permissive-licensed engine, and the best relational/recursive-CTE/JSONB fit. sqlx keeps the Rust process from
-linking a C client (it speaks the wire protocol in Rust), though the Postgres server itself is C. This mirrors
-the README's own "C now / Rust when ready" pattern. The README's row currently marks the Rust-when-ready target
-as TiKV, but TiKV is wrong here: its mandatory Go Placement Driver cluster violates the single-node constraint
-and is not even pure Rust. The correct tracked Rust migration for the VIEW is Turso/Limbo (pure-Rust SQLite
-dialect), a near-drop-in future swap rather than a rewrite.
-
-### Honest tradeoff (correctness AND operations)
-
-You trade Postgres's decades of adversarial, Jepsen-adjacent scrutiny and a SQL `UNIQUE` constraint for redb's
-thinner (self-run, no third-party Jepsen) evidence base and a bus-factor-1 maintainer, and you take on
-hand-enforcing the one-vote invariant and the tally aggregation in application code. That correctness burden is
-real but bounded and testable precisely because the core is tiny: opaque encrypted blobs, one unique-key insert
-per voter, a fold to tally, single-writer serializable 2PC commits. It never needs joins, recursion, or the SQL
-surface where hand-rolling gets dangerous.
-
-Verification (lens 3, which refuted the original write-up as too rosy) forces a second, equally honest cost:
-the split converts a single-datastore system into a TWO-datastore system. redb is a single-file, single-process,
-single-writer engine with no replication and a modest backup story; Postgres remains for the view. So the
-operator runs two engines, two backup and restore regimes, and two durability models. This trades away some of
-criterion 4's operational simplicity. Mitigate concretely: document a redb backup and copy-on-quiesce procedure,
-run a tested restore drill, and adopt a hard rule that no query joins across the two stores (the core stays
-query-free by design, so authoritative-plus-view questions are answered by two lookups in application code, not
-a cross-store join).
-
-### Ranking (Rust-preference-weighted)
-
-1. redb (for the core). The only pure-Rust store with genuinely election-grade durability today: COW B+trees,
-   serializable single-writer MVCC, fsync-by-default with checksum-validated crash recovery to the last durable
-   commit, a stable on-disk format, and a crash fuzzer that diffs against a reference model. Its non-Rust
-   footprint is zero for this deployment: per crates.io the only non-dev runtime deps are `chrono`/`log`/`uuid`
-   (all optional, pure Rust) and `libc` (optional, gated to `cfg(target_os = "wasi")`), so a Linux/musl EU
-   server links zero C. That is a real distinction from SQLite/LMDB/`heed` (C cores behind `-sys` wrappers) and
-   from Postgres (a C server process). Bus-factor-1 and no external Jepsen are the honest costs.
-2. Postgres 18 + sqlx (for the view). Gold-standard ACID and the best relational/recursive-CTE/JSONB fit; it is
-   C, but the view is rebuildable so the Rust-native criterion is far less binding. Also the safe whole-system
-   fallback if a single engine is ever mandated.
-3. Turso/Limbo. Architecturally the ideal pure-Rust SQL endgame (SQLite dialect, deterministic-simulation and
-   Antithesis-style testing). Correction folded in from verification: it is no longer true that Turso "cannot
-   use the unique index"; its January 2026 MVCC overhaul added index, checkpoint, and recovery support. The
-   ranking outcome is unchanged but rests on the correct, stronger ground: Turso's MVCC path is officially
-   experimental and not recommended for production, and libSQL (the C fork) is still the production path. Do not
-   ship the tally on it in 2026; track it as the migration target for the VIEW.
-4. SurrealDB. Pure-Rust and a good multi-model fit for the view, but disqualified from the core: BSL 1.1 with a
-   single-vendor VC roadmap (a confirmed February 2026 raise of 23M USD explicitly to pivot to agentic AI
-   memory), snapshot-isolation-not-serializable by default, and zero independent durability or isolation
-   verification. The owner's own hourglass marker says to avoid BSL/single-vendor where a healthy open
-   alternative exists, and here two exist.
-5. CozoDB. Best Datalog fit for recursive membership, but its only durable backends are RocksDB/SQLite (C/C++),
-   its last release was v0.7.6 (2023-12-11) so it is effectively stale, and there is no crash-safety evidence.
-   Not worth the risk over Postgres for the view or redb for the core.
-
-### Governance and longevity of the core pick
-
-Verification (lens 2) confirmed the governance verdict HOLDS and sharpened it. redb is a bus-factor-1 side
-project (Christopher Berner authored roughly 91 percent of commits; the maintainer leads OpenAI's robotics
-team), with no foundation, company, or sponsors program. State that plainly. Two facts make it a defensible
-multi-year bet anyway, and both should be weighted heavily:
-
-- The permissive MIT/Apache-2.0 license is the decisive longevity fact. It converts bus-factor-1 from a
-  vendor-death risk into a fork-if-abandoned risk: an org can vendor, pin, and self-maintain redb forever with
-  zero permission. That is impossible under SurrealDB's BSL 1.1. On the license axis redb is the best-governed
-  candidate, not a compromise.
-- redb is the least-bad pure-Rust ACID engine, and there is no better-governed pure-Rust alternative to switch
-  to. The nearest competitor, Fjall, is ALSO single-maintainer, and its maintainer announced that active
-  feature development will mostly wind down going into 2026, whereas redb shipped v4.0/4.1 in April 2026 (that
-  is, accelerating).
-
-Because the split keeps Postgres as the whole-system fallback, the residual governance risk is bounded and
-reversible: a tiny opaque-blob + unique-insert + fold core is portable to Postgres or SQLite in days, so redb
-is never lock-in. The concrete guardrails are load-bearing, not optional: pin the exact redb version, vendor
-the source, run 2PC durability, keep the crash-injection CI, keep independent backups, run on power-loss-
-protected disk, and keep the Postgres-fallback migration script warm.
-
-The upshot: state it plainly. redb is "Rust-native now" for the core, and it earns that outright because it
-meets the durability bar, so the ethos wins where it coincides with the crown-jewel data. Postgres is "C now,
-Turso/Limbo as the tracked Rust migration" for the rebuildable view, and that is defended against the Rust
-preference because the view is recomputable. SQLite + heed/LMDB remain excellent and election-safe but are
-exactly the C core the owner is moving away from, so they lose to redb once redb clears the durability bar,
-which for a store this small it does.
+1. redb, for both halves. Pure Rust, zero C, election-grade durability for the core (2PC with checksum-
+   validated crash recovery), and adequate for the small rebuildable view via hand-written indexes plus
+   tantivy for search. Its permissive MIT/Apache-2.0 license makes bus-factor-1 a fork-if-abandoned risk, not
+   a vendor-death risk.
+2. Turso/Limbo, optional SQL layer for the VIEW only. Pure-Rust SQLite; experimental durability is fine for
+   rebuildable data, disqualifying for the tally.
+3. tantivy, pure-Rust full-text search for the view, replacing the one thing a KV does poorly.
+4. SurrealDB. Rust and multi-model, but BSL 1.1 plus single-vendor VC (the Feb-2026 23M USD AI-memory pivot)
+   fails the ethos, and its durability/isolation are unverified. Out.
+5. Postgres. Dropped. Gold-standard ACID and SQL, but it is C, and the only workload that could have
+   justified it (the rebuildable view) does not need a battle-tested engine, so the Rust-native criterion
+   wins outright.
 
 ## Crux decision 2: atproto signing curve (Ed25519 vs P-256 / k256)
 
@@ -308,8 +222,9 @@ config validation.
 
 ## Change these (shortlist)
 
-- SurrealDB and TiKV out. Split store: redb (pure Rust, 2PC durability) for the ballot/tally/roster core;
-  Postgres+sqlx for the rebuildable firehose view; Turso/Limbo tracked as the view's Rust replacement.
+- SurrealDB, TiKV, and Postgres all out. Fully Rust datastore: redb (pure Rust, 2PC) for both the
+  ballot/tally/roster core and the rebuildable firehose view (hand-written indexes + tantivy for search);
+  Turso/Limbo an optional pure-Rust SQL layer for the view.
 - Ed25519 out as the atproto signing standard; P-256 in for minting/signing, verify both p256 and k256, add
   an atproto-exception README row.
 - GraphQL/cynic out; XRPC + typed axum handlers in.
