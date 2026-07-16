@@ -6,24 +6,59 @@ artifact it is grounded in, and a one-line rationale tied to the future-proofing
 
 ## Database engine
 
-Decision: PostgreSQL as the authoritative store, accessed through `sqlx` with compile-checked queries and no
-ORM.
+Decision: SPLIT the datastore. Use redb 4.1.x (pure Rust, dual MIT/Apache-2.0) as the authoritative
+ballot/tally/roster core, and PostgreSQL 18 accessed through `sqlx` (compile-checked queries, no ORM) as the
+rebuildable firehose-materialized view. Track Turso/Limbo as the eventual Rust-native replacement for the view.
+This supersedes the earlier "Postgres for everything" pick: it moves the one correctness-critical component
+where the Rust-native ethos and the crown-jewel data coincide onto pure Rust, and concedes C only on the
+disposable, recomputable half.
 
-- Adoption: materialize the firehose into normal tables keyed by `(did, collection, rkey)`; codegen'd
-  lexicon serde structs map to `sqlx` typed columns or `jsonb`.
-- Extension: model ballots append-only with a `UNIQUE (poll, voter)` constraint and compute the tally by
-  aggregation; store sealed sessions and encrypted secret-ballot rows as opaque `BYTEA` so the engine never
-  sees plaintext and the crypto is decoupled from the DB choice.
-- Rationale: real ACID for the official-tally and secret-ballot-dedup path, plus PostgreSQL-License
-  governance, is the future-proof choice the correctness verdict demands over BSL/unverified SurrealDB.
+- Adoption (the core, redb): depend on `redb = "4.1"`. Store the authoritative state in a single redb file with
+  a few typed tables. Ballots go in a table keyed by `(poll_id, voter_did)` whose key uniqueness IS the
+  one-vote-per-member invariant: an insert that collides is the rejected duplicate vote, so no SQL `UNIQUE`
+  constraint is needed. The ballot value is the opaque `ChaCha20-Poly1305` sealed blob (the engine never sees
+  plaintext, matching the crypto-decoupling in the crypto cluster). The official tally is a pure fold over the
+  poll's ballot range, not a SQL aggregation. Roster and roles live in their own keyed tables. The core never
+  performs a join, a recursive query, or any SQL. Run every write transaction with two-phase-commit durability,
+  NOT redb's 1PC+C default: redb's own `design.md` recommends 2PC for adversarial/malicious input, and a public
+  election is exactly that threat model; the cost is one extra fsync per commit, negligible at hundreds to
+  low-thousands of members.
+- Adoption (the view, Postgres 18 + sqlx): materialize the firehose into normal tables keyed by
+  `(did, collection, rkey)`; codegen'd lexicon serde structs map to `sqlx` typed columns or `jsonb`; the
+  membership hierarchy is a recursive CTE and membership edges are join tables. `sqlx` speaks the Postgres wire
+  protocol in Rust, so the Rust process links no C client, though the Postgres server itself is C. This is the
+  README's own "C now / Rust when ready" pattern; the correct tracked Rust migration for the VIEW is Turso/Limbo
+  (pure-Rust SQLite dialect), a near-drop-in future swap, not TiKV (its mandatory Go Placement Driver cluster
+  violates the single-node constraint and is not pure Rust).
+- Extension (durability and operations, load-bearing): run redb with `Durability::Immediate` plus 2PC on the
+  ballot core; pin the exact redb version and vendor the source; add a per-commit crash-injection test in CI
+  (redb's own fuzzer diffs a recovered DB against a `BTreeMap` reference model, so mirror that shape for the
+  ballot table); deploy on an enterprise SSD with power-loss protection (or with the volatile write cache
+  disabled), because fsync durability is only as strong as the disk. Price the two-datastore operational cost
+  honestly: two backup and restore regimes, no cross-store joins by rule (authoritative-plus-view questions are
+  two lookups in application code), a documented redb copy-on-quiesce backup and a tested restore drill, and a
+  warm Postgres-fallback migration script so the tiny opaque-blob core stays portable in days if redb is ever
+  abandoned.
+- Rationale: the authoritative core needs durable, serializable, all-or-nothing commits on a single node and
+  nothing else, and redb is the only pure-Rust engine that delivers election-grade durability for a store this
+  small (COW B+trees, serializable single-writer MVCC, fsync-by-default, checksum-validated crash recovery to
+  the last durable commit, a stable on-disk format, and empirical crash fuzzing). Its permissive MIT/Apache-2.0
+  license makes bus-factor-1 a fork-if-abandoned risk rather than a vendor-death risk, and the tiny replaceable
+  core keeps Postgres as a real fallback. The rebuildable view is recomputable from Jetstream and query-shaped,
+  so the Rust-native criterion is far weaker there and Postgres 18's ACID, healthy governance, and
+  recursive-CTE/JSONB fit win now, with Turso/Limbo the tracked pure-Rust endgame once its MVCC path leaves
+  experimental status and libSQL is no longer the production path.
 
 ## Realtime and the firehose consumer
 
 Decision: consume Jetstream (JSON over WebSocket, filtered to `app.radikal.*` collections and member DIDs)
-as the change-feed; push local authoritative deltas over one axum WebSocket fed by Postgres LISTEN/NOTIFY.
+as the change-feed; push local authoritative deltas over one axum WebSocket fed by an in-process broadcast
+channel (`tokio::sync::broadcast`), since the AppView is a single persistent process holding the redb core,
+the Postgres view, the firehose connection, and the WebSocket server. No DB LISTEN/NOTIFY is required.
 
 - Adoption: use `microcosm-rs`/`atproto-jetstream` for the Jetstream client with cursor handling and
-  auto-reconnect; materialize records into Postgres.
+  auto-reconnect; materialize records into the Postgres view; broadcast authoritative deltas (poll open/close,
+  projector focus, roster changes) from the redb write path directly onto the in-process channel.
 - Extension: persist the Jetstream cursor and implement refetch-on-reconnect plus PDS backfill-on-gap
   (Jetstream has no missed-event backfill); consider self-hosting a Jetstream/tap instance for sovereignty.
 - Rationale: the firehose, not a DB-vendor feature, is the vendor-neutral long-lived sync substrate, which
@@ -128,25 +163,54 @@ method-agnostic resolver.
 - Adoption: `atrium-oauth` for the atproto OAuth client (DPoP P-256, PAR, PKCE S256); `atrium-identity` for
   did:plc + did:web + did:key resolution; own a thin wrapper layer so a future breaking atrium 0.x bump is a
   one-file change and pin exact 0.25.x versions gated behind the vote/ballot test suite.
-- Extension: run or consume a self-auditing PLC read-replica (the Feb-2026 reference pattern on the
-  independent `go-didplc` codebase, `/export/stream` websocket, PLC spec v0.3.0) to keep member identities
-  verifiable during a plc.directory outage; issue the org's own DID and resolve the org signing-key custody
-  question (HSM/multi-sig backups, or run your own PDS) before launch.
-- Rationale: DID-as-identity is the best migration decision, and a method-agnostic resolver plus a mirrored,
-  self-auditing directory earns the "portable identity beats ActivityPub" claim under the sovereignty ethos.
+- PDS-agnostic (owner decision): the AppView does NOT run or mandate its own PDS. Members and the org each
+  register with whatever atproto host they choose (Eurosky, Bluesky, w.social, or a self-hosted PDS); the
+  AppView authenticates whoever logs in via atproto OAuth and resolves their DID method-agnostically. The
+  org's signing-key custody is therefore the responsibility of whatever PDS the org picked, not this codebase.
+- Extension (optional, not required): consume a self-auditing PLC read-replica (the Feb-2026 reference pattern
+  on the independent `go-didplc` codebase, `/export/stream` websocket, PLC spec v0.3.0) to keep member
+  identities verifiable during a plc.directory outage. This is a resilience nice-to-have, not a launch blocker.
+- Rationale: DID-as-identity is the best migration decision, and staying host-agnostic (register anywhere)
+  maximizes the portability/sovereignty win over ActivityPub without the AppView taking on PDS operations.
 
 ## Crypto for the private half
 
-Decision: ChaCha20-Poly1305 seals the private, server-only material; HKDF-SHA256 derives the keys.
+Decision: ChaCha20-Poly1305 seals the at-rest server-held material; HKDF-SHA256 derives the keys. (Ballot
+ANONYMITY is now handled by a full cryptographic end-to-end-verifiable scheme, see "Voting integrity" below,
+not by server-side sealing alone; these AEAD primitives cover the session blob and any server-held keys.)
 
 - Adoption: carry the existing `seal()`/`open()` (ChaCha20-Poly1305, `chacha20poly1305` v0.10) forward for
-  the at-rest `atproto_session` blob and secret-ballot storage; these rows live ONLY in Postgres, never as
-  public atproto records, because a DID-signed record cannot be anonymous by construction.
+  the at-rest `atproto_session` blob and any server-held key material; the `atproto_session` blob lives ONLY
+  in the redb core, never as a public atproto record.
 - Extension: upgrade to XChaCha20-Poly1305 (24-byte nonce) or per-record KDF-derived keys to remove the
-  96-bit random-nonce birthday ceiling as ballot volume grows; replace the bare `SHA-256(secret)` key
-  derivation with HKDF-SHA256 (the `hkdf` v0.12 crate, already used on the RFC 8291 push path) using
-  per-purpose `info` labels for domain separation between the cookie key and the ballot-store key; keep
-  Argon2id reserved for a hypothetical future admin/recovery-code password and `age` reserved for
-  out-of-band operator secrets only.
+  96-bit random-nonce birthday ceiling; replace the bare `SHA-256(secret)` key derivation with HKDF-SHA256
+  (the `hkdf` v0.12 crate, already used on the RFC 8291 push path) using per-purpose `info` labels for domain
+  separation between the cookie key and any ballot-key material; keep Argon2id reserved for a hypothetical
+  future admin/recovery-code password and `age` reserved for out-of-band operator secrets only.
 - Rationale: ChaCha20-Poly1305 is a constant-time pure-Rust AEAD that avoids OpenSSL, and HKDF is the right
   KDF for already-high-entropy inputs, so using Argon2 to stretch them would be a category error.
+
+## Voting integrity (owner decisions: full cryptographic, eligibility, delegation, public audit)
+
+Decision: move from the interim "authenticated insert, no owner_id" secret ballot to a FULL cryptographic
+end-to-end-verifiable (E2E-V) scheme, with per-poll voting eligibility (only selected members may vote),
+delegation rules (proxy/weighted voting is IN, reversing the earlier "dropped" note), and INDEPENDENTLY
+auditable tallies. The specific E2E-V scheme is an open sub-decision (see below and the open-decisions doc).
+
+- Eligibility + delegation (org-authoritative, redb core): the org maintains a per-poll eligibility roster
+  with a weight per eligible voter; a delegation is a signed assignment that moves a voter's weight to a
+  delegate, resolved into the weight column before a poll opens. This is authoritative state, so it lives in
+  redb, never as a public record.
+- Anonymity + audit (the E2E-V layer): eligibility is separated from the ballot so the tally is publicly
+  verifiable without linking a ballot to a voter. The atproto angle is the natural fit for the public audit
+  trail: the append-only public bulletin board of cast ballots can BE atproto records (CID-addressed,
+  firehose-visible, immutable), giving universal verifiability for free, while a blind-signature or
+  homomorphic layer provides the anonymity + eligibility.
+- Open sub-decision (the scheme): blind-signature tokens + public board (simplest; org blind-signs one
+  weighted eligibility token per voter, cast anonymously to the board, double-vote blocked by token) vs
+  homomorphic tally (Helios-style exponential ElGamal + threshold decryption; strongest privacy-preserving
+  universal verifiability) vs a verifiable mixnet. Note the hard tension: delegation/liquid-democracy is in
+  fundamental conflict with unlinkability (a resolved delegation chain can re-identify), so the scheme must
+  fix HOW much delegation is exposed. To be settled before implementation.
+- Rationale: a public election tool must be independently auditable AND ballot-secret; server-trust is not
+  sufficient, which is why the owner chose the full cryptographic route.
