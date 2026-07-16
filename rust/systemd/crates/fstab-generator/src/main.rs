@@ -97,7 +97,13 @@ fn main() -> ExitCode {
         match load_fstab(&fstab_path) {
             Ok(entries) => {
                 for e in entries {
-                    all_entries.push((e, false));
+                    // In the initrd, entries flagged x-initrd.mount are the real
+                    // root's filesystems and must be mounted under /sysroot (so
+                    // they are in place before switch-root). In particular the
+                    // root entry `/` becomes `/sysroot` → sysroot.mount. Entries
+                    // without the flag are initrd-local mounts, used as-is.
+                    let prefix = in_initrd && parse_csv(&e.options).contains(&"x-initrd.mount");
+                    all_entries.push((e, prefix));
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -141,7 +147,14 @@ fn main() -> ExitCode {
         // in initrd mode.
         let mut entry = entry.clone();
         if *prefix_sysroot {
-            entry.where_ = format!("/sysroot{}", entry.where_);
+            // "/" → "/sysroot" (the root mount, exactly), not "/sysroot/";
+            // "/nix/store" → "/sysroot/nix/store". The exact "/sysroot" is what
+            // routes to initrd-root-fs.target below.
+            entry.where_ = if entry.where_ == "/" {
+                "/sysroot".to_string()
+            } else {
+                format!("/sysroot{}", entry.where_)
+            };
         }
         // Duplicate mountpoint detection — matches upstream.
         if seen_mountpoints.contains(&entry.where_) {
