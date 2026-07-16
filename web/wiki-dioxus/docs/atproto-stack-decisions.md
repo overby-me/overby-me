@@ -198,8 +198,11 @@ atproto records.
 - Anonymity + audit: eligibility is separated from the ballot so the tally is publicly recomputable from the
   board without linking a ballot to a voter (individual verifiability: the voter finds their ballot on the
   board; universal verifiability: anyone re-tallies the board).
-- Crypto to select at implementation time (a smaller follow-up, not a blocker): the blind-signature primitive
-  (RSA blind signatures per RFC 9474, or blind BLS/Schnorr), preferring a maintained pure-Rust implementation.
+- Crypto primitive (spike done, pre-rewrite plan #6): use `blind-rsa-signatures` (jedisct1 / Frank Denis),
+  the maintained pure-Rust implementation of RFC 9474 RSA blind signatures. The org blind-signs the voter's
+  weighted eligibility token; the voter unblinds it and casts anonymously; the unblinded signature verifies as
+  RSA-PSS against the org's public key and cannot be linked back to the blinded request. Pure Rust, no OpenSSL,
+  IETF-standardized. This clears the biggest ballot-design unknown: the E2E scheme is buildable in pure Rust.
 - Rationale: a public election tool must be independently auditable AND ballot-secret; server-trust is not
   sufficient, which is why the owner chose the full cryptographic route, and the atproto public board makes
   the audit trail native rather than a bolted-on bulletin board.

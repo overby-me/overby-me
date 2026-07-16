@@ -3,6 +3,15 @@
 
 The interim Hasura/NHost/Postgres stack is throwaway. This list only greenlights work that lives in the kept Dioxus frontend and is wanted regardless, migrates into the axum backend that becomes the AppView, is pure domain/crypto/schema design that transfers close to 100 percent, or is data hygiene that lowers big-bang migration risk. Everything grounded below was verified against the code and docs. Two items from the shortlist were refuted by the adversarial verification and moved to the defer section, with reasons.
 
+## Status (2026-07-16)
+
+Done: #1 (authz-predicate consolidation into `auth::is_active_member`/`is_active_owner`; fixed the real
+present-tense bug where the notify paths ignored the durable node_id binding), #5 (`statecookie.rs` hardened to
+HKDF-SHA256 + XChaCha20-Poly1305, with a legacy-decrypt fallback so at-rest sessions survive), #6 (blind-sig
+crate spike: `blind-rsa-signatures` / RFC 9474 confirmed pure-Rust and fit for purpose), #10 (SurrealQL
+domain-model doc converted to SQL on Turso). Remaining: #2 (graphql.rs seam), #3/#4 (DID audit + nudge), #7
+(lexicons), #8 (orphan purge), #9 (fonts + PWA).
+
 ## Do now (prioritized)
 
 ### 1. Consolidate the membership/ownership authz predicates into one backend module
