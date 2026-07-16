@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::graphql::NodeWithChildren;
+use crate::model::NodeWithChildren;
 
 use super::loader::icon_el;
 

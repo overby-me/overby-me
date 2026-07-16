@@ -8,6 +8,8 @@ mod graphql;
 mod i18n;
 #[cfg(feature = "remote-logging")]
 mod logging;
+/// Frontend-owned domain types (the anti-corruption seam over `graphql.rs`).
+pub mod model;
 mod nhost;
 mod pwa;
 mod route;

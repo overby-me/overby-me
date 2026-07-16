@@ -657,8 +657,8 @@ fn heading_prefix(mime_id: Option<&str>, ordinal: Option<usize>) -> String {
 /// The children to descend into for a recursive export, ordered like the folder
 /// view. Structural / content-bearing mimes only (not files, polls, speak…).
 fn export_children(
-    children: &[crate::graphql::ChildNodeFields],
-) -> Vec<crate::graphql::ChildNodeFields> {
+    children: &[crate::model::ChildNodeFields],
+) -> Vec<crate::model::ChildNodeFields> {
     let mut out: Vec<_> = children
         .iter()
         .filter(|c| {

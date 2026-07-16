@@ -3,8 +3,9 @@
 //! (which also carries the ballot mechanics).
 use dioxus::prelude::*;
 
-use crate::graphql::{self, NodeWithChildren};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::NodeWithChildren;
 use crate::session::use_session;
 
 mod policy;

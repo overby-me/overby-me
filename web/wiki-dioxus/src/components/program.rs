@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
-use crate::graphql::NodeWithChildren;
 use crate::i18n::t;
+use crate::model::NodeWithChildren;
 use crate::route::Route;
 
 use super::loader::{icon_el, mime_icon, visible_sorted};

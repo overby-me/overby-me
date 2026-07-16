@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
 
-use crate::graphql::{
-    self, ChildNodeFields, Jsonb, NodeWithChildren, NodesInsertInput, NodesSetInput, Uuid,
-};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::{
+    ChildNodeFields, Jsonb, NodeWithChildren, NodesInsertInput, NodesSetInput, Uuid,
+};
 use crate::session::use_session;
 
 /// Apply the result of a speaker-queue mutation: on success bump `refresh` (which
@@ -944,7 +945,7 @@ fn remaining_seconds_at(time: f64, updated_ms: f64, now_ms: f64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graphql::{Jsonb, Timestamptz, Uuid};
+    use crate::model::{Jsonb, Timestamptz, Uuid};
 
     fn speaker(id: &str, kind: &str, index: i32, created: &str) -> ChildNodeFields {
         ChildNodeFields {

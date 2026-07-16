@@ -10,8 +10,11 @@ present-tense bug where the notify paths ignored the durable node_id binding), #
 HKDF-SHA256 + XChaCha20-Poly1305, with a legacy-decrypt fallback so at-rest sessions survive), #6 (blind-sig
 crate spike: `blind-rsa-signatures` / RFC 9474 confirmed pure-Rust and fit for purpose), #7 (public wiki.radikal.* lexicons drafted under lexicons/), #10 (SurrealQL domain-model doc
 converted to SQL on Turso), #3 (DID-reachability audit run), #4 (atproto-link nudge in the member roster),
-#8 (orphan purge action in the Missing-Parent admin). Remaining: #2 (graphql.rs seam, deliberately deferred),
-#9 (self-host fonts + finish PWA offline).
+#8 (orphan purge action in the Missing-Parent admin), #9 (fonts self-hosted via `asset!()` + `@font-face`,
+Google Fonts CDN dropped, service-worker cache bumped so they cache offline), and #2 (the graphql.rs
+anti-corruption seam: a new cynic-free `src/model.rs` owns every domain type components touch; `graphql.rs`
+keeps the cynic wire types internal and converts at each query/mutation boundary, so the backend swap is
+contained to that mapping layer). All 10 do-now items are complete.
 
 ### #3 audit result (2026-07-16, live read-only)
 

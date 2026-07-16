@@ -1,7 +1,9 @@
+use crate::model;
 use dioxus::prelude::*;
 
-use crate::graphql::{self, NodeWithChildren};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::NodeWithChildren;
 use crate::route::Route;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
@@ -45,7 +47,7 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
                 // saved reorder (the folder subscription won't refire on failure).
                 let mut ok = true;
                 for (i, item) in current_items.iter().enumerate() {
-                    let set = graphql::NodesSetInput {
+                    let set = model::NodesSetInput {
                         index: Some(i32::try_from(i).unwrap_or(0)),
                         ..Default::default()
                     };

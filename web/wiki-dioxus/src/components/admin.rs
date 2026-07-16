@@ -1,7 +1,9 @@
+use crate::model;
 use dioxus::prelude::*;
 
-use crate::graphql::{self, NodeWithChildren, PollSummaryFields};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::{NodeWithChildren, PollSummaryFields};
 use crate::route::Route;
 use crate::session::use_session;
 
@@ -435,7 +437,7 @@ fn AdminPollRow(poll: PollSummaryFields, #[props(default)] can_manage: bool) -> 
                                 match graphql::update_node(
                                     token.as_deref(),
                                     &poll_id,
-                                    graphql::NodesSetInput {
+                                    model::NodesSetInput {
                                         mutable: Some(false),
                                         ..Default::default()
                                     },

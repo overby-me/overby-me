@@ -1,3 +1,4 @@
+use crate::model;
 use dioxus::prelude::*;
 
 use super::*;
@@ -173,7 +174,7 @@ pub(super) fn DrawerLevel(
 /// path start expanded and the active node is highlighted.
 #[component]
 pub(super) fn DrawerNodeItem(
-    node: graphql::DrawerChildFields,
+    node: model::DrawerChildFields,
     path_prefix: Vec<String>,
     current_path: Vec<String>,
     depth: usize,

@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 
-use crate::graphql::{self, NodeWithChildren};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::NodeWithChildren;
 use crate::route::Route;
 use crate::session::use_session;
 
@@ -686,13 +687,13 @@ pub trait HasMimeId {
     fn mime_id_str(&self) -> Option<&str>;
 }
 
-impl HasMimeId for graphql::ChildNodeFields {
+impl HasMimeId for crate::model::ChildNodeFields {
     fn mime_id_str(&self) -> Option<&str> {
         self.mime_id.as_deref()
     }
 }
 
-impl HasMimeId for graphql::DrawerChildFields {
+impl HasMimeId for crate::model::DrawerChildFields {
     fn mime_id_str(&self) -> Option<&str> {
         self.mime_id.as_deref()
     }
@@ -779,8 +780,10 @@ pub fn slugify(name: &str) -> String {
 /// hidden-mime entries dropped, ordered by `index` then creation time. Row-level
 /// permissions are already applied by Hasura, so only the hidden filter and the
 /// ordering need to happen client-side.
-pub fn visible_sorted(children: &[graphql::ChildNodeFields]) -> Vec<graphql::ChildNodeFields> {
-    let mut out: Vec<graphql::ChildNodeFields> = children
+pub fn visible_sorted(
+    children: &[crate::model::ChildNodeFields],
+) -> Vec<crate::model::ChildNodeFields> {
+    let mut out: Vec<crate::model::ChildNodeFields> = children
         .iter()
         .filter(|c| c.mime.as_ref().map(|m| !m.hidden).unwrap_or(true))
         .cloned()
@@ -798,7 +801,7 @@ pub fn visible_sorted(children: &[graphql::ChildNodeFields]) -> Vec<graphql::Chi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graphql::{ChildNodeFields, MimeFields, Timestamptz, Uuid};
+    use crate::model::{ChildNodeFields, MimeFields, Timestamptz, Uuid};
 
     fn child(name: &str, index: i32, hidden: bool, created: &str) -> ChildNodeFields {
         ChildNodeFields {

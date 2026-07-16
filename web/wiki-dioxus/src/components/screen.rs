@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 
-use crate::graphql::{self, NodeWithChildren};
+use crate::graphql::{self};
+use crate::model::NodeWithChildren;
 use crate::session::use_session;
 
 use super::loader::MimeLoader;

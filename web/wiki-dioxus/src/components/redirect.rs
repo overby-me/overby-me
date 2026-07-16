@@ -1,7 +1,9 @@
+use crate::model;
 use dioxus::prelude::*;
 
-use crate::graphql::{self, NodeWithChildren, NodesSetInput};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::{NodeWithChildren, NodesSetInput};
 use crate::session::use_session;
 
 /// RedirectApp — a node that forwards to an external URL stored on its `data`
@@ -100,7 +102,7 @@ fn RedirectEdit(node_id: String, initial: String) -> Element {
                         saving.set(true);
                         spawn(async move {
                             let set = NodesSetInput {
-                                data: Some(graphql::Jsonb(serde_json::json!({ "url": value }))),
+                                data: Some(model::Jsonb(serde_json::json!({ "url": value }))),
                                 ..Default::default()
                             };
                             let _ = graphql::update_node(token.as_deref(), &node_id, set).await;

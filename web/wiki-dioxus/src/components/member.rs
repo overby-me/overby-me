@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 
-use crate::graphql::{self, MemberFields, MembersSetInput, NodeWithChildren};
+use crate::graphql::{self};
 use crate::i18n::{t, t_with};
+use crate::model::{MemberFields, MembersSetInput, NodeWithChildren};
 use crate::route::Route;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;

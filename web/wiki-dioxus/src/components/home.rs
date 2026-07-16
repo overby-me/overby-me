@@ -1,3 +1,4 @@
+use crate::model;
 use dioxus::prelude::*;
 
 use crate::graphql;
@@ -178,7 +179,7 @@ fn RecentContents() -> Element {
 }
 
 #[component]
-fn RecentItem(node: graphql::ChildNodeFields) -> Element {
+fn RecentItem(node: model::ChildNodeFields) -> Element {
     let session = use_session();
     let nav = use_navigator();
     let node_id = node.id.0.clone();

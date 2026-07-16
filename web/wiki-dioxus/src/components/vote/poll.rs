@@ -1,7 +1,9 @@
+use crate::model;
 use dioxus::prelude::*;
 
-use crate::graphql::{self, NodeWithChildren};
+use crate::graphql::{self};
 use crate::i18n::{t, t_with};
+use crate::model::NodeWithChildren;
 use crate::route::Route;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
@@ -458,7 +460,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                                     match graphql::update_node(
                                         token.as_deref(),
                                         &poll_id,
-                                        graphql::NodesSetInput {
+                                        model::NodesSetInput {
                                             mutable: Some(false),
                                             ..Default::default()
                                         },

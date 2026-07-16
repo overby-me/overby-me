@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::graphql::NodeWithChildren;
+use crate::model::NodeWithChildren;
 
 /// CowApp — the "secret cow" easter egg (#82). Reachable via `?app=cow`; not
 /// advertised in the app rail. It cowsays the node's name, in the spirit of

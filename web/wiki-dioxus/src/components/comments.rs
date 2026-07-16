@@ -6,8 +6,9 @@
 
 use dioxus::prelude::*;
 
-use crate::graphql::{self, ChildNodeFields};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::ChildNodeFields;
 use crate::session::use_session;
 
 use super::loader::relative_time;

@@ -1,3 +1,4 @@
+use crate::model;
 use dioxus::prelude::*;
 
 use crate::graphql::{self};
@@ -7,9 +8,9 @@ use crate::session::use_session;
 
 /// The result of loading the user's contexts: (groups, events, pending invites).
 type ContextLists = (
-    Vec<graphql::ContextNodeFields>,
-    Vec<graphql::ContextNodeFields>,
-    Vec<graphql::InvitationFields>,
+    Vec<model::ContextNodeFields>,
+    Vec<model::ContextNodeFields>,
+    Vec<model::InvitationFields>,
 );
 
 /// HomeList — shows the user's groups and events, loaded from GraphQL. Pending
@@ -96,7 +97,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     let hint_style = "padding: 4px 16px;";
     // Pending invitations, split into the list they belong to (group vs event) so
     // each shows inline at the top of that list.
-    let invited_by_mime = |mime: &str| -> Vec<graphql::InvitationFields> {
+    let invited_by_mime = |mime: &str| -> Vec<model::InvitationFields> {
         match &state {
             Some(Ok((_, _, invites))) => invites
                 .iter()
@@ -131,7 +132,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
             Some(Ok((groups, _, _))) => {
                 let expanded = *groups_expanded.read();
                 let total = groups.len();
-                let visible: Vec<graphql::ContextNodeFields> = if expanded {
+                let visible: Vec<model::ContextNodeFields> = if expanded {
                     groups.clone()
                 } else {
                     groups.iter().take(LIST_LIMIT).cloned().collect()
@@ -406,7 +407,7 @@ fn NewContextButton(mime: String, root_id: String, root_context_id: String) -> E
 
 /// A single group/event entry. Clicking resolves the node's path and navigates.
 #[component]
-pub(super) fn ContextItem(node: graphql::ContextNodeFields) -> Element {
+pub(super) fn ContextItem(node: model::ContextNodeFields) -> Element {
     let session = use_session();
     let nav = use_navigator();
     let name = node.name.clone();
@@ -442,7 +443,7 @@ pub(super) fn ContextItem(node: graphql::ContextNodeFields) -> Element {
 /// conflict when a membership already exists) accept that row and drop the
 /// duplicate invite.
 #[component]
-pub(super) fn InvitedContextItem(invite: graphql::InvitationFields) -> Element {
+pub(super) fn InvitedContextItem(invite: model::InvitationFields) -> Element {
     let session = use_session();
     let mut confirm_open = use_signal(|| false);
     // Optimistic: accepting or declining hides the invite at once; the refetch then
@@ -567,9 +568,9 @@ pub(super) fn InvitedContextItem(invite: graphql::InvitationFields) -> Element {
 /// Group events into (year, events) buckets, preserving the input order. Since
 /// events arrive newest-first, buckets come out in descending-year order.
 pub(super) fn group_by_year(
-    events: &[graphql::ContextNodeFields],
-) -> Vec<(String, Vec<graphql::ContextNodeFields>)> {
-    let mut out: Vec<(String, Vec<graphql::ContextNodeFields>)> = Vec::new();
+    events: &[model::ContextNodeFields],
+) -> Vec<(String, Vec<model::ContextNodeFields>)> {
+    let mut out: Vec<(String, Vec<model::ContextNodeFields>)> = Vec::new();
     for event in events {
         let year = event
             .created_at

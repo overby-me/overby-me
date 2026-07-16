@@ -1,7 +1,9 @@
+use crate::model;
 use dioxus::prelude::*;
 
-use crate::graphql::{self, ChildNodeFields, NodeWithChildren};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::{ChildNodeFields, NodeWithChildren};
 use crate::route::Route;
 use crate::session::use_session;
 
@@ -334,7 +336,7 @@ pub fn FolderApp(
                                             match graphql::update_node(
                                                 token.as_deref(),
                                                 &id,
-                                                graphql::NodesSetInput {
+                                                model::NodesSetInput {
                                                     attachable: Some(new_val),
                                                     ..Default::default()
                                                 },
@@ -689,7 +691,7 @@ fn FolderAdd(
                 let Some(fid) = file_id.read().clone() else {
                     return;
                 };
-                Some(crate::graphql::Jsonb(serde_json::json!({
+                Some(crate::model::Jsonb(serde_json::json!({
                     "fileId": fid,
                     "type": file_type.read().clone(),
                 })))
@@ -723,12 +725,12 @@ fn FolderAdd(
             file_name.set(String::new());
             open.set(false);
             spawn(async move {
-                let input = crate::graphql::NodesInsertInput {
+                let input = crate::model::NodesInsertInput {
                     name: Some(name),
                     key: Some(key.clone()),
                     mime_id: Some(mime),
-                    parent_id: Some(crate::graphql::Uuid(parent_id)),
-                    context_id: context_id.map(crate::graphql::Uuid),
+                    parent_id: Some(crate::model::Uuid(parent_id)),
+                    context_id: context_id.map(crate::model::Uuid),
                     data,
                     mutable: Some(true),
                     index: None,

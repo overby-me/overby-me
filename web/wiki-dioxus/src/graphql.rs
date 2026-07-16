@@ -1,6 +1,7 @@
 use cynic::QueryBuilder;
 use serde::{Deserialize, Serialize};
 
+use crate::model;
 use crate::nhost::graphql_url;
 
 mod schema {
@@ -19,6 +20,273 @@ cynic::impl_scalar!(Timestamptz, schema::timestamptz);
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Jsonb(pub serde_json::Value);
 cynic::impl_scalar!(Jsonb, schema::jsonb);
+
+// --- Anti-corruption seam: cynic wire types <-> frontend-owned `model` types ---
+//
+// The cynic types below (bound to `graphql/schema.graphql`) are the wire shapes.
+// Every public query/mutation fn converts at its boundary so components only ever
+// see `model` types. This is the single place the two type families meet; swapping
+// the backend replaces this file, not every component.
+
+impl From<Uuid> for model::Uuid {
+    fn from(v: Uuid) -> Self {
+        model::Uuid(v.0)
+    }
+}
+impl From<Timestamptz> for model::Timestamptz {
+    fn from(v: Timestamptz) -> Self {
+        model::Timestamptz(v.0)
+    }
+}
+impl From<Jsonb> for model::Jsonb {
+    fn from(v: Jsonb) -> Self {
+        model::Jsonb(v.0)
+    }
+}
+
+impl From<MimeFields> for model::MimeFields {
+    fn from(m: MimeFields) -> Self {
+        model::MimeFields {
+            id: m.id,
+            icon: m.icon,
+            hidden: m.hidden,
+            context: m.context,
+        }
+    }
+}
+impl From<UserRef> for model::UserRef {
+    fn from(u: UserRef) -> Self {
+        model::UserRef {
+            id: u.id.into(),
+            display_name: u.display_name,
+            avatar_url: u.avatar_url,
+        }
+    }
+}
+impl From<MemberNodeRef> for model::MemberNodeRef {
+    fn from(n: MemberNodeRef) -> Self {
+        model::MemberNodeRef { mime_id: n.mime_id }
+    }
+}
+impl From<ParentNodeFields> for model::ParentNodeFields {
+    fn from(p: ParentNodeFields) -> Self {
+        model::ParentNodeFields {
+            id: p.id.into(),
+            name: p.name,
+            key: p.key,
+            mime_id: p.mime_id,
+        }
+    }
+}
+impl From<MemberFields> for model::MemberFields {
+    fn from(m: MemberFields) -> Self {
+        model::MemberFields {
+            id: m.id.into(),
+            name: m.name,
+            email: m.email,
+            accepted: m.accepted,
+            active: m.active,
+            owner: m.owner,
+            hidden: m.hidden,
+            node_id: m.node_id.map(Into::into),
+            user: m.user.map(Into::into),
+            node: m.node.map(Into::into),
+        }
+    }
+}
+impl From<ChildNodeFields> for model::ChildNodeFields {
+    fn from(c: ChildNodeFields) -> Self {
+        model::ChildNodeFields {
+            id: c.id.into(),
+            name: c.name,
+            key: c.key,
+            mime_id: c.mime_id,
+            mutable: c.mutable,
+            index: c.index,
+            created_at: c.created_at.map(Into::into),
+            owner_id: c.owner_id.map(Into::into),
+            data: c.data.map(Into::into),
+            mime: c.mime.map(Into::into),
+            is_owner: c.is_owner,
+            is_context_owner: c.is_context_owner,
+            owner: c.owner.map(Into::into),
+            parent: c.parent.map(Into::into),
+        }
+    }
+}
+impl From<NodeWithChildren> for model::NodeWithChildren {
+    fn from(n: NodeWithChildren) -> Self {
+        model::NodeWithChildren {
+            id: n.id.into(),
+            name: n.name,
+            key: n.key,
+            mime_id: n.mime_id,
+            parent_id: n.parent_id.map(Into::into),
+            context_id: n.context_id.map(Into::into),
+            owner_id: n.owner_id.map(Into::into),
+            mutable: n.mutable,
+            index: n.index,
+            data: n.data.map(Into::into),
+            mime: n.mime.map(Into::into),
+            parent: n.parent.map(|p| Box::new((*p).into())),
+            children: n.children.into_iter().map(Into::into).collect(),
+            members: n.members.into_iter().map(Into::into).collect(),
+            is_owner: n.is_owner,
+            is_context_owner: n.is_context_owner,
+            attachable: n.attachable,
+            created_at: n.created_at.map(Into::into),
+            owner: n.owner.map(Into::into),
+        }
+    }
+}
+impl From<NodeFields> for model::NodeFields {
+    fn from(n: NodeFields) -> Self {
+        model::NodeFields {
+            id: n.id.into(),
+            name: n.name,
+            key: n.key,
+            mime_id: n.mime_id,
+            parent_id: n.parent_id.map(Into::into),
+            context_id: n.context_id.map(Into::into),
+            owner_id: n.owner_id.map(Into::into),
+            mutable: n.mutable,
+            index: n.index,
+            get_index: n.get_index,
+            data: n.data.map(Into::into),
+            mime: n.mime.map(Into::into),
+            is_owner: n.is_owner,
+            is_context_owner: n.is_context_owner,
+            created_at: n.created_at.map(Into::into),
+            parent: n.parent.map(Into::into),
+        }
+    }
+}
+impl From<ContextNodeFields> for model::ContextNodeFields {
+    fn from(c: ContextNodeFields) -> Self {
+        model::ContextNodeFields {
+            id: c.id.into(),
+            name: c.name,
+            key: c.key,
+            mime_id: c.mime_id,
+            parent_id: c.parent_id.map(Into::into),
+            created_at: c.created_at.map(Into::into),
+            data: c.data.map(Into::into),
+        }
+    }
+}
+impl From<DrawerChildFields> for model::DrawerChildFields {
+    fn from(d: DrawerChildFields) -> Self {
+        let child_count = d
+            .children_aggregate
+            .aggregate
+            .as_ref()
+            .map(|a| a.count)
+            .unwrap_or(0);
+        model::DrawerChildFields {
+            id: d.id.into(),
+            name: d.name,
+            key: d.key,
+            mime_id: d.mime_id,
+            mutable: d.mutable,
+            data: d.data.map(Into::into),
+            child_count,
+        }
+    }
+}
+impl From<PollSummaryFields> for model::PollSummaryFields {
+    fn from(p: PollSummaryFields) -> Self {
+        model::PollSummaryFields {
+            id: p.id.into(),
+            name: p.name,
+            data: p.data.map(Into::into),
+            created_at: p.created_at.map(Into::into),
+            mutable: p.mutable,
+        }
+    }
+}
+impl From<InvitationFields> for model::InvitationFields {
+    fn from(i: InvitationFields) -> Self {
+        model::InvitationFields {
+            id: i.id.into(),
+            parent: i.parent.map(Into::into),
+        }
+    }
+}
+impl From<PermissionFields> for model::PermissionFields {
+    fn from(p: PermissionFields) -> Self {
+        model::PermissionFields {
+            id: p.id.into(),
+            mime_id: p.mime_id,
+            role: p.role,
+            insert: p.insert,
+            select: p.select,
+            delete: p.delete,
+            active: p.active,
+        }
+    }
+}
+impl From<UserSearchFields> for model::UserSearchFields {
+    fn from(u: UserSearchFields) -> Self {
+        model::UserSearchFields {
+            id: u.id.into(),
+            display_name: u.display_name,
+            avatar_url: u.avatar_url,
+        }
+    }
+}
+impl From<InsertedNode> for model::InsertedNode {
+    fn from(n: InsertedNode) -> Self {
+        model::InsertedNode {
+            id: n.id.into(),
+            key: n.key,
+        }
+    }
+}
+
+// Write side: frontend-owned `model` inputs -> cynic input objects.
+impl From<model::NodesInsertInput> for NodesInsertInput {
+    fn from(m: model::NodesInsertInput) -> Self {
+        NodesInsertInput {
+            name: m.name,
+            key: m.key,
+            mime_id: m.mime_id,
+            parent_id: m.parent_id.map(|u| Uuid(u.0)),
+            context_id: m.context_id.map(|u| Uuid(u.0)),
+            data: m.data.map(|j| Jsonb(j.0)),
+            mutable: m.mutable,
+            index: m.index,
+        }
+    }
+}
+impl From<model::NodesSetInput> for NodesSetInput {
+    fn from(m: model::NodesSetInput) -> Self {
+        NodesSetInput {
+            name: m.name,
+            data: m.data.map(|j| Jsonb(j.0)),
+            mutable: m.mutable,
+            index: m.index,
+            attachable: m.attachable,
+            context_id: m.context_id.map(|u| Uuid(u.0)),
+            owner_id: m.owner_id.map(|u| Uuid(u.0)),
+            parent_id: m.parent_id.map(|u| Uuid(u.0)),
+            created_at: m.created_at.map(|t| Timestamptz(t.0)),
+        }
+    }
+}
+impl From<model::MembersSetInput> for MembersSetInput {
+    fn from(m: model::MembersSetInput) -> Self {
+        MembersSetInput {
+            accepted: m.accepted,
+            active: m.active,
+            email: m.email,
+            name: m.name,
+            owner: m.owner,
+            hidden: m.hidden,
+            node_id: m.node_id.map(|u| Uuid(u.0)),
+            parent_id: m.parent_id.map(|u| Uuid(u.0)),
+        }
+    }
+}
 
 // --- Query: Fetch a single node by ID ---
 
@@ -871,13 +1139,13 @@ pub async fn create_poll(
     min_vote: usize,
     max_vote: usize,
     rules: BallotRules,
-) -> Result<InsertedNode, String> {
+) -> Result<model::InsertedNode, String> {
     // Close the context's current active poll, if any (only one is open at once).
     if let Ok(Some(prior)) = active_node_id(access_token, context_id).await {
         let _ = update_node(
             access_token,
             &prior,
-            NodesSetInput {
+            model::NodesSetInput {
                 mutable: Some(false),
                 ..Default::default()
             },
@@ -894,13 +1162,13 @@ pub async fn create_poll(
     });
     let inserted = insert_node(
         access_token,
-        NodesInsertInput {
+        model::NodesInsertInput {
             name: Some(name.to_string()),
             key: Some(key.to_string()),
             mime_id: Some("vote/poll".to_string()),
-            parent_id: Some(Uuid(parent_id.to_string())),
-            context_id: Some(Uuid(context_id.to_string())),
-            data: Some(Jsonb(data)),
+            parent_id: Some(model::Uuid(parent_id.to_string())),
+            context_id: Some(model::Uuid(context_id.to_string())),
+            data: Some(model::Jsonb(data)),
             mutable: Some(true),
             index: None,
         },
@@ -1109,7 +1377,7 @@ pub async fn query_members_page(
     filter: &MemberPageFilter,
     limit: usize,
     offset: usize,
-) -> Result<(Vec<MemberFields>, usize), String> {
+) -> Result<(Vec<model::MemberFields>, usize), String> {
     let where_clause = members_where(parent_id, filter);
     // The `members` table exposes no `_aggregate` in this schema, so the total is
     // counted with a separate id-only query (just UUIDs) instead of
@@ -1172,22 +1440,22 @@ pub(crate) fn gql_escape(s: &str) -> String {
 }
 
 /// Parse one raw `members` JSON row into a [`MemberFields`].
-fn parse_member_row(v: &serde_json::Value) -> Option<MemberFields> {
+fn parse_member_row(v: &serde_json::Value) -> Option<model::MemberFields> {
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
     let b = |k: &str| v.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
-    Some(MemberFields {
-        id: Uuid(v.get("id")?.as_str()?.to_string()),
+    Some(model::MemberFields {
+        id: model::Uuid(v.get("id")?.as_str()?.to_string()),
         name: s("name"),
         email: s("email"),
         accepted: b("accepted"),
         active: b("active"),
         owner: b("owner"),
         hidden: b("hidden"),
-        node_id: s("nodeId").map(Uuid),
+        node_id: s("nodeId").map(model::Uuid),
         user: v.get("user").and_then(|u| {
             let display_name = u.get("displayName").and_then(|d| d.as_str())?;
-            Some(UserRef {
-                id: Uuid(
+            Some(model::UserRef {
+                id: model::Uuid(
                     u.get("id")
                         .and_then(|d| d.as_str())
                         .unwrap_or_default()
@@ -1201,7 +1469,7 @@ fn parse_member_row(v: &serde_json::Value) -> Option<MemberFields> {
                     .to_string(),
             })
         }),
-        node: v.get("node").map(|n| MemberNodeRef {
+        node: v.get("node").map(|n| model::MemberNodeRef {
             mime_id: n.get("mimeId").and_then(|m| m.as_str()).map(String::from),
         }),
     })
@@ -1286,7 +1554,7 @@ pub async fn query_invitations(
     access_token: Option<&str>,
     user_id: &str,
     email: &str,
-) -> Result<Vec<InvitationFields>, String> {
+) -> Result<Vec<model::InvitationFields>, String> {
     let where_clause = invitations_where_clause(user_id, email);
     let operation = InvitationsQuery::build(MembersWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
@@ -1294,6 +1562,7 @@ pub async fn query_invitations(
         .members
         .into_iter()
         .filter(|m| m.parent.is_some())
+        .map(Into::into)
         .collect())
 }
 
@@ -1337,14 +1606,14 @@ pub async fn decline_invitation(
 pub async fn update_member(
     access_token: Option<&str>,
     member_id: &str,
-    set: MembersSetInput,
+    set: model::MembersSetInput,
 ) -> Result<bool, String> {
     use cynic::MutationBuilder;
     let operation = UpdateMemberMutation::build(UpdateMemberVariables {
         pk: MembersPkColumnsInput {
             id: Uuid(member_id.to_string()),
         },
-        set,
+        set: set.into(),
     });
     let result = execute(access_token, operation).await?;
     Ok(result.update_member.is_some())
@@ -1585,7 +1854,7 @@ pub async fn query_node_by_key(
     access_token: Option<&str>,
     key: &str,
     parent_id: Option<&str>,
-) -> Result<Option<NodeFields>, String> {
+) -> Result<Option<model::NodeFields>, String> {
     let where_clause = NodesBoolExp {
         and: Some(vec![
             NodesBoolExp {
@@ -1614,18 +1883,18 @@ pub async fn query_node_by_key(
 
     let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
-    Ok(result.nodes.into_iter().next())
+    Ok(result.nodes.into_iter().next().map(Into::into))
 }
 
 pub async fn query_node_by_id(
     access_token: Option<&str>,
     id: &str,
-) -> Result<Option<NodeWithChildren>, String> {
+) -> Result<Option<model::NodeWithChildren>, String> {
     let operation = NodeWithChildrenQuery::build(NodeWithChildrenVariables {
         id: Uuid(id.to_string()),
     });
     let result = execute(access_token, operation).await?;
-    Ok(result.node)
+    Ok(result.node.map(Into::into))
 }
 
 thread_local! {
@@ -1664,7 +1933,7 @@ async fn query_root_id(access_token: Option<&str>) -> Result<Option<String>, Str
 /// segment), so fetch it via the root id directly.
 pub async fn query_root_node(
     access_token: Option<&str>,
-) -> Result<Option<NodeWithChildren>, String> {
+) -> Result<Option<model::NodeWithChildren>, String> {
     let Some(root_id) = query_root_id(access_token).await? else {
         return Ok(None);
     };
@@ -1674,7 +1943,7 @@ pub async fn query_root_node(
 pub async fn resolve_path(
     access_token: Option<&str>,
     segments: &[String],
-) -> Result<Option<NodeWithChildren>, String> {
+) -> Result<Option<model::NodeWithChildren>, String> {
     // Path segments are keys of nodes below the root, so start the walk at the
     // root node rather than at the (parent-less) top level.
     let Some(root_id) = query_root_id(access_token).await? else {
@@ -1710,7 +1979,7 @@ pub struct Crumb {
     pub mime_id: Option<String>,
     pub ordinal: Option<usize>,
     // A file crumb's content `type`, so it shows a format-specific icon.
-    pub data: Option<Jsonb>,
+    pub data: Option<model::Jsonb>,
 }
 
 /// How many leading path segments belong to the current node's context: the
@@ -1773,12 +2042,14 @@ pub async fn path_crumbs(
 /// Insert a node
 pub async fn insert_node(
     access_token: Option<&str>,
-    input: NodesInsertInput,
-) -> Result<Option<InsertedNode>, String> {
+    input: model::NodesInsertInput,
+) -> Result<Option<model::InsertedNode>, String> {
     use cynic::MutationBuilder;
-    let operation = InsertNodeMutation::build(InsertNodeVariables { object: input });
+    let operation = InsertNodeMutation::build(InsertNodeVariables {
+        object: input.into(),
+    });
     let result = execute(access_token, operation).await?;
-    Ok(result.insert_node)
+    Ok(result.insert_node.map(Into::into))
 }
 
 /// The per-context permission template seeded when a new group/event is created,
@@ -1883,15 +2154,15 @@ pub async fn create_context(
     mime_id: &str,
     name: &str,
     key: &str,
-) -> Result<InsertedNode, String> {
+) -> Result<model::InsertedNode, String> {
     let inserted = insert_node(
         access_token,
-        NodesInsertInput {
+        model::NodesInsertInput {
             name: Some(name.to_string()),
             key: Some(key.to_string()),
             mime_id: Some(mime_id.to_string()),
-            parent_id: Some(Uuid(parent_id.to_string())),
-            context_id: Some(Uuid(parent_context_id.to_string())),
+            parent_id: Some(model::Uuid(parent_id.to_string())),
+            context_id: Some(model::Uuid(parent_context_id.to_string())),
             data: None,
             mutable: Some(true),
             index: None,
@@ -1904,8 +2175,8 @@ pub async fn create_context(
     update_node(
         access_token,
         &id,
-        NodesSetInput {
-            context_id: Some(Uuid(id.clone())),
+        model::NodesSetInput {
+            context_id: Some(model::Uuid(id.clone())),
             mutable: Some(false),
             ..Default::default()
         },
@@ -1930,7 +2201,7 @@ pub async fn create_speaker_list(
     context_id: &str,
     name: &str,
     key: &str,
-) -> Result<InsertedNode, String> {
+) -> Result<model::InsertedNode, String> {
     let can_insert = node_insert_mimes(access_token, context_id)
         .await
         .iter()
@@ -1956,12 +2227,12 @@ pub async fn create_speaker_list(
     }
     insert_node(
         access_token,
-        NodesInsertInput {
+        model::NodesInsertInput {
             name: Some(name.to_string()),
             key: Some(key.to_string()),
             mime_id: Some("speak/list".to_string()),
-            parent_id: Some(Uuid(context_id.to_string())),
-            context_id: Some(Uuid(context_id.to_string())),
+            parent_id: Some(model::Uuid(context_id.to_string())),
+            context_id: Some(model::Uuid(context_id.to_string())),
             data: None,
             mutable: Some(true),
             index: None,
@@ -1994,12 +2265,12 @@ pub fn deep_copy_node(
         } else {
             node.key.clone()
         };
-        let input = NodesInsertInput {
+        let input = model::NodesInsertInput {
             name: Some(node.name.clone()),
             key: Some(key),
             mime_id: node.mime_id.clone(),
-            parent_id: Some(Uuid(parent_id.clone())),
-            context_id: context_id.clone().map(Uuid),
+            parent_id: Some(model::Uuid(parent_id.clone())),
+            context_id: context_id.clone().map(model::Uuid),
             data: node.data.clone(),
             mutable: Some(node.mutable),
             index: Some(node.index),
@@ -2014,7 +2285,7 @@ pub fn deep_copy_node(
             let object = MembersInsertInput {
                 name: m.name.clone(),
                 email: m.email.clone(),
-                node_id: m.node_id.clone(),
+                node_id: m.node_id.clone().map(|u| Uuid(u.0)),
                 parent_id: Some(Uuid(new_id.clone())),
             };
             let op = InsertMemberMutation::build(InsertMemberVariables { object });
@@ -2064,14 +2335,14 @@ pub async fn is_descendant_of(access_token: Option<&str>, target: &str, ancestor
 pub async fn update_node(
     access_token: Option<&str>,
     id: &str,
-    set: NodesSetInput,
+    set: model::NodesSetInput,
 ) -> Result<bool, String> {
     use cynic::MutationBuilder;
     let operation = UpdateNodeMutation::build(UpdateNodeVariables {
         pk: NodesPkColumnsInput {
             id: Uuid(id.to_string()),
         },
-        set,
+        set: set.into(),
     });
     let result = execute(access_token, operation).await?;
     Ok(result.update_node.is_some())
@@ -2188,7 +2459,7 @@ pub struct PermissionsBoolExp {
 pub async fn query_permissions(
     access_token: Option<&str>,
     context_id: &str,
-) -> Result<Vec<PermissionFields>, String> {
+) -> Result<Vec<model::PermissionFields>, String> {
     let where_clause = PermissionsBoolExp {
         context_id: Some(UuidComparisonExp {
             eq: Some(Uuid(context_id.to_string())),
@@ -2197,7 +2468,7 @@ pub async fn query_permissions(
     };
     let operation = PermissionsQuery::build(PermissionsWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
-    Ok(result.permissions)
+    Ok(result.permissions.into_iter().map(Into::into).collect())
 }
 
 // --- Polls of a context (the admin results overview) ---
@@ -2228,7 +2499,7 @@ pub struct PollSummaryFields {
 pub async fn query_context_polls(
     access_token: Option<&str>,
     context_id: &str,
-) -> Result<Vec<PollSummaryFields>, String> {
+) -> Result<Vec<model::PollSummaryFields>, String> {
     let where_clause = NodesBoolExp {
         and: Some(vec![
             NodesBoolExp {
@@ -2255,7 +2526,7 @@ pub async fn query_context_polls(
         let b_ts = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
         b_ts.cmp(a_ts)
     });
-    Ok(result.nodes)
+    Ok(result.nodes.into_iter().map(Into::into).collect())
 }
 
 /// Every vote cast on a poll (each as its list of selected option indices),
@@ -2422,13 +2693,13 @@ pub async fn cast_vote(
             .map(|i| serde_json::Value::from(u64::try_from(*i).unwrap_or(0)))
             .collect(),
     );
-    let input = NodesInsertInput {
+    let input = model::NodesInsertInput {
         name: Some(format!("vote-{key_suffix}")),
         key: Some(format!("vote-{key_suffix}")),
         mime_id: Some("vote/vote".to_string()),
-        parent_id: Some(Uuid(poll_id.to_string())),
-        context_id: context_id.map(|c| Uuid(c.to_string())),
-        data: Some(Jsonb(data)),
+        parent_id: Some(model::Uuid(poll_id.to_string())),
+        context_id: context_id.map(|c| model::Uuid(c.to_string())),
+        data: Some(model::Jsonb(data)),
         mutable: None,
         index: None,
     };
@@ -2440,7 +2711,7 @@ pub async fn search_nodes(
     access_token: Option<&str>,
     query: &str,
     context_id: Option<&str>,
-) -> Result<Vec<NodeFields>, String> {
+) -> Result<Vec<model::NodeFields>, String> {
     if query.is_empty() {
         return Ok(vec![]);
     }
@@ -2534,7 +2805,7 @@ pub async fn search_nodes(
         let bt = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
         bt.cmp(at)
     });
-    Ok(nodes)
+    Ok(nodes.into_iter().map(Into::into).collect())
 }
 
 /// The signed-in user's most recent contributions for the profile: the
@@ -2546,7 +2817,7 @@ pub async fn query_user_contributions(
     access_token: Option<&str>,
     user_id: &str,
     limit: i32,
-) -> Vec<ChildNodeFields> {
+) -> Vec<model::ChildNodeFields> {
     let where_clause = NodesBoolExp {
         and: Some(vec![
             NodesBoolExp {
@@ -2582,7 +2853,7 @@ pub async fn query_user_contributions(
         limit: Some(limit),
     });
     match execute(access_token, op).await {
-        Ok(d) => d.nodes,
+        Ok(d) => d.nodes.into_iter().map(Into::into).collect(),
         Err(_) => Vec::new(),
     }
 }
@@ -2594,7 +2865,7 @@ pub async fn query_recent_nodes(
     access_token: Option<&str>,
     limit: i32,
     user_id: &str,
-) -> Vec<ChildNodeFields> {
+) -> Vec<model::ChildNodeFields> {
     let where_clause = NodesBoolExp {
         and: Some(vec![
             NodesBoolExp {
@@ -2634,7 +2905,7 @@ pub async fn query_recent_nodes(
         limit: Some(limit),
     });
     match execute(access_token, op).await {
-        Ok(d) => d.nodes,
+        Ok(d) => d.nodes.into_iter().map(Into::into).collect(),
         Err(_) => Vec::new(),
     }
 }
@@ -2769,7 +3040,7 @@ pub async fn search_users(access_token: Option<&str>, query: &str) -> Vec<Author
 /// Fetch a single user's public identity (id + name + avatar) by id, for the
 /// per-user profile page. Only readable when the viewer shares a context with
 /// them (the `users` select permission), so returns None otherwise.
-pub async fn query_user(access_token: Option<&str>, id: &str) -> Option<UserSearchFields> {
+pub async fn query_user(access_token: Option<&str>, id: &str) -> Option<model::UserSearchFields> {
     use cynic::QueryBuilder;
     let op = UsersSearchQuery::build(UsersSearchVariables {
         where_clause: UsersBoolExp {
@@ -2786,6 +3057,7 @@ pub async fn query_user(access_token: Option<&str>, id: &str) -> Option<UserSear
         .users
         .into_iter()
         .next()
+        .map(Into::into)
 }
 
 /// Invite a known user by node id (binds `nodeId` + `name`), as opposed to the
@@ -2982,7 +3254,7 @@ pub async fn node_insert_mimes(access_token: Option<&str>, node_id: &str) -> Vec
 pub async fn query_comments(
     access_token: Option<&str>,
     parent_id: &str,
-) -> Result<Vec<ChildNodeFields>, String> {
+) -> Result<Vec<model::ChildNodeFields>, String> {
     use cynic::QueryBuilder;
     let where_clause = NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
@@ -3002,7 +3274,7 @@ pub async fn query_comments(
         let bt = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
         at.cmp(bt)
     });
-    Ok(nodes)
+    Ok(nodes.into_iter().map(Into::into).collect())
 }
 
 /// Post a comment (a `vote/comment` node) under `parent_id` (a post or another
@@ -3017,13 +3289,13 @@ pub async fn insert_comment(
     author: &str,
     text: &str,
 ) -> Result<bool, String> {
-    let input = NodesInsertInput {
+    let input = model::NodesInsertInput {
         name: Some(author.to_string()),
         key: Some(key.to_string()),
         mime_id: Some("vote/comment".to_string()),
-        parent_id: Some(Uuid(parent_id.to_string())),
-        context_id: context_id.map(|c| Uuid(c.to_string())),
-        data: Some(Jsonb(serde_json::json!({ "text": text }))),
+        parent_id: Some(model::Uuid(parent_id.to_string())),
+        context_id: context_id.map(|c| model::Uuid(c.to_string())),
+        data: Some(model::Jsonb(serde_json::json!({ "text": text }))),
         mutable: Some(false),
         index: None,
     };
@@ -3091,7 +3363,7 @@ pub async fn query_contexts(
     access_token: Option<&str>,
     user_id: &str,
     mime_id: &str,
-) -> Result<Vec<ContextNodeFields>, String> {
+) -> Result<Vec<model::ContextNodeFields>, String> {
     let where_clause = contexts_where_clause(user_id, mime_id);
     let operation = ContextsWhereQuery::build(NodesWhereVariables { where_clause });
     let mut result = execute(access_token, operation).await?;
@@ -3101,13 +3373,15 @@ pub async fn query_contexts(
         let b_ts = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
         b_ts.cmp(a_ts)
     });
-    Ok(result.nodes)
+    Ok(result.nodes.into_iter().map(Into::into).collect())
 }
 
 /// Nodes with a missing parent (`parentId is null`) — the "Missing parent" admin
 /// view (#149). The single legitimate root is one of these, so callers filter it
 /// out; anything else is an orphan that lost its parent.
-pub async fn query_orphans(access_token: Option<&str>) -> Result<Vec<ContextNodeFields>, String> {
+pub async fn query_orphans(
+    access_token: Option<&str>,
+) -> Result<Vec<model::ContextNodeFields>, String> {
     let where_clause = NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
             is_null: Some(true),
@@ -3117,7 +3391,7 @@ pub async fn query_orphans(access_token: Option<&str>) -> Result<Vec<ContextNode
     };
     let operation = ContextsWhereQuery::build(NodesWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
-    Ok(result.nodes)
+    Ok(result.nodes.into_iter().map(Into::into).collect())
 }
 
 /// Build the `where` filter for a node's visible children, mirroring the React
@@ -3199,7 +3473,7 @@ pub async fn query_children(
     access_token: Option<&str>,
     parent_id: &str,
     user_id: &str,
-) -> Result<Vec<ChildNodeFields>, String> {
+) -> Result<Vec<model::ChildNodeFields>, String> {
     let where_clause = children_where_clause(parent_id, user_id);
     let order_by = drawer_child_order();
     let operation = ChildrenQuery::build(ChildrenVariables {
@@ -3207,7 +3481,7 @@ pub async fn query_children(
         order_by: Some(order_by),
     });
     let result = execute(access_token, operation).await?;
-    Ok(result.nodes)
+    Ok(result.nodes.into_iter().map(Into::into).collect())
 }
 
 /// The drawer-tree variant of `query_children`: same visible-children filter and
@@ -3217,7 +3491,7 @@ pub async fn query_drawer_children(
     access_token: Option<&str>,
     parent_id: &str,
     user_id: &str,
-) -> Result<Vec<DrawerChildFields>, String> {
+) -> Result<Vec<model::DrawerChildFields>, String> {
     let where_clause = children_where_clause(parent_id, user_id);
     let child_visible = child_visibility_clause(user_id);
     let order_by = drawer_child_order();
@@ -3227,7 +3501,7 @@ pub async fn query_drawer_children(
         child_visible,
     });
     let result = execute(access_token, operation).await?;
-    Ok(result.nodes)
+    Ok(result.nodes.into_iter().map(Into::into).collect())
 }
 
 /// Shared ordering for a node's children: by explicit index, then creation time

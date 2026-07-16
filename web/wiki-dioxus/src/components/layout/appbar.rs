@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 
 use super::*;
-use crate::graphql::NodeFields;
 use crate::i18n::t;
+use crate::model::NodeFields;
 
 /// M3 top app bar over the content region: a leading menu button (compact, opens
 /// the tree drawer), the breadcrumb trail as the headline, and trailing search +

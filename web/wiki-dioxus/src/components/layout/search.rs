@@ -1,8 +1,9 @@
 use dioxus::prelude::*;
 
 use super::*;
-use crate::graphql::{self, NodeFields};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::NodeFields;
 use crate::route::Route;
 use crate::session::use_session;
 

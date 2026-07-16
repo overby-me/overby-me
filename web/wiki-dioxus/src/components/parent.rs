@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 
-use crate::graphql::{self, ContextNodeFields};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::ContextNodeFields;
 use crate::session::use_session;
 
 use super::loader::icon_el;
@@ -146,7 +147,7 @@ fn is_orphan(node: &ContextNodeFields) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graphql::Uuid;
+    use crate::model::Uuid;
 
     fn node(key: &str, mime: &str) -> ContextNodeFields {
         ContextNodeFields {

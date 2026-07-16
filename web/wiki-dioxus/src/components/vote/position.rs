@@ -1,7 +1,9 @@
+use crate::model;
 use dioxus::prelude::*;
 
-use crate::graphql::{self, NodeWithChildren};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::NodeWithChildren;
 use crate::route::Route;
 use crate::session::use_session;
 
@@ -106,13 +108,13 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
             pending_q.write().push((key.clone(), text.clone()));
             q_text.set(String::new());
             spawn(async move {
-                let input = graphql::NodesInsertInput {
+                let input = model::NodesInsertInput {
                     name: author,
                     key: Some(key.clone()),
                     mime_id: Some("vote/question".to_string()),
-                    parent_id: Some(graphql::Uuid(node_id)),
-                    context_id: context_id.map(graphql::Uuid),
-                    data: Some(graphql::Jsonb(serde_json::json!({ "text": text }))),
+                    parent_id: Some(model::Uuid(node_id)),
+                    context_id: context_id.map(model::Uuid),
+                    data: Some(model::Jsonb(serde_json::json!({ "text": text }))),
                     mutable: Some(false),
                     index: None,
                 };
@@ -443,13 +445,13 @@ fn AddCandidateButton(
             name.set(String::new());
             photo_id.set(None);
             spawn(async move {
-                let data = img.map(|fid| graphql::Jsonb(serde_json::json!({ "image": fid })));
-                let input = graphql::NodesInsertInput {
+                let data = img.map(|fid| model::Jsonb(serde_json::json!({ "image": fid })));
+                let input = model::NodesInsertInput {
                     name: Some(cname),
                     key: Some(key.clone()),
                     mime_id: Some("vote/candidate".to_string()),
-                    parent_id: Some(graphql::Uuid(parent_id)),
-                    context_id: context_id.map(graphql::Uuid),
+                    parent_id: Some(model::Uuid(parent_id)),
+                    context_id: context_id.map(model::Uuid),
                     data,
                     mutable: Some(true),
                     index: None,
@@ -545,12 +547,12 @@ pub(super) fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Elem
             let path = path.clone();
             spawn(async move {
                 let key = crate::components::loader::slugify(&name);
-                let input = graphql::NodesInsertInput {
+                let input = model::NodesInsertInput {
                     name: Some(name),
                     key: Some(key.clone()),
                     mime_id: Some("vote/change".to_string()),
-                    parent_id: Some(graphql::Uuid(node_id)),
-                    context_id: context_id.map(graphql::Uuid),
+                    parent_id: Some(model::Uuid(node_id)),
+                    context_id: context_id.map(model::Uuid),
                     data: None,
                     mutable: Some(true),
                     index: None,

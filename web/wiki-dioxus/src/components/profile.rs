@@ -1,3 +1,4 @@
+use crate::model;
 use dioxus::prelude::*;
 
 use crate::graphql;
@@ -78,10 +79,7 @@ pub fn ProfileApp() -> Element {
         let token = access_token.clone();
         let uid = user_id.clone();
         async move {
-            type Lists = (
-                Vec<graphql::ContextNodeFields>,
-                Vec<graphql::ContextNodeFields>,
-            );
+            type Lists = (Vec<model::ContextNodeFields>, Vec<model::ContextNodeFields>);
             let Some(uid) = uid else {
                 return Ok::<Lists, String>((Vec::new(), Vec::new()));
             };
@@ -355,7 +353,7 @@ pub fn ProfileApp() -> Element {
 /// The profile's authored-contributions list, revealed a handful at a time via an
 /// incremental "show more".
 #[component]
-fn ContributionList(items: Vec<graphql::ChildNodeFields>) -> Element {
+fn ContributionList(items: Vec<model::ChildNodeFields>) -> Element {
     const STEP: usize = 5;
     let mut shown = use_signal(|| STEP);
     if items.is_empty() {
@@ -389,7 +387,7 @@ fn ContributionList(items: Vec<graphql::ChildNodeFields>) -> Element {
 /// hint. Shared by the Groups and Events cards. Reveals a handful at a time via
 /// an incremental "show more".
 #[component]
-fn ContextList(contexts: Vec<graphql::ContextNodeFields>) -> Element {
+fn ContextList(contexts: Vec<model::ContextNodeFields>) -> Element {
     const STEP: usize = 5;
     let mut shown = use_signal(|| STEP);
     if contexts.is_empty() {
@@ -433,7 +431,7 @@ fn ContextList(contexts: Vec<graphql::ContextNodeFields>) -> Element {
 /// for a comment, else the node name) and its parent as context. Clicking resolves
 /// the node's full path (like the home "Newest" list) and navigates to it.
 #[component]
-fn ContributionItem(node: graphql::ChildNodeFields) -> Element {
+fn ContributionItem(node: model::ChildNodeFields) -> Element {
     let session = use_session();
     let nav = use_navigator();
     let node_id = node.id.0.clone();

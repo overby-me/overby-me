@@ -1,10 +1,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::model;
 use dioxus::prelude::*;
 
 use crate::components::richtext;
-use crate::graphql::{self, NodeWithChildren};
+use crate::graphql::{self};
 use crate::i18n::t;
+use crate::model::NodeWithChildren;
 use crate::route::Route;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
@@ -392,15 +394,15 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     if d.is_empty() {
                         None
                     } else {
-                        Some(graphql::Timestamptz(d))
+                        Some(model::Timestamptz(d))
                     }
                 } else {
                     None
                 };
 
-                let set = graphql::NodesSetInput {
+                let set = model::NodesSetInput {
                     name: Some(title_val),
-                    data: Some(graphql::Jsonb(data)),
+                    data: Some(model::Jsonb(data)),
                     mutable: Some(mutable),
                     created_at,
                     ..Default::default()
@@ -478,9 +480,9 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         data_obj.remove("image");
                     }
                 }
-                let set = graphql::NodesSetInput {
+                let set = model::NodesSetInput {
                     name: Some(title_val),
-                    data: Some(graphql::Jsonb(serde_json::Value::Object(data_obj))),
+                    data: Some(model::Jsonb(serde_json::Value::Object(data_obj))),
                     mutable: Some(true),
                     ..Default::default()
                 };
