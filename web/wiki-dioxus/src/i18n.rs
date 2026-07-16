@@ -96,6 +96,17 @@ fn da_translations() -> &'static HashMap<String, serde_json::Value> {
 }
 
 const EN_JSON: &str = r#"{
+    "feedback": {
+        "menu": "Send feedback",
+        "title": "Send feedback",
+        "messageLabel": "What happened, or what would you like?",
+        "placeholder": "Describe the bug, idea, or feedback...",
+        "bug": "Bug",
+        "feature": "Feature",
+        "other": "Other",
+        "send": "Send",
+        "sent": "Thanks! Your feedback was sent."
+    },
     "editor": {
         "style": "Style",
         "paragraph": "Paragraph",
@@ -528,6 +539,17 @@ const EN_JSON: &str = r#"{
 }"#;
 
 const DA_JSON: &str = r#"{
+    "feedback": {
+        "menu": "Send feedback",
+        "title": "Send feedback",
+        "messageLabel": "Hvad skete der, eller hvad kunne du tænke dig?",
+        "placeholder": "Beskriv fejlen, idéen eller din feedback...",
+        "bug": "Fejl",
+        "feature": "Ønske",
+        "other": "Andet",
+        "send": "Send",
+        "sent": "Tak! Din feedback blev sendt."
+    },
     "editor": {
         "style": "Stil",
         "paragraph": "Afsnit",

@@ -1,0 +1,121 @@
+//! In-app feedback / bug report / feature request. The dialog is opened from
+//! the user menu; on submit it POSTs to the backend `/feedback` endpoint, which
+//! ships the report to the team's observability sink (BetterStack, the same
+//! sink app errors go to). The current path, app version and user agent are
+//! attached automatically, and the backend captures the sender when signed in.
+//!
+//! The dialog is a CONTROLLED component driven by an `open` signal owned by the
+//! caller (the user menu), and rendered OUTSIDE the menu's conditional markup,
+//! so closing the menu does not unmount the open dialog.
+
+use dioxus::prelude::*;
+
+use crate::components::widgets::Dialog;
+use crate::i18n::t;
+use crate::session::use_session;
+use crate::snackbar::show_snackbar;
+
+/// Matches the backend's message cap, so a long paste is trimmed before send.
+const FEEDBACK_MAXLEN: usize = 4000;
+
+/// The feedback dialog. `open` is owned by the caller so the trigger (a user-menu
+/// item) can live inside the menu while the dialog renders outside it.
+#[component]
+pub fn FeedbackDialog(open: Signal<bool>) -> Element {
+    let mut open = open;
+    let session = use_session();
+    let mut kind = use_signal(|| "bug".to_string());
+    let mut message = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+
+    let submit = move |_| {
+        let msg = message.read().trim().to_string();
+        if msg.is_empty() || *busy.read() {
+            return;
+        }
+        let k = kind.read().clone();
+        let token = session.read().access_token.clone();
+        let path = web_sys::window()
+            .and_then(|w| w.location().pathname().ok())
+            .unwrap_or_default();
+        let ua = web_sys::window()
+            .map(|w| w.navigator().user_agent().unwrap_or_default())
+            .unwrap_or_default();
+        busy.set(true);
+        spawn(async move {
+            let res = crate::backend_api::submit_feedback(
+                token.as_deref(),
+                &k,
+                &msg,
+                &path,
+                env!("CARGO_PKG_VERSION"),
+                &ua,
+            )
+            .await;
+            busy.set(false);
+            match res {
+                Ok(()) => {
+                    open.set(false);
+                    message.set(String::new());
+                    show_snackbar(&t("feedback.sent"));
+                }
+                Err(e) => {
+                    log::error!("feedback submit failed: {e}");
+                    show_snackbar(&t("error.somethingWentWrong"));
+                }
+            }
+        });
+    };
+
+    // (value, material-icon, label) for the type toggle.
+    let types = [
+        ("bug", "bug_report", t("feedback.bug")),
+        ("feature", "lightbulb", t("feedback.feature")),
+        ("other", "chat", t("feedback.other")),
+    ];
+
+    rsx! {
+        Dialog {
+            open: open(),
+            on_dismiss: move |_| open.set(false),
+            headline: t("feedback.title"),
+            icon: "feedback".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: message.read().trim().is_empty() || *busy.read(),
+                    onclick: submit,
+                    "{t(\"feedback.send\")}"
+                }
+            },
+            // Type selector (bug / feature / other): a labelled toggle row.
+            div { class: "stack stack-h", style: "margin-bottom: var(--md-sys-spacing-3);",
+                for (val , icon , label) in types {
+                    button {
+                        key: "{val}",
+                        r#type: "button",
+                        class: if kind.read().as_str() == val { "btn btn-primary" } else { "btn btn-outlined" },
+                        onclick: move |_| kind.set(val.to_string()),
+                        span { class: "material-icons", "{icon}" }
+                        " {label}"
+                    }
+                }
+            }
+            div { class: "text-field",
+                label { "{t(\"feedback.messageLabel\")}" }
+                textarea {
+                    rows: "5",
+                    maxlength: "{FEEDBACK_MAXLEN}",
+                    placeholder: t("feedback.placeholder"),
+                    value: "{message}",
+                    oninput: move |e| message.set(e.value()),
+                }
+            }
+        }
+    }
+}

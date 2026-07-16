@@ -47,6 +47,11 @@ pub struct Config {
     pub vapid_public: String,
     /// VAPID `sub` claim: a `mailto:` or `https:` contact for the push service.
     pub vapid_subject: String,
+    /// BetterStack (Logtail) source token for user feedback / bug reports (the
+    /// same sink the frontend ships errors to). Empty disables shipping (the
+    /// endpoint then logs the report server-side instead of dropping it).
+    pub betterstack_token: String,
+    pub betterstack_host: String,
 }
 
 impl Config {
@@ -69,6 +74,9 @@ impl Config {
             vapid_public: env("VAPID_PUBLIC_KEY"),
             vapid_subject: std::env::var("VAPID_SUBJECT")
                 .unwrap_or_else(|_| "mailto:niclasoverby@gmail.com".to_string()),
+            betterstack_token: env("BETTERSTACK_SOURCE_TOKEN"),
+            betterstack_host: std::env::var("BETTERSTACK_INGEST_HOST")
+                .unwrap_or_else(|_| "in.logs.betterstack.com".to_string()),
         }
     }
     pub fn client_id(&self) -> String {

@@ -17,6 +17,10 @@ pub(super) fn UserMenu() -> Element {
     let is_auth = session.read().is_authenticated();
     let theme = use_theme();
     let mut menu_open = use_signal(|| false);
+    // The feedback dialog is opened from a menu item but rendered OUTSIDE the
+    // menu's conditional markup (below), so closing the menu on click does not
+    // unmount the open dialog.
+    let mut feedback_open = use_signal(|| false);
 
     let initial = session
         .read()
@@ -184,6 +188,16 @@ pub(super) fn UserMenu() -> Element {
                         span { class: "material-icons", "language" }
                         {match *LANG.read() { Lang::En => " Dansk", Lang::Da => " English" }}
                     }
+                    // Send feedback / report a bug (available signed in or out).
+                    button {
+                        class: "list-item",
+                        onclick: move |_| {
+                            menu_open.set(false);
+                            feedback_open.set(true);
+                        },
+                        span { class: "material-icons", "feedback" }
+                        " {t(\"feedback.menu\")}"
+                    }
                     if is_auth {
                         // Your profile (memberships + the link-Bluesky card). Only
                         // reachable here, so keep it above the account actions.
@@ -244,6 +258,9 @@ pub(super) fn UserMenu() -> Element {
                     }
                 }
             }
+            // Rendered outside the `if menu_open()` block so closing the menu
+            // does not unmount the dialog while it is open.
+            crate::components::feedback::FeedbackDialog { open: feedback_open }
         }
     }
 }

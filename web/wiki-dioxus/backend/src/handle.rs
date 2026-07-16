@@ -19,6 +19,7 @@ use http::StatusCode;
 mod auth;
 mod dpop;
 mod error;
+mod feedback;
 mod members;
 mod nhost;
 mod notify;
@@ -87,6 +88,7 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
         "/push/reply" => notify::reply(cfg, client, query, bearer).await,
         "/members/claim" => members::claim(cfg, client, query, bearer).await,
         "/members/claim-link" => members::claim_link(cfg, client, query, bearer).await,
+        "/feedback" => feedback::submit(cfg, client, query, bearer).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }
