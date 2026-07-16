@@ -3197,6 +3197,17 @@ select:focus {
 	color: var(--md-on-primary-container);
 	font-weight: 600;
 }
+.results-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--md-sys-spacing-2);
+}
+/* The export/print actions are a screen-only affordance: never on the printout. */
+@media print {
+	.results-actions {
+		display: none;
+	}
+}
 .winner-badge {
 	color: var(--md-tertiary);
 	font-size: 1.125rem;

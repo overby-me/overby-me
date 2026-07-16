@@ -189,9 +189,9 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                                 .unwrap_or_default();
                                                 let mut csv = String::from("Name,Email\n");
                                                 for m in &all {
-                                                    csv.push_str(&csv_field(&m.label()));
+                                                    csv.push_str(&crate::export::csv_field(&m.label()));
                                                     csv.push(',');
-                                                    csv.push_str(&csv_field(m.email.as_deref().unwrap_or("")));
+                                                    csv.push_str(&crate::export::csv_field(m.email.as_deref().unwrap_or("")));
                                                     csv.push('\n');
                                                 }
                                                 let file = format!("{}-participants.csv", crate::export::sanitize_filename(&fname));
@@ -753,16 +753,6 @@ fn MemberTableRow(
                 }
             }
         }
-    }
-}
-
-/// Quote a CSV field when it contains a comma, quote, or newline (RFC 4180:
-/// wrap in quotes and double any inner quotes).
-fn csv_field(s: &str) -> String {
-    if s.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
     }
 }
 

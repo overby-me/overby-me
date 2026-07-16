@@ -643,6 +643,26 @@ pub fn download_bytes(filename: &str, mime: &str, bytes: &[u8]) {
     }
 }
 
+/// Quote a CSV field per RFC 4180: wrap in double quotes when it contains a
+/// comma, quote, or newline, doubling any inner quotes. The one canonical CSV
+/// escaper (member roster + poll results both use it).
+pub fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// Open the browser print dialog for the current page. The print stylesheet
+/// (`@media print`) hides the app chrome, so the visible card (a closed poll's
+/// results, a document) prints clean.
+pub fn print_page() {
+    if let Some(window) = web_sys::window() {
+        let _ = window.print();
+    }
+}
+
 /// The letter/number prefix for a heading (policy "A: ", change "1: "), by the
 /// node's ordinal among same-type siblings.
 fn heading_prefix(mime_id: Option<&str>, ordinal: Option<usize>) -> String {

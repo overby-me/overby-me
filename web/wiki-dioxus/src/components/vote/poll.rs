@@ -340,6 +340,43 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         None
     };
 
+    // A CSV snapshot of the tally for the minutes/archive, plus a print action.
+    // Parity with the old wiki (which exported only the member roster): the
+    // results are now exportable too. Headers stay English (spreadsheet
+    // convention, like the roster export); the button labels are localized.
+    let results_csv = {
+        let mut s = String::new();
+        if !name.is_empty() {
+            s.push_str(&crate::export::csv_field(&name));
+            s.push_str("\n\n");
+        }
+        s.push_str("Option,Votes,Percent\n");
+        for (i, opt) in opts.iter().enumerate() {
+            let count = counts.get(i).copied().unwrap_or(0);
+            let base = if multi_select || is_abstention(i) {
+                total_votes
+            } else {
+                cast_votes
+            };
+            let pct = (count * 100).checked_div(base).unwrap_or(0);
+            s.push_str(&crate::export::csv_field(opt));
+            s.push_str(&format!(",{count},{pct}%\n"));
+        }
+        s.push('\n');
+        s.push_str(&format!("Total votes,{total_votes}\n"));
+        if eligible_count > 0 {
+            s.push_str(&format!("Eligible,{eligible_count}\n"));
+            s.push_str(&format!("Turnout,{turnout_pct}%\n"));
+        }
+        if let Some(win) = &winning_option {
+            s.push_str(&format!("Result,{}\n", crate::export::csv_field(win)));
+        } else if is_tie {
+            s.push_str("Result,Tie\n");
+        }
+        s
+    };
+    let results_filename = format!("{}-results.csv", crate::export::sanitize_filename(&name));
+
     let submit = {
         let token = session.read().access_token.clone();
         let poll = poll_id.clone();
@@ -648,6 +685,34 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                             }
                         } else {
                             "{t(\"poll.resultsHidden\")}"
+                        }
+                    }
+                    // Export/print the tally for the minutes (hidden on the projector,
+                    // which is a clean display, and only when there are results to save).
+                    if show_results && !projector {
+                        div { class: "results-actions mt-1",
+                            button {
+                                class: "btn-text",
+                                onclick: {
+                                    let csv = results_csv.clone();
+                                    let file = results_filename.clone();
+                                    move |_| {
+                                        crate::export::download_bytes(
+                                            &file,
+                                            "text/csv;charset=utf-8",
+                                            csv.as_bytes(),
+                                        )
+                                    }
+                                },
+                                span { class: "material-icons", "download" }
+                                " {t(\"vote.exportCsv\")}"
+                            }
+                            button {
+                                class: "btn-text",
+                                onclick: move |_| crate::export::print_page(),
+                                span { class: "material-icons", "print" }
+                                " {t(\"vote.print\")}"
+                            }
                         }
                     }
                 }
