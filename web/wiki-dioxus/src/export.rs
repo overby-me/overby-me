@@ -310,8 +310,21 @@ fn frame_size_cm(w: u32, h: u32) -> (f64, f64) {
 }
 
 /// Fetch an image's bytes for embedding. Returns `None` on any error (network,
-/// CORS, etc.) so the caller can fall back to emitting the URL as a link.
+/// CORS, etc.) so the caller can fall back to emitting the URL as a link. A
+/// `data:` URI (how the insert-image button stores an inline image) is decoded
+/// in-place rather than fetched, so those images embed on export too.
 async fn fetch_image_bytes(url: &str) -> Option<Vec<u8>> {
+    if let Some(rest) = url.strip_prefix("data:") {
+        // data:[<mediatype>][;base64],<data> — only base64 payloads carry bytes.
+        let (meta, payload) = rest.split_once(',')?;
+        if !meta.contains("base64") {
+            return None;
+        }
+        // Decode via atob (the inverse of the btoa in download_bytes): each code
+        // unit of the result is one byte, so no base64 crate dependency is needed.
+        let bin = web_sys::window()?.atob(payload).ok()?;
+        return Some(bin.chars().map(|c| c as u8).collect());
+    }
     let resp = reqwest::Client::new().get(url).send().await.ok()?;
     if !resp.status().is_success() {
         return None;

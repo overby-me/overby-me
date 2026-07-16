@@ -18,6 +18,29 @@ pub const NODE_NAME_MAXLEN: usize = 120;
 /// DOM id of the `contenteditable` editing surface.
 const EDITOR_ID: &str = "rich-editor";
 
+/// DOM id of the hidden file input the insert-image toolbar button triggers.
+const INLINE_IMAGE_INPUT_ID: &str = "inline-image-input";
+
+/// Cap on an inline image inserted as a data URI. Inline images are self-
+/// contained (no upload, so no token in the persisted content), but that puts the
+/// bytes in the document's JSON, so a large photo belongs in the cover-image slot
+/// / storage instead. ~2 MiB keeps a document reasonable.
+const MAX_INLINE_IMAGE_BYTES: usize = 2 * 1024 * 1024;
+
+/// Programmatically click a DOM element by id (used to open the hidden inline-
+/// image file picker from the toolbar button).
+fn click_element_by_id(id: &str) {
+    use wasm_bindgen::JsCast;
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(id))
+    {
+        if let Ok(h) = el.dyn_into::<web_sys::HtmlElement>() {
+            h.click();
+        }
+    }
+}
+
 /// Idle time after the last keystroke before the editor silently autosaves the
 /// draft, so a crash or accidental close never loses more than this window.
 const AUTOSAVE_DEBOUNCE_MS: u32 = 2500;
@@ -548,6 +571,49 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
         });
     };
 
+    // Insert a chosen image inline, as a self-contained `data:` URI: no upload, so
+    // no session token ends up in the persisted content (unlike a protected file
+    // URL), and it renders as-is in both the editor and the SlateRenderer. Capped
+    // so the document JSON does not balloon (see MAX_INLINE_IMAGE_BYTES). The
+    // selection was saved when the toolbar button was pressed; restore it so the
+    // image lands where the caret was, not wherever focus returned from the dialog.
+    let on_pick_inline_image = move |evt: FormEvent| {
+        let files = evt.files();
+        let Some(fd) = files.into_iter().next() else {
+            return;
+        };
+        let ctype = fd
+            .content_type()
+            .filter(|c| !c.is_empty())
+            .unwrap_or_else(|| "image/png".to_string());
+        spawn(async move {
+            match fd.read_bytes().await {
+                Ok(bytes) => {
+                    if bytes.len() > MAX_INLINE_IMAGE_BYTES {
+                        show_snackbar(&t("editor.imageTooLarge"));
+                        return;
+                    }
+                    let Some(window) = web_sys::window() else {
+                        return;
+                    };
+                    // btoa needs a binary string (each char < 256); map bytes 1:1.
+                    let binary: String = bytes.iter().map(|&b| b as char).collect();
+                    let Ok(b64) = window.btoa(&binary) else {
+                        show_snackbar(&t("error.somethingWentWrong"));
+                        return;
+                    };
+                    let data_uri = format!("data:{ctype};base64,{b64}");
+                    richtext::focus_editor(EDITOR_ID);
+                    richtext::restore_selection();
+                    richtext::exec_value("insertImage", &data_uri);
+                    dirty.set(true);
+                    set_editor_dirty(true);
+                }
+                Err(_) => show_snackbar(&t("error.somethingWentWrong")),
+            }
+        });
+    };
+
     if !is_auth {
         // DESIGN: an expressive locked-barrier state instead of a plain card.
         return rsx! {
@@ -896,6 +962,29 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                 link_open.set(!open);
                             },
                             span { class: "material-icons", "link" }
+                        }
+
+                        div { class: "editor-divider" }
+
+                        // Insert an inline image (stored as a self-contained data
+                        // URI). Opens the hidden file picker; the selection is saved
+                        // first so the image lands at the caret after the dialog.
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"editor.insertImage\")}",
+                            onmousedown: move |e| e.prevent_default(),
+                            onclick: move |_| {
+                                richtext::save_selection();
+                                click_element_by_id(INLINE_IMAGE_INPUT_ID);
+                            },
+                            span { class: "material-icons", "image" }
+                        }
+                        input {
+                            id: INLINE_IMAGE_INPUT_ID,
+                            r#type: "file",
+                            accept: "image/*",
+                            style: "display: none;",
+                            onchange: on_pick_inline_image,
                         }
                     }
 

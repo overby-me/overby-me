@@ -134,7 +134,9 @@ const EN_JSON: &str = r#"{
         "link": "Link",
         "linkUrl": "Link URL",
         "addLink": "Apply",
-        "removeLink": "Remove link"
+        "removeLink": "Remove link",
+        "insertImage": "Insert image",
+        "imageTooLarge": "That image is too large to embed. Use a smaller image or the cover image."
     },
     "toc": {
         "title": "On this page",
@@ -583,7 +585,9 @@ const DA_JSON: &str = r#"{
         "link": "Link",
         "linkUrl": "Link-URL",
         "addLink": "Anvend",
-        "removeLink": "Fjern link"
+        "removeLink": "Fjern link",
+        "insertImage": "Indsæt billede",
+        "imageTooLarge": "Billedet er for stort til at indlejre. Brug et mindre billede eller forsidebilledet."
     },
     "toc": {
         "title": "P\u00e5 denne side",
