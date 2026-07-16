@@ -751,6 +751,95 @@ impl Store {
         }
         Ok(out)
     }
+
+    // -- Write side (Phase 1): a freshly-authenticated DID authors its own
+    //    content. Membership/authz gating (is_active_member) is deferred with the
+    //    DID-binding flow; these inserts are unconditional given a caller DID. --
+
+    /// Create a document authored by `author_did` (the sole author). Returns the
+    /// new document id. Nullable-UNIQUE `legacy_id` is passed as explicit NULL.
+    pub async fn create_document(
+        &self,
+        context_id: &str,
+        parent_id: Option<&str>,
+        kind: &str,
+        title: &str,
+        content: Option<&str>,
+        author_did: &str,
+    ) -> Result<String, DbError> {
+        let id = format!("d-{}", crate::util::random_token(16));
+        let conn = self.db.acquire().await?;
+        conn.execute(
+            "INSERT INTO document (id, context_id, parent_id, kind, title, content, legacy_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            vec![
+                Value::Text(id.clone()),
+                Value::Text(context_id.to_string()),
+                opt_str_val(parent_id),
+                Value::Text(kind.to_string()),
+                Value::Text(title.to_string()),
+                opt_str_val(content),
+            ],
+        )
+        .await?;
+        conn.execute(
+            "INSERT INTO document_author (document_id, author_did, author_text, ord) \
+             VALUES (?1, ?2, NULL, 0)",
+            [id.as_str(), author_did],
+        )
+        .await?;
+        Ok(id)
+    }
+
+    /// Create a comment on `on_id` authored by `author_did`. Returns its id.
+    pub async fn create_comment(
+        &self,
+        on_id: &str,
+        context_id: &str,
+        author_did: &str,
+        text: &str,
+    ) -> Result<String, DbError> {
+        let id = format!("k-{}", crate::util::random_token(16));
+        let conn = self.db.acquire().await?;
+        conn.execute(
+            "INSERT INTO comment (id, on_id, context_id, author_did, author_text, text, legacy_id) \
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL)",
+            [id.as_str(), on_id, context_id, author_did, text],
+        )
+        .await?;
+        Ok(id)
+    }
+
+    /// Add `reactor_did`'s `emoji` reaction to `subject_uri` (idempotent via
+    /// `upsert_reaction`'s unique triple). Returns the reaction id.
+    pub async fn create_reaction(
+        &self,
+        subject_uri: &str,
+        reactor_did: &str,
+        emoji: &str,
+    ) -> Result<String, DbError> {
+        let id = format!("r-{}", crate::util::random_token(16));
+        let now = crate::util::rfc3339_utc(crate::util::now_secs());
+        self.upsert_reaction(&id, subject_uri, reactor_did, emoji, &now)
+            .await?;
+        Ok(id)
+    }
+
+    /// Remove `reactor_did`'s `emoji` reaction from `subject_uri` (toggle off).
+    pub async fn remove_reaction(
+        &self,
+        subject_uri: &str,
+        reactor_did: &str,
+        emoji: &str,
+    ) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute(
+            "DELETE FROM reaction WHERE subject_uri = ?1 AND reactor_did = ?2 AND emoji = ?3",
+            [subject_uri, reactor_did, emoji],
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 /// A nullable TEXT param: `Value::Text` or SQL NULL.

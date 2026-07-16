@@ -12,7 +12,8 @@
 use crate::AppState;
 use axum::Json;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::header::AUTHORIZATION;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
@@ -193,6 +194,150 @@ pub async fn get_reactions(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Write side (Phase 1): a freshly-authenticated DID authors its own content.
+// ---------------------------------------------------------------------------
+
+/// PLACEHOLDER auth: the `Authorization: Bearer <did>` value is treated as the
+/// caller's DID. Real auth resolves an atproto session / access token to a DID
+/// (the deferred identity slice) and enforces membership; do NOT deploy this
+/// as-is. It exists so the write vertical (validation + SQL + XRPC shape) is
+/// buildable and testable ahead of the identity flow.
+fn caller_did(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("Bearer ")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn auth_required() -> Response {
+    err(
+        StatusCode::UNAUTHORIZED,
+        "AuthRequired",
+        "missing bearer DID",
+    )
+}
+
+fn wrote(id: String) -> Response {
+    (StatusCode::OK, Json(serde_json::json!({ "id": id }))).into_response()
+}
+
+fn write_failed(what: &str, e: impl std::fmt::Display) -> Response {
+    tracing::error!("{what} failed: {e}");
+    err(StatusCode::BAD_GATEWAY, "InternalError", "write failed")
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateDocumentBody {
+    pub context_id: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    pub kind: String,
+    pub title: String,
+    #[serde(default)]
+    pub content: Option<serde_json::Value>,
+}
+
+/// `com.example.wiki.createDocument` (procedure) — the caller authors a document.
+pub async fn create_document(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CreateDocumentBody>,
+) -> Response {
+    let Some(did) = caller_did(&headers) else {
+        return auth_required();
+    };
+    let content = body.content.as_ref().map(|v| v.to_string());
+    let store = crate::Store::new(state.db.clone());
+    match store
+        .create_document(
+            &body.context_id,
+            body.parent_id.as_deref(),
+            &body.kind,
+            &body.title,
+            content.as_deref(),
+            &did,
+        )
+        .await
+    {
+        Ok(id) => wrote(id),
+        Err(e) => write_failed("createDocument", e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PostCommentBody {
+    pub on_id: String,
+    pub context_id: String,
+    pub text: String,
+}
+
+/// `com.example.wiki.postComment` (procedure) — the caller comments on a node.
+pub async fn post_comment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<PostCommentBody>,
+) -> Response {
+    let Some(did) = caller_did(&headers) else {
+        return auth_required();
+    };
+    let store = crate::Store::new(state.db.clone());
+    match store
+        .create_comment(&body.on_id, &body.context_id, &did, &body.text)
+        .await
+    {
+        Ok(id) => wrote(id),
+        Err(e) => write_failed("postComment", e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReactionBody {
+    pub subject: String,
+    pub emoji: String,
+}
+
+/// `com.example.wiki.addReaction` (procedure) — the caller reacts to a subject.
+pub async fn add_reaction(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ReactionBody>,
+) -> Response {
+    let Some(did) = caller_did(&headers) else {
+        return auth_required();
+    };
+    let store = crate::Store::new(state.db.clone());
+    match store
+        .create_reaction(&body.subject, &did, &body.emoji)
+        .await
+    {
+        Ok(id) => wrote(id),
+        Err(e) => write_failed("addReaction", e),
+    }
+}
+
+/// `com.example.wiki.removeReaction` (procedure) — the caller un-reacts.
+pub async fn remove_reaction(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ReactionBody>,
+) -> Response {
+    let Some(did) = caller_did(&headers) else {
+        return auth_required();
+    };
+    let store = crate::Store::new(state.db.clone());
+    match store
+        .remove_reaction(&body.subject, &did, &body.emoji)
+        .await
+    {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(e) => write_failed("removeReaction", e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{AppState, Config, Db, router};
@@ -201,6 +346,10 @@ mod tests {
     use tower::ServiceExt;
 
     async fn seeded_router() -> axum::Router {
+        router(seeded_state().await)
+    }
+
+    async fn seeded_state() -> AppState {
         let db = Db::open(":memory:").await.expect("open");
         db.init_schema().await.expect("schema");
         let conn = db.acquire().await.expect("conn");
@@ -227,12 +376,37 @@ mod tests {
         )
         .await
         .expect("seed");
-        router(AppState::new(db, Config::default()))
+        AppState::new(db, Config::default())
     }
 
     async fn get(app: axum::Router, uri: &str) -> (StatusCode, serde_json::Value) {
         let resp = app
             .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .expect("request");
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .expect("body");
+        let v = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, v)
+    }
+
+    async fn post(
+        app: axum::Router,
+        uri: &str,
+        did: Option<&str>,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut b = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json");
+        if let Some(d) = did {
+            b = b.header("authorization", format!("Bearer {d}"));
+        }
+        let resp = app
+            .oneshot(b.body(Body::from(body.to_string())).unwrap())
             .await
             .expect("request");
         let status = resp.status();
@@ -362,5 +536,117 @@ mod tests {
         assert_eq!(reactions.len(), 1);
         assert_eq!(reactions[0]["emoji"], "👍");
         assert_eq!(reactions[0]["reactor_did"], "did:plc:bob");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn create_document_by_a_did_then_read_it_back() {
+        let state = seeded_state().await;
+        let (status, v) = post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.createDocument",
+            Some("did:plc:carol"),
+            serde_json::json!({
+                "context_id": "c1",
+                "kind": "document",
+                "title": "Carol's Doc",
+                "content": {"blocks": [{"text": "hej"}]}
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let id = v["id"].as_str().expect("id").to_string();
+
+        // Read it back through getDocument on the SAME db: title, author, content.
+        let (status, doc) = get(
+            router(state.clone()),
+            &format!("/xrpc/com.example.wiki.getDocument?id={id}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(doc["title"], "Carol's Doc");
+        assert_eq!(doc["authors"][0]["did"], "did:plc:carol");
+        assert_eq!(doc["content"]["blocks"][0]["text"], "hej");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_write_without_a_bearer_is_401() {
+        let (status, v) = post(
+            seeded_router().await,
+            "/xrpc/com.example.wiki.postComment",
+            None,
+            serde_json::json!({"on_id": "d1", "context_id": "c1", "text": "hi"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(v["error"], "AuthRequired");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn post_comment_lands_in_the_thread() {
+        let state = seeded_state().await;
+        let (status, _) = post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.postComment",
+            Some("did:plc:dave"),
+            serde_json::json!({"on_id": "d1", "context_id": "c1", "text": "Seconded"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, v) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getComments?on=d1",
+        )
+        .await;
+        let comments = v.as_array().expect("array");
+        // The seed comment plus the new one.
+        assert!(comments.iter().any(|c| c["text"] == "Seconded"));
+        assert!(
+            comments
+                .iter()
+                .any(|c| c["author"]["did"] == "did:plc:dave")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn add_then_remove_reaction_toggles() {
+        let state = seeded_state().await;
+        let subject = "at://did:plc:x/com.example.wiki.comment/z";
+        let add = |emoji: &'static str| {
+            let s = state.clone();
+            async move {
+                post(
+                    router(s),
+                    "/xrpc/com.example.wiki.addReaction",
+                    Some("did:plc:eve"),
+                    serde_json::json!({"subject": subject, "emoji": emoji}),
+                )
+                .await
+            }
+        };
+        assert_eq!(add("🎉").await.0, StatusCode::OK);
+        // Re-adding the same emoji is idempotent (unique triple), still one row.
+        assert_eq!(add("🎉").await.0, StatusCode::OK);
+        let (_, v) = get(
+            router(state.clone()),
+            &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
+        )
+        .await;
+        assert_eq!(v.as_array().unwrap().len(), 1);
+
+        // Remove it.
+        let (status, _) = post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.removeReaction",
+            Some("did:plc:eve"),
+            serde_json::json!({"subject": subject, "emoji": "🎉"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, v) = get(
+            router(state.clone()),
+            &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
+        )
+        .await;
+        assert_eq!(v.as_array().unwrap().len(), 0);
     }
 }

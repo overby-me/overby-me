@@ -25,7 +25,7 @@ pub use db::{Db, DbError};
 pub use store::Store;
 
 use axum::extract::State;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -100,6 +100,23 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.getReactions",
             get(xrpc::get_reactions),
+        )
+        // The write procedures (Phase 1: the authenticated DID authors content).
+        .route(
+            "/xrpc/com.example.wiki.createDocument",
+            post(xrpc::create_document),
+        )
+        .route(
+            "/xrpc/com.example.wiki.postComment",
+            post(xrpc::post_comment),
+        )
+        .route(
+            "/xrpc/com.example.wiki.addReaction",
+            post(xrpc::add_reaction),
+        )
+        .route(
+            "/xrpc/com.example.wiki.removeReaction",
+            post(xrpc::remove_reaction),
         )
         .with_state(state)
 }
