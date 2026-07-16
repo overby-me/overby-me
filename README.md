@@ -102,6 +102,7 @@
 | [Nixpkgs-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
 | [Patch-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patch) | GNU patch-compatible patch application tool |
 | [Patchelf-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patchelf) | patchelf-compatible ELF binary patching tool |
+| [Pipewire-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pipewire) | PipeWire-compatible multimedia tools and protocol client |
 | [Pkg-config-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pkg-config) | pkg-config reimplementation |
 | [Sed-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/sed) | GNU sed-compatible stream editor |
 | [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | Systemd replacement |
@@ -427,7 +428,7 @@
 | 🚧 | Libc | [Glibc 💣](https://en.wikipedia.org/wiki/Glibc) | [Musl 💣](https://www.musl-libc.org), [Relibc 🦀](https://github.com/redox-os/relibc) | [Gcompat 💣](https://git.adelielinux.org/adelie/gcompat) | |
 | 🚧 | Init System | [Systemd 💣](https://github.com/systemd/systemd) | [Redox Init 🦀](https://gitlab.redox-os.org/redox-os/init), [Synit 🦀](https://git.syndicate-lang.org/synit/synit), [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | ⬅️ | |
 | 🚧 | Inter-process Communication | [Dbus 💣](https://gitlab.freedesktop.org/dbus/dbus) | [Zlink 🦀](https://github.com/z-galaxy/zlink) | [Zbus 🦀](https://github.com/dbus2/zbus), [Busd 🦀](https://github.com/dbus2/busd) | |
-| 🚫 | Multimedia Server | [Pipewire 💣](https://gitlab.freedesktop.org/pipewire/pipewire) | [Pipewire-native-rs 🦀](https://gitlab.freedesktop.org/pipewire/pipewire-native-rs) | ⬅️ | [Pulseaudio 💣](https://gitlab.freedesktop.org/pulseaudio/pulseaudio) |
+| 🚧 | Multimedia Server | [Pipewire 💣](https://gitlab.freedesktop.org/pipewire/pipewire) | [Pipewire-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pipewire), [Pipewire-native-rs 🦀](https://gitlab.freedesktop.org/pipewire/pipewire-native-rs) | ⬅️ | [Pulseaudio 💣](https://gitlab.freedesktop.org/pulseaudio/pulseaudio) |
 | 🚫 | XR Runtime | [Monado 💣](https://gitlab.freedesktop.org/monado/monado) | | [OpenXR 📖](https://www.khronos.org/openxr) | [Arcan 💣](https://github.com/letoram/arcan) |
 | ✅ | Filesystem | [Btrfs 📖💣](https://btrfs.wiki.kernel.org/index.php/Main_Page) | [Fxfs 🦀](https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/src/storage/fxfs), [Redoxfs 🦀](https://gitlab.redox-os.org/redox-os/redoxfs) | 🆗 | [Ext4 📖💣](https://docs.kernel.org/filesystems/ext4/) |
 | ✅ | Sandboxing | [Hakoniwa 🦀](https://github.com/souk4711/hakoniwa) | | [Bubblewrap-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bubblewrap) | [Bubblewrap 💣](https://github.com/containers/bubblewrap) |

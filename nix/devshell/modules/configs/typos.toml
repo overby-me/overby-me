@@ -68,6 +68,9 @@ aranges = "aranges"
 Nd = "Nd"
 # controllen = libc msghdr field msg_controllen (sendmsg/recvmsg SCM_RIGHTS)
 controllen = "controllen"
+# CAF = Apple Core Audio Format (libsndfile container, rust/pipewire pw-cat)
+caf = "caf"
+CAF = "CAF"
 
 [default.extend-identifiers]
 # GNU tar upstream test names (tests/extrac*.at in tar-1.35) — not typos.

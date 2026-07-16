@@ -230,6 +230,7 @@
         ./rust/patchelf
         ./rust/pcre2
         ./rust/perl
+        ./rust/pipewire
         ./rust/pkg-config
         ./rust/sed
         ./rust/systemd

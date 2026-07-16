@@ -1,0 +1,3 @@
+"$REF"  --monitor=foo </dev/null > "$TMPDIR/expected" 2>&1 || true
+"$RUST" --monitor=foo </dev/null > "$TMPDIR/actual"   2>&1 || true
+compare "pw-dump --monitor=foo (no-arg flag)"
