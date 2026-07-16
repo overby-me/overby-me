@@ -350,6 +350,12 @@ pub fn activate_unit(
     source: ActivationSource,
 ) -> std::result::Result<StartResult, UnitOperationError> {
     trace!("Activate id: {id_to_start:?}");
+    // In the initrd (where journald/console aren't up), trace unit activation to
+    // /dev/kmsg so the boot chain is visible — essential for bringing up the
+    // initrd → switch-root sequence. No-op outside the initrd.
+    if crate::config::in_initrd() {
+        crate::entrypoints::kmsg(&format!("activate {}", id_to_start.name));
+    }
 
     let Some(unit) = run_info.unit_table.get(&id_to_start) else {
         // If this occurs, there is a flaw in the handling of dependencies
