@@ -2052,6 +2052,10 @@ fn context_permission_objects(ctx_id: &str) -> serde_json::Value {
                 "vote/comment",
             ],
         ),
+        // Emoji reactions: a vote/reaction lives under a comment (or, in future,
+        // directly on the content it reacts to), so it shares the comment's
+        // parent set. Any member may react.
+        ("vote/reaction", "member", REACTION_PARENTS),
         ("speak/speak", "member", &["speak/list"]),
         (
             "vote/change",
@@ -2096,6 +2100,19 @@ fn context_permission_objects(ctx_id: &str) -> serde_json::Value {
         .collect();
     serde_json::Value::Array(objs)
 }
+
+/// The parent mimes a `vote/reaction` may be created under. Reactions attach to
+/// comments today; the wider content set keeps them consistent with `vote/comment`
+/// and ready for reactions placed directly on content later.
+const REACTION_PARENTS: &[&str] = &[
+    "vote/policy",
+    "vote/change",
+    "wiki/document",
+    "wiki/file",
+    "vote/position",
+    "vote/candidate",
+    "vote/comment",
+];
 
 /// Create a new context node — a group (`wiki/group`) or event (`wiki/event`) —
 /// under `parent_id`, mirroring the old wiki's create-context flow. First it
@@ -3240,6 +3257,91 @@ pub async fn insert_comment(
         parent_id: Some(model::Uuid(parent_id.to_string())),
         context_id: context_id.map(|c| model::Uuid(c.to_string())),
         data: Some(model::Jsonb(serde_json::json!({ "text": text }))),
+        mutable: Some(false),
+        index: None,
+    };
+    insert_node(access_token, input)
+        .await
+        .map(|inserted| inserted.is_some())
+}
+
+/// The emoji reactions (`vote/reaction` children) on a node, in insertion order.
+/// Each carries `owner_id` (who reacted) and `data.emoji`, so the UI can group
+/// by emoji, count, and mark the caller's own reactions. Reuses the comment
+/// query shape (both are `ChildNodeFields` children filtered by mime).
+pub async fn query_reactions(
+    access_token: Option<&str>,
+    parent_id: &str,
+) -> Result<Vec<model::ChildNodeFields>, String> {
+    use cynic::QueryBuilder;
+    let where_clause = NodesBoolExp {
+        parent_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(parent_id.to_string())),
+            is_null: None,
+        }),
+        mime_id: Some(StringComparisonExp {
+            eq: Some("vote/reaction".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let op = CommentsQuery::build(CommentsVariables { where_clause });
+    let nodes = execute(access_token, op).await?.nodes;
+    Ok(nodes.into_iter().map(Into::into).collect())
+}
+
+/// Add an emoji reaction (`vote/reaction` node) under `parent_id` (a comment),
+/// storing the emoji in `data.emoji` and as the node name. Older contexts predate
+/// the `vote/reaction` permission, so — like `create_speaker_list` — this grants
+/// it for the context (scoped, member role) if missing before inserting.
+pub async fn insert_reaction(
+    access_token: Option<&str>,
+    parent_id: &str,
+    context_id: Option<&str>,
+    emoji: &str,
+) -> Result<bool, String> {
+    if let Some(ctx) = context_id {
+        let allowed = node_insert_mimes(access_token, parent_id)
+            .await
+            .iter()
+            .any(|m| m == "vote/reaction");
+        if !allowed {
+            // Best-effort: seed the context's vote/reaction permission if it is
+            // missing. Only an actor allowed to write the permissions table (an
+            // owner) will succeed here; for a plain member in an OLD context the
+            // seed is a no-op and the insert below is the real gate (new contexts
+            // get the rule from the creation template). Never fatal on its own.
+            let _ = execute_raw_vars(
+                access_token,
+                "mutation($objs: [permissions_insert_input!]!) { insertPermissions(objects: $objs) { affected_rows } }",
+                serde_json::json!({ "objs": [{
+                    "contextId": ctx,
+                    "nodeId": ctx,
+                    "mimeId": "vote/reaction",
+                    "role": "member",
+                    "parents": REACTION_PARENTS,
+                    "active": true,
+                    "insert": true,
+                    "select": true,
+                    "update": true,
+                    "delete": true,
+                }] }),
+            )
+            .await;
+        }
+    }
+    let key = format!(
+        "reaction-{}-{}",
+        js_sys::Date::now() as u64,
+        (js_sys::Math::random() * 1e9) as u64
+    );
+    let input = model::NodesInsertInput {
+        name: Some(emoji.to_string()),
+        key: Some(key),
+        mime_id: Some("vote/reaction".to_string()),
+        parent_id: Some(model::Uuid(parent_id.to_string())),
+        context_id: context_id.map(|c| model::Uuid(c.to_string())),
+        data: Some(model::Jsonb(serde_json::json!({ "emoji": emoji }))),
         mutable: Some(false),
         index: None,
     };

@@ -383,6 +383,7 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "vote/candidate" => "face",
         "vote/question" => "question_mark",
         "vote/comment" => "add_comment",
+        "vote/reaction" => "add_reaction",
         "vote/change" => "rate_review",
         "vote/poll" => "poll",
         // speak / apps (old wiki: speak/list=InterpreterMode, app/speak=RecordVoiceOver)

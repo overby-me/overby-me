@@ -386,6 +386,11 @@ fn CommentThread(
                         }
                     }
                     p { class: "comment-text", "{text}" }
+                    ReactionBar {
+                        comment_id: comment.id.0.clone(),
+                        context_id: context_id.clone(),
+                        can_react: is_auth && can_comment,
+                    }
                     div { class: "comment-actions",
                         if is_auth && can_comment {
                             button {
@@ -483,6 +488,187 @@ fn CommentThread(
                     depth: depth + 1,
                     refresh,
                     can_comment,
+                }
+            }
+        }
+    }
+}
+
+/// The quick-react emoji set shown in the add-reaction popover.
+const QUICK_REACTIONS: &[&str] = &["👍", "❤️", "😂", "🎉", "😮", "😢", "🙏", "🚀"];
+
+/// The emoji stored on a `vote/reaction` node (`data.emoji`).
+fn reaction_emoji(node: &ChildNodeFields) -> String {
+    node.data
+        .as_ref()
+        .and_then(|d| d.0.get("emoji"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Toggle the caller's `emoji` reaction on `parent_id`: remove it when `my_id` is
+/// their existing reaction node, otherwise add it.
+async fn toggle_reaction(
+    token: Option<String>,
+    parent_id: String,
+    context_id: Option<String>,
+    emoji: String,
+    my_id: Option<String>,
+) -> Result<(), String> {
+    match my_id {
+        Some(id) => graphql::delete_node(token.as_deref(), &id).await.map(|_| ()),
+        None => {
+            graphql::insert_reaction(token.as_deref(), &parent_id, context_id.as_deref(), &emoji)
+                .await
+                .map(|_| ())
+        }
+    }
+}
+
+/// A reaction bar under a comment: grouped emoji chips with counts (the caller's
+/// own reactions highlighted, tap to toggle) plus an add-reaction popover. Live:
+/// refetches whenever a `vote/reaction` under this comment changes.
+#[component]
+fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) -> Element {
+    let session = use_session();
+    let current_user_id = session.read().user.as_ref().map(|u| u.id.clone());
+    let refresh = use_signal(|| 0u32);
+
+    let sub_id = comment_id.clone();
+    crate::subscription::use_live(
+        format!(
+            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{sub_id}\" }}, mimeId: {{ _eq: \"vote/reaction\" }} }}) {{ id }} }}"
+        ),
+        refresh,
+    );
+
+    let load_id = comment_id.clone();
+    let token = session.read().access_token.clone();
+    let rev = refresh();
+    let reactions_res = crate::use_data_resource!(|(load_id, token, rev)| async move {
+        let _ = rev;
+        graphql::query_reactions(token.as_deref(), &load_id)
+            .await
+            .unwrap_or_default()
+    });
+    let reactions = reactions_res.read().clone().unwrap_or_default();
+
+    // Group by emoji in first-seen order: (emoji, count, my reaction node id).
+    let mut groups: Vec<(String, usize, Option<String>)> = Vec::new();
+    for r in reactions.iter() {
+        let emoji = reaction_emoji(r);
+        if emoji.is_empty() {
+            continue;
+        }
+        let mine =
+            current_user_id.is_some() && r.owner_id.as_ref().map(|o| o.0.clone()) == current_user_id;
+        if let Some(g) = groups.iter_mut().find(|(e, _, _)| *e == emoji) {
+            g.1 += 1;
+            if mine {
+                g.2 = Some(r.id.0.clone());
+            }
+        } else {
+            groups.push((emoji, 1, mine.then(|| r.id.0.clone())));
+        }
+    }
+
+    let mut picker_open = use_signal(|| false);
+    // Nothing to show and no permission to add: render nothing.
+    if groups.is_empty() && !can_react {
+        return rsx! {};
+    }
+
+    rsx! {
+        div { class: "reaction-bar",
+            for (emoji, count, my_id) in groups.iter() {
+                button {
+                    key: "{emoji}",
+                    class: if my_id.is_some() { "reaction-chip is-mine" } else { "reaction-chip" },
+                    disabled: !can_react,
+                    onclick: {
+                        let emoji = emoji.clone();
+                        let my_id = my_id.clone();
+                        let parent_id = comment_id.clone();
+                        let context_id = context_id.clone();
+                        move |_| {
+                            if !can_react {
+                                return;
+                            }
+                            let token = session.read().access_token.clone();
+                            let (emoji, my_id, parent_id, context_id) =
+                                (emoji.clone(), my_id.clone(), parent_id.clone(), context_id.clone());
+                            spawn(async move {
+                                match toggle_reaction(token, parent_id, context_id, emoji, my_id).await {
+                                    Ok(()) => {
+                                        let mut refresh = refresh;
+                                        refresh += 1;
+                                    }
+                                    Err(e) => {
+                                        log::error!("reaction failed: {e}");
+                                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                    }
+                                }
+                            });
+                        }
+                    },
+                    span { class: "reaction-emoji", "{emoji}" }
+                    span { class: "reaction-count", "{count}" }
+                }
+            }
+            if can_react {
+                div { class: "reaction-add",
+                    button {
+                        class: "reaction-chip reaction-add-btn",
+                        aria_label: "{t(\"vote.addReaction\")}",
+                        onclick: move |_| {
+                            let open = picker_open();
+                            picker_open.set(!open);
+                        },
+                        span { class: "material-icons", "add_reaction" }
+                    }
+                    if picker_open() {
+                        div { class: "reaction-picker",
+                            for e in QUICK_REACTIONS.iter() {
+                                button {
+                                    key: "{e}",
+                                    class: "reaction-picker-item",
+                                    onclick: {
+                                        let emoji = e.to_string();
+                                        let existing = groups
+                                            .iter()
+                                            .find(|(em, _, _)| em == &emoji)
+                                            .and_then(|(_, _, mid)| mid.clone());
+                                        let parent_id = comment_id.clone();
+                                        let context_id = context_id.clone();
+                                        move |_| {
+                                            picker_open.set(false);
+                                            let token = session.read().access_token.clone();
+                                            let (emoji, existing, parent_id, context_id) = (
+                                                emoji.clone(),
+                                                existing.clone(),
+                                                parent_id.clone(),
+                                                context_id.clone(),
+                                            );
+                                            spawn(async move {
+                                                match toggle_reaction(token, parent_id, context_id, emoji, existing).await {
+                                                    Ok(()) => {
+                                                        let mut refresh = refresh;
+                                                        refresh += 1;
+                                                    }
+                                                    Err(e) => {
+                                                        log::error!("reaction failed: {e}");
+                                                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    },
+                                    "{e}"
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
