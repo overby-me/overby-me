@@ -7,10 +7,13 @@ choices that need a human call.
 
 ## Decided (2026-07-16)
 
-- **Datastore**: fully Rust, no Postgres. redb (pure Rust, 2PC durability) for BOTH the ballot/tally/roster
-  core AND the rebuildable firehose view (hand-written indexes + tantivy for full-text search). Turso/Limbo
-  (pure-Rust SQLite) an optional SQL layer for the view only, acceptable because the view is rebuildable.
-  Postgres dropped entirely.
+- **Datastore**: Turso Database (MIT, mostly-pure-Rust, SQLite+Postgres-compatible, embeddable + server +
+  WASM, SQLite on-disk file-format, Antithesis-tested, corporate-backed). One engine for the ballot core, the
+  rebuildable firehose view, and an optional firehose-fed WASM client cache. View on Turso from day one
+  (rebuildable = zero risk); ballot core on Turso once it is 1.0 with proven crash-recovery, with plain SQLite
+  as a lossless file-format bridge (or redb+replication as a pure-Rust fallback) in the interim. Mandatory
+  off-node replication of the append-only ballot log is the decisive integrity control regardless of engine.
+  Chosen because it uniquely hits Rust + corporate-backed + SQL + open-license (MIT, not BSL) + WASM client.
 - **UI toolkit**: Dioxus everywhere (it renders beyond the web: desktop/mobile/native via Blitz). Public
   permalinks served as static HTML via `dioxus-ssr` (no hydration). Leptos rejected (web-only). Mojo dropped
   from the frontend.

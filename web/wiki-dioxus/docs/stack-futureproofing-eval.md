@@ -12,10 +12,10 @@ verification confirmed a verdict, that is stated plainly.
 
 | Component | Current | Verdict | Why | Action |
 |-|-|-|-|-|
-| Meta Database / authoritative store | Hasura to SurrealDB (BSL 1.1) | change | The Rust-native preference is first-class, so no C engine anywhere: SurrealDB is BSL + unverified, and Postgres is C. The view being rebuildable removes the only reason a C engine was ever considered | Fully Rust (see crux 1): redb 4.1 (pure Rust, MIT/Apache, 2PC) for BOTH the ballot/tally/roster core AND the rebuildable firehose view (hand-written indexes + tantivy for search); Turso/Limbo an optional pure-Rust SQL layer for the view. Postgres dropped |
-| Database | Postgres to TiKV | change | TiKV is distributed cluster infra (mandatory Go Placement Driver, not pure Rust) and Postgres is C; neither fits the Rust-native single-node target | Drop both TiKV and Postgres; the view is redb too (optionally Turso/Limbo for SQL ergonomics), all pure Rust |
+| Meta Database / authoritative store | Hasura to SurrealDB (BSL 1.1) | change | Needs Rust + corporate-backed + SQL + open-license + WASM-capable; SurrealDB is BSL + a CVE, redb is single-maintainer, bare SQLite/Postgres is C with no client story | Turso Database (see crux 1): MIT, mostly-pure-Rust, SQLite+Postgres-compatible, embeddable + server + WASM, SQLite file-format (portable), Antithesis-tested. View on it from day one; ballot core on it once 1.0-proven (SQLite as a lossless bridge, redb+replication as pure-Rust fallback) plus mandatory off-node ballot-log replication |
+| Database | Postgres to TiKV | change | TiKV is heavy distributed infra (Go Placement Driver); bare Postgres/SQLite are C with no WASM-client story | Drop TiKV; the store is Turso Database (SQLite+Postgres-compatible, one engine for core + view + an optional WASM client cache); plain SQLite or redb are named fallbacks/bridges only |
 | Storage Engine | Sled / Fjall (R&D), RocksDB (legacy) | change (to N/A-for-AppView) | The AppView workload is relational (uniqueness, joins, aggregation); a raw KV is the wrong abstraction. Only relevant under a self-hosted PDS | Prefer Fjall or redb over Sled if an embedded engine is ever needed under a query engine or PDS; never Sled for durability-critical ballots |
-| Realtime / sync transport | SurrealDB LIVE queries | keep-and-extend | The real change-feed is the atproto firehose, not a DB-vendor feature; binding realtime to SurrealDB LIVE re-creates the Hasura lock-in being unwound | Consume Jetstream filtered to `app.radikal.*`; push authoritative deltas over one axum WS fed by an in-process broadcast channel (the AppView is a single process holding redb for both core and view plus the firehose, so no DB LISTEN/NOTIFY is needed) |
+| Realtime / sync transport | SurrealDB LIVE queries | keep-and-extend | The real change-feed is the atproto firehose, not a DB-vendor feature; binding realtime to SurrealDB LIVE re-creates the Hasura lock-in being unwound | Consume Jetstream filtered to `app.radikal.*`; push authoritative deltas over one axum WS fed by an in-process broadcast channel (the AppView is a single process holding Turso for both core and view plus the firehose, so no DB LISTEN/NOTIFY is needed) |
 | API surface | GraphQL (Hasura) | change | GraphQL was Hasura's auto-generated surface, not a chosen contract; atproto's native convention is XRPC, and lexicons already drive the types | Expose XRPC query/procedure lexicons + typed axum handlers; drop GraphQL and cynic |
 | Web Server | Caddy to Moella | keep (Caddy) / R&D-only (Moella) | Moella/Kvarn is single-maintainer, hobby-scale, WS/reverse-proxy paths only recently stabilized; wrong bet for a tool running elections | Keep Caddy (or terminate TLS directly in axum); pilot Moella on a non-critical surface before promoting |
 
@@ -47,7 +47,7 @@ verification confirmed a verdict, that is stated plainly.
 | Symmetric AEAD | AES-GCM + ChaCha20-Poly1305 | keep | ChaCha20-Poly1305 (RFC 8439) is a constant-time pure-Rust primitive that avoids OpenSSL; correct for sealing sessions and secret-ballot rows | Carry seal/open forward; upgrade to XChaCha20-Poly1305 or per-record KDF-derived keys to remove the 96-bit random-nonce ceiling |
 | Asymmetric (age) | age (GPG legacy) | keep | Small, open, maintained pure-Rust format for ops secrets; orthogonal to the atproto data plane | Keep age for out-of-band operator secrets only; not for per-record ballot/session encryption |
 | Key Derivation | Argon2 | keep-and-extend (nuanced) | Argon2id is the right password KDF, but the rewrite has no password store (identity is atproto DID + OAuth). Its relevance, not its longevity, is the issue | Keep Argon2id in the table for future admin/recovery-code hashing; use HKDF-SHA256 with per-purpose `info` labels to derive keys from STATE_SECRET |
-| Meta Database (crypto-material store) | SurrealDB (BSL) vs Postgres+sqlx | change | Same conflict as the data cluster; the crown-jewel encrypted private state belongs on the pure-Rust, correctness-verified core, not a BSL engine | Store sealed sessions and encrypted ballots in the redb core as opaque bytes (per crux 1), so the engine choice is decoupled from the crypto |
+| Meta Database (crypto-material store) | SurrealDB (BSL) vs Postgres+sqlx | change | The crown-jewel encrypted private state belongs on the correctness-verified store, decoupled from the crypto | Store sealed sessions and encrypted ballots in the Turso ballot core as opaque bytes (per crux 1), so the engine choice is decoupled from the crypto |
 
 ### Cluster: Schema language + data notation
 
@@ -75,62 +75,61 @@ verification confirmed a verdict, that is stated plainly.
 | Firehose / Jetstream consumer | not in README | keep-and-extend | Rust Jetstream ecosystem (microcosm-rs, atproto-jetstream) is production-proven at this scale; avoids raw CBOR subscribeRepos + MST | Consume Jetstream filtered to your collections/DIDs; persist cursor; refetch-on-reconnect + PDS backfill-on-gap; keep authoritative state out of the firehose |
 | XRPC / axum + WebSocket | not in README; interim axum 0.8 | keep-and-extend | axum is already in the tree (zero migration); XRPC is JSON/CBOR over HTTP; one axum WS replaces the 9-sockets-per-page problem | One `/ws` per client multiplexing all live channels, driven by the DB change-feed; run as a persistent process |
 
-## Crux decision 1: the data DB (fully Rust-native, no Postgres)
+## Crux decision 1: the AppView datastore (Turso Database)
 
-Recommended decision: redb 4.1 (pure Rust, MIT/Apache-2.0) is the ONLY datastore, for BOTH the authoritative
-core and the rebuildable firehose view, with tantivy (pure Rust) for full-text search. Postgres is dropped
-entirely. Turso/Limbo (the pure-Rust SQLite rewrite) is an optional SQL convenience layer for the view only,
-acceptable now precisely because the view is rebuildable. SurrealDB (BSL) and TiKV (Go Placement Driver) stay
-out.
+Recommended decision: Turso Database is the datastore for the whole stack. It is the from-scratch,
+MIT-licensed, mostly-pure-Rust rewrite of SQLite: embeddable in-process (the `turso` crate), also a server,
+WASM-capable, SQLite-compatible at the language AND on-disk-file-format level, with an in-tree experimental
+PostgreSQL wire-protocol + dialect frontend. This supersedes the earlier redb-everywhere and SQLite-everywhere
+picks; those remain named fallbacks below.
 
-This supersedes both prior picks ("Postgres for everything", then "redb core plus Postgres view"). Both
-under-weighted the owner's first-class Rust-native criterion by keeping a C engine (Postgres) for the view.
-The view being rebuildable removes the only objection (query correctness/ergonomics) that justified Postgres,
-so nothing is left that requires linking C.
+### Why Turso is the future-proof pick
 
-Why redb serves the view too. The view materializes atproto records (JSON keyed by did/collection/rkey), the
-node hierarchy (parent to children), and the roster/roles, for ONE small civic org (thousands of nodes,
-hundreds to low-thousands of members). Those are ordered-key lookups, prefix range scans (a node's children),
-and a short recursive walk (ancestors and the membership hierarchy), which is exactly what an ordered-KV
-B-tree store does natively. The SQL conveniences Postgres offered (recursive CTE, JSONB operators) are
-ergonomics, not necessities at this scale: the recursive hierarchy is a small Rust graph walk, and the
-handful of feed/filter views are secondary indexes maintained on write in redb. Full-text search, the one
-thing a plain KV does poorly, goes to tantivy (pure Rust), not a SQL LIKE.
+It is the only candidate that satisfies every constraint this decision accumulated:
 
-The honest tradeoff. You trade Postgres's query engine for hand-written Rust query and index code over redb.
-That is more application code and a few hand-maintained secondary indexes instead of free SQL indexes, and it
-is real work, but bounded and testable because the dataset is small and the query set is fixed and known. In
-exchange the entire datastore is pure Rust with zero C linked (a musl/EU server links no database C at all),
-which is the stated priority. Because the view is rebuildable from the firehose, any view bug or corruption
-is recoverable by replay, so the correctness bar there is low, which is exactly why a C engine was never
-actually required for it.
+- Rust + corporate-backed (Turso Inc.) + MIT. This answers BOTH the Rust-native hard line AND the
+  "not a single-maintainer hobby project" concern that ruled out redb, without SurrealDB's BSL license or its
+  auth-bypass CVE surface.
+- SQL, so the view needs no hand-written query layer (recursive queries, JSON, secondary indexes come from
+  the engine). SQLite dialect today; an experimental Postgres wire + dialect frontend is merging in under an
+  "LLVM of databases" architecture (one dialect-agnostic core of storage/B-trees/WAL/MVCC, pluggable
+  SQLite/Postgres frontends).
+- SQLite file-format compatible (same on-disk B-tree and page format). The on-disk format is therefore stable
+  and portable, SQLite tooling reads it, and it provides a zero-friction migration bridge to and from plain
+  SQLite.
+- Embeddable in-process AND a server AND WASM. One engine can back the axum AppView and, optionally, a
+  firehose-fed query cache inside the Dioxus WASM client, so client and server share one schema and one SQL
+  dialect. (atproto remains the sync layer; the WASM engine is a local cache, not a competing replicator.)
+- Correctness engineering: built with Antithesis deterministic-simulation testing targeting SQLite-or-better
+  reliability (the FoundationDB / TigerBeetle approach), not merely field-aging.
 
-The core is unchanged. redb with two-phase-commit durability (redb's own design.md recommends 2PC for
-adversarial input, and a public election is adversarial), on power-loss-protected disk, ballots stored as
-opaque encrypted bytes, one-vote-per-member as a single unique-key insert, the tally as a fold. No SQL,
-joins, or recursion are needed there either.
+Status (mid-2026): v0.x, in production at some organizations, 1.0 estimated roughly 6 months out. Because the
+rewrite is future-dated, Turso is likely at or past 1.0 by cutover.
 
-Turso/Limbo, if you want SQL for the view. If hand-written redb queries for the view get painful, Turso/Limbo
-(the pure-Rust SQLite rewrite) is acceptable for the VIEW now, not merely "tracked", precisely because the
-view is rebuildable: Limbo's MVCC and durability being officially experimental does not matter when a crash
-just triggers a firehose replay. Do NOT put the tally on Limbo (that needs the bulletproof durability only
-redb-2PC gives today). So the fully-Rust menu is: redb-only (most ethos-pure, more query code) or redb-core
-plus Limbo-view (SQL ergonomics for the disposable half). Either way there is no Postgres.
+### The view
 
-Ranking (Rust-preference first):
+On Turso from day one. The view is firehose-rebuildable, so any residual pre-1.0 durability risk is repaired
+by a replay; the risk there is effectively zero.
 
-1. redb, for both halves. Pure Rust, zero C, election-grade durability for the core (2PC with checksum-
-   validated crash recovery), and adequate for the small rebuildable view via hand-written indexes plus
-   tantivy for search. Its permissive MIT/Apache-2.0 license makes bus-factor-1 a fork-if-abandoned risk, not
-   a vendor-death risk.
-2. Turso/Limbo, optional SQL layer for the VIEW only. Pure-Rust SQLite; experimental durability is fine for
-   rebuildable data, disqualifying for the tally.
-3. tantivy, pure-Rust full-text search for the view, replacing the one thing a KV does poorly.
-4. SurrealDB. Rust and multi-model, but BSL 1.1 plus single-vendor VC (the Feb-2026 23M USD AI-memory pivot)
-   fails the ethos, and its durability/isolation are unverified. Out.
-5. Postgres. Dropped. Gold-standard ACID and SQL, but it is C, and the only workload that could have
-   justified it (the rebuildable view) does not need a battle-tested engine, so the Rust-native criterion
-   wins outright.
+### The ballot core, and the one caveat
+
+The core (secret ballots, one-vote dedup, tally, roster, eligibility) is the unrecoverable, adversarial path,
+so it wants durability that is battle-proven at ship time. Two things make this safe:
+
+1. At cutover, confirm Turso is 1.0 with Antithesis coverage of the crash and recovery paths. If it is not yet
+   there, the SQLite file-format compatibility means the core can run on PLAIN SQLite and migrate to Turso
+   losslessly later, with no rework. (redb + replication remains a pure-Rust fallback if SQLite's C engine is
+   unacceptable even as a bridge.)
+2. The decisive election-integrity control is mandatory off-node replication of the append-only ballot log,
+   which sits on top of whatever engine backs the core. This does not exist in the backend yet and is the real
+   work; the engine choice is secondary to it.
+
+### What this supersedes
+
+redb-everywhere (pure Rust, but a single-maintainer engine and a hand-written view query layer) and
+SQLite-everywhere (proven but C, and no client/WASM story) were the interim answers while Turso matured. The
+trajectory (SQLite + Postgres dialects, WASM, Antithesis testing, SQLite file format, 1.0 near, corporate
+backing) makes Turso the target and both of those the fallbacks.
 
 ## Crux decision 2: atproto signing curve (Ed25519 vs P-256 / k256)
 
@@ -222,9 +221,10 @@ config validation.
 
 ## Change these (shortlist)
 
-- SurrealDB, TiKV, and Postgres all out. Fully Rust datastore: redb (pure Rust, 2PC) for both the
-  ballot/tally/roster core and the rebuildable firehose view (hand-written indexes + tantivy for search);
-  Turso/Limbo an optional pure-Rust SQL layer for the view.
+- Datastore is Turso Database (MIT, mostly-pure-Rust, SQLite+Postgres-compatible, embeddable + server + WASM,
+  SQLite file-format, Antithesis-tested): one engine for the ballot core + the rebuildable view + an optional
+  WASM client cache. Plain SQLite (a lossless file-format bridge) and redb+replication are named fallbacks for
+  the core until Turso is 1.0-proven; mandatory off-node ballot-log replication is the real integrity control.
 - Ed25519 out as the atproto signing standard; P-256 in for minting/signing, verify both p256 and k256, add
   an atproto-exception README row.
 - GraphQL/cynic out; XRPC + typed axum handlers in.

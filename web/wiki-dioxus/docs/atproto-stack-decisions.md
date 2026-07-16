@@ -6,54 +6,45 @@ artifact it is grounded in, and a one-line rationale tied to the future-proofing
 
 ## Database engine
 
-Decision: FULLY Rust-native datastore, no Postgres. Use redb 4.1.x (pure Rust, dual MIT/Apache-2.0) for BOTH
-the authoritative ballot/tally/roster core AND the rebuildable firehose-materialized view, with tantivy (pure
-Rust) for full-text search. Turso/Limbo (the pure-Rust SQLite rewrite) is an OPTIONAL SQL convenience layer
-for the view only, acceptable now because the view is rebuildable. This supersedes both the "Postgres for
-everything" and the "redb core + Postgres view" picks: the view being rebuildable removes the only reason
-(query ergonomics) a C engine was ever considered, so nothing links C.
+Decision: Turso Database is the datastore. It is the MIT-licensed, mostly-pure-Rust rewrite of SQLite,
+embeddable in-process (the `turso` crate), also a server, WASM-capable, SQLite-compatible at the language and
+on-disk-file-format level, with an in-tree experimental PostgreSQL wire-protocol + dialect frontend (the
+"LLVM of databases" architecture). One engine backs the ballot core, the rebuildable firehose view, and an
+optional firehose-fed query cache in the Dioxus WASM client.
 
-- Adoption (the core, redb): depend on `redb = "4.1"`. Store the authoritative state in a single redb file with
-  a few typed tables. Ballots go in a table keyed by `(poll_id, ballot_token)` whose key uniqueness IS the
-  one-vote invariant: a colliding insert is the rejected duplicate, so no SQL `UNIQUE` is needed. The ballot
-  value is opaque (the engine never sees plaintext). The official tally is a pure fold over the poll's ballot
-  range, not a SQL aggregation. Roster, roles, and per-poll eligibility/weight live in their own keyed tables.
-  The core never joins, recurses, or runs SQL. Run every write transaction with two-phase-commit durability,
-  NOT redb's 1PC+C default: redb's own `design.md` recommends 2PC for adversarial/malicious input, and a public
-  election is exactly that threat model; the cost is one extra fsync per commit, negligible at this member count.
-- Adoption (the view, also redb + tantivy): materialize the firehose into redb tables keyed by
-  `(did, collection, rkey)`; the node hierarchy is a `parent_id`-keyed table (children via a prefix range scan,
-  ancestors/membership via a short recursive walk in Rust); feed/filter views are secondary redb tables
-  maintained on write. Full-text search, the one thing a KV does poorly, goes to `tantivy` (pure Rust), not SQL
-  LIKE. The view is small (one civic org, thousands of nodes) so hand-written key/range queries are fast and
-  bounded. If SQL ergonomics for the view ever get painful, add Turso/Limbo (pure-Rust SQLite) for the view
-  ONLY; its officially-experimental durability is fine there because a crash just triggers a firehose replay,
-  and it is disqualifying only for the tally, which stays on redb-2PC.
-- Extension (durability and operations, load-bearing): run redb with `Durability::Immediate` plus 2PC on the
-  ballot core; pin the exact redb version and vendor the source; add a per-commit crash-injection test in CI
-  (mirror redb's own fuzzer, which diffs a recovered DB against a `BTreeMap` reference model, for the ballot
-  table); deploy on an enterprise SSD with power-loss protection (or with the volatile write cache disabled),
-  because fsync durability is only as strong as the disk. One engine means one backup regime; keep the core and
-  the view in separate redb files (or separate tables) so a view rebuild never touches ballots, and keep a
-  documented copy-on-quiesce backup + a tested restore drill for the core.
-- Rationale: the authoritative core needs durable, serializable, all-or-nothing commits on a single node and
-  nothing else, and redb delivers exactly that in pure Rust (COW B+trees, serializable single-writer MVCC,
-  fsync-by-default, checksum-validated crash recovery, a stable on-disk format, empirical crash fuzzing) with a
-  permissive MIT/Apache-2.0 license that makes bus-factor-1 a fork-if-abandoned risk, not a vendor-death risk.
-  The view is recomputable from the firehose and small, so its query needs are met by ordered-KV scans plus a
-  Rust graph walk plus tantivy, and paying a C dependency to buy SQL sugar on disposable data would violate the
-  Rust-native priority for no correctness gain.
+- Chosen because it uniquely satisfies the accumulated constraints: Rust + corporate-backed (answers the
+  "not a single-maintainer hobby project" concern that ruled out redb) + SQL (no hand-written view query
+  layer) + open license (MIT, not SurrealDB's BSL, no auth-bypass CVE surface) + embeddable AND WASM client +
+  a stable, portable SQLite on-disk format. Built with Antithesis deterministic-simulation testing targeting
+  SQLite-or-better reliability.
+- The view: on Turso from day one. It is firehose-rebuildable, so any residual pre-1.0 durability risk is
+  repaired by a replay. The node hierarchy is a recursive query (or a maintained closure table); atproto
+  records live in JSON columns; feeds/filters are ordinary indexed SELECTs. Full-text can use Turso's native
+  FTS once stable, or a separate tantivy index in the interim.
+- The ballot core: on Turso once it is 1.0 with proven crash-recovery (Antithesis coverage of the crash/
+  recovery paths). Until then, the SQLite file-format compatibility lets the core run on plain SQLite and
+  migrate to Turso losslessly, with no rework (redb + replication remains a pure-Rust fallback if a C engine
+  is unacceptable even as a bridge). One-vote-per-member is a UNIQUE-constrained insert, the ballot is an
+  opaque encrypted blob, the tally is an aggregation; a poll's dedup marker and ballot are written in one
+  transaction.
+- Load-bearing integrity control (engine-independent): mandatory off-node replication of the append-only
+  ballot log, which does not exist in the backend yet and is the real work. Run the core with SQLite/Turso
+  hardened durability (WAL + synchronous FULL + fullfsync, verified via PRAGMA readback) on power-loss-
+  protected disk.
+- Rationale: Turso is the one engine that is Rust, corporate-backed, SQL, open-licensed, and client+server
+  WASM-capable, on an ambitious and well-tested trajectory; for a future-dated rewrite it is likely at 1.0 by
+  cutover, and its SQLite file-format compatibility makes both the interim bridge and any future exit cheap.
 
 ## Realtime and the firehose consumer
 
 Decision: consume Jetstream (JSON over WebSocket, filtered to `app.radikal.*` collections and member DIDs)
 as the change-feed; push local authoritative deltas over one axum WebSocket fed by an in-process broadcast
-channel (`tokio::sync::broadcast`), since the AppView is a single persistent process holding the redb core,
-the redb view + tantivy index, the firehose connection, and the WebSocket server. No DB LISTEN/NOTIFY is required.
+channel (`tokio::sync::broadcast`), since the AppView is a single persistent process holding the Turso ballot core,
+the Turso view + tantivy index, the firehose connection, and the WebSocket server. No DB LISTEN/NOTIFY is required.
 
 - Adoption: use `microcosm-rs`/`atproto-jetstream` for the Jetstream client with cursor handling and
-  auto-reconnect; materialize records into the redb view (and the tantivy index); broadcast authoritative
-  deltas (poll open/close, projector focus, roster changes) from the redb write path directly onto the
+  auto-reconnect; materialize records into the Turso view (and the tantivy index); broadcast authoritative
+  deltas (poll open/close, projector focus, roster changes) from the Turso write path directly onto the
   in-process channel.
 - Extension: persist the Jetstream cursor and implement refetch-on-reconnect plus PDS backfill-on-gap
   (Jetstream has no missed-event backfill); consider self-hosting a Jetstream/tap instance for sovereignty.
@@ -177,7 +168,7 @@ not by server-side sealing alone; these AEAD primitives cover the session blob a
 
 - Adoption: carry the existing `seal()`/`open()` (ChaCha20-Poly1305, `chacha20poly1305` v0.10) forward for
   the at-rest `atproto_session` blob and any server-held key material; the `atproto_session` blob lives ONLY
-  in the redb core, never as a public atproto record.
+  in the Turso ballot core, never as a public atproto record.
 - Extension: upgrade to XChaCha20-Poly1305 (24-byte nonce) or per-record KDF-derived keys to remove the
   96-bit random-nonce birthday ceiling; replace the bare `SHA-256(secret)` key derivation with HKDF-SHA256
   (the `hkdf` v0.12 crate, already used on the RFC 8291 push path) using per-purpose `info` labels for domain
@@ -194,7 +185,7 @@ delegation rules (proxy/weighted voting is IN, reversing the earlier "dropped" n
 auditable tallies. Scheme chosen (owner): blind-signature eligibility tokens + a public bulletin board of
 atproto records.
 
-- Eligibility + delegation (org-authoritative, redb core): the org maintains a per-poll eligibility roster
+- Eligibility + delegation (org-authoritative, Turso ballot core): the org maintains a per-poll eligibility roster
   with a weight per eligible voter; a delegation is a signed assignment that moves a voter's weight to a
   delegate, resolved into the weight column BEFORE a poll opens. This is authoritative state, so it lives in
   redb, never as a public record. Resolving delegation to weights server-side before token issuance is how the
