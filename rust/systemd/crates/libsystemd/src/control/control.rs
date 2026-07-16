@@ -5997,13 +5997,13 @@ pub fn execute_command(
                 return Ok(serde_json::json!(null));
             }
 
-            // Verify the unit exists.
-            {
-                let ri = run_info.read_poisoned();
-                let units = find_units_with_name(&unit_name, &ri.unit_table);
-                if units.is_empty() {
-                    return Err(format!("Unit {unit_name} not found."));
-                }
+            // Verify the unit exists, loading it from disk on demand — like
+            // upstream systemd, which loads the unit before applying/reverting
+            // properties. A unit file may be freshly written to disk but not
+            // yet in the in-memory table (no intervening daemon-reload), so a
+            // table-only check would wrongly report it missing.
+            if let Err(e) = find_or_load_unit(&unit_name, &run_info) {
+                return Err(format!("Unit {unit_name} not found: {e}"));
             }
 
             // Handle Markers property specially (transient, not persisted)
@@ -6299,13 +6299,13 @@ pub fn execute_command(
             // 4. Runtime override: /run/systemd/system/<unit>
             let mut removed = Vec::new();
 
-            // Verify the unit exists.
-            {
-                let ri = run_info.read_poisoned();
-                let units = find_units_with_name(&unit_name, &ri.unit_table);
-                if units.is_empty() {
-                    return Err(format!("Unit {unit_name} not found."));
-                }
+            // Verify the unit exists, loading it from disk on demand — like
+            // upstream systemd, which loads the unit before applying/reverting
+            // properties. A unit file may be freshly written to disk but not
+            // yet in the in-memory table (no intervening daemon-reload), so a
+            // table-only check would wrongly report it missing.
+            if let Err(e) = find_or_load_unit(&unit_name, &run_info) {
+                return Err(format!("Unit {unit_name} not found: {e}"));
             }
 
             // Check if a vendor-provided unit file exists (in /usr/lib or /lib).
