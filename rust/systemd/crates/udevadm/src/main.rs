@@ -79,7 +79,12 @@ use clap::{Parser, Subcommand};
 )]
 struct Cli {
     /// Enable debug output
-    #[arg(long, short = 'd', global = true)]
+    // No `short = 'd'`: as a global flag it would collide with `info`'s
+    // `-d/--device-id-of-file`, and clap's builder debug_assert panics on the
+    // duplicate short, aborting every `udevadm info` invocation. Upstream
+    // udevadm's global option is `--debug` (long only); `-d` belongs to
+    // `info --device-id-of-file`.
+    #[arg(long, global = true)]
     debug: bool,
 
     /// Print version and exit (subcommands accept this too)
