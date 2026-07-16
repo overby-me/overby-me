@@ -104,7 +104,7 @@ in
       # the stage-2 manager — the role it is designed for, and the setup these
       # integration tests exercise. Re-enabling systemd-in-initrd is tracked as
       # future work once rust-systemd grows an initrd mode (see PLAN.md).
-      boot.initrd.systemd.enable = lib.mkIf (!useUpstreamSystemd) false;
+      boot.initrd.systemd.enable = lib.mkIf (!useUpstreamSystemd) true;
 
       # Use rust-systemd as the systemd package (or upstream C systemd for baseline)
       systemd.package =

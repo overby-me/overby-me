@@ -247,11 +247,145 @@ pub fn run_service_manager() {
         info!("daemon-reexec: skipped full activation, statuses restored from state file");
     } else {
         kmsg(&format!("activating target {}", target_id.name));
+        // Initrd diagnostic: 10s into the signal loop, dump the state of the
+        // units on the switch-root critical path so a hung boot reveals exactly
+        // what sysroot.mount is waiting on. Gated on in_initrd; remove before
+        // final. Clone run_info here since activate_needed_units consumes it.
+        if in_initrd {
+            spawn_initrd_state_dump(run_info.clone());
+        }
         units::activate_needed_units(target_id, run_info);
     }
 
     kmsg("initial activation returned; entering signal loop");
     handle.join().unwrap();
+}
+
+fn spawn_initrd_state_dump(ri_dbg: runtime_info::ArcMutRuntimeInfo) {
+    let ri_dbg2 = ri_dbg.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(10));
+        let ri = ri_dbg.read_poisoned();
+        kmsg("--- initrd unit state dump (t+10s) ---");
+        let mut entries: Vec<(&str, String)> = Vec::new();
+        for (id, unit) in ri.unit_table.iter() {
+            let n = id.name.as_str();
+            let interesting = n.contains("sysroot")
+                || n.contains("initrd-root")
+                || n.contains("initrd-fs")
+                || n.contains("initrd-parse")
+                || n.contains("initrd-cleanup")
+                || n.contains("initrd-switch")
+                || n.contains("fsck")
+                || n.ends_with(".device");
+            let st = format!("{}", *unit.common.status.read_poisoned());
+            let unsettled = st == "starting" || st == "stopping" || st == "restarting";
+            if interesting || unsettled {
+                entries.push((n, st));
+            }
+        }
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        for (n, st) in entries {
+            kmsg(&format!("  {n} = {st}"));
+        }
+        // Dump exact (Debug) status + deps of fsck and sysroot.mount to see
+        // where the chain is stuck: fsck completed but sysroot.mount not
+        // re-attempted, vs fsck still activating.
+        for (id, unit) in ri.unit_table.iter() {
+            if id.name.contains("fsck@") || id.name == "sysroot.mount" {
+                let d = &unit.common.dependencies;
+                let fmt = |v: &[crate::units::UnitId]| {
+                    v.iter()
+                        .map(|u| format!("{}<{:?}>", u.name, u.kind))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                let st = unit.common.status.read_poisoned();
+                kmsg(&format!("  {} status={:?}", id.name, *st));
+                kmsg(&format!("  {} after=[{}]", id.name, fmt(&d.after)));
+                kmsg(&format!("  {} requires=[{}]", id.name, fmt(&d.requires)));
+                kmsg(&format!("  {} binds_to=[{}]", id.name, fmt(&d.binds_to)));
+            }
+        }
+        // Explicit status of the switch-root chain units (they may be loaded
+        // on demand / stopped by the isolate, so may not match the filter above).
+        for name in [
+            "initrd-cleanup.service",
+            "initrd-switch-root.target",
+            "initrd-switch-root.service",
+        ] {
+            match ri.unit_table.values().find(|u| u.id.name == name) {
+                Some(u) => {
+                    kmsg(&format!(
+                        "  {name} status={:?}",
+                        *u.common.status.read_poisoned()
+                    ));
+                }
+                None => kmsg(&format!("  {name} = NOT IN TABLE")),
+            }
+        }
+        drop(ri);
+        // Is the control socket up and is journald still running (the isolate
+        // may have torn down what `systemctl --no-block switch-root` needs)?
+        let sock_probe = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(
+                "echo '[/run/systemd]'; ls -la /run/systemd/ 2>&1 | head; \
+                 for p in /proc/[0-9]*/comm; do c=$(cat $p 2>/dev/null); case $c in *journal*|systemd-udevd) echo \"proc: $c\";; esac; done",
+            )
+            .output();
+        if let Ok(o) = sock_probe {
+            for line in String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .chain(String::from_utf8_lossy(&o.stderr).lines())
+            {
+                if !line.trim().is_empty() {
+                    kmsg(&format!("  | {line}"));
+                }
+            }
+        }
+        // Probe the /nix/store overlay setup: does the rw-store have the
+        // upper/work dirs (rw-sysroot-nix-store.service's mkdir), and is that
+        // mkdir process still alive (i.e. the oneshot never completed)?
+        let probe = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(
+                "echo '[.rw-store]'; ls -la /sysroot/nix/.rw-store/ 2>&1; \
+                 echo '[upper]'; ls -la /sysroot/nix/.rw-store/upper 2>&1; \
+                 for p in /proc/[0-9]*/comm; do c=$(cat $p 2>/dev/null); case $c in mkdir) d=$(dirname $p); echo \"mkdir-alive $d cmd=$(tr '\\0' ' ' < $d/cmdline 2>/dev/null)\";; esac; done",
+            )
+            .output();
+        if let Ok(o) = probe {
+            for line in String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .chain(String::from_utf8_lossy(&o.stderr).lines())
+            {
+                if !line.trim().is_empty() {
+                    kmsg(&format!("  | {line}"));
+                }
+            }
+        }
+        kmsg("--- end unit state dump ---");
+    });
+
+    // Early snapshot: 2s in, before udev has created the by-label symlink, log
+    // whether fsck already ran and what state its backing .device unit is in.
+    // Distinguishes "fsck started because its device dep is missing/misclassified"
+    // from "the device unit was marked Started prematurely".
+    let ri_early = ri_dbg2;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let ri = ri_early.read_poisoned();
+        kmsg("--- initrd early snapshot (t+2s) ---");
+        for (id, unit) in ri.unit_table.iter() {
+            let n = id.name.as_str();
+            if n.contains("fsck@") || (n.contains("by\\x2dlabel-nixos") && n.ends_with(".device")) {
+                let st = format!("{}", *unit.common.status.read_poisoned());
+                kmsg(&format!("  [t2] {n} = {st}"));
+            }
+        }
+        kmsg("--- end early snapshot ---");
+    });
 }
 
 fn find_shell_path() -> Option<std::path::PathBuf> {

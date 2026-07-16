@@ -406,16 +406,36 @@ pub fn switch_root(new_root: &str, init: Option<&str>) -> Result<(), String> {
         return Err(format!("switch-root: {new_root} is not a directory"));
     }
 
-    // Resolve the init to exec in the new root (same candidate list systemd
-    // probes when no init is given).
-    let init = init.map(String::from).unwrap_or_else(|| {
-        for cand in ["/sbin/init", "/etc/init", "/bin/init", "/bin/sh"] {
-            if new_root_path.join(cand.trim_start_matches('/')).exists() {
-                return cand.to_string();
+    // Resolve the init to exec in the new root. An empty string counts as
+    // "unset" (the initrd-switch-root.service ExecStart passes no init, so the
+    // client may forward an empty arg). When no init is given, honor the
+    // kernel cmdline's init= first (this is how the real system's init is
+    // selected on NixOS, where the stage-2 init is a /nix/store/<toplevel>/init
+    // path and /sbin/init does not exist until stage-2 activation runs), then
+    // fall back to the standard candidate list systemd probes.
+    let init = init
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| {
+            if let Some(cmdline_init) = read_cmdline_init() {
+                if new_root_path
+                    .join(cmdline_init.trim_start_matches('/'))
+                    .exists()
+                {
+                    return cmdline_init;
+                }
+                warn!(
+                    "switch-root: cmdline init={cmdline_init} not found under {new_root}, \
+                     falling back to standard candidates"
+                );
             }
-        }
-        "/sbin/init".to_string()
-    });
+            for cand in ["/sbin/init", "/etc/init", "/bin/init", "/bin/sh"] {
+                if new_root_path.join(cand.trim_start_matches('/')).exists() {
+                    return cand.to_string();
+                }
+            }
+            "/sbin/init".to_string()
+        });
 
     // Move the API filesystems into the new root so they survive the switch.
     for m in ["/dev", "/proc", "/sys", "/run"] {
@@ -453,7 +473,26 @@ pub fn switch_root(new_root: &str, init: Option<&str>) -> Result<(), String> {
         .filter_map(|(k, v)| std::ffi::CString::new(format!("{k}={v}")).ok())
         .collect();
     let err = nix::unistd::execve(&c_path, &c_argv, &c_envp);
+    // execve only returns on failure. Surface it on the kmsg console too (the
+    // caller runs us on a --no-block thread whose Err would otherwise only reach
+    // the journal), so a broken switch-root is diagnosable from the boot log.
+    crate::entrypoints::kmsg(&format!("switch-root: execve {init} failed: {err:?}"));
     Err(format!("switch-root: execve {init} failed: {err:?}"))
+}
+
+/// Parse `init=` from the kernel command line, returning the requested init
+/// path if present. This mirrors how systemd selects the real system's init
+/// when switching root without an explicit init argument.
+fn read_cmdline_init() -> Option<String> {
+    let cmdline = std::fs::read_to_string("/proc/cmdline").ok()?;
+    for tok in cmdline.split_whitespace() {
+        if let Some(v) = tok.strip_prefix("init=")
+            && !v.is_empty()
+        {
+            return Some(v.to_string());
+        }
+    }
+    None
 }
 
 /// Serialize the current running-service state to a file.
