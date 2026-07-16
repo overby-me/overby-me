@@ -3801,6 +3801,192 @@ fn ethtool_driver(ifname: &str) -> Option<String> {
     }
 }
 
+/// Encode a filesystem label the way udev/libblkid does for the `*_ENC`
+/// properties: printable ASCII outside the safe set becomes `\xNN`. The safe
+/// set matches libudev's `encode_devnode_name` allow-list so by-label symlink
+/// names come out identical to upstream.
+fn udev_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        let safe = b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'#' | b'+' | b'-' | b'.' | b':' | b'=' | b'@' | b'_' | b'/'
+            );
+        if safe {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("\\x{b:02x}"));
+        }
+    }
+    out
+}
+
+/// Format a 16-byte binary UUID as the canonical 8-4-4-4-12 hex string.
+fn format_uuid(u: &[u8]) -> String {
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        u[0],
+        u[1],
+        u[2],
+        u[3],
+        u[4],
+        u[5],
+        u[6],
+        u[7],
+        u[8],
+        u[9],
+        u[10],
+        u[11],
+        u[12],
+        u[13],
+        u[14],
+        u[15]
+    )
+}
+
+/// Push ID_FS_LABEL / ID_FS_LABEL_ENC from a NUL/space-terminated label field.
+fn push_fs_label(out: &mut Vec<(String, String)>, label: &[u8]) {
+    let end = label.iter().position(|&b| b == 0).unwrap_or(label.len());
+    let mut label = &label[..end];
+    while label.last() == Some(&b' ') {
+        label = &label[..label.len() - 1];
+    }
+    if !label.is_empty() {
+        out.push((
+            "ID_FS_LABEL".to_string(),
+            String::from_utf8_lossy(label).into_owned(),
+        ));
+        out.push(("ID_FS_LABEL_ENC".to_string(), udev_encode(label)));
+    }
+}
+
+/// Push ID_FS_UUID / ID_FS_UUID_ENC from a 16-byte binary UUID (skipped if all-zero).
+fn push_fs_uuid(out: &mut Vec<(String, String)>, uuid: &[u8]) {
+    if uuid.len() == 16 && uuid.iter().any(|&b| b != 0) {
+        let s = format_uuid(uuid);
+        // UUID characters are all in the safe set, so ENC == plain.
+        out.push(("ID_FS_UUID".to_string(), s.clone()));
+        out.push(("ID_FS_UUID_ENC".to_string(), s));
+    }
+}
+
+fn read_at(f: &mut std::fs::File, off: u64, buf: &mut [u8]) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    f.seek(SeekFrom::Start(off)).is_ok() && f.read_exact(buf).is_ok()
+}
+
+/// Probe a block device for filesystem metadata natively, returning the udev
+/// `ID_FS_*` properties libblkid would (TYPE, USAGE, LABEL[_ENC], UUID[_ENC]).
+///
+/// rust-systemd runs its own udevd, and NixOS's systemd-initrd ships no
+/// standalone `blkid` binary (upstream udev links libblkid), so the previous
+/// `IMPORT{builtin}="blkid"` implementation — which shelled out to `blkid` —
+/// silently produced nothing in the initrd. Without ID_FS_LABEL_ENC the
+/// `disk/by-label/*` symlink is never created, so the root device can't be
+/// found and the boot hangs. Probing the superblocks ourselves fixes that
+/// without depending on an external tool. Covers the common filesystems; falls
+/// through (returns empty) for anything unrecognised so the caller can still
+/// try a real `blkid` if one happens to be present.
+fn probe_filesystem(devnode: &std::path::Path) -> Vec<(String, String)> {
+    let mut f = match std::fs::File::open(devnode) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+
+    // ext2/3/4 — superblock at byte offset 1024, magic 0xEF53 at sb+0x38.
+    let mut sb = [0u8; 1024];
+    if read_at(&mut f, 1024, &mut sb) && sb[0x38] == 0x53 && sb[0x39] == 0xEF {
+        let compat = u32::from_le_bytes([sb[0x5c], sb[0x5d], sb[0x5e], sb[0x5f]]);
+        let incompat = u32::from_le_bytes([sb[0x60], sb[0x61], sb[0x62], sb[0x63]]);
+        let ro_compat = u32::from_le_bytes([sb[0x64], sb[0x65], sb[0x66], sb[0x67]]);
+        // ext4 if any 64bit/extent/flex_bg/… incompat or ro-compat feature is set.
+        let ext4 = incompat & (0x0040 | 0x0080 | 0x0100 | 0x0200 | 0x0400) != 0
+            || ro_compat & (0x0008 | 0x0010 | 0x0020 | 0x0040 | 0x0400) != 0;
+        let ext3 = compat & 0x0004 != 0; // HAS_JOURNAL
+        let fstype = if ext4 {
+            "ext4"
+        } else if ext3 {
+            "ext3"
+        } else {
+            "ext2"
+        };
+        out.push(("ID_FS_TYPE".to_string(), fstype.to_string()));
+        out.push(("ID_FS_USAGE".to_string(), "filesystem".to_string()));
+        push_fs_uuid(&mut out, &sb[0x68..0x78]);
+        push_fs_label(&mut out, &sb[0x78..0x88]);
+        return out;
+    }
+
+    // XFS — magic "XFSB" at offset 0; uuid at 32, label (12 bytes) at 108.
+    let mut xfs = [0u8; 128];
+    if read_at(&mut f, 0, &mut xfs) && &xfs[0..4] == b"XFSB" {
+        out.push(("ID_FS_TYPE".to_string(), "xfs".to_string()));
+        out.push(("ID_FS_USAGE".to_string(), "filesystem".to_string()));
+        push_fs_uuid(&mut out, &xfs[32..48]);
+        push_fs_label(&mut out, &xfs[108..120]);
+        return out;
+    }
+
+    // btrfs — superblock at 65536, magic "_BHRfS_M" at sb+0x40; fsid at sb+0x20,
+    // label (256 bytes) at sb+0x12b.
+    let mut btrfs = [0u8; 0x200];
+    if read_at(&mut f, 65536, &mut btrfs) && &btrfs[0x40..0x48] == b"_BHRfS_M" {
+        out.push(("ID_FS_TYPE".to_string(), "btrfs".to_string()));
+        out.push(("ID_FS_USAGE".to_string(), "filesystem".to_string()));
+        push_fs_uuid(&mut out, &btrfs[0x20..0x30]);
+        let mut label = [0u8; 256];
+        if read_at(&mut f, 65536 + 0x12b, &mut label) {
+            push_fs_label(&mut out, &label);
+        }
+        return out;
+    }
+
+    // swap — magic "SWAPSPACE2"/"SWAP-SPACE" at the end of the first page
+    // (offset 4086); uuid at 1036, label (16 bytes) at 1052.
+    let mut page = [0u8; 4096];
+    if read_at(&mut f, 0, &mut page)
+        && (&page[4086..4096] == b"SWAPSPACE2" || &page[4086..4096] == b"SWAP-SPACE")
+    {
+        out.push(("ID_FS_TYPE".to_string(), "swap".to_string()));
+        out.push(("ID_FS_USAGE".to_string(), "other".to_string()));
+        push_fs_uuid(&mut out, &page[1036..1052]);
+        push_fs_label(&mut out, &page[1052..1068]);
+        return out;
+    }
+
+    // FAT/vfat — boot signature 0x55AA at 510. FAT32 vs FAT12/16 differ in
+    // where the label / volume id / type string live.
+    if page[510] == 0x55 && page[511] == 0xAA {
+        // FAT32 has a zero "sectors per FAT (16-bit)" at offset 22.
+        let is_fat32 = page[22] == 0 && page[23] == 0;
+        let (label_off, vid_off, type_off) = if is_fat32 { (71, 67, 82) } else { (43, 39, 54) };
+        let type_ok = &page[type_off..type_off + 3] == b"FAT";
+        if type_ok {
+            out.push(("ID_FS_TYPE".to_string(), "vfat".to_string()));
+            out.push(("ID_FS_USAGE".to_string(), "filesystem".to_string()));
+            // Volume id → XXXX-XXXX serial.
+            let vid = u32::from_le_bytes([
+                page[vid_off],
+                page[vid_off + 1],
+                page[vid_off + 2],
+                page[vid_off + 3],
+            ]);
+            let serial = format!("{:04X}-{:04X}", (vid >> 16) & 0xffff, vid & 0xffff);
+            out.push(("ID_FS_UUID".to_string(), serial.clone()));
+            out.push(("ID_FS_UUID_ENC".to_string(), serial));
+            let label = &page[label_off..label_off + 11];
+            if label != b"NO NAME    " {
+                push_fs_label(&mut out, label);
+            }
+            return out;
+        }
+    }
+
+    out
+}
+
 /// Handle IMPORT{builtin} for common udev builtins.
 fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -3887,26 +4073,36 @@ fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
             }
         }
         "blkid" => {
-            // Identify filesystem/partition type
-            // Try to run the real blkid for accurate results
+            // Identify filesystem metadata (ID_FS_TYPE/LABEL/UUID/…). Probe the
+            // superblocks natively first, like libblkid — the initrd ships no
+            // standalone `blkid` binary, so shelling out silently produced
+            // nothing and the root's by-label symlink was never created. Only
+            // fall back to an external `blkid` for filesystems we don't probe.
             if let Some(devnode) = event.devnode() {
-                let output = Command::new("blkid")
-                    .arg("-p")
-                    .arg("-o")
-                    .arg("udev")
-                    .arg(&devnode)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::null())
-                    .output();
-                if let Ok(output) = output
-                    && output.status.success()
-                {
-                    for line in String::from_utf8_lossy(&output.stdout).lines() {
-                        if let Some(eq) = line.find('=') {
-                            let key = line[..eq].to_string();
-                            let val = line[eq + 1..].to_string();
-                            event.env.insert(key, val);
+                let props = probe_filesystem(&devnode);
+                if !props.is_empty() {
+                    for (key, val) in props {
+                        event.env.insert(key, val);
+                    }
+                } else {
+                    let output = Command::new("blkid")
+                        .arg("-p")
+                        .arg("-o")
+                        .arg("udev")
+                        .arg(&devnode)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::null())
+                        .output();
+                    if let Ok(output) = output
+                        && output.status.success()
+                    {
+                        for line in String::from_utf8_lossy(&output.stdout).lines() {
+                            if let Some(eq) = line.find('=') {
+                                let key = line[..eq].to_string();
+                                let val = line[eq + 1..].to_string();
+                                event.env.insert(key, val);
+                            }
                         }
                     }
                 }
@@ -6508,6 +6704,77 @@ pub fn run_daemon() {
 
 #[cfg(test)]
 mod tests {
+    // -----------------------------------------------------------------------
+    // Native filesystem probe tests (IMPORT{builtin}="blkid" replacement)
+    // -----------------------------------------------------------------------
+
+    fn probe_map(bytes: &[u8]) -> std::collections::HashMap<String, String> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!("udevd-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Unique per call so parallel tests don't clobber each other's image.
+        let path = dir.join(format!("img-{}", SEQ.fetch_add(1, Ordering::Relaxed)));
+        std::fs::write(&path, bytes).unwrap();
+        let out = super::probe_filesystem(&path).into_iter().collect();
+        let _ = std::fs::remove_file(&path);
+        out
+    }
+
+    #[test]
+    fn test_probe_ext4_label_and_uuid() {
+        // Craft a minimal ext4 superblock: magic 0xEF53 at 1024+0x38, the
+        // EXTENTS incompat feature so it's detected as ext4, a UUID and label.
+        let mut img = vec![0u8; 4096];
+        let sb = 1024;
+        img[sb + 0x38] = 0x53;
+        img[sb + 0x39] = 0xEF; // s_magic = 0xEF53
+        img[sb + 0x60] = 0x40; // s_feature_incompat: INCOMPAT_EXTENTS
+        let uuid = [
+            0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x12, 0x34, 0x12, 0x34, 0x12, 0x34, 0x56, 0x78,
+            0x9a, 0xbc,
+        ];
+        img[sb + 0x68..sb + 0x78].copy_from_slice(&uuid);
+        img[sb + 0x78..sb + 0x78 + 5].copy_from_slice(b"nixos");
+        let m = probe_map(&img);
+        assert_eq!(m.get("ID_FS_TYPE").map(String::as_str), Some("ext4"));
+        assert_eq!(m.get("ID_FS_USAGE").map(String::as_str), Some("filesystem"));
+        assert_eq!(m.get("ID_FS_LABEL").map(String::as_str), Some("nixos"));
+        assert_eq!(m.get("ID_FS_LABEL_ENC").map(String::as_str), Some("nixos"));
+        assert_eq!(
+            m.get("ID_FS_UUID").map(String::as_str),
+            Some("12345678-1234-1234-1234-123456789abc")
+        );
+        assert_eq!(
+            m.get("ID_FS_UUID_ENC").map(String::as_str),
+            Some("12345678-1234-1234-1234-123456789abc")
+        );
+    }
+
+    #[test]
+    fn test_probe_ext2_no_journal() {
+        let mut img = vec![0u8; 2048];
+        let sb = 1024;
+        img[sb + 0x38] = 0x53;
+        img[sb + 0x39] = 0xEF;
+        // no features → ext2
+        let m = probe_map(&img);
+        assert_eq!(m.get("ID_FS_TYPE").map(String::as_str), Some("ext2"));
+    }
+
+    #[test]
+    fn test_probe_unknown_is_empty() {
+        let img = vec![0u8; 4096];
+        assert!(probe_map(&img).is_empty());
+    }
+
+    #[test]
+    fn test_udev_encode_spaces() {
+        // A label with a space must be encoded like libblkid for the symlink.
+        assert_eq!(super::udev_encode(b"My Disk"), "My\\x20Disk");
+        assert_eq!(super::udev_encode(b"nixos"), "nixos");
+    }
+
     // -----------------------------------------------------------------------
     // Network interface renaming tests
     // -----------------------------------------------------------------------
