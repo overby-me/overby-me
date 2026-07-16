@@ -124,7 +124,7 @@
 | Project | Description |
 |-|-|
 | [Homepage 🐒➡️🔥](https://tangled.org/@overby.me/overby.me/tree/main/web/homepage) | Personal website and portfolio |
-| [Wiki 🐒➡️🔥🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki) | Political conference and discussion platform |
+| [Wiki 🐒➡️🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki-dioxus) | Political conference and discussion platform |
 
 #### Nix & Nickel
 
@@ -348,8 +348,9 @@
 |:-:|-|-|-|-|-|
 | ✅ | Text | [UTF-8 📖](https://en.wikipedia.org/wiki/UTF-8) | | 🆗 | [UTF-16 📖](https://en.wikipedia.org/wiki/UTF-16) |
 | ✅ | Object Notation | [JSON 📖](https://www.json.org) | [KDL](https://kdl.dev), [EON](https://github.com/emilk/eon) | 🆗 | |
-| ✅ | Binary Object Notation | [CBOR 📖](https://cbor.io) | | 🆗 | |
-| 🚧 | Schema Validation | [JSON Schema 📖](https://json-schema.org) | [Nickel](https://nickel-lang.org) | 🆗 | |
+| ✅ | Binary Object Notation | [CBOR 📖](https://cbor.io) | [DAG-CBOR / DRISL 🌀📖](https://ipld.io/specs/codecs/dag-cbor/spec/) | 🆗 | |
+| 🚧 | Content Addressing | [CID / Multihash 🌀📖](https://github.com/multiformats/cid) | | 🆗 | |
+| 🚧 | Schema Validation | [JSON Schema 📖](https://json-schema.org) | [Nickel](https://nickel-lang.org), [Lexicon 🌀📖](https://atproto.com/specs/lexicon) | 🆗 | |
 
 </details>
 
@@ -369,6 +370,8 @@
 | ✅ | Social Protocol | [AT Protocol 🌀📖](https://atproto.com) | | [Bridgy Fed](https://fed.brid.gy/) | [ActivityPub 📖](https://www.w3.org/TR/activitypub/) |
 | 🚧 | DNS Protocol | [DNS-over-HTTPS 📖](https://en.wikipedia.org/wiki/DNS_over_HTTPS) | [DNS-over-TLS 📖](https://en.wikipedia.org/wiki/DNS_over_TLS) | 🆗 | [DNS 📖](https://en.wikipedia.org/wiki/Domain_Name_System) |
 | 🚧 | Identity Protocol | [DID 📖](https://www.w3.org/TR/did-core/) | [ATProto DID 🌀](https://atproto.com/specs/did) | 🆗 | |
+| 🚧 | Firehose / Sync | [Jetstream 🌀](https://github.com/bluesky-social/jetstream) | | [atproto Sync 🌀📖](https://atproto.com/specs/sync) | |
+| 🚧 | RPC | [XRPC 🌀📖](https://atproto.com/specs/xrpc) | | 🆗 | |
 | ✅ | Email Protocol | [JMAP 📖](https://jmap.io) | | 🆗 | [IMAP 📖](https://en.wikipedia.org/wiki/Internet_Message_Access_Protocol), [POP3 📖](https://en.wikipedia.org/wiki/Post_Office_Protocol) |
 
 </details>
@@ -383,10 +386,12 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Symmetric Encryption | [AES-GCM 📖](https://en.wikipedia.org/wiki/Galois/Counter_Mode), [ChaCha20-Poly1305 📖](https://en.wikipedia.org/wiki/ChaCha20-Poly1305) | | 🆗 | |
+| ✅ | Symmetric Encryption | [AES-GCM 📖](https://en.wikipedia.org/wiki/Galois/Counter_Mode), [ChaCha20-Poly1305 📖](https://en.wikipedia.org/wiki/ChaCha20-Poly1305), [XChaCha20-Poly1305 📖](https://en.wikipedia.org/wiki/ChaCha20-Poly1305) | | 🆗 | |
 | ✅ | Asymmetric Encryption | [age 📖](https://age-encryption.org/v1) | | 🆗 | [GPG 📖](https://en.wikipedia.org/wiki/GNU_Privacy_Guard) |
-| ✅ | Key Derivation | [Argon2 📖](https://en.wikipedia.org/wiki/Argon2) | | 🆗 | |
-| ✅ | Signing | [Ed25519 📖](https://en.wikipedia.org/wiki/EdDSA#Ed25519) | | 🆗 | |
+| ✅ | Key Derivation | [Argon2 📖](https://en.wikipedia.org/wiki/Argon2), [HKDF 📖](https://en.wikipedia.org/wiki/HKDF) | | 🆗 | |
+| ✅ | Signing (general) | [Ed25519 📖](https://en.wikipedia.org/wiki/EdDSA#Ed25519) | | 🆗 | |
+| 🚧 | Signing (atproto) | [P-256 & secp256k1 🌀📖](https://atproto.com/specs/cryptography) | | 🆗 | |
+| 🚧 | Blind Signatures | [RFC 9474 (RSA) 📖](https://www.rfc-editor.org/rfc/rfc9474) | [blind-rsa-signatures 🦀](https://github.com/jedisct1/rust-blind-rsa-signatures) | 🆗 | |
 
 </details>
 
@@ -452,12 +457,14 @@
 | ✅ | TLS Protocol | [Rustls 🦀](https://github.com/rustls/rustls) | | 🆗 | [Openssl 💣](https://github.com/openssl/openssl) |
 | ✅ | HTTP Protocol | [Hyper 🦀](https://github.com/hyperium/hyper) | | 🆗 | [Nghttp2 💣](https://github.com/nghttp2/nghttp2), [Nghttp3 💣](https://github.com/ngtcp2/nghttp3) |
 | ✅ | HTTP Client | [Reqwest 🦀](https://github.com/seanmonstar/reqwest) | | [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/curl) | [Curl 💣](https://github.com/curl/curl) |
+| ✅ | Web Framework | [Axum 🦀](https://github.com/tokio-rs/axum) | | 🆗 | |
+| 🚧 | atproto SDK | [Atrium 🦀🌀](https://github.com/atrium-rs/atrium) | | 🆗 | |
 | ✅ | SSH Protocol | [Russh 🦀](https://github.com/Eugeny/russh) | | 🆗 | [OpenSSH 💣](https://github.com/openssh/openssh-portable) |
 | ✅ | Font Rendering | [Cosmic-text 🦀](https://github.com/pop-os/cosmic-text) | | 🆗 | [HarfBuzz 💣](https://github.com/harfbuzz/harfbuzz), [FreeType 💣](https://github.com/freetype/freetype) |
 | ✅ | 2D Renderer | [Vello 🦀](https://github.com/linebender/vello) | | 🆗 | [Skia 💣](https://github.com/google/skia), [Cairo 💣](https://en.wikipedia.org/wiki/Cairo_(graphics)) |
 | ✅ | 3D Renderer | [Wgpu 🦀](https://github.com/gfx-rs/wgpu) | | [Vulkan 📖](https://www.vulkan.org) | |
 | ✅ | Compositor Framework | [Smithay 🦀](https://github.com/Smithay/smithay) | | 🆗 | [Mutter 💣](https://gitlab.gnome.org/GNOME/mutter) |
-| 🚧 | UI Toolkit | [React 🐒](https://react.dev) | [Mojo WASM Toolkit 🔥](https://tangled.org/@overby.me/overby.me/tree/main/mojo/wasm), [Dioxus 🦀](https://github.com/dioxusLabs/dioxus) | [Web Component 📖](https://www.webcomponents.org/) | |
+| 🚧 | UI Toolkit | [React 🐒](https://react.dev) | [Dioxus 🦀](https://github.com/dioxusLabs/dioxus) | [Web Component 📖](https://www.webcomponents.org/) | |
 | 🚧 | UI Components | [MUI 🐒](https://mui.com) | [Dioxus Components 🦀](https://github.com/DioxusLabs/components) | 🆗 | |
 | 🚫 | XR Toolkit | [Stereokit 💣](https://github.com/StereoKit/StereoKit) | | 🆗 | |
 | 🚧 | Browser Engine | [Gecko 🦀💣](https://en.wikipedia.org/wiki/Gecko_(software)) | [Servo 🦀](https://github.com/servo/servo) | ⬅️ | |
@@ -477,7 +484,7 @@
 | ✅ | ECMAScript Runtime | [Deno 🦀](https://github.com/denoland/deno) | [Bun 🦀](https://github.com/oven-sh/bun) | [Deno Node APIs](https://docs.deno.com/runtime/reference/node_apis) | [Node.js 💣](https://github.com/nodejs/node) |
 | ✅ | Container Runtime | [Youki 🦀](https://github.com/containers/youki) | | [OCI 📖](https://github.com/opencontainers/runtime-spec) | [Runc 🐹](https://github.com/opencontainers/runc) |
 | ✅ | Virtualization | [Cloud Hypervisor 🦀](https://github.com/cloud-hypervisor/cloud-hypervisor) | | [KVM 📖](https://en.wikipedia.org/wiki/Kernel-based_Virtual_Machine) | [QEMU 💣](https://github.com/qemu/qemu) |
-| 🚧 | Meta Database | [Hasura λ➡️🦀](https://github.com/hasura/graphql-engine) | [Surrealdb ⏳🦀](https://github.com/surrealdb/surrealdb) | [GraphQL](https://graphql.org) | |
+| 🚧 | Meta Database | [Hasura λ➡️🦀](https://github.com/hasura/graphql-engine) | [Turso ⏳🦀](https://github.com/tursodatabase/turso) | [GraphQL](https://graphql.org), [SQLite 📖](https://www.sqlite.org) | [SurrealDB 🦀](https://github.com/surrealdb/surrealdb) |
 | 🚧 | Database | [Postgres 💣](https://github.com/postgres/postgres) | [Tikv 🦀](https://github.com/tikv/tikv) | 🆗 | |
 | 🚧 | Storage Engine | | [Sled 🦀](https://github.com/spacejam/sled), [Fjall 🦀](https://github.com/fjall-rs/fjall) | 🆗 | [RocksDB 💣](https://github.com/facebook/rocksdb) |
 | ✅ | Web Server | [Caddy 🐹](https://github.com/caddyserver/caddy) | [Moella 🦀](https://github.com/Icelk/moella) | 🆗 | [Nginx 💣](https://github.com/nginx/nginx) |
@@ -750,8 +757,8 @@
 | ✅ | Bare Metal Hosting | [Hetzner 🇪🇺](https://hetzner.com) | | 🆗 | |
 | ✅ | Static Host | [Statichost 🇪🇺](https://statichost.eu) | [FastFront 🇪🇺](https://www.fastfront.io) | 🆗 | [Vercel 🇺🇸](https://vercel.com) |
 | ✅ | Domain Registrar | [Simply 🇪🇺](https://simply.com) | | 🆗 | |
-| 🚧 | Backend | [Nhost 🇪🇺](https://nhost.io) | WIP Backend 🔥 | 🆗 | |
-| ✅ | Logging | [Bugfender 🇪🇺](https://bugfender.com) | | 🆗 | [Sentry 🇺🇸](https://sentry.io) |
+| 🚧 | Backend | [Nhost 🇪🇺](https://nhost.io) | [AT Protocol AppView (axum) 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki-dioxus/backend) | 🆗 | |
+| ✅ | Logging | [Better Stack 🇪🇺](https://betterstack.com) | | 🆗 | [Bugfender 🇪🇺](https://bugfender.com), [Sentry 🇺🇸](https://sentry.io) |
 | ✅ | Analytics | [Counter.dev 🇪🇺](https://counter.dev) | | 🆗 | [Vercel Analytics 🇺🇸](https://vercel.com/analytics) |
 | ✅ | Content Delivery Network | [Bunny.net 🇪🇺](https://bunny.net) | | 🆗 | |
 
