@@ -649,7 +649,17 @@ fn emit_mount_unit(out_dir: &Path, entry: &FstabEntry, in_initrd: bool) -> io::R
     };
     if !is_rootfs {
         unit.push_str(&format!("Before={target_fs}\n"));
-        // Ensure /usr mounts ordering for rootfs; skipping for MVP.
+        // Implicit parent-mount ordering. systemd orders every mount after the
+        // mount that provides its parent directory. In the initrd the real root
+        // is `sysroot.mount`, so `/sysroot/nix/.ro-store`, `/sysroot/nix/store`,
+        // … must wait for it — otherwise they run against the initrd's tmpfs
+        // /sysroot (the mount point ends up on the wrong fs / the mount fails
+        // ENOENT), and the NixOS store (which holds the stage-2 init) never
+        // comes up so switch-root can't exec it.
+        if in_initrd && is_sysroot_prefixed && effective_where != "/sysroot" {
+            unit.push_str("After=sysroot.mount\n");
+            unit.push_str("RequiresMountsFor=/sysroot\n");
+        }
     }
     if !has_opt(&systemd_opts, "noauto") {
         // The mount is auto-started; recorded via .wants/.requires
