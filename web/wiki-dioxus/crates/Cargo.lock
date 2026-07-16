@@ -1910,6 +1910,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "migration-loader"
+version = "0.1.0"
+dependencies = [
+ "migration-extractor",
+ "serde",
+ "serde_json",
+ "tokio",
+ "turso",
+ "wiki-domain-types",
+ "wiki-schema",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

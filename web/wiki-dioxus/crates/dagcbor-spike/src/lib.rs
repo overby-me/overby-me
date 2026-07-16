@@ -37,15 +37,77 @@ pub fn cid_of(bytes: &[u8]) -> Cid {
     Cid::new_v1(DAG_CBOR_CODEC, mh)
 }
 
-/// A sample record shaped like the drafted com.example.wiki.post lexicon
-/// (integers and strings only: the no-floats rule is structural).
+/// `com.atproto.repo.strongRef`: an immutable pointer to a specific record
+/// version (its at-uri plus the CID of the exact bytes). Strings only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SamplePost {
+pub struct StrongRef {
+    pub uri: String,
+    pub cid: String,
+}
+
+/// A record shaped like the drafted `com.example.wiki.post` lexicon: the public
+/// feed post. Strings and refs only (the no-floats rule is structural). Field
+/// declaration order is irrelevant to the wire bytes: DAG-CBOR sorts map keys
+/// canonically (length-first, then bytewise), which `serde_ipld_dagcbor` does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WikiPost {
     #[serde(rename = "$type")]
     pub record_type: String,
     pub text: String,
+    /// Optional at-uri of the public group/event this was posted in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Optional thread parent (a strongRef, per the lexicon).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply: Option<StrongRef>,
     #[serde(rename = "createdAt")]
     pub created_at: String,
+}
+
+impl WikiPost {
+    pub const NSID: &'static str = "com.example.wiki.post";
+}
+
+/// A record shaped like the drafted `com.example.wiki.comment` lexicon: a public
+/// comment on a public content item, threaded via `parent`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WikiComment {
+    #[serde(rename = "$type")]
+    pub record_type: String,
+    /// The public record this comments on (required).
+    pub subject: StrongRef,
+    pub text: String,
+    /// Optional: the comment this replies to (threading).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reply: Option<String>,
+    pub parent: Option<StrongRef>,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+impl WikiComment {
+    pub const NSID: &'static str = "com.example.wiki.comment";
+}
+
+/// A record shaped like the drafted `com.example.wiki.resolution` lexicon: the
+/// published outcome of a motion/election (authored by the org's DID). `status`
+/// is an OPEN string set (`knownValues`), never a breaking enum, so it is a
+/// plain `String` carrying `carried`/`rejected`/`withdrawn` (or a future value).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WikiResolution {
+    #[serde(rename = "$type")]
+    pub record_type: String,
+    pub title: String,
+    /// Optional rendered resolution body.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    pub status: String,
+    /// Optional at-uri of the public group/event this belongs to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+impl WikiResolution {
+    pub const NSID: &'static str = "com.example.wiki.resolution";
 }

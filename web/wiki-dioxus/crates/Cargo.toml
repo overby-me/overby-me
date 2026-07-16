@@ -13,5 +13,6 @@ members = [
     "oauth-spike",
     "domain-types",
     "migration-extractor",
+    "migration-loader",
     "appview",
 ]

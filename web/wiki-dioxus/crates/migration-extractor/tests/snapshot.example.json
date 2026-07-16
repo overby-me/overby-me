@@ -1,0 +1,58 @@
+{
+  "nodes": [
+    {
+      "id": "g1",
+      "name": "Group One",
+      "key": "group-one",
+      "mimeId": "wiki/group",
+      "parentId": null,
+      "contextId": null,
+      "ownerId": "u1",
+      "data": null,
+      "createdAt": "2026-07-16T12:00:00.000Z"
+    },
+    {
+      "id": "d1",
+      "name": "Motion One",
+      "key": null,
+      "mimeId": "wiki/document",
+      "parentId": "g1",
+      "contextId": "g1",
+      "ownerId": "u1",
+      "data": { "content": [{ "text": "hej" }] },
+      "createdAt": "2026-07-16T12:00:00.000Z"
+    }
+  ],
+  "members": [
+    {
+      "id": "m1",
+      "name": "Alice",
+      "email": "alice@x.dk",
+      "nodeId": "u1",
+      "parentId": "g1",
+      "accepted": true,
+      "active": true,
+      "owner": true,
+      "claimToken": null
+    },
+    {
+      "id": "a1",
+      "name": "Guest Author",
+      "email": null,
+      "nodeId": null,
+      "parentId": "d1",
+      "accepted": false,
+      "active": false,
+      "owner": false,
+      "claimToken": null
+    }
+  ],
+  "users": [
+    {
+      "id": "u1",
+      "displayName": "Alice",
+      "avatarUrl": null,
+      "handle": "alice.test"
+    }
+  ]
+}

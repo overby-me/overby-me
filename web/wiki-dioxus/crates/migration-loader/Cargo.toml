@@ -1,0 +1,18 @@
+[package]
+name = "migration-loader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# The BACK of the migration pipeline: write an `Extraction` into a staging Turso
+# db under the generated entity schema, in FK order and idempotently by primary
+# key + legacy_id.
+turso = "0.2"
+serde = "1"
+serde_json = "1"
+wiki-schema = { path = "../schema" }
+wiki-domain-types = { path = "../domain-types" }
+migration-extractor = { path = "../migration-extractor" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

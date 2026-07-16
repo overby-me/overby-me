@@ -6,18 +6,7 @@
 //!
 //! Usage: extract <snapshot.json>  (writes extraction.json + report.json)
 
-use migration_extractor::{InterimMember, InterimNode, InterimUser, extract};
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct Snapshot {
-    #[serde(default)]
-    nodes: Vec<InterimNode>,
-    #[serde(default)]
-    members: Vec<InterimMember>,
-    #[serde(default)]
-    users: Vec<InterimUser>,
-}
+use migration_extractor::{Snapshot, extract};
 
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| {

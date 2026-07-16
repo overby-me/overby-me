@@ -55,30 +55,128 @@ fn known_answer_cid_for_fixed_bytes() {
 }
 
 #[test]
-fn sample_record_round_trips_and_addresses_stably() {
-    // A record shaped like the drafted post lexicon: encode, address, decode,
-    // and the re-encode of the decode is byte-identical (determinism), so the
-    // CID is stable across a round trip.
-    let post = SamplePost {
-        record_type: "com.example.wiki.post".into(),
+fn wiki_post_round_trips_and_addresses_stably() {
+    // The real com.example.wiki.post record: encode, address, decode, and the
+    // re-encode of the decode is byte-identical (determinism), so the CID is
+    // stable across a round trip.
+    let post = WikiPost {
+        record_type: WikiPost::NSID.into(),
         text: "Hej verden".into(),
-        created_at: "2026-07-16T12:00:00.000Z".into(),
+        group: None,
         reply: None,
+        created_at: "2026-07-16T12:00:00.000Z".into(),
     };
     let bytes = encode(&post).expect("encode");
     let cid1 = cid_of(&bytes);
 
-    let back: SamplePost = decode(&bytes).expect("decode");
+    let back: WikiPost = decode(&bytes).expect("decode");
     assert_eq!(back, post);
 
     let bytes2 = encode(&back).expect("re-encode");
     assert_eq!(bytes, bytes2, "deterministic re-encode");
     assert_eq!(cid_of(&bytes2), cid1, "stable CID across round trip");
 
-    // The optional field is OMITTED when None (atproto convention), not null.
+    // The optional fields are OMITTED when None (atproto convention), not null.
     assert!(
         !hex::encode(&bytes).contains(hex::encode("reply").as_str()),
         "absent optional field is omitted from the encoding"
+    );
+    assert!(
+        !hex::encode(&bytes).contains(hex::encode("group").as_str()),
+        "absent optional field is omitted from the encoding"
+    );
+}
+
+#[test]
+fn struct_encoding_is_canonically_key_sorted() {
+    // The load-bearing property for a correct CID: a struct encodes IDENTICALLY
+    // to the equivalent map (serde_json::Value), i.e. `serde_ipld_dagcbor` sorts
+    // struct field keys canonically (length-first, then bytewise), NOT in
+    // declaration order. If this ever regresses, every record CID drifts and the
+    // network rejects the bytes.
+    let post = WikiPost {
+        record_type: WikiPost::NSID.into(),
+        text: "Hej".into(),
+        group: Some("at://did:plc:org/com.example.wiki.group/abc".into()),
+        reply: Some(StrongRef {
+            uri: "at://did:plc:alice/com.example.wiki.post/xyz".into(),
+            cid: "bafyreidykglsfhoixmivffc5uwhcgshx4j465xwqntbmu43nb2dzqwfvae".into(),
+        }),
+        created_at: "2026-07-16T12:00:00.000Z".into(),
+    };
+    let struct_bytes = encode(&post).expect("encode struct");
+    // The same content as an insertion-order-scrambled JSON map.
+    let value: serde_json::Value = serde_json::json!({
+        "createdAt": "2026-07-16T12:00:00.000Z",
+        "$type": "com.example.wiki.post",
+        "reply": {
+            "cid": "bafyreidykglsfhoixmivffc5uwhcgshx4j465xwqntbmu43nb2dzqwfvae",
+            "uri": "at://did:plc:alice/com.example.wiki.post/xyz",
+        },
+        "text": "Hej",
+        "group": "at://did:plc:org/com.example.wiki.group/abc",
+    });
+    let value_bytes = encode(&value).expect("encode value");
+    assert_eq!(
+        struct_bytes, value_bytes,
+        "struct fields must encode in canonical key order, not declaration order"
+    );
+}
+
+#[test]
+fn known_answer_cids_for_the_content_records() {
+    // Regression pins for the three drafted content records under the placeholder
+    // NSID. Each CID is sha2-256 of the canonical DAG-CBOR bytes under CIDv1/
+    // dag-cbor (0x71) and reproducible with any IPLD tool from the fixed record.
+    // A wrong CID means the network rejects or mis-addresses the published record.
+    let post = WikiPost {
+        record_type: WikiPost::NSID.into(),
+        text: "Hej verden".into(),
+        group: Some("at://did:plc:org/com.example.wiki.group/g1".into()),
+        reply: None,
+        created_at: "2026-07-16T12:00:00.000Z".into(),
+    };
+    assert_eq!(
+        cid_of(&encode(&post).unwrap()).to_string(),
+        "bafyreiea5wb5am57qvnczh4vjtzxyxz7pujpg4hzbnygeliyfgyc2v4yty"
+    );
+
+    let comment = WikiComment {
+        record_type: WikiComment::NSID.into(),
+        subject: StrongRef {
+            uri: "at://did:plc:org/com.example.wiki.resolution/r1".into(),
+            cid: "bafyreidykglsfhoixmivffc5uwhcgshx4j465xwqntbmu43nb2dzqwfvae".into(),
+        },
+        text: "Enig".into(),
+        parent: None,
+        created_at: "2026-07-16T12:00:00.000Z".into(),
+    };
+    assert_eq!(
+        cid_of(&encode(&comment).unwrap()).to_string(),
+        "bafyreicm5ffwmkpxjbyvx7t4nl7y7qx5kxxjvnt7ahwf36idtkcrkdbode"
+    );
+
+    let resolution = WikiResolution {
+        record_type: WikiResolution::NSID.into(),
+        title: "Vedtaegtsaendring".into(),
+        body: Some("Foreningen vedtager...".into()),
+        status: "carried".into(),
+        context: None,
+        created_at: "2026-07-16T12:00:00.000Z".into(),
+    };
+    assert_eq!(
+        cid_of(&encode(&resolution).unwrap()).to_string(),
+        "bafyreibaxzqht56gehvdjg4qxfiowyxtpbyzck4jiybs763tme25psqkuq"
+    );
+
+    // All three round-trip through decode unchanged.
+    assert_eq!(
+        decode::<WikiComment>(&encode(&comment).unwrap()).unwrap(),
+        comment
+    );
+    assert_eq!(
+        decode::<WikiResolution>(&encode(&resolution).unwrap()).unwrap(),
+        resolution
     );
 }
 

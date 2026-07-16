@@ -130,6 +130,20 @@ impl FieldGapReport {
     }
 }
 
+/// The interim snapshot the extractor consumes: `{ nodes, members, users }` as
+/// produced by the read-only `scripts/dump-interim-snapshot.nu` dump (a separate,
+/// owner-approved step; this crate never touches the live DB). Each list defaults
+/// to empty so a partial dump still parses.
+#[derive(Debug, Default, Deserialize)]
+pub struct Snapshot {
+    #[serde(default)]
+    pub nodes: Vec<InterimNode>,
+    #[serde(default)]
+    pub members: Vec<InterimMember>,
+    #[serde(default)]
+    pub users: Vec<InterimUser>,
+}
+
 /// The extracted domain rows plus the gap report.
 #[derive(Debug, Default, Serialize)]
 pub struct Extraction {
