@@ -6,8 +6,8 @@ A first cut of the data model for the custom backend, derived from the current
 
 - **Lexicons** — the (small) surface of *public* atproto records in user repos.
 - **Domain model** — the (large) *private, org-authoritative* store in the
-  backend DB (SurrealDB, per the port doc). Written in SurrealQL as a concrete
-  starting point.
+  backend DB (Turso, per the tech-stack decision). Written as concrete SQL (SQLite
+  dialect) as a starting point.
 
 > Draft, not committed. NSID `wiki.radikal.*` is a placeholder — use a domain the
 > org controls.
@@ -62,9 +62,9 @@ Precision worth keeping: atproto-the-network is public-by-default, so for the
 private half this is **"lexicons as the schema language"** (one canonical model +
 validation + codegen), not "private atproto records" (which don't exist on the
 public network). Private instances live in your store; the lexicon is the shared
-shape. **SurrealDB then *realises* these entities** — adding the relational/graph
-structure (membership edges, references), indexes, and the always-private tables —
-while the lexicons stay the source of truth for entity *shape*.
+shape. **Turso then *realises* these entities** as SQL tables, adding the relational
+structure (membership and references as join tables + foreign keys), indexes, and the
+always-private tables, while the lexicons stay the source of truth for entity *shape*.
 
 ## Source-of-truth split, per entity
 
@@ -206,124 +206,146 @@ Design consequences:
 - **Always-private items get no visibility toggle** — ballots, the dedup marker,
   the roster. The toggle exists only where publishing is meaningful and safe.
 
-## DB realisation (SurrealQL)
+## DB realisation (SQL, on Turso)
 
-The SurrealDB tables *realise* the lexicon-defined entities — same shapes,
-codegen-shared with the record types — and add what lexicons don't express: the
-relational/graph structure (membership edges, references), indexes, and the
-always-private tables (ballots, dedup, roster). `visibility` marks which rows also
-exist as published records.
+The Turso tables *realise* the lexicon-defined entities (same shapes, codegen-shared with the record types)
+and add what lexicons do not express: the relational structure (membership and references as join tables and
+foreign keys), indexes, and the always-private tables (ballots, dedup, roster). `visibility` marks which rows
+also exist as published records. SQL is shown in the SQLite dialect (Turso's primary frontend); arrays and
+Slate content are JSON columns and timestamps are text.
 
-```surql
--- Identity: the DID *is* the person (record id = the DID).
-DEFINE TABLE user SCHEMAFULL;
-DEFINE FIELD did          ON user TYPE string;
-DEFINE FIELD handle       ON user TYPE option<string>;
-DEFINE FIELD display_name ON user TYPE option<string>;
-DEFINE FIELD avatar_url   ON user TYPE option<string>;
+```sql
+-- Identity: the DID IS the person (primary key = the DID).
+CREATE TABLE user (
+  did          TEXT PRIMARY KEY,
+  handle       TEXT,
+  display_name TEXT,
+  avatar_url   TEXT
+);
 
--- Contexts: groups & events (the org's structures). Hierarchy via `parent`.
-DEFINE TABLE context SCHEMAFULL;
-DEFINE FIELD kind       ON context TYPE string ASSERT $value IN ['group', 'event'];
-DEFINE FIELD name       ON context TYPE string;
-DEFINE FIELD slug       ON context TYPE string;
-DEFINE FIELD parent     ON context TYPE option<record<context>>;
-DEFINE FIELD visibility  ON context TYPE string DEFAULT 'private' ASSERT $value IN ['private', 'public'];
-DEFINE FIELD published_uri ON context TYPE option<string>;   -- the at-uri, if the group/event is public
-DEFINE FIELD created_at ON context TYPE datetime DEFAULT time::now();
-DEFINE INDEX context_slug ON context FIELDS parent, slug UNIQUE;
+-- Contexts: groups & events (the org's structures). Hierarchy via parent_id.
+CREATE TABLE context (
+  id            TEXT PRIMARY KEY,
+  kind          TEXT NOT NULL CHECK (kind IN ('group','event')),
+  name          TEXT NOT NULL,
+  slug          TEXT NOT NULL,
+  parent_id     TEXT REFERENCES context(id),
+  visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
+  published_uri TEXT,                                    -- the at-uri, if the group/event is public
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX context_slug ON context(parent_id, slug);
 
 -- Content: documents / folders / files / proposals (kind-tagged).
-DEFINE TABLE document SCHEMAFULL;
-DEFINE FIELD context       ON document TYPE record<context>;
-DEFINE FIELD parent        ON document TYPE option<record>;      -- folder or context
-DEFINE FIELD kind          ON document TYPE string;              -- document|folder|file|policy|position|candidate|change
-DEFINE FIELD title         ON document TYPE string;
-DEFINE FIELD content       ON document FLEXIBLE TYPE option<object>;  -- Slate JSON (carries over)
-DEFINE FIELD author        ON document TYPE option<record<user>>;
-DEFINE FIELD visibility    ON document TYPE string DEFAULT 'private' ASSERT $value IN ['private', 'public'];
-DEFINE FIELD published_uri ON document TYPE option<string>;      -- the at-uri, once published
-DEFINE FIELD created_at    ON document TYPE datetime DEFAULT time::now();
+CREATE TABLE document (
+  id            TEXT PRIMARY KEY,
+  context_id    TEXT NOT NULL REFERENCES context(id),
+  parent_id     TEXT,                                    -- folder or context
+  kind          TEXT NOT NULL,                           -- document|folder|file|policy|position|candidate|change
+  title         TEXT NOT NULL,
+  content       TEXT,                                    -- Slate JSON (carries over)
+  author_did    TEXT REFERENCES user(did),
+  visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
+  published_uri TEXT,                                    -- the at-uri, once published
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX document_context ON document(context_id, parent_id);
 
--- Feed posts: the social unit. `visibility=public` -> mirrored to a repo.
-DEFINE TABLE post SCHEMAFULL;
-DEFINE FIELD author        ON post TYPE record<user>;
-DEFINE FIELD group         ON post TYPE option<record<context>>;  -- posted in a group/event
-DEFINE FIELD reply         ON post TYPE option<record<post>>;     -- thread parent
-DEFINE FIELD text          ON post TYPE string;
-DEFINE FIELD visibility    ON post TYPE string DEFAULT 'private' ASSERT $value IN ['private', 'public'];
-DEFINE FIELD published_uri ON post TYPE option<string>;
-DEFINE FIELD created_at    ON post TYPE datetime DEFAULT time::now();
-DEFINE INDEX post_feed     ON post FIELDS group, created_at;      -- feed by group + time
+-- Feed posts: the social unit. visibility='public' -> mirrored to a repo.
+CREATE TABLE post (
+  id            TEXT PRIMARY KEY,
+  author_did    TEXT NOT NULL REFERENCES user(did),
+  group_id      TEXT REFERENCES context(id),            -- posted in a group/event
+  reply_to      TEXT REFERENCES post(id),               -- thread parent
+  text          TEXT NOT NULL,
+  visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
+  published_uri TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX post_feed ON post(group_id, created_at);   -- feed by group + time
 
--- Membership as a GRAPH edge (user -> context) — this is where SurrealDB beats
--- Hasura's per-row RLS subqueries.
-DEFINE TABLE member TYPE RELATION FROM user TO context SCHEMAFULL;
-DEFINE FIELD role   ON member TYPE string DEFAULT 'member' ASSERT $value IN ['member', 'owner'];
-DEFINE FIELD active ON member TYPE bool DEFAULT true;
-DEFINE FIELD email  ON member TYPE option<string>;   -- the invite (roster) address
-DEFINE INDEX member_unique ON member FIELDS in, out UNIQUE;
+-- Membership as a join table (user <-> context), indexed both ways. Replaces
+-- Hasura's per-row RLS subqueries with a plain indexed join.
+CREATE TABLE member (
+  user_did   TEXT REFERENCES user(did),
+  context_id TEXT NOT NULL REFERENCES context(id),
+  role       TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member','owner')),
+  active     INTEGER NOT NULL DEFAULT 1,
+  email      TEXT,                                       -- the invite (roster) address
+  PRIMARY KEY (user_did, context_id)
+);
+CREATE INDEX member_by_context ON member(context_id, active);
 
--- Comments: internal discussion, threaded via `parent`.
-DEFINE TABLE comment SCHEMAFULL;
-DEFINE FIELD on         ON comment TYPE record;             -- document/comment it replies to
-DEFINE FIELD context    ON comment TYPE record<context>;
-DEFINE FIELD author     ON comment TYPE record<user>;
-DEFINE FIELD text       ON comment TYPE string;
-DEFINE FIELD created_at ON comment TYPE datetime DEFAULT time::now();
+-- Comments: internal discussion, threaded via on_id.
+CREATE TABLE comment (
+  id         TEXT PRIMARY KEY,
+  on_id      TEXT NOT NULL,                              -- document/comment it replies to
+  context_id TEXT NOT NULL REFERENCES context(id),
+  author_did TEXT NOT NULL REFERENCES user(did),
+  text       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
--- === Voting (carries over the interim anonymity hardening as first-class schema) ===
-DEFINE TABLE poll SCHEMAFULL;
-DEFINE FIELD context    ON poll TYPE record<context>;
-DEFINE FIELD question   ON poll TYPE string;
-DEFINE FIELD options    ON poll TYPE array<string>;
-DEFINE FIELD open       ON poll TYPE bool DEFAULT true;
-DEFINE FIELD secret     ON poll TYPE bool DEFAULT false;
-DEFINE FIELD created_at ON poll TYPE datetime DEFAULT time::now();
+-- === Voting (carries the interim anonymity hardening as first-class schema) ===
+CREATE TABLE poll (
+  id         TEXT PRIMARY KEY,
+  context_id TEXT NOT NULL REFERENCES context(id),
+  question   TEXT NOT NULL,
+  options    TEXT NOT NULL,                              -- JSON array of strings
+  open       INTEGER NOT NULL DEFAULT 1,
+  secret     INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- WHO voted (dedup) — no choice stored. One row per (poll, voter).
-DEFINE TABLE voted SCHEMAFULL;
-DEFINE FIELD poll  ON voted TYPE record<poll>;
-DEFINE FIELD voter ON voted TYPE record<user>;
-DEFINE INDEX voted_once ON voted FIELDS poll, voter UNIQUE;
+CREATE TABLE voted (
+  poll_id   TEXT NOT NULL REFERENCES poll(id),
+  voter_did TEXT NOT NULL REFERENCES user(did),
+  PRIMARY KEY (poll_id, voter_did)                       -- the UNIQUE key rejects a second vote
+);
 
 -- WHAT was chosen — no voter, append-only, coarse timestamp (poll's, not cast time).
 -- Nothing links a `ballot` to a `voted` row: same anonymity design as the interim
 -- fix, now enforced by the schema itself.
-DEFINE TABLE ballot SCHEMAFULL;
-DEFINE FIELD poll        ON ballot TYPE record<poll>;
-DEFINE FIELD choices     ON ballot TYPE array<int>;
-DEFINE FIELD cast_bucket ON ballot TYPE datetime;   -- = poll.created_at, NOT the real cast time
+CREATE TABLE ballot (
+  poll_id     TEXT NOT NULL REFERENCES poll(id),
+  choices     TEXT NOT NULL,                             -- JSON array of option indices
+  cast_bucket TEXT NOT NULL                              -- = poll.created_at, NOT the real cast time
+);
+CREATE INDEX ballot_by_poll ON ballot(poll_id);
 ```
 
-**Casting a secret ballot** (atomic; robust regardless of isolation guarantees —
-the de-risking from the port doc):
+**Casting a secret ballot** (atomic; robust regardless of isolation guarantees, the de-risking from the port
+doc). `BEGIN IMMEDIATE` takes the write lock up front; the dedup insert and the ballot insert commit together:
 
-```surql
-BEGIN;
-  CREATE voted SET poll = $poll, voter = $me;   -- UNIQUE index rejects a second vote
-  CREATE ballot SET poll = $poll, choices = $choices, cast_bucket = $poll.created_at;
+```sql
+BEGIN IMMEDIATE;
+  INSERT INTO voted (poll_id, voter_did) VALUES (:poll, :me);   -- PK rejects a second vote
+  INSERT INTO ballot (poll_id, choices, cast_bucket)
+    VALUES (:poll, :choices, (SELECT created_at FROM poll WHERE id = :poll));
 COMMIT;
 ```
 
 **Tally** — always recomputed by aggregation, never a mutable counter:
 
-```surql
-SELECT choices, count() AS n FROM ballot WHERE poll = $poll GROUP BY choices;
+```sql
+SELECT choices, count(*) AS n FROM ballot WHERE poll_id = :poll GROUP BY choices;
 ```
 
-**Membership checks via graph** (replaces Hasura's `is_context_owner` subqueries):
+**Membership checks** (replace Hasura's `is_context_owner` subqueries with an indexed join):
 
-```surql
+```sql
 -- active members of a context:
-SELECT in.* FROM member WHERE out = $ctx AND active = true;
--- is $me an active owner of $ctx?
-SELECT * FROM member WHERE in = $me AND out = $ctx AND role = 'owner' AND active = true;
+SELECT u.* FROM member m JOIN user u ON u.did = m.user_did
+  WHERE m.context_id = :ctx AND m.active = 1;
+-- is :me an active owner of :ctx?
+SELECT 1 FROM member
+  WHERE user_did = :me AND context_id = :ctx AND role = 'owner' AND active = 1;
 ```
 
-Ephemeral coordination (the `active` projector node, `screenComments`, speaker
-lists) is small mutable state — a `projector` / `speaker_entry` table or even
-per-context fields; not modelled here since it's transient.
+Ephemeral coordination (the `active` projector node, `screenComments`, speaker lists) is small mutable state,
+a `projector` / `speaker_entry` table pushed over the in-process broadcast channel; not modelled here since it
+is transient.
 
 ## Identity binding (email invite → DID)
 
@@ -344,14 +366,16 @@ the current `members.node_id` pattern, re-pointed at DIDs.
   (`document.published_uri`); on delete → unlink.
 - **Publishing** (internal → public) writes the record to the repo via `atrium`,
   then the firehose echoes it back for materialisation.
-- Client realtime is SurrealDB **LIVE queries** (validated) with
+- Client realtime is an **in-process broadcast channel** (`tokio::sync::broadcast`)
+  fed by the Turso write path, pushed over one axum WebSocket, with
   **refetch-on-reconnect**.
 
 ## Open questions
 
 - Do `document` sub-kinds (policy/position/candidate/change) deserve their own
   tables, or is a `kind` tag enough? (Start with the tag; split if queries get ugly.)
-- Ephemeral state (projector/speaker) — SurrealDB LIVE queries or a lighter
-  channel? LIVE is probably fine and keeps it in one store.
+- Ephemeral state (projector/speaker): a small mutable table pushed over the
+  in-process broadcast, or an even lighter transient channel? The broadcast keeps it
+  in one process alongside the store.
 - Org DID custody — who holds the org's signing key that publishes resolutions?
   (Ties to the run-your-own-PDS decision in `atproto-port.md §7.2`.)
