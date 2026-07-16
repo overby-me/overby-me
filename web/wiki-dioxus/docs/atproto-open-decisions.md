@@ -59,6 +59,14 @@ choices that need a human call.
 
 ## Open (need a call)
 
+- **NSID authority domain**: NOT decided (owner, 2026-07-16: no domain picked yet). All lexicons and docs
+  use the reserved placeholder `com.example.wiki.*` (RFC 2606 `example.com`, cannot collide, obviously a
+  placeholder) so nothing is accidentally minted under a name the org may not keep. Requirements for the
+  eventual call: a domain the org durably controls (registrar + DNS access for the Lexicon Resolution TXT
+  record), reversed into the NSID authority (e.g. `radikal.wiki` gives `wiki.radikal.*`). The rebrand is a
+  mechanical find-replace plus a lexicons/ directory rename, documented in `lexicons/README.md` (NSID
+  section); it must happen before any codegen, XRPC route, Jetstream filter, or published record embeds the
+  NSID. Until then the placeholder is safe everywhere, including the spec crate and lexicon drafts.
 - **README P-256 atproto-exception row**: expanded into the concrete before/after rows below (owner asked to
   see the edits before deciding). Awaiting go-ahead to apply to the monorepo-root README.
 
@@ -82,8 +90,8 @@ Concrete edits to the monorepo-root `README.md`, pending approval:
 - TLS terminated at the Caddy edge; stay on the `ring` rustls provider until PQ-hybrid KEX or FIPS forces
   aws-lc-rs. HTTP/2 + TCP primary; HTTP/3 optional edge only.
 - Realtime via one multiplexed axum WebSocket fed by an in-process broadcast channel (the AppView is one
-  persistent process holding redb for both core and view, plus the firehose).
-- API surface: XRPC + `wiki.radikal.*` lexicons at the public boundary; a typed internal Rust API for the
+  persistent process holding the Turso core and view, plus the firehose).
+- API surface: XRPC + `com.example.wiki.*` lexicons at the public boundary; a typed internal Rust API for the
   Dioxus client. GraphQL/cynic dropped.
 - `reqwest` pinned to atrium's resolved version (0.12 today) so the connection pool is shared.
 - Files/blobs: PDS blobs for public files, an org object store for private (replacing NHost storage).

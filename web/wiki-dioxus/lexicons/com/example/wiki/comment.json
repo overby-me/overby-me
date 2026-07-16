@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "wiki.radikal.comment",
+  "id": "com.example.wiki.comment",
   "defs": {
     "main": {
       "type": "record",

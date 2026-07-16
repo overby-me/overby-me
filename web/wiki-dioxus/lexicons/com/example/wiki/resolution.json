@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "wiki.radikal.resolution",
+  "id": "com.example.wiki.resolution",
   "defs": {
     "main": {
       "type": "record",

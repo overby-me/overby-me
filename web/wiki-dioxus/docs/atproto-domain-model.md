@@ -9,8 +9,9 @@ A first cut of the data model for the custom backend, derived from the current
   backend DB (Turso, per the tech-stack decision). Written as concrete SQL (SQLite
   dialect) as a starting point.
 
-> Draft, not committed. NSID `wiki.radikal.*` is a placeholder — use a domain the
-> org controls.
+> Draft, not committed. NSID `com.example.wiki.*` is a deliberate RFC 2606 placeholder:
+> the authority domain is not decided yet (an Open entry in `atproto-open-decisions.md`);
+> the rebrand procedure is documented in `lexicons/README.md`.
 
 ## The headline: visibility is per-item — a public/private hybrid
 
@@ -50,7 +51,7 @@ atproto earns its place on two counts, independent of how public the app is:
    True even for a mostly-private app.
 2. **Lexicons are canonical at the federation boundary ONLY.** The public subset
    (post, statement, resolution, public group/event/document, comment) is governed
-   by `wiki.radikal.*` lexicons: `atrium` codegens the Rust record types, and the
+   by `com.example.wiki.*` lexicons: `atrium` codegens the Rust record types, and the
    lexicon is the published, versioned contract every federated record must obey.
    The always-private entities (ballot, eligibility/delegation, voted-dedup,
    membership-as-affiliation, projector/speaker state) get NO lexicon: hand-authored
@@ -110,7 +111,7 @@ The `post` is the feed unit — the atproto-native heart of the "public half":
 ```json
 {
   "lexicon": 1,
-  "id": "wiki.radikal.post",
+  "id": "com.example.wiki.post",
   "defs": {
     "main": {
       "type": "record",
@@ -136,7 +137,7 @@ The `post` is the feed unit — the atproto-native heart of the "public half":
 ```json
 {
   "lexicon": 1,
-  "id": "wiki.radikal.statement",
+  "id": "com.example.wiki.statement",
   "defs": {
     "main": {
       "type": "record",
@@ -160,7 +161,7 @@ The `post` is the feed unit — the atproto-native heart of the "public half":
 ```json
 {
   "lexicon": 1,
-  "id": "wiki.radikal.resolution",
+  "id": "com.example.wiki.resolution",
   "defs": {
     "main": {
       "type": "record",
@@ -362,8 +363,8 @@ the current `members.node_id` pattern, re-pointed at DIDs.
 
 ## AppView / materialisation
 
-- Consume **Jetstream**, filtered to `wiki.radikal.*` + relevant `app.bsky.*`.
-- On a `wiki.radikal.statement` / `resolution` record → upsert a row and link it
+- Consume **Jetstream**, filtered to `com.example.wiki.*` + relevant `app.bsky.*`.
+- On a `com.example.wiki.statement` / `resolution` record → upsert a row and link it
   (`document.published_uri`); on delete → unlink.
 - **Publishing** (internal → public) writes the record to the repo via `atrium`,
   then the firehose echoes it back for materialisation.

@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "wiki.radikal.post",
+  "id": "com.example.wiki.post",
   "defs": {
     "main": {
       "type": "record",
@@ -19,7 +19,7 @@
           "group": {
             "type": "string",
             "format": "at-uri",
-            "description": "Optional: the public group or event this was posted in (a wiki.radikal.group / wiki.radikal.event record)."
+            "description": "Optional: the public group or event this was posted in (a com.example.wiki.group / com.example.wiki.event record)."
           },
           "reply": {
             "type": "ref",

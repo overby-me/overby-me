@@ -37,7 +37,7 @@ optional firehose-fed query cache in the Dioxus WASM client.
 
 ## Realtime and the firehose consumer
 
-Decision: consume Jetstream (JSON over WebSocket, filtered to `app.radikal.*` collections and member DIDs)
+Decision: consume Jetstream (JSON over WebSocket, filtered to `com.example.wiki.*` collections and member DIDs)
 as the change-feed; push local authoritative deltas over one axum WebSocket fed by an in-process broadcast
 channel (`tokio::sync::broadcast`), since the AppView is a single persistent process holding the Turso ballot core,
 the Turso view + tantivy index, the firehose connection, and the WebSocket server. No DB LISTEN/NOTIFY is required.
@@ -82,7 +82,7 @@ CIDv1/multihash/multibase.
 Decision: lexicons are canonical at the federation boundary only; Rust serde types are canonical for the
 private half.
 
-- Adoption: author `wiki.radikal.*` lexicons for the PUBLIC subset (post, statement, resolution, public
+- Adoption: author `com.example.wiki.*` lexicons for the PUBLIC subset (post, statement, resolution, public
   group/event/document, comment); feed them through `atrium-lex`/`atrium-codegen` to generate Rust record
   types; register NSID authority via a DNS TXT record on an org-owned domain per the Lexicon Resolution
   spec.
@@ -114,7 +114,7 @@ Decision: three complementary validation layers, not one schema doing all three.
 Decision: axum (on hyper/tower/tokio) is the server framework; reqwest (rustls-tls) is the single outbound
 client; rustls is the TLS stack.
 
-- Adoption: axum routes expose XRPC (`com.atproto.*` proxied plus `app.radikal.*` queries), the OAuth
+- Adoption: axum routes expose XRPC (`com.atproto.*` proxied plus `com.example.wiki.*` queries), the OAuth
   callback, and one `/ws` WebSocket per client multiplexing all live channels; reuse ONE configured
   `reqwest::Client` (connection-pooled, HTTP/2, `default-features=false` + `rustls-tls` + webpki-roots) as
   the transport for `atrium-xrpc` and all PDS/plc.directory/DID-doc/handle-resolution calls; run as a

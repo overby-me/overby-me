@@ -132,8 +132,14 @@ Round 1 is fully landed: all 10 do-now items are done. Three facts changed the b
 Status: items 1 and 2 are DONE (owner calls made 2026-07-16: UNIT tokens, PER-POLL issuer keys, and
 boundary-only lexicon scope; recorded in `atproto-open-decisions.md` under Decided, with the weighted-token
 phrasing superseded in `atproto-stack-decisions.md` and the "lexicons model ALL data" section of
-`atproto-domain-model.md` rewritten to boundary-only). Item 3 stays open pending the domain-control check.
-The crypto track (items 5, 8, 9, 10) and the types track behind item 2 are now unblocked.
+`atproto-domain-model.md` rewritten to boundary-only). Item 3 resolved differently than written: the owner
+has NOT decided a domain, so instead of picking a root, every NSID reference (lexicon ids, docs, the old
+`app.radikal.*` vs `wiki.radikal.*` split) was normalized to the reserved placeholder `com.example.wiki.*`
+(RFC 2606, cannot collide, obviously unminted), the lexicons moved to `lexicons/com/example/wiki/`, the
+rebrand procedure documented in `lexicons/README.md`, and the domain choice recorded as an Open decision.
+This achieves item 3's irreversibility guard (nothing can be accidentally minted under a wrong name) while
+deferring the actual domain call. The crypto track (items 5, 8, 9, 10) and the types track behind item 2
+are now unblocked.
 
 ### Do now (prioritized)
 
