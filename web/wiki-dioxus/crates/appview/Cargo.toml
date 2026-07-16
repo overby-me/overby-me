@@ -1,0 +1,27 @@
+[package]
+name = "appview"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# The AppView is a stateful persistent process (not scale-to-zero serverless):
+# axum HTTP + WebSocket, a Turso datastore, an in-process broadcast channel.
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "signal"] }
+tower = { version = "0.5", features = ["util"] }
+http = "1"
+turso = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "json", "env-filter"] }
+wiki-domain-types = { path = "../domain-types" }
+ballot-spec = { path = "../ballot-spec" }
+
+[[bin]]
+name = "appview"
+path = "src/main.rs"
+
+[lib]
+name = "appview"
+path = "src/lib.rs"

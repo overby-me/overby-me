@@ -1,0 +1,92 @@
+//! The atproto AppView service (the stateful process the interim NHost/Hasura
+//! backend evolves into). This is the kickoff skeleton: config, the Turso pool
+//! with the FK-pragma helper, the in-process broadcast channel, and one `/ws`
+//! plus `/healthz`. Every transferable module (util, statecookie, push, the
+//! Store seam, XRPC handlers, the firehose consumer, the OAuth callback) lands
+//! into this crate from here.
+//!
+//! It is a single stateful always-on process (Turso core+view, a firehose
+//! connection, the broadcast channel, the WebSocket server), so it CANNOT run
+//! on scale-to-zero serverless like the interim backend; see the deploy item.
+
+pub mod config;
+pub mod db;
+pub mod ws;
+
+pub use config::Config;
+pub use db::{Db, DbError};
+
+use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
+use tokio::sync::broadcast;
+
+/// Shared application state handed to every handler.
+#[derive(Clone)]
+pub struct AppState {
+    pub db: Db,
+    /// Authoritative deltas broadcast to all connected clients over `/ws`.
+    pub deltas: broadcast::Sender<String>,
+    pub config: Config,
+}
+
+impl AppState {
+    /// Build state around an open database, with a fresh broadcast channel.
+    pub fn new(db: Db, config: Config) -> Self {
+        let (deltas, _rx) = broadcast::channel::<String>(1024);
+        Self { db, deltas, config }
+    }
+}
+
+/// The AppView router: liveness plus the multiplexed client WebSocket.
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/ws", get(ws::ws_handler))
+        .with_state(state)
+}
+
+/// Liveness + readiness: confirms the database is reachable (a real connection
+/// with the FK pragma verified) and reports firehose configuration. A stalled
+/// firehose or wedged DB is otherwise invisible until users complain, so this
+/// is the signal the deploy unit and any uptime check watch.
+async fn healthz(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let db_ok = state.db.acquire().await.is_ok();
+    Json(serde_json::json!({
+        "ok": db_ok,
+        "db": db_ok,
+        // The firehose consumer is a later item; report whether it is configured.
+        "firehose_configured": !state.config.firehose_url.is_empty(),
+        "clients": state.deltas.receiver_count(),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn healthz_reports_db_reachable() {
+        let db = Db::open(":memory:").await.expect("open");
+        let app = router(AppState::new(db, Config::default()));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("request");
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .expect("body");
+        let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["db"], true);
+    }
+}
