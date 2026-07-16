@@ -18,7 +18,7 @@
   };
 
   # Static site build consumed by the host (statichost.eu). Mirrors the
-  # wiki-dioxus-frontend package: dx drives cargo/wasm-bindgen/wasm-opt, deps
+  # wiki-frontend package: dx drives cargo/wasm-bindgen/wasm-opt, deps
   # are vendored from Cargo.lock, and the toolchain (dioxus-cli 0.7.x,
   # wasm-bindgen-cli 0.2.x, binaryen) comes straight from nixpkgs.
   packages.homepage = {

@@ -1,23 +1,51 @@
-build: install build-gqty build-rsbuild
+dx := `which -a dx | grep dioxus | head -1`
 
-build-rsbuild:
-    export PUBLIC_GIT_COMMIT_SHA=$(git rev-parse HEAD)
-    deno run -A npm:@rsbuild/core build
+dev:
+    {{dx}} serve
 
-build-gqty:
-    deno run -A npm:@gqty/cli generate
+build:
+    {{dx}} build --release
+    # dx drops files from assets/ it doesn't recognize, so copy them into the
+    # served root ourselves. This is the single source of truth for the deploy
+    # bundle — the Nix package (default.nix) runs `just build`, so both match.
+    #   _redirects — SPA deep-link fallback for statichost.eu (e.g. /a/b resolves)
+    #   sw.js      — served from the ROOT so its scope is `/` (not the hashed
+    #                /assets/ path, whose scope would only be /assets/)
+    cp assets/_redirects target/dx/wiki-dioxus/release/web/public/_redirects
+    cp assets/sw.js target/dx/wiki-dioxus/release/web/public/sw.js
 
-dev: build-gqty
-    deno run -A npm:@rsbuild/core dev --open
+# Build the deployable frontend bundle (index.html + assets + sw.js at the root)
+# via the Nix package, then print the output dir. The final upload to
+# statichost.eu (dev.radikal.wiki) is manual — see README.md#deploy — since the
+# statichost credentials are not in the repo.
+deploy-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$(git rev-parse --show-toplevel)"
+    out="$(nix build --no-link --print-out-paths "$root#wiki-frontend")"
+    echo "frontend bundle: $out"
+    echo "Upload the CONTENTS of that directory to statichost.eu (dev.radikal.wiki),"
+    echo "keeping sw.js at the served root so its scope is '/'."
 
-install:
-    deno install
+check:
+    cargo check --target wasm32-unknown-unknown
+    nu scripts/check-css-spacing.nu
 
-start:
-    deno run -A npm:@rsbuild/core preview
+# Design-system lint: spacing/font-size must flow through tokens (ratchet gate).
+lint-css:
+    nu scripts/check-css-spacing.nu
 
-lint:
-    deno lint
+fmt:
+    cargo fmt
 
-build-nix:
-    nix build .#wiki-frontend --print-build-logs
+clippy:
+    cargo clippy --target wasm32-unknown-unknown -- -D warnings
+
+# Unit tests (host target — GraphQL serialization, path helpers, etc.)
+test:
+    cargo test
+
+# Browser smoke tests: build, serve, and drive the app in headless Servo.
+# Set WIKI_EMAIL / WIKI_PASSWORD to also run the authenticated tests.
+test-browser *ARGS:
+    nu test-browser.nu {{ARGS}}

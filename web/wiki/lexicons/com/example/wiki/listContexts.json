@@ -1,0 +1,26 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.listContexts",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "List the top-level (root) group/event contexts. Identity-free.",
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["contexts"],
+					"properties": {
+						"contexts": {
+							"type": "array",
+							"items": {
+								"type": "ref",
+								"ref": "com.example.wiki.defs#contextView"
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

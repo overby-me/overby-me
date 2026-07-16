@@ -124,7 +124,7 @@
 | Project | Description |
 |-|-|
 | [Homepage 🐒➡️🔥](https://tangled.org/@overby.me/overby.me/tree/main/web/homepage) | Personal website and portfolio |
-| [Wiki 🐒➡️🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki-dioxus) | Political conference and discussion platform |
+| [Wiki 🐒➡️🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki) | Political conference and discussion platform |
 
 #### Nix & Nickel
 
@@ -757,7 +757,7 @@
 | ✅ | Bare Metal Hosting | [Hetzner 🇪🇺](https://hetzner.com) | | 🆗 | |
 | ✅ | Static Host | [Statichost 🇪🇺](https://statichost.eu) | [FastFront 🇪🇺](https://www.fastfront.io) | 🆗 | [Vercel 🇺🇸](https://vercel.com) |
 | ✅ | Domain Registrar | [Simply 🇪🇺](https://simply.com) | | 🆗 | |
-| 🚧 | Backend | [Nhost 🇪🇺](https://nhost.io) | [AT Protocol AppView (axum) 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki-dioxus/backend) | 🆗 | |
+| 🚧 | Backend | [Nhost 🇪🇺](https://nhost.io) | [AT Protocol AppView (axum) 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki/backend) | 🆗 | |
 | ✅ | Logging | [Better Stack 🇪🇺](https://betterstack.com) | | 🆗 | [Bugfender 🇪🇺](https://bugfender.com), [Sentry 🇺🇸](https://sentry.io) |
 | ✅ | Analytics | [Counter.dev 🇪🇺](https://counter.dev) | | 🆗 | [Vercel Analytics 🇺🇸](https://vercel.com/analytics) |
 | ✅ | Content Delivery Network | [Bunny.net 🇪🇺](https://bunny.net) | | 🆗 | |
