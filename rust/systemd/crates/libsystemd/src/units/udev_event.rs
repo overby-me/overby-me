@@ -737,6 +737,37 @@ fn apply_device_active(
         }
     }
 
+    // Re-attempt units that deferred activation until this device was
+    // announced: anything ordered After= or that Requires=/BindsTo= one of
+    // these device aliases. The important initrd case is
+    // systemd-fsck@<dev>.service (BindsTo=%i.device) and the matching mount
+    // (e.g. sysroot.mount for /dev/disk/by-label/<x>): both stay Stopped after
+    // deferring on the not-yet-present device, and nothing else would pull them
+    // once the device finally appears. Activating them here lets the root fs
+    // get fsck'd and mounted so the initrd can switch-root.
+    {
+        let ri = run_info.read_poisoned();
+        let device_ids: Vec<UnitId> = unit_names
+            .iter()
+            .map(|name| UnitId {
+                kind: UnitIdKind::Device,
+                name: name.clone(),
+            })
+            .collect();
+        for (uid, unit) in ri.unit_table.iter() {
+            if matches!(uid.kind, UnitIdKind::Device) {
+                continue;
+            }
+            let deps = &unit.common.dependencies;
+            let depends_on_device = device_ids.iter().any(|d| {
+                deps.after.contains(d) || deps.requires.contains(d) || deps.binds_to.contains(d)
+            });
+            if depends_on_device && !deps_to_activate.contains(uid) {
+                deps_to_activate.push(uid.clone());
+            }
+        }
+    }
+
     if !deps_to_activate.is_empty() {
         let run_info = run_info.clone();
         let first_name = unit_names[0].clone();

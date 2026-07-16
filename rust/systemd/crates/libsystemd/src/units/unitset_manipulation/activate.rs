@@ -230,9 +230,24 @@ pub fn unstarted_deps(
             let is_pull_dep = required || pulled;
 
             let Some(elem_unit) = run_info.unit_table.get(elem) else {
-                // Dependency not in unit table (e.g. optional unit that was
-                // never loaded, or removed during pruning/cycle-breaking).
-                // Treat it as ready so it doesn't block activation.
+                // Dependency not in the unit table. A *required* (Requires=/
+                // BindsTo=) dependency on a .device unit that isn't loaded yet
+                // means udev has not announced the device — we must WAIT rather
+                // than start prematurely. Otherwise systemd-fsck@… / …mount for
+                // a by-label/by-uuid device runs before its /dev symlink exists
+                // and fails, so the initrd root never mounts. The device unit is
+                // created and marked Started from the later udev event, which
+                // re-triggers activation of whatever was blocked on it.
+                if required && matches!(elem.kind, crate::units::UnitIdKind::Device) {
+                    trace!(
+                        "unstarted_deps: {:?} waiting for not-yet-announced device {:?}",
+                        id, elem
+                    );
+                    acc.push(elem.clone());
+                    return acc;
+                }
+                // Otherwise (optional unit never loaded, or removed during
+                // pruning/cycle-breaking): treat as ready so it doesn't block.
                 warn!(
                     "Unit {:?} has an ordering dependency on {:?} which is not in the unit table. Ignoring.",
                     id, elem
