@@ -25,12 +25,61 @@
 
 use crate::db::{Db, DbError};
 use turso::Value;
-use wiki_domain_types::{Author, Context, ContextKind, Document, DocumentKind};
+use wiki_domain_types::{Author, Comment, Context, ContextKind, Document, DocumentKind, Reaction};
 
 /// Parse a snake_case DB enum value (e.g. `"document"`, `"private"`) into a
 /// `#[serde(rename_all = "snake_case")]` domain enum; `None` on an unknown value.
 fn parse_enum<T: serde::de::DeserializeOwned>(s: &str) -> Option<T> {
     serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
+}
+
+/// The `document` columns the read side selects (order matches [`doc_base`]).
+const DOC_COLS: &str =
+    "id, context_id, parent_id, kind, title, content, visibility, published_uri, created_at";
+/// The `context` columns the read side selects (order matches [`ctx_from_row`]).
+const CTX_COLS: &str = "id, kind, name, slug, parent_id, visibility, published_uri, created_at";
+
+/// The raw `document` row fields, before authors are hydrated.
+struct DocBase {
+    id: String,
+    context_id: String,
+    parent_id: Option<String>,
+    kind: String,
+    title: String,
+    content: Option<String>,
+    visibility: Option<String>,
+    published_uri: Option<String>,
+    created_at: Option<String>,
+}
+
+fn doc_base(row: &turso::Row) -> Result<DocBase, DbError> {
+    Ok(DocBase {
+        id: row.get::<String>(0)?,
+        context_id: row.get::<String>(1)?,
+        parent_id: opt_text(row, 2),
+        kind: row.get::<String>(3)?,
+        title: row.get::<String>(4)?,
+        content: opt_text(row, 5),
+        visibility: opt_text(row, 6),
+        published_uri: opt_text(row, 7),
+        created_at: opt_text(row, 8),
+    })
+}
+
+fn ctx_from_row(row: &turso::Row) -> Result<Context, DbError> {
+    Ok(Context {
+        id: row.get::<String>(0)?,
+        kind: parse_enum(&row.get::<String>(1)?).unwrap_or(ContextKind::Group),
+        name: row.get::<String>(2)?,
+        slug: row.get::<String>(3)?,
+        parent_id: opt_text(row, 4),
+        visibility: opt_text(row, 5)
+            .and_then(|s| parse_enum(&s))
+            .unwrap_or_default(),
+        published_uri: opt_text(row, 6),
+        created_at: opt_text(row, 7),
+        legacy_id: None,
+    })
 }
 
 /// Read a nullable TEXT column as an `Option<String>`. turso's `FromValue` has
@@ -457,58 +506,44 @@ impl Store {
 
     /// A content node (document / folder / file / proposal) by id, with its
     /// authors. `None` if no such document.
+    /// Hydrate a `DocBase` into a full `Document` (attaches its authors).
+    async fn hydrate_document(&self, b: DocBase) -> Result<Document, DbError> {
+        let authors = self.document_authors(&b.id).await?;
+        Ok(Document {
+            id: b.id,
+            context_id: b.context_id,
+            parent_id: b.parent_id,
+            kind: parse_enum(&b.kind).unwrap_or(DocumentKind::Document),
+            title: b.title,
+            content: b.content.and_then(|s| serde_json::from_str(&s).ok()),
+            authors,
+            visibility: b
+                .visibility
+                .and_then(|s| parse_enum(&s))
+                .unwrap_or_default(),
+            published_uri: b.published_uri,
+            created_at: b.created_at,
+            legacy_id: None,
+        })
+    }
+
+    /// A content node (document / folder / file / proposal) by id, with its
+    /// authors. `None` if no such document.
     pub async fn read_document(&self, id: &str) -> Result<Option<Document>, DbError> {
-        // Extract the row fields first (releasing the query) before the authors
-        // sub-query on a fresh connection.
-        let fields = {
+        let base = {
             let conn = self.db.acquire().await?;
             let mut rows = conn
                 .query(
-                    "SELECT id, context_id, parent_id, kind, title, content, visibility, \
-                     published_uri, created_at FROM document WHERE id = ?1",
+                    &format!("SELECT {DOC_COLS} FROM document WHERE id = ?1"),
                     [id],
                 )
                 .await?;
             match rows.next().await? {
-                Some(row) => (
-                    row.get::<String>(0)?,
-                    row.get::<String>(1)?,
-                    opt_text(&row, 2),
-                    row.get::<String>(3)?,
-                    row.get::<String>(4)?,
-                    opt_text(&row, 5),
-                    opt_text(&row, 6),
-                    opt_text(&row, 7),
-                    opt_text(&row, 8),
-                ),
+                Some(row) => doc_base(&row)?,
                 None => return Ok(None),
             }
         };
-        let (
-            id,
-            context_id,
-            parent_id,
-            kind,
-            title,
-            content,
-            visibility,
-            published_uri,
-            created_at,
-        ) = fields;
-        let authors = self.document_authors(&id).await?;
-        Ok(Some(Document {
-            id,
-            context_id,
-            parent_id,
-            kind: parse_enum(&kind).unwrap_or(DocumentKind::Document),
-            title,
-            content: content.and_then(|s| serde_json::from_str(&s).ok()),
-            authors,
-            visibility: visibility.and_then(|s| parse_enum(&s)).unwrap_or_default(),
-            published_uri,
-            created_at,
-            legacy_id: None,
-        }))
+        Ok(Some(self.hydrate_document(base).await?))
     }
 
     /// A context (group / event) by id. `None` if no such context.
@@ -516,27 +551,205 @@ impl Store {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                "SELECT id, kind, name, slug, parent_id, visibility, published_uri, created_at \
-                 FROM context WHERE id = ?1",
+                &format!("SELECT {CTX_COLS} FROM context WHERE id = ?1"),
                 [id],
             )
             .await?;
-        let Some(row) = rows.next().await? else {
-            return Ok(None);
+        match rows.next().await? {
+            Some(row) => Ok(Some(ctx_from_row(&row)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Resolve a path of context slugs from the root (a top-level group/event with
+    /// no parent), each segment a child context's slug. `None` if the path breaks.
+    /// Documents carry no slug in the reconciled schema, so they are id-addressed
+    /// via `read_document`, not path-resolved.
+    pub async fn resolve_context(&self, slugs: &[String]) -> Result<Option<Context>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut parent_id: Option<String> = None;
+        let mut found: Option<Context> = None;
+        for slug in slugs {
+            let row = if let Some(pid) = &parent_id {
+                let mut rows = conn
+                    .query(
+                        &format!(
+                            "SELECT {CTX_COLS} FROM context WHERE parent_id = ?1 AND slug = ?2 LIMIT 1"
+                        ),
+                        vec![Value::Text(pid.clone()), Value::Text(slug.clone())],
+                    )
+                    .await?;
+                rows.next().await?
+            } else {
+                let mut rows = conn
+                    .query(
+                        &format!(
+                            "SELECT {CTX_COLS} FROM context WHERE parent_id IS NULL AND slug = ?1 LIMIT 1"
+                        ),
+                        [slug.as_str()],
+                    )
+                    .await?;
+                rows.next().await?
+            };
+            match row {
+                Some(row) => {
+                    let ctx = ctx_from_row(&row)?;
+                    parent_id = Some(ctx.id.clone());
+                    found = Some(ctx);
+                }
+                None => return Ok(None),
+            }
+        }
+        Ok(found)
+    }
+
+    /// The child content nodes directly under `parent_id` (a context or folder),
+    /// oldest first, each with its authors.
+    pub async fn list_children(&self, parent_id: &str) -> Result<Vec<Document>, DbError> {
+        let bases = {
+            let conn = self.db.acquire().await?;
+            let mut rows = conn
+                .query(
+                    &format!(
+                        "SELECT {DOC_COLS} FROM document WHERE parent_id = ?1 ORDER BY created_at"
+                    ),
+                    [parent_id],
+                )
+                .await?;
+            let mut v = Vec::new();
+            while let Some(row) = rows.next().await? {
+                v.push(doc_base(&row)?);
+            }
+            v
         };
-        Ok(Some(Context {
-            id: row.get::<String>(0)?,
-            kind: parse_enum(&row.get::<String>(1)?).unwrap_or(ContextKind::Group),
-            name: row.get::<String>(2)?,
-            slug: row.get::<String>(3)?,
-            parent_id: opt_text(&row, 4),
-            visibility: opt_text(&row, 5)
-                .and_then(|s| parse_enum(&s))
-                .unwrap_or_default(),
-            published_uri: opt_text(&row, 6),
-            created_at: opt_text(&row, 7),
-            legacy_id: None,
-        }))
+        let mut out = Vec::with_capacity(bases.len());
+        for b in bases {
+            out.push(self.hydrate_document(b).await?);
+        }
+        Ok(out)
+    }
+
+    /// The top-level contexts (groups/events with no parent), by name.
+    pub async fn list_root_contexts(&self) -> Result<Vec<Context>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!("SELECT {CTX_COLS} FROM context WHERE parent_id IS NULL ORDER BY name"),
+                (),
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(ctx_from_row(&row)?);
+        }
+        Ok(out)
+    }
+
+    /// Documents whose title or content matches `query` (a case-insensitive
+    /// substring), most recent first, capped.
+    pub async fn search_documents(&self, query: &str) -> Result<Vec<Document>, DbError> {
+        let like = format!("%{query}%");
+        let bases = {
+            let conn = self.db.acquire().await?;
+            let mut rows = conn
+                .query(
+                    &format!(
+                        "SELECT {DOC_COLS} FROM document \
+                         WHERE title LIKE ?1 OR content LIKE ?1 ORDER BY created_at DESC LIMIT 50"
+                    ),
+                    [like.as_str()],
+                )
+                .await?;
+            let mut v = Vec::new();
+            while let Some(row) = rows.next().await? {
+                v.push(doc_base(&row)?);
+            }
+            v
+        };
+        let mut out = Vec::with_capacity(bases.len());
+        for b in bases {
+            out.push(self.hydrate_document(b).await?);
+        }
+        Ok(out)
+    }
+
+    /// The most recently created documents across all contexts (the "newest" feed).
+    pub async fn list_recent(&self, limit: i64) -> Result<Vec<Document>, DbError> {
+        let bases = {
+            let conn = self.db.acquire().await?;
+            let mut rows = conn
+                .query(
+                    &format!("SELECT {DOC_COLS} FROM document ORDER BY created_at DESC LIMIT ?1"),
+                    [limit],
+                )
+                .await?;
+            let mut v = Vec::new();
+            while let Some(row) = rows.next().await? {
+                v.push(doc_base(&row)?);
+            }
+            v
+        };
+        let mut out = Vec::with_capacity(bases.len());
+        for b in bases {
+            out.push(self.hydrate_document(b).await?);
+        }
+        Ok(out)
+    }
+
+    /// The comment thread on a node (comments whose `on_id` is the node), oldest
+    /// first. Each carries a DID or free-text author.
+    pub async fn get_comments(&self, on_id: &str) -> Result<Vec<Comment>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT id, on_id, context_id, author_did, author_text, text, created_at \
+                 FROM comment WHERE on_id = ?1 ORDER BY created_at",
+                [on_id],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let author = match (opt_text(&row, 3), opt_text(&row, 4)) {
+                (Some(did), _) => Author::User { did },
+                (None, Some(display)) => Author::FreeText { display },
+                // The CHECK guarantees one is present; skip a malformed row.
+                (None, None) => continue,
+            };
+            out.push(Comment {
+                id: row.get::<String>(0)?,
+                on_id: row.get::<String>(1)?,
+                context_id: row.get::<String>(2)?,
+                author,
+                text: row.get::<String>(5)?,
+                created_at: opt_text(&row, 6),
+                legacy_id: None,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The reactions on a subject (by its at-uri), oldest first.
+    pub async fn get_reactions(&self, subject_uri: &str) -> Result<Vec<Reaction>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT id, subject_uri, reactor_did, emoji, created_at \
+                 FROM reaction WHERE subject_uri = ?1 ORDER BY created_at",
+                [subject_uri],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(Reaction {
+                id: row.get::<String>(0)?,
+                subject_uri: row.get::<String>(1)?,
+                reactor_did: opt_text(&row, 2),
+                emoji: row.get::<String>(3)?,
+                created_at: opt_text(&row, 4),
+                legacy_id: None,
+            });
+        }
+        Ok(out)
     }
 }
 

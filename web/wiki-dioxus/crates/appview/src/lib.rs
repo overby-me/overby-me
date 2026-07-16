@@ -79,6 +79,28 @@ pub fn router(state: AppState) -> Router {
             get(xrpc::get_document),
         )
         .route("/xrpc/com.example.wiki.getContext", get(xrpc::get_context))
+        .route(
+            "/xrpc/com.example.wiki.resolveNode",
+            get(xrpc::resolve_node),
+        )
+        .route(
+            "/xrpc/com.example.wiki.listChildren",
+            get(xrpc::list_children),
+        )
+        .route(
+            "/xrpc/com.example.wiki.listContexts",
+            get(xrpc::list_contexts),
+        )
+        .route("/xrpc/com.example.wiki.listRecent", get(xrpc::list_recent))
+        .route("/xrpc/com.example.wiki.search", get(xrpc::search))
+        .route(
+            "/xrpc/com.example.wiki.getComments",
+            get(xrpc::get_comments),
+        )
+        .route(
+            "/xrpc/com.example.wiki.getReactions",
+            get(xrpc::get_reactions),
+        )
         .with_state(state)
 }
 
