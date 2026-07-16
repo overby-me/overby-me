@@ -439,6 +439,25 @@ fn heading_level(block_type: &str) -> Option<u8> {
     }
 }
 
+/// Flatten a whole Slate document to plain text: every block's leaf text, one
+/// block per line. Accepts either the node `data` object (`{ "content": [...] }`),
+/// a bare blocks array, or a single block. Used by the amendment diff to compare
+/// a motion and an amendment as text.
+pub(crate) fn slate_plain_text(data: &serde_json::Value) -> String {
+    let blocks = data
+        .get("content")
+        .and_then(|c| c.as_array())
+        .or_else(|| data.as_array());
+    match blocks {
+        Some(arr) => arr
+            .iter()
+            .map(block_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None => block_plain_text(data),
+    }
+}
+
 /// All leaf text of a block, concatenated (for the TOC label / anchor).
 fn block_plain_text(block: &serde_json::Value) -> String {
     fn collect(v: &serde_json::Value, out: &mut String) {

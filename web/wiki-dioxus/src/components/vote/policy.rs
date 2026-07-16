@@ -43,6 +43,15 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let context_id = node.context_id.as_ref().map(|u| u.0.clone());
     let is_ctx_owner = node.is_context_owner.unwrap_or(false);
 
+    // The motion's own body as plain text, to diff each amendment against. Which
+    // amendment (if any) currently shows its diff, keyed by id.
+    let motion_text = node
+        .data
+        .as_ref()
+        .map(|d| crate::components::content::slate_plain_text(&d.0))
+        .unwrap_or_default();
+    let mut diff_open = use_signal(|| Option::<String>::None);
+
     rsx! {
         // Main content. The comment thread renders at the end, below the
         // amendments and polls.
@@ -87,6 +96,16 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                             // wiki's expandable ChangeList row.
                             let body = item.data.as_ref().map(|d| d.0.clone());
                             let has_body = crate::components::content::has_rich_content(body.as_ref());
+                            // The amendment as plain text, for the diff against the
+                            // motion. Diff is offered only when both sides have text
+                            // and neither is too long (see `diffable`).
+                            let amendment_text = body
+                                .as_ref()
+                                .map(crate::components::content::slate_plain_text)
+                                .unwrap_or_default();
+                            let can_diff = diffable(&motion_text, &amendment_text);
+                            let this_id = item.id.0.clone();
+                            let is_open = can_diff && diff_open() == Some(this_id.clone());
                             rsx! {
                                 div { key: "{item.id.0}", class: "amendment-item",
                                     div {
@@ -109,8 +128,34 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                                 }
                                             }
                                         }
+                                        // Toggle a word-level diff against the motion.
+                                        if can_diff {
+                                            button {
+                                                class: "btn-text btn-sm amendment-diff-toggle",
+                                                onclick: {
+                                                    let this_id = this_id.clone();
+                                                    move |_| {
+                                                        let open = diff_open() == Some(this_id.clone());
+                                                        diff_open.set(if open { None } else { Some(this_id.clone()) });
+                                                    }
+                                                },
+                                                span { class: "material-icons", "difference" }
+                                                if is_open {
+                                                    " {t(\"vote.hideDiff\")}"
+                                                } else {
+                                                    " {t(\"vote.showDiff\")}"
+                                                }
+                                            }
+                                        }
                                     }
-                                    if has_body {
+                                    if is_open {
+                                        div { class: "amendment-preview amendment-diff",
+                                            AmendmentDiffView {
+                                                original: motion_text.clone(),
+                                                proposed: amendment_text.clone(),
+                                            }
+                                        }
+                                    } else if has_body {
                                         div { class: "amendment-preview",
                                             crate::components::content::SlateRenderer { data: body }
                                         }
@@ -185,6 +230,96 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/// One token of a word-level diff.
+#[derive(Clone, Copy, PartialEq)]
+enum DiffTag {
+    Equal,
+    Insert,
+    Delete,
+}
+
+/// A hand-rolled word-level LCS diff (no diff crate, to avoid churning the Nix
+/// dependency hashes). Returns the amendment's words tagged Equal / Insert (added
+/// vs the motion) / Delete (removed). Whitespace-delimited tokens: coarse but
+/// enough to make an amendment's change legible. Bounded by the caller, which
+/// only diffs reasonably-sized bodies (`MAX_DIFF_WORDS`).
+fn word_diff(old: &str, new: &str) -> Vec<(DiffTag, String)> {
+    let a: Vec<&str> = old.split_whitespace().collect();
+    let b: Vec<&str> = new.split_whitespace().collect();
+    let (n, m) = (a.len(), b.len());
+    // LCS-length table (row-major, (n+1) x (m+1)).
+    let mut lcs = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            lcs[i][j] = if a[i] == b[j] {
+                lcs[i + 1][j + 1] + 1
+            } else {
+                lcs[i + 1][j].max(lcs[i][j + 1])
+            };
+        }
+    }
+    // Backtrack into a Delete/Insert/Equal token stream.
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < n && j < m {
+        if a[i] == b[j] {
+            out.push((DiffTag::Equal, a[i].to_string()));
+            i += 1;
+            j += 1;
+        } else if lcs[i + 1][j] >= lcs[i][j + 1] {
+            out.push((DiffTag::Delete, a[i].to_string()));
+            i += 1;
+        } else {
+            out.push((DiffTag::Insert, b[j].to_string()));
+            j += 1;
+        }
+    }
+    while i < n {
+        out.push((DiffTag::Delete, a[i].to_string()));
+        i += 1;
+    }
+    while j < m {
+        out.push((DiffTag::Insert, b[j].to_string()));
+        j += 1;
+    }
+    out
+}
+
+/// The largest body pair (words on either side) the O(n*m) diff will run on, so a
+/// very long motion cannot wedge the tab. Past this the toggle is not offered.
+pub(crate) const MAX_DIFF_WORDS: usize = 3000;
+
+/// Whether a motion/amendment text pair is small enough to diff.
+pub(crate) fn diffable(original: &str, proposed: &str) -> bool {
+    !original.trim().is_empty()
+        && !proposed.trim().is_empty()
+        && original.split_whitespace().count() <= MAX_DIFF_WORDS
+        && proposed.split_whitespace().count() <= MAX_DIFF_WORDS
+}
+
+/// A word-level diff of an amendment against the original motion text: inserted
+/// words highlighted, removed words struck through, so what an amendment changes
+/// is legible inline without opening it and reading both side by side.
+#[component]
+fn AmendmentDiffView(original: String, proposed: String) -> Element {
+    let tokens = word_diff(&original, &proposed);
+    rsx! {
+        p { class: "amendment-diff-text",
+            for (i , (tag , word)) in tokens.iter().enumerate() {
+                span {
+                    key: "{i}",
+                    class: match tag {
+                        DiffTag::Insert => "diff-ins",
+                        DiffTag::Delete => "diff-del",
+                        DiffTag::Equal => "diff-eq",
+                    },
+                    "{word} "
                 }
             }
         }

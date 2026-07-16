@@ -2216,6 +2216,28 @@ select:focus {
 	margin-left: var(--md-sys-spacing-9);
 }
 
+/* Amendment word-level diff against the motion text. */
+.amendment-diff-toggle {
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+.amendment-diff-text {
+	line-height: 1.7;
+}
+.diff-ins {
+	background: color-mix(in srgb, var(--md-tertiary) 22%, transparent);
+	color: var(--md-on-surface);
+	border-radius: 3px;
+	padding: 0 2px;
+}
+.diff-del {
+	background: color-mix(in srgb, var(--md-error) 18%, transparent);
+	color: var(--md-on-surface-variant);
+	text-decoration: line-through;
+	border-radius: 3px;
+	padding: 0 2px;
+}
+
 .list-item {
 	position: relative;
 	display: flex;
