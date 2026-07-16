@@ -1,24 +1,16 @@
-//! The ballot-core durability WRITER (round-2 item 15): loops the exact
-//! atomic-cast transaction shape from the domain model (a unique-constrained
-//! dedup insert plus an append-only ballot insert under BEGIN IMMEDIATE)
-//! against a database file, until killed. The kill9 integration test spawns
-//! this binary, SIGKILLs it mid-write, and asserts post-crash atomicity.
-//!
-//! The tested shape is invariant under the coming dedup-key change (interim
-//! per-user marker becomes the token nullifier), so this harness transfers
-//! unchanged as the ballot core's durability suite.
+//! The ballot-core durability WRITER (round-2 item 15, rewrite kickoff item 12):
+//! loops the exact atomic-cast transaction the durable board runs (a
+//! UNIQUE-token dedup insert plus an append-only body insert under BEGIN
+//! IMMEDIATE) against a database file, until killed. It now writes the durable
+//! board's REAL schema (`ballot_store::BOARD_DDL`), so the kill9 integration
+//! test's post-crash atomicity assertions cover exactly the rows
+//! `PersistentBoard::cast` writes. The token here is a synthetic monotonic value
+//! (crash atomicity is orthogonal to signature verification, which the board's
+//! own unit tests cover with real crypto).
 //!
 //! Usage: durability-harness <engine: sqlite|turso> <db-path>
 
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS dedup (
-  txn_id INTEGER PRIMARY KEY
-);
-CREATE TABLE IF NOT EXISTS ballot (
-  txn_id  INTEGER NOT NULL,
-  choices TEXT NOT NULL
-);
-";
+use ballot_store::BOARD_DDL as SCHEMA;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -42,26 +34,31 @@ fn run_sqlite(path: &str) {
     conn.pragma_update(None, "synchronous", "FULL")
         .expect("sync full");
     conn.execute_batch(SCHEMA).expect("schema");
-    // Resume after the last committed txn (the test may respawn the writer).
+    // Resume after the last committed position (the test may respawn the writer).
     let start: i64 = conn
-        .query_row("SELECT coalesce(max(txn_id), 0) FROM dedup", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT coalesce(max(position), -1) FROM board_nullifier",
+            [],
+            |r| r.get(0),
+        )
         .expect("resume point");
-    let mut txn_id = start + 1;
+    let mut position = start + 1;
     loop {
         conn.execute_batch("BEGIN IMMEDIATE")
             .expect("begin immediate");
-        conn.execute("INSERT INTO dedup (txn_id) VALUES (?1)", [txn_id])
-            .expect("dedup insert");
         conn.execute(
-            "INSERT INTO ballot (txn_id, choices) VALUES (?1, '[0]')",
-            [txn_id],
+            "INSERT INTO board_nullifier (token, position) VALUES (?1, ?2)",
+            [position, position],
         )
-        .expect("ballot insert");
+        .expect("nullifier insert");
+        conn.execute(
+            "INSERT INTO board_body (position, body) VALUES (?1, '[0]')",
+            [position],
+        )
+        .expect("body insert");
         conn.execute_batch("COMMIT").expect("commit");
-        println!("{txn_id}");
-        txn_id += 1;
+        println!("{position}");
+        position += 1;
     }
 }
 
@@ -75,26 +72,32 @@ fn run_turso(path: &str) {
         let conn = db.connect().expect("connect");
         conn.execute_batch(SCHEMA).await.expect("schema");
         let mut rows = conn
-            .query("SELECT coalesce(max(txn_id), 0) FROM dedup", ())
+            .query(
+                "SELECT coalesce(max(position), -1) FROM board_nullifier",
+                (),
+            )
             .await
             .expect("resume q");
         let row = rows.next().await.expect("next").expect("row");
         let start: i64 = row.get(0).expect("max");
-        let mut txn_id = start + 1;
+        let mut position = start + 1;
         loop {
             conn.execute("BEGIN IMMEDIATE", ()).await.expect("begin");
-            conn.execute("INSERT INTO dedup (txn_id) VALUES (?1)", (txn_id,))
-                .await
-                .expect("dedup insert");
             conn.execute(
-                "INSERT INTO ballot (txn_id, choices) VALUES (?1, '[0]')",
-                (txn_id,),
+                "INSERT INTO board_nullifier (token, position) VALUES (?1, ?2)",
+                (position, position),
             )
             .await
-            .expect("ballot insert");
+            .expect("nullifier insert");
+            conn.execute(
+                "INSERT INTO board_body (position, body) VALUES (?1, '[0]')",
+                (position,),
+            )
+            .await
+            .expect("body insert");
             conn.execute("COMMIT", ()).await.expect("commit");
-            println!("{txn_id}");
-            txn_id += 1;
+            println!("{position}");
+            position += 1;
         }
     });
 }

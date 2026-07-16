@@ -312,6 +312,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ballot-store"
+version = "0.1.0"
+dependencies = [
+ "ballot-spec",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "turso",
+]
+
+[[package]]
 name = "base-x"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -935,6 +947,7 @@ dependencies = [
 name = "durability-harness"
 version = "0.1.0"
 dependencies = [
+ "ballot-store",
  "rusqlite",
  "tokio",
  "turso",

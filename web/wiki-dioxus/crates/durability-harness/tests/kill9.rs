@@ -25,29 +25,30 @@ fn crash_loop(engine: &str, path: &str, rounds: u32, run_ms: u64) {
     }
 }
 
-/// The atomicity assertion: every committed txn id has BOTH its dedup marker
-/// and its ballot row; no txn id has only one of them. Returns how many
-/// transactions survived (must be > 0 for the test to have exercised writes).
+/// The atomicity assertion: every committed board position has BOTH its
+/// nullifier (dedup) row and its body row; no position has only one of them.
+/// Returns how many entries survived (must be > 0 for the test to have exercised
+/// writes). These are exactly the rows `PersistentBoard::cast` writes.
 fn assert_atomic(conn: &rusqlite::Connection) -> i64 {
-    let orphan_markers: i64 = conn
+    let orphan_nullifiers: i64 = conn
         .query_row(
-            "SELECT count(*) FROM dedup d WHERE NOT EXISTS
-               (SELECT 1 FROM ballot b WHERE b.txn_id = d.txn_id)",
+            "SELECT count(*) FROM board_nullifier n WHERE NOT EXISTS
+               (SELECT 1 FROM board_body b WHERE b.position = n.position)",
             [],
             |r| r.get(0),
         )
-        .expect("orphan markers");
-    let orphan_ballots: i64 = conn
+        .expect("orphan nullifiers");
+    let orphan_bodies: i64 = conn
         .query_row(
-            "SELECT count(*) FROM ballot b WHERE NOT EXISTS
-               (SELECT 1 FROM dedup d WHERE d.txn_id = b.txn_id)",
+            "SELECT count(*) FROM board_body b WHERE NOT EXISTS
+               (SELECT 1 FROM board_nullifier n WHERE n.position = b.position)",
             [],
             |r| r.get(0),
         )
-        .expect("orphan ballots");
-    assert_eq!(orphan_markers, 0, "a dedup marker without its ballot");
-    assert_eq!(orphan_ballots, 0, "a ballot without its dedup marker");
-    conn.query_row("SELECT count(*) FROM dedup", [], |r| r.get(0))
+        .expect("orphan bodies");
+    assert_eq!(orphan_nullifiers, 0, "a nullifier without its body");
+    assert_eq!(orphan_bodies, 0, "a body without its nullifier");
+    conn.query_row("SELECT count(*) FROM board_nullifier", [], |r| r.get(0))
         .expect("count")
 }
 
@@ -110,7 +111,7 @@ fn turso_survives_kill9_and_bridges_to_stock_sqlite() {
             .expect("turso reopen");
         let tconn = db.connect().expect("connect");
         let mut rows = tconn
-            .query("SELECT count(*) FROM dedup", ())
+            .query("SELECT count(*) FROM board_nullifier", ())
             .await
             .expect("query");
         let row = rows.next().await.expect("next").expect("row");

@@ -7,3 +7,6 @@ edition = "2024"
 rusqlite = { version = "0.37", features = ["bundled"] }
 turso = "0.2"
 tokio = { version = "1", features = ["macros", "rt"] }
+# The writer loops the exact atomic dedup+append transaction the durable board
+# runs, against the board's real schema, so the kill-9 proof covers those rows.
+ballot-store = { path = "../ballot-store" }

@@ -7,6 +7,7 @@
 resolver = "2"
 members = [
     "ballot-spec",
+    "ballot-store",
     "schema",
     "dagcbor-spike",
     "durability-harness",
