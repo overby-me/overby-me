@@ -60,4 +60,16 @@
         mainProgram = "appview";
       };
     };
+
+  # The stateful systemd service module (a host imports this + enables it).
+  nixosModules.wiki-appview = ./nixos-module.nix;
+
+  # End-to-end VM test: the acceptance harness for the always-on process, too big
+  # for a derivation check (it boots a real VM behind Caddy and soaks a restart).
+  # `nix build .#checks.<system>.wiki-appview-e2e`.
+  checks.wiki-appview-e2e = pkgs:
+    import ./nixos-test.nix {
+      inherit pkgs;
+      wiki-appview = pkgs.wiki-appview or (throw "wiki-appview package not found");
+    };
 }
