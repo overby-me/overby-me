@@ -758,6 +758,33 @@ pub(crate) fn service_exit_handler(
                     "Oneshot service {} exited cleanly with RemainAfterExit=yes, staying active",
                     unit.id.name
                 );
+                // rust-systemd's activation is a forward walk with no global
+                // "a unit just became active, re-evaluate its waiters" pass. A
+                // oneshot that was started via a side path (e.g. udev re-
+                // activating device dependents) leaves units that Require=/Want=
+                // it stuck if they deferred while it was running. Re-attempt
+                // them now that this unit is active. In the initrd this is how
+                // sysroot.mount (Requires=systemd-fsck@<dev>) proceeds once the
+                // fsck oneshot completes, so the root gets mounted and the
+                // switch-root chain continues.
+                let waiters: Vec<crate::units::UnitId> = {
+                    let d = &unit.common.dependencies;
+                    let mut v = d.required_by.clone();
+                    for id in &d.wanted_by {
+                        if !v.contains(id) {
+                            v.push(id.clone());
+                        }
+                    }
+                    v
+                };
+                if !waiters.is_empty() {
+                    let arc = arc_run_info.clone();
+                    std::thread::spawn(move || {
+                        for w in waiters {
+                            let _ = crate::units::activate_needed_units(w, arc.clone());
+                        }
+                    });
+                }
                 return Ok((None, None));
             }
 
