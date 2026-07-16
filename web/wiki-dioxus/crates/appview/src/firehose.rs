@@ -24,9 +24,11 @@ pub const WIKI_COLLECTIONS: &[&str] = &[
     "com.example.wiki.post",
     "com.example.wiki.comment",
     "com.example.wiki.resolution",
+    "com.example.wiki.reaction",
 ];
 
 const POST_COLLECTION: &str = "com.example.wiki.post";
+const REACTION_COLLECTION: &str = "com.example.wiki.reaction";
 
 /// Live firehose status for `/healthz`: whether the socket is connected and how
 /// many events have been seen (a stalled firehose is connected-but-not-advancing,
@@ -94,11 +96,11 @@ impl From<serde_json::Error> for FirehoseError {
 /// commit, materialize it into the Turso view and return the change [`Delta`] to
 /// broadcast. Non-wiki / non-commit events return `None`.
 ///
-/// Materialization depth: the public `post` maps 1:1 to an entity table (author
-/// DID, text, createdAt), so it is upserted/deleted here. `comment` and
-/// `resolution` need subject->context resolution (a NOT NULL context) and are
-/// broadcast-only for now (a delta still fires so clients refetch); their
-/// materialization is a later slice.
+/// Materialization depth: the public `post` and `reaction` records map cleanly
+/// to entity tables (they carry the author/reactor DID + at-uri subjects), so
+/// they are upserted/deleted here. `comment` and `resolution` need subject->
+/// context resolution (a NOT NULL context) and are broadcast-only for now (a
+/// delta still fires so clients refetch); their materialization is a later slice.
 pub async fn ingest(store: &Store, raw: &str) -> Result<Option<Delta>, FirehoseError> {
     let event: JetstreamEvent = serde_json::from_str(raw)?;
     if event.kind != "commit" {
@@ -114,32 +116,50 @@ pub async fn ingest(store: &Store, raw: &str) -> Result<Option<Delta>, FirehoseE
     let uri = format!("at://{}/{}/{}", event.did, commit.collection, commit.rkey);
 
     match commit.operation.as_str() {
-        "create" | "update" => {
-            if commit.collection == POST_COLLECTION
-                && let Some(rec) = &commit.record
-            {
-                let text = rec.get("text").and_then(|v| v.as_str());
-                let created = rec.get("createdAt").and_then(|v| v.as_str());
-                // The lexicon requires text + createdAt; skip a malformed
-                // record's materialization but still emit the delta.
-                if let (Some(text), Some(created)) = (text, created) {
-                    let group = rec.get("group").and_then(|v| v.as_str());
-                    let reply = rec
-                        .get("reply")
-                        .and_then(|r| r.get("uri"))
-                        .and_then(|v| v.as_str());
-                    store.upsert_user_min(&event.did).await?;
-                    store
-                        .upsert_public_post(&uri, &event.did, text, group, reply, created)
-                        .await?;
+        "create" | "update" => match commit.collection.as_str() {
+            POST_COLLECTION => {
+                if let Some(rec) = &commit.record {
+                    let text = rec.get("text").and_then(|v| v.as_str());
+                    let created = rec.get("createdAt").and_then(|v| v.as_str());
+                    // The lexicon requires text + createdAt; skip a malformed
+                    // record's materialization but still emit the delta.
+                    if let (Some(text), Some(created)) = (text, created) {
+                        let group = rec.get("group").and_then(|v| v.as_str());
+                        let reply = rec
+                            .get("reply")
+                            .and_then(|r| r.get("uri"))
+                            .and_then(|v| v.as_str());
+                        store.upsert_user_min(&event.did).await?;
+                        store
+                            .upsert_public_post(&uri, &event.did, text, group, reply, created)
+                            .await?;
+                    }
                 }
             }
-        }
-        "delete" => {
-            if commit.collection == POST_COLLECTION {
-                store.delete_public_post(&uri).await?;
+            REACTION_COLLECTION => {
+                if let Some(rec) = &commit.record {
+                    let subject = rec
+                        .get("subject")
+                        .and_then(|s| s.get("uri"))
+                        .and_then(|v| v.as_str());
+                    let emoji = rec.get("emoji").and_then(|v| v.as_str());
+                    let created = rec.get("createdAt").and_then(|v| v.as_str());
+                    if let (Some(subject), Some(emoji), Some(created)) = (subject, emoji, created) {
+                        store.upsert_user_min(&event.did).await?;
+                        store
+                            .upsert_reaction(&uri, subject, &event.did, emoji, created)
+                            .await?;
+                    }
+                }
             }
-        }
+            // comment / resolution: broadcast-only (deferred materialization).
+            _ => {}
+        },
+        "delete" => match commit.collection.as_str() {
+            POST_COLLECTION => store.delete_public_post(&uri).await?,
+            REACTION_COLLECTION => store.delete_reaction(&uri).await?,
+            _ => {}
+        },
         _ => return Ok(None),
     }
 
@@ -333,6 +353,75 @@ mod tests {
             .unwrap();
         let n: i64 = c.next().await.unwrap().unwrap().get(0).unwrap();
         assert_eq!(n, 0, "comment materialization is deferred");
+    }
+
+    fn reaction_event(op: &str, rkey: &str, emoji: &str, subject: &str) -> String {
+        format!(
+            r#"{{"did":"did:plc:alice","kind":"commit","commit":{{"operation":"{op}","collection":"com.example.wiki.reaction","rkey":"{rkey}","record":{{"$type":"com.example.wiki.reaction","subject":{{"uri":"{subject}","cid":"bafy"}},"emoji":"{emoji}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
+        )
+    }
+
+    async fn count_reactions(db: &Db, sql: &str, arg: &str) -> i64 {
+        let conn = db.acquire().await.unwrap();
+        let mut rows = conn.query(sql, [arg]).await.unwrap();
+        rows.next().await.unwrap().unwrap().get(0).unwrap()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reaction_materializes_dedups_and_deletes() {
+        let (store, db) = store_with_db().await;
+        let subject = "at://did:plc:org/com.example.wiki.comment/k1";
+        let uri = "at://did:plc:alice/com.example.wiki.reaction/r1";
+
+        // A create materializes the reaction and returns a delta.
+        let delta = ingest(&store, &reaction_event("create", "r1", "👍", subject))
+            .await
+            .unwrap()
+            .expect("reaction delta");
+        assert_eq!(delta.collection, "com.example.wiki.reaction");
+        assert_eq!(delta.uri, uri);
+        assert_eq!(
+            count_reactions(&db, "SELECT count(*) FROM reaction WHERE id = ?1", uri).await,
+            1
+        );
+
+        // The same (subject, reactor, emoji) under a different record is deduped.
+        ingest(&store, &reaction_event("create", "r2", "👍", subject))
+            .await
+            .unwrap();
+        assert_eq!(
+            count_reactions(
+                &db,
+                "SELECT count(*) FROM reaction WHERE subject_uri = ?1",
+                subject
+            )
+            .await,
+            1,
+            "duplicate (subject, reactor, emoji) is idempotent"
+        );
+
+        // A different emoji from the same reactor is a distinct reaction.
+        ingest(&store, &reaction_event("create", "r3", "🎉", subject))
+            .await
+            .unwrap();
+        assert_eq!(
+            count_reactions(
+                &db,
+                "SELECT count(*) FROM reaction WHERE subject_uri = ?1",
+                subject
+            )
+            .await,
+            2
+        );
+
+        // A delete removes that reaction by its at-uri.
+        ingest(&store, &reaction_event("delete", "r1", "", subject))
+            .await
+            .unwrap();
+        assert_eq!(
+            count_reactions(&db, "SELECT count(*) FROM reaction WHERE id = ?1", uri).await,
+            0
+        );
     }
 
     #[test]

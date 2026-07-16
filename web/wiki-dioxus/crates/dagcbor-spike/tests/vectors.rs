@@ -169,7 +169,21 @@ fn known_answer_cids_for_the_content_records() {
         "bafyreibaxzqht56gehvdjg4qxfiowyxtpbyzck4jiybs763tme25psqkuq"
     );
 
-    // All three round-trip through decode unchanged.
+    let reaction = WikiReaction {
+        record_type: WikiReaction::NSID.into(),
+        subject: StrongRef {
+            uri: "at://did:plc:org/com.example.wiki.comment/k1".into(),
+            cid: "bafyreidykglsfhoixmivffc5uwhcgshx4j465xwqntbmu43nb2dzqwfvae".into(),
+        },
+        emoji: "👍".into(),
+        created_at: "2026-07-16T12:00:00.000Z".into(),
+    };
+    assert_eq!(
+        cid_of(&encode(&reaction).unwrap()).to_string(),
+        "bafyreicutzq4x2j4redrmqdq4c6sgeat32x2plryw4x2zhgev7p4f5blnu"
+    );
+
+    // All round-trip through decode unchanged.
     assert_eq!(
         decode::<WikiComment>(&encode(&comment).unwrap()).unwrap(),
         comment
@@ -177,6 +191,10 @@ fn known_answer_cids_for_the_content_records() {
     assert_eq!(
         decode::<WikiResolution>(&encode(&resolution).unwrap()).unwrap(),
         resolution
+    );
+    assert_eq!(
+        decode::<WikiReaction>(&encode(&reaction).unwrap()).unwrap(),
+        reaction
     );
 }
 

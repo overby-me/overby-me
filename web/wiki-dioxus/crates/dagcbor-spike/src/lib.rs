@@ -111,3 +111,22 @@ pub struct WikiResolution {
 impl WikiResolution {
     pub const NSID: &'static str = "com.example.wiki.resolution";
 }
+
+/// A record shaped like the drafted `com.example.wiki.reaction` lexicon: a
+/// member's emoji reaction to a public item, addressed by a strongRef. Strings
+/// and a ref only. `emoji` is a single grapheme cluster (may be a ZWJ sequence).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WikiReaction {
+    #[serde(rename = "$type")]
+    pub record_type: String,
+    /// The public record being reacted to.
+    pub subject: StrongRef,
+    /// The reaction emoji (one grapheme).
+    pub emoji: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+impl WikiReaction {
+    pub const NSID: &'static str = "com.example.wiki.reaction";
+}

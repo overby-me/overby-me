@@ -371,6 +371,57 @@ impl Store {
             .await?;
         Ok(())
     }
+
+    /// Materialize a public `com.example.wiki.reaction` record into the `reaction`
+    /// view, keyed by its at-uri. Idempotent: updates the row if the at-uri is
+    /// already present, and skips if the same `(subject, reactor, emoji)` triple
+    /// already exists under a different record (a redundant double-react).
+    pub async fn upsert_reaction(
+        &self,
+        uri: &str,
+        subject_uri: &str,
+        reactor_did: &str,
+        emoji: &str,
+        created_at: &str,
+    ) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        let updated = conn
+            .execute(
+                "UPDATE reaction SET subject_uri = ?1, reactor_did = ?2, emoji = ?3, created_at = ?4 \
+                 WHERE id = ?5",
+                [subject_uri, reactor_did, emoji, created_at, uri],
+            )
+            .await?;
+        if updated > 0 {
+            return Ok(());
+        }
+        // The unique (subject, reactor, emoji) already reacted (a different
+        // record with the same triple): idempotent no-op.
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM reaction WHERE subject_uri = ?1 AND reactor_did = ?2 AND emoji = ?3 LIMIT 1",
+                [subject_uri, reactor_did, emoji],
+            )
+            .await?;
+        if rows.next().await?.is_some() {
+            return Ok(());
+        }
+        conn.execute(
+            "INSERT INTO reaction (id, subject_uri, reactor_did, emoji, created_at, legacy_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?1)",
+            [uri, subject_uri, reactor_did, emoji, created_at],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Delete a reaction from the view by its at-uri (a firehose delete op).
+    pub async fn delete_reaction(&self, uri: &str) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("DELETE FROM reaction WHERE id = ?1", [uri])
+            .await?;
+        Ok(())
+    }
 }
 
 /// A nullable TEXT param: `Value::Text` or SQL NULL.

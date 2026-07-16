@@ -192,3 +192,19 @@ pub struct Comment {
     pub created_at: Option<String>,
     pub legacy_id: Option<String>,
 }
+
+/// An emoji reaction to a content item, addressed by the subject's at-uri.
+/// Net-new (no interim source); one per `(subject_uri, reactor_did, emoji)`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reaction {
+    /// The reaction record's at-uri (the primary key).
+    pub id: String,
+    /// The at-uri of the record being reacted to.
+    pub subject_uri: String,
+    /// The reactor's DID (`None` only for a not-yet-realized user).
+    pub reactor_did: Option<String>,
+    /// A single emoji grapheme.
+    pub emoji: String,
+    pub created_at: Option<String>,
+    pub legacy_id: Option<String>,
+}

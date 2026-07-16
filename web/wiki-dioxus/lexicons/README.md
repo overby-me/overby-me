@@ -15,6 +15,10 @@ Only entities that are meaningfully and safely publishable get a lexicon:
 - `com.example.wiki.statement`: a member's personal public statement.
 - `com.example.wiki.resolution`: the org's published outcome of a motion/election.
 - `com.example.wiki.comment`: a public comment on a public item.
+- `com.example.wiki.reaction`: a member's emoji reaction to a public item
+  (comment/post/resolution), addressed by a strongRef. One record per (reactor,
+  subject, emoji); deleting the record removes the reaction (toggle). Net-new (the
+  old wiki had no reactions), so it maps no legacy mime.
 - `com.example.wiki.group` / `com.example.wiki.event`: the opt-in-public container contexts. The
   group/event kind split is carried by the two NSIDs; a record exists only while the context is public.
 - `com.example.wiki.poll` / `com.example.wiki.ballotEntry`: the public poll announcement and the
