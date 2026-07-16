@@ -301,7 +301,6 @@ fn print_tree(node: &CgroupNode, prefix: &str, is_last: bool, is_root: bool, sho
     // Print child cgroups
     let child_count = visible_children.len();
     for (i, child) in visible_children.iter().enumerate() {
-        item_index += 1;
         let is_last_child = i == child_count - 1;
         print_tree(child, &child_prefix, is_last_child, false, show_empty);
     }

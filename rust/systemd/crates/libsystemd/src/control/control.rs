@@ -190,6 +190,16 @@ pub enum Command {
     Freeze(String),
     /// `thaw <unit>` — thaw a frozen unit's cgroup (resume all processes).
     Thaw(String),
+    /// `bind <unit> <source> <destination> [read-only] [mkdir]` — bind-mount
+    /// source onto destination inside the mount namespace of the running
+    /// service.  Used by `systemctl bind` to add BindPaths= at runtime.
+    Bind {
+        unit: String,
+        source: String,
+        destination: String,
+        read_only: bool,
+        mkdir: bool,
+    },
     /// `show-environment` — list the manager's environment variables.
     ShowEnvironment,
     /// `set-environment KEY=VALUE...` — set environment variables.
@@ -198,6 +208,32 @@ pub enum Command {
     UnsetEnvironment(Vec<String>),
     /// `import-environment KEY...` — import variables from the calling process.
     ImportEnvironment(Vec<String>),
+    /// `udev-event` — notification from systemd-udevd that a device event was
+    /// processed.  PID 1 uses this to create/activate/deactivate `.device`
+    /// units and fire dependencies like `BindsTo=sys-subsystem-net-devices-…`.
+    /// No response is sent back.
+    UdevEvent(UdevEventParams),
+}
+
+/// Parameters for the `udev-event` notification.
+#[derive(Debug, Clone)]
+pub struct UdevEventParams {
+    /// Kernel action: "add", "change", "remove", "move", "online", "offline", "bind", "unbind".
+    pub action: String,
+    /// Full sysfs path of the device (e.g. `/sys/devices/virtual/net/eth0`).
+    pub sysfs_path: String,
+    /// Primary device node (e.g. `/dev/sda1`) — empty for most sysfs-only devices.
+    pub devname: String,
+    /// Device subsystem (e.g. `net`, `block`, `tty`).
+    pub subsystem: String,
+    /// All udev env properties after rule processing, including `SYSTEMD_ALIAS=`,
+    /// `SYSTEMD_WANTS=`, `SYSTEMD_READY=`.
+    pub env: std::collections::HashMap<String, String>,
+    /// Merged sticky tag set for the device (includes `systemd` if
+    /// `TAG+="systemd"` ever fired for this device).
+    pub tags: Vec<String>,
+    /// Device nodes created from `SYMLINK+=` rules (e.g. `/dev/disk/by-uuid/…`).
+    pub symlinks: Vec<String>,
 }
 
 /// Parameters for creating a transient (in-memory) service unit.
@@ -240,6 +276,12 @@ pub struct TransientUnitParams {
     pub socket_properties: Vec<String>,
     /// Nice level for the spawned process.
     pub nice: Option<i32>,
+    /// File descriptors to pass to the service via LISTEN_FDS/LISTEN_FDNAMES.
+    /// Set from the D-Bus `ExtraFileDescriptors` property on StartTransientUnit.
+    /// Each entry is (raw_fd, name). The caller has already transferred
+    /// ownership: rust-systemd will NOT close these fds until the service
+    /// consumes them or the unit is removed.
+    pub extra_file_descriptors: Vec<(std::os::fd::RawFd, String)>,
 }
 
 #[derive(Debug)]
@@ -741,6 +783,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         path_properties,
                         socket_properties,
                         nice,
+                        extra_file_descriptors: Vec::new(),
                     })
                 }
                 Some(_) | None => {
@@ -1029,6 +1072,37 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             };
             Command::Thaw(name)
         }
+        "bind" => {
+            // params: { unit, source, destination, read_only, mkdir }
+            let obj = match &call.params {
+                Some(Value::Object(m)) => m,
+                _ => {
+                    return Err(ParseError::ParamsInvalid(
+                        "bind requires an object with unit/source/destination".to_string(),
+                    ));
+                }
+            };
+            let get_str = |k: &str| -> Result<String, ParseError> {
+                obj.get(k)
+                    .and_then(|v| v.as_str().map(|s| s.to_owned()))
+                    .ok_or_else(|| ParseError::ParamsInvalid(format!("bind: missing {k}")))
+            };
+            let unit = get_str("unit")?;
+            let source = get_str("source")?;
+            let destination = get_str("destination")?;
+            let read_only = obj
+                .get("read_only")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let mkdir = obj.get("mkdir").and_then(|v| v.as_bool()).unwrap_or(false);
+            Command::Bind {
+                unit,
+                source,
+                destination,
+                read_only,
+                mkdir,
+            }
+        }
         "show-environment" => Command::ShowEnvironment,
         "set-environment" => {
             let vars = match &call.params {
@@ -1062,6 +1136,72 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 Some(_) | None => vec![],
             };
             Command::ImportEnvironment(vars)
+        }
+        "udev-event" => {
+            let obj = match &call.params {
+                Some(Value::Object(o)) => o,
+                _ => {
+                    return Err(ParseError::ParamsInvalid(
+                        "udev-event requires an object".to_string(),
+                    ));
+                }
+            };
+            let action = obj
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let sysfs_path = obj
+                .get("sysfs_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let devname = obj
+                .get("devname")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let subsystem = obj
+                .get("subsystem")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let env = obj
+                .get("env")
+                .and_then(|v| v.as_object())
+                .map(|o| {
+                    o.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                        .collect::<std::collections::HashMap<_, _>>()
+                })
+                .unwrap_or_default();
+            let tags = obj
+                .get("tags")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let symlinks = obj
+                .get("symlinks")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Command::UdevEvent(UdevEventParams {
+                action,
+                sysfs_path,
+                devname,
+                subsystem,
+                env,
+                tags,
+                symlinks,
+            })
         }
         _ => {
             return Err(ParseError::MethodNotFound(format!(
@@ -1314,6 +1454,32 @@ fn find_sleep_binary() -> Option<std::path::PathBuf> {
     }
 
     None
+}
+
+/// Normalize `\xHH` hex escapes in an OpenFile= entry to lowercase,
+/// matching upstream systemd's canonical form.
+fn canonicalize_open_file(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && (bytes[i + 1] == b'x' || bytes[i + 1] == b'X')
+            && (bytes[i + 2] as char).is_ascii_hexdigit()
+            && (bytes[i + 3] as char).is_ascii_hexdigit()
+        {
+            out.push('\\');
+            out.push('x');
+            out.push((bytes[i + 2] as char).to_ascii_lowercase());
+            out.push((bytes[i + 3] as char).to_ascii_lowercase());
+            i += 4;
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
 }
 
 pub fn find_or_load_unit(
@@ -2048,6 +2214,93 @@ fn unit_status_marker(unit_name: &str, unit_table: &UnitTable) -> &'static str {
 /// Create or update an implicit slice unit with default properties and any applicable
 /// drop-in overrides. In systemd, slice units exist implicitly without a unit file.
 /// The description follows the pattern "Slice /a/b/c" where dashes become path separators.
+/// Create (or update) a transient slice unit.  Uses the same filesystem-
+/// dropin pipeline as `create_or_update_implicit_slice`, then merges the
+/// caller's D-Bus properties on top.
+fn create_transient_slice(
+    params: &TransientUnitParams,
+    run_info: &ArcMutRuntimeInfo,
+) -> Result<crate::units::UnitId, String> {
+    let slice_name = params.unit_name.clone();
+
+    // Apply the caller-provided properties first, then let
+    // `create_or_update_implicit_slice` apply filesystem dropins on top
+    // so dropins win for conflicting keys — matching upstream's
+    // "dropin-files override transient properties" semantic (15-dropin
+    // testcase_hierarchical_slice_dropins).  For non-conflicting keys
+    // (e.g. Description= when no dropin sets it) the transient value
+    // survives.
+    {
+        let mut ri_mut = run_info.write_poisoned();
+        create_or_update_implicit_slice(&slice_name, &mut ri_mut);
+        let unit = ri_mut
+            .unit_table
+            .values_mut()
+            .find(|u| u.id.name == slice_name)
+            .ok_or_else(|| format!("Transient slice {slice_name} not found after creation"))?;
+
+        // Transient values first — fill in fields the dropin didn't set.
+        if let Some(ref desc) = params.description
+            && unit.common.unit.description.is_empty()
+        {
+            unit.common.unit.description = desc.clone();
+        } else if let Some(ref desc) = params.description
+            && unit.common.unit.description.starts_with("Slice /")
+        {
+            // Synthetic default from create_or_update_implicit_slice —
+            // replace with the caller-specified one.
+            unit.common.unit.description = desc.clone();
+        }
+
+        // Always-accumulating list values.
+        for prop in &params.properties {
+            if let Some((k, v)) = prop.split_once('=')
+                && k == "Documentation"
+            {
+                for entry in v.split(|c: char| c.is_whitespace()) {
+                    let entry = entry.trim();
+                    if !entry.is_empty() {
+                        unit.common.unit.documentation.push(entry.to_owned());
+                    }
+                }
+            }
+        }
+
+        // Scalar cgroup/resource values — only set if the dropin didn't.
+        if let crate::units::Specific::Slice(ref mut slice) = unit.specific {
+            for prop in &params.properties {
+                if let Some((k, v)) = prop.split_once('=') {
+                    match k {
+                        "MemoryMax" if slice.conf.memory_max.is_none() => {
+                            slice.conf.memory_max = Some(parse_memory_limit(v))
+                        }
+                        "MemoryMin" if slice.conf.memory_min.is_none() => {
+                            slice.conf.memory_min = Some(parse_memory_limit(v))
+                        }
+                        "MemoryLow" if slice.conf.memory_low.is_none() => {
+                            slice.conf.memory_low = Some(parse_memory_limit(v))
+                        }
+                        "MemoryHigh" if slice.conf.memory_high.is_none() => {
+                            slice.conf.memory_high = Some(parse_memory_limit(v))
+                        }
+                        "MemorySwapMax" if slice.conf.memory_swap_max.is_none() => {
+                            slice.conf.memory_swap_max = Some(parse_memory_limit(v))
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Mark as transient so `systemctl show -P Transient` returns yes.
+        let transient_dir = std::path::Path::new("/run/systemd/transient");
+        let _ = std::fs::create_dir_all(transient_dir);
+        unit.common.unit.fragment_path = Some(transient_dir.join(&slice_name));
+
+        Ok(unit.id.clone())
+    }
+}
+
 fn create_or_update_implicit_slice(
     slice_name: &str,
     run_info: &mut crate::runtime_info::RuntimeInfo,
@@ -2257,9 +2510,32 @@ fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf])
                         _ => {}
                     }
                     match key {
-                        "Description" => {
-                            if !value.is_empty() {
-                                unit.common.unit.description = value.to_string();
+                        "Description" if !value.is_empty() => {
+                            unit.common.unit.description = value.to_string();
+                        }
+                        // StandardInputText= / StandardInputData= accumulate
+                        // across directives; an empty value resets the list.
+                        // These configure systemd to stream the given bytes
+                        // (or base64 bytes) into the service's stdin.  See
+                        // systemd.exec(5).
+                        "StandardInputText" => {
+                            if value.is_empty() {
+                                svc.conf.exec_config.standard_input_text.clear();
+                            } else {
+                                svc.conf
+                                    .exec_config
+                                    .standard_input_text
+                                    .push(value.to_string());
+                            }
+                        }
+                        "StandardInputData" => {
+                            if value.is_empty() {
+                                svc.conf.exec_config.standard_input_data.clear();
+                            } else {
+                                svc.conf
+                                    .exec_config
+                                    .standard_input_data
+                                    .push(value.to_string());
                             }
                         }
                         _ => {
@@ -2638,6 +2914,13 @@ fn create_transient_unit(
 
     let unit_name = &params.unit_name;
 
+    // Transient slice units (e.g. `busctl call Manager StartTransientUnit
+    // 'a-b-c.slice' ...`) reuse the implicit-slice creation path and then
+    // apply the caller-provided Description=/MemoryMax= etc. as overrides.
+    if unit_name.ends_with(".slice") {
+        return create_transient_slice(params, run_info);
+    }
+
     // Determine the service type.
     let srvc_type = match params.service_type.as_deref() {
         Some("simple") | None => ServiceType::Simple,
@@ -2651,19 +2934,42 @@ fn create_transient_unit(
         Some(other) => return Err(format!("Unknown service type: {other}")),
     };
 
-    // Build the main command from the command line.  This is appended to
-    // the ExecStart list AFTER any `-p ExecStart=` properties, so that
-    // for multi-ExecStart oneshot services the property-based commands run
-    // first and the trailing command is the main process.
-    let main_cmd: Option<Commandline> = params
+    // Build the main commands from the command line.  Matching upstream
+    // systemd-run, a literal `;` argument splits the command list into
+    // multiple ExecStart= entries (shell-escaped as `\;` on the invoking
+    // command line).  Used by tests like TEST-78-SIGQUEUE:
+    //   `systemd-run -p Type=notify -- env … systemd-notify --exec --ready \; sleep infinity`
+    let main_cmds: Vec<Commandline> = params
         .command
         .as_ref()
         .filter(|cmd_parts| !cmd_parts.is_empty())
-        .map(|cmd_parts| Commandline {
-            cmd: cmd_parts[0].clone(),
-            args: cmd_parts[1..].to_vec(),
-            prefixes: vec![],
-        });
+        .map(|cmd_parts| {
+            let mut cmds = Vec::new();
+            let mut current: Vec<String> = Vec::new();
+            for part in cmd_parts.iter() {
+                if part == ";" {
+                    if !current.is_empty() {
+                        cmds.push(Commandline {
+                            cmd: current[0].clone(),
+                            args: current[1..].to_vec(),
+                            prefixes: vec![],
+                        });
+                        current = Vec::new();
+                    }
+                } else {
+                    current.push(part.clone());
+                }
+            }
+            if !current.is_empty() {
+                cmds.push(Commandline {
+                    cmd: current[0].clone(),
+                    args: current[1..].to_vec(),
+                    prefixes: vec![],
+                });
+            }
+            cmds
+        })
+        .unwrap_or_default();
     let exec: Vec<Commandline> = Vec::new();
 
     // Ensure the transient directory exists for --pipe temp files.
@@ -3019,6 +3325,13 @@ fn create_transient_unit(
                 }
                 "DynamicUser" => {
                     service_conf.exec_config.dynamic_user = matches!(value, "yes" | "true" | "1");
+                }
+                "OpenFile" => {
+                    if value.is_empty() {
+                        service_conf.open_file.clear();
+                    } else {
+                        service_conf.open_file.push(canonicalize_open_file(value));
+                    }
                 }
                 "NotifyAccess" => {
                     notify_access_explicitly_set = true;
@@ -3768,10 +4081,27 @@ fn create_transient_unit(
                         Some(matches!(value, "yes" | "true" | "1"));
                 }
                 "CapabilityBoundingSet" => {
-                    service_conf
-                        .exec_config
-                        .capability_bounding_set
-                        .extend(value.split_whitespace().map(|s| s.to_string()));
+                    // systemd semantics: a leading `~` on the VALUE inverts
+                    // the whole line (every token becomes a deny).
+                    // `CapabilityBoundingSet=~CAP_SYS_TIME CAP_WAKE_ALARM`
+                    // drops both caps from the default full set, it does
+                    // NOT mean "keep only CAP_WAKE_ALARM and drop CAP_SYS_TIME".
+                    let trimmed = value.trim_start();
+                    let (invert, body) = if let Some(rest) = trimmed.strip_prefix('~') {
+                        (true, rest)
+                    } else {
+                        (false, trimmed)
+                    };
+                    service_conf.exec_config.capability_bounding_set.extend(
+                        body.split_whitespace().map(|s| {
+                            let stripped = s.strip_prefix('~').unwrap_or(s);
+                            if invert {
+                                format!("~{stripped}")
+                            } else {
+                                stripped.to_string()
+                            }
+                        }),
+                    );
                 }
                 "AmbientCapabilities" => {
                     service_conf
@@ -3800,6 +4130,26 @@ fn create_transient_unit(
                         "tty-fail" => crate::units::StandardInput::TtyFail,
                         _ => crate::units::StandardInput::Null,
                     };
+                }
+                "StandardInputText" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.standard_input_text.clear();
+                    } else {
+                        service_conf
+                            .exec_config
+                            .standard_input_text
+                            .push(value.to_string());
+                    }
+                }
+                "StandardInputData" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.standard_input_data.clear();
+                    } else {
+                        service_conf
+                            .exec_config
+                            .standard_input_data
+                            .push(value.to_string());
+                    }
                 }
                 "UtmpIdentifier" => {
                     service_conf.exec_config.utmp_identifier = if value.is_empty() {
@@ -3977,9 +4327,10 @@ fn create_transient_unit(
         service_conf.limit_nofile = read_default_limit_nofile();
     }
 
-    // Append the main command (from the trailing command line) after any
-    // `-p ExecStart=` property entries, so it runs last.
-    if let Some(cmd) = main_cmd {
+    // Append the main commands (from the trailing command line, possibly
+    // split on `;`) after any `-p ExecStart=` property entries, so they
+    // run last.
+    for cmd in main_cmds {
         service_conf.exec.push(cmd);
     }
 
@@ -4019,6 +4370,7 @@ fn create_transient_unit(
                 ignore_on_isolate: false,
                 default_instance: None,
                 allow_isolate: false,
+                stop_when_unneeded: false,
                 job_timeout_sec: None,
                 job_timeout_action: crate::units::UnitAction::None,
                 refuse_manual_start: false,
@@ -4061,6 +4413,8 @@ fn create_transient_unit(
             main_pid: std::sync::atomic::AtomicI32::new(0),
             main_exit_pid: std::sync::atomic::AtomicI32::new(0),
             main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+            runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+            watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
         },
         specific: Specific::Service(ServiceSpecific {
             conf: service_conf,
@@ -4081,7 +4435,11 @@ fn create_transient_unit(
                     notify_monotonic_usec: None,
                     invocation_id: None,
                     watchdog_usec_override: None,
-                    stored_fds: Vec::new(),
+                    stored_fds: params
+                        .extra_file_descriptors
+                        .iter()
+                        .map(|(fd, name)| (name.clone(), *fd))
+                        .collect(),
                     notify_access_override: None,
                     accepted_fd: None,
                     accepted_peer_uid: None,
@@ -4109,6 +4467,8 @@ fn create_transient_unit(
                     extend_timeout_usec: None,
                     extend_timeout_timestamp: None,
                     join_namespace_pid: None,
+                    helper_mount_ns: None,
+                    current_exec_argv: None,
                     manual_stop: false,
                 },
             }),
@@ -4270,6 +4630,7 @@ fn create_transient_unit(
                     ignore_on_isolate: false,
                     default_instance: None,
                     allow_isolate: false,
+                    stop_when_unneeded: false,
                     job_timeout_sec: None,
                     job_timeout_action: crate::units::UnitAction::None,
                     refuse_manual_start: false,
@@ -4312,6 +4673,8 @@ fn create_transient_unit(
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+                runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+                watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Timer(crate::units::TimerSpecific {
                 conf: timer_config,
@@ -4425,6 +4788,7 @@ fn create_transient_unit(
                     ignore_on_isolate: false,
                     default_instance: None,
                     allow_isolate: false,
+                    stop_when_unneeded: false,
                     job_timeout_sec: None,
                     job_timeout_action: crate::units::UnitAction::None,
                     refuse_manual_start: false,
@@ -4467,6 +4831,8 @@ fn create_transient_unit(
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+                runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+                watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Path(crate::units::PathSpecific {
                 conf: path_config,
@@ -4661,6 +5027,180 @@ fn parse_timespan(s: &str) -> Option<std::time::Duration> {
         Some(std::time::Duration::from_secs(total_secs))
     } else {
         None
+    }
+}
+
+/// Bind-mount `source` onto `destination` inside the mount namespace of the
+/// running service `unit`.  Used by both the control-socket `bind` command
+/// (invoked by `systemctl bind`) and the D-Bus `BindMountUnit` method.  A
+/// helper child enters the target's `/proc/<main_pid>/ns/mnt`, optionally
+/// creates the destination, and performs the bind.  Returns Ok on success
+/// or a human-readable error string otherwise.
+pub fn bind_mount_into_unit(
+    run_info: &ArcMutRuntimeInfo,
+    unit: &str,
+    source: &str,
+    destination: &str,
+    read_only: bool,
+    mkdir: bool,
+) -> Result<(), String> {
+    // Resolve the target's main PID and verify it's a service with a
+    // private mount namespace.
+    let main_pid = {
+        let ri = run_info.read_poisoned();
+        let found = ri
+            .unit_table
+            .values()
+            .find(|u| u.id.name == unit)
+            .ok_or_else(|| format!("Unit {unit} not found"))?;
+        let crate::units::Specific::Service(srvc) = &found.specific else {
+            return Err(format!("Unit {unit} is not a service — cannot bind-mount"));
+        };
+        let has_ns = srvc.conf.exec_config.private_tmp
+            || srvc.conf.exec_config.private_devices
+            || srvc.conf.exec_config.private_mounts
+            || srvc.conf.exec_config.private_users
+            || !srvc.conf.exec_config.bind_paths.is_empty()
+            || !srvc.conf.exec_config.bind_read_only_paths.is_empty()
+            || !srvc.conf.exec_config.read_only_paths.is_empty()
+            || !srvc.conf.exec_config.inaccessible_paths.is_empty();
+        if !has_ns {
+            return Err(format!(
+                "Unit {unit} has no private mount namespace — cannot live-mount"
+            ));
+        }
+        let pid = found
+            .common
+            .main_pid
+            .load(std::sync::atomic::Ordering::Acquire);
+        if pid <= 0 {
+            return Err(format!("Unit {unit} has no running main process"));
+        }
+        pid
+    };
+
+    let src_meta =
+        std::fs::metadata(source).map_err(|e| format!("source {source} not accessible: {e}"))?;
+    let src_is_dir = src_meta.is_dir();
+
+    use std::ffi::CString;
+    let src_c = CString::new(source).map_err(|e| format!("bad source: {e}"))?;
+    let dst_c = CString::new(destination).map_err(|e| format!("bad destination: {e}"))?;
+
+    // Use a pipe as a status channel.  PID 1's signal-hook thread reaps
+    // every SIGCHLD via signalfd, so a `waitpid(child_pid, ...)` here
+    // races and usually returns ECHILD before we can read the exit code.
+    // Instead the helper writes its result byte to the pipe before
+    // exiting; we read it from the parent.  EOF on the pipe means the
+    // helper died without writing (e.g. SIGKILL).
+    let mut pipe_fds: [libc::c_int; 2] = [-1, -1];
+    if unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return Err(format!(
+            "pipe for bind-mount helper failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let read_fd = pipe_fds[0];
+    let write_fd = pipe_fds[1];
+
+    match unsafe { libc::fork() } {
+        -1 => Err(format!(
+            "fork for bind-mount helper failed: {}",
+            std::io::Error::last_os_error()
+        )),
+        0 => {
+            unsafe { libc::close(read_fd) };
+            // Clear CLOEXEC on write_fd so it survives any future exec
+            // (defensive — we don't exec, but the parent does dup'ing
+            // tricks elsewhere).
+            unsafe {
+                let flags = libc::fcntl(write_fd, libc::F_GETFD);
+                libc::fcntl(write_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC);
+            }
+            let report = |code: u8| -> ! {
+                let buf = [code];
+                unsafe {
+                    libc::write(write_fd, buf.as_ptr() as *const libc::c_void, 1);
+                    libc::close(write_fd);
+                }
+                std::process::exit(code as i32);
+            };
+
+            let ns_path = format!("/proc/{main_pid}/ns/mnt");
+            let ns_file = match std::fs::File::open(&ns_path) {
+                Ok(f) => f,
+                Err(_) => report(11),
+            };
+            use std::os::unix::io::AsRawFd;
+            if unsafe { libc::setns(ns_file.as_raw_fd(), libc::CLONE_NEWNS) } != 0 {
+                report(12);
+            }
+
+            if mkdir {
+                if src_is_dir {
+                    let _ = std::fs::create_dir_all(destination);
+                } else if let Some(parent) = std::path::Path::new(destination).parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                    let _ = std::fs::File::create(destination);
+                } else {
+                    let _ = std::fs::File::create(destination);
+                }
+            }
+
+            let flags = (libc::MS_BIND | libc::MS_REC) as libc::c_ulong;
+            if unsafe {
+                libc::mount(
+                    src_c.as_ptr(),
+                    dst_c.as_ptr(),
+                    std::ptr::null(),
+                    flags,
+                    std::ptr::null(),
+                )
+            } != 0
+            {
+                report(13);
+            }
+            if read_only {
+                let remount = (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY) as libc::c_ulong;
+                if unsafe {
+                    libc::mount(
+                        std::ptr::null(),
+                        dst_c.as_ptr(),
+                        std::ptr::null(),
+                        remount,
+                        std::ptr::null(),
+                    )
+                } != 0
+                {
+                    report(14);
+                }
+            }
+            report(0);
+        }
+        _child_pid => {
+            unsafe { libc::close(write_fd) };
+            // Read the exit code byte the helper wrote before exit.  If
+            // the pipe closes without a byte, the helper died abnormally.
+            let mut buf = [0u8; 1];
+            let n = unsafe { libc::read(read_fd, buf.as_mut_ptr() as *mut libc::c_void, 1) };
+            unsafe { libc::close(read_fd) };
+            if n != 1 {
+                Err("bind-mount helper terminated abnormally".to_string())
+            } else {
+                match buf[0] {
+                    0 => Ok(()),
+                    11 => Err(format!("failed to open /proc/{main_pid}/ns/mnt")),
+                    12 => Err("setns(CLONE_NEWNS) failed".to_string()),
+                    13 => Err(format!(
+                        "bind mount {source} onto {destination} failed inside service namespace"
+                    )),
+                    14 => Err(format!(
+                        "read-only remount of {destination} failed inside service namespace"
+                    )),
+                    code => Err(format!("bind-mount helper exited with code {code}")),
+                }
+            }
+        }
     }
 }
 
@@ -6014,6 +6554,16 @@ pub fn execute_command(
             info!("clean {}: removed {:?}", unit_name, removed);
             return Ok(serde_json::json!({ "cleaned": unit_name }));
         }
+        Command::Bind {
+            ref unit,
+            ref source,
+            ref destination,
+            read_only,
+            mkdir,
+        } => {
+            bind_mount_into_unit(&run_info, unit, source, destination, read_only, mkdir)?;
+            return Ok(serde_json::json!({ "bound": unit }));
+        }
         Command::Freeze(ref unit_name) | Command::Thaw(ref unit_name) => {
             let freeze = matches!(cmd, Command::Freeze(_));
 
@@ -6080,14 +6630,38 @@ pub fn execute_command(
                     write_cgroup_freeze(&slice_cgroup, freeze);
                 }
 
-                // Recursively freeze/thaw child units in this slice
+                // Recursively freeze/thaw child units in this slice.
+                //
+                // We match children by two criteria so the recursive walk
+                // isn't defeated by an out-of-sync `conf.slice` field:
+                //  (a) `svc.conf.slice == slice_name` (primary path), or
+                //  (b) the service's own cgroup_path lives under the slice's
+                //      cgroup path (cgroup-hierarchy fallback).  Needed for
+                //      services whose conf.slice hasn't been updated yet
+                //      after a transient-unit create/recreate cycle.
                 let slice_name = unit_name.clone();
+                let slice_cgroup_root = crate::platform::cgroups::get_cgroup_root(
+                    &std::path::PathBuf::from("/sys/fs/cgroup"),
+                )
+                .ok()
+                .map(|root| {
+                    crate::units::from_parsed_config::slice_cgroup_path(&root, &slice_name)
+                });
                 for child_unit in ri.unit_table.values() {
                     let child_slice = match &child_unit.specific {
                         Specific::Service(svc) => svc.conf.slice.as_deref(),
                         _ => None,
                     };
-                    if child_slice != Some(&slice_name) {
+                    let matches_by_name = child_slice == Some(&slice_name);
+                    let matches_by_cgroup = !matches_by_name
+                        && slice_cgroup_root.is_some()
+                        && matches!(
+                            &child_unit.specific,
+                            Specific::Service(svc)
+                            if svc.conf.platform_specific.cgroup_path.starts_with(
+                                slice_cgroup_root.as_ref().unwrap())
+                        );
+                    if !matches_by_name && !matches_by_cgroup {
                         continue;
                     }
                     let child_status = child_unit.common.status.read_poisoned().clone();
@@ -6267,6 +6841,10 @@ pub fn execute_command(
                     env.insert(var.clone(), v);
                 }
             }
+            return Ok(serde_json::json!(null));
+        }
+        Command::UdevEvent(params) => {
+            crate::units::handle_udev_event(&run_info, &params);
             return Ok(serde_json::json!(null));
         }
         Command::ListTimers => {
@@ -6783,6 +7361,48 @@ pub fn execute_command(
                     props.insert("LimitNOFILESoft".to_string(), fmt(&rl.soft));
                 }
 
+                // Even for not-found units, reverse-dependency lookup
+                // still works in upstream systemd: a unit may be
+                // referenced by Wants=/Requires= edges from loaded
+                // units even if the target's own fragment is missing.
+                // This matters for SYSTEMD_WANTS= from udev rules that
+                // points at services that don't exist on disk.
+                let mut wanted_by = Vec::new();
+                let mut required_by = Vec::new();
+                let mut part_of_by = Vec::new();
+                let mut bound_by = Vec::new();
+                let mut upheld_by = Vec::new();
+                let mut conflicted_by = Vec::new();
+                for unit in ri.unit_table.values() {
+                    let matches_name = |id: &UnitId| id.name == full_name;
+                    let me_id = unit.id.clone();
+                    if unit.common.dependencies.wants.iter().any(matches_name) {
+                        wanted_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.requires.iter().any(matches_name) {
+                        required_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.part_of.iter().any(matches_name) {
+                        part_of_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.binds_to.iter().any(matches_name) {
+                        bound_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.upholds.iter().any(matches_name) {
+                        upheld_by.push(me_id.name.clone());
+                    }
+                    if unit.common.dependencies.conflicts.iter().any(matches_name) {
+                        conflicted_by.push(me_id.name.clone());
+                    }
+                }
+                let join_space = |v: &[String]| v.join(" ");
+                props.insert("WantedBy".to_string(), join_space(&wanted_by));
+                props.insert("RequiredBy".to_string(), join_space(&required_by));
+                props.insert("PartOfBy".to_string(), join_space(&part_of_by));
+                props.insert("BoundBy".to_string(), join_space(&bound_by));
+                props.insert("UpheldBy".to_string(), join_space(&upheld_by));
+                props.insert("ConflictedBy".to_string(), join_space(&conflicted_by));
+
                 let text = unit_properties::format_properties(&props, filter.as_deref());
                 return Ok(serde_json::json!({ "show": text }));
             }
@@ -7088,17 +7708,45 @@ pub fn execute_command(
                     out.push_str(&content);
                 }
 
-                // Also include drop-in files from .d and system.control directories
+                // Also include drop-in files from .d and system.control
+                // directories, following the same hierarchy rules as the
+                // loader: type-level ("service.d"), prefix-level
+                // ("a-.service.d", "a-b-.service.d"), and exact-name
+                // ("a-b-c.service.d") — from least to most specific.
                 let name = &unit.id.name;
-                let dropin_dirs = [
-                    format!("/etc/systemd/system/{name}.d"),
-                    format!("/run/systemd/system/{name}.d"),
-                    format!("/etc/systemd/system.control/{name}.d"),
-                    format!("/run/systemd/system.control/{name}.d"),
+                let base_dirs = [
+                    "/etc/systemd/system",
+                    "/run/systemd/system",
+                    "/usr/lib/systemd/system",
+                    "/etc/systemd/system.control",
+                    "/run/systemd/system.control",
                 ];
-                for dir in &dropin_dirs {
-                    let dir_path = std::path::Path::new(dir);
-                    if dir_path.is_dir() {
+                // Build the list of dropin directory *names* applicable to
+                // this unit, in order.
+                let mut dropin_dir_names: Vec<String> = Vec::new();
+                if let Some(type_suffix) = name.rsplit('.').next()
+                    && !type_suffix.is_empty()
+                {
+                    dropin_dir_names.push(format!("{type_suffix}.d"));
+                }
+                if let Some(dot_pos) = name.rfind('.') {
+                    let base = &name[..dot_pos];
+                    let suffix = &name[dot_pos..];
+                    let parts: Vec<&str> = base.split('-').collect();
+                    for i in 1..parts.len() {
+                        let prefix = parts[..i].join("-");
+                        dropin_dir_names.push(format!("{prefix}-{suffix}.d"));
+                    }
+                }
+                dropin_dir_names.push(format!("{name}.d"));
+
+                for base in &base_dirs {
+                    for dir_name in &dropin_dir_names {
+                        let dir = format!("{base}/{dir_name}");
+                        let dir_path = std::path::Path::new(&dir);
+                        if !dir_path.is_dir() {
+                            continue;
+                        }
                         let mut files: Vec<_> = std::fs::read_dir(dir_path)
                             .into_iter()
                             .flatten()
@@ -7117,6 +7765,22 @@ pub fn execute_command(
                 }
             }
             if out.is_empty() {
+                // Implicit / transient slice units have no fragment file.
+                // Emit a synthetic representation mirroring upstream's
+                // fallback so `systemctl cat a-b-c.slice` succeeds when no
+                // dropins are present.
+                if unit_name.ends_with(".slice") {
+                    let ri = run_info.read_poisoned();
+                    let unit = ri.unit_table.values().find(|u| u.id.name == *unit_name);
+                    if let Some(unit) = unit {
+                        let desc = unit.common.unit.description.clone();
+                        return Ok(serde_json::json!({
+                            "cat": format!(
+                                "# /run/systemd/system/{unit_name}\n[Unit]\nDescription={desc}\n\n[Slice]\n"
+                            )
+                        }));
+                    }
+                }
                 return Err(format!(
                     "No fragment path recorded for {unit_name} (unit may have been generated at runtime)"
                 ));
@@ -7175,7 +7839,7 @@ pub fn execute_command(
             }
 
             // Get ExecReload commands and the main PID for $MAINPID substitution
-            let (reload_cmds, main_pid, working_dir) =
+            let (reload_cmds, main_pid, working_dir, service_type) =
                 if let Specific::Service(svc) = &unit.specific {
                     let state = svc.state.read_poisoned();
                     let pid = state.srvc.main_pid.or(state.srvc.pid);
@@ -7183,12 +7847,36 @@ pub fn execute_command(
                         svc.conf.reload.clone(),
                         pid.map(i32::from),
                         svc.conf.exec_config.working_directory.clone(),
+                        svc.conf.srcv_type,
                     )
                 } else {
                     return Err(format!("Unit {unit_name} is not a service, cannot reload."));
                 };
 
-            if reload_cmds.is_empty() {
+            // Type=notify-reload: no ExecReload needed.  Send SIGHUP to
+            // the main PID — upstream systemd does the same (it writes
+            // RELOADING=1 / READY=1 around the reload).  TEST-17-UDEV
+            // exercises this via `systemctl reload systemd-udevd.service`.
+            let notify_reload_sighup =
+                matches!(service_type, crate::units::ServiceType::NotifyReload)
+                    && reload_cmds.is_empty();
+            if notify_reload_sighup {
+                let Some(pid) = main_pid else {
+                    return Err(format!(
+                        "Unit {unit_name} has no main PID, cannot send SIGHUP."
+                    ));
+                };
+                if unsafe { libc::kill(pid, libc::SIGHUP) } != 0 {
+                    let err = std::io::Error::last_os_error();
+                    return Err(format!(
+                        "Failed to send SIGHUP to {unit_name} (pid {pid}): {err}"
+                    ));
+                }
+                result_vec
+                    .as_array_mut()
+                    .unwrap()
+                    .push(Value::String(format!("Reloaded {unit_name}")));
+            } else if reload_cmds.is_empty() {
                 return Err(format!(
                     "Job for {unit_name} failed because the unit does not support reload."
                 ));
@@ -7560,7 +8248,22 @@ pub fn execute_command(
             }
             // Try to find the unit in memory, or load it from disk.
             match find_or_load_unit(&unit_name, &run_info) {
-                Err(_) => return Err(format!("Unit {unit_name} not found.")),
+                Err(_) => {
+                    // For .device units specifically, upstream systemd
+                    // reports `inactive` (exit 3) for unknown device
+                    // names rather than `not-found` (exit 4), because
+                    // a device unit name can be constructed for any
+                    // plausible path even if the device doesn't exist.
+                    // TEST-17-UDEV.SYSTEMD_ALIAS relies on this via
+                    // `assert_rc 3 systemctl is-active
+                    // /dev/test/symlink-to-null-on-change` for a path
+                    // whose alias unit only materialises on `change`
+                    // events.
+                    if unit_name.ends_with(".device") {
+                        return Ok(serde_json::json!("inactive"));
+                    }
+                    return Err(format!("Unit {unit_name} not found."));
+                }
                 Ok(id) => {
                     let ri = run_info.read_poisoned();
                     let unit = ri
@@ -7610,7 +8313,11 @@ pub fn execute_command(
                 }
             }
             match found_path {
-                None => return Err(format!("Unit {unit_name} not found.")),
+                // Matching upstream `systemctl is-enabled <missing>`: return
+                // "not-found" (no error) so callers can branch on the state
+                // string.  Tests like TEST-17-UDEV.credentials early-exit
+                // when a dependent service is missing, and rely on this.
+                None => return Ok(serde_json::json!("not-found")),
                 Some(path) => {
                     let state =
                         unit_file_state(&unit_name, &ri.unit_table, &path, &ri.config.unit_dirs);
@@ -7667,6 +8374,25 @@ pub fn execute_command(
 
             for unit_name in &actual_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
+
+                // Capture restart counter BEFORE activation begins.
+                // The exit handler can increment n_restarts as soon as the
+                // first activation attempt fails (e.g. for Restart=always
+                // services where the first ExecStart exits non-zero).
+                // Capturing after activate_needed_units would miss this
+                // initial failure because the restart could have already
+                // happened and bumped n_restarts.
+                let initial_restarts = {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table
+                        .get(&id)
+                        .map(|u| {
+                            u.common
+                                .n_restarts
+                                .load(std::sync::atomic::Ordering::Relaxed)
+                        })
+                        .unwrap_or(0)
+                };
 
                 // If this unit was part of a broken ordering cycle, record a
                 // per-start transaction ID.  Upstream systemd detects cycles
@@ -7995,21 +8721,10 @@ pub fn execute_command(
                 // still be in Starting state.  Poll until it leaves Starting
                 // (either becomes Started after READY=1 or fails/stops).
                 if is_notify {
-                    // Capture restart counter at the start of polling.
+                    // initial_restarts was captured above before activation.
                     // If it increases during polling, the initial start
                     // attempt failed and was restarted — report failure
                     // to match C systemd's job tracking behavior.
-                    let initial_restarts = {
-                        let ri = run_info.read_poisoned();
-                        ri.unit_table
-                            .get(&id)
-                            .map(|u| {
-                                u.common
-                                    .n_restarts
-                                    .load(std::sync::atomic::Ordering::Relaxed)
-                            })
-                            .unwrap_or(0)
-                    };
                     // Use the service's TimeoutStartSec (default 90s) for
                     // the polling deadline.  This ensures `systemctl start`
                     // returns promptly when a short timeout is configured
@@ -8798,13 +9513,64 @@ pub fn execute_command(
             }
 
             // Remove units whose files no longer exist on disk.
-            // Skip transient units (no file path) — they only exist at runtime.
+            // Skip transient units — they only exist at runtime.  A unit
+            // is transient if it has no fragment_path OR its fragment_path
+            // lives under /run/systemd/transient (where busctl/systemd-run
+            // write synthetic config for on-the-fly units).  Also skip any
+            // unit that is currently `Started`/`Starting`/`Restarting` so a
+            // user who moves the .service file aside between runs can still
+            // observe `is-active` returning success — matches upstream
+            // systemd's TEST-07-PID1.issue-3171 expectation that a running
+            // socket survives daemon-reload after its on-disk file moves
+            // to `.disabled`.
             let mut removed_units_names = Vec::new();
             let stale_ids: Vec<_> = run_info
                 .unit_table
                 .iter()
                 .filter(|(_, unit)| {
-                    !fresh_names.contains(&unit.id.name) && unit.common.unit.fragment_path.is_some()
+                    if fresh_names.contains(&unit.id.name) {
+                        return false;
+                    }
+                    let status = unit.common.status.read_poisoned();
+                    if matches!(
+                        &*status,
+                        UnitStatus::Started(_) | UnitStatus::Starting | UnitStatus::Restarting
+                    ) {
+                        return false;
+                    }
+                    drop(status);
+                    match &unit.common.unit.fragment_path {
+                        None => false,
+                        Some(p) => {
+                            if p.starts_with("/run/systemd/transient") {
+                                return false;
+                            }
+                            // Keep template instances alive whenever the
+                            // backing template is still on disk — daemon-
+                            // reload's disk scan doesn't re-enumerate
+                            // instances (it only parses the template), so
+                            // purging them would lose state for units that
+                            // were instantiated on-demand via
+                            // find_or_load_unit.  TEST-15-DROPIN
+                            // testcase_template_alias depends on this so
+                            // the forward-loaded test15-a@inst.service
+                            // survives the daemon-reload that precedes the
+                            // reverse check.
+                            if let Some((template_name, _)) =
+                                crate::units::loading::directory_deps::parse_template_instance(
+                                    &unit.id.name,
+                                )
+                                && run_info
+                                    .config
+                                    .unit_dirs
+                                    .iter()
+                                    .any(|d| d.join(&template_name).exists())
+                            {
+                                return false;
+                            }
+                            true
+                        }
+                    }
                 })
                 .map(|(id, _)| id.clone())
                 .collect();
@@ -8823,15 +9589,78 @@ pub fn execute_command(
                     .cloned();
                 if let Some(existing_id) = existing_id {
                     if let Some(existing_unit) = run_info.unit_table.get_mut(&existing_id) {
+                        // Transient units live only at runtime; their
+                        // authoritative [Unit] config (Description=, etc.)
+                        // came from the StartTransientUnit call, not from
+                        // disk.  When daemon-reload re-parses disk and
+                        // synthesizes an implicit-slice match by name, do
+                        // not clobber the transient [Unit] section or
+                        // dependencies — UNLESS a real fragment file has
+                        // since appeared on disk, in which case the disk
+                        // fragment wins and the unit stops being transient.
+                        let is_transient_existing = existing_unit
+                            .common
+                            .unit
+                            .fragment_path
+                            .as_ref()
+                            .is_some_and(|p| p.starts_with("/run/systemd/transient"));
+                        let has_disk_fragment = new_unit
+                            .common
+                            .unit
+                            .fragment_path
+                            .as_ref()
+                            .is_some_and(|p| {
+                                !p.starts_with("/run/systemd/transient")
+                                    && std::fs::metadata(p).is_ok()
+                            });
+                        let preserve_transient = is_transient_existing && !has_disk_fragment;
                         // Update configuration but preserve runtime status
                         // (PIDs, restart counts, etc.) by only replacing conf.
                         existing_unit.specific.update_config_from(new_unit.specific);
-                        existing_unit.common.unit = new_unit.common.unit;
-                        existing_unit.common.dependencies = new_unit.common.dependencies;
+                        if !preserve_transient {
+                            existing_unit.common.unit = new_unit.common.unit;
+                            existing_unit.common.dependencies = new_unit.common.dependencies;
+                        }
                         updated_units_names.push(Value::String(existing_id.name.clone()));
                     }
                 } else {
                     ignored_units_names.push(Value::String(new_id.name.clone()));
+                }
+            }
+
+            // Re-apply filesystem dropins to transient slices so new
+            // dropin files in /run/systemd/system/ (or /etc/) are picked
+            // up on reload.  Transient service units already pick up
+            // dropins via `apply_dropins_to_transient` during their
+            // creation path; slices use the implicit-slice path which we
+            // re-invoke here.
+            let transient_slices: Vec<(String, crate::units::UnitConfig)> = run_info
+                .unit_table
+                .values()
+                .filter(|u| {
+                    u.id.name.ends_with(".slice")
+                        && u.common
+                            .unit
+                            .fragment_path
+                            .as_ref()
+                            .map(|p| p.starts_with("/run/systemd/transient"))
+                            .unwrap_or(false)
+                })
+                .map(|u| (u.id.name.clone(), u.common.unit.clone()))
+                .collect();
+            for (name, saved_unit_section) in transient_slices {
+                create_or_update_implicit_slice(&name, run_info);
+                // Restore transient [Unit] section fields (Description,
+                // Documentation, etc.) that were set via StartTransientUnit
+                // — the implicit-slice helper rebuilds from a synthetic
+                // default that would otherwise clobber them.  Also re-pin
+                // the fragment_path to /run/systemd/transient/ (the helper
+                // resets it to /run/systemd/system/...).
+                if let Some(unit) = run_info.unit_table.values_mut().find(|u| u.id.name == name) {
+                    unit.common.unit = saved_unit_section;
+                    unit.common.unit.fragment_path = Some(std::path::PathBuf::from(format!(
+                        "/run/systemd/transient/{name}"
+                    )));
                 }
             }
 
@@ -9190,6 +10019,7 @@ mod tests {
                     ignore_on_isolate: false,
                     default_instance: None,
                     allow_isolate: false,
+                    stop_when_unneeded: false,
                     job_timeout_sec: None,
                     job_timeout_action: crate::units::UnitAction::None,
                     refuse_manual_start: false,
@@ -9232,6 +10062,8 @@ mod tests {
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+                runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+                watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Target(TargetSpecific {
                 state: RwLock::new(TargetState {
@@ -11055,6 +11887,7 @@ mod tests {
             path_properties: Vec::new(),
             socket_properties: Vec::new(),
             nice: None,
+            extra_file_descriptors: Vec::new(),
         };
         let debug = format!("{params:?}");
         assert!(debug.contains("run-test.service"));
@@ -11090,6 +11923,7 @@ mod tests {
             path_properties: Vec::new(),
             socket_properties: Vec::new(),
             nice: None,
+            extra_file_descriptors: Vec::new(),
         };
         let cloned = params.clone();
         assert_eq!(cloned.unit_name, params.unit_name);

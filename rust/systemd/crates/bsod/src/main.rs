@@ -302,7 +302,7 @@ fn main() {
     // Install signal handlers without SA_RESTART so read() gets interrupted
     unsafe {
         let mut sa: libc::sigaction = std::mem::zeroed();
-        sa.sa_sigaction = signal_handler as usize;
+        sa.sa_sigaction = signal_handler as extern "C" fn(libc::c_int) as libc::sighandler_t;
         sa.sa_flags = 0; // No SA_RESTART
         libc::sigemptyset(&mut sa.sa_mask);
         libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());

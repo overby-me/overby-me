@@ -411,12 +411,33 @@ pub fn resolve_symlink_aliases(
             }
 
             // Find all instances of the alias template in the unit table.
+            // Skip instances that have an *instance-level* symlink override
+            // pointing at a DIFFERENT target than the template-level alias —
+            // these redirect to a different unit (e.g. bar-alias@2.service
+            // -> yup@.service overrides bar-alias@.service -> bar@.service
+            // so bar-alias@2 is yup@2, not bar@2).  Handled separately in
+            // instantiate_template_units.
             let alias_instances: Vec<UnitId> = unit_table
                 .keys()
                 .filter(|id| {
-                    id.name.starts_with(alias_prefix)
+                    if !(id.name.starts_with(alias_prefix)
                         && id.name.ends_with(alias_suffix)
-                        && !is_template_unit(&id.name)
+                        && !is_template_unit(&id.name))
+                    {
+                        return false;
+                    }
+                    // Check for instance-level symlink override.  If the
+                    // instance's file is a symlink whose target differs from
+                    // alias_template (the template-level symlink target),
+                    // this instance is NOT part of the template alias chain.
+                    let has_different_target = unit_dirs.iter().any(|d| {
+                        let p = d.join(&id.name);
+                        std::fs::read_link(&p)
+                            .ok()
+                            .and_then(|t| t.file_name().map(|f| f.to_string_lossy().to_string()))
+                            .is_some_and(|tname| tname != *real_template)
+                    });
+                    !has_different_target
                 })
                 .cloned()
                 .collect();
@@ -1149,15 +1170,36 @@ pub fn apply_dropins(
 
         match new_unit {
             Ok(mut unit) => {
-                // Record the drop-in file paths for NeedDaemonReload detection.
-                let dropin_dirname = format!("{}.d", unit_name);
+                // Record the drop-in file paths for NeedDaemonReload
+                // detection and `systemctl show -P DropInPaths`. Match the
+                // loader hierarchy: type-level, hierarchical prefixes, and
+                // exact-name.
+                let mut candidate_dirnames: Vec<String> = Vec::new();
+                if let Some(type_suffix) = unit_name.rsplit('.').next()
+                    && !type_suffix.is_empty()
+                {
+                    candidate_dirnames.push(format!("{type_suffix}.d"));
+                }
+                if let Some(dot_pos) = unit_name.rfind('.') {
+                    let base = &unit_name[..dot_pos];
+                    let suffix = &unit_name[dot_pos..];
+                    let parts: Vec<&str> = base.split('-').collect();
+                    for i in 1..parts.len() {
+                        let prefix = parts[..i].join("-");
+                        candidate_dirnames.push(format!("{prefix}-{suffix}.d"));
+                    }
+                }
+                candidate_dirnames.push(format!("{unit_name}.d"));
+
                 let mut dropin_files = Vec::new();
                 for dir in unit_dirs {
-                    let dropin_dir = dir.join(&dropin_dirname);
-                    if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
-                        for entry in entries.flatten() {
-                            if entry.file_name().to_string_lossy().ends_with(".conf") {
-                                dropin_files.push(entry.path());
+                    for dropin_dirname in &candidate_dirnames {
+                        let dropin_dir = dir.join(dropin_dirname);
+                        if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
+                            for entry in entries.flatten() {
+                                if entry.file_name().to_string_lossy().ends_with(".conf") {
+                                    dropin_files.push(entry.path());
+                                }
                             }
                         }
                     }
@@ -1190,9 +1232,23 @@ pub fn apply_directory_dependencies(
     let effective_deps = resolve_masked_dir_deps(dir_deps);
 
     for dep in &effective_deps {
-        // Find the parent unit
-        let parent_id = match unit_table.keys().find(|id| id.name == dep.parent_unit) {
-            Some(id) => id.clone(),
+        // Find the parent unit — by primary id.name OR by alias.
+        // TEST-15-DROPIN.testcase_template_dropins uses a template-level
+        // symlink alias (bar-alias@.service -> bar@.service) plus an
+        // alias-instance .requires/ directory (bar-alias@0.service.requires/),
+        // and expects the Requires= drop-in to land on the resolved
+        // unit (bar@0.service).  Without the alias fallback we'd silently
+        // drop these deps because no unit is literally named
+        // "bar-alias@0.service" in the table.
+        let parent_id = match unit_table
+            .values()
+            .find(|u| {
+                u.id.name == dep.parent_unit
+                    || u.common.unit.aliases.iter().any(|a| a == &dep.parent_unit)
+            })
+            .map(|u| u.id.clone())
+        {
+            Some(id) => id,
             None => {
                 trace!(
                     "Directory dependency: parent unit {} not found, skipping",
@@ -1458,6 +1514,28 @@ pub fn instantiate_template_units(
             }
             instances_to_create.push((dep.child_unit.clone(), template_name, instance_name));
         }
+
+        // Also instantiate template-instance PARENTS of directory deps.
+        // TEST-15-DROPIN.testcase_template_dropins creates
+        // bar-alias@3.service.requires/ where bar-alias@.service → bar@.service
+        // (template-level symlink) and the parent template instance
+        // (bar-alias@3) needs to exist in the table for the .requires/
+        // dir to wire up correctly — even if no other code path loads it.
+        let parent_id: UnitId = match dep.parent_unit.as_str().try_into() {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+        if unit_table.contains_key(&parent_id) {
+            continue;
+        }
+        if let Some((template_name, instance_name)) = parse_template_instance(&dep.parent_unit)
+            && !instances_to_create
+                .iter()
+                .any(|(n, _, _)| n == &dep.parent_unit)
+            && !has_unresolved_specifiers(&instance_name)
+        {
+            instances_to_create.push((dep.parent_unit.clone(), template_name, instance_name));
+        }
     }
 
     // Also check for template instances referenced in Wants=/Requires= of existing units
@@ -1498,10 +1576,85 @@ pub fn instantiate_template_units(
 
     // Instantiate each template
     for (instance_unit_name, template_name, instance_name) in &instances_to_create {
+        // Resolve instance-level symlink override.  If
+        // /etc/systemd/system/bar-alias@2.service is a symlink to
+        // yup@.service (template) or yup@3.service (concrete instance),
+        // bar-alias@2 is effectively an alias of yup@2 (instance mapped
+        // across) or yup@3 (whatever the symlink points at).  We make
+        // the unit's primary id.name be the RESOLVED name (yup@2 /
+        // yup@3) and add the symlink name (bar-alias@2) as an alias, so
+        // dir-deps keyed on either name land on the same unit.  If the
+        // resolved unit already exists, skip and let the existing code
+        // path register the alias via find_symlink_aliases.
+        // TEST-15-DROPIN.testcase_template_dropins exercises both forms.
+        let instance_override = unit_dirs.iter().find_map(|d| {
+            let p = d.join(instance_unit_name);
+            std::fs::read_link(&p).ok().and_then(|t| {
+                let tname = t.file_name()?.to_string_lossy().to_string();
+                if tname.contains("@.") {
+                    // Symlink to a template: derive yup@<instance>.service
+                    // using the bar-alias@<N>.service's own instance.
+                    let (prefix, suffix) = tname.split_once("@.")?;
+                    let resolved = format!("{prefix}@{instance_name}.{suffix}");
+                    Some((tname, instance_name.clone(), resolved))
+                } else if let Some((t_tmpl, t_inst)) = parse_template_instance(&tname) {
+                    // Symlink to a concrete instance: use that instance.
+                    Some((t_tmpl, t_inst, tname))
+                } else {
+                    None
+                }
+            })
+        });
+        let (template_name, instance_name, effective_instance_unit_name, alias_name) =
+            if let Some((eff_tmpl, eff_inst, eff_name)) = instance_override {
+                (
+                    eff_tmpl,
+                    eff_inst,
+                    eff_name,
+                    Some(instance_unit_name.clone()),
+                )
+            } else {
+                (
+                    template_name.clone(),
+                    instance_name.clone(),
+                    instance_unit_name.clone(),
+                    None,
+                )
+            };
+        let instance_unit_name = &effective_instance_unit_name;
+        let template_name = &template_name;
+        let instance_name = &instance_name;
+
         trace!(
             "Instantiating template {} with instance {} -> {}",
             template_name, instance_name, instance_unit_name
         );
+
+        // Remove any orphan unit created by parse_all_units from the
+        // original symlink name (bar-alias@2.service parsed directly via
+        // fs::read_to_string follow-symlink).  The canonical unit under
+        // the resolved identity (yup@2.service) takes its place.
+        if let Some(alias) = &alias_name {
+            let orphan_id = unit_table
+                .values()
+                .find(|u| u.id.name == *alias)
+                .map(|u| u.id.clone());
+            if let Some(orphan_id) = orphan_id {
+                unit_table.remove(&orphan_id);
+            }
+        }
+
+        // If the resolved unit is already in the table, just add the
+        // alias name to it and skip re-instantiating.
+        if let Some(existing) = unit_table
+            .values_mut()
+            .find(|u| u.id.name == *instance_unit_name)
+            && let Some(alias) = &alias_name
+            && !existing.common.unit.aliases.contains(alias)
+        {
+            existing.common.unit.aliases.push(alias.clone());
+            continue;
+        }
 
         if let Some(mut unit) = instantiate_template(
             template_name,
@@ -1510,6 +1663,11 @@ pub fn instantiate_template_units(
             unit_dirs,
             dropins,
         ) {
+            if let Some(alias) = &alias_name
+                && !unit.common.unit.aliases.contains(alias)
+            {
+                unit.common.unit.aliases.push(alias.clone());
+            }
             // Discover template-level aliases (e.g. bar-alias@0.service
             // for bar@0.service when bar-alias@.service → bar@.service).
             let unit_path = unit_dirs
@@ -1543,8 +1701,18 @@ pub fn instantiate_template_units(
 
     // Now re-apply directory dependencies for newly instantiated units
     for dep in dir_deps {
-        let parent_id = match unit_table.keys().find(|id| id.name == dep.parent_unit) {
-            Some(id) => id.clone(),
+        // Resolve parent by primary id.name OR by alias — same fallback
+        // as `apply_directory_dependencies` above; see that comment for
+        // why this matters for template-alias .requires/ dirs.
+        let parent_id = match unit_table
+            .values()
+            .find(|u| {
+                u.id.name == dep.parent_unit
+                    || u.common.unit.aliases.iter().any(|a| a == &dep.parent_unit)
+            })
+            .map(|u| u.id.clone())
+        {
+            Some(id) => id,
             None => continue,
         };
 
@@ -1805,6 +1973,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                         job_timeout_action: Default::default(),
                         job_timeout_sec: None,
                         allow_isolate: false,
+                        stop_when_unneeded: false,
                         refuse_manual_start: false,
                         refuse_manual_stop: false,
                         on_success: Vec::new(),
@@ -1846,6 +2015,8 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     main_pid: std::sync::atomic::AtomicI32::new(0),
                     main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                     main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+                    runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+                    watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
                 },
                 specific: Specific::Swap(SwapSpecific {
                     conf: SwapConfig {
@@ -1979,6 +2150,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     job_timeout_action: Default::default(),
                     job_timeout_sec: None,
                     allow_isolate: false,
+                    stop_when_unneeded: false,
                     refuse_manual_start: false,
                     refuse_manual_stop: false,
                     on_success: Vec::new(),
@@ -2020,6 +2192,8 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+                runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+                watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Mount(MountSpecific {
                 conf: MountConfig {
@@ -2349,6 +2523,52 @@ mod tests {
     }
 
     #[test]
+    fn test_collect_applicable_dropins_type_level() {
+        // Type-level dropin "service.d" should apply to all .service units
+        let mut dropins: HashMap<String, Vec<(String, String)>> = HashMap::new();
+        dropins.insert(
+            "service".to_owned(),
+            vec![(
+                "override.conf".to_owned(),
+                "[Service]\nExecCondition=echo %n\n".to_owned(),
+            )],
+        );
+        let result = collect_applicable_dropins("test15-a.service", &dropins);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "override.conf");
+        assert!(
+            result[0].1.contains("ExecCondition=echo test15-a.service"),
+            "Expected %n resolution to unit name, got: {}",
+            result[0].1
+        );
+    }
+
+    #[test]
+    fn test_collect_applicable_dropins_hierarchy() {
+        // All three tiers should apply in order: type, prefix, exact
+        let mut dropins: HashMap<String, Vec<(String, String)>> = HashMap::new();
+        dropins.insert(
+            "service".to_owned(),
+            vec![("10.conf".to_owned(), "TYPE\n".to_owned())],
+        );
+        dropins.insert(
+            "a-.service".to_owned(),
+            vec![("20.conf".to_owned(), "A-PREFIX\n".to_owned())],
+        );
+        dropins.insert(
+            "a-b-.service".to_owned(),
+            vec![("30.conf".to_owned(), "A-B-PREFIX\n".to_owned())],
+        );
+        dropins.insert(
+            "a-b-c.service".to_owned(),
+            vec![("40.conf".to_owned(), "EXACT\n".to_owned())],
+        );
+        let result = collect_applicable_dropins("a-b-c.service", &dropins);
+        let contents: Vec<&str> = result.iter().map(|(_, c)| c.trim()).collect();
+        assert_eq!(contents, vec!["TYPE", "A-PREFIX", "A-B-PREFIX", "EXACT"]);
+    }
+
+    #[test]
     fn test_parse_template_instance() {
         assert_eq!(
             parse_template_instance("serial-getty@ttyS0.service"),
@@ -2621,6 +2841,7 @@ mod tests {
                     ignore_on_isolate: false,
                     default_instance: None,
                     allow_isolate: false,
+                    stop_when_unneeded: false,
                     job_timeout_sec: None,
                     job_timeout_action: crate::units::UnitAction::None,
                     refuse_manual_start: false,
@@ -2663,6 +2884,8 @@ mod tests {
                 main_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_pid: std::sync::atomic::AtomicI32::new(0),
                 main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+                runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+                watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Target(crate::units::TargetSpecific {
                 state: RwLock::new(crate::units::TargetState {

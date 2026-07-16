@@ -1524,7 +1524,9 @@ fn allocate_space(
         let m = &mut matched[req.matched_idx];
         let def = &defs[m.definition_index];
 
-        if !m.is_new && m.existing.is_some() {
+        if !m.is_new
+            && let Some(existing) = &m.existing
+        {
             // Growth of existing partition
             let share = if total_weight > 0 {
                 (remaining as u128 * req.weight as u128 / total_weight as u128) as u64
@@ -1532,7 +1534,7 @@ fn allocate_space(
                 0
             };
             let growth = share.min(req.max_bytes);
-            let current_size = m.existing.as_ref().unwrap().size_bytes(sector_size);
+            let current_size = existing.size_bytes(sector_size);
             m.allocated_size = current_size + growth;
             m.is_grown = growth > 0;
         } else {

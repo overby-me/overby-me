@@ -69,10 +69,8 @@ pub fn difftest(attr: TokenStream, item: TokenStream) -> TokenStream {
             Ok(metas) => {
                 for meta in &metas {
                     match meta {
-                        Meta::Path(path) => {
-                            if path.is_ident("ignore") {
-                                ignore = true;
-                            }
+                        Meta::Path(path) if path.is_ident("ignore") => {
+                            ignore = true;
                         }
                         Meta::NameValue(nv) => {
                             if nv.path.is_ident("category") {

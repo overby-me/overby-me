@@ -132,8 +132,9 @@ impl CalendarSpec {
                     // time only
                     (None, Some(p))
                 } else {
-                    // Ambiguous — treat as date
-                    (Some(p), None)
+                    // Bare token without `-` or `:` — upstream rejects
+                    // these (e.g. `systemd-analyze calendar 1` fails).
+                    return Err(format!("Invalid calendar expression: {input}"));
                 }
             }
             2 => (Some(date_time_parts[0]), Some(date_time_parts[1])),
@@ -161,6 +162,15 @@ impl CalendarSpec {
                 CalendarComponent::List(vec![CalendarValue::Exact(0)]),
             )
         };
+
+        // Validate ranges: systemd rejects calendar expressions whose
+        // components fall outside wall-clock bounds (e.g. `*-* 99:*:*`).
+        // Upstream: TEST-65-ANALYZE asserts these error out.
+        validate_component_range(&month, 1, 12, "month")?;
+        validate_component_range(&day, 1, 31, "day")?;
+        validate_component_range(&hour, 0, 23, "hour")?;
+        validate_component_range(&minute, 0, 59, "minute")?;
+        validate_component_range(&second, 0, 60, "second")?;
 
         Ok(CalendarSpec {
             original,
@@ -450,6 +460,53 @@ fn parse_date_part(
 }
 
 /// Parse the time portion: `HH:MM:SS` or `HH:MM`.
+/// Reject CalendarComponents whose numeric values fall outside `[min, max]`.
+/// Wildcard components are always accepted.
+fn validate_component_range(
+    c: &CalendarComponent,
+    min: u32,
+    max: u32,
+    field: &str,
+) -> Result<(), String> {
+    match c {
+        CalendarComponent::Wildcard => Ok(()),
+        CalendarComponent::WildcardRepeat(_) => Ok(()),
+        CalendarComponent::List(values) => {
+            for v in values {
+                match v {
+                    CalendarValue::Exact(n) => {
+                        if *n < min || *n > max {
+                            return Err(format!("{field} {n} out of range {min}..{max}"));
+                        }
+                    }
+                    CalendarValue::Range(start, end) => {
+                        if *start < min || *start > max || *end < min || *end > max {
+                            return Err(format!(
+                                "{field} range {start}..{end} out of range {min}..{max}"
+                            ));
+                        }
+                    }
+                    CalendarValue::Repeat(start, _step) => {
+                        if *start < min || *start > max {
+                            return Err(format!(
+                                "{field} repeat start {start} out of range {min}..{max}"
+                            ));
+                        }
+                    }
+                    CalendarValue::RangeRepeat(start, end, _step) => {
+                        if *start < min || *start > max || *end < min || *end > max {
+                            return Err(format!(
+                                "{field} range-repeat {start}..{end} out of range {min}..{max}"
+                            ));
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
 fn parse_time_part(
     s: &str,
 ) -> Result<(CalendarComponent, CalendarComponent, CalendarComponent), String> {

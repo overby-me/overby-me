@@ -237,6 +237,8 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     extend_timeout_usec: None,
                     extend_timeout_timestamp: None,
                     join_namespace_pid: None,
+                    helper_mount_ns: None,
+                    current_exec_argv: None,
                     manual_stop: false,
                 },
             }),
@@ -876,6 +878,7 @@ fn make_common_from_parsed(
             job_timeout_action: unit.job_timeout_action,
             job_timeout_sec: unit.job_timeout_sec,
             allow_isolate: unit.allow_isolate,
+            stop_when_unneeded: unit.stop_when_unneeded,
             refuse_manual_start: unit.refuse_manual_start,
             refuse_manual_stop: unit.refuse_manual_stop,
             on_success: unit.on_success,
@@ -917,6 +920,8 @@ fn make_common_from_parsed(
         main_pid: std::sync::atomic::AtomicI32::new(0),
         main_exit_pid: std::sync::atomic::AtomicI32::new(0),
         main_exit_status: std::sync::atomic::AtomicI32::new(-1),
+        runtime_max_timeout_fired: std::sync::atomic::AtomicBool::new(false),
+        watchdog_timeout_fired: std::sync::atomic::AtomicBool::new(false),
     })
 }
 

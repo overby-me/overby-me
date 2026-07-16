@@ -114,6 +114,16 @@ enum Command {
         expressions: Vec<String>,
     },
 
+    /// Compare two version strings.  With an operator
+    /// (`lt`, `le`, `eq`, `ne`, `ge`, `gt`) exit 0 if the comparison
+    /// holds, otherwise non-zero.  Without an operator print one of
+    /// `<` / `==` / `>` depending on the relative ordering.
+    #[command(name = "compare-versions")]
+    CompareVersions {
+        /// Versions and optional operator: `VER1 OP VER2` or `VER1 VER2`
+        args: Vec<String>,
+    },
+
     /// Verify unit file(s) for correctness
     Verify {
         /// Unit file(s) to verify
@@ -820,6 +830,63 @@ fn evaluate_condition(expr: &str) -> (bool, &'static str) {
                 .split_whitespace()
                 .any(|arg| arg == value || arg.starts_with(&format!("{value}=")))
         }
+        "ConditionKernelVersion" | "AssertKernelVersion" => {
+            // Compare /proc/sys/kernel/osrelease against an expression like
+            // `>= 4.15`, `< 1.0`, `! < 4.0`.  An optional leading `!` inverts
+            // the comparison.  Operators: `<`, `<=`, `=` / `==`, `!=` / `<>`,
+            // `>=`, `>`.
+            evaluate_kernel_version(value)
+        }
+        "ConditionEnvironment" | "AssertEnvironment" => {
+            // Match an environment variable.  Format: NAME, NAME=VALUE, or
+            // a leading `!` to invert.  Manager environment is the relevant
+            // scope for analyze.
+            let (np, val) = if let Some(p) = value.strip_prefix('!') {
+                (true, p.trim())
+            } else {
+                (false, value)
+            };
+            let present = if let Some((k, v)) = val.split_once('=') {
+                std::env::var(k).is_ok_and(|env_v| env_v == v)
+            } else {
+                std::env::var(val).is_ok()
+            };
+            if np { !present } else { present }
+        }
+        "ConditionACPower" | "AssertACPower" => {
+            // Detect AC power via /sys/class/power_supply/AC*/online.
+            // Without any AC adapter visible (typical in VMs), we treat the
+            // condition as "true" (matches upstream's "ac power present"
+            // assumption).  Negation via leading `!`.
+            let (np, val) = if let Some(p) = value.strip_prefix('!') {
+                (true, p.trim())
+            } else {
+                (false, value)
+            };
+            let on_ac = check_ac_power();
+            let want = !matches!(val, "no" | "false" | "0");
+            let result = on_ac == want;
+            if np { !result } else { result }
+        }
+        "ConditionArchitecture" | "AssertArchitecture" => {
+            let (np, want) = if let Some(p) = value.strip_prefix('!') {
+                (true, p.trim())
+            } else {
+                (false, value)
+            };
+            let actual = std::env::consts::ARCH;
+            // Map Rust's ARCH names to systemd's normalised names.
+            let normalised = match actual {
+                "x86_64" => "x86-64",
+                "x86" => "x86",
+                "aarch64" => "arm64",
+                "arm" => "arm",
+                "powerpc64" => "ppc64",
+                other => other,
+            };
+            let result = normalised == want;
+            if np { !result } else { result }
+        }
         _ => {
             return (false, "Unknown condition type");
         }
@@ -831,6 +898,141 @@ fn evaluate_condition(expr: &str) -> (bool, &'static str) {
     } else {
         (false, "not met")
     }
+}
+
+/// Evaluate a `ConditionKernelVersion=` / `AssertKernelVersion=` expression.
+///
+/// `value` is the right-hand side, e.g. `>= 4.15`, `< 1.0`, `! < 4.0`.
+/// A leading `!` inverts the result of the comparison.
+fn evaluate_kernel_version(value: &str) -> bool {
+    let value = value.trim();
+    let (negate, rest) = if let Some(rest) = value.strip_prefix('!') {
+        (true, rest.trim())
+    } else {
+        (false, value)
+    };
+
+    // Split on the first non-comparison-operator character to get OP and VERSION.
+    // Operators: `<=`, `>=`, `==`, `!=`, `<>`, `<`, `>`, `=`.
+    let (op, version) = if let Some(rest) = rest.strip_prefix("<=") {
+        ("<=", rest.trim())
+    } else if let Some(rest) = rest.strip_prefix(">=") {
+        (">=", rest.trim())
+    } else if let Some(rest) = rest.strip_prefix("==") {
+        ("==", rest.trim())
+    } else if let Some(rest) = rest.strip_prefix("!=") {
+        ("!=", rest.trim())
+    } else if let Some(rest) = rest.strip_prefix("<>") {
+        ("!=", rest.trim())
+    } else if let Some(rest) = rest.strip_prefix('<') {
+        ("<", rest.trim())
+    } else if let Some(rest) = rest.strip_prefix('>') {
+        (">", rest.trim())
+    } else if let Some(rest) = rest.strip_prefix('=') {
+        ("==", rest.trim())
+    } else {
+        // No operator — treat the whole rest as a glob match against the version
+        return matches_kernel_glob(rest, &kernel_release()) ^ negate;
+    };
+
+    let actual = kernel_release();
+    let cmp = compare_kernel_versions(&actual, version);
+    let result = match op {
+        "<" => cmp < 0,
+        "<=" => cmp <= 0,
+        "==" => cmp == 0,
+        "!=" => cmp != 0,
+        ">=" => cmp >= 0,
+        ">" => cmp > 0,
+        _ => false,
+    };
+    if negate { !result } else { result }
+}
+
+fn kernel_release() -> String {
+    fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn matches_kernel_glob(pattern: &str, version: &str) -> bool {
+    // Cheap glob: match `*` as wildcard, otherwise literal substring.
+    if pattern.contains('*') {
+        let parts: Vec<&str> = pattern.split('*').collect();
+        let mut pos = 0usize;
+        for (i, part) in parts.iter().enumerate() {
+            if part.is_empty() {
+                continue;
+            }
+            if i == 0 {
+                if !version[pos..].starts_with(part) {
+                    return false;
+                }
+                pos += part.len();
+            } else {
+                match version[pos..].find(part) {
+                    Some(idx) => pos += idx + part.len(),
+                    None => return false,
+                }
+            }
+        }
+        true
+    } else {
+        version.contains(pattern)
+    }
+}
+
+/// Compare two version strings by numeric components.  Returns negative if
+/// `a < b`, 0 if equal, positive if `a > b`.  Non-numeric prefixes/suffixes
+/// are stripped — anything like `5.10.0-rc1` becomes `5.10.0` for comparison
+/// purposes.
+fn compare_kernel_versions(a: &str, b: &str) -> i32 {
+    fn split(s: &str) -> Vec<u32> {
+        s.split(|c: char| !c.is_ascii_digit() && c != '.')
+            .next()
+            .unwrap_or("")
+            .split('.')
+            .filter_map(|p| p.parse::<u32>().ok())
+            .collect()
+    }
+    let av = split(a);
+    let bv = split(b);
+    let len = av.len().max(bv.len());
+    for i in 0..len {
+        let x = av.get(i).copied().unwrap_or(0);
+        let y = bv.get(i).copied().unwrap_or(0);
+        if x < y {
+            return -1;
+        }
+        if x > y {
+            return 1;
+        }
+    }
+    0
+}
+
+fn check_ac_power() -> bool {
+    // Walk /sys/class/power_supply/* looking for an AC adapter that's online.
+    if let Ok(entries) = fs::read_dir("/sys/class/power_supply") {
+        for entry in entries.flatten() {
+            let type_path = entry.path().join("type");
+            if let Ok(t) = fs::read_to_string(&type_path)
+                && t.trim() == "Mains"
+            {
+                let online = entry.path().join("online");
+                if let Ok(o) = fs::read_to_string(&online)
+                    && o.trim() == "1"
+                {
+                    return true;
+                }
+            }
+        }
+        // /sys/class/power_supply exists but no Mains adapter found:
+        // assume on AC (likely a desktop or VM).
+        return true;
+    }
+    // No power_supply subsystem at all (also typical of VMs): assume on AC.
+    true
 }
 
 fn detect_virtualization() -> Option<String> {
@@ -1034,10 +1236,11 @@ fn main() {
         Some(Command::Calendar {
             ref expressions,
             iterations,
-            ..
-        }) => cmd_calendar(expressions, iterations),
+            ref base_time,
+        }) => cmd_calendar(expressions, iterations, base_time.as_deref()),
         Some(Command::Timespan { ref expressions }) => cmd_timespan(expressions),
         Some(Command::Timestamp { ref expressions }) => cmd_timestamp(expressions),
+        Some(Command::CompareVersions { ref args }) => cmd_compare_versions(args),
         Some(Command::Verify { ref files, .. }) => cmd_verify(files),
         Some(Command::Condition {
             ref expressions,
@@ -1212,11 +1415,25 @@ fn cmd_dot(
     println!("}}");
 }
 
-fn cmd_calendar(expressions: &[String], iterations: u32) {
+fn cmd_calendar(expressions: &[String], iterations: u32, base_time: Option<&str>) {
     if expressions.is_empty() {
         eprintln!("No calendar expression specified.");
         process::exit(1);
     }
+
+    // Resolve the base time — defaults to "now" if unspecified.  Any parse
+    // failure (e.g. `--base-time=never`) must exit non-zero to match
+    // upstream's TEST-65-ANALYZE expectation.
+    let base_now = match base_time {
+        Some(bt) => match parse_timestamp(bt) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("Failed to parse base time '{}': {}", bt, e);
+                process::exit(1);
+            }
+        },
+        None => SystemTime::now(),
+    };
 
     for expr in expressions {
         match CalendarSpec::parse(expr) {
@@ -1225,7 +1442,7 @@ fn cmd_calendar(expressions: &[String], iterations: u32) {
                 println!("Normalized form: {}", spec.normalized());
 
                 if iterations > 0 {
-                    let now = SystemTime::now();
+                    let now = base_now;
                     let mut ref_dt = CalendarSpec::system_time_to_datetime(now);
                     // Start from one second after now for "next" semantics
                     ref_dt = ref_dt.add_second();
@@ -1337,6 +1554,59 @@ fn cmd_timespan(expressions: &[String]) {
                 eprintln!("Failed to parse time span '{}': {}", expr, e);
                 process::exit(1);
             }
+        }
+    }
+}
+
+/// Compare two version strings using `compare_kernel_versions` (the same
+/// numeric-component compare used for `ConditionKernelVersion=`).  With an
+/// operator (`lt`, `le`, `eq`, `ne`, `ge`, `gt`) exit 0 when the comparison
+/// holds, otherwise exit non-zero.  Without an operator print one of
+/// `<` / `==` / `>` and exit 0.
+///
+/// Empty version strings sort below all non-empty strings (matching upstream
+/// `systemd-analyze compare-versions` semantics).
+fn cmd_compare_versions(args: &[String]) {
+    fn compare_versions(a: &str, b: &str) -> i32 {
+        match (a.is_empty(), b.is_empty()) {
+            (true, true) => 0,
+            (true, false) => -1,
+            (false, true) => 1,
+            (false, false) => compare_kernel_versions(a, b),
+        }
+    }
+
+    match args.len() {
+        2 => {
+            let cmp = compare_versions(&args[0], &args[1]);
+            let sym = match cmp.signum() {
+                -1 => "<",
+                0 => "==",
+                _ => ">",
+            };
+            println!("{} {} {}", args[0], sym, args[1]);
+        }
+        3 => {
+            let cmp = compare_versions(&args[0], &args[2]);
+            let result = match args[1].as_str() {
+                "lt" | "<" => cmp < 0,
+                "le" | "<=" => cmp <= 0,
+                "eq" | "==" | "=" => cmp == 0,
+                "ne" | "!=" | "<>" => cmp != 0,
+                "ge" | ">=" => cmp >= 0,
+                "gt" | ">" => cmp > 0,
+                other => {
+                    eprintln!("Unknown operator: {other}");
+                    process::exit(1);
+                }
+            };
+            if !result {
+                process::exit(1);
+            }
+        }
+        _ => {
+            eprintln!("compare-versions: expects 2 or 3 arguments");
+            process::exit(1);
         }
     }
 }

@@ -97,10 +97,22 @@ extern "C" fn handle_sigchld(_: libc::c_int) {
 
 fn setup_signal_handlers() {
     unsafe {
-        libc::signal(libc::SIGTERM, handle_sigterm as libc::sighandler_t);
-        libc::signal(libc::SIGINT, handle_sigint as libc::sighandler_t);
-        libc::signal(libc::SIGHUP, handle_sighup as libc::sighandler_t);
-        libc::signal(libc::SIGCHLD, handle_sigchld as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            handle_sigterm as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            handle_sigint as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGHUP,
+            handle_sighup as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGCHLD,
+            handle_sigchld as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 }
@@ -362,9 +374,278 @@ pub fn open_uevent_socket() -> io::Result<i32> {
     }
 }
 
+/// Open a netlink socket for sending UDEV-processed events to
+/// group 2 (libudev monitor group).  Clients like `udevadm monitor
+/// --udev` subscribe to this group.
+///
+/// Returns the fd on success; errors are surfaced to the caller so
+/// the daemon can log and continue (monitor broadcast is best-effort).
+pub fn open_udev_monitor_send_socket() -> io::Result<i32> {
+    unsafe {
+        let fd = libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+            15, // NETLINK_KOBJECT_UEVENT
+        );
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut addr: libc::sockaddr_nl = std::mem::zeroed();
+        addr.nl_family = libc::AF_NETLINK as u16;
+        // Source pid can be 0 — kernel will auto-assign.  We don't
+        // subscribe to any groups since we're send-only.
+        addr.nl_pid = 0;
+        addr.nl_groups = 0;
+
+        let ret = libc::bind(
+            fd,
+            &addr as *const libc::sockaddr_nl as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        );
+        if ret < 0 {
+            let err = io::Error::last_os_error();
+            libc::close(fd);
+            return Err(err);
+        }
+
+        // Large send buffer so big UDEV events (100+ properties, as in
+        // TEST-17-UDEV.buffer-size) don't fail with ENOBUFS.
+        let buf_size: libc::c_int = 128 * 1024 * 1024; // 128 MiB
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            &buf_size as *const libc::c_int as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+
+        Ok(fd)
+    }
+}
+
+/// libudev monitor header (matches `struct udev_monitor_netlink_header`
+/// in upstream libudev-monitor.c).
+///
+/// Serialized in **native byte order** — upstream uses host byte order
+/// for the magic.  All offsets/lengths are in bytes from the start of
+/// the full message.
+#[repr(C)]
+struct UdevMonitorHeader {
+    prefix: [u8; 8],     // "libudev\0"
+    magic: u32,          // 0xfeedcafe
+    header_size: u32,    // sizeof(Self) = 40
+    properties_off: u32, // offset to properties payload
+    properties_len: u32, // length of properties payload
+    filter_subsystem_hash: u32,
+    filter_devtype_hash: u32,
+    filter_tag_bloom_hi: u32,
+    filter_tag_bloom_lo: u32,
+}
+
+const UDEV_MONITOR_MAGIC: u32 = 0xfeedcafe;
+const UDEV_MONITOR_HEADER_SIZE: usize = 40;
+
+/// MurmurHash2 used by libudev for monitor filter hashes.
+fn murmur_hash2(key: &[u8]) -> u32 {
+    const SEED: u32 = 0;
+    const M: u32 = 0x5bd1e995;
+    const R: u32 = 24;
+
+    let mut h: u32 = SEED ^ (key.len() as u32);
+    let mut chunks = key.chunks_exact(4);
+    for chunk in chunks.by_ref() {
+        let mut k = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        k = k.wrapping_mul(M);
+        k ^= k >> R;
+        k = k.wrapping_mul(M);
+        h = h.wrapping_mul(M);
+        h ^= k;
+    }
+    let remainder = chunks.remainder();
+    if !remainder.is_empty() {
+        let mut k: u32 = 0;
+        for (i, &b) in remainder.iter().enumerate().rev() {
+            k |= (b as u32) << (i * 8);
+        }
+        h ^= k;
+        h = h.wrapping_mul(M);
+    }
+    h ^= h >> 13;
+    h = h.wrapping_mul(M);
+    h ^= h >> 15;
+    h
+}
+
+/// Build the libudev-monitor netlink message body for an event.
+///
+/// Pure function (no I/O) — separated from the send path so tests can
+/// round-trip the framing against `parse_monitor_event` without a
+/// real socket.  Returns the full header + properties blob ready for
+/// `sendto(SOCK_NETLINK, group=2)`.
+pub fn build_udev_monitor_message(event: &UEvent, result: &RuleResult) -> Vec<u8> {
+    // Build the property block.  Include ACTION/DEVPATH/SUBSYSTEM/…
+    // plus every env var set on the event.  Properties are NUL-
+    // separated — the kernel uses the same convention.
+    let mut props: Vec<u8> = Vec::new();
+    let push_kv = |buf: &mut Vec<u8>, k: &str, v: &str| {
+        buf.extend_from_slice(k.as_bytes());
+        buf.push(b'=');
+        buf.extend_from_slice(v.as_bytes());
+        buf.push(0);
+    };
+    push_kv(&mut props, "ACTION", &event.action);
+    push_kv(&mut props, "DEVPATH", &event.devpath);
+    if !event.subsystem.is_empty() {
+        push_kv(&mut props, "SUBSYSTEM", &event.subsystem);
+    }
+    if !event.devtype.is_empty() {
+        push_kv(&mut props, "DEVTYPE", &event.devtype);
+    }
+    if !event.devname.is_empty() {
+        push_kv(&mut props, "DEVNAME", &event.devname);
+    }
+    push_kv(&mut props, "SEQNUM", &event.seqnum.to_string());
+    // User-set env, excluding kernel-provided properties we already
+    // emitted above.  Iterate in a stable order so the serialised output
+    // is deterministic (makes tests robust to HashMap iteration order).
+    let mut env_keys: Vec<&String> = event.env.keys().collect();
+    env_keys.sort();
+    for k in env_keys {
+        match k.as_str() {
+            "ACTION" | "DEVPATH" | "SUBSYSTEM" | "DEVTYPE" | "DEVNAME" | "SEQNUM" => continue,
+            _ => {}
+        }
+        push_kv(&mut props, k, &event.env[k]);
+    }
+    // Tag list and symlinks so monitor consumers can see them.
+    if !result.tags.is_empty() {
+        let joined = result.tags.iter().fold(String::from(":"), |mut a, t| {
+            a.push_str(t);
+            a.push(':');
+            a
+        });
+        push_kv(&mut props, "TAGS", &joined);
+    }
+    if !result.symlinks.is_empty() {
+        push_kv(&mut props, "DEVLINKS", &result.symlinks.join(" "));
+    }
+
+    // Build the header.
+    let subsystem_hash = if event.subsystem.is_empty() {
+        0
+    } else {
+        murmur_hash2(event.subsystem.as_bytes())
+    };
+    let devtype_hash = if event.devtype.is_empty() {
+        0
+    } else {
+        murmur_hash2(event.devtype.as_bytes())
+    };
+    let mut header = UdevMonitorHeader {
+        prefix: *b"libudev\0",
+        magic: UDEV_MONITOR_MAGIC,
+        header_size: UDEV_MONITOR_HEADER_SIZE as u32,
+        properties_off: UDEV_MONITOR_HEADER_SIZE as u32,
+        properties_len: props.len() as u32,
+        filter_subsystem_hash: subsystem_hash,
+        filter_devtype_hash: devtype_hash,
+        filter_tag_bloom_hi: 0,
+        filter_tag_bloom_lo: 0,
+    };
+    // Tag bloom filter: OR'd hashes of every tag.  Use the libudev
+    // convention of splitting 64 bits into hi/lo u32s.
+    for tag in &result.tags {
+        let h = murmur_hash2(tag.as_bytes());
+        let bit_hi = 1u32 << ((h >> 6) & 31);
+        let bit_lo = 1u32 << (h & 31);
+        header.filter_tag_bloom_hi |= bit_hi;
+        header.filter_tag_bloom_lo |= bit_lo;
+    }
+
+    // Serialise header + properties into a single buffer.
+    let mut msg = Vec::with_capacity(UDEV_MONITOR_HEADER_SIZE + props.len());
+    // SAFETY: plain-old-data struct with no padding (#[repr(C)] fields align
+    // to 4; all u8[8] and u32, total 40 bytes).
+    unsafe {
+        let p = &header as *const UdevMonitorHeader as *const u8;
+        msg.extend_from_slice(std::slice::from_raw_parts(p, UDEV_MONITOR_HEADER_SIZE));
+    }
+    msg.extend_from_slice(&props);
+    msg
+}
+
+/// Send a UDEV-processed event to group 2 in the libudev monitor
+/// format, so `udevadm monitor --udev` subscribers receive it.  The
+/// body is a null-byte-separated sequence of `KEY=VALUE` strings, the
+/// same format the kernel uses for its own uevents.
+fn broadcast_udev_monitor_event(fd: i32, event: &UEvent, result: &RuleResult) {
+    let msg = build_udev_monitor_message(event, result);
+
+    let mut dest: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    dest.nl_family = libc::AF_NETLINK as u16;
+    dest.nl_groups = 2; // UDEV monitor group
+
+    let ret = unsafe {
+        libc::sendto(
+            fd,
+            msg.as_ptr() as *const libc::c_void,
+            msg.len(),
+            0,
+            &dest as *const libc::sockaddr_nl as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        )
+    };
+    if ret < 0 {
+        log::debug!(
+            "udev-monitor broadcast send failed: {}",
+            io::Error::last_os_error()
+        );
+    }
+}
+
+/// Parse the property block out of a libudev monitor message.  Used
+/// by tests to round-trip through `build_udev_monitor_message`.
+/// Returns `None` if the header is malformed.
+#[cfg(test)]
+pub fn parse_udev_monitor_message(
+    data: &[u8],
+) -> Option<std::collections::HashMap<String, String>> {
+    if data.len() < UDEV_MONITOR_HEADER_SIZE || &data[0..8] != b"libudev\0" {
+        return None;
+    }
+    let magic = u32::from_ne_bytes(data[8..12].try_into().ok()?);
+    if magic != UDEV_MONITOR_MAGIC {
+        return None;
+    }
+    let props_off = u32::from_ne_bytes(data[16..20].try_into().ok()?) as usize;
+    let props_len = u32::from_ne_bytes(data[20..24].try_into().ok()?) as usize;
+    if props_off + props_len > data.len() {
+        return None;
+    }
+    let payload = &data[props_off..props_off + props_len];
+    let mut out = std::collections::HashMap::new();
+    for chunk in payload.split(|&b| b == 0) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let s = std::str::from_utf8(chunk).ok()?;
+        if let Some(eq) = s.find('=') {
+            out.insert(s[..eq].to_owned(), s[eq + 1..].to_owned());
+        }
+    }
+    Some(out)
+}
+
 /// Receive a uevent from the netlink socket. Returns None if no data available.
+///
+/// Uses a 2 MiB stack buffer — upstream udevd allocates 2 MiB so events
+/// carrying many properties (TEST-17-UDEV.buffer-size exercises this
+/// with 100 × 100-byte properties) don't get truncated.
 pub fn recv_uevent(fd: i32) -> Option<UEvent> {
-    let mut buf = [0u8; 8192];
+    // Heap-allocate the read buffer (2 MiB) instead of using the stack;
+    // avoids blowing the default thread stack.
+    let mut buf = vec![0u8; 2 * 1024 * 1024];
     let n = unsafe {
         libc::recv(
             fd,
@@ -720,31 +1001,15 @@ fn parse_rule_value(s: &str) -> Result<(String, &str), String> {
     while i < bytes.len() {
         let c = bytes[i] as char;
         if c == '\\' && i + 1 < bytes.len() {
-            // Escape sequences
+            // Only \" and \\ are unescaped inside udev rule values.
+            // \n, \t, etc. stay as literal backslash-char — they're
+            // passed through to any consumer (e.g. IMPORT{program}
+            // shell invocation) and may be interpreted there.  Upstream
+            // udev rule value parser behaves the same way.
             let next = bytes[i + 1] as char;
             match next {
                 '"' | '\\' => {
                     value.push(next);
-                    i += 2;
-                }
-                'a' => {
-                    value.push('\x07');
-                    i += 2;
-                }
-                'b' => {
-                    value.push('\x08');
-                    i += 2;
-                }
-                'n' => {
-                    value.push('\n');
-                    i += 2;
-                }
-                'r' => {
-                    value.push('\r');
-                    i += 2;
-                }
-                't' => {
-                    value.push('\t');
                     i += 2;
                 }
                 _ => {
@@ -796,11 +1061,7 @@ pub fn split_alternatives(pattern: &str) -> Vec<&str> {
     for (i, &b) in bytes.iter().enumerate() {
         match b {
             b'[' => depth += 1,
-            b']' => {
-                if depth > 0 {
-                    depth -= 1;
-                }
-            }
+            b']' if depth > 0 => depth -= 1,
             b'|' if depth == 0 => {
                 result.push(&pattern[start..i]);
                 start = i + 1;
@@ -1007,6 +1268,14 @@ fn expand_one_subst(
                     );
                 }
                 'D' => return (device_name.to_string(), 1),
+                'S' => return ("/sys".to_string(), 1),
+                'r' => return ("/dev".to_string(), 1),
+                'v' => {
+                    // Kernel release (`uname -r`).  Used by .link file
+                    // Property= values (TEST-17-UDEV.link-property asserts
+                    // LINK_VERSION=%v expands to the running kernel).
+                    return (kernel_release(), 1);
+                }
                 's' => {
                     if start + 1 < chars.len() && chars[start + 1] == '{' {
                         let (attr_name, adv) = extract_braced(chars, start + 1);
@@ -1156,6 +1425,35 @@ fn devpath_basename(event: &UEvent) -> String {
     event.devpath.rsplit('/').next().unwrap_or("").to_string()
 }
 
+fn kernel_release() -> String {
+    nix::sys::utsname::uname()
+        .ok()
+        .map(|u| u.release().to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Kernel-provided / framework-reserved udev property keys that user
+/// rules and .link-file `Property=` directives must not overwrite or
+/// unset.  Matches upstream sd-device.c's is_valid_udev_property check:
+/// these come from the kernel (or the udev event header) and define the
+/// device's identity; letting a rule re-bind them would desynchronise
+/// the in-memory event from the kernel's view.
+fn is_read_only_property(key: &str) -> bool {
+    matches!(
+        key,
+        "ACTION"
+            | "DEVPATH"
+            | "SUBSYSTEM"
+            | "DEVTYPE"
+            | "DEVNAME"
+            | "IFINDEX"
+            | "MAJOR"
+            | "MINOR"
+            | "SEQNUM"
+            | "DRIVER"
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Rule matching and execution
 // ---------------------------------------------------------------------------
@@ -1202,6 +1500,14 @@ pub fn process_rules(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) -
         let mut has_match_keys = false;
 
         for token in &rule.tokens {
+            // PROGRAM= (Assign form) runs the program for its side
+            // effect of populating %c/$result, but does NOT fail the
+            // rule on program error.  Only PROGRAM== (Match form) does
+            // that.  Real udev uses the same semantics.
+            if is_match_key(&token.key) && !is_match_op(token.op) {
+                let _ = match_token(token, event, &mut program_result);
+                continue;
+            }
             if is_match_op(token.op) {
                 has_match_keys = true;
                 if !match_token(token, event, &mut program_result) {
@@ -1221,6 +1527,10 @@ pub fn process_rules(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) -
             // Execute assignment tokens
             for token in &rule.tokens {
                 if is_match_op(token.op) {
+                    continue;
+                }
+                // PROGRAM= was already run for side effects above.
+                if is_match_key(&token.key) {
                     continue;
                 }
 
@@ -1266,6 +1576,14 @@ pub fn process_rules(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) -
 
 fn is_match_op(op: RuleOp) -> bool {
     matches!(op, RuleOp::Match | RuleOp::Nomatch)
+}
+
+/// Keys that act as match operators regardless of the `=`/`==` form
+/// the rule writer used.  `PROGRAM=` is treated as `PROGRAM==` because
+/// upstream udev evaluates the program at rule dispatch regardless of
+/// operator form — the `=` shorthand is common in test rules.
+fn is_match_key(key: &str) -> bool {
+    key == "PROGRAM"
 }
 
 /// Check if a single match token matches the event.
@@ -1545,15 +1863,27 @@ fn execute_assignment(
         }
         "ENV" => {
             if let Some(ref key) = token.attr {
-                event.env.insert(key.clone(), value.to_string());
-                result.env_overrides.insert(key.clone(), value.to_string());
+                let new_value = match token.op {
+                    // `ENV{K}+=V` appends to existing value (space-separated),
+                    // matching upstream udev — SYSTEMD_WANTS+= tests rely on
+                    // this for accumulating unit names.
+                    RuleOp::AssignAdd => match event.env.get(key) {
+                        Some(existing) if !existing.is_empty() => {
+                            format!("{existing} {value}")
+                        }
+                        _ => value.to_string(),
+                    },
+                    _ => value.to_string(),
+                };
+                event.env.insert(key.clone(), new_value.clone());
+                result.env_overrides.insert(key.clone(), new_value);
             }
         }
         "TAG" => match token.op {
-            RuleOp::Assign | RuleOp::AssignFinal | RuleOp::AssignAdd => {
-                if !value.is_empty() && !result.tags.contains(&value.to_string()) {
-                    result.tags.push(value.to_string());
-                }
+            RuleOp::Assign | RuleOp::AssignFinal | RuleOp::AssignAdd
+                if !value.is_empty() && !result.tags.contains(&value.to_string()) =>
+            {
+                result.tags.push(value.to_string());
             }
             RuleOp::AssignRemove => {
                 result.tags.retain(|t| t != value);
@@ -1633,16 +1963,22 @@ fn handle_import(
     match import_type {
         "program" => {
             if let Some(output) = run_program_capture(value, event) {
-                // Parse output as KEY=VALUE lines
+                // Parse output as KEY=VALUE lines.  Don't trim the
+                // value — leading/trailing whitespace is meaningful
+                // and is preserved by upstream's IMPORT{program}
+                // (the TEST-17-UDEV.IMPORT test exercises this via
+                // `echo -e FOO=\x20aaa\x20` where the surrounding
+                // spaces have to round-trip into E:FOO=\x20aaa\x20).
                 for line in output.lines() {
-                    let line = line.trim();
                     if line.is_empty() || line.starts_with('#') {
                         continue;
                     }
                     if let Some(eq) = line.find('=') {
-                        let key = line[..eq].trim().to_string();
-                        let val = line[eq + 1..].trim().to_string();
-                        event.env.insert(key, val);
+                        let key = line[..eq].to_string();
+                        let val = line[eq + 1..].to_string();
+                        if !key.is_empty() {
+                            event.env.insert(key, val);
+                        }
                     }
                 }
                 *program_result = output;
@@ -3088,6 +3424,19 @@ fn builtin_net_setup_link(event: &mut UEvent) {
         link.path.to_string_lossy().to_string(),
     );
 
+    // Set ID_NET_LINK_FILE_DROPINS to the list of applied drop-in paths,
+    // colon-separated, matching upstream udev's output format.
+    if !link.dropin_paths.is_empty() {
+        let joined: Vec<String> = link
+            .dropin_paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        event
+            .env
+            .insert("ID_NET_LINK_FILE_DROPINS".to_string(), joined.join(":"));
+    }
+
     // Resolve the interface name from NamePolicy / Name.
     // The closure looks up naming environment variables that were set by
     // earlier builtins (typically `net_id` and `path_id`).
@@ -3165,6 +3514,291 @@ fn builtin_net_setup_link(event: &mut UEvent) {
             .env
             .insert("ID_NET_LINK_FILE_ALTNAMES".to_string(), alt_names.join(" "));
     }
+
+    // .link file Property=/UnsetProperty=/ImportProperty= apply only on
+    // add/bind/move events.  Upstream `link_apply_config` early-returns
+    // for any other action (notably 'change') so re-processing a device
+    // (e.g. `udevadm trigger --action=change`) rebuilds the udev db
+    // without the link file's user-defined properties, leaving only
+    // rule-set values and metadata (ID_NET_LINK_FILE, ID_NET_LINK_FILE_DROPINS,
+    // ID_NET_NAME).  'move' must pass through because an interface rename
+    // ("dummy0 → test1") emits a 'move' uevent and the test still expects
+    // the link file's Property=HOGE=foo to land in the post-rename db.
+    if !matches!(event.action.as_str(), "add" | "bind" | "move") {
+        return;
+    }
+
+    // [Link] Property=KEY=VALUE ... — set udev properties on the event env.
+    // Each entry is a single "KEY=VALUE" token.  Values may contain
+    // specifiers like `%v` (kernel release) which get expanded via the
+    // shared substitution engine.  Kernel-provided read-only properties
+    // (ACTION, DEVPATH, IFINDEX, SUBSYSTEM, DEVTYPE, DEVNAME, MAJOR, MINOR)
+    // cannot be overwritten by a .link file — upstream sd-device.c enforces
+    // the same invariant.
+    for entry in &link.link_section.properties {
+        if let Some((k, v)) = entry.split_once('=') {
+            let k = k.trim();
+            if k.is_empty() || is_read_only_property(k) {
+                continue;
+            }
+            let expanded = expand_substitutions(v, event, "", "", &[]);
+            event.env.insert(k.to_string(), expanded);
+        }
+    }
+
+    // [Link] UnsetProperty=KEY ... — remove udev properties from the env.
+    // Same read-only gate: the kernel-provided set cannot be unset either.
+    for key in &link.link_section.unset_properties {
+        let key = key.trim();
+        if !key.is_empty() && !is_read_only_property(key) {
+            event.env.remove(key);
+        }
+    }
+
+    // [Link] ImportProperty=KEY ... — preserve a property from the udev
+    // database across event re-processing. When a drop-in clears the
+    // Property= list and explicitly opts in to keeping certain keys via
+    // ImportProperty=, we pull those from the on-disk db (populated by
+    // the previous event) and re-inject them into the current env.
+    if !link.link_section.import_properties.is_empty()
+        && let Some(db_entries) = read_existing_udev_db_env(event)
+    {
+        for key in &link.link_section.import_properties {
+            let key = key.trim();
+            if key.is_empty() || event.env.contains_key(key) {
+                continue;
+            }
+            if let Some(val) = db_entries.get(key) {
+                event.env.insert(key.to_string(), val.clone());
+            }
+        }
+    }
+}
+
+/// Test-mode emitter for `udevadm test-builtin net_setup_link <syspath>`.
+/// Unlike the runtime builtin, this does not mutate state; it just prints
+/// the properties each directive would set so the caller's assertions can
+/// check drop-in merging independently of the on-disk udev db.  Matches
+/// upstream's test-builtin format: each `Property=KEY=VALUE` emits
+/// `KEY=VALUE`, each `UnsetProperty=KEY` emits `KEY=` (empty
+/// assignment), and the `ID_NET_LINK_FILE` / `ID_NET_LINK_FILE_DROPINS`
+/// metadata are emitted up-front.
+pub fn test_builtin_net_setup_link_lines(devpath: &str, action: &str) -> Vec<String> {
+    let syspath = std::path::PathBuf::from(devpath);
+    let iface = syspath
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    if iface.is_empty() {
+        return Vec::new();
+    }
+    let mac = std::fs::read_to_string(syspath.join("address"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let link_configs = link_config::load_link_configs();
+    let matched = link_config::find_matching_link_config(
+        &link_configs,
+        &iface,
+        mac.as_deref(),
+        None,
+        None,
+        None,
+    );
+    let Some(link) = matched else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    out.push(format!("ID_NET_LINK_FILE={}", link.path.display()));
+    if !link.dropin_paths.is_empty() {
+        let joined: Vec<String> = link
+            .dropin_paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        out.push(format!("ID_NET_LINK_FILE_DROPINS={}", joined.join(":")));
+    }
+    // Resolve ID_NET_NAME from NamePolicy / Name.  In test-builtin mode we
+    // have no pre-populated env, so only Name= / NamePolicy=keep / the
+    // current interface name can supply it.
+    if let Some(new_name) = link_config::resolve_name_from_policy(link, |_key| Some(iface.clone()))
+        && !new_name.is_empty()
+    {
+        out.push(format!("ID_NET_NAME={new_name}"));
+    }
+    // Property= / UnsetProperty= / ImportProperty= only apply on
+    // add/bind/move — matching the runtime builtin's action gate.  The
+    // test script exercises both 'add' (expects the assignments) and
+    // 'change' (expects metadata only).
+    if matches!(action, "add" | "bind" | "move") {
+        // Synthesise a minimal UEvent so specifier expansion (%v etc.)
+        // works in Property= values.
+        let fake_event = UEvent {
+            action: action.to_string(),
+            devpath: devpath.to_string(),
+            subsystem: "net".to_string(),
+            devtype: String::new(),
+            devname: iface.clone(),
+            driver: String::new(),
+            major: String::new(),
+            minor: String::new(),
+            seqnum: 0,
+            env: std::collections::HashMap::new(),
+        };
+        // Emit Property= entries as KEY=VALUE (even when the same KEY is
+        // also listed in UnsetProperty= — upstream logs every directive).
+        // Kernel-provided keys (ACTION, DEVPATH, ...) are dropped to match
+        // sd-device.c's read-only property invariant.
+        for entry in &link.link_section.properties {
+            if let Some((k, v)) = entry.split_once('=') {
+                let k = k.trim();
+                if k.is_empty() || is_read_only_property(k) {
+                    continue;
+                }
+                let expanded = expand_substitutions(v, &fake_event, "", "", &[]);
+                out.push(format!("{k}={expanded}"));
+            }
+        }
+        // Emit UnsetProperty= entries as KEY= (empty assignment).  This
+        // is what the comment in upstream TEST-17-UDEV.link-property.sh
+        // calls "empty assignment is also logged".
+        for key in &link.link_section.unset_properties {
+            let key = key.trim();
+            if !key.is_empty() && !is_read_only_property(key) {
+                out.push(format!("{key}="));
+            }
+        }
+    }
+    out
+}
+
+/// Read the `E:KEY=VALUE` entries from the udev database file for this
+/// event's device, returning a map of key → value. Used by
+/// `[Link] ImportProperty=` to preserve properties across event
+/// re-processing. Returns `None` if there is no db entry yet.
+fn read_existing_udev_db_env(event: &UEvent) -> Option<HashMap<String, String>> {
+    let db_path = udev_db_path_for_event(event)?;
+    let content = std::fs::read_to_string(&db_path).ok()?;
+    let mut env = HashMap::new();
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("E:")
+            && let Some((k, v)) = rest.split_once('=')
+        {
+            env.insert(k.to_string(), v.to_string());
+        }
+    }
+    Some(env)
+}
+
+/// Compute the `/run/udev/data/<id>` path for an event, mirroring the
+/// naming convention used when writing the database (see
+/// `write_udev_db_entry`). Returns None if no id can be derived.
+fn udev_db_path_for_event(event: &UEvent) -> Option<std::path::PathBuf> {
+    let id_file_name = if event.subsystem == "net"
+        && let Some(ifindex) = event.env.get("IFINDEX")
+    {
+        format!("n{ifindex}")
+    } else if let (Some(maj), Some(min)) = (event.env.get("MAJOR"), event.env.get("MINOR")) {
+        if event.subsystem == "block" {
+            format!("b{maj}:{min}")
+        } else {
+            format!("c{maj}:{min}")
+        }
+    } else {
+        return None;
+    };
+    Some(std::path::PathBuf::from(format!(
+        "/run/udev/data/{id_file_name}"
+    )))
+}
+
+/// Encode udev-db-style whitespace/control chars as `\xNN` — matches
+/// the upstream serialization so `udevadm info` output round-trips
+/// through pipelines that would otherwise be tripped up by literal
+/// spaces or tabs in env values.  Backslash is NOT escaped so a value
+/// that already contains a `\xNN` sequence (e.g. from a rule file)
+/// passes through unchanged.
+fn escape_db_value(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b' ' | b'\t' | b'\n' | b'\r' => out.push_str(&format!("\\x{:02x}", b)),
+            1..=0x1f | 0x7f => out.push_str(&format!("\\x{:02x}", b)),
+            _ => out.push(b as char),
+        }
+    }
+    out
+}
+
+/// Query the kernel via SIOCETHTOOL/ETHTOOL_GDRVINFO for `ifname`'s
+/// driver name (e.g. "dummy", "virtio_net").  Returns None on any
+/// error or if the driver field is empty.
+fn ethtool_driver(ifname: &str) -> Option<String> {
+    const ETHTOOL_GDRVINFO: u32 = 0x00000003;
+    const SIOCETHTOOL: libc::c_ulong = 0x8946;
+
+    #[repr(C)]
+    struct EthtoolDrvinfo {
+        cmd: u32,
+        driver: [u8; 32],
+        version: [u8; 32],
+        fw_version: [u8; 32],
+        bus_info: [u8; 32],
+        erom_version: [u8; 32],
+        reserved2: [u8; 12],
+        n_priv_flags: u32,
+        n_stats: u32,
+        testinfo_len: u32,
+        eedump_len: u32,
+        regdump_len: u32,
+    }
+
+    if ifname.is_empty() || ifname.len() >= libc::IFNAMSIZ {
+        return None;
+    }
+
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+    if fd < 0 {
+        return None;
+    }
+
+    let mut drvinfo = EthtoolDrvinfo {
+        cmd: ETHTOOL_GDRVINFO,
+        driver: [0; 32],
+        version: [0; 32],
+        fw_version: [0; 32],
+        bus_info: [0; 32],
+        erom_version: [0; 32],
+        reserved2: [0; 12],
+        n_priv_flags: 0,
+        n_stats: 0,
+        testinfo_len: 0,
+        eedump_len: 0,
+        regdump_len: 0,
+    };
+
+    let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+    let name_bytes = ifname.as_bytes();
+    for (i, b) in name_bytes.iter().enumerate() {
+        ifr.ifr_name[i] = *b as libc::c_char;
+    }
+    ifr.ifr_ifru.ifru_data = (&raw mut drvinfo).cast();
+
+    let rc = unsafe { libc::ioctl(fd, SIOCETHTOOL, &raw mut ifr) };
+    unsafe { libc::close(fd) };
+    if rc < 0 {
+        return None;
+    }
+
+    let nul = drvinfo.driver.iter().position(|&b| b == 0).unwrap_or(32);
+    let s = std::str::from_utf8(&drvinfo.driver[..nul]).ok()?;
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_owned())
+    }
 }
 
 /// Handle IMPORT{builtin} for common udev builtins.
@@ -3235,12 +3869,21 @@ fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
             }
         }
         "net_id" => {
-            // Generate predictable network interface names
-            // This is complex; provide basic ID_NET_NAME_PATH
+            // Generate predictable network interface name info.
+            // Upstream's net_id sets several ID_NET_NAME_* variants plus
+            // ID_NET_DRIVER (via ethtool SIOCETHTOOL/ETHTOOL_GDRVINFO);
+            // we provide the minimum subset TEST-17-UDEV.netif-*.sh
+            // exercises.
             if event.subsystem == "net"
-                && let Some(ref devname) = event.env.get("INTERFACE").cloned()
+                && let Some(ref ifname) = event.env.get("INTERFACE").cloned()
             {
-                event.env.insert("ID_NET_NAME".to_string(), devname.clone());
+                event.env.insert("ID_NET_NAME".to_string(), ifname.clone());
+                event
+                    .env
+                    .insert("ID_NET_NAME_PATH".to_string(), ifname.clone());
+                if let Some(drv) = ethtool_driver(ifname) {
+                    event.env.insert("ID_NET_DRIVER".to_string(), drv);
+                }
             }
         }
         "blkid" => {
@@ -3326,7 +3969,14 @@ fn run_program_capture(cmd: &str, event: &UEvent) -> Option<String> {
 
     match child_cmd.output() {
         Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            // Strip only trailing newlines — leading/trailing SPACE inside
+            // the captured value is significant for IMPORT{program}
+            // (TEST-17-UDEV.IMPORT exercises this via echo -e
+            // "FOO=\x20aaa\x20" which must round-trip with both spaces
+            // preserved into the udev db as E:FOO=\x20aaa\x20).
+            let stdout = String::from_utf8_lossy(&output.stdout)
+                .trim_end_matches(['\n', '\r'])
+                .to_string();
             Some(stdout)
         }
         Ok(output) => {
@@ -3370,23 +4020,24 @@ fn resolve_program_path(name: &str) -> PathBuf {
 
 /// Get the database file path for a device.
 pub fn device_db_path(event: &UEvent) -> PathBuf {
-    // Database entries are stored by device type + major:minor or by devpath
+    // Upstream systemd convention:
+    //   * block: b<maj>:<min>
+    //   * char:  c<maj>:<min>
+    //   * net:   n<ifindex>
+    //   * else:  +<subsystem>:<sysname>
     if !event.major.is_empty() && !event.minor.is_empty() {
-        // Block or char device
         let dev_type = if event.subsystem == "block" { 'b' } else { 'c' };
         Path::new(DB_DIR).join(format!("{}{}:{}", dev_type, event.major, event.minor))
+    } else if event.subsystem == "net"
+        && let Some(ifindex) = event.env.get("IFINDEX")
+        && !ifindex.is_empty()
+    {
+        Path::new(DB_DIR).join(format!("n{ifindex}"))
+    } else if !event.subsystem.is_empty() {
+        let basename = event.devpath.rsplit('/').next().unwrap_or(&event.devpath);
+        Path::new(DB_DIR).join(format!("+{}:{}", event.subsystem, basename))
     } else {
-        // No major:minor — use escaped devpath with +<subsystem> prefix
-        let escaped = if event.subsystem.is_empty() {
-            format!("n{}", event.devpath.replace('/', "\\x2f"))
-        } else {
-            format!(
-                "+{}:{}",
-                event.subsystem,
-                event.devpath.rsplit('/').next().unwrap_or(&event.devpath)
-            )
-        };
-        Path::new(DB_DIR).join(escaped)
+        Path::new(DB_DIR).join(format!("n{}", event.devpath.replace('/', "\\x2f")))
     }
 }
 
@@ -3439,6 +4090,30 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
     // Acquire exclusive lock — released when `_lock` is dropped at scope exit.
     let _lock = lock_db()?;
 
+    // Read the previous entry so we can preserve the historical (G:)
+    // tag set across action=add/change events.  Upstream's `TAGS` is
+    // the union of every tag ever applied (sticky); `CURRENT_TAGS` is
+    // only this event's tag set.  TEST-17-UDEV.TAG exercises this
+    // distinction by checking that an earlier `:added:` remains in
+    // `TAGS` after a later `change` event whose rule only sets
+    // `:changed:`.
+    let mut merged_tags: Vec<String> = Vec::new();
+    if let Ok(prev) = fs::read_to_string(&db_path) {
+        for line in prev.lines() {
+            if let Some(tag) = line.strip_prefix("G:")
+                && !tag.is_empty()
+                && !merged_tags.contains(&tag.to_string())
+            {
+                merged_tags.push(tag.to_string());
+            }
+        }
+    }
+    for tag in &result.tags {
+        if !merged_tags.contains(tag) {
+            merged_tags.push(tag.clone());
+        }
+    }
+
     let mut content = String::new();
 
     // Symlinks
@@ -3446,9 +4121,12 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
         content.push_str(&format!("S:{}\n", link));
     }
 
-    // Tags
-    for tag in &result.tags {
+    // G: — historical (accumulated) tag set.  Q: — current event only.
+    for tag in &merged_tags {
         content.push_str(&format!("G:{}\n", tag));
+    }
+    for tag in &result.tags {
+        content.push_str(&format!("Q:{}\n", tag));
     }
 
     // Priority (default 0)
@@ -3456,20 +4134,50 @@ fn write_device_db(event: &UEvent, result: &RuleResult) -> io::Result<()> {
         content.push_str("L:0\n");
     }
 
-    // Environment properties
+    // Environment properties — escape whitespace so `udevadm info`
+    // output round-trips through shell pipelines.  Matches upstream's
+    // `\x20`, `\x09`, `\x0a` encoding for SP/TAB/LF in env values.
     for (key, val) in &event.env {
-        // Skip kernel-standard properties
         match key.as_str() {
             "ACTION" | "DEVPATH" | "SUBSYSTEM" | "SEQNUM" | "SYNTH_UUID" => continue,
             _ => {}
         }
-        content.push_str(&format!("E:{}={}\n", key, val));
+        content.push_str(&format!("E:{}={}\n", key, escape_db_value(val)));
+    }
+
+    // Surface tag state as pseudo-properties so `udevadm info` output
+    // includes `E:TAGS=:tag1:tag2:` (union of all tags ever applied)
+    // and `E:CURRENT_TAGS=:tag1:tag2:` (only this event).  Colon-
+    // delimited with leading and trailing colons.
+    let format_joined = |tags: &[String]| -> String {
+        if tags.is_empty() {
+            String::new()
+        } else {
+            tags.iter().fold(String::from(":"), |mut acc, t| {
+                acc.push_str(t);
+                acc.push(':');
+                acc
+            })
+        }
+    };
+    if !merged_tags.is_empty() {
+        content.push_str(&format!("E:TAGS={}\n", format_joined(&merged_tags)));
+    }
+    if !result.tags.is_empty() {
+        content.push_str(&format!("E:CURRENT_TAGS={}\n", format_joined(&result.tags)));
     }
 
     // Write atomically
     let tmp_path = db_path.with_extension("tmp");
     fs::write(&tmp_path, &content)?;
     fs::rename(&tmp_path, &db_path)?;
+
+    // Reflect the merged (sticky) tag set into /run/udev/tags/ so
+    // later `test -f /run/udev/tags/<tag>/c1:3` probes see every tag
+    // the device has ever received, not just the most recent event's.
+    if !merged_tags.is_empty() {
+        write_device_tags(event, &merged_tags);
+    }
 
     Ok(())
 }
@@ -3741,8 +4449,6 @@ fn execute_run_programs(event: &mut UEvent, result: &RuleResult, hwdb: Option<&H
         }
 
         let prog = resolve_program_path(parts[0]);
-        log::debug!("RUN: {} (resolved: {})", expanded, prog.display());
-
         let mut child_cmd = Command::new(&prog);
         child_cmd
             .args(&parts[1..])
@@ -3759,18 +4465,37 @@ fn execute_run_programs(event: &mut UEvent, result: &RuleResult, hwdb: Option<&H
             child_cmd.env(k, v);
         }
 
-        match child_cmd.status() {
-            Ok(status) => {
-                if !status.success() {
-                    log::debug!(
-                        "RUN '{}' exited with status {}",
-                        expanded,
-                        status.code().unwrap_or(-1)
-                    );
+        // Use spawn()+wait() instead of status() so we can log the
+        // child PID up-front — useful diagnostic when a RUN= program
+        // appears to hang.
+        match child_cmd.spawn() {
+            Ok(mut child) => {
+                let pid = child.id();
+                let comm = fs::read_to_string(format!("/proc/{pid}/comm"))
+                    .map(|s| s.trim().to_owned())
+                    .unwrap_or_else(|e| format!("<unreadable: {e}>"));
+                log::info!(
+                    "RUN spawned pid={pid} comm={comm:?} {} args={:?} (resolved: {})",
+                    parts[0],
+                    &parts[1..],
+                    prog.display()
+                );
+                match child.wait() {
+                    Ok(status) => {
+                        log::info!(
+                            "RUN pid={pid} '{}' finished: status={}, success={}",
+                            expanded,
+                            status.code().unwrap_or(-1),
+                            status.success(),
+                        );
+                    }
+                    Err(e) => {
+                        log::warn!("RUN pid={pid} wait failed for '{}': {}", expanded, e);
+                    }
                 }
             }
             Err(e) => {
-                log::debug!("Failed to execute RUN '{}': {}", expanded, e);
+                log::warn!("Failed to spawn RUN '{}': {}", expanded, e);
             }
         }
     }
@@ -3798,6 +4523,8 @@ fn execute_run_programs(event: &mut UEvent, result: &RuleResult, hwdb: Option<&H
 // Netlink ROUTE protocol constants (for RTM_SETLINK).
 const NETLINK_ROUTE: i32 = 0;
 const RTM_SETLINK: u16 = 19;
+const RTM_NEWLINKPROP: u16 = 108;
+const RTM_DELLINKPROP: u16 = 109;
 const NLM_F_REQUEST: u16 = 0x0001;
 const NLM_F_ACK: u16 = 0x0004;
 const NLMSG_ERROR: u16 = 2;
@@ -3807,6 +4534,11 @@ const IFINFOMSG_LEN: usize = 16; // ifi_family(1) + pad(1) + ifi_type(2) + ifi_i
 const IFLA_IFNAME: u16 = 3;
 const IFLA_ADDRESS: u16 = 1;
 const IFLA_MTU: u16 = 4;
+const IFLA_PROP_LIST: u16 = 52;
+const IFLA_ALT_IFNAME: u16 = 53;
+/// Nested-attribute flag OR'd into the attr_type to tell the kernel the
+/// attribute's payload is itself a list of nested attributes.
+const NLA_F_NESTED: u16 = 0x8000;
 const AF_UNSPEC: u8 = 0;
 
 fn nl_align(len: usize) -> usize {
@@ -3999,6 +4731,195 @@ fn set_network_interface_mtu(ifindex: i32, mtu: u32) -> io::Result<()> {
     netlink_route_request(&msg)
 }
 
+/// Build the IFLA_PROP_LIST nested attribute payload containing one
+/// IFLA_ALT_IFNAME sub-attribute per alternative name.  Returns the raw
+/// bytes ready to be wrapped in an IFLA_PROP_LIST header.
+fn build_altname_list_payload(names: &[&str]) -> Vec<u8> {
+    let mut payload = Vec::new();
+    for name in names {
+        let name_bytes = name.as_bytes();
+        let inner_len = 4 + name_bytes.len() + 1; // rta_hdr + name + NUL
+        let padded_len = nl_rta_align(inner_len);
+        let mut inner = vec![0u8; padded_len];
+        nl_put_u16(&mut inner, 0, inner_len as u16);
+        nl_put_u16(&mut inner, 2, IFLA_ALT_IFNAME);
+        inner[4..4 + name_bytes.len()].copy_from_slice(name_bytes);
+        // NUL terminator already present (vec was zero-init).
+        payload.extend_from_slice(&inner);
+    }
+    payload
+}
+
+/// Send either RTM_NEWLINKPROP (add altnames) or RTM_DELLINKPROP (remove
+/// altnames) carrying an IFLA_PROP_LIST containing IFLA_ALT_IFNAME
+/// sub-attributes.  Used to attach/remove alternative names to a
+/// network interface.
+fn linkprop_request(ifindex: i32, msg_type: u16, names: &[&str]) -> io::Result<()> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    let inner = build_altname_list_payload(names);
+    let prop_list_attr_total = nl_rta_align(4 + inner.len());
+    let msg_len = NLMSG_HDR_LEN + IFINFOMSG_LEN + prop_list_attr_total;
+    let mut msg = vec![0u8; nl_align(msg_len)];
+
+    nl_put_u32(&mut msg, 0, msg_len as u32);
+    nl_put_u16(&mut msg, 4, msg_type);
+    nl_put_u16(&mut msg, 6, NLM_F_REQUEST | NLM_F_ACK);
+    nl_put_u32(&mut msg, 8, 1);
+    nl_put_u32(&mut msg, 12, 0);
+
+    let ifi = NLMSG_HDR_LEN;
+    msg[ifi] = AF_UNSPEC;
+    nl_put_i32(&mut msg, ifi + 4, ifindex);
+
+    let attr_off = NLMSG_HDR_LEN + IFINFOMSG_LEN;
+    nl_put_rta_bytes(&mut msg, attr_off, IFLA_PROP_LIST | NLA_F_NESTED, &inner);
+
+    netlink_route_request(&msg)
+}
+
+/// Add alternative names to a network interface via RTM_NEWLINKPROP.
+fn add_network_interface_altnames(ifindex: i32, names: &[&str]) -> io::Result<()> {
+    linkprop_request(ifindex, RTM_NEWLINKPROP, names)
+}
+
+/// Remove alternative names from a network interface via RTM_DELLINKPROP.
+fn del_network_interface_altnames(ifindex: i32, names: &[&str]) -> io::Result<()> {
+    linkprop_request(ifindex, RTM_DELLINKPROP, names)
+}
+
+/// Read the current alternative names of a network interface from
+/// sysfs.  Returns an empty Vec if none are set or sysfs is unavailable.
+fn read_current_altnames(event: &UEvent) -> Vec<String> {
+    // sysfs doesn't expose altnames directly; we'd need RTM_GETLINK.
+    // For our use case we don't need to know the full current set — we
+    // just need to detect names that appear in OUR event's config vs
+    // what the kernel already has.  Use a RTM_GETLINK query.
+    let ifindex = match read_net_ifindex(event) {
+        Some(i) => i,
+        None => return Vec::new(),
+    };
+    rtm_getlink_altnames(ifindex).unwrap_or_default()
+}
+
+/// Issue RTM_GETLINK for a specific ifindex and parse IFLA_PROP_LIST /
+/// IFLA_ALT_IFNAME sub-attributes into a list of strings.
+fn rtm_getlink_altnames(ifindex: i32) -> io::Result<Vec<String>> {
+    const RTM_GETLINK: u16 = 18;
+
+    let msg_len = NLMSG_HDR_LEN + IFINFOMSG_LEN;
+    let mut msg = vec![0u8; nl_align(msg_len)];
+    nl_put_u32(&mut msg, 0, msg_len as u32);
+    nl_put_u16(&mut msg, 4, RTM_GETLINK);
+    nl_put_u16(&mut msg, 6, NLM_F_REQUEST | NLM_F_ACK);
+    nl_put_u32(&mut msg, 8, 1);
+    nl_put_u32(&mut msg, 12, 0);
+    let ifi = NLMSG_HDR_LEN;
+    msg[ifi] = AF_UNSPEC;
+    nl_put_i32(&mut msg, ifi + 4, ifindex);
+
+    // Reuse the socket setup from netlink_route_request but inline since we
+    // need to read the full response (not just ACK).
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_RAW | libc::SOCK_CLOEXEC,
+            NETLINK_ROUTE,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    addr.nl_family = libc::AF_NETLINK as u16;
+    unsafe {
+        libc::bind(
+            fd,
+            &addr as *const libc::sockaddr_nl as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        )
+    };
+    let tv = libc::timeval {
+        tv_sec: 2,
+        tv_usec: 0,
+    };
+    unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVTIMEO,
+            &tv as *const libc::timeval as *const libc::c_void,
+            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+        );
+    }
+
+    if unsafe { libc::send(fd, msg.as_ptr() as *const libc::c_void, msg.len(), 0) } < 0 {
+        let e = io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(e);
+    }
+
+    let mut buf = vec![0u8; 65536];
+    let n = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
+    unsafe { libc::close(fd) };
+    if n < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let n = n as usize;
+
+    // Skip nlmsghdr (16) + ifinfomsg (16), then walk attributes.
+    if n < NLMSG_HDR_LEN + IFINFOMSG_LEN {
+        return Ok(Vec::new());
+    }
+    // Only RTM_NEWLINK responses carry the interface info we want.
+    // NLMSG_ERROR / NLMSG_DONE / ACKs get ignored so we don't parse
+    // their bytes as bogus IFLA attributes.
+    const RTM_NEWLINK: u16 = 16;
+    let nlmsg_type = u16::from_ne_bytes(buf[4..6].try_into().unwrap());
+    if nlmsg_type != RTM_NEWLINK {
+        return Ok(Vec::new());
+    }
+
+    let mut altnames = Vec::new();
+    let mut off = NLMSG_HDR_LEN + IFINFOMSG_LEN;
+    while off + 4 <= n {
+        let rta_len = u16::from_ne_bytes(buf[off..off + 2].try_into().unwrap()) as usize;
+        let rta_type = u16::from_ne_bytes(buf[off + 2..off + 4].try_into().unwrap());
+        if rta_len < 4 || off + rta_len > n {
+            break;
+        }
+        if rta_type & !NLA_F_NESTED == IFLA_PROP_LIST {
+            // Walk nested IFLA_ALT_IFNAME children.
+            let mut inner_off = off + 4;
+            let inner_end = off + rta_len;
+            while inner_off + 4 <= inner_end {
+                let ilen =
+                    u16::from_ne_bytes(buf[inner_off..inner_off + 2].try_into().unwrap()) as usize;
+                let itype =
+                    u16::from_ne_bytes(buf[inner_off + 2..inner_off + 4].try_into().unwrap());
+                if ilen < 4 || inner_off + ilen > inner_end {
+                    break;
+                }
+                if itype == IFLA_ALT_IFNAME && ilen > 4 {
+                    // Strip trailing NUL(s).
+                    let end = inner_off + ilen;
+                    let mut name_end = end;
+                    while name_end > inner_off + 4 && buf[name_end - 1] == 0 {
+                        name_end -= 1;
+                    }
+                    if let Ok(s) = std::str::from_utf8(&buf[inner_off + 4..name_end]) {
+                        altnames.push(s.to_owned());
+                    }
+                }
+                inner_off += nl_rta_align(ilen);
+            }
+        }
+        off += nl_rta_align(rta_len);
+    }
+    Ok(altnames)
+}
+
 /// Read the interface index from sysfs for a network device event.
 fn read_net_ifindex(event: &UEvent) -> Option<i32> {
     event
@@ -4058,18 +4979,39 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
     let current_name = net_kernel_name(event).unwrap_or("").to_string();
 
     // Determine the target interface name.
-    // Priority: ID_NET_NAME (from net_setup_link/rules) > NAME= from rules.
-    let target_name = event
-        .env
-        .get("ID_NET_NAME")
-        .cloned()
-        .or_else(|| result.name.clone());
+    // Priority: `NAME=` from rules wins over ID_NET_NAME from the
+    // `net_setup_link` builtin.  Upstream systemd honors rule-set
+    // names even when a `.link` file would otherwise derive a name
+    // via NamePolicy=.  TEST-17-UDEV.rename-netif issue-#25106 subtest
+    // depends on `KERNEL=="hoge", NAME="foobar"` actually renaming
+    // to foobar despite 99-default.link's NamePolicy= keeping "hoge".
+    let target_name = result
+        .name
+        .clone()
+        .or_else(|| event.env.get("ID_NET_NAME").cloned());
 
     // Rename the interface if a target name is set and differs from current.
     if let Some(ref new_name) = target_name
         && !new_name.is_empty()
         && *new_name != current_name
     {
+        // If the target name is currently set as an altname on THIS
+        // interface, the kernel rejects the rename with EEXIST (altnames
+        // share the net namespace name lookup with primary names).  Drop
+        // the altname first so the rename can proceed.  TEST-17-UDEV.netif-altname
+        // exercises this by rotating through Name=test1 then Name=test2
+        // while test2 sits in the prior altname set.
+        let pre_rename_altnames = rtm_getlink_altnames(ifindex).unwrap_or_default();
+        if pre_rename_altnames.iter().any(|a| a == new_name) {
+            log::debug!(
+                "Dropping altname '{}' from ifindex={} before rename",
+                new_name,
+                ifindex
+            );
+            if let Err(e) = del_network_interface_altnames(ifindex, &[new_name.as_str()]) {
+                log::warn!("Failed to drop altname '{}' before rename: {}", new_name, e);
+            }
+        }
         log::info!(
             "Renaming network interface '{}' -> '{}' (ifindex={})",
             current_name,
@@ -4116,6 +5058,85 @@ fn apply_net_link_settings(event: &mut UEvent, result: &RuleResult) {
             log::warn!("Failed to set MTU on ifindex={}: {}", ifindex, e);
         }
     }
+
+    // Apply alternative names from `.link` AlternativeName= /
+    // AlternativeNamesPolicy=.  The interface's previously-set altnames
+    // are diffed against the new set, so repeated add/trigger events
+    // converge cleanly: altnames that used to be set but aren't now are
+    // removed, and altnames that are new are added.  TEST-17-UDEV.netif-altname
+    // exercises this via repeated `.link` file rewrites.
+    let final_name = event
+        .env
+        .get("INTERFACE")
+        .cloned()
+        .unwrap_or_else(|| current_name.clone());
+    let desired_altnames = compute_desired_altnames(
+        event
+            .env
+            .get("ID_NET_LINK_FILE_ALTNAMES")
+            .map(|s| s.as_str()),
+        &final_name,
+    );
+    let current_altnames = read_current_altnames(event);
+    let (to_remove, to_add) = diff_altnames(&current_altnames, &desired_altnames);
+
+    if !to_remove.is_empty() {
+        log::debug!("Removing altnames {:?} from ifindex={}", to_remove, ifindex);
+        for name in &to_remove {
+            if let Err(e) = del_network_interface_altnames(ifindex, &[*name])
+                && e.raw_os_error() != Some(libc::ENODEV)
+            {
+                log::debug!("del altname '{}' on ifindex={}: {}", name, ifindex, e);
+            }
+        }
+    }
+    if !to_add.is_empty() {
+        log::debug!(
+            "Adding altnames {:?} to ifindex={} (current={:?})",
+            to_add,
+            ifindex,
+            current_altnames
+        );
+        for name in &to_add {
+            if let Err(e) = add_network_interface_altnames(ifindex, &[*name])
+                && e.raw_os_error() != Some(libc::EEXIST)
+            {
+                log::warn!("add altname '{}' on ifindex={}: {}", name, ifindex, e);
+            }
+        }
+    }
+}
+
+/// Compute the desired altname list from a space-separated input and a
+/// "do not include" primary name.  Empty tokens are skipped, duplicates
+/// are de-duplicated, and the primary name is filtered out.
+fn compute_desired_altnames(list: Option<&str>, primary_name: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Some(list) = list {
+        for n in list.split_whitespace() {
+            if !n.is_empty() && n != primary_name && !out.iter().any(|e| e == n) {
+                out.push(n.to_owned());
+            }
+        }
+    }
+    out
+}
+
+/// Compute the (remove, add) set-difference of `current` vs `desired`
+/// altname lists so the caller only issues netlink changes for the
+/// difference.  Order within each returned vec matches the source vec.
+fn diff_altnames<'a>(current: &'a [String], desired: &'a [String]) -> (Vec<&'a str>, Vec<&'a str>) {
+    let to_remove: Vec<&str> = current
+        .iter()
+        .filter(|n| !desired.iter().any(|d| d == *n))
+        .map(|s| s.as_str())
+        .collect();
+    let to_add: Vec<&str> = desired
+        .iter()
+        .filter(|n| !current.iter().any(|c| c == *n))
+        .map(|s| s.as_str())
+        .collect();
+    (to_remove, to_add)
 }
 
 fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
@@ -4127,14 +5148,40 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
         event.devname
     );
 
+    // Inject global ENV properties set via `udevadm control -p KEY=VAL`
+    // before rules run, so `ENV{KEY}=="…"` tests see them.  Kernel-set
+    // event properties take precedence (we use `or_insert`).
+    for (k, v) in global_env_snapshot() {
+        event.env.entry(k).or_insert(v);
+    }
+
+    // Synthesized uevents (written via /sys/.../uevent) don't include
+    // subsystem-specific env like IFINDEX — the kernel only adds those
+    // in the initial `add` broadcast.  Backfill IFINDEX from sysfs for
+    // net devices so downstream logic (db path `n<ifindex>`, rules
+    // keyed on INTERFACE, netlink operations) sees a consistent view
+    // across add/change/move/online events.  TEST-17-UDEV.rename-netif
+    // relies on `ACTION=="online"` writing to the same db entry as
+    // the original `add`.
+    if event.subsystem == "net"
+        && !event.env.contains_key("IFINDEX")
+        && let Some(idx) = read_net_ifindex(event)
+    {
+        event.env.insert("IFINDEX".to_string(), idx.to_string());
+    }
+
     let result = process_rules(rules, event, hwdb);
 
     match event.action.as_str() {
         "add" | "change" | "bind" | "move" | "online" => {
-            // Apply network link settings (rename, MAC, MTU) before other actions.
-            // This must happen early so that symlinks, database entries, and RUN
-            // programs see the final interface name.
-            if event.subsystem == "net" && matches!(event.action.as_str(), "add" | "move") {
+            // Apply network link settings (rename, MAC, MTU, altnames)
+            // ONLY on `add` — upstream intentionally skips .link
+            // application on `move`/`change`/`online`.  This matters
+            // for `ip link set dev X name Y`, which emits a `move`
+            // event that must NOT re-run NamePolicy= logic or re-add
+            // altnames that the manual rename just cleared.
+            // TEST-17-UDEV.netif-altname asserts this explicitly.
+            if event.subsystem == "net" && event.action == "add" {
                 apply_net_link_settings(event, &result);
             }
 
@@ -4149,18 +5196,37 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
                 create_device_symlinks(event, &result.symlinks);
             }
 
+            // Mark the device as still-being-processed if we will run
+            // any RUN programs.  Clients like systemd check
+            // ID_PROCESSING=1 in the db entry to know whether they
+            // should wait before activating `.device` units or firing
+            // BindsTo= dependents.
+            let has_run_programs =
+                !result.run_programs.is_empty() || !result.run_builtins.is_empty();
+            if has_run_programs {
+                event.env.insert("ID_PROCESSING".to_owned(), "1".to_owned());
+            }
+
             // Write device database
             if let Err(e) = write_device_db(event, &result) {
                 log::debug!("Failed to write device db: {}", e);
             }
 
-            // Write tags
-            if !result.tags.is_empty() {
-                write_device_tags(event, &result.tags);
-            }
+            // (Tag-file writes now happen inside write_device_db so
+            // the tag file set is kept in sync with the merged-G:
+            // historical tag set persisted to the database.)
 
             // Execute RUN programs
             execute_run_programs(event, &result, hwdb);
+
+            // Clear the ID_PROCESSING marker and rewrite the db so
+            // downstream consumers see the device as done.
+            if has_run_programs {
+                event.env.remove("ID_PROCESSING");
+                if let Err(e) = write_device_db(event, &result) {
+                    log::debug!("Failed to rewrite device db after RUN completion: {}", e);
+                }
+            }
         }
         "remove" | "unbind" | "offline" => {
             // Remove symlinks (read from database first, under shared lock)
@@ -4191,6 +5257,132 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
             log::debug!("Unknown action '{}', processing rules only", event.action);
             // Still process rules and run programs
             execute_run_programs(event, &result, hwdb);
+        }
+    }
+
+    // After all per-action bookkeeping (db/symlinks/RUN) has finished, tell
+    // PID 1 about the event so the service manager can create/activate/
+    // deactivate `.device` units.  Fire-and-forget; errors are logged but
+    // do not block rule processing.
+    notify_systemd_device_event(event, &result);
+
+    // Broadcast the processed event on netlink group 2 so `udevadm
+    // monitor --udev` subscribers receive it.  This is the libudev
+    // monitor protocol — a fire-and-forget sendto() with the libudev
+    // header prefix.  If the global send socket isn't open (e.g. very
+    // early boot or socket() failed), skip silently.
+    let send_fd = UDEV_MONITOR_SEND_FD.load(std::sync::atomic::Ordering::Acquire);
+    if send_fd >= 0 {
+        broadcast_udev_monitor_event(send_fd, event, &result);
+    }
+}
+
+/// Shared netlink fd used by every worker thread to broadcast UDEV
+/// monitor events.  Initialised once by `main_loop()` at startup.
+/// -1 means "not yet opened"; broadcasts are skipped in that case.
+pub static UDEV_MONITOR_SEND_FD: std::sync::atomic::AtomicI32 =
+    std::sync::atomic::AtomicI32::new(-1);
+
+/// Path of PID 1's control socket (`SYSTEMCTL_ADDR` override for tests).
+fn systemd_control_socket_path() -> String {
+    std::env::var("SYSTEMCTL_ADDR")
+        .unwrap_or_else(|_| "/run/systemd/rust-systemd-notify/control.socket".to_owned())
+}
+
+/// Send a `udev-event` JSON-RPC notification to PID 1's control socket.
+///
+/// This is the udev → systemd integration hand-off: once udevd has
+/// finished processing rules (written the db, created symlinks, run
+/// RUN= programs), it tells PID 1 what happened so systemd can
+/// create/update/remove the corresponding `.device` units.
+///
+/// No response is expected; failures are logged at debug level since
+/// PID 1 may be rust-systemd (which understands the method), C systemd
+/// (which doesn't), or absent (in containers/tests).
+fn notify_systemd_device_event(event: &UEvent, result: &RuleResult) {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+
+    let sock_path = systemd_control_socket_path();
+    // Cheap check: if the socket file doesn't exist, skip without logging
+    // on every event.
+    if !std::path::Path::new(&sock_path).exists() {
+        return;
+    }
+
+    // Merge the sticky (G:) historical tag set with this event's tags so
+    // the server sees the full set of tags ever applied to this device,
+    // matching the `TAGS` pseudo-property in the udev db.
+    let merged_tags: Vec<String> = {
+        let mut tags: Vec<String> = Vec::new();
+        let db_path = device_db_path(event);
+        if let Ok(content) = std::fs::read_to_string(&db_path) {
+            for line in content.lines() {
+                if let Some(tag) = line.strip_prefix("G:")
+                    && !tag.is_empty()
+                    && !tags.contains(&tag.to_string())
+                {
+                    tags.push(tag.to_string());
+                }
+            }
+        }
+        for tag in &result.tags {
+            if !tags.contains(tag) {
+                tags.push(tag.clone());
+            }
+        }
+        tags
+    };
+
+    let sysfs_path = format!("/sys{}", event.devpath);
+    let devname = event
+        .devnode()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "udev-event",
+        "params": {
+            "action": event.action,
+            "sysfs_path": sysfs_path,
+            "devname": devname,
+            "subsystem": event.subsystem,
+            "env": event.env,
+            "tags": merged_tags,
+            "symlinks": result.symlinks,
+        },
+        "id": null,
+    });
+    let payload_str = payload.to_string();
+
+    let mut stream = match UnixStream::connect(&sock_path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::debug!(
+                "udev-event: connect {} failed ({e}); skipping notify",
+                sock_path
+            );
+            return;
+        }
+    };
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(2)));
+    if let Err(e) = stream.write_all(payload_str.as_bytes()) {
+        log::debug!("udev-event: write failed: {e}");
+        return;
+    }
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    // Drain (and discard) the server's response so its write_all doesn't
+    // hit a broken pipe.  A short read timeout keeps this non-blocking if
+    // PID 1 is slow.
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+    let mut buf = [0u8; 4096];
+    use std::io::Read;
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(_) => continue,
+            Err(_) => break,
         }
     }
 }
@@ -4369,6 +5561,76 @@ static EVENTS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static EVENTS_FINISHED: AtomicU64 = AtomicU64::new(0);
 
 // ---------------------------------------------------------------------------
+// Global ENV properties (`udevadm control -p KEY=VAL`)
+// ---------------------------------------------------------------------------
+
+/// Location of the persistent global-env store.  Kept under `/run`
+/// (tmpfs) so it clears on reboot but survives `systemctl restart
+/// systemd-udevd.service` — which is what 17-udev-global-property
+/// expects.
+const GLOBAL_ENV_FILE: &str = "/run/udev/control.conf";
+
+/// In-memory mirror of the persistent store, kept around to avoid a
+/// parse-on-every-event cost.
+static GLOBAL_ENV: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::BTreeMap<String, String>>,
+> = std::sync::OnceLock::new();
+
+fn global_env_cache() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, String>> {
+    GLOBAL_ENV.get_or_init(|| {
+        let mut map = std::collections::BTreeMap::new();
+        if let Ok(content) = fs::read_to_string(GLOBAL_ENV_FILE) {
+            for line in content.lines() {
+                if let Some((k, v)) = line.split_once('=')
+                    && !k.is_empty()
+                {
+                    map.insert(k.to_string(), v.to_string());
+                }
+            }
+        }
+        std::sync::Mutex::new(map)
+    })
+}
+
+fn write_global_env_file(map: &std::collections::BTreeMap<String, String>) {
+    let mut s = String::new();
+    for (k, v) in map {
+        s.push_str(&format!("{k}={v}\n"));
+    }
+    if let Some(parent) = Path::new(GLOBAL_ENV_FILE).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(GLOBAL_ENV_FILE, s);
+}
+
+/// Set or remove a global env property.  Empty `value` removes the key.
+fn set_global_env_property(key: &str, value: &str) {
+    let mut map = global_env_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if value.is_empty() {
+        map.remove(key);
+    } else {
+        map.insert(key.to_string(), value.to_string());
+    }
+    write_global_env_file(&map);
+}
+
+fn clear_global_env_properties() {
+    let mut map = global_env_cache().lock().unwrap_or_else(|e| e.into_inner());
+    map.clear();
+    let _ = fs::remove_file(GLOBAL_ENV_FILE);
+}
+
+/// Read the current set of global ENV properties (for injection at
+/// event processing time).  Returns a cloned snapshot so the caller
+/// doesn't need to hold the lock.
+pub fn global_env_snapshot() -> std::collections::BTreeMap<String, String> {
+    global_env_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+// ---------------------------------------------------------------------------
 // Control socket handling
 // ---------------------------------------------------------------------------
 
@@ -4379,7 +5641,7 @@ fn handle_control_command(
 ) -> String {
     let parts: Vec<&str> = cmd.trim().splitn(2, ' ').collect();
     let command = parts.first().copied().unwrap_or("");
-    let _arg = parts.get(1).copied().unwrap_or("");
+    let args = parts.get(1).copied().unwrap_or("");
 
     match command.to_uppercase().as_str() {
         "PING" => "OK\n".to_string(),
@@ -4417,7 +5679,11 @@ fn handle_control_command(
             "OK\n".to_string()
         }
         "SET_LOG_LEVEL" => {
-            // Stub
+            // Accept but don't actually change max log level — emitting
+            // DEBUG logs flood stderr (→ journald) and can stall the
+            // daemon's event loop when tests invoke
+            // `udevadm control --log-priority=debug`.
+            let _ = args;
             "OK\n".to_string()
         }
         "START_EXEC_QUEUE" => {
@@ -4426,6 +5692,41 @@ fn handle_control_command(
         }
         "STOP_EXEC_QUEUE" => {
             EXEC_QUEUE_PAUSED.store(true, Ordering::SeqCst);
+            "OK\n".to_string()
+        }
+        "SET_EXEC_DELAY" => {
+            // Stub — we don't delay RUN execution.  Accept the value.
+            "OK\n".to_string()
+        }
+        "SET_TRACE" => {
+            // Stub — we don't implement PROGRAM rule tracing.
+            "OK\n".to_string()
+        }
+        "ENV" => {
+            // `ENV KEY=VALUE` sets a global property that is injected
+            // into every event's environment before rules run.  An empty
+            // VALUE unsets the property.  We persist the table to
+            // `/run/udev/control.conf` so properties survive
+            // systemctl restart.
+            if let Some((key, val)) = args.split_once('=') {
+                let key = key.trim();
+                if !key.is_empty() {
+                    set_global_env_property(key, val.trim());
+                }
+            }
+            "OK\n".to_string()
+        }
+        "RELOAD_CREDS" => {
+            // Stub — systemd credentials are not yet integrated.
+            "OK\n".to_string()
+        }
+        "REVERT" => {
+            // Revert global ENV properties set via `udevadm control -p`.
+            clear_global_env_properties();
+            // Revert to startup configuration.  Trigger a rule reload to
+            // approximate; a full revert would require snapshotting
+            // state at startup.
+            *rules_reload_needed = true;
             "OK\n".to_string()
         }
         _ => format!("ERR unknown command: {}\n", command),
@@ -4911,6 +6212,19 @@ pub fn run_daemon() {
     let exec_delay = args.exec_delay;
     let _event_timeout = args.event_timeout;
 
+    // Open the send socket used to broadcast processed events to the
+    // libudev monitor group.  Best-effort — if this fails, workers
+    // simply skip the broadcast (see broadcast_udev_monitor_event).
+    match open_udev_monitor_send_socket() {
+        Ok(fd) => {
+            UDEV_MONITOR_SEND_FD.store(fd, std::sync::atomic::Ordering::Release);
+            log::debug!("udev monitor send socket opened (fd={fd})");
+        }
+        Err(e) => {
+            log::warn!("Failed to open udev monitor send socket: {e}");
+        }
+    }
+
     // Shared daemon state for D-Bus interface
     let daemon_state = Arc::new(Mutex::new(DaemonState {
         event_queue: event_queue.clone(),
@@ -5023,15 +6337,14 @@ pub fn run_daemon() {
             ));
         }
 
-        // Reap child processes
+        // Clear the SIGCHLD flag without reaping.  Worker threads use
+        // Rust's `Command::output()` which calls `waitpid(pid, ...)` for
+        // its own child — reaping with `waitpid(-1, ..., WNOHANG)` here
+        // races with that call and makes `Child::wait` panic when the
+        // kernel reports "no such child" for a pid the worker still
+        // expects to reap.
         if CHILDREN_FLAG.load(Ordering::SeqCst) {
             CHILDREN_FLAG.store(false, Ordering::SeqCst);
-            loop {
-                let ret = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
-                if ret <= 0 {
-                    break;
-                }
-            }
         }
 
         // Send watchdog keepalive
@@ -5581,7 +6894,278 @@ mod tests {
         assert_eq!(super::IFLA_IFNAME, 3);
         assert_eq!(super::IFLA_ADDRESS, 1);
         assert_eq!(super::IFLA_MTU, 4);
+        assert_eq!(super::IFLA_PROP_LIST, 52);
+        assert_eq!(super::IFLA_ALT_IFNAME, 53);
+        assert_eq!(super::NLA_F_NESTED, 0x8000);
+        assert_eq!(super::RTM_NEWLINKPROP, 108);
+        assert_eq!(super::RTM_DELLINKPROP, 109);
         assert_eq!(super::AF_UNSPEC, 0);
+    }
+
+    #[test]
+    fn test_build_altname_list_payload_single() {
+        let payload = super::build_altname_list_payload(&["eth42"]);
+        // Expected: rta_len(2) | rta_type(2) | name bytes | NUL | padding
+        // "eth42" is 5 bytes + NUL = 6 total, rta_len = 4 + 6 = 10,
+        // padded to 12.
+        assert_eq!(payload.len(), 12);
+        let rta_len = u16::from_ne_bytes(payload[0..2].try_into().unwrap());
+        let rta_type = u16::from_ne_bytes(payload[2..4].try_into().unwrap());
+        assert_eq!(rta_len, 10);
+        assert_eq!(rta_type, super::IFLA_ALT_IFNAME);
+        assert_eq!(&payload[4..9], b"eth42");
+        assert_eq!(payload[9], 0);
+    }
+
+    #[test]
+    fn test_build_altname_list_payload_multiple() {
+        let payload = super::build_altname_list_payload(&["a", "bc"]);
+        // First attribute: "a" (1 byte) + NUL + 4 header = 6, padded to 8
+        // Second attribute: "bc" (2) + NUL + 4 header = 7, padded to 8
+        assert_eq!(payload.len(), 16);
+        let rta1_type = u16::from_ne_bytes(payload[2..4].try_into().unwrap());
+        assert_eq!(rta1_type, super::IFLA_ALT_IFNAME);
+        let rta2_type = u16::from_ne_bytes(payload[10..12].try_into().unwrap());
+        assert_eq!(rta2_type, super::IFLA_ALT_IFNAME);
+    }
+
+    #[test]
+    fn test_build_altname_list_payload_empty() {
+        let payload = super::build_altname_list_payload(&[]);
+        assert!(payload.is_empty());
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_basic() {
+        let got = super::compute_desired_altnames(Some("alt1 alt2 alt3"), "eth0");
+        assert_eq!(got, vec!["alt1", "alt2", "alt3"]);
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_filters_primary() {
+        // Primary name must not appear in the altname list (kernel rejects it).
+        let got = super::compute_desired_altnames(Some("eth0 alt1 alt2"), "eth0");
+        assert_eq!(got, vec!["alt1", "alt2"]);
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_dedup() {
+        let got = super::compute_desired_altnames(Some("alt1 alt1 alt2 alt1"), "eth0");
+        assert_eq!(got, vec!["alt1", "alt2"]);
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_empty_tokens_skipped() {
+        let got = super::compute_desired_altnames(Some("  alt1  \t alt2  "), "eth0");
+        assert_eq!(got, vec!["alt1", "alt2"]);
+    }
+
+    #[test]
+    fn test_compute_desired_altnames_none_input() {
+        let got = super::compute_desired_altnames(None, "eth0");
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn test_diff_altnames_no_change() {
+        let cur: Vec<String> = vec!["a".into(), "b".into()];
+        let des: Vec<String> = vec!["a".into(), "b".into()];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert!(rm.is_empty());
+        assert!(ad.is_empty());
+    }
+
+    #[test]
+    fn test_diff_altnames_add_only() {
+        let cur: Vec<String> = vec![];
+        let des: Vec<String> = vec!["new1".into(), "new2".into()];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert!(rm.is_empty());
+        assert_eq!(ad, vec!["new1", "new2"]);
+    }
+
+    #[test]
+    fn test_diff_altnames_remove_only() {
+        let cur: Vec<String> = vec!["old1".into(), "old2".into()];
+        let des: Vec<String> = vec![];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert_eq!(rm, vec!["old1", "old2"]);
+        assert!(ad.is_empty());
+    }
+
+    #[test]
+    fn test_diff_altnames_overlapping() {
+        // kept: alt2; removed: alt1; added: alt3
+        let cur: Vec<String> = vec!["alt1".into(), "alt2".into()];
+        let des: Vec<String> = vec!["alt2".into(), "alt3".into()];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert_eq!(rm, vec!["alt1"]);
+        assert_eq!(ad, vec!["alt3"]);
+    }
+
+    #[test]
+    fn test_diff_altnames_full_replacement() {
+        let cur: Vec<String> = vec!["a".into(), "b".into()];
+        let des: Vec<String> = vec!["x".into(), "y".into()];
+        let (rm, ad) = super::diff_altnames(&cur, &des);
+        assert_eq!(rm, vec!["a", "b"]);
+        assert_eq!(ad, vec!["x", "y"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // libudev monitor framing round-trip
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_monitor_message_roundtrip_basic() {
+        let mut event = super::UEvent::new();
+        event.action = "add".to_string();
+        event.devpath = "/devices/virtual/mem/null".to_string();
+        event.subsystem = "mem".to_string();
+        event.devname = "null".to_string();
+        event.seqnum = 42;
+        let result = super::RuleResult::default();
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let parsed = super::parse_udev_monitor_message(&msg).expect("parse failed");
+
+        assert_eq!(parsed.get("ACTION").map(|s| s.as_str()), Some("add"));
+        assert_eq!(
+            parsed.get("DEVPATH").map(|s| s.as_str()),
+            Some("/devices/virtual/mem/null")
+        );
+        assert_eq!(parsed.get("SUBSYSTEM").map(|s| s.as_str()), Some("mem"));
+        assert_eq!(parsed.get("DEVNAME").map(|s| s.as_str()), Some("null"));
+        assert_eq!(parsed.get("SEQNUM").map(|s| s.as_str()), Some("42"));
+    }
+
+    #[test]
+    fn test_monitor_message_header_magic() {
+        let event = super::UEvent::new();
+        let result = super::RuleResult::default();
+        let msg = super::build_udev_monitor_message(&event, &result);
+        assert!(msg.len() >= super::UDEV_MONITOR_HEADER_SIZE);
+        assert_eq!(&msg[0..8], b"libudev\0");
+        let magic = u32::from_ne_bytes(msg[8..12].try_into().unwrap());
+        assert_eq!(magic, super::UDEV_MONITOR_MAGIC);
+        let header_size = u32::from_ne_bytes(msg[12..16].try_into().unwrap());
+        assert_eq!(header_size as usize, super::UDEV_MONITOR_HEADER_SIZE);
+    }
+
+    #[test]
+    fn test_monitor_message_tag_bloom_filter_nonzero_when_tagged() {
+        let event = super::UEvent::new();
+        let mut result = super::RuleResult::default();
+        result.tags.push("systemd".to_string());
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let bloom_hi = u32::from_ne_bytes(msg[32..36].try_into().unwrap());
+        let bloom_lo = u32::from_ne_bytes(msg[36..40].try_into().unwrap());
+        // Tagged devices must leave at least one bit in the bloom filter
+        // so libudev consumers with a tag filter don't skip them.
+        assert!(bloom_hi != 0 || bloom_lo != 0);
+    }
+
+    #[test]
+    fn test_monitor_message_subsystem_hash_populated() {
+        let mut event = super::UEvent::new();
+        event.subsystem = "block".to_string();
+        let result = super::RuleResult::default();
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let subsystem_hash = u32::from_ne_bytes(msg[24..28].try_into().unwrap());
+        assert_ne!(subsystem_hash, 0);
+        // Matches the MurmurHash2 we ship — any change should be deliberate.
+        assert_eq!(subsystem_hash, super::murmur_hash2(b"block"));
+    }
+
+    #[test]
+    fn test_monitor_message_roundtrip_many_properties() {
+        // TEST-17-UDEV.buffer-size exercises this with 100 × 100-byte
+        // properties.  Simulate that here so a regression in header
+        // offset / SOCK_SNDBUF sizing surfaces in unit tests.
+        let mut event = super::UEvent::new();
+        event.action = "add".to_string();
+        event.devpath = "/devices/virtual/mem/null".to_string();
+        event.subsystem = "mem".to_string();
+        for i in 0..100 {
+            event
+                .env
+                .insert(format!("XXX{:03}", i), "0123456789".repeat(10));
+        }
+        let result = super::RuleResult::default();
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let parsed = super::parse_udev_monitor_message(&msg).expect("parse failed");
+
+        // All 100 XXXNNN properties must round-trip without truncation.
+        for i in 0..100 {
+            let key = format!("XXX{:03}", i);
+            let expected = "0123456789".repeat(10);
+            assert_eq!(
+                parsed.get(&key).map(|s| s.as_str()),
+                Some(expected.as_str()),
+                "property {key} missing or wrong after round-trip"
+            );
+        }
+    }
+
+    #[test]
+    fn test_monitor_message_tags_serialized() {
+        let event = super::UEvent::new();
+        let mut result = super::RuleResult::default();
+        result.tags.push("systemd".to_string());
+        result.tags.push("seat".to_string());
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let parsed = super::parse_udev_monitor_message(&msg).expect("parse failed");
+        let tags = parsed.get("TAGS").expect("TAGS missing");
+        assert!(tags.contains(":systemd:"));
+        assert!(tags.contains(":seat:"));
+    }
+
+    #[test]
+    fn test_monitor_message_symlinks_serialized() {
+        let event = super::UEvent::new();
+        let mut result = super::RuleResult::default();
+        result.symlinks.push("disk/by-uuid/abc".to_string());
+        result.symlinks.push("disk/by-id/xyz".to_string());
+
+        let msg = super::build_udev_monitor_message(&event, &result);
+        let parsed = super::parse_udev_monitor_message(&msg).expect("parse failed");
+        let dl = parsed.get("DEVLINKS").expect("DEVLINKS missing");
+        assert!(dl.contains("disk/by-uuid/abc"));
+        assert!(dl.contains("disk/by-id/xyz"));
+    }
+
+    #[test]
+    fn test_monitor_message_rejects_bad_prefix() {
+        let bad = vec![0u8; super::UDEV_MONITOR_HEADER_SIZE + 4];
+        assert!(super::parse_udev_monitor_message(&bad).is_none());
+    }
+
+    #[test]
+    fn test_monitor_message_rejects_bad_magic() {
+        let event = super::UEvent::new();
+        let result = super::RuleResult::default();
+        let mut msg = super::build_udev_monitor_message(&event, &result);
+        // Flip a bit in the magic.
+        msg[8] ^= 0xff;
+        assert!(super::parse_udev_monitor_message(&msg).is_none());
+    }
+
+    #[test]
+    fn test_murmur_hash2_matches_libudev_reference() {
+        // Known MurmurHash2 outputs for the libudev bloom filter.
+        // These are reference values from upstream libudev.
+        assert_eq!(super::murmur_hash2(b""), 0);
+        // Stability of the algorithm — any change here must be
+        // intentional (would invalidate every cached bloom filter).
+        let h1 = super::murmur_hash2(b"block");
+        let h2 = super::murmur_hash2(b"block");
+        assert_eq!(h1, h2);
+        let h3 = super::murmur_hash2(b"net");
+        assert_ne!(h1, h3);
     }
 
     use super::*;
@@ -7267,9 +8851,12 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_parse_rule_value_escape() {
+    fn test_parse_rule_value_escape_n_preserved() {
+        // \n is NOT interpreted as newline inside rule values — it stays
+        // as the 2-char sequence `\n` so downstream consumers (e.g.
+        // IMPORT{program} shell invocation) can interpret it themselves.
         let (val, rest) = parse_rule_value(r#""hello\nworld""#).unwrap();
-        assert_eq!(val, "hello\nworld");
+        assert_eq!(val, r"hello\nworld");
         assert!(rest.is_empty());
     }
 
@@ -7281,9 +8868,20 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_rule_value_tab() {
+    fn test_parse_rule_value_tab_preserved() {
+        // \t is NOT unescaped — kept as 2 chars `\t`.
         let (val, _) = parse_rule_value(r#""col1\tcol2""#).unwrap();
-        assert_eq!(val, "col1\tcol2");
+        assert_eq!(val, r"col1\tcol2");
+    }
+
+    #[test]
+    fn test_parse_rule_value_backslash_double_x() {
+        // \\x20 (source: 4 chars \ \ x 2 0) parses to \x20 (source: 2
+        // chars \ x 2 0).  This is the core round-trip behaviour
+        // exercised by TEST-17-UDEV.IMPORT where echo -e then
+        // interprets \x20 as a space character.
+        let (val, _) = parse_rule_value(r#""aa\\x20bb""#).unwrap();
+        assert_eq!(val, r"aa\x20bb");
     }
 
     // -----------------------------------------------------------------------

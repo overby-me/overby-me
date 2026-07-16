@@ -1210,15 +1210,16 @@ pub(crate) fn service_exit_handler(
         // already completed/failed — re-activating them would differ from
         // real systemd where the job queue doesn't re-enqueue them.
         let stopped_deps = if restart_mode == RestartMode::Normal {
-            let mut all_deps = Vec::new();
+            // Only BindsTo= units (bound_by) propagate stops on restart.
+            // Requires= does NOT propagate stops on the reverse side
+            // (required_by units are not deactivated when their requirement
+            // restarts). PartOf= units would restart with the parent but
+            // that's a separate semantic from stop propagation here.
             let mut reactivate_deps = Vec::new();
             if let Some(unit) = run_info.unit_table.get(&srvc_id) {
                 reactivate_deps.extend(unit.common.dependencies.bound_by.clone());
-                all_deps.extend(unit.common.dependencies.bound_by.clone());
-                all_deps.extend(unit.common.dependencies.required_by.clone());
-                all_deps.extend(unit.common.dependencies.part_of_by.clone());
             }
-            for dep_id in &all_deps {
+            for dep_id in &reactivate_deps {
                 if let Err(e) = crate::units::deactivate_unit_recursive(dep_id, run_info) {
                     trace!(
                         "Failed to propagate stop to {} during RestartMode=normal restart of {name}: {e}",

@@ -51,7 +51,13 @@ use crate::units::{Specific, StatusStarted, Timeout, UnitStatus};
 /// `WatchdogSec=` value so that timeouts are detected promptly.
 /// Real systemd uses per-service timers, but a 2-second poll is a
 /// reasonable trade-off for our architecture.
-const WATCHDOG_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+// Polling interval for the watchdog enforcement loop.
+//
+// Tighter than upstream systemd's event-loop wake-ups (which fire exactly at
+// the deadline via timerfd) but sufficient to catch a `RuntimeMaxSec=5s`
+// timeout within the typical test allowance of `runtime_max + 2s`.  Was
+// 2 seconds; bumped down so 5s deadlines don't slip past a 7s test budget.
+const WATCHDOG_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Start the background watchdog enforcement thread.
 ///
@@ -197,12 +203,18 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
         );
 
         // Set the runtime_max_timeout_fired flag so the exit handler knows
-        // this was a RuntimeMaxSec kill (result="timeout").
+        // this was a RuntimeMaxSec kill (result="timeout").  Also mirror
+        // it onto the lock-free Common atomic so `systemctl show -P Result`
+        // returns "timeout" even when the per-service state lock is briefly
+        // contended.
         {
             let ri = run_info.read_poisoned();
             if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == rt.unit_name)
                 && let Specific::Service(srvc_specific) = &unit.specific
             {
+                unit.common
+                    .runtime_max_timeout_fired
+                    .store(true, std::sync::atomic::Ordering::Release);
                 let mut state = srvc_specific.state.write_poisoned();
                 state.srvc.runtime_max_timeout_fired = true;
             }
@@ -229,12 +241,16 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
         );
 
         // Set the watchdog_timeout_fired flag so that the exit handler
-        // knows this was a watchdog kill (for Restart=on-watchdog).
+        // knows this was a watchdog kill (for Restart=on-watchdog).  Also
+        // mirror it onto the Common atomic for lock-free Result reads.
         {
             let ri = run_info.read_poisoned();
             if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == wt.unit_name)
                 && let Specific::Service(srvc_specific) = &unit.specific
             {
+                unit.common
+                    .watchdog_timeout_fired
+                    .store(true, std::sync::atomic::Ordering::Release);
                 let mut state = srvc_specific.state.write_poisoned();
                 state.srvc.watchdog_timeout_fired = true;
             }
@@ -401,6 +417,8 @@ mod tests {
             extend_timeout_usec: None,
             extend_timeout_timestamp: None,
             join_namespace_pid: None,
+            helper_mount_ns: None,
+            current_exec_argv: None,
             manual_stop: false,
         }
     }

@@ -254,8 +254,15 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
     // Parse type field
     let type_str = &fields[0];
     let (entry_type, plus) = match type_str.as_str() {
+        // `u`: create system user, `u+`: ensure system user (don't error if
+        // already exists with different fields), `u!`: create system user
+        // and lock the password (no login).  `u!+` combines both modifiers.
+        // We don't currently implement password locking, so `u!` and `u!+`
+        // create the user identically to `u` / `u+`.
         "u" => (EntryType::CreateUser, false),
         "u+" => (EntryType::CreateUser, true),
+        "u!" => (EntryType::CreateUser, false),
+        "u!+" | "u+!" => (EntryType::CreateUser, true),
         "g" => (EntryType::CreateGroup, false),
         "g+" => (EntryType::CreateGroup, true),
         "m" => (EntryType::AddToGroup, false),
@@ -333,9 +340,14 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
 }
 
 /// Parse a sysusers.d config file.
+///
+/// A path of `-` reads from stdin (matches upstream `systemd-sysusers -`).
 fn parse_config_file(path: &Path) -> io::Result<Vec<SysusersEntry>> {
-    let file = fs::File::open(path)?;
-    let reader = io::BufReader::new(file);
+    let reader: Box<dyn BufRead> = if path == Path::new("-") {
+        Box::new(io::BufReader::new(io::stdin()))
+    } else {
+        Box::new(io::BufReader::new(fs::File::open(path)?))
+    };
     let mut entries = Vec::new();
 
     for (line_idx, line) in reader.lines().enumerate() {

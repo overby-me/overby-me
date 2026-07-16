@@ -780,11 +780,6 @@ fn main() {
     // Try to create a transient unit via the control socket first
     match try_create_transient_unit(&cli, &unit_name) {
         Ok(Some(resp)) => {
-            // Successfully created the transient unit.
-            if !cli.quiet {
-                eprintln!("Running as unit: {unit_name}");
-            }
-
             // When --wait/--scope was set, the control socket blocked until
             // the unit finished and the response contains the exit code.
             if cli.wait || cli.pipe || cli.scope {

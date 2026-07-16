@@ -92,11 +92,12 @@ mod dbus_support {
         // Spawn a thread to listen for NameOwnerChanged signals
         let handle = std::thread::spawn(move || {
             for signal in signals {
-                if let Ok(args) = signal.args() {
-                    if args.name.as_str() == target_name && args.new_owner.is_some() {
-                        *found_clone.lock().unwrap() = true;
-                        return;
-                    }
+                if let Ok(args) = signal.args()
+                    && args.name.as_str() == target_name
+                    && args.new_owner.is_some()
+                {
+                    *found_clone.lock().unwrap() = true;
+                    return;
                 }
             }
         });
@@ -106,10 +107,10 @@ mod dbus_support {
             if *found.lock().unwrap() {
                 break WaitResult::Ok;
             }
-            if let Some(timeout) = timeout {
-                if start.elapsed() >= timeout {
-                    break WaitResult::Timedout;
-                }
+            if let Some(timeout) = timeout
+                && start.elapsed() >= timeout
+            {
+                break WaitResult::Timedout;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         };

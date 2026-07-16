@@ -25,6 +25,25 @@ struct Cli {
     #[arg(long, short)]
     list: bool,
 
+    /// Don't truncate output (no-op for our compact `--list` output, but
+    /// accepted for upstream-systemd CLI parity).
+    #[arg(long)]
+    full: bool,
+
+    /// Disable colored output.  Accepted for parity; ignored.
+    #[arg(long)]
+    no_legend: bool,
+
+    /// Suppress informational output.  Accepted for parity; ignored.
+    #[arg(short, long)]
+    quiet: bool,
+
+    /// Output format selector.  `pretty`/`short` JSON output, otherwise the
+    /// flag is accepted-but-ignored (`--json=off`).  Currently treated as
+    /// a no-op for `--list` (we always print plain table).
+    #[arg(long, value_name = "MODE")]
+    json: Option<String>,
+
     /// Mount type (e.g., ext4, tmpfs, nfs)
     #[arg(short = 't', long = "type")]
     fstype: Option<String>,

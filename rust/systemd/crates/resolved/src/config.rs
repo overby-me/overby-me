@@ -767,10 +767,8 @@ fn parse_link_state(ifindex: u32, content: &str) -> Option<LinkDns> {
             let key = key.trim();
             let value = value.trim();
             match key {
-                "IFNAME" | "NETWORK_FILE_IFNAME" => {
-                    if ifname.is_empty() {
-                        ifname = value.to_string();
-                    }
+                "IFNAME" | "NETWORK_FILE_IFNAME" if ifname.is_empty() => {
+                    ifname = value.to_string();
                 }
                 "DNS" => {
                     for server_str in value.split_whitespace() {

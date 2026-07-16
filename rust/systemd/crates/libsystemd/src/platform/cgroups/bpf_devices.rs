@@ -8,6 +8,13 @@
 //! This module generates the minimal eBPF bytecode needed to enforce
 //! `DevicePolicy=` and `DeviceAllow=` directives, loads it via the `bpf()`
 //! syscall, and attaches it to the service's cgroup directory.
+//!
+//! The `BPF_*` constants and instruction/register helpers below mirror the
+//! kernel's eBPF ABI in full so the bytecode builder reads like the kernel
+//! headers; the minimal device program only emits a subset, so allow the
+//! unused ABI surface rather than trimming it to whatever today's program
+//! happens to reference.
+#![allow(dead_code)]
 
 use crate::units::unit_parsing::DevicePolicy;
 use log::trace;

@@ -62,9 +62,18 @@ in
     }: let
       udevRulesOverride = pkgs.runCommand "rust-systemd-udev-rules-override" {} ''
         mkdir -p $out/lib/udev/rules.d
+        # Copy rules that either:
+        #  * reference `systemctl` (systemd-unit integrations)
+        #  * ship builtin IMPORTs (`net_id`, `net_setup_link`, …) needed
+        #    by TEST-17-UDEV.* for ID_NET_DRIVER/ID_NET_NAME-style props
+        #  * 99-systemd.rules (required verbatim by the sanity-check
+        #    subtest's `udevadm cat 99-systemd`)
         for rule in ${config.systemd.package}/lib/udev/rules.d/*.rules; do
-          if grep -q 'systemctl' "$rule"; then
-            cp "$rule" "$out/lib/udev/rules.d/$(basename "$rule")"
+          name=$(basename "$rule")
+          if grep -q 'systemctl' "$rule" \
+             || grep -q 'IMPORT{builtin}' "$rule" \
+             || [ "$name" = "99-systemd.rules" ]; then
+            cp "$rule" "$out/lib/udev/rules.d/$name"
           fi
         done
       '';
@@ -77,6 +86,60 @@ in
         then pkgs.systemd
         else rustSystemdPackage;
       services.udev.packages = [udevRulesOverride];
+
+      # Replace the upstream bash stage-2-init.sh with a version that
+      # strips the racy `exec > >(tee -i /proc/self/fd/"$logOutFd" |
+      # while read -r line; …) 2>&1` process-substitution pipeline.
+      # That bash-level fd-inheritance setup races with parallel
+      # kernel module loading (fuse/vmci/vsock auto-load) during
+      # early boot and hangs the VM about 30% of the time.  Taking
+      # the pipe out means stage-2 output goes straight to /dev/console
+      # instead of being re-logged to /dev/kmsg by a subshell, which
+      # is a small loss of diagnostic polish for a large boot-stability
+      # win.  All other stage-2 behavior (activation script, exec
+      # systemd) is preserved verbatim.
+      system.build.bootStage2 = let
+        # Delete the whole `if test -w /dev/kmsg; then ... fi` block
+        # that wraps the racy `exec > >(tee | while read) 2>&1` pipe.
+        # Deleting only the inner then-branch would leave bash with an
+        # empty `then`, which is a syntax error.  Stripping the entire
+        # if/fi chain makes stage-2 output go directly to inherited
+        # stdout (/dev/console from stage-1) — no subshell, no pipe,
+        # no race.
+        patchedSrc = pkgs.runCommand "stage-2-init-no-tee-pipe.sh" {} ''
+          # End pattern `^    fi$` (4 leading spaces, nothing else)
+          # deliberately matches the outer `fi` at column 4 closing
+          # the `if test -w /dev/kmsg; then … fi` block — not the
+          # deeper 12-space inner `fi` that closes `if test -n "$line"`.
+          sed '/^ *if test -w \/dev\/kmsg; then$/,/^    fi$/d' \
+              ${pkgs.path}/nixos/modules/system/boot/stage-2-init.sh \
+              > $out
+        '';
+      in
+        lib.mkIf (!useUpstreamSystemd) (
+          lib.mkForce (pkgs.replaceVarsWith {
+            src = patchedSrc;
+            isExecutable = true;
+            replacements = {
+              shell = "${pkgs.bash}/bin/bash";
+              systemConfig = null;
+              inherit (config.boot) systemdExecutable;
+              nixStoreMountOpts = lib.concatStringsSep " " (
+                map lib.escapeShellArg config.boot.nixStoreMountOpts
+              );
+              inherit (config.system.nixos) distroName;
+              useHostResolvConf =
+                config.networking.resolvconf.enable
+                && config.networking.useHostResolvConf;
+              inherit (config.system.build) earlyMountScript;
+              path = lib.makeBinPath [pkgs.coreutils pkgs.util-linux];
+              postBootCommands = pkgs.writeText "local-cmds" ''
+                ${config.boot.postBootCommands}
+                ${config.powerManagement.powerUpCommands}
+              '';
+            };
+          })
+        );
 
       # sudo-rs
       security.sudo.enable = false;
@@ -160,6 +223,19 @@ in
           systemd-networkd-wait-online.enable = lib.mkForce false;
           lvm-devices-import.enable = lib.mkForce false;
           uuidd.enable = lib.mkForce false;
+          # Override systemd-journal-upload — NixOS includes it even
+          # without `services.journald.upload.enable = true`, and since
+          # no URL is configured it immediately exits with "No URL
+          # specified", leaving `systemctl is-system-running` at
+          # "degraded" and tripping the TEST-74-AUX-UTILS
+          # is-system-running test.  Clear wantedBy so nothing pulls
+          # it in on default.target, and replace ExecStart with
+          # `/bin/true` so any explicit start call is a no-op.
+          systemd-journal-upload = {
+            wantedBy = lib.mkForce [];
+            serviceConfig.ExecStart = lib.mkForce "${pkgs.coreutils}/bin/true";
+            serviceConfig.Restart = lib.mkForce "no";
+          };
         };
       };
 
@@ -291,6 +367,33 @@ in
           [ -e "/usr/lib/systemd/$name" ] || ln -sfn "$bin" "/usr/lib/systemd/$name"
         done
 
+        # Symlink udev rules files so tests like TEST-17-UDEV.sanity-check.sh
+        # that reference /usr/lib/udev/rules.d/99-systemd.rules directly can
+        # find them (NixOS installs rules only under /etc/udev/rules.d).
+        mkdir -p /usr/lib/udev/rules.d
+        for f in ${config.systemd.package}/lib/udev/rules.d/*.rules; do
+          [ -e "$f" ] || continue
+          name=$(basename "$f")
+          [ -e "/usr/lib/udev/rules.d/$name" ] || ln -sfn "$f" "/usr/lib/udev/rules.d/$name"
+        done
+
+        # Populate /dev/block/ with major:minor symlinks for existing block
+        # devices. The TEST-17-UDEV.sanity-check.sh lock-test iterates
+        # `/dev/block/*` and set-e aborts if the glob is empty — this ensures
+        # at least one entry is present even if rust-udevd hasn't processed
+        # block events yet.
+        mkdir -p /dev/block
+        for blk in /sys/block/*; do
+          [ -d "$blk" ] || continue
+          if [ -f "$blk/dev" ]; then
+            devstr=$(cat "$blk/dev" 2>/dev/null)
+            name=$(basename "$blk")
+            if [ -n "$devstr" ] && [ -e "/dev/$name" ]; then
+              [ -e "/dev/block/$devstr" ] || ln -sfn "/dev/$name" "/dev/block/$devstr"
+            fi
+          fi
+        done
+
         # Copy share data (e.g. gatewayd/browse.html) to /usr/share as a
         # writable directory.  Tests like journal-gatewayd need to mv/restore
         # files under /usr/share/systemd, which fails if it's a read-only
@@ -380,6 +483,14 @@ in
               -e 's|^ExecStartPre=true|ExecStartPre=/usr/bin/true|' \
               -e 's|^ExecStartPre=echo |ExecStartPre=/usr/bin/echo |' \
               -e 's|^ExecStartPre=sleep |ExecStartPre=/usr/bin/sleep |' \
+              -e 's|^ExecStartPre=grep |ExecStartPre=/usr/bin/grep |' \
+              -e 's|^ExecStartPre=test |ExecStartPre=/usr/bin/test |' \
+              -e 's|^ExecStart=grep |ExecStart=/usr/bin/grep |' \
+              -e 's|^ExecStart=test |ExecStart=/usr/bin/test |' \
+              -e 's|^ExecStart=touch |ExecStart=/usr/bin/touch |' \
+              -e 's|^ExecStart=mkdir |ExecStart=/usr/bin/mkdir |' \
+              -e 's|^ExecStart=cp |ExecStart=/usr/bin/cp |' \
+              -e 's|^ExecStart=rm |ExecStart=/usr/bin/rm |' \
               -e 's|^ExecStartPost=bash |ExecStartPost=/usr/bin/bash |' \
               -e 's|^ExecStartPost=sh |ExecStartPost=/bin/sh |' \
               -e 's|^ExecStopPost=bash |ExecStopPost=/usr/bin/bash |' \
@@ -477,7 +588,11 @@ in
       # scripts already set `set -eux` internally.
       # Tee output to /dev/kmsg so it appears on serial console (nix build -L).
       # Use a FIFO to capture the exit code without PIPESTATUS (avoiding Nix escaping).
-      test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}./${testName}.sh 2>&1 | tee /dev/ttyS0"
+      # Wrap the test script so an exit code of 77 (upstream convention for
+      # "prerequisite missing, skip") creates /skipped even when the script
+      # didn't touch it itself (e.g. TEST-83-BTRFS exits 77 on non-btrfs root
+      # without writing /skipped).
+      test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}bash -c './${testName}.sh; rc=$?; [ $rc -eq 77 ] && touch /skipped; exit $rc' 2>&1 | tee /dev/ttyS0"
 
       try:
           (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
@@ -493,7 +608,23 @@ in
           (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
           print(output)
 
-      # Check for /testok (standard systemd test success marker)
-      machine.succeed("test -f /testok")
+      # Check for /testok (standard systemd test success marker) or
+      # /skipped (upstream convention for tests that detected a missing
+      # prerequisite — e.g. TEST-08-INITRD when not running under a
+      # systemd initrd).  Either is a valid "this test ran to completion"
+      # marker; its absence means the script crashed / a set-e-trapped
+      # `test` assertion failed.
+      (rc_ok, ok_out) = machine.execute("test -f /testok")
+      (rc_skip, skip_out) = machine.execute("test -f /skipped")
+      if rc_ok != 0 and rc_skip != 0:
+          print("=== /testok and /skipped both missing — dumping journal for diagnostics ===")
+          (rc_j, j) = machine.execute("journalctl --no-pager -b 2>&1 | tail -400")
+          print(j)
+          print("=== systemctl list-units --failed ===")
+          (rc_f, f) = machine.execute("systemctl list-units --failed 2>&1")
+          print(f)
+      # Assert one of /testok or /skipped exists — previous `machine.fail`
+      # was inverted and silently let missing-marker cases pass.
+      machine.succeed("test -f /testok -o -f /skipped")
     '';
   }

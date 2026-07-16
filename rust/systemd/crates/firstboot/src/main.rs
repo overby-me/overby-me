@@ -291,7 +291,7 @@ fn generate_machine_id() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    format!("{:032x}", now.as_nanos() & u128::MAX)
+    format!("{:032x}", now.as_nanos())
 }
 
 fn is_valid_machine_id(id: &str) -> bool {

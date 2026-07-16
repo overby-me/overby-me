@@ -329,12 +329,27 @@ extern "C" fn handle_sigusr2(_: libc::c_int) {
 
 fn setup_signal_handlers() {
     unsafe {
-        libc::signal(libc::SIGTERM, handle_sigterm as libc::sighandler_t);
-        libc::signal(libc::SIGINT, handle_sigint as libc::sighandler_t);
-        libc::signal(libc::SIGHUP, handle_sighup as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            handle_sigterm as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            handle_sigint as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGHUP,
+            handle_sighup as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
-        libc::signal(libc::SIGUSR1, handle_sigusr1 as libc::sighandler_t);
-        libc::signal(libc::SIGUSR2, handle_sigusr2 as libc::sighandler_t);
+        libc::signal(
+            libc::SIGUSR1,
+            handle_sigusr1 as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGUSR2,
+            handle_sigusr2 as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
     }
 }
 

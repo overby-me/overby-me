@@ -1882,10 +1882,10 @@ fn print_id(id: Id128, mode: PrintMode, value_only: bool, name: Option<&str>) {
         }
         _ => {
             let formatted = id.format(mode);
-            if value_only || name.is_none() {
-                println!("{formatted}");
+            if !value_only && let Some(name) = name {
+                println!("{name} {formatted}");
             } else {
-                println!("{} {formatted}", name.unwrap());
+                println!("{formatted}");
             }
         }
     }

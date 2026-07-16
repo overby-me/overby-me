@@ -1,0 +1,4 @@
+# Ignore `repeated_keys` on rust/systemd/testsuite.nix — the module
+# intentionally splits `system.*` assignments across a large function
+# body for readability.  Combining them would require major reflow.
+disabled = ["repeated_keys"]

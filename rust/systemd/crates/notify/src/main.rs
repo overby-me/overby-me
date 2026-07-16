@@ -76,6 +76,14 @@ struct Cli {
     #[arg(long)]
     exec: bool,
 
+    /// Fork off a background process that will execute the command
+    /// given after `--`.  The parent prints the child's PID on stdout
+    /// and exits.  Useful for launching daemons from shell scripts
+    /// where the PID needs to be captured (e.g.,
+    /// `PID=$(systemd-notify --fork -- my-daemon)`).
+    #[arg(long)]
+    fork: bool,
+
     /// Additional variables to send, in VAR=VALUE format.
     /// When --exec is used, everything after `;` or `--` is the command to exec.
     #[arg(trailing_var_arg = true)]
@@ -221,22 +229,33 @@ fn main() {
         parts.push(format!("MAINPID={pid}"));
     }
 
-    // Separate variables from exec command (when --exec is used).
-    // With --exec, arguments after ";" or without "=" are the command.
+    // Separate variables from exec command (when --exec or --fork is used).
+    // Arguments after ";" or "--" are the command; bare tokens without '='
+    // under --exec/--fork are also treated as command words.
+    let use_cmd = cli.exec || cli.fork;
     let mut exec_cmd: Vec<String> = Vec::new();
     let mut found_separator = false;
     for var in &cli.variables {
-        if cli.exec && (var == ";" || var == "--") {
+        if use_cmd && (var == ";" || var == "--") {
             found_separator = true;
             continue;
         }
-        if found_separator || (cli.exec && !var.contains('=')) {
+        if found_separator || (use_cmd && !var.contains('=')) {
             exec_cmd.push(var.clone());
         } else if var.contains('=') {
             parts.push(var.clone());
-        } else if !cli.exec {
+        } else if !use_cmd {
             eprintln!("Warning: ignoring argument without '=': {var}");
         }
+    }
+
+    // --fork path: fork first so we know the child's PID, then (if the
+    // caller also requested notifications) inject MAINPID=<child> and
+    // send the message from the parent.  The parent prints the child
+    // PID and exits; the child execs the command.
+    if cli.fork && !exec_cmd.is_empty() {
+        let notify_socket = std::env::var("NOTIFY_SOCKET").ok();
+        fork_exec_and_notify(&exec_cmd, &parts, notify_socket.as_deref());
     }
 
     // If nothing to send, exit successfully
@@ -285,6 +304,82 @@ fn main() {
         let err = process::Command::new(cmd).args(args).exec();
         eprintln!("Error: failed to exec {cmd}: {err}");
         process::exit(1);
+    }
+}
+
+/// Fork a child that execs `cmd`.  The parent, after fork, optionally
+/// sends the given notification parts (with an added `MAINPID=<child>`
+/// line) to `$NOTIFY_SOCKET`, then prints the child's PID on stdout and
+/// exits 0.  If fork or exec fails, exits 1.
+fn fork_exec_and_notify(cmd: &[String], parts: &[String], notify_socket: Option<&str>) -> ! {
+    use std::ffi::CString;
+    match unsafe { libc::fork() } {
+        -1 => {
+            eprintln!("fork failed: {}", std::io::Error::last_os_error());
+            process::exit(1);
+        }
+        0 => {
+            // Detach from the controlling terminal / session so the child
+            // survives when the invoking shell tears down its subshell
+            // (e.g. `PID=$(systemd-notify --fork -- …)`).
+            unsafe { libc::setsid() };
+            // Redirect stdout/stderr to /dev/null so the `$(...)` reader
+            // gets EOF as soon as the parent exits — otherwise the
+            // subshell keeps blocking on the child's open stdout.
+            unsafe {
+                let devnull_ro = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
+                let devnull_wr = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+                if devnull_ro >= 0 {
+                    libc::dup2(devnull_ro, 0);
+                    libc::close(devnull_ro);
+                }
+                if devnull_wr >= 0 {
+                    libc::dup2(devnull_wr, 1);
+                    libc::dup2(devnull_wr, 2);
+                    libc::close(devnull_wr);
+                }
+            }
+            let prog = match CString::new(cmd[0].as_str()) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("invalid program name: {e}");
+                    process::exit(1);
+                }
+            };
+            let args: Vec<CString> = cmd
+                .iter()
+                .map(|a| CString::new(a.as_str()).unwrap())
+                .collect();
+            let ptrs: Vec<*const libc::c_char> = args
+                .iter()
+                .map(|a| a.as_ptr())
+                .chain(std::iter::once(std::ptr::null()))
+                .collect();
+            unsafe { libc::execvp(prog.as_ptr(), ptrs.as_ptr()) };
+            eprintln!(
+                "exec {} failed: {}",
+                cmd[0],
+                std::io::Error::last_os_error()
+            );
+            process::exit(1);
+        }
+        pid => {
+            // If the caller requested notifications, inject MAINPID=<child>
+            // and send them now — best-effort, so failures don't block
+            // returning the PID to the caller.
+            if !parts.is_empty()
+                && let Some(sock) = notify_socket
+            {
+                let mut with_mainpid = parts.to_vec();
+                if !with_mainpid.iter().any(|p| p.starts_with("MAINPID=")) {
+                    with_mainpid.push(format!("MAINPID={pid}"));
+                }
+                let msg = with_mainpid.join("\n");
+                let _ = send_notification(sock, &msg);
+            }
+            println!("{pid}");
+            process::exit(0);
+        }
     }
 }
 

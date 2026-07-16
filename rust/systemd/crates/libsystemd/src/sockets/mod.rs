@@ -1,12 +1,14 @@
 //! Socket related code. Opening of all different kinds, match sockets to services etc
 
 mod fifo;
+mod mqueue;
 mod netlink_sockets;
 pub(crate) mod network_sockets;
 mod special_file;
 mod unix_sockets;
 pub use fifo::*;
 use log::trace;
+pub use mqueue::*;
 pub use netlink_sockets::*;
 pub use network_sockets::*;
 pub use special_file::*;
@@ -108,12 +110,14 @@ pub enum SocketKind {
     Fifo(String),
     Netlink(String),
     Special(String),
+    MessageQueue(String),
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum SpecializedSocketConfig {
     UnixSocket(UnixSocketConfig),
     Fifo(FifoConfig),
+    MessageQueue(MessageQueueConfig),
     TcpSocket(TcpSocketConfig),
     UdpSocket(UdpSocketConfig),
     NetlinkSocket(NetlinkSocketConfig),
@@ -127,6 +131,7 @@ impl SpecializedSocketConfig {
             Self::TcpSocket(conf) => conf.open(sock_conf),
             Self::UdpSocket(conf) => conf.open(sock_conf),
             Self::Fifo(conf) => conf.open(sock_conf),
+            Self::MessageQueue(conf) => conf.open(sock_conf),
             Self::NetlinkSocket(conf) => conf.open(sock_conf),
             Self::SpecialFile(conf) => conf.open(sock_conf),
         }
@@ -137,6 +142,7 @@ impl SpecializedSocketConfig {
             Self::TcpSocket(conf) => conf.close(rawfd),
             Self::UdpSocket(conf) => conf.close(rawfd),
             Self::Fifo(conf) => conf.close(rawfd, remove_on_stop),
+            Self::MessageQueue(conf) => conf.close(rawfd, remove_on_stop),
             Self::NetlinkSocket(conf) => conf.close(rawfd),
             Self::SpecialFile(conf) => conf.close(rawfd),
         }

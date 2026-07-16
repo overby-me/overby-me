@@ -22,6 +22,7 @@ members = [
   "crates/dissect",
   "crates/escape",
   "crates/firstboot",
+  "crates/fstab-generator",
   "crates/homectl",
   "crates/homed",
   "crates/hostnamectl",

@@ -18,6 +18,7 @@
 pub mod calendar_spec;
 pub mod config;
 pub mod control;
+pub mod dbus_server;
 pub mod dbus_wait;
 pub mod entrypoints;
 pub mod fd_store;

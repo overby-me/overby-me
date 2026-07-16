@@ -65,6 +65,9 @@ const KNOWN_FLAGS: &[&str] = &[
     "--show-transaction",
     "--recursive",
     "--with-dependencies",
+    // `systemctl bind` specific flags
+    "--mkdir",
+    "--read-only",
     "--dry-run",
     "-T",
 ];
@@ -382,6 +385,8 @@ fn main() {
     let mut output_format: Option<String> = None;
     let mut what_filter: Option<String> = None;
     let mut now = false;
+    let mut bind_mkdir = false;
+    let mut bind_read_only = false;
     let mut preset_mode: Option<String> = None;
     let mut kill_whom: Option<String> = None;
     let mut kill_value: Option<i32> = None;
@@ -568,6 +573,12 @@ fn main() {
             if arg == "--now" {
                 now = true;
             }
+            if arg == "--mkdir" {
+                bind_mkdir = true;
+            }
+            if arg == "--read-only" {
+                bind_read_only = true;
+            }
             if arg == "--no-legend" {
                 no_legend = true;
             }
@@ -733,6 +744,21 @@ fn main() {
         positional.push("list-units".to_string());
     }
 
+    // Path-to-unit translation: systemctl accepts absolute paths like
+    // `/sys/devices/virtual/net/eth0` or `/dev/sda1` and resolves them
+    // to the corresponding `.device` unit name using the systemd path-
+    // escape convention (each `/` → `-`, and other specials → `\xNN`).
+    // Matches upstream systemd's `unit_name_mangle_with_suffix`.
+    // Skip positional[0] since that's the subcommand.
+    for arg in positional.iter_mut().skip(1) {
+        if arg.starts_with("/sys/") || arg.starts_with("/dev/") {
+            *arg = format!(
+                "{}.device",
+                libsystemd::unit_name::unit_name_path_escape(arg),
+            );
+        }
+    }
+
     // Parse signal name from --signal / -s flag captured in first pass
     let kill_signal: Option<i32> = kill_signal_str.as_deref().and_then(|name| {
         if let Ok(sig) = name.parse::<i32>() {
@@ -863,7 +889,7 @@ fn main() {
         "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" => &positional[0],
         // Timer, property, edit, revert, clean commands — pass through
         "list-timers" | "list-sockets" | "list-paths" | "list-jobs" | "set-property" | "edit"
-        | "revert" | "clean" => &positional[0],
+        | "revert" | "clean" | "bind" => &positional[0],
         // log-level, log-target, service-watchdogs — get or set manager properties
         "log-level" | "log-target" | "service-watchdogs" => &positional[0],
         // is-failed with no unit = is-system-running (system state check)
@@ -1573,6 +1599,24 @@ fn main() {
             std::process::exit(1);
         }
         Some(Value::String(positional[1].clone()))
+    } else if method == "bind" {
+        // bind <unit> <source> <destination> [--read-only] [--mkdir]
+        if positional.len() < 4 {
+            if !quiet {
+                eprintln!("Error: bind requires <unit> <source> <destination> arguments.");
+            }
+            std::process::exit(1);
+        }
+        let mut obj = serde_json::Map::new();
+        obj.insert("unit".to_string(), Value::String(positional[1].clone()));
+        obj.insert("source".to_string(), Value::String(positional[2].clone()));
+        obj.insert(
+            "destination".to_string(),
+            Value::String(positional[3].clone()),
+        );
+        obj.insert("read_only".to_string(), Value::Bool(bind_read_only));
+        obj.insert("mkdir".to_string(), Value::Bool(bind_mkdir));
+        Some(Value::Object(obj))
     } else if method == "reset-failed" {
         // reset-failed [unit] — optional unit name
         if positional.len() >= 2 {
@@ -1919,6 +1963,10 @@ fn handle_response(
                 "enabled" | "enabled-runtime" | "static" | "indirect" | "generated" => {
                     std::process::exit(0)
                 }
+                // Matching upstream: "not-found" is exit 4 (distinct from
+                // exit 1 for "disabled" etc.) so shell scripts can branch
+                // on it.  TEST-17-UDEV.credentials relies on this.
+                "not-found" => std::process::exit(4),
                 _ => std::process::exit(1),
             }
         }

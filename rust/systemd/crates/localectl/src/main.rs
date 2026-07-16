@@ -932,11 +932,9 @@ fn main() {
                             print_usage();
                             return;
                         }
-                        'p' => {
-                            if i + 1 < args.len() {
-                                properties.push(args[i + 1].clone());
-                                skip_next = true;
-                            }
+                        'p' if i + 1 < args.len() => {
+                            properties.push(args[i + 1].clone());
+                            skip_next = true;
                         }
                         _ => {} // ignore unknown short flags
                     }

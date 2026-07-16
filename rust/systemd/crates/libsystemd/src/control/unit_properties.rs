@@ -197,6 +197,16 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         let status = unit.common.status.read_poisoned();
         insert_status(&mut props, &status);
 
+        // Device units use the `plugged` SubState when active (not the
+        // default `running`), and `tentative` when present-but-not-ready
+        // (SYSTEMD_READY=0).  TEST-17-UDEV.* asserts `SubState=plugged`
+        // explicitly.
+        if matches!(&unit.specific, Specific::Device(_))
+            && matches!(&*status, UnitStatus::Started(_))
+        {
+            insert(&mut props, "SubState", "plugged");
+        }
+
         // Override ActiveState for completed oneshot services with
         // RemainAfterExit=no: they are kept as Started for the boot
         // activation walker, but should report "inactive" (issue #27953).
@@ -208,6 +218,17 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         {
             insert(&mut props, "ActiveState", "inactive");
             insert(&mut props, "SubState", "dead");
+        }
+        // Override SubState to "exited" for completed oneshot services
+        // with RemainAfterExit=yes.  These stay Started but the process
+        // has finished, so C systemd reports SubState=exited.
+        if matches!(&*status, UnitStatus::Started(_))
+            && let Specific::Service(srvc) = &unit.specific
+            && srvc.conf.srcv_type == crate::units::ServiceType::OneShot
+            && srvc.conf.remain_after_exit
+            && srvc.state.read_poisoned().srvc.pid.is_none()
+        {
+            insert(&mut props, "SubState", "exited");
         }
     }
 
@@ -279,6 +300,9 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
             let state_ref = state_guard.as_ref().ok();
 
             if let Some(state) = state_ref {
+                if !svc.conf.open_file.is_empty() {
+                    insert(&mut props, "OpenFile", &svc.conf.open_file.join("\n"));
+                }
                 insert(
                     &mut props,
                     "NotifyAccess",
@@ -423,10 +447,26 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                     );
                 }
                 {
+                    // Use the Common atomics so a contended state lock
+                    // doesn't drop the timeout/watchdog signal here.
+                    let runtime_max_fired = unit
+                        .common
+                        .runtime_max_timeout_fired
+                        .load(std::sync::atomic::Ordering::Acquire);
+                    let watchdog_fired = unit
+                        .common
+                        .watchdog_timeout_fired
+                        .load(std::sync::atomic::Ordering::Acquire);
                     let status = unit.common.status.read_poisoned();
-                    let result = match &*status {
-                        UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
-                        _ => "success",
+                    let result = if runtime_max_fired {
+                        "timeout"
+                    } else if watchdog_fired {
+                        "watchdog"
+                    } else {
+                        match &*status {
+                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
+                            _ => "success",
+                        }
                     };
                     insert(&mut props, "Result", result);
                 }
@@ -474,6 +514,19 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                     "NFileDescriptorStore",
                     &state.srvc.stored_fds.len().to_string(),
                 );
+                // ExtraFileDescriptorNames is the space-separated list of
+                // FD names registered via StartTransientUnit's
+                // ExtraFileDescriptors property. We reuse stored_fds for
+                // this because both paths feed into LISTEN_FDNAMES.
+                let names: Vec<&str> = state
+                    .srvc
+                    .stored_fds
+                    .iter()
+                    .map(|(n, _)| n.as_str())
+                    .collect();
+                if !names.is_empty() {
+                    insert(&mut props, "ExtraFileDescriptorNames", &names.join(" "));
+                }
             } else {
                 insert(&mut props, "StatusErrno", "0");
                 insert(&mut props, "NFileDescriptorStore", "0");
@@ -755,16 +808,38 @@ pub fn need_daemon_reload(unit: &Unit, unit_dirs: &[std::path::PathBuf]) -> bool
         }
     }
 
-    // Collect current set of drop-in .conf file paths across all unit dirs.
+    // Collect current set of drop-in .conf file paths across all unit
+    // dirs.  Include type-level ("service.d"), prefix-level
+    // ("a-.service.d", "a-b-.service.d"), and exact-name ("a-b-c.service.d"),
+    // matching the loader's hierarchy.
+    let unit_name = &unit.id.name;
+    let mut dropin_dirnames: Vec<String> = Vec::new();
+    if let Some(type_suffix) = unit_name.rsplit('.').next()
+        && !type_suffix.is_empty()
+    {
+        dropin_dirnames.push(format!("{type_suffix}.d"));
+    }
+    if let Some(dot_pos) = unit_name.rfind('.') {
+        let base = &unit_name[..dot_pos];
+        let suffix = &unit_name[dot_pos..];
+        let parts: Vec<&str> = base.split('-').collect();
+        for i in 1..parts.len() {
+            let prefix = parts[..i].join("-");
+            dropin_dirnames.push(format!("{prefix}-{suffix}.d"));
+        }
+    }
+    dropin_dirnames.push(format!("{unit_name}.d"));
+
     let mut current_dropins: Vec<std::path::PathBuf> = Vec::new();
-    let dropin_dirname = format!("{}.d", unit.id.name);
     for dir in unit_dirs {
-        let dropin_dir = dir.join(&dropin_dirname);
-        if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                if name.to_string_lossy().ends_with(".conf") {
-                    current_dropins.push(entry.path());
+        for dropin_dirname in &dropin_dirnames {
+            let dropin_dir = dir.join(dropin_dirname);
+            if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    if name.to_string_lossy().ends_with(".conf") {
+                        current_dropins.push(entry.path());
+                    }
                 }
             }
         }
@@ -916,10 +991,39 @@ fn insert_bool(props: &mut PropertyMap, key: &str, value: bool) {
 fn insert_dep_list(props: &mut PropertyMap, key: &str, ids: &[crate::units::UnitId]) {
     let value: String = ids
         .iter()
-        .map(|id| id.name.as_str())
+        .map(|id| format_property_list_item(id.name.as_str()))
         .collect::<Vec<_>>()
         .join(" ");
     props.insert(key.to_string(), value);
+}
+
+/// Format a single item in a space-separated property list value.
+/// Upstream wraps items containing characters that need shell-escaping
+/// (backslash, whitespace, quotes) in double quotes and C-escapes the
+/// contents so the serialized form can round-trip through `systemctl
+/// show`. Items without such characters pass through unchanged.
+fn format_property_list_item(s: &str) -> String {
+    let needs_quote = s.chars().any(|c| {
+        c == '\\' || c == '"' || c == ' ' || c == '\t' || c == '\n' || c == '\'' || c.is_control()
+    });
+    if !needs_quote {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn insert_string_list(props: &mut PropertyMap, key: &str, items: &[String]) {
@@ -1531,6 +1635,30 @@ fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
 
     // IP address allow/deny (from ServiceConfig but stored in ExecConfig vicinity)
     // These are on ServiceConfig, not ExecConfig, so handled in insert_service_config.
+
+    // StandardInputData= is reported as the base64 encoding of the
+    // concatenation of every StandardInputText= value (each suffixed with
+    // "\n") followed by every StandardInputData= value (pre-decoded from
+    // base64).  `systemctl show -P StandardInputData` expects this merged
+    // base64 form.  Matches upstream behaviour exercised by 15-DROPIN
+    // testcase_transient_service_dropins.
+    {
+        use base64::Engine;
+        let engine = base64::engine::general_purpose::STANDARD;
+        let mut bytes: Vec<u8> = Vec::new();
+        for s in &conf.standard_input_text {
+            bytes.extend_from_slice(s.as_bytes());
+            bytes.push(b'\n');
+        }
+        for s in &conf.standard_input_data {
+            if let Ok(decoded) = engine.decode(s) {
+                bytes.extend(decoded);
+            }
+        }
+        if !bytes.is_empty() {
+            insert(props, "StandardInputData", &engine.encode(&bytes));
+        }
+    }
 }
 
 fn insert_socket_config(props: &mut PropertyMap, conf: &SocketConfig) {
@@ -1560,6 +1688,9 @@ fn insert_socket_config(props: &mut PropertyMap, conf: &SocketConfig) {
             }
             crate::sockets::SpecializedSocketConfig::SpecialFile(sp) => {
                 format!("special:{}", sp.path.display())
+            }
+            crate::sockets::SpecializedSocketConfig::MessageQueue(mq) => {
+                format!("mqueue:{}", mq.name)
             }
         };
         listen_items.push(desc);

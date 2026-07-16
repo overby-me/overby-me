@@ -507,13 +507,13 @@ fn display_snapshot(
                 .partial_cmp(&a.cpu_percent)
                 .unwrap_or(std::cmp::Ordering::Equal)
         }),
-        SortOrder::Memory => entries.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes)),
+        SortOrder::Memory => entries.sort_by_key(|e| std::cmp::Reverse(e.memory_bytes)),
         SortOrder::Io => entries.sort_by(|a, b| {
             let a_total = a.io_read_bytes.saturating_add(a.io_write_bytes);
             let b_total = b.io_read_bytes.saturating_add(b.io_write_bytes);
             b_total.cmp(&a_total)
         }),
-        SortOrder::Tasks => entries.sort_by(|a, b| b.tasks.cmp(&a.tasks)),
+        SortOrder::Tasks => entries.sort_by_key(|e| std::cmp::Reverse(e.tasks)),
         SortOrder::Path => entries.sort_by(|a, b| a.path.cmp(&b.path)),
     }
 

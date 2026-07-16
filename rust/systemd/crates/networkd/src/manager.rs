@@ -278,17 +278,12 @@ impl NetworkManager {
                 pd_assigned_addresses: Vec::new(),
             };
 
-            if matched_config.is_some() {
+            if let Some(cfg) = matched_config {
                 log::info!(
                     "Link {} (idx={}) matched config {}",
                     name,
                     ifindex,
-                    matched_config
-                        .unwrap()
-                        .path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy(),
+                    cfg.path.file_name().unwrap_or_default().to_string_lossy(),
                 );
             } else {
                 log::debug!(

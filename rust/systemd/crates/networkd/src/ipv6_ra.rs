@@ -782,12 +782,10 @@ fn parse_ra_options(ra: &mut RouterAdvertisement, mut data: &[u8]) {
                     ra.routes.push(route);
                 }
             }
-            NDP_OPT_SOURCE_LL_ADDR => {
-                if opt_len_bytes >= 8 {
-                    let mut mac = [0u8; 6];
-                    mac.copy_from_slice(&opt_data[2..8]);
-                    ra.source_ll_addr = Some(mac);
-                }
+            NDP_OPT_SOURCE_LL_ADDR if opt_len_bytes >= 8 => {
+                let mut mac = [0u8; 6];
+                mac.copy_from_slice(&opt_data[2..8]);
+                ra.source_ll_addr = Some(mac);
             }
             _ => {
                 // Unknown option — skip.

@@ -96,8 +96,8 @@ pub fn wait_for_service(
                             format!("{duration_timeout:?}"),
                         ));
                     }
-                    let duration_elapsed = if srvc.extend_timeout_timestamp.is_some() {
-                        srvc.extend_timeout_timestamp.unwrap().elapsed()
+                    let duration_elapsed = if let Some(ext_ts) = srvc.extend_timeout_timestamp {
+                        ext_ts.elapsed()
                     } else {
                         start_time.elapsed()
                     };

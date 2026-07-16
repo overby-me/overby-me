@@ -101,6 +101,215 @@ pub fn open_journal_stream(
     Some(s)
 }
 
+/// Build a `HelperMountNs` from a `ServiceConfig`, returning `None` when
+/// the service has no directives that change the filesystem view.  This is
+/// the input that helper commands (ExecStartPre=/Post=/StopPost=) use to
+/// match the eventual ExecStart= namespace.
+fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
+    let exec = &conf.exec_config;
+    if exec.bind_paths.is_empty()
+        && exec.bind_read_only_paths.is_empty()
+        && exec.inaccessible_paths.is_empty()
+        && !exec.private_tmp
+    {
+        return None;
+    }
+    let prepare = |entries: &[String]| -> Vec<PreparedBindPath> {
+        entries
+            .iter()
+            .filter_map(|e| parse_bind_entry(e))
+            .map(|(src, dst)| {
+                let src_is_dir = std::fs::metadata(&src).map(|m| m.is_dir()).unwrap_or(false);
+                PreparedBindPath {
+                    src,
+                    dst,
+                    src_is_dir,
+                }
+            })
+            .collect()
+    };
+    Some(HelperMountNs {
+        bind_paths: prepare(&exec.bind_paths),
+        bind_read_only_paths: prepare(&exec.bind_read_only_paths),
+        inaccessible_paths: exec.inaccessible_paths.clone(),
+        private_tmp: exec.private_tmp,
+    })
+}
+
+/// Parse a `BindPaths=` / `BindReadOnlyPaths=` entry of the form
+/// `src`, `src:dst`, or `src:dst:options` and return `(src, dst)`.  If only
+/// `src` is given, the destination is the same path.  Options are currently
+/// ignored (e.g. `rbind`, `norbind`).
+fn parse_bind_entry(entry: &str) -> Option<(String, String)> {
+    let mut parts = entry.splitn(3, ':');
+    let src = parts.next()?.to_owned();
+    let dst = parts
+        .next()
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| src.clone());
+    if src.is_empty() || dst.is_empty() {
+        return None;
+    }
+    Some((src, dst))
+}
+
+/// Apply the minimal mount-namespace settings required by helper commands
+/// (ExecStartPre=/Post=/StopPost=) so they see the same filesystem view as
+/// ExecStart=.  Runs in the fork'd child between fork and exec (pre_exec
+/// context) — must avoid any allocator / libstd paths that could reenter.
+///
+/// Order of operations mirrors exec_helper:
+///   1. unshare(CLONE_NEWNS) — new mount namespace
+///   2. Mark `/` MS_SLAVE|MS_REC so our mounts don't propagate back up
+///   3. PrivateTmp= first — mount a fresh tmpfs on /tmp and /var/tmp so
+///      later BindPaths= that target `/tmp/...` are created inside the
+///      fresh tmpfs (not on the host /tmp, which would be hidden by the
+///      tmpfs mount and invisible to the helper).
+///   4. BindPaths= / BindReadOnlyPaths= — create destinations as needed
+///      (directories for dir sources, empty files for file sources) so
+///      `mount(MS_BIND)` has something to bind onto.
+///   5. InaccessiblePaths= last so it blocks anything bind-mounted above.
+fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
+    use std::ffi::CString;
+
+    let ret = unsafe { libc::unshare(libc::CLONE_NEWNS) };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // Remount / as slave so our mounts stay inside this namespace.
+    let slash = c"/";
+    let none_p = std::ptr::null::<libc::c_char>();
+    let ret = unsafe {
+        libc::mount(
+            none_p,
+            slash.as_ptr(),
+            none_p,
+            (libc::MS_SLAVE | libc::MS_REC) as libc::c_ulong,
+            std::ptr::null(),
+        )
+    };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    // PrivateTmp=yes FIRST so BindPaths targeting /tmp/... land in the
+    // fresh tmpfs.  A failure to mount over /var/tmp (missing on minimal
+    // VMs) is non-fatal — /tmp is the main target BindPaths typically
+    // references.  /tmp itself must succeed.
+    if ns.private_tmp {
+        let tmpfs_name = c"tmpfs";
+        let ret = unsafe {
+            libc::mount(
+                tmpfs_name.as_ptr(),
+                c"/tmp".as_ptr(),
+                tmpfs_name.as_ptr(),
+                (libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
+                c"mode=01777".as_ptr().cast(),
+            )
+        };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // /var/tmp: best-effort (may not exist on minimal VMs).
+        unsafe {
+            libc::mount(
+                tmpfs_name.as_ptr(),
+                c"/var/tmp".as_ptr(),
+                tmpfs_name.as_ptr(),
+                (libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
+                c"mode=01777".as_ptr().cast(),
+            );
+        }
+    }
+
+    // BindPaths=: create destination + read-write bind mount.
+    apply_bind_list(&ns.bind_paths, false)?;
+
+    // BindReadOnlyPaths=: create destination + bind + remount RO.
+    apply_bind_list(&ns.bind_read_only_paths, true)?;
+
+    // InaccessiblePaths= last: mount a read-only empty tmpfs over each so
+    // the helper cannot bypass the block via earlier bind mounts or the
+    // PrivateTmp tmpfs.
+    for p in &ns.inaccessible_paths {
+        let Ok(dst) = CString::new(p.as_str()) else {
+            continue;
+        };
+        let tmpfs_name = c"tmpfs";
+        let ret = unsafe {
+            libc::mount(
+                tmpfs_name.as_ptr(),
+                dst.as_ptr(),
+                tmpfs_name.as_ptr(),
+                (libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV) as libc::c_ulong,
+                c"size=0k,mode=0000".as_ptr().cast(),
+            )
+        };
+        if ret != 0 {
+            // Non-fatal: the path may not exist or may be a file we can't
+            // overmount with tmpfs.
+            continue;
+        }
+    }
+
+    Ok(())
+}
+
+/// Apply a list of prepared `BindPaths=` / `BindReadOnlyPaths=` entries:
+/// create the destination (directory for directory sources, empty file
+/// otherwise), perform the bind mount, and optionally remount RO.  Uses
+/// [`PreparedBindPath`] so the source-type probe is done in the parent
+/// and not in pre_exec context.
+fn apply_bind_list(entries: &[PreparedBindPath], read_only: bool) -> std::io::Result<()> {
+    use std::ffi::CString;
+    let none_p = std::ptr::null::<libc::c_char>();
+    for entry in entries {
+        let src = &entry.src;
+        let dst = &entry.dst;
+        if entry.src_is_dir {
+            let _ = std::fs::create_dir_all(dst);
+        } else if let Some(parent) = std::path::Path::new(dst).parent() {
+            let _ = std::fs::create_dir_all(parent);
+            if !std::path::Path::new(dst).exists() {
+                let _ = std::fs::File::create(dst);
+            }
+        }
+        let Ok(c_src) = CString::new(src.as_str()) else {
+            continue;
+        };
+        let Ok(c_dst) = CString::new(dst.as_str()) else {
+            continue;
+        };
+        let ret = unsafe {
+            libc::mount(
+                c_src.as_ptr(),
+                c_dst.as_ptr(),
+                none_p,
+                (libc::MS_BIND | libc::MS_REC) as libc::c_ulong,
+                std::ptr::null(),
+            )
+        };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if read_only {
+            let ret = unsafe {
+                libc::mount(
+                    none_p,
+                    c_dst.as_ptr(),
+                    none_p,
+                    (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY) as libc::c_ulong,
+                    std::ptr::null(),
+                )
+            };
+            if ret != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Check if a unit is masked (symlink to /dev/null) on disk.
 fn is_unit_masked(name: &str) -> bool {
     let runtime = std::path::Path::new("/run/systemd/system").join(name);
@@ -306,12 +515,58 @@ pub struct Service {
     /// PID of a running service whose mount namespace this service should join
     /// via setns(2), resolved from JoinsNamespaceOf= at start time.
     pub join_namespace_pid: Option<u32>,
+    /// Argv of the currently-executing `ExecStart=` command (full command
+    /// line as `cmd arg1 arg2 …`), or `None` when no ExecStart is running.
+    /// Used by the oneshot activation loop to survive `daemon-reload`
+    /// mid-activation: after each command completes, we re-read the
+    /// ServiceConfig from the unit table and look up this argv to find
+    /// where to resume in the (possibly modified) exec list.
+    pub current_exec_argv: Option<String>,
+    /// When set, `run_cmd` arranges for the spawned child to enter a fresh
+    /// mount namespace (via `unshare(CLONE_NEWNS)`) and applies the listed
+    /// BindPaths=, BindReadOnlyPaths=, InaccessiblePaths= + PrivateTmp=
+    /// before exec.  Set by `run_prestart`/`run_poststart`/`run_poststop`
+    /// so that helper commands see the same filesystem view as the
+    /// eventual ExecStart=.  One-shot: cleared by `run_cmd` after spawn.
+    pub helper_mount_ns: Option<HelperMountNs>,
     /// Set to `true` when the service is explicitly stopped via `systemctl stop`
     /// (i.e. `kill()` is called). The exit handler checks this flag to suppress
     /// automatic restart even when `Restart=always` is configured. This matches
     /// real systemd's behavior where manual stop inhibits auto-restart.
     /// Cleared on `start()`.
     pub manual_stop: bool,
+}
+
+/// Minimal mount-namespace settings applied to helper commands
+/// (ExecStartPre=/ExecStartPost=/ExecStopPost=) so they see the same
+/// filesystem view as ExecStart=.  Only the directives that change file
+/// visibility are replicated here — security settings like
+/// ProtectSystem=/NoNewPrivileges= are a separate concern handled by
+/// exec_helper on the main ExecStart.
+///
+/// Bind entries are normalized to [`PreparedBindPath`] (with the
+/// source-type resolved in the parent before `fork()`) so the
+/// `pre_exec` closure can avoid `std::fs::metadata` — allocator-using
+/// code is not async-signal-safe between `fork` and `execve`.
+#[derive(Clone, Debug, Default)]
+pub struct HelperMountNs {
+    /// `BindPaths=` entries, pre-parsed + src-stat'd.
+    pub bind_paths: Vec<PreparedBindPath>,
+    /// `BindReadOnlyPaths=` entries, pre-parsed + src-stat'd.
+    pub bind_read_only_paths: Vec<PreparedBindPath>,
+    /// `InaccessiblePaths=` absolute paths.
+    pub inaccessible_paths: Vec<String>,
+    /// `PrivateTmp=yes` — mount fresh tmpfs over /tmp and /var/tmp.
+    pub private_tmp: bool,
+}
+
+/// A bind-path entry with the source-type probe already resolved in
+/// the parent so the pre_exec child doesn't need to `stat()`.
+#[derive(Clone, Debug)]
+pub struct PreparedBindPath {
+    pub src: String,
+    pub dst: String,
+    pub src_is_dir: bool,
 }
 
 /// Environment variables passed to OnSuccess=/OnFailure= handler services.
@@ -479,6 +734,12 @@ impl Service {
         common
             .main_exit_status
             .store(-1, std::sync::atomic::Ordering::Release);
+        common
+            .runtime_max_timeout_fired
+            .store(false, std::sync::atomic::Ordering::Release);
+        common
+            .watchdog_timeout_fired
+            .store(false, std::sync::atomic::Ordering::Release);
 
         super::prepare_service::prepare_service(
             self,
@@ -541,22 +802,68 @@ impl Service {
         if !conf.exec.is_empty() {
             // For multi-ExecStart oneshot services, run all but the last
             // command via run_cmd (helper process style) sequentially.
+            //
+            // The loop re-reads the service's `exec` list from the unit
+            // table on each iteration so a `systemctl daemon-reload` that
+            // swaps `ExecStart=` lines mid-activation is observed: we
+            // record the just-completed command's argv in
+            // `self.current_exec_argv`, then look that argv up in the
+            // re-read list to decide where to go next.  If the running
+            // command was removed from the new config, or if the new
+            // position is at the end, we drop out of the preliminary loop
+            // and let the main-process path dispatch the now-last command.
             if conf.srcv_type == ServiceType::OneShot && conf.exec.len() > 1 {
                 let timeout = self.get_start_timeout(conf);
-                let working_dir = conf.exec_config.working_directory.as_ref();
-                let preliminary = &conf.exec[..conf.exec.len() - 1];
-                for cmd in preliminary {
-                    self.run_cmd(cmd, id.clone(), name, timeout, run_info, working_dir)
-                        .map_err(|start_err| {
-                            match self.run_poststop(conf, id.clone(), name, run_info) {
-                                Ok(()) => ServiceErrorReason::StartFailed(start_err),
-                                Err(poststop_err) => ServiceErrorReason::StartAndPoststopFailed(
-                                    start_err,
-                                    poststop_err,
-                                ),
+                let mut idx: usize = 0;
+                #[allow(clippy::while_let_loop)]
+                loop {
+                    let (exec_list, working_dir) = match run_info
+                        .unit_table
+                        .values()
+                        .find(|u| u.id == id)
+                        .map(|u| &u.specific)
+                    {
+                        Some(crate::units::Specific::Service(srvc)) => (
+                            srvc.conf.exec.clone(),
+                            srvc.conf.exec_config.working_directory.clone(),
+                        ),
+                        _ => break,
+                    };
+
+                    if let Some(last_argv) = self.current_exec_argv.take() {
+                        match exec_list.iter().position(|c| c.to_string() == last_argv) {
+                            Some(pos) => idx = pos + 1,
+                            None => break,
+                        }
+                    }
+
+                    // Stop the preliminary loop once we've reached the
+                    // last command in the re-read list — the main-process
+                    // dispatch below runs it.
+                    if idx + 1 >= exec_list.len() {
+                        break;
+                    }
+
+                    let cmd = exec_list[idx].clone();
+                    self.current_exec_argv = Some(cmd.to_string());
+                    self.run_cmd(
+                        &cmd,
+                        id.clone(),
+                        name,
+                        timeout,
+                        run_info,
+                        working_dir.as_ref(),
+                    )
+                    .map_err(|start_err| {
+                        match self.run_poststop(conf, id.clone(), name, run_info) {
+                            Ok(()) => ServiceErrorReason::StartFailed(start_err),
+                            Err(poststop_err) => {
+                                ServiceErrorReason::StartAndPoststopFailed(start_err, poststop_err)
                             }
-                        })?;
+                        }
+                    })?;
                 }
+                self.current_exec_argv = None;
             }
 
             // Fork the last ExecStart command as the main process.
@@ -972,6 +1279,16 @@ impl Service {
                     Ok(())
                 });
             }
+        } else if let Some(ns) = self.helper_mount_ns.clone() {
+            // Helper command (ExecStartPre=/Post=/StopPost=) in a service
+            // with namespace settings — apply a minimal mount namespace so
+            // the helper sees the same filesystem as ExecStart= will.  We
+            // clone rather than take so batches of helper commands (via
+            // `run_all_cmds`) all see the same namespace.
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                cmd.pre_exec(move || apply_helper_mount_namespace(&ns));
+            }
         }
 
         trace!("Run {cmdline:?} for service: {name}");
@@ -1085,14 +1402,20 @@ impl Service {
         }
         let timeout = self.get_stop_timeout(conf);
         let cmds = conf.stop.clone();
-        self.run_all_cmds(
+        // ExecStop= runs while the service's state directory / BindPaths
+        // are still set up, so it should see the same filesystem view as
+        // ExecStart=.
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
+        let res = self.run_all_cmds(
             &cmds,
             id,
             name,
             timeout,
             run_info,
             conf.exec_config.working_directory.as_ref(),
-        )
+        );
+        self.helper_mount_ns = None;
+        res
     }
     /// Run ExecCondition= commands. Returns Ok(true) to proceed, Ok(false) to
     /// skip the service (condition not met), or Err on hard failure (exit 255
@@ -1108,31 +1431,37 @@ impl Service {
             return Ok(true);
         }
         let timeout = self.get_start_timeout(conf);
-        for cmd in &conf.exec_condition.clone() {
-            match self.run_cmd(
-                cmd,
-                id.clone(),
-                name,
-                timeout,
-                run_info,
-                conf.exec_config.working_directory.as_ref(),
-            ) {
-                Ok(()) => {} // exit 0 — condition met, continue
-                Err(RunCmdError::BadExitCode(
-                    _,
-                    crate::signal_handler::ChildTermination::Exit(code),
-                )) if code != 255 => {
-                    // Exit 1-254: condition not met, skip service (not a failure)
-                    trace!("ExecCondition {cmd:?} exited with {code}, skipping service {name}");
-                    return Ok(false);
-                }
-                Err(e) => {
-                    // Exit 255 or signal: hard failure
-                    return Err(e);
+        // ExecCondition= checks should see the same filesystem view as
+        // ExecStart= (e.g. BindPaths= content, PrivateTmp= isolation) so
+        // their predicates are meaningful for the configured service.
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
+        let result = (|| {
+            for cmd in &conf.exec_condition.clone() {
+                match self.run_cmd(
+                    cmd,
+                    id.clone(),
+                    name,
+                    timeout,
+                    run_info,
+                    conf.exec_config.working_directory.as_ref(),
+                ) {
+                    Ok(()) => {} // exit 0 — condition met, continue
+                    Err(RunCmdError::BadExitCode(
+                        _,
+                        crate::signal_handler::ChildTermination::Exit(code),
+                    )) if code != 255 => {
+                        trace!("ExecCondition {cmd:?} exited with {code}, skipping service {name}");
+                        return Ok(false);
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
                 }
             }
-        }
-        Ok(true)
+            Ok(true)
+        })();
+        self.helper_mount_ns = None;
+        result
     }
 
     fn run_prestart(
@@ -1147,14 +1476,17 @@ impl Service {
         }
         let timeout = self.get_start_timeout(conf);
         let cmds = conf.startpre.clone();
-        self.run_all_cmds(
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
+        let res = self.run_all_cmds(
             &cmds,
             id,
             name,
             timeout,
             run_info,
             conf.exec_config.working_directory.as_ref(),
-        )
+        );
+        self.helper_mount_ns = None;
+        res
     }
     fn run_poststart(
         &mut self,
@@ -1168,14 +1500,17 @@ impl Service {
         }
         let timeout = self.get_start_timeout(conf);
         let cmds = conf.startpost.clone();
-        self.run_all_cmds(
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
+        let res = self.run_all_cmds(
             &cmds,
             id,
             name,
             timeout,
             run_info,
             conf.exec_config.working_directory.as_ref(),
-        )
+        );
+        self.helper_mount_ns = None;
+        res
     }
     pub fn run_poststop(
         &mut self,
@@ -1187,6 +1522,7 @@ impl Service {
         trace!("Run poststop for {name}");
         let timeout = self.get_stop_timeout(conf);
         let cmds = conf.stoppost.clone();
+        self.helper_mount_ns = helper_mount_ns_from_conf(conf);
         let res = self.run_all_cmds(
             &cmds,
             id,
@@ -1195,6 +1531,7 @@ impl Service {
             run_info,
             conf.exec_config.working_directory.as_ref(),
         );
+        self.helper_mount_ns = None;
 
         if conf.srcv_type != ServiceType::OneShot {
             // already happened when the oneshot process exited in the exit handler
