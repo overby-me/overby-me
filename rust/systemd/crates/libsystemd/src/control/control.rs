@@ -8942,7 +8942,7 @@ pub fn execute_command(
                 // Extract info from locked state, then release before waiting.
                 enum PostCheck {
                     Target {
-                        req_dep_ids: Vec<crate::units::UnitId>,
+                        wait_dep_ids: Vec<crate::units::UnitId>,
                     },
                     OneShot,
                     Notify,
@@ -9016,24 +9016,37 @@ pub fn execute_command(
                                     return Err(format!("Unit {} failed to start", id.name));
                                 }
                                 drop(status);
-                                let req_dep_ids = unit.common.dependencies.requires.to_vec();
-                                PostCheck::Target { req_dep_ids }
+                                // Wait for the target's pulled-in deps to settle
+                                // before `systemctl start <target>` returns, matching
+                                // upstream transaction-completion semantics.  Include
+                                // Wants= (e.g. from .wants/ symlinks) as well as
+                                // Requires=: a Wants oneshot pulled in by the target
+                                // can still be `activating` (its completion is deferred)
+                                // when start returns, so a following `is-active` would
+                                // race it.  A failing Wants dep does not fail the target
+                                // — only the target's own deactivation does (checked in
+                                // the loop below via `target_stopped`).
+                                let mut wait_dep_ids = unit.common.dependencies.requires.to_vec();
+                                wait_dep_ids.extend(unit.common.dependencies.wants.iter().cloned());
+                                PostCheck::Target { wait_dep_ids }
                             }
                         }
                     } else {
                         PostCheck::NotFound
                     }
                 };
-                // For targets: wait for required deps to finish any
-                // active restart cycle. When a dep hits its rate limit,
-                // the exit handler propagates the failure to required_by
-                // units (deactivating this target). We just need to
-                // wait for the cycle to complete before checking.
-                // Oneshot starts are deferred too (completion = process exit),
-                // so they need the same settle-wait as the notify-style types.
+                // For targets: wait for the pulled-in deps (Requires= and
+                // Wants=) to finish activating / any restart cycle before
+                // `systemctl start <target>` returns.  When a required dep hits
+                // its rate limit, the exit handler propagates the failure to
+                // required_by units (deactivating this target); a failing Wants
+                // dep does not fail the target.  Oneshot/notify starts are
+                // deferred (completion = process exit / READY=1), so a pulled-in
+                // Wants oneshot can still be `activating` when start returns —
+                // hence this settle-wait, matching upstream transaction semantics.
                 let is_notify = matches!(&post_check, PostCheck::Notify | PostCheck::OneShot);
-                if let PostCheck::Target { req_dep_ids } = post_check
-                    && !req_dep_ids.is_empty()
+                if let PostCheck::Target { wait_dep_ids } = post_check
+                    && !wait_dep_ids.is_empty()
                 {
                     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
                     // Give exit handlers a moment to fire before first check.
@@ -9041,10 +9054,10 @@ pub fn execute_command(
                     // entire restart cycle asynchronously in the exit handler.
                     std::thread::sleep(std::time::Duration::from_millis(200));
                     loop {
-                        // Check if any required dep is still transitioning
+                        // Check if any pulled-in dep is still transitioning
                         let any_transitioning = {
                             let ri = run_info.read_poisoned();
-                            req_dep_ids.iter().any(|dep_id| {
+                            wait_dep_ids.iter().any(|dep_id| {
                                 ri.unit_table
                                     .get(dep_id)
                                     .map(|dep| {
