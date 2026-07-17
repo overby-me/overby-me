@@ -641,7 +641,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Local LLM | [Devstral 2 🇪🇺](https://mistral.ai/news/devstral-2-vibe-cli) | [Soofi S 🇪🇺](https://www.soofi.info), [EuroLLM 🇪🇺](https://eurollm.io), [GLM 5.1 🇨🇳](https://docs.z.ai/guides/llm/glm-5.1), [DeepSeek-V4-Pro 🇨🇳](https://api-docs.deepseek.com/news/news260424) | 🆗 | |
+| ✅ | Local LLM | [Devstral 2 🇪🇺](https://mistral.ai/news/devstral-2-vibe-cli) | [Soofi S 🇪🇺](https://www.soofi.info), [EuroLLM 🇪🇺](https://eurollm.io) | 🆗 | |
 | ✅ | Hosted LLM | [Mistral Large 🇪🇺](https://mistral.ai/models/) | [Kimi K3 🇨🇳](https://platform.moonshot.ai) | 🆗 | [Claude Opus 4.7 🔒🇺🇸](https://claude.ai) |
 | ✅ | Local Provider | [Ollama 🐹🏡🇪🇺](https://github.com/ollama/ollama) | | 🆗 | |
 | ✅ | Hosted Provider | [Mistral 🇪🇺](https://mistral.ai) | [Lumo 🇪🇺](https://lumo.proton.me), [Nebius 🇪🇺](https://nebius.com) | 🆗 | [OpenAI 🔒🇺🇸](https://openai.com), [Anthropic Claude ⚖️🇺🇸](https://claude.ai) |
