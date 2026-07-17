@@ -1016,6 +1016,14 @@ impl Service {
                         // oneshot/forking (main process exit), dbus (bus name
                         // appearing) and exec (exec confirmation window).
                         // Simple/Idle have no wait and need no deferral.
+                        // Type=exec is excluded: its wait is a bounded ~500ms
+                        // exec-confirmation poll (fork_parent), so it cannot
+                        // wedge the manager, and keeping it inline preserves the
+                        // synchronous exec()-failure detection that
+                        // `systemctl start`/`systemd-run` rely on to report a
+                        // failed User=/binary.  The writer-pending gate already
+                        // prevents its brief read-lock hold from starving
+                        // daemon-reload.
                         matches!(
                             source,
                             ActivationSource::DeferNotifyWait
@@ -1028,7 +1036,6 @@ impl Service {
                                 | ServiceType::OneShot
                                 | ServiceType::Forking
                                 | ServiceType::Dbus
-                                | ServiceType::Exec
                         )
                     };
                     if defer_wait {

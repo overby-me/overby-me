@@ -5637,6 +5637,45 @@ pub fn execute_command(
                 let is_oneshot = srvc_type == Some(crate::units::ServiceType::OneShot);
                 let is_exec = srvc_type == Some(crate::units::ServiceType::Exec);
 
+                // The start wait for notify/oneshot/forking/dbus/exec is now
+                // deferred to a background completion handler, so the unit may
+                // still be `Starting` when `activate_needed_units` returns.
+                // Wait for it to settle (leave Starting) before the failure
+                // checks below, so a failed exec()/User=/binary is reported to
+                // `systemd-run` instead of racing as a spurious success.
+                if matches!(
+                    srvc_type,
+                    Some(
+                        crate::units::ServiceType::Exec
+                            | crate::units::ServiceType::OneShot
+                            | crate::units::ServiceType::Forking
+                            | crate::units::ServiceType::Dbus
+                            | crate::units::ServiceType::Notify
+                            | crate::units::ServiceType::NotifyReload
+                    )
+                ) {
+                    let deadline =
+                        std::time::Instant::now() + std::time::Duration::from_secs(90);
+                    loop {
+                        let still_starting = {
+                            let ri = run_info.read_poisoned();
+                            ri.unit_table
+                                .get(&id)
+                                .map(|u| {
+                                    matches!(
+                                        &*u.common.status.read_poisoned(),
+                                        crate::units::UnitStatus::Starting
+                                    )
+                                })
+                                .unwrap_or(false)
+                        };
+                        if !still_starting || std::time::Instant::now() > deadline {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                }
+
                 // For Type=exec, wait_for_service catches exec()
                 // failures (exit 203) synchronously and sets
                 // StoppedUnexpected, but the activation graph may
