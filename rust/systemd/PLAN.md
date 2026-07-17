@@ -9,6 +9,45 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 Run the whole tree's checks: `just check` (never plain `nix flake check`,
 which OOMs on this repo's check count).
 
+## 2026-07-17 — hang-class fixes and the upstream divergence map (branch `rust-systemd-complete`)
+
+Continuation of the drift recovery. `01-basic` now passes reliably as
+systemd-in-initrd (`boot.initrd.systemd.enable = true`, a mode c-systemd's
+NixOS tests never used). Landed, in order:
+
+- **Boot root causes** (each a real drop-in gap): PID 1 journal sends made
+  non-blocking (never block while holding unit locks); `DefaultEnvironment=`
+  applied to spawned services; switch-root no longer shadows API filesystems
+  already mounted under the new root (preserves `/run/current-system`);
+  native by-label/by-uuid block-device coldplug + mknod from sysfs + uevent
+  re-trigger for missed driver autoloads; standard `/dev` symlinks
+  (`/dev/fd` etc.); activation-goal re-drive.
+- **The writer-starvation hang class**: an activation holding the global
+  RuntimeInfo READ lock (plus the service state write lock) across a blocking
+  start wait starves control-socket writers (`systemctl daemon-reload`) behind
+  the writer-preferring rwlock, wedging the manager. Fixed by deferring every
+  blocking start wait to a background completion handler: Type=notify/
+  notify-reload (READY=1), oneshot + forking (main-process exit via the
+  race-free `main_exit_status` signal, with PIDFile/MAINPID pickup), dbus
+  (bus-name wait on the handler thread), exec (203-confirmation window) — for
+  pool, socket, timer, path and udev activation sources. ExecStartPost runs in
+  the deferred path; start timeouts escalate SIGTERM then SIGKILL. The initrd
+  keeps the narrow notify-only deferral (deferring boot-critical initrd
+  oneshots races the switch-root execve). Residual: an ~8% intermittent
+  daemon-reload wedge remains, rooted in the spawn/prepare path blocking under
+  the guards (UPSTREAM-MAP fix 2 owns this).
+- **`UPSTREAM-MAP.md`** — an 8-subsystem, adversarially verified divergence
+  audit against upstream systemd v258 (87 divergences, a 6-invariant
+  "no-wedge contract", a 16-item prioritized fix plan). Architectural driver
+  for the remaining work; its per-test impact claims must be reconciled with
+  this document's recorded test status.
+- **PID 1 panic hardening**: boot-target prune failure now falls back to
+  emergency.target instead of panicking.
+
+Next: UPSTREAM-MAP fix 2 (helper/stop waits off the global lock), fix 3
+(quiescent-point daemon-reload), then re-validate the previously-green suite
+below against the new nixpkgs base.
+
 ## 2026-07-16 — nixpkgs-drift boot recovery (branch `rust-systemd-complete`)
 
 Merging onto current `main` (nixpkgs bumped to systemd 260 / kernel 6.18)
