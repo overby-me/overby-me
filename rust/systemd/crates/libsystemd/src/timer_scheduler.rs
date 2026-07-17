@@ -586,12 +586,16 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer
                     let id = unit.id.clone();
                     drop(ri);
                     match crate::units::activate_unit(
-                        id,
+                        id.clone(),
                         &run_info.read_poisoned(),
                         ActivationSource::TriggerActivation,
                     ) {
                         Ok(_) => {
                             info!("Timer fired: started {}", target_unit_name);
+                            // If the start wait was deferred (unit left
+                            // Starting), hand completion + timeout enforcement
+                            // to the background handler.
+                            crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
                         }
                         Err(e) => {
                             warn!("Timer failed to start {}: {}", target_unit_name, e);
@@ -619,11 +623,14 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer
                 let id = unit.id.clone();
                 drop(ri);
                 match crate::units::activate_unit(
-                    id,
+                    id.clone(),
                     &run_info.read_poisoned(),
                     ActivationSource::TriggerActivation,
                 ) {
-                    Ok(_) => info!("Timer fired: started {} (on-demand)", target_unit_name),
+                    Ok(_) => {
+                        info!("Timer fired: started {} (on-demand)", target_unit_name);
+                        crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
+                    }
                     Err(e) => warn!(
                         "Timer failed to start {} (on-demand): {}",
                         target_unit_name, e

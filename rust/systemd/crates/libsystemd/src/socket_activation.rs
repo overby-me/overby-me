@@ -365,6 +365,18 @@ fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
                         .read()
                         .unwrap()
                 );
+                // If the service deferred its start wait (Type=notify /
+                // oneshot returned DeferredNotifyWait, leaving it Starting),
+                // spawn the background completion handler.  Otherwise this
+                // thread would hold the RuntimeInfo read lock across the wait
+                // and starve control-socket writers (e.g. daemon-reload).
+                let deferred = unit_table
+                    .get(service_id)
+                    .map(|u| matches!(&*u.common.status.read_poisoned(), UnitStatus::Starting))
+                    .unwrap_or(false);
+                if deferred {
+                    crate::units::spawn_deferred_service_wait(service_id.clone(), run_info.clone());
+                }
             }
             Err(e) => {
                 if matches!(e.reason, UnitOperationErrorReason::DependencyError(_)) {
@@ -539,7 +551,7 @@ fn handle_accept_yes(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) 
     };
 
     {
-        let mut ri = run_info.write_poisoned();
+        let mut ri = run_info.write_poisoned_nonblocking();
         let unit_dirs = ri.config.unit_dirs.clone();
 
         // Check if already exists
@@ -602,6 +614,19 @@ fn handle_accept_yes(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) 
                     "Accept=yes service instance {} activated successfully",
                     instance_name
                 );
+                // Spawn the background completion handler if the instance
+                // deferred its start wait (see handle_accept_no).
+                let deferred = ri
+                    .unit_table
+                    .get(&instance_id)
+                    .map(|u| matches!(&*u.common.status.read_poisoned(), UnitStatus::Starting))
+                    .unwrap_or(false);
+                if deferred {
+                    crate::units::spawn_deferred_service_wait(
+                        instance_id.clone(),
+                        run_info.clone(),
+                    );
+                }
             }
             Err(e) => {
                 error!(

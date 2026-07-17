@@ -365,12 +365,6 @@ pub fn activate_unit(
     source: ActivationSource,
 ) -> std::result::Result<StartResult, UnitOperationError> {
     trace!("Activate id: {id_to_start:?}");
-    // In the initrd (where journald/console aren't up), trace unit activation to
-    // /dev/kmsg so the boot chain is visible — essential for bringing up the
-    // initrd → switch-root sequence. No-op outside the initrd.
-    if crate::config::in_initrd() {
-        crate::entrypoints::kmsg(&format!("activate {}", id_to_start.name));
-    }
 
     let Some(unit) = run_info.unit_table.get(&id_to_start) else {
         // If this occurs, there is a flaw in the handling of dependencies
@@ -795,6 +789,51 @@ pub fn collect_unit_start_subgraph(ids_to_start: &mut Vec<UnitId>, unit_table: &
 /// Collects the subgraph of units that need to be started to reach the `target_id` (Note: not required to be a unit of type .target).
 ///
 /// Then starts these units as concurrently as possible respecting the before <-> after ordering
+/// The unit the manager is currently trying to reach. Starts as the boot
+/// target and is replaced whenever `systemctl isolate` switches goals (e.g.
+/// the initrd isolating to `initrd-switch-root.target`). The background
+/// re-drive uses this so asynchronous completions re-evaluate the CURRENT goal
+/// rather than the static boot target — without it, a completion that occurs
+/// after an isolate re-drives the already-reached boot target and the isolate
+/// goal stalls.
+static ACTIVE_GOAL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Record the unit the manager is now trying to reach.
+pub fn set_active_goal(name: &str) {
+    if let Ok(mut g) = ACTIVE_GOAL.lock() {
+        *g = Some(name.to_owned());
+    }
+}
+
+/// The unit the manager is currently trying to reach, if set.
+pub fn active_goal() -> Option<String> {
+    ACTIVE_GOAL.lock().ok().and_then(|g| g.clone())
+}
+
+/// Count of in-flight `activate_needed_units_with_source` calls. Used so the
+/// background goal re-drive can skip while another activation is already
+/// running, instead of launching a concurrent full activation (each spins up a
+/// 32-thread pool) that would just contend locks and starve real progress.
+static ACTIVATION_DEPTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// True if at least one activation pass is currently running.
+pub fn activation_in_flight() -> bool {
+    ACTIVATION_DEPTH.load(std::sync::atomic::Ordering::SeqCst) > 0
+}
+
+struct ActivationDepthGuard;
+impl ActivationDepthGuard {
+    fn new() -> Self {
+        ACTIVATION_DEPTH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+impl Drop for ActivationDepthGuard {
+    fn drop(&mut self) {
+        ACTIVATION_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 pub fn activate_needed_units(
     target_id: UnitId,
     run_info: ArcMutRuntimeInfo,
@@ -811,6 +850,7 @@ pub fn activate_needed_units_with_source(
     run_info: ArcMutRuntimeInfo,
     source: ActivationSource,
 ) -> Vec<UnitOperationError> {
+    let _depth_guard = ActivationDepthGuard::new();
     let mut needed_ids = vec![target_id.clone()];
     {
         let run_info = run_info.read_poisoned();
@@ -884,14 +924,6 @@ pub fn activate_needed_units_with_source(
 
         let root_units =
             { find_startable_units(&needed_ids, &run_info.read_poisoned(), Some(&needed_ids)) };
-        if pass == 0 {
-            let root_names: Vec<&str> = root_units.iter().map(|id| id.name.as_str()).collect();
-            trace!(
-                "activate_needed_units: root units count={}: {:?}",
-                root_units.len(),
-                root_names
-            );
-        }
 
         activate_units_recursive(
             root_units,
@@ -1245,6 +1277,23 @@ fn deferred_notify_wait_and_dispatch(
         }
     };
 
+    // Oneshot services are deferred here too (see services.rs).  Their
+    // completion signal is process exit (recorded in main_exit_status by the
+    // service exit handler), not a READY=1 notification.
+    let is_oneshot = {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .get(&id)
+            .map(|u| {
+                matches!(
+                    &u.specific,
+                    Specific::Service(svc)
+                        if svc.conf.srcv_type == crate::units::ServiceType::OneShot
+                )
+            })
+            .unwrap_or(false)
+    };
+
     let start_time = std::time::Instant::now();
 
     // Poll until READY=1 is received, the unit leaves Starting state
@@ -1339,6 +1388,37 @@ fn deferred_notify_wait_and_dispatch(
             }
         }
 
+        // For oneshot services, completion is the ExecStart process exiting.
+        // main_exit_status is set by the service exit handler when the process
+        // is reaped, so it is a race-free "has it finished" signal.  On a clean
+        // exit fall through to the Started transition below; on a failing exit
+        // stop polling and let the exit handler own the failed/OnFailure/Restart
+        // transition (mirrors the inline wait_for_service oneshot semantics).
+        let oneshot_done = if is_oneshot {
+            let exit_success = if let Specific::Service(svc) = &unit.specific {
+                let state = svc.state.read_poisoned();
+                state.srvc.main_exit_status.map(|code| {
+                    code == 0
+                        || svc.conf.success_exit_status.exit_codes.contains(&code)
+                        || svc
+                            .conf
+                            .exec
+                            .last()
+                            .map(|e| e.prefixes.contains(&crate::units::CommandlinePrefix::Minus))
+                            .unwrap_or(false)
+                })
+            } else {
+                None
+            };
+            match exit_success {
+                Some(true) => true,
+                Some(false) => return,
+                None => false,
+            }
+        } else {
+            false
+        };
+
         // Check if the global notification handler has set signaled_ready.
         // Also check if the service is in reloading state — RELOADING=1
         // implies the service previously sent READY=1, so it should be
@@ -1350,10 +1430,15 @@ fn deferred_notify_wait_and_dispatch(
             return;
         };
 
-        if ready {
+        if ready || oneshot_done {
             info!(
-                "deferred_notify_wait: {} received READY=1, transitioning to Started",
-                name
+                "deferred_notify_wait: {} {}, transitioning to Started",
+                name,
+                if oneshot_done {
+                    "oneshot ExecStart exited"
+                } else {
+                    "received READY=1"
+                }
             );
 
             // Update service state and unit status under brief locks.
@@ -1428,6 +1513,68 @@ fn deferred_notify_wait_and_dispatch(
         }
 
         drop(ri);
+    }
+}
+
+/// Spawn the deferred completion handler for a service whose start wait was
+/// deferred (`start_service` returned `StartResult::DeferredNotifyWait`, so the
+/// unit is left in `Starting`).  Used by activation paths that call
+/// `activate_unit` directly and therefore do not go through
+/// `activate_units_recursive`'s thread-pool deferral — notably socket
+/// activation.  The handler polls in the background (via `try_read`, never
+/// holding the read lock across the wait) so the caller can release its
+/// `RuntimeInfo` read lock immediately instead of blocking on READY=1 / process
+/// exit and starving control-socket writers.
+pub(crate) fn spawn_deferred_service_wait(id: UnitId, run_info: ArcMutRuntimeInfo) {
+    let next_services_ids = {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .get(&id)
+            .map(|u| u.common.dependencies.before.clone())
+            .unwrap_or_default()
+    };
+    {
+        // Wake the notification handler so it collects the new service's
+        // notification socket and can process READY=1.
+        let ri = run_info.read_poisoned();
+        ri.notify_eventfds();
+    }
+    let name = id.name.clone();
+    let filter_ids = Arc::new(Vec::new());
+    let errors = Arc::new(Mutex::new(Vec::new()));
+    if let Err(e) = std::thread::Builder::new()
+        .name(format!("defer-wait-{name}"))
+        .spawn(move || {
+            deferred_notify_wait_and_dispatch(
+                id,
+                next_services_ids,
+                filter_ids,
+                run_info,
+                errors,
+                ActivationSource::Regular,
+            );
+        })
+    {
+        error!("Failed to spawn deferred service wait thread for {name}: {e}");
+    }
+}
+
+/// Convenience wrapper for trigger paths (timer, path, udev, exit-handler)
+/// that call `activate_unit` directly: if the unit was left `Starting`
+/// (i.e. its start wait was deferred), spawn the background completion
+/// handler.  Without this the unit has no completion owner — nothing
+/// enforces its start timeout and nothing transitions it to Started, so it
+/// can sit in `activating` forever.
+pub(crate) fn spawn_deferred_service_wait_if_starting(id: &UnitId, run_info: &ArcMutRuntimeInfo) {
+    let starting = {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .get(id)
+            .map(|u| matches!(&*u.common.status.read_poisoned(), UnitStatus::Starting))
+            .unwrap_or(false)
+    };
+    if starting {
+        spawn_deferred_service_wait(id.clone(), run_info.clone());
     }
 }
 

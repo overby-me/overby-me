@@ -964,12 +964,16 @@ fn fire_path_target(
                     let id = unit.id.clone();
                     drop(ri);
                     match crate::units::activate_unit(
-                        id,
+                        id.clone(),
                         &run_info.read_poisoned(),
                         ActivationSource::TriggerActivation,
                     ) {
                         Ok(_) => {
                             info!("Path triggered: started {}", target_unit_name);
+                            // If the start wait was deferred (unit left
+                            // Starting), hand completion + timeout enforcement
+                            // to the background handler.
+                            crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
                         }
                         Err(e) => {
                             warn!("Path failed to start {}: {}", target_unit_name, e);
@@ -995,11 +999,14 @@ fn fire_path_target(
                 let id = unit.id.clone();
                 drop(ri);
                 match crate::units::activate_unit(
-                    id,
+                    id.clone(),
                     &run_info.read_poisoned(),
                     ActivationSource::TriggerActivation,
                 ) {
-                    Ok(_) => info!("Path triggered: started {} (on-demand)", target_unit_name),
+                    Ok(_) => {
+                        info!("Path triggered: started {} (on-demand)", target_unit_name);
+                        crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
+                    }
                     Err(e) => warn!(
                         "Path failed to start {} (on-demand): {}",
                         target_unit_name, e

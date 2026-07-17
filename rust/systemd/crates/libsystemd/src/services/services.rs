@@ -118,22 +118,57 @@ fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
         entries
             .iter()
             .filter_map(|e| parse_bind_entry(e))
-            .map(|(src, dst)| {
+            .filter_map(|(src, dst)| {
                 let src_is_dir = std::fs::metadata(&src).map(|m| m.is_dir()).unwrap_or(false);
-                PreparedBindPath {
-                    src,
-                    dst,
-                    src_is_dir,
-                }
+                let c_src = std::ffi::CString::new(src.as_str()).ok()?;
+                let c_dst = std::ffi::CString::new(dst.as_str()).ok()?;
+                // Pre-compute the directories the child must create so the
+                // pre_exec closure never calls the allocator-using
+                // create_dir_all: for a directory source the whole dst path,
+                // for a file source only its parent chain (dst becomes a file).
+                let mkdir_target = if src_is_dir {
+                    dst.as_str()
+                } else {
+                    std::path::Path::new(&dst)
+                        .parent()
+                        .and_then(|p| p.to_str())
+                        .unwrap_or("")
+                };
+                Some(PreparedBindPath {
+                    c_src,
+                    c_dst,
+                    mkdirs: ancestor_dir_cstrings(mkdir_target),
+                    make_file: !src_is_dir,
+                })
             })
             .collect()
     };
     Some(HelperMountNs {
         bind_paths: prepare(&exec.bind_paths),
         bind_read_only_paths: prepare(&exec.bind_read_only_paths),
-        inaccessible_paths: exec.inaccessible_paths.clone(),
+        inaccessible_paths: exec
+            .inaccessible_paths
+            .iter()
+            .filter_map(|p| std::ffi::CString::new(p.as_str()).ok())
+            .collect(),
         private_tmp: exec.private_tmp,
     })
+}
+
+/// Produce a top-down list of ancestor directory paths for `dir` as CStrings,
+/// so the pre_exec child can `mkdir` each in order without the allocator-using
+/// `std::fs::create_dir_all`.  `/a/b/c` -> `["/a", "/a/b", "/a/b/c"]`.
+fn ancestor_dir_cstrings(dir: &str) -> Vec<std::ffi::CString> {
+    let mut out = Vec::new();
+    let mut acc = String::new();
+    for comp in dir.split('/').filter(|c| !c.is_empty()) {
+        acc.push('/');
+        acc.push_str(comp);
+        if let Ok(c) = std::ffi::CString::new(acc.as_str()) {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Parse a `BindPaths=` / `BindReadOnlyPaths=` entry of the form
@@ -170,8 +205,6 @@ fn parse_bind_entry(entry: &str) -> Option<(String, String)> {
 ///      `mount(MS_BIND)` has something to bind onto.
 ///   5. InaccessiblePaths= last so it blocks anything bind-mounted above.
 fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
-    use std::ffi::CString;
-
     let ret = unsafe { libc::unshare(libc::CLONE_NEWNS) };
     if ret != 0 {
         return Err(std::io::Error::last_os_error());
@@ -231,10 +264,7 @@ fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
     // InaccessiblePaths= last: mount a read-only empty tmpfs over each so
     // the helper cannot bypass the block via earlier bind mounts or the
     // PrivateTmp tmpfs.
-    for p in &ns.inaccessible_paths {
-        let Ok(dst) = CString::new(p.as_str()) else {
-            continue;
-        };
+    for dst in &ns.inaccessible_paths {
         let tmpfs_name = c"tmpfs";
         let ret = unsafe {
             libc::mount(
@@ -261,29 +291,35 @@ fn apply_helper_mount_namespace(ns: &HelperMountNs) -> std::io::Result<()> {
 /// [`PreparedBindPath`] so the source-type probe is done in the parent
 /// and not in pre_exec context.
 fn apply_bind_list(entries: &[PreparedBindPath], read_only: bool) -> std::io::Result<()> {
-    use std::ffi::CString;
     let none_p = std::ptr::null::<libc::c_char>();
     for entry in entries {
-        let src = &entry.src;
-        let dst = &entry.dst;
-        if entry.src_is_dir {
-            let _ = std::fs::create_dir_all(dst);
-        } else if let Some(parent) = std::path::Path::new(dst).parent() {
-            let _ = std::fs::create_dir_all(parent);
-            if !std::path::Path::new(dst).exists() {
-                let _ = std::fs::File::create(dst);
+        // Create the destination mountpoint using only async-signal-safe
+        // syscalls with CStrings built in the parent: mkdir every ancestor
+        // (ignoring EEXIST), then create the leaf file if the source is not a
+        // directory.  No allocator runs between fork and execve here.
+        for dir in &entry.mkdirs {
+            unsafe {
+                libc::mkdir(dir.as_ptr(), 0o755);
             }
         }
-        let Ok(c_src) = CString::new(src.as_str()) else {
-            continue;
-        };
-        let Ok(c_dst) = CString::new(dst.as_str()) else {
-            continue;
-        };
+        if entry.make_file {
+            let fd = unsafe {
+                libc::open(
+                    entry.c_dst.as_ptr(),
+                    libc::O_CREAT | libc::O_WRONLY | libc::O_CLOEXEC,
+                    0o644,
+                )
+            };
+            if fd >= 0 {
+                unsafe {
+                    libc::close(fd);
+                }
+            }
+        }
         let ret = unsafe {
             libc::mount(
-                c_src.as_ptr(),
-                c_dst.as_ptr(),
+                entry.c_src.as_ptr(),
+                entry.c_dst.as_ptr(),
                 none_p,
                 (libc::MS_BIND | libc::MS_REC) as libc::c_ulong,
                 std::ptr::null(),
@@ -296,7 +332,7 @@ fn apply_bind_list(entries: &[PreparedBindPath], read_only: bool) -> std::io::Re
             let ret = unsafe {
                 libc::mount(
                     none_p,
-                    c_dst.as_ptr(),
+                    entry.c_dst.as_ptr(),
                     none_p,
                     (libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY) as libc::c_ulong,
                     std::ptr::null(),
@@ -550,23 +586,32 @@ pub struct Service {
 /// code is not async-signal-safe between `fork` and `execve`.
 #[derive(Clone, Debug, Default)]
 pub struct HelperMountNs {
-    /// `BindPaths=` entries, pre-parsed + src-stat'd.
+    /// `BindPaths=` entries, pre-parsed + src-stat'd + CString-encoded.
     pub bind_paths: Vec<PreparedBindPath>,
-    /// `BindReadOnlyPaths=` entries, pre-parsed + src-stat'd.
+    /// `BindReadOnlyPaths=` entries, pre-parsed + src-stat'd + CString-encoded.
     pub bind_read_only_paths: Vec<PreparedBindPath>,
-    /// `InaccessiblePaths=` absolute paths.
-    pub inaccessible_paths: Vec<String>,
+    /// `InaccessiblePaths=` absolute paths, pre-encoded as CStrings so the
+    /// pre_exec child never allocates.
+    pub inaccessible_paths: Vec<std::ffi::CString>,
     /// `PrivateTmp=yes` — mount fresh tmpfs over /tmp and /var/tmp.
     pub private_tmp: bool,
 }
 
-/// A bind-path entry with the source-type probe already resolved in
-/// the parent so the pre_exec child doesn't need to `stat()`.
+/// A bind-path entry with everything the pre_exec child needs pre-resolved
+/// in the parent: source/destination as CStrings, the mountpoint's ancestor
+/// directories to create, and whether the destination is a plain file.  The
+/// child then uses only async-signal-safe syscalls (no allocator between
+/// `fork` and `execve`).
 #[derive(Clone, Debug)]
 pub struct PreparedBindPath {
-    pub src: String,
-    pub dst: String,
-    pub src_is_dir: bool,
+    /// Source path, pre-encoded as a CString in the parent.
+    pub c_src: std::ffi::CString,
+    /// Destination path, pre-encoded as a CString in the parent.
+    pub c_dst: std::ffi::CString,
+    /// Ancestor directories to `mkdir` in the child, top-down, pre-encoded.
+    pub mkdirs: Vec<std::ffi::CString>,
+    /// Create the destination as an empty file (source is not a directory).
+    pub make_file: bool,
 }
 
 /// Environment variables passed to OnSuccess=/OnFailure= handler services.
@@ -933,12 +978,51 @@ impl Service {
                     // the RuntimeInfo read lock immediately.  The global
                     // notification handler will process READY=1 and set
                     // signaled_ready; a background thread polls for it.
-                    if matches!(source, ActivationSource::DeferNotifyWait)
-                        && matches!(
+                    // Defer the blocking start wait to a background thread for
+                    // every activation whose caller completes the unit
+                    // asynchronously (any non-`NonBlocking` source that spawns
+                    // the deferred handler: the normal thread-pool path via
+                    // `DeferNotifyWait`, and socket/trigger activation).  Holding
+                    // the RuntimeInfo read lock across the wait — whether for
+                    // Type=notify (READY=1) or Type=oneshot (process exit) —
+                    // starves control-socket writers such as `systemctl
+                    // daemon-reload` behind glibc's writer-preferring rwlock, so
+                    // a single hung service (e.g. a socket-activated notify
+                    // daemon, or `linger-users` whose `loginctl` blocks on
+                    // logind) can wedge the whole manager.  The background
+                    // handler polls signaled_ready / main_exit_status via
+                    // `try_read` and never starves writers; the service exit
+                    // handler and the periodic goal re-drive dispatch the
+                    // before-chain once the unit completes.
+                    let defer_wait = if crate::config::in_initrd() {
+                        // In the initrd, only the original narrow notify
+                        // deferral applies.  Deferring boot-critical initrd
+                        // oneshots (e.g. initrd-nixos-activation, which creates
+                        // /run/current-system before switch-root) races the
+                        // switch-root execve that tears the initrd manager down,
+                        // and the initrd has no control-socket writer to starve.
+                        matches!(source, ActivationSource::DeferNotifyWait)
+                            && matches!(
+                                conf.srcv_type,
+                                ServiceType::Notify | ServiceType::NotifyReload
+                            )
+                    } else {
+                        // In stage-2, defer every blocking wait (notify + oneshot)
+                        // for any async-completing source so the calling thread
+                        // never holds the RuntimeInfo read lock across the wait
+                        // and cannot starve control-socket writers such as
+                        // `systemctl daemon-reload`.
+                        matches!(
+                            source,
+                            ActivationSource::DeferNotifyWait
+                                | ActivationSource::SocketActivation
+                                | ActivationSource::TriggerActivation
+                        ) && matches!(
                             conf.srcv_type,
-                            ServiceType::Notify | ServiceType::NotifyReload
+                            ServiceType::Notify | ServiceType::NotifyReload | ServiceType::OneShot
                         )
-                    {
+                    };
+                    if defer_wait {
                         return Ok(StartResult::DeferredNotifyWait);
                     }
                     super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
@@ -1292,17 +1376,21 @@ impl Service {
         }
 
         trace!("Run {cmdline:?} for service: {name}");
-        let spawn_result = {
-            let mut pid_table_locked = run_info.pid_table.lock_poisoned();
-            let res = cmd.spawn();
-            if let Ok(child) = &res {
-                pid_table_locked.insert(
-                    nix::unistd::Pid::from_raw(child.id() as i32),
-                    PidEntry::Helper(id.clone(), name.to_string()),
-                );
-            }
-            res
-        };
+        // Spawn WITHOUT holding the pid_table lock. Command::spawn() blocks on
+        // the exec-sync pipe until the child execs; if the child stalls pre-exec
+        // (e.g. a pre_exec hook allocating while another thread held the malloc
+        // arena lock at fork), holding pid_table across spawn() would pin it
+        // forever, freezing the SIGCHLD reaper and every oneshot/helper wait
+        // that polls pid_table. Insert the pid right after spawn() returns: the
+        // child has already exec'd but the helper has not run long enough to
+        // exit, so there is no reaper race window here.
+        let spawn_result = cmd.spawn();
+        if let Ok(child) = &spawn_result {
+            run_info.pid_table.lock_poisoned().insert(
+                nix::unistd::Pid::from_raw(child.id() as i32),
+                PidEntry::Helper(id.clone(), name.to_string()),
+            );
+        }
         match spawn_result {
             Ok(mut child) => {
                 trace!("Wait for {cmdline:?} for service: {name}");
