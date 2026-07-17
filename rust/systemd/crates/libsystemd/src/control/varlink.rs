@@ -158,6 +158,20 @@ pub fn journal_log_with_fields(message: &str, priority: u8, fields: &[(&str, &st
         Err(_) => return,
     };
 
+    // The manager (PID 1) must NEVER block on journal logging.  This function
+    // is called from hot paths that hold locks — e.g.
+    // `state_transition_starting` sends the "Starting ..." lifecycle line while
+    // holding the unit's status write lock and its ordering deps' read locks
+    // (from `acquire_locks`).  If journald is not draining
+    // `/run/systemd/journal/socket` (not yet started, or its datagram receive
+    // buffer filled by the burst of lifecycle messages during early boot), a
+    // blocking `send_to` would stall that thread with the status locks held,
+    // cascading into an activation-wide deadlock as every other unit blocks in
+    // `acquire_locks`.  Match systemd's non-blocking journal client: set the
+    // socket non-blocking so a full buffer drops the message (EAGAIN) instead
+    // of blocking.
+    let _ = sock.set_nonblocking(true);
+
     let mut payload = String::new();
     payload.push_str(&format!("MESSAGE={message}\n"));
     payload.push_str(&format!("PRIORITY={priority}\n"));
