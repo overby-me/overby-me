@@ -592,6 +592,11 @@ fn start_service_with_filedescriptors(
                 env.push(("LOGNAME".to_owned(), user_str.clone()));
                 env.push(("HOME".to_owned(), pwentry.home.clone()));
                 env.push(("SHELL".to_owned(), pwentry.shell.clone()));
+            } else if conf.exec_config.dynamic_user {
+                // Dynamic users have no real passwd entry; upstream's
+                // nss-systemd synthesizes their record with "/" as the home
+                // directory, which is what WorkingDirectory=~ resolves to.
+                env.push(("HOME".to_owned(), "/".to_owned()));
             }
             // Load EnvironmentFile= files first (lower priority than Environment=).
             // Parsing follows systemd's rules: double-quoted values may span
