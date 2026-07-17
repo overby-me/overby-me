@@ -441,6 +441,12 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
         && !crate::units::check_start_rate_limit(unit)
     {
         warn!("Unit {name} hit start rate limit, refusing automatic restart");
+        // Record start-limit-hit so the `Result` property reports
+        // "start-limit-hit" instead of the generic "exit-code" derived from the
+        // failed Stopped status below (mirrors upstream SERVICE_FAILURE_START_LIMIT_HIT).
+        if let Specific::Service(srvc) = &unit.specific {
+            srvc.state.write_poisoned().srvc.start_limit_hit = true;
+        }
         let reason = crate::units::UnitOperationErrorReason::GenericStartError(
             "Start request repeated too quickly".into(),
         );

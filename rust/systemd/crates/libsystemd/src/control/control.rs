@@ -1393,9 +1393,14 @@ fn reset_failed_unit(unit: &Unit) {
         *status = UnitStatus::NeverStarted;
     }
     drop(status);
-    // Clear the manual_stop flag so the service can be restarted cleanly.
+    // Clear the manual_stop flag so the service can be restarted cleanly, and
+    // clear start_limit_hit so `Result` no longer reports "start-limit-hit"
+    // for a unit that reset-failed has returned to inactive (mirrors upstream
+    // unit_reset_failed resetting the service result to success).
     if let Specific::Service(srvc) = &unit.specific {
-        srvc.state.write_poisoned().srvc.manual_stop = false;
+        let mut state = srvc.state.write_poisoned();
+        state.srvc.manual_stop = false;
+        state.srvc.start_limit_hit = false;
     }
     // Reset path-specific result.
     if let Specific::Path(path_specific) = &unit.specific {
@@ -4633,6 +4638,7 @@ fn create_transient_unit(
                     stderr_buffer: Vec::new(),
                     watchdog_timeout_fired: false,
                     runtime_max_timeout_fired: false,
+                    start_limit_hit: false,
                     runtime_started_at: None,
                     main_exit_status: None,
                     main_exit_pid: None,

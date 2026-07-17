@@ -343,6 +343,8 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                         "timeout"
                     } else if state.srvc.watchdog_timeout_fired {
                         "watchdog"
+                    } else if state.srvc.start_limit_hit {
+                        "start-limit-hit"
                     } else {
                         match &*status {
                             UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",

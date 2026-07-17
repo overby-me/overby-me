@@ -515,6 +515,11 @@ pub struct Service {
     /// checks this flag to set the service result to "timeout".
     /// Cleared on service (re)start.
     pub runtime_max_timeout_fired: bool,
+    /// Set to `true` when the service exhausts its start rate limit
+    /// (`StartLimitIntervalSec=`/`StartLimitBurst=`) and automatic restart is
+    /// refused.  The `Result` property reports "start-limit-hit" while set.
+    /// Cleared on service (re)start.
+    pub start_limit_hit: bool,
     /// Timestamp when the service transitioned to Running.
     /// Used by the watchdog thread to enforce `RuntimeMaxSec=`.
     pub runtime_started_at: Option<std::time::Instant>,
@@ -772,6 +777,7 @@ impl Service {
         // service based on stale state.
         self.watchdog_timeout_fired = false;
         self.runtime_max_timeout_fired = false;
+        self.start_limit_hit = false;
         self.runtime_started_at = None;
         self.watchdog_last_ping = None;
         self.watchdog_usec_override = None;
