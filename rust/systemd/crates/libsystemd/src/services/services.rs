@@ -486,6 +486,12 @@ pub struct Service {
     pub accepted_fd: Option<RawFd>,
     /// Peer UID of the accepted connection (for MaxConnectionsPerSource tracking).
     pub accepted_peer_uid: Option<u32>,
+    /// StandardOutput=/StandardError=socket for this service.  Cached from the
+    /// config by `prepare_service` so helper commands (ExecStartPre= etc.),
+    /// which run via `run_cmd` rather than the main exec path, can wire their
+    /// stdout/stderr to the accepted connection fd instead of the capture pipe.
+    pub stdout_socket: bool,
+    pub stderr_socket: bool,
 
     pub notifications: Option<UnixDatagram>,
     pub notifications_path: Option<std::path::PathBuf>,
@@ -1315,19 +1321,41 @@ impl Service {
             cmd.current_dir(dir);
         }
         use std::os::unix::io::FromRawFd;
-        let stdout = if let Some(stdio) = &self.stdout {
-            unsafe {
-                let duped = nix::unistd::dup(BorrowedFd::borrow_raw(stdio.write_fd())).unwrap();
-                Stdio::from(std::fs::File::from_raw_fd(duped.into_raw_fd()))
+        // Duplicate a raw fd into an owned `Stdio` for the child.  The dup is
+        // owned by the returned `Stdio` and closed once the child is spawned;
+        // it never consumes the source fd (e.g. `accepted_fd`, which the main
+        // exec path still owns and closes after fork).  A dup failure
+        // (EMFILE/EBADF) must never panic PID 1, so fall back to /dev/null.
+        let dup_to_stdio = |fd: RawFd| -> Stdio {
+            match nix::unistd::dup(unsafe { BorrowedFd::borrow_raw(fd) }) {
+                Ok(duped) => {
+                    Stdio::from(unsafe { std::fs::File::from_raw_fd(duped.into_raw_fd()) })
+                }
+                Err(e) => {
+                    warn!("run_cmd({name}): dup of fd {fd} failed ({e}); using /dev/null");
+                    Stdio::null()
+                }
             }
+        };
+        // ExecStartPre= (and the pre-main-fork oneshot commands) with
+        // StandardOutput=socket must write to the accepted connection, like the
+        // main process does — `self.stdout` is only a capture pipe for
+        // socket/journal output, so use the accepted fd directly when present.
+        // ExecStartPost=/ExecStopPost= run after the main fork has taken and
+        // closed `accepted_fd` (see start_service.rs), so they fall back to the
+        // capture pipe here; routing those to the socket too would require
+        // keeping the fd open past the fork, which no current test needs.
+        let stdout = if self.stdout_socket && let Some(fd) = self.accepted_fd {
+            dup_to_stdio(fd)
+        } else if let Some(stdio) = &self.stdout {
+            dup_to_stdio(stdio.write_fd())
         } else {
             Stdio::piped()
         };
-        let stderr = if let Some(stdio) = &self.stderr {
-            unsafe {
-                let duped = nix::unistd::dup(BorrowedFd::borrow_raw(stdio.write_fd())).unwrap();
-                Stdio::from(std::fs::File::from_raw_fd(duped.into_raw_fd()))
-            }
+        let stderr = if self.stderr_socket && let Some(fd) = self.accepted_fd {
+            dup_to_stdio(fd)
+        } else if let Some(stdio) = &self.stderr {
+            dup_to_stdio(stdio.write_fd())
         } else {
             Stdio::piped()
         };

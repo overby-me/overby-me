@@ -138,6 +138,29 @@ pub fn prepare_service(
     }
     open_stderr_inherit_stdout(srvc, conf)?;
 
+    // Cache whether stdout/stderr resolve to the connection socket, mirroring
+    // the ExecParams stdout_is_socket/stderr_is_socket computation used for the
+    // main process.  Pre-fork helper commands (ExecStartPre=) run via `run_cmd`,
+    // which wires their stdio from these flags so `StandardOutput=socket` also
+    // reaches the accepted connection.  (Upstream shares the socket with every
+    // Exec* command; here only pre-fork helpers still hold the accepted fd, as
+    // the main fork takes and closes it before Post helpers run.)
+    srvc.stdout_socket = match &conf.exec_config.stdout_path {
+        Some(StdIoOption::Socket) => true,
+        None => conf.exec_config.stdin_option == crate::units::StandardInput::Socket,
+        _ => false,
+    };
+    srvc.stderr_socket = match &conf.exec_config.stderr_path {
+        Some(StdIoOption::Socket) => true,
+        // StandardError=inherit: follow stdout.
+        None => match &conf.exec_config.stdout_path {
+            Some(StdIoOption::Socket) => true,
+            None => conf.exec_config.stdin_option == crate::units::StandardInput::Socket,
+            _ => false,
+        },
+        _ => false,
+    };
+
     srvc.notifications_path = Some(notify_socket_env_var);
 
     Ok(())

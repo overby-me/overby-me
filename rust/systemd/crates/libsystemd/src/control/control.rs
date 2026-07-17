@@ -4621,6 +4621,8 @@ fn create_transient_unit(
                     notify_access_override: None,
                     accepted_fd: None,
                     accepted_peer_uid: None,
+                    stdout_socket: false,
+                    stderr_socket: false,
                     notifications: None,
                     notifications_path: None,
                     stdout: None,
