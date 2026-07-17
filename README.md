@@ -487,7 +487,7 @@
 | 🚧 | Meta Database | [Hasura λ➡️🦀](https://github.com/hasura/graphql-engine) | [Turso ⏳🦀](https://github.com/tursodatabase/turso) | [GraphQL](https://graphql.org), [SQLite 📖](https://www.sqlite.org) | [SurrealDB 🦀](https://github.com/surrealdb/surrealdb) |
 | 🚧 | Database | [Postgres 💣](https://github.com/postgres/postgres) | [Tikv 🦀](https://github.com/tikv/tikv) | 🆗 | |
 | 🚧 | Storage Engine | | [Sled 🦀](https://github.com/spacejam/sled), [Fjall 🦀](https://github.com/fjall-rs/fjall) | 🆗 | [RocksDB 💣](https://github.com/facebook/rocksdb) |
-| ✅ | Web Server | [Caddy 🐹](https://github.com/caddyserver/caddy) | [Moella 🦀](https://github.com/Icelk/moella) | 🆗 | [Nginx 💣](https://github.com/nginx/nginx) |
+| ✅ | Web Server | [Ferron 🦀](https://github.com/ferronweb/ferron) | [Moella 🦀](https://github.com/Icelk/moella) | 🆗 | [Caddy 🐹](https://github.com/caddyserver/caddy), [Nginx 💣](https://github.com/nginx/nginx) |
 | ✅ | Email Server | [Stalwart 🦀](https://stalw.art) | | [IMAP 📖](https://en.wikipedia.org/wiki/Internet_Message_Access_Protocol), [POP3 📖](https://en.wikipedia.org/wiki/Post_Office_Protocol) | [Postfix 💣](https://www.postfix.org), [Dovecot 💣](https://www.dovecot.org) |
 | 🚧 | Virtual Private Network | [Tailscale 🇨🇦🔒🐹](https://github.com/tailscale/tailscale) | [Netbird 🐹](https://github.com/netbirdio/netbird), [Innernet 🦀](https://github.com/tonarino/innernet) | [WireGuard 📖](https://www.wireguard.com) | |
 | ✅ | Secret Manager | [SPIRE 🌐🐹](https://github.com/spiffe/spire) | | [SPIFFE 📖](https://github.com/spiffe/spiffe) | |
@@ -641,7 +641,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Local LLM | [Devstral 2 🇪🇺](https://mistral.ai/news/devstral-2-vibe-cli) | [EuroLLM 🇪🇺](https://eurollm.io), [GLM 5.1 🇨🇳](https://docs.z.ai/guides/llm/glm-5.1), [DeepSeek-V4-Pro 🇨🇳](https://api-docs.deepseek.com/news/news260424) | 🆗 | |
+| ✅ | Local LLM | [Devstral 2 🇪🇺](https://mistral.ai/news/devstral-2-vibe-cli) | [Soofi S 🇪🇺](https://www.soofi.info), [EuroLLM 🇪🇺](https://eurollm.io), [GLM 5.1 🇨🇳](https://docs.z.ai/guides/llm/glm-5.1), [DeepSeek-V4-Pro 🇨🇳](https://api-docs.deepseek.com/news/news260424) | 🆗 | |
 | ✅ | Hosted LLM | [Mistral Large 🇪🇺](https://mistral.ai/products/premier#702) | | 🆗 | [Claude Opus 4.7 🔒🇺🇸](https://claude.ai) |
 | ✅ | Local Provider | [Ollama 🐹🏡🇪🇺](https://github.com/ollama/ollama) | | 🆗 | |
 | ✅ | Hosted Provider | [Mistral 🇪🇺](https://mistral.ai) | [Lumo 🇪🇺](https://lumo.proton.me), [Nebius 🇪🇺](https://nebius.com) | 🆗 | [OpenAI 🔒🇺🇸](https://openai.com), [Anthropic Claude ⚖️🇺🇸](https://claude.ai) |
