@@ -78,15 +78,22 @@ impl MessageQueueConfig {
         Ok(Box::new(owned))
     }
 
-    pub fn close(&self, rawfd: RawFd, remove_on_stop: bool) -> Result<(), String> {
-        // Closing the fd alone does not unlink the queue — the name
-        // persists in the global namespace until mq_unlink() is called.
+    pub fn close(&self, _rawfd: RawFd, remove_on_stop: bool) -> Result<(), String> {
+        // Closing the fd alone does not unlink the queue: the name persists in
+        // the global namespace until mq_unlink() is called.
         if remove_on_stop {
             let cname = CString::new(self.name.as_str())
                 .map_err(|e| format!("invalid queue name {}: {e}", self.name))?;
             unsafe { libc::mq_unlink(cname.as_ptr()) };
         }
-        unsafe { libc::close(rawfd) };
+        // Do NOT close the fd here.  It is owned by the `File` wrapped in the
+        // `Box<dyn AsRawFd>` that open() returned and is closed exactly once
+        // when the caller drops that Box.  Closing it here as well was a
+        // double-close: another thread can reuse the fd number between this
+        // close and the Box's drop, so the drop then closes an unrelated fd
+        // (use-after-close), corrupting libc state and crashing PID 1 with a
+        // GP fault.  The network-socket close() paths are no-ops for the same
+        // reason.
         Ok(())
     }
 }
