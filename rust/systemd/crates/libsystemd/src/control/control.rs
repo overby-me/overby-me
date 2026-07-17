@@ -9702,13 +9702,25 @@ pub fn execute_command(
             // /run/systemd/system.conf or /etc/systemd/system.conf.
             parse_manager_environment(&run_info);
 
+            // Hoist the disk rescan OUT of the write critical section: unit
+            // file parsing takes hundreds of milliseconds and needs only the
+            // config, so do it under a brief read and enter the write with
+            // the parsed result in hand (mirrors upstream, which re-scans
+            // before swapping tables at its quiescent point).
+            let units = {
+                let ri = run_info.read_poisoned();
+                load_all_units_no_prune(&ri.config.unit_dirs, &ri.config.target_unit)
+            }
+            .map_err(|e| format!("Error while loading unit definitions: {e:?}"))?;
+
+            // Announce the pending table-wide writer so cooperative
+            // background readers (deferred completion pollers, the goal
+            // re-drive, new activation jobs) back off and a zero-reader
+            // window appears for the try_write spin below.
+            let _writer_gate = crate::units::WriterPendingGuard::announce();
+
             let run_info = &mut *run_info.write_poisoned_nonblocking();
             let unit_table = &run_info.unit_table;
-            // Load all units without pruning so that standalone units
-            // (not reachable from the boot target) are also discovered.
-            let units =
-                load_all_units_no_prune(&run_info.config.unit_dirs, &run_info.config.target_unit)
-                    .map_err(|e| format!("Error while loading unit definitions: {e:?}"))?;
 
             // collect all names
             let existing_names: Vec<String> = unit_table
@@ -9939,12 +9951,17 @@ pub fn execute_command(
                 .push(Value::Object(response_object));
         }
         Command::LoadAllNewDry => {
+            // Hoist the disk rescan out of the write critical section
+            // (see LoadAllNew above).
+            let units = {
+                let ri = run_info.read_poisoned();
+                load_all_units_no_prune(&ri.config.unit_dirs, &ri.config.target_unit)
+            }
+            .map_err(|e| format!("Error while loading unit definitions: {e:?}"))?;
+
+            let _writer_gate = crate::units::WriterPendingGuard::announce();
             let run_info = &mut *run_info.write_poisoned_nonblocking();
             let unit_table = &run_info.unit_table;
-            // Load all units without pruning (same as LoadAllNew).
-            let units =
-                load_all_units_no_prune(&run_info.config.unit_dirs, &run_info.config.target_unit)
-                    .map_err(|e| format!("Error while loading unit definitions: {e:?}"))?;
 
             // collect all names
             let existing_names = unit_table

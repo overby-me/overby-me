@@ -834,6 +834,35 @@ impl Drop for ActivationDepthGuard {
     }
 }
 
+/// Pending-writer gate (the quiescent-point mechanism upstream gets for free
+/// from its single-threaded event loop).  A table-wide mutator (daemon-reload)
+/// sets this before spinning for the RuntimeInfo write lock; the hot
+/// background readers (deferred completion pollers, the goal re-drive, new
+/// activation pool jobs) back off while it is set, so a zero-reader window
+/// reliably appears instead of the writer livelocking against 32 overlapping
+/// 100ms read pulses.
+static WRITER_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True while a table-wide writer (daemon-reload) is waiting for the lock.
+/// Cooperative background readers should skip their next acquisition.
+pub fn writer_pending() -> bool {
+    WRITER_PENDING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// RAII guard announcing a pending table-wide writer.
+pub struct WriterPendingGuard;
+impl WriterPendingGuard {
+    pub fn announce() -> Self {
+        WRITER_PENDING.store(true, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+impl Drop for WriterPendingGuard {
+    fn drop(&mut self) {
+        WRITER_PENDING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 pub fn activate_needed_units(
     target_id: UnitId,
     run_info: ArcMutRuntimeInfo,
@@ -1107,6 +1136,14 @@ fn activate_units_recursive(
                 other => other,
             };
 
+            // Yield to a pending table-wide writer before pinning a read
+            // guard for the whole activation.  Bounded so a stalled writer
+            // cannot wedge activation forever.
+            let gate_start = std::time::Instant::now();
+            while writer_pending() && gate_start.elapsed() < std::time::Duration::from_secs(10) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+
             // Hold the RuntimeInfo read lock in a named variable so we can
             // reuse it for the post-activation status check without acquiring
             // a second read lock (which would deadlock on glibc's
@@ -1377,6 +1414,13 @@ fn deferred_notify_wait_and_dispatch(
     // (e.g. process exited / was killed), or the start timeout expires.
     loop {
         std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Yield to a pending table-wide writer (daemon-reload): skip this
+        // tick's read acquisitions so the writer gets a zero-reader window
+        // instead of livelocking against dozens of 100ms pollers.
+        if writer_pending() {
+            continue;
+        }
 
         // Check timeout, respecting EXTEND_TIMEOUT_USEC if set.
         let timed_out = if let Some(timeout) = timeout {

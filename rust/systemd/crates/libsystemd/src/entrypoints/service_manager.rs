@@ -330,6 +330,10 @@ fn spawn_active_goal_redrive(run_info: runtime_info::ArcMutRuntimeInfo) {
             if units::activation_in_flight() {
                 continue;
             }
+            // Yield to a pending table-wide writer (daemon-reload).
+            if units::writer_pending() {
+                continue;
+            }
             let Some(goal_name) = units::active_goal() else {
                 continue;
             };
