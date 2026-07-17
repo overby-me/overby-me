@@ -31,3 +31,7 @@
 | systemd.swap | 4 | 0 | 0 | 4 | 100% |
 
 Legend: ✅ = complete, 🔶 = partial, ❌ = not started
+
+Note: `../../UPSTREAM-MAP.md` records verified semantic divergences from upstream
+systemd v258 per subsystem; where it conflicts with the coverage claims above, the
+map is the audited source of truth.

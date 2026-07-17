@@ -8,6 +8,14 @@ adversarially verified against both sources except those marked `*` (unverified,
 verification budget cap); minor-severity rows without a marker were produced by the same analysis
 but received lighter verification. Severities reflect post-verification calibration.
 
+**Related documents:** `PLAN.md` (integration-test status: ~403/404 tests passing
+pre-nixpkgs-drift, failing tests categorized by root cause) and `docs/plan/status.md`
+(port phases + directive coverage, 414/429 = 97%). This map was derived from source
+comparison alone; its per-fix "test impact" claims must be reconciled against PLAN.md's
+recorded test status before acting on them - several tests named as affected are recorded
+there as passing. Where this map documents divergences in areas status.md marks complete,
+the map audits and supersedes the status claim.
+
 Subsystem ID prefixes used throughout: ML (manager-loop), JT (jobs-transactions),
 ST (service-types), SR (sigchld-reaping), SA (socket-activation), RR (reload-reexec),
 DM (device-mount), LM (locking-model).
