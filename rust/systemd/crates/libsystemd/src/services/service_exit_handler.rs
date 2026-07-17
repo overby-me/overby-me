@@ -589,7 +589,6 @@ pub(crate) fn service_exit_handler(
         "Exit handler for service {:?} with pid: {pid} code: {code:?}",
         srvc_id.name
     );
-
     let Some(unit) = run_info.unit_table.get(&srvc_id) else {
         panic!("Tried to run a unit that has been removed from the map");
     };

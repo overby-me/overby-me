@@ -1998,7 +1998,8 @@ fn activate_mount(
         data
     );
 
-    match nix::mount::mount(what, conf.where_.as_str(), fs_type, flags, data) {
+    let mount_result = nix::mount::mount(what, conf.where_.as_str(), fs_type, flags, data);
+    match mount_result {
         Ok(()) => {
             info!("Successfully mounted {} on {}", conf.what, conf.where_);
             let mut status = status.write_poisoned();

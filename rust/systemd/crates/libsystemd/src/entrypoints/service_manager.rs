@@ -221,6 +221,11 @@ pub fn run_service_manager() {
     // triggered by the replay can reach the notification handler etc.
     // Matches upstream's `manager_enumerate_devices()` at boot.
     crate::units::rebuild_device_units_from_udev_db(&run_info);
+    // Native block-device coldplug: probe block devices directly (ext*
+    // superblock) to synthesize referenced by-label/by-uuid .device units even
+    // when systemd-udevd hasn't pushed the event yet. Critical in the initrd,
+    // where the root device is referenced by label and udevd's push can stall.
+    crate::units::coldplug_referenced_block_devices(&run_info);
     // Coldplug fallback: synthesize plugged `.device` units for referenced
     // devices whose nodes already exist in /dev. After switch-root the real
     // root's /dev is fully populated but the udev db was cleared and stage-2's
@@ -228,6 +233,24 @@ pub fn run_service_manager() {
     // referenced devices (console, root) are present before activation instead
     // of waiting on an unreliable udevd push.
     crate::units::synthesize_referenced_present_devices(&run_info);
+    // Some referenced devices (notably the root block device in the initrd)
+    // only appear once their driver probes during activation, which runs AFTER
+    // this point. Re-run the coldplug in the background (non-blocking, so
+    // activation can proceed and load those drivers) so their .device units are
+    // synthesized as soon as the devices show up, unblocking the mounts that
+    // wait on them. Best-effort with a bounded lifetime.
+    {
+        let ri = run_info.clone();
+        let _ = std::thread::Builder::new()
+            .name("coldplug-retry".to_owned())
+            .spawn(move || {
+                for _ in 0..120 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    crate::units::coldplug_referenced_block_devices(&ri);
+                    crate::units::synthesize_referenced_present_devices(&ri);
+                }
+            });
+    }
     // Cleanup the reexec .status file now that rebuild has consumed
     // it (see note in check_and_restore_reexec_state about the
     // deferred deletion).
@@ -269,12 +292,9 @@ pub fn run_service_manager() {
         info!("daemon-reexec: skipped full activation, statuses restored from state file");
     } else {
         kmsg(&format!("activating target {}", target_id.name));
-        // Initrd diagnostic: 10s into the signal loop, dump the state of the
-        // units on the switch-root critical path so a hung boot reveals exactly
-        // what sysroot.mount is waiting on. Gated on in_initrd; remove before
-        // final. Clone run_info here since activate_needed_units consumes it.
         let _ = in_initrd;
-        spawn_initrd_state_dump(run_info.clone());
+        units::set_active_goal(&target_id.name);
+        spawn_active_goal_redrive(run_info.clone());
         units::activate_needed_units(target_id, run_info);
     }
 
@@ -282,191 +302,52 @@ pub fn run_service_manager() {
     handle.join().unwrap();
 }
 
-fn spawn_initrd_state_dump(ri_dbg: runtime_info::ArcMutRuntimeInfo) {
-    let ri_dbg2 = ri_dbg.clone();
+/// Background re-drive for the current activation goal.
+///
+/// rust-systemd's activation is a forward walk that can return before its goal
+/// is reached: at a given moment no unit may be startable (all remaining ones
+/// are blocked on asynchronous mount/device/oneshot completions), and the
+/// targeted async re-drive paths re-evaluate the static boot target rather than
+/// the CURRENT goal. After `systemctl isolate` (e.g. the initrd isolating to
+/// `initrd-switch-root.target`, or any stage-2 target chain) that leaves the
+/// new goal stalled nondeterministically. This thread periodically re-runs
+/// activation for whatever goal is currently active (see
+/// `units::set_active_goal`) until it is reached, so a unit that became active
+/// asynchronously reliably unblocks its waiters. `activate_unit` is idempotent,
+/// so re-drives that make no progress are cheap, and once the goal is active we
+/// stop calling activation and just idle.
+fn spawn_active_goal_redrive(run_info: runtime_info::ArcMutRuntimeInfo) {
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(10));
-        let ri = ri_dbg.read_poisoned();
-        kmsg("--- initrd unit state dump (t+10s) ---");
-        let mut entries: Vec<(&str, String)> = Vec::new();
-        for (id, unit) in ri.unit_table.iter() {
-            let n = id.name.as_str();
-            let interesting = n.contains("sysroot")
-                || n.contains("initrd-root")
-                || n.contains("initrd-fs")
-                || n.contains("initrd-parse")
-                || n.contains("initrd-cleanup")
-                || n.contains("initrd-switch")
-                || n.contains("fsck")
-                || n.ends_with(".device");
-            let st = format!("{}", *unit.common.status.read_poisoned());
-            let unsettled = st == "starting" || st == "stopping" || st == "restarting";
-            if interesting || unsettled {
-                entries.push((n, st));
+        // Up to ~120s of re-drives; stops issuing activations once the goal is
+        // active. In the initrd the switch-root execve tears this thread down.
+        for _ in 0..400 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            // Never launch a concurrent activation: if the initial activation
+            // (or another re-drive/control/exit-handler pass) is already
+            // running, skip this tick. Each activate_needed_units spins up a
+            // 32-thread pool; running several at once just contends locks and
+            // starves real progress (observed: boot crawling, nothing starting).
+            if units::activation_in_flight() {
+                continue;
             }
-        }
-        entries.sort_by(|a, b| a.0.cmp(b.0));
-        for (n, st) in entries {
-            kmsg(&format!("  {n} = {st}"));
-        }
-        // Device diagnostic (Rust fs reads — the shell probe lacks grep/PATH in
-        // the initrd). List every .device unit actually in the table, the
-        // by-label symlinks udev created, and the udev db entries, to decide
-        // whether the .device units are missing because udev never detected the
-        // label (no by-label symlink / empty db) or because the udev-event RPC
-        // that creates them never reached PID 1 (symlink+db present, unit absent).
-        {
-            let devs: Vec<&str> = ri
-                .unit_table
-                .keys()
-                .filter(|id| matches!(id.kind, crate::units::UnitIdKind::Device))
-                .map(|id| id.name.as_str())
-                .collect();
-            kmsg(&format!("  [devunits] {} in table: {:?}", devs.len(), devs));
-        }
-        for dir in ["/dev/disk/by-label", "/dev/disk/by-uuid", "/run/udev/data"] {
-            match std::fs::read_dir(dir) {
-                Ok(rd) => {
-                    let names: Vec<String> = rd
-                        .filter_map(|e| e.ok())
-                        .map(|e| e.file_name().to_string_lossy().into_owned())
-                        .collect();
-                    kmsg(&format!("  [ls {dir}] {names:?}"));
-                }
-                Err(e) => kmsg(&format!("  [ls {dir}] err: {e}")),
-            }
-        }
-        // Dump the udev db entries that mention the root label or a tty/console,
-        // to see what properties udevd recorded (ID_FS_LABEL, SYMLINK, TAGS).
-        if let Ok(rd) = std::fs::read_dir("/run/udev/data") {
-            for e in rd.filter_map(|e| e.ok()) {
-                if let Ok(content) = std::fs::read_to_string(e.path())
-                    && (content.contains("nixos")
-                        || content.contains("ttyS0")
-                        || content.contains("hvc0"))
-                {
-                    let name = e.file_name().to_string_lossy().into_owned();
-                    for line in content.lines().filter(|l| {
-                        l.contains("DEVNAME")
-                            || l.contains("FS_LABEL")
-                            || l.contains("SYMLINK")
-                            || l.starts_with("G:")
-                    }) {
-                        kmsg(&format!("  [udevdb {name}] {line}"));
-                    }
+            let Some(goal_name) = units::active_goal() else {
+                continue;
+            };
+            let goal = {
+                let ri = run_info.read_poisoned();
+                ri.unit_table
+                    .values()
+                    .find(|u| u.id.name == goal_name || u.common.unit.aliases.contains(&goal_name))
+                    .map(|u| (u.id.clone(), u.common.status.read_poisoned().is_started()))
+            };
+            match goal {
+                // Goal reached — idle (a later isolate may set a new goal).
+                Some((_, true)) | None => continue,
+                Some((id, false)) => {
+                    let _ = units::activate_needed_units(id, run_info.clone());
                 }
             }
         }
-        // Dump exact (Debug) status + deps of fsck and sysroot.mount to see
-        // where the chain is stuck: fsck completed but sysroot.mount not
-        // re-attempted, vs fsck still activating.
-        for (id, unit) in ri.unit_table.iter() {
-            if id.name.contains("fsck@")
-                || id.name == "sysroot.mount"
-                || id.name == "backdoor.service"
-            {
-                let d = &unit.common.dependencies;
-                let fmt = |v: &[crate::units::UnitId]| {
-                    v.iter()
-                        .map(|u| format!("{}<{:?}>", u.name, u.kind))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
-                let st = unit.common.status.read_poisoned();
-                kmsg(&format!("  {} status={:?}", id.name, *st));
-                kmsg(&format!("  {} after=[{}]", id.name, fmt(&d.after)));
-                kmsg(&format!("  {} requires=[{}]", id.name, fmt(&d.requires)));
-                kmsg(&format!("  {} binds_to=[{}]", id.name, fmt(&d.binds_to)));
-            }
-        }
-        // Explicit status of the switch-root chain units (they may be loaded
-        // on demand / stopped by the isolate, so may not match the filter above).
-        for name in [
-            "initrd-cleanup.service",
-            "initrd-switch-root.target",
-            "initrd-switch-root.service",
-            "backdoor.service",
-            "multi-user.target",
-            "basic.target",
-            "sysinit.target",
-            "dev-hvc0.device",
-            "dev-ttyS0.device",
-            "systemd-udevd.service",
-            "systemd-udev-trigger.service",
-        ] {
-            match ri.unit_table.values().find(|u| u.id.name == name) {
-                Some(u) => {
-                    kmsg(&format!(
-                        "  {name} status={:?}",
-                        *u.common.status.read_poisoned()
-                    ));
-                }
-                None => kmsg(&format!("  {name} = NOT IN TABLE")),
-            }
-        }
-        drop(ri);
-        // Is the control socket up and is journald still running (the isolate
-        // may have torn down what `systemctl --no-block switch-root` needs)?
-        let sock_probe = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(
-                "echo '[/run/systemd]'; ls -la /run/systemd/ 2>&1 | head; \
-                 for p in /proc/[0-9]*/comm; do c=$(cat $p 2>/dev/null); case $c in *journal*|systemd-udevd) echo \"proc: $c\";; esac; done",
-            )
-            .output();
-        if let Ok(o) = sock_probe {
-            for line in String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .chain(String::from_utf8_lossy(&o.stderr).lines())
-            {
-                if !line.trim().is_empty() {
-                    kmsg(&format!("  | {line}"));
-                }
-            }
-        }
-        // Probe the /nix/store overlay setup: does the rw-store have the
-        // upper/work dirs (rw-sysroot-nix-store.service's mkdir), and is that
-        // mkdir process still alive (i.e. the oneshot never completed)?
-        let probe = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(
-                "echo '[notify-sock]'; ls -la /run/systemd/rust-systemd-notify/ 2>&1; \
-                 echo '[devs]'; ls -la /dev/ttyS0 /dev/hvc0 2>&1; \
-                 echo '[udevadm ttyS0]'; udevadm info /dev/ttyS0 2>&1 | grep -iE 'TAGS|SYSTEMD|E: DEVNAME' | head; \
-                 echo '[udevadm hvc0]'; udevadm info /dev/hvc0 2>&1 | grep -iE 'TAGS|SYSTEMD|E: DEVNAME' | head; \
-                 echo '[.rw-store]'; ls -la /sysroot/nix/.rw-store/ 2>&1",
-            )
-            .output();
-        if let Ok(o) = probe {
-            for line in String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .chain(String::from_utf8_lossy(&o.stderr).lines())
-            {
-                if !line.trim().is_empty() {
-                    kmsg(&format!("  | {line}"));
-                }
-            }
-        }
-        kmsg("--- end unit state dump ---");
-    });
-
-    // Early snapshot: 2s in, before udev has created the by-label symlink, log
-    // whether fsck already ran and what state its backing .device unit is in.
-    // Distinguishes "fsck started because its device dep is missing/misclassified"
-    // from "the device unit was marked Started prematurely".
-    let ri_early = ri_dbg2;
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        let ri = ri_early.read_poisoned();
-        kmsg("--- initrd early snapshot (t+2s) ---");
-        for (id, unit) in ri.unit_table.iter() {
-            let n = id.name.as_str();
-            if n.contains("fsck@") || (n.contains("by\\x2dlabel-nixos") && n.ends_with(".device")) {
-                let st = format!("{}", *unit.common.status.read_poisoned());
-                kmsg(&format!("  [t2] {n} = {st}"));
-            }
-        }
-        kmsg("--- end early snapshot ---");
     });
 }
 
@@ -596,11 +477,56 @@ fn mount_api_filesystems() {
         // Create the mount point. Entries under /dev and /sys come after their
         // parent in the table, so the parent is mounted by the time we get here.
         let _ = std::fs::create_dir_all(target);
+        // Skip if something is already mounted here. Relying on EBUSY is wrong
+        // for stackable filesystems: mounting a fresh `tmpfs` over an
+        // already-mounted /run (or /dev/shm, …) SUCCEEDS and stacks an empty
+        // tmpfs on top, shadowing whatever was there. In stage-2 that hides the
+        // /run carried over from the initrd — including the NixOS activation's
+        // /run/current-system, which /etc/profile needs for the system PATH.
+        // Real systemd skips API mounts that are already present, so match that.
+        if is_mount_point(target) {
+            continue;
+        }
         match mount(Some(*source), *target, Some(*fstype), *flags, *data) {
             Ok(()) => {}
             Err(nix::errno::Errno::EBUSY) => {} // already mounted — fine
             Err(e) => log::warn!("mount_api_filesystems: {target} ({fstype}): {e}"),
         }
+    }
+}
+
+/// Whether `path` is a mount point — true if its device id differs from its
+/// parent's. Used to avoid stacking a second mount over an already-mounted API
+/// filesystem (e.g. re-mounting /run in stage-2 would shadow the initrd's /run).
+#[cfg(target_os = "linux")]
+/// Create the standard `/dev` symlinks that systemd's `dev_setup()` creates so
+/// the global `/dev` provides `/dev/fd`, `/dev/stdin/stdout/stderr` and
+/// `/dev/core`. Best-effort: only creates a link if it does not already exist.
+fn create_standard_dev_symlinks() {
+    let links = [
+        ("/proc/self/fd", "/dev/fd"),
+        ("/proc/self/fd/0", "/dev/stdin"),
+        ("/proc/self/fd/1", "/dev/stdout"),
+        ("/proc/self/fd/2", "/dev/stderr"),
+        ("/proc/kcore", "/dev/core"),
+    ];
+    for (target, link) in links {
+        if std::fs::symlink_metadata(link).is_err() {
+            let _ = std::os::unix::fs::symlink(target, link);
+        }
+    }
+}
+
+fn is_mount_point(path: &str) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let p = std::path::Path::new(path);
+    let Ok(meta) = std::fs::symlink_metadata(p) else {
+        return false;
+    };
+    let parent = p.parent().unwrap_or_else(|| std::path::Path::new("/"));
+    match std::fs::metadata(parent) {
+        Ok(pmeta) => meta.dev() != pmeta.dev(),
+        Err(_) => false,
     }
 }
 
@@ -615,6 +541,13 @@ fn pid1_specific_setup() {
     // mounted them (this is then a no-op); in the initrd we are the first init
     // and must do it ourselves, like upstream systemd.
     mount_api_filesystems();
+
+    // Create the standard /dev symlinks (matching systemd's dev_setup()):
+    // /dev/fd, /dev/stdin, /dev/stdout, /dev/stderr and /dev/core. Shell
+    // process substitution (`diff <(a) <(b)`) and `/dev/stdin` redirects open
+    // /dev/fd/N via these; without them such constructs fail with "No such file
+    // or directory" on the global /dev.
+    create_standard_dev_symlinks();
 
     // When running as PID 1, the inherited stdin/stdout/stderr may be broken
     // pipes (e.g. the NixOS stage-2 init script redirects stdout through a
