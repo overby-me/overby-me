@@ -171,8 +171,24 @@
     ```
   '';
 
-  # Play a freedesktop sound-theme event via PipeWire (pw-play).
-  playSound = file: "${pkgs.pipewire}/bin/pw-play ${pkgs.sound-theme-freedesktop}/share/sounds/freedesktop/stereo/${file}";
+  inherit (pkgs.stdenv) isDarwin;
+
+  # Desktop notification, platform-appropriate: notify-send needs a Linux
+  # notification daemon; darwin uses the built-in osascript.
+  notify = message:
+    if isDarwin
+    then ''/usr/bin/osascript -e 'display notification "${message}" with title "Claude Code"' ''
+    else "${pkgs.libnotify}/bin/notify-send 'Claude Code' '${message}'";
+
+  # Play a notification sound: freedesktop sound-theme event via PipeWire
+  # (pw-play) on Linux, built-in system sounds via afplay on darwin.
+  playSound = {
+    linux,
+    darwin,
+  }:
+    if isDarwin
+    then "/usr/bin/afplay /System/Library/Sounds/${darwin}"
+    else "${pkgs.pipewire}/bin/pw-play ${pkgs.sound-theme-freedesktop}/share/sounds/freedesktop/stereo/${linux}";
 
   claudeSettingsJson = (pkgs.formats.json {}).generate "claude-settings.json" {
     hooks = {
@@ -193,11 +209,14 @@
           hooks = [
             {
               type = "command";
-              command = "${pkgs.libnotify}/bin/notify-send 'Claude Code' 'Waiting for your input'";
+              command = notify "Waiting for your input";
             }
             {
               type = "command";
-              command = playSound "message.oga";
+              command = playSound {
+                linux = "message.oga";
+                darwin = "Ping.aiff";
+              };
             }
           ];
         }
@@ -208,11 +227,14 @@
           hooks = [
             {
               type = "command";
-              command = "${pkgs.libnotify}/bin/notify-send 'Claude Code' 'Task completed'";
+              command = notify "Task completed";
             }
             {
               type = "command";
-              command = playSound "complete.oga";
+              command = playSound {
+                linux = "complete.oga";
+                darwin = "Glass.aiff";
+              };
             }
           ];
         }
