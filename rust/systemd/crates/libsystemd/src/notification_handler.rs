@@ -178,18 +178,30 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                     if mut_state.srvc.notifications.is_none() {
                         continue;
                     }
-                    let old_flags =
-                        nix::fcntl::fcntl(unsafe { borrow_fd(*fd) }, nix::fcntl::FcntlArg::F_GETFL)
-                            .unwrap();
-
-                    let old_flags = nix::fcntl::OFlag::from_bits(old_flags).unwrap();
-                    let mut new_flags = old_flags;
+                    // The service's notification fd may already be closed (e.g.
+                    // the service exited), so fcntl can return EBADF. Skip the
+                    // fd rather than panicking — a panic here would take down
+                    // PID 1's notification thread and stall every service still
+                    // waiting to send READY=1.
+                    let old_flags = match nix::fcntl::fcntl(
+                        unsafe { borrow_fd(*fd) },
+                        nix::fcntl::FcntlArg::F_GETFL,
+                    ) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            log::debug!("notify: F_GETFL on fd {fd} failed: {e}; skipping");
+                            continue;
+                        }
+                    };
+                    let mut new_flags = nix::fcntl::OFlag::from_bits_truncate(old_flags);
                     new_flags.insert(nix::fcntl::OFlag::O_NONBLOCK);
-                    nix::fcntl::fcntl(
+                    if let Err(e) = nix::fcntl::fcntl(
                         unsafe { borrow_fd(*fd) },
                         nix::fcntl::FcntlArg::F_SETFL(new_flags),
-                    )
-                    .unwrap();
+                    ) {
+                        log::debug!("notify: F_SETFL on fd {fd} failed: {e}; skipping");
+                        continue;
+                    }
 
                     // Use recvmsg() instead of recv() to capture
                     // SCM_RIGHTS ancillary data (file descriptors)
@@ -203,11 +215,14 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                             | nix::sys::socket::MsgFlags::MSG_DONTWAIT,
                     );
 
-                    nix::fcntl::fcntl(
+                    // Restore the original flags (best-effort — the fd may have
+                    // been closed by the peer between the read and now).
+                    let _ = nix::fcntl::fcntl(
                         unsafe { borrow_fd(*fd) },
-                        nix::fcntl::FcntlArg::F_SETFL(old_flags),
-                    )
-                    .unwrap();
+                        nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::from_bits_truncate(
+                            old_flags,
+                        )),
+                    );
 
                     match recv_result {
                         Ok(msg) => {
@@ -531,34 +546,50 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
                             let mut_state = &mut *srvc.state.write_poisoned();
                             let status = srvc_unit.common.status.read_poisoned();
 
-                            let old_flags = nix::fcntl::fcntl(
+                            // The service's stdout/stderr fd may already be
+                            // closed (the service exited), so fcntl/read can
+                            // return EBADF. Skip the fd rather than panicking —
+                            // a panic here takes down PID 1's stdout/stderr
+                            // handler thread and stops journal capture for every
+                            // service.
+                            let old_flags = match nix::fcntl::fcntl(
                                 unsafe { borrow_fd(*fd) },
                                 nix::fcntl::FcntlArg::F_GETFL,
-                            )
-                            .unwrap();
-                            let old_flags = nix::fcntl::OFlag::from_bits(old_flags).unwrap();
-                            let mut new_flags = old_flags;
+                            ) {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    log::debug!("stdout: F_GETFL on fd {fd} failed: {e}; skipping");
+                                    continue;
+                                }
+                            };
+                            let mut new_flags = nix::fcntl::OFlag::from_bits_truncate(old_flags);
                             new_flags.insert(nix::fcntl::OFlag::O_NONBLOCK);
-                            nix::fcntl::fcntl(
+                            if let Err(e) = nix::fcntl::fcntl(
                                 unsafe { borrow_fd(*fd) },
                                 nix::fcntl::FcntlArg::F_SETFL(new_flags),
-                            )
-                            .unwrap();
+                            ) {
+                                log::debug!("stdout: F_SETFL on fd {fd} failed: {e}; skipping");
+                                continue;
+                            }
 
-                            ////
                             let bytes =
                                 match nix::unistd::read(unsafe { borrow_fd(*fd) }, &mut buf[..]) {
                                     Ok(b) => b,
                                     Err(nix::Error::EWOULDBLOCK) => 0,
-                                    Err(e) => panic!("{}", e),
+                                    Err(e) => {
+                                        log::debug!("stdout: read fd {fd} failed: {e}; skipping");
+                                        continue;
+                                    }
                                 };
-                            ////
 
-                            nix::fcntl::fcntl(
+                            // Restore the original flags (best-effort — the fd
+                            // may have been closed by the peer in the meantime).
+                            let _ = nix::fcntl::fcntl(
                                 unsafe { borrow_fd(*fd) },
-                                nix::fcntl::FcntlArg::F_SETFL(old_flags),
-                            )
-                            .unwrap();
+                                nix::fcntl::FcntlArg::F_SETFL(
+                                    nix::fcntl::OFlag::from_bits_truncate(old_flags),
+                                ),
+                            );
 
                             if bytes == 0 {
                                 // EOF: the write end of the pipe was closed.
