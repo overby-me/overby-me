@@ -381,6 +381,282 @@ pub fn synthesize_referenced_present_devices(run_info: &ArcMutRuntimeInfo) {
     }
 }
 
+/// Format a 16-byte binary UUID as the canonical dashed lowercase hex string
+/// (matches udev's ID_FS_UUID and the `/dev/disk/by-uuid/` symlink name).
+fn format_fs_uuid(u: &[u8]) -> Option<String> {
+    if u.len() != 16 || u.iter().all(|&b| b == 0) {
+        return None;
+    }
+    Some(format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        u[0],
+        u[1],
+        u[2],
+        u[3],
+        u[4],
+        u[5],
+        u[6],
+        u[7],
+        u[8],
+        u[9],
+        u[10],
+        u[11],
+        u[12],
+        u[13],
+        u[14],
+        u[15]
+    ))
+}
+
+/// Read an ext2/3/4 filesystem label and UUID by parsing the superblock
+/// directly (offset 1024, magic 0xEF53 at +0x38, UUID at +0x68, label at
+/// +0x78), the way libblkid does. Only ext* is handled here — enough for the
+/// common root filesystem. Returns (label, uuid), each present only if set.
+fn probe_ext_label_uuid(devnode: &std::path::Path) -> Option<(Option<String>, Option<String>)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(devnode).ok()?;
+    let mut sb = [0u8; 1024];
+    f.seek(SeekFrom::Start(1024)).ok()?;
+    f.read_exact(&mut sb).ok()?;
+    if !(sb[0x38] == 0x53 && sb[0x39] == 0xEF) {
+        return None; // not ext2/3/4
+    }
+    let uuid = format_fs_uuid(&sb[0x68..0x78]);
+    let label = {
+        let l = &sb[0x78..0x88];
+        let end = l.iter().position(|&b| b == 0).unwrap_or(l.len());
+        let s = String::from_utf8_lossy(&l[..end])
+            .trim_end_matches(' ')
+            .to_string();
+        (!s.is_empty()).then_some(s)
+    };
+    Some((label, uuid))
+}
+
+/// Native block-device coldplug for by-label / by-uuid device units.
+///
+/// The root device unit in a NixOS initrd is referenced by label
+/// (`dev-disk-by\x2dlabel-<L>.device`, required by systemd-fsck@ and
+/// sysroot.mount). That unit — and the `/dev/disk/by-label/<L>` symlink — is
+/// normally created only after systemd-udevd processes the block device and
+/// pushes a udev-event to PID 1. That push is unreliable in the initrd
+/// (`udevadm trigger` can stall), so the device unit stays absent, fsck never
+/// runs, and the boot hangs.
+///
+/// Here PID 1 probes the block devices itself (ext* superblock, like blkid) and
+/// synthesizes a plugged device unit for every referenced by-label/by-uuid
+/// device whose label/UUID matches a present block device — no udevd round-trip
+/// needed. `synthesize_referenced_present_devices` covers devices whose /dev
+/// node already exists; this covers the by-label/by-uuid aliases whose symlink
+/// udev hasn't created yet.
+/// Re-emit an "add" uevent for every device under the given sysfs subtrees,
+/// like `udevadm trigger`. udevd (socket-activated) then processes each
+/// device's MODALIAS and autoloads its driver — notably virtio_blk for the
+/// root disk — recovering from a coldplug that raced or whose trigger service
+/// did not run, so the referenced-but-absent root device eventually appears.
+fn trigger_coldplug_uevents() {
+    for root in ["/sys/bus", "/sys/devices"] {
+        write_uevents_recursive(std::path::Path::new(root), 0);
+    }
+}
+
+fn write_uevents_recursive(dir: &std::path::Path, depth: usize) {
+    if depth > 12 {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in rd.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        // Use symlink_metadata so we only descend REAL directories: /sys is full
+        // of symlinks that would otherwise cause loops/duplicate work.
+        let Ok(md) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if md.is_dir() {
+            let uevent = path.join("uevent");
+            if std::fs::symlink_metadata(&uevent)
+                .map(|m| m.is_file())
+                .unwrap_or(false)
+            {
+                let _ = std::fs::write(&uevent, "add\n");
+            }
+            write_uevents_recursive(&path, depth + 1);
+        }
+    }
+}
+
+/// Create a block-device node at `devnode` from the `major:minor` recorded in
+/// `/sys/class/block/<sysname>/dev`, so device probing does not have to wait
+/// for udev to create the node.
+fn create_dev_node_from_sysfs(sysname: &str, devnode: &str) {
+    let Ok(content) = std::fs::read_to_string(format!("/sys/class/block/{sysname}/dev")) else {
+        return;
+    };
+    let Some((maj, min)) = content.trim().split_once(':') else {
+        return;
+    };
+    let (Ok(maj), Ok(min)) = (maj.parse::<u64>(), min.parse::<u64>()) else {
+        return;
+    };
+    let devt = nix::sys::stat::makedev(maj, min);
+    let _ = nix::sys::stat::mknod(
+        devnode,
+        nix::sys::stat::SFlag::S_IFBLK,
+        nix::sys::stat::Mode::from_bits_truncate(0o660),
+        devt,
+    );
+}
+
+pub fn coldplug_referenced_block_devices(run_info: &ArcMutRuntimeInfo) {
+    // Collect referenced-but-absent by-label / by-uuid device units.
+    // Each entry: (is_uuid, value, unit_name).
+    let mut wanted: Vec<(bool, String, String)> = Vec::new();
+    {
+        let ri = run_info.read_poisoned();
+        let mut seen = std::collections::HashSet::new();
+        for unit in ri.unit_table.values() {
+            let deps = &unit.common.dependencies;
+            for id in deps
+                .after
+                .iter()
+                .chain(deps.requires.iter())
+                .chain(deps.binds_to.iter())
+                .chain(deps.wants.iter())
+            {
+                if !matches!(id.kind, UnitIdKind::Device)
+                    || ri.unit_table.contains_key(id)
+                    || !seen.insert(id.name.clone())
+                {
+                    continue;
+                }
+                let stem = id.name.strip_suffix(".device").unwrap_or(&id.name);
+                let Some(path) = crate::unit_name::unit_name_path_unescape(stem) else {
+                    continue;
+                };
+                if std::path::Path::new(&path).exists() {
+                    continue; // handled by synthesize_referenced_present_devices
+                }
+                if let Some(label) = path.strip_prefix("/dev/disk/by-label/") {
+                    wanted.push((false, label.to_owned(), id.name.clone()));
+                } else if let Some(uuid) = path.strip_prefix("/dev/disk/by-uuid/") {
+                    wanted.push((true, uuid.to_owned(), id.name.clone()));
+                }
+            }
+        }
+    }
+    if wanted.is_empty() {
+        return;
+    }
+
+    // Probe every block device once, then match against the wanted set.
+    let mut probes: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir("/sys/class/block") {
+        for e in rd.filter_map(|e| e.ok()) {
+            let sysname = e.file_name().to_string_lossy().to_string();
+            let devnode = format!("/dev/{sysname}");
+            let p = std::path::Path::new(&devnode);
+            // The kernel registers block devices in /sys very early, but the
+            // /dev node is created asynchronously by udev. If we run before udev
+            // has created the node, create it ourselves from the sysfs dev
+            // number so probing (and thus the root device unit) does not race
+            // udev — otherwise a referenced by-label/by-uuid root device can be
+            // stuck ABSENT and the initrd never reaches switch-root.
+            if !p.exists() {
+                create_dev_node_from_sysfs(&sysname, &devnode);
+            }
+            if p.exists()
+                && let Some((label, uuid)) = probe_ext_label_uuid(p)
+            {
+                probes.push((devnode, label, uuid));
+            }
+        }
+    }
+
+    // No block devices present at all: the driver for the referenced root
+    // device has not been autoloaded (its coldplug uevent was missed or the
+    // udev-trigger service raced). Re-emit device uevents so udevd autoloads it.
+    // Rate-limit so the bg-retry (every 500ms) does not walk /sys every tick.
+    if probes.is_empty() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TRIGGER_TICK: AtomicU64 = AtomicU64::new(0);
+        if TRIGGER_TICK
+            .fetch_add(1, Ordering::Relaxed)
+            .is_multiple_of(4)
+        {
+            trigger_coldplug_uevents();
+        }
+    }
+
+    let mut to_create: Vec<(String, String, String)> = Vec::new();
+    for (is_uuid, value, unit_name) in &wanted {
+        for (devnode, label, uuid) in &probes {
+            let matched = if *is_uuid {
+                uuid.as_deref() == Some(value.as_str())
+            } else {
+                label.as_deref() == Some(value.as_str())
+            };
+            if matched {
+                let symlink = if *is_uuid {
+                    format!("/dev/disk/by-uuid/{value}")
+                } else {
+                    format!("/dev/disk/by-label/{value}")
+                };
+                to_create.push((unit_name.clone(), devnode.clone(), symlink));
+                break;
+            }
+        }
+    }
+    if to_create.is_empty() {
+        return;
+    }
+
+    // Create the by-label/by-uuid symlinks (normally udev's job) so the
+    // referencing .mount unit can resolve the device even when we win the race
+    // against udev. Best-effort: skip if the link already exists.
+    for (_, devnode, symlink) in &to_create {
+        let link = std::path::Path::new(symlink);
+        if !link.exists() {
+            if let Some(parent) = link.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::os::unix::fs::symlink(devnode, link);
+        }
+    }
+
+    let mut ri = run_info.write_poisoned_nonblocking();
+    for (name, devnode, _symlink) in &to_create {
+        let id = UnitId {
+            kind: UnitIdKind::Device,
+            name: name.clone(),
+        };
+        if ri.unit_table.contains_key(&id) {
+            continue;
+        }
+        let params = UdevEventParams {
+            action: "add".to_owned(),
+            sysfs_path: String::new(),
+            devname: devnode.clone(),
+            subsystem: "block".to_owned(),
+            env: std::collections::HashMap::new(),
+            tags: vec!["systemd".to_owned()],
+            symlinks: Vec::new(),
+        };
+        match build_device_unit(name, &params) {
+            Ok(unit) => {
+                crate::units::insert_new_unit_lenient(unit, &mut ri);
+                if let Some(u) = ri.unit_table.get(&id) {
+                    let mut status = u.common.status.write_poisoned();
+                    *status = UnitStatus::Started(StatusStarted::Running);
+                }
+                debug!("coldplug: synthesized plugged block device unit {name} -> {devnode}");
+            }
+            Err(e) => warn!("coldplug: failed to synthesize block device unit {name}: {e}"),
+        }
+    }
+}
+
 /// Read the reexec status file and collect the names of `.device`
 /// units that were in `Started` state before the re-exec.  Used by
 /// `rebuild_device_units_from_udev_db` to preserve `plugged` state
