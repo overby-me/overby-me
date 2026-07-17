@@ -1,7 +1,7 @@
 mod dependency_resolving;
 pub(crate) mod directory_deps;
 pub use dependency_resolving::*;
-use log::{info, trace, warn};
+use log::{error, info, trace, warn};
 
 use crate::runtime_info::UnitTable;
 use crate::units::{ParsingError, Specific, Unit, UnitId, get_file_list, parse_file};
@@ -281,7 +281,18 @@ fn load_all_units_inner(
             target_unit
         );
 
-        prune_units(target_unit, &mut unit_table).unwrap();
+        // Never panic PID 1 if the boot target cannot be resolved: fall back
+        // to emergency.target (matching upstream's degraded-boot behavior),
+        // and if even that is missing, skip pruning and boot with the full
+        // table rather than dying.
+        if let Err(e) = prune_units(target_unit, &mut unit_table) {
+            error!(
+                "Failed to prune to target {target_unit}: {e}; falling back to emergency.target"
+            );
+            if let Err(e2) = prune_units("emergency.target", &mut unit_table) {
+                error!("Failed to prune to emergency.target as well: {e2}; continuing unpruned");
+            }
+        }
 
         info!("Units after prune: {} total", unit_table.len());
     } else {
