@@ -9130,8 +9130,20 @@ pub fn execute_command(
                     };
                     let mut deadline =
                         std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+                    // When the primary unit is still NeverStarted but no ordering
+                    // dependency is left working, its background dispatch (a
+                    // completed dependency's before-chain, run from the deferred
+                    // completion handler) may be imminent: the dependency flips to
+                    // Started a beat before the primary is dispatched to Starting.
+                    // Bridge that window with a short grace, measured from the
+                    // moment the dependencies went quiet, so `systemctl start`
+                    // keeps upstream's "start job still pending" semantics instead
+                    // of returning before the unit actually runs — without waiting
+                    // the full start timeout if it is genuinely never dispatched.
+                    let mut dep_quiesced_at: Option<std::time::Instant> = None;
                     loop {
-                        let still_starting = {
+                        // `(deps_or_self_active, primary_neverstarted)`
+                        let (deps_or_self_active, primary_neverstarted) = {
                             let ri = run_info.read_poisoned();
                             ri.unit_table
                                 .get(&id)
@@ -9153,7 +9165,7 @@ pub fn execute_command(
                                     }
                                     let status = u.common.status.read_poisoned().clone();
                                     match status {
-                                        UnitStatus::Starting => true,
+                                        UnitStatus::Starting => (true, false),
                                         // The unit may not have begun yet because an
                                         // ordering dependency's start was deferred
                                         // (e.g. a oneshot dep still running): the
@@ -9172,27 +9184,47 @@ pub fn execute_command(
                                                 .iter()
                                                 .chain(u.common.dependencies.requires.iter())
                                                 .collect();
-                                            u.common.dependencies.after.iter().any(|dep_id| {
-                                                pulled.contains(dep_id)
-                                                    && ri
-                                                        .unit_table
-                                                        .get(dep_id)
-                                                        .map(|d| {
-                                                            matches!(
-                                                                &*d.common
-                                                                    .status
-                                                                    .read_poisoned(),
-                                                                UnitStatus::Starting
-                                                                    | UnitStatus::NeverStarted
-                                                            )
-                                                        })
-                                                        .unwrap_or(false)
-                                            })
+                                            let working = u
+                                                .common
+                                                .dependencies
+                                                .after
+                                                .iter()
+                                                .any(|dep_id| {
+                                                    pulled.contains(dep_id)
+                                                        && ri
+                                                            .unit_table
+                                                            .get(dep_id)
+                                                            .map(|d| {
+                                                                matches!(
+                                                                    &*d.common
+                                                                        .status
+                                                                        .read_poisoned(),
+                                                                    UnitStatus::Starting
+                                                                        | UnitStatus::NeverStarted
+                                                                )
+                                                            })
+                                                            .unwrap_or(false)
+                                                });
+                                            (working, true)
                                         }
-                                        _ => false,
+                                        _ => (false, false),
                                     }
                                 })
-                                .unwrap_or(false)
+                                .unwrap_or((false, false))
+                        };
+                        let still_starting = if deps_or_self_active {
+                            // Primary is Starting, or an ordering dep is still
+                            // working: keep waiting and reset the dispatch grace.
+                            dep_quiesced_at = None;
+                            true
+                        } else if primary_neverstarted {
+                            // Primary parked with quiet deps: allow a brief grace
+                            // for the imminent background dispatch before giving up.
+                            let now = std::time::Instant::now();
+                            let since = *dep_quiesced_at.get_or_insert(now);
+                            now.duration_since(since) < std::time::Duration::from_secs(3)
+                        } else {
+                            false
                         };
                         // Also check if a restart happened — if the restart
                         // counter increased, the initial start attempt failed.
