@@ -113,6 +113,12 @@ pub fn handle_signals(
                                                     _ => unreachable!(),
                                                 };
                                                 trace!("Save service as exited. PID: {pid}");
+                                                if !crate::config::in_initrd() {
+                                                    crate::entrypoints::kmsg(&format!(
+                                                        "REAP pid={pid} {} -> ServiceExited",
+                                                        id.name
+                                                    ));
+                                                }
                                                 pt.insert(pid, PidEntry::ServiceExited(code));
                                                 Some(id)
                                             }
@@ -395,6 +401,21 @@ pub fn daemon_reexec(run_info: &ArcMutRuntimeInfo) {
 /// `/` and we `chroot` into it and `execve` the new init. As PID 1, exec'ing
 /// the new init makes it the real system manager. Only returns (with `Err`) on
 /// failure; on success it never returns.
+/// True if `path` is a mount point: its underlying device differs from its
+/// parent directory's. Used so switch-root does not relocate API filesystems
+/// that the initrd already bind-mounted under the new root.
+fn is_mount_point(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("/"));
+    match std::fs::metadata(parent) {
+        Ok(pmeta) => meta.dev() != pmeta.dev(),
+        Err(_) => false,
+    }
+}
+
 pub fn switch_root(new_root: &str, init: Option<&str>) -> Result<(), String> {
     use nix::mount::{MsFlags, mount};
     use std::path::Path;
@@ -438,21 +459,37 @@ pub fn switch_root(new_root: &str, init: Option<&str>) -> Result<(), String> {
         });
 
     // Move the API filesystems into the new root so they survive the switch.
+    //
+    // If a filesystem is ALREADY mounted under the new root, do NOT move the
+    // initrd's own mount on top of it: NixOS's systemd initrd bind-mounts /run
+    // (and friends) into /sysroot via `sysroot-*.mount`, and the NixOS
+    // activation populates that /run with /run/current-system. Moving the
+    // initrd's /run over it would shadow that content and lose
+    // /run/current-system in stage 2. This matches systemd's switch-root, which
+    // only relocates API mounts that are not already present under the new root.
     for m in ["/dev", "/proc", "/sys", "/run"] {
         let target = new_root_path.join(m.trim_start_matches('/'));
         let _ = std::fs::create_dir_all(&target);
-        if let Err(e) = mount(
+        // Skip filesystems already mounted under the new root (see the comment
+        // above) — moving the initrd's own mount on top would shadow them.
+        if is_mount_point(&target) {
+            continue;
+        }
+        match mount(
             Some(m),
             &target,
             None::<&str>,
             MsFlags::MS_MOVE,
             None::<&str>,
         ) {
-            // Non-fatal: some may not be mounted; log and continue.
-            warn!(
-                "switch-root: could not move {m} -> {}: {e}",
-                target.display()
-            );
+            Ok(()) => {}
+            Err(e) => {
+                // Non-fatal: some may not be mounted; log and continue.
+                warn!(
+                    "switch-root: could not move {m} -> {}: {e}",
+                    target.display()
+                );
+            }
         }
     }
 
