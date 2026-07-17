@@ -9008,10 +9008,46 @@ pub fn execute_command(
                                             }
                                         }
                                     }
-                                    matches!(
-                                        &*u.common.status.read_poisoned(),
-                                        UnitStatus::Starting
-                                    )
+                                    let status = u.common.status.read_poisoned().clone();
+                                    match status {
+                                        UnitStatus::Starting => true,
+                                        // The unit may not have begun yet because an
+                                        // ordering dependency's start was deferred
+                                        // (e.g. a oneshot dep still running): the
+                                        // activation pool parks this unit until the
+                                        // dep completes and its deferred handler
+                                        // dispatches the before-chain.  Keep waiting
+                                        // while any ordering dep this unit pulls in
+                                        // is still starting, so `systemctl start`
+                                        // keeps upstream's transaction-completion
+                                        // semantics.
+                                        UnitStatus::NeverStarted => {
+                                            let pulled: std::collections::HashSet<_> = u
+                                                .common
+                                                .dependencies
+                                                .wants
+                                                .iter()
+                                                .chain(u.common.dependencies.requires.iter())
+                                                .collect();
+                                            u.common.dependencies.after.iter().any(|dep_id| {
+                                                pulled.contains(dep_id)
+                                                    && ri
+                                                        .unit_table
+                                                        .get(dep_id)
+                                                        .map(|d| {
+                                                            matches!(
+                                                                &*d.common
+                                                                    .status
+                                                                    .read_poisoned(),
+                                                                UnitStatus::Starting
+                                                                    | UnitStatus::NeverStarted
+                                                            )
+                                                        })
+                                                        .unwrap_or(false)
+                                            })
+                                        }
+                                        _ => false,
+                                    }
                                 })
                                 .unwrap_or(false)
                         };
