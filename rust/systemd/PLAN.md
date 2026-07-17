@@ -9,6 +9,48 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 Run the whole tree's checks: `just check` (never plain `nix flake check`,
 which OOMs on this repo's check count).
 
+## 2026-07-17 (later) — adversarial-review-driven fixes (branch `rust-systemd-complete`)
+
+Continuation. Head `bdd00cbc`. Three fixes landed this arc, each adversarially
+reviewed (two independent agents attacking the diff) before any VM run:
+
+- **target-ordering** (`8840f0fc`): `systemctl start A` (A `Wants`+`After` a
+  oneshot B) returned before A ran — the settle-wait broke when B flipped
+  `Started` a beat before the deferred handler dispatched A. Fixed with a
+  grace-bounded dispatch bridge.
+- **ExecStartPre → accepted socket** (`0848d1d6`): `StandardOutput=socket` only
+  reached the main exec; helper commands (ExecStartPre=) wrote to the capture
+  pipe. Now they dup the accepted connection fd. (Review caught a PID-1 panic:
+  `dup().unwrap()` → graceful fallback.)
+- **target Wants settle-on-start** (`bdd00cbc`): `systemctl start <target>`
+  returned before pulled-in `Wants=` oneshots finished; the settle-wait now
+  waits on requires ∪ wants (Wants failure stays non-fatal).
+
+**Practice adopted (from the Bun Zig→Rust rewrite writeup):** adversarial diff
+review before every expensive VM run. It has already caught, pre-commit, a
+PID-1 panic, a flaky notify-timestamp race, and an FDSTORE fd-drop.
+
+**Recurring root cause:** the hang class, target-ordering, exec-timestamps and
+wantedby failures are all symptoms of the same divergence — a multi-threaded
+activation pool + per-unit locks where upstream has a single-threaded event
+loop. Symptom fixes work; the deepest leverage is aligning the concurrency model.
+
+**Green-list drift found (batch 17, pre-existing — NOT caused by this arc):**
+`Result=start-limit-hit` unimplemented (issue-3166; task #21), a GP-fault crash
+on mqueue socket+mount stop (mqueue-ownership; task #22), and issue-3171 /
+issue-34104 (untriaged). Deferred deep gaps: exec-timestamps needs a
+notification-processing refactor (#18); socket-max-connection subtest passes but
+VM shutdown hangs on lingering Accept=yes instances (#20); socket-defer (#17).
+
+**Test-run efficiency:** every `07-pid1-*` check boots a full VM to run ONE
+subtest (~85 boots for the group vs upstream's single boot). Iterate with
+grouped runs (a match-all `TEST_MATCH_SUBTEST`) and parallel `nix build`
+(~6 VMs fit in the ~15 GB free / 22 cores); reserve per-subtest checks for
+certifying the green-list.
+
+**NOTE:** `default.nix` `buildType = "debug"` is committed for fast validation —
+revert to release and re-validate the key tests before final handoff.
+
 ## 2026-07-17 — hang-class fixes and the upstream divergence map (branch `rust-systemd-complete`)
 
 Continuation of the drift recovery. `01-basic` now passes reliably as
