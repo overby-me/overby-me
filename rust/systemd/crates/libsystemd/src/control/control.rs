@@ -8828,8 +8828,17 @@ pub fn execute_command(
                                     }
                                     PostCheck::OneShot
                                 }
+                                // All types whose start wait is deferred to a
+                                // background completion handler: the unit may
+                                // still be Starting when activation returns, so
+                                // `systemctl start` must poll until it settles
+                                // (blocking start semantics, like upstream's
+                                // start job).
                                 crate::units::ServiceType::Notify
-                                | crate::units::ServiceType::NotifyReload => {
+                                | crate::units::ServiceType::NotifyReload
+                                | crate::units::ServiceType::Forking
+                                | crate::units::ServiceType::Dbus
+                                | crate::units::ServiceType::Exec => {
                                     let status = unit.common.status.read_poisoned();
                                     match &*status {
                                         UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
@@ -8875,7 +8884,9 @@ pub fn execute_command(
                 // the exit handler propagates the failure to required_by
                 // units (deactivating this target). We just need to
                 // wait for the cycle to complete before checking.
-                let is_notify = matches!(&post_check, PostCheck::Notify);
+                // Oneshot starts are deferred too (completion = process exit),
+                // so they need the same settle-wait as the notify-style types.
+                let is_notify = matches!(&post_check, PostCheck::Notify | PostCheck::OneShot);
                 if let PostCheck::Target { req_dep_ids } = post_check
                     && !req_dep_ids.is_empty()
                 {
