@@ -1945,7 +1945,7 @@ fn refresh_directory_deps(unit_name: &str, run_info: &ArcMutRuntimeInfo) {
                             Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
                             Err(std::sync::TryLockError::WouldBlock) => {
                                 if std::time::Instant::now() > deadline {
-                                    break run_info.write_poisoned();
+                                    break run_info.write_poisoned_nonblocking();
                                 }
                                 std::thread::sleep(std::time::Duration::from_millis(10));
                             }
@@ -2285,7 +2285,7 @@ fn create_transient_slice(
     // (e.g. Description= when no dropin sets it) the transient value
     // survives.
     {
-        let mut ri_mut = run_info.write_poisoned();
+        let mut ri_mut = run_info.write_poisoned_nonblocking();
         create_or_update_implicit_slice(&slice_name, &mut ri_mut);
         let unit = ri_mut
             .unit_table
@@ -2637,7 +2637,45 @@ fn unit_id_from_name(name: &str) -> UnitId {
 /// them in the manager environment table) and the early boot path (which applies
 /// them to PID 1's process environment so generators/services inherit them).
 pub fn read_manager_environment_vars() -> Vec<(String, String)> {
+    read_system_conf_env_setting("ManagerEnvironment=")
+}
+
+/// Read `DefaultEnvironment=` from system.conf files and drop-ins.  These
+/// variables form the base environment block that the manager applies to every
+/// spawned service (before `EnvironmentFile=`/`Environment=` overrides).  NixOS
+/// sets this so service processes get a PATH that reaches `/nix/store` binaries
+/// via `/run/current-system/sw/bin` and `/run/wrappers/bin` (its systemd is
+/// compiled with a DEFAULT_PATH pointing only at its own bin).
+pub fn read_default_environment_vars() -> Vec<(String, String)> {
+    read_system_conf_env_setting("DefaultEnvironment=")
+}
+
+/// Read a `KEY=VALUE`-list manager setting (e.g. `ManagerEnvironment=` or
+/// `DefaultEnvironment=`) from the system.conf files and drop-ins, in priority
+/// order (last wins).
+fn read_system_conf_env_setting(setting_prefix: &str) -> Vec<(String, String)> {
     let mut env_vars: Vec<(String, String)> = Vec::new();
+
+    let collect = |content: &str, env_vars: &mut Vec<(String, String)>| {
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(val) = line.strip_prefix(setting_prefix) {
+                // The whole value may be wrapped in quotes, or each KEY=VALUE
+                // assignment may be individually quoted.  Parse space-separated
+                // assignments, stripping surrounding single/double quotes from
+                // each token and from the key/value.
+                let val = val.trim().trim_matches(|c| c == '"' || c == '\'');
+                for pair in val.split_whitespace() {
+                    let pair = pair.trim_matches(|c| c == '"' || c == '\'');
+                    if let Some((k, v)) = pair.split_once('=') {
+                        let k = k.trim_matches(|c| c == '"' || c == '\'');
+                        let v = v.trim_matches(|c| c == '"' || c == '\'');
+                        env_vars.push((k.to_owned(), v.to_owned()));
+                    }
+                }
+            }
+        }
+    };
 
     // Read from main system.conf files (in priority order, last wins)
     for path in &[
@@ -2646,17 +2684,7 @@ pub fn read_manager_environment_vars() -> Vec<(String, String)> {
         "/run/systemd/system.conf",
     ] {
         if let Ok(content) = std::fs::read_to_string(path) {
-            for line in content.lines() {
-                let line = line.trim();
-                if let Some(val) = line.strip_prefix("ManagerEnvironment=") {
-                    // Parse space-separated KEY=VALUE pairs
-                    for pair in val.split_whitespace() {
-                        if let Some((k, v)) = pair.split_once('=') {
-                            env_vars.push((k.to_owned(), v.to_owned()));
-                        }
-                    }
-                }
-            }
+            collect(&content, &mut env_vars);
         }
     }
 
@@ -2675,16 +2703,7 @@ pub fn read_manager_environment_vars() -> Vec<(String, String)> {
             files.sort_by_key(|e| e.file_name());
             for entry in files {
                 if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                    for line in content.lines() {
-                        let line = line.trim();
-                        if let Some(val) = line.strip_prefix("ManagerEnvironment=") {
-                            for pair in val.split_whitespace() {
-                                if let Some((k, v)) = pair.split_once('=') {
-                                    env_vars.push((k.to_owned(), v.to_owned()));
-                                }
-                            }
-                        }
-                    }
+                    collect(&content, &mut env_vars);
                 }
             }
         }
@@ -2729,6 +2748,12 @@ fn run_isolate(target: &str, run_info: &ArcMutRuntimeInfo) -> Result<(), String>
     // `systemctl --no-block switch-root`). Without this the target activates but
     // its Wants= service is never loaded, so the switch-root never happens.
     load_dependency_units(&target_id, run_info);
+    // Redirect the background re-drive to this new goal so asynchronous
+    // completions (e.g. initrd-nixos-activation.service finishing after the
+    // isolate started) re-evaluate THIS target rather than the passive boot
+    // target — otherwise the isolate goal can stall (its ordered-after service
+    // never gets re-driven) and, in the initrd, switch-root never fires.
+    crate::units::set_active_goal(&target_id.name);
     // Start the target and everything it pulls in.
     let errs = crate::units::activate_needed_units(target_id.clone(), run_info.clone());
     // Isolation: stop units that are neither the target nor reachable from it
@@ -4641,7 +4666,7 @@ fn create_transient_unit(
     }
 
     // Insert the transient unit into the unit table.
-    let mut ri = run_info.write_poisoned();
+    let mut ri = run_info.write_poisoned_nonblocking();
     // If a unit with the same name already exists and is stopped/failed
     // (or a completed oneshot still in Started state), remove it so the
     // new transient can replace it (matching systemd --collect behavior).
@@ -5925,7 +5950,7 @@ pub fn execute_command(
             drop(ri);
             // Also load units into memory (old enable behavior)
             {
-                let run_info_w = &mut *run_info.write_poisoned();
+                let run_info_w = &mut *run_info.write_poisoned_nonblocking();
                 let mut map = std::collections::HashMap::new();
                 for name in &names {
                     let full_name = if name.contains('.') {
@@ -6345,7 +6370,7 @@ pub fn execute_command(
 
             // Apply properties to the in-memory unit immediately (like real systemd).
             {
-                let mut ri = run_info.write_poisoned();
+                let mut ri = run_info.write_poisoned_nonblocking();
                 let uid = crate::units::UnitId {
                     name: unit_name.clone(),
                     kind: if unit_name.ends_with(".service") {
@@ -6767,7 +6792,7 @@ pub fn execute_command(
 
             // Auto-create implicit slice units if needed
             if unit_name.ends_with(".slice") {
-                let mut ri_mut = run_info.write_poisoned();
+                let mut ri_mut = run_info.write_poisoned_nonblocking();
                 let exists = ri_mut.unit_table.values().any(|u| u.id.name == *unit_name);
                 if !exists {
                     create_or_update_implicit_slice(unit_name, &mut ri_mut);
@@ -9257,7 +9282,7 @@ pub fn execute_command(
             }
         }
         Command::Remove(unit_name) => {
-            let run_info = &mut *run_info.write_poisoned();
+            let run_info = &mut *run_info.write_poisoned_nonblocking();
             let id = {
                 let units = find_units_with_name(&unit_name, &run_info.unit_table);
                 if units.len() > 1 {
@@ -9646,7 +9671,7 @@ pub fn execute_command(
             }
         }
         Command::LoadNew(names) => {
-            let run_info = &mut *run_info.write_poisoned();
+            let run_info = &mut *run_info.write_poisoned_nonblocking();
             let mut map = std::collections::HashMap::new();
             for name in &names {
                 // Normalize: append .service suffix if no suffix present
@@ -9677,7 +9702,7 @@ pub fn execute_command(
             // /run/systemd/system.conf or /etc/systemd/system.conf.
             parse_manager_environment(&run_info);
 
-            let run_info = &mut *run_info.write_poisoned();
+            let run_info = &mut *run_info.write_poisoned_nonblocking();
             let unit_table = &run_info.unit_table;
             // Load all units without pruning so that standalone units
             // (not reachable from the boot target) are also discovered.
@@ -9914,7 +9939,7 @@ pub fn execute_command(
                 .push(Value::Object(response_object));
         }
         Command::LoadAllNewDry => {
-            let run_info = &mut *run_info.write_poisoned();
+            let run_info = &mut *run_info.write_poisoned_nonblocking();
             let unit_table = &run_info.unit_table;
             // Load all units without pruning (same as LoadAllNew).
             let units =
@@ -10109,9 +10134,16 @@ pub fn listen_on_commands<T: 'static + Read + IoWrite + Send>(
                                     };
                                     let err = super::jsonrpc2::make_error(code, err_msg, None);
                                     let msg = super::jsonrpc2::make_error_response(call.id, err);
-                                    let response_string =
-                                        serde_json::to_string_pretty(&msg).unwrap();
-                                    source.write_all(response_string.as_bytes()).unwrap();
+                                    // The client may have hung up (BrokenPipe),
+                                    // e.g. `systemctl --no-block` or a udevd
+                                    // fire-and-forget notification that closes
+                                    // right after writing. Don't panic PID 1's
+                                    // control-socket handler over a dropped peer.
+                                    if let Ok(response_string) = serde_json::to_string_pretty(&msg)
+                                        && let Err(e) = source.write_all(response_string.as_bytes())
+                                    {
+                                        log::debug!("control: write response failed: {e}");
+                                    }
                                 }
                                 Ok(cmd) => {
                                     let msg = match execute_command(cmd, run_info.clone()) {
@@ -10127,9 +10159,16 @@ pub fn listen_on_commands<T: 'static + Read + IoWrite + Send>(
                                             super::jsonrpc2::make_result_response(call.id, result)
                                         }
                                     };
-                                    let response_string =
-                                        serde_json::to_string_pretty(&msg).unwrap();
-                                    source.write_all(response_string.as_bytes()).unwrap();
+                                    // The client may have hung up (BrokenPipe),
+                                    // e.g. `systemctl --no-block` or a udevd
+                                    // fire-and-forget notification that closes
+                                    // right after writing. Don't panic PID 1's
+                                    // control-socket handler over a dropped peer.
+                                    if let Ok(response_string) = serde_json::to_string_pretty(&msg)
+                                        && let Err(e) = source.write_all(response_string.as_bytes())
+                                    {
+                                        log::debug!("control: write response failed: {e}");
+                                    }
                                 }
                             }
                         }

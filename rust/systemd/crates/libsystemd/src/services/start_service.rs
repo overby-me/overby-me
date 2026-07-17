@@ -567,16 +567,22 @@ fn start_service_with_filedescriptors(
         login_shell: exec.prefixes.contains(&CommandlinePrefix::Pipe),
         env: {
             let default_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-            let mut env = vec![
-                // Use the inherited PATH if available (important for NixOS where
-                // executables live in /nix/store and are reachable via
-                // /run/current-system/sw/bin, /run/wrappers/bin, etc.).
-                // Fall back to the systemd default FHS PATH (see man systemd.exec).
-                (
+            // Base environment from DefaultEnvironment= (system.conf).  systemd
+            // applies these variables to every spawned service before
+            // EnvironmentFile=/Environment= overrides.  NixOS sets a PATH here
+            // that reaches /nix/store binaries via /run/current-system/sw/bin,
+            // which is why service scripts can find coreutils (stty, sleep, ...).
+            let mut env: Vec<(String, String)> = crate::control::read_default_environment_vars();
+            // Ensure PATH is set: prefer DefaultEnvironment's PATH, then the
+            // manager's inherited PATH (important for NixOS where executables
+            // live in /nix/store), then the systemd default FHS PATH (see man
+            // systemd.exec).
+            if !env.iter().any(|(k, _)| k == "PATH") {
+                env.push((
                     "PATH".to_owned(),
                     std::env::var("PATH").unwrap_or_else(|_| default_path.to_owned()),
-                ),
-            ];
+                ));
+            }
             // Set HOME, USER, LOGNAME, SHELL from the User= setting.
             // systemd populates these automatically when User= is set.
             if let Some(ref user_str) = conf.exec_config.user
