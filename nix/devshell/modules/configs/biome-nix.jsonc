@@ -13,6 +13,11 @@
 			"!.devenv",
 			".pre-commit-config.yaml",
 			"!/nix/**/*",
+			// web/wiki is a Rust/Dioxus/WASM app (it replaced the former React
+			// app biome governed). Its incidental JS/CSS/JSON (service worker,
+			// theme + test scripts, lexicon docs) are hand-authored to their own
+			// conventions and were never biome-governed; keep them out of biome.
+			"!/web/wiki/**/*",
 			"!**/out",
 			"!**/node_modules",
 			"!**/dist",

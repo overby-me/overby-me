@@ -26,6 +26,8 @@ extend-ignore-re = [
 odf = "odf"
 ODF = "ODF"
 Odf = "Odf"
+# fo = XSL-FO namespace prefix used throughout ODF (xmlns:fo, fo:font-size, ...)
+fo = "fo"
 # "mis-detects" — valid hyphenated prefix in euro-office PLAN.md
 mis = "mis"
 # Perl 5 test-suite filename (op/aassign.t — array assign)
@@ -105,8 +107,7 @@ extend-exclude = [
   # Euro-Office upstream patches (verbatim upstream code, incl. its own typos
   # like BUIDLER in build_3rdparty.py context lines).
   "pkgs/euro-office/patches/*",
-  "web/wiki/core/i18n/locales/da/translation.json",
-  "web/wiki-dioxus/src/i18n.rs",
+  "web/wiki/src/i18n.rs",
   "secrets/*.age",
   # Upstream compiler code with assembly mnemonics and domain-specific abbreviations
   "rust/gcc/src/",

@@ -31,4 +31,18 @@ exclude = [
   'proxy\.example',
   ":port",
   "%E2%80%A6",
+  # Scaleway Serverless Functions/Containers API endpoints (e.g. the wiki backend):
+  # these serve specific routes and 404 on `/`, so they are not link-checkable.
+  'functions\.fnc\.[a-z0-9-]+\.scw\.cloud',
+  # WebPush service endpoints are opaque per-subscriber URLs, not documentation
+  # links; they appear in the wiki's push code + SSRF-allowlist tests (push.rs).
+  'fcm\.googleapis\.com',
+  'push\.services\.mozilla\.com',
+  'web\.push\.apple\.com',
+  'notify\.windows\.com',
+  # Private / link-local addresses used as SSRF-rejection test targets (e.g. the
+  # cloud metadata service 169.254.169.254) and fake test endpoints — never real
+  # links.
+  '//(10|192\.168|169\.254)\.\d',
+  "//ep/",
 ]

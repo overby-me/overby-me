@@ -26,7 +26,14 @@
           NIX_FLAKE_CHECKER_CHECK_SUPPORTED=false exec ${pkgs.flake-checker}/bin/flake-checker -f "$@"
         ''}";
       };
-      biome.enable = true;
+      biome = {
+        enable = true;
+        # web/wiki is a Rust/Dioxus/WASM app, not a JS/TS project. Its incidental
+        # JS/CSS/JSON (service worker, theme + test scripts, lexicon docs) is
+        # hand-authored to its own conventions and governed by the app's own gates
+        # (rustfmt/clippy/cargo test/check-css-spacing.nu), not by biome.
+        excludes = ["^web/wiki/"];
+      };
       alejandra.enable = true;
       deadnix.enable = true;
       ripsecrets.enable = true;
@@ -41,6 +48,14 @@
       typos = {
         enable = true;
         settings.configPath = "./nix/devshell/modules/configs/typos.toml";
+        # Every typos hit in web/wiki was a false positive on technical content:
+        # plural all-caps SQL keywords (a trailing lowercase "s" confuses the
+        # tokenizer), percent-encoded UTF-8 test fixtures, and ported short
+        # identifiers. Allow-listing those tokens in the shared typos.toml would
+        # mask real typos monorepo-wide, so scope typos to skip the app instead
+        # (its i18n strings were already excluded). deslop and lychee, which DO
+        # find real issues here, stay enabled with tuned configs.
+        excludes = ["^web/wiki/"];
       };
       nickel-format = {
         enable = true;
