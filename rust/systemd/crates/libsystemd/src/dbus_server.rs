@@ -1061,6 +1061,12 @@ mod inner {
 
         /// Find the unit that owns the given PID.  Returns the unit's
         /// object path, or an error if the PID isn't tracked.
+        ///
+        /// The D-Bus method name must be `GetUnitByPID` (acronym uppercase) to
+        /// match upstream; without this override zbus would derive
+        /// `GetUnitByPid` from the snake_case fn name and clients calling
+        /// `GetUnitByPID` get "Unknown method".
+        #[zbus(name = "GetUnitByPID")]
         fn get_unit_by_pid(&self, pid: u32) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
             let ri = self.run_info.read_poisoned();
             let pid_i32 = pid as i32;
