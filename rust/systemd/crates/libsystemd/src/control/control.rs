@@ -5382,6 +5382,72 @@ pub fn bind_mount_into_unit(
     }
 }
 
+/// Unit marker bits in upstream rendering order (dbus-unit.c
+/// property_get_markers): needs-reload, needs-restart, needs-start,
+/// needs-stop.
+const UNIT_MARKERS: [&str; 4] = [
+    "needs-reload",
+    "needs-restart",
+    "needs-start",
+    "needs-stop",
+];
+
+fn marker_bit(name: &str) -> Option<u32> {
+    UNIT_MARKERS
+        .iter()
+        .position(|m| *m == name)
+        .map(|i| 1u32 << i)
+}
+
+fn render_markers(bits: u32) -> Vec<String> {
+    UNIT_MARKERS
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| bits & (1 << i) != 0)
+        .map(|(_, m)| (*m).to_owned())
+        .collect()
+}
+
+/// Mirror upstream unit_normalize_markers (unit.c:7141-7171): the job-merging
+/// conflict rules between existing and newly-set markers.
+fn normalize_markers(existing: u32, new: u32) -> u32 {
+    const RELOAD: u32 = 1 << 0;
+    const RESTART: u32 = 1 << 1;
+    const START: u32 = 1 << 2;
+    const STOP: u32 = 1 << 3;
+    let mut existing = existing;
+    // New stop wins against all existing markers.
+    if new & STOP != 0 {
+        existing &= !(RESTART | START | RELOAD);
+    }
+    // New start wins against existing stop.
+    if new & START != 0 {
+        existing &= !STOP;
+    }
+    // New restart wins against existing start and reload.
+    if new & RESTART != 0 {
+        existing &= !(START | RELOAD);
+    }
+    let mut markers = existing | new;
+    // Reload loses against everything.
+    if markers & (RESTART | START | STOP) != 0 {
+        markers &= !RELOAD;
+    }
+    // Stop wins against restart and reload.
+    if markers & STOP != 0 {
+        markers &= !(RESTART | RELOAD);
+    }
+    // Start wins against stop.
+    if markers & START != 0 {
+        markers &= !STOP;
+    }
+    // Restart wins against start.
+    if markers & RESTART != 0 && markers & START != 0 {
+        markers &= !START;
+    }
+    markers
+}
+
 pub fn execute_command(
     cmd: Command,
     run_info: ArcMutRuntimeInfo,
@@ -6235,16 +6301,46 @@ pub fn execute_command(
                 .find(|p| p.starts_with("Markers="))
                 .map(|p| p.strip_prefix("Markers=").unwrap_or("").to_owned());
             if let Some(markers_val) = &markers_prop {
+                // Mirror upstream parse_unit_marker + unit_normalize_markers
+                // (unit.c:7114-7171): bare words use last-one-wins (each bare
+                // word resets the settings), +/- prefixed words modify single
+                // markers, the mask collects every mentioned marker, and the
+                // job-merging conflict rules normalize the result (restart
+                // absorbs start/reload, stop wins, start clears stop, reload
+                // loses to everything).
+                let mut settings: u32 = 0;
+                let mut mask: u32 = 0;
+                for word in markers_val.split_whitespace() {
+                    let (on, name) = match word.as_bytes().first() {
+                        Some(b'+') => (true, &word[1..]),
+                        Some(b'-') => (false, &word[1..]),
+                        _ => {
+                            settings = 0; // bare word: last one wins
+                            (true, word)
+                        }
+                    };
+                    let Some(bit) = marker_bit(name) else {
+                        return Err(format!("Bad marker syntax: {word}"));
+                    };
+                    if on {
+                        settings |= bit;
+                    } else {
+                        settings &= !bit;
+                    }
+                    mask |= bit;
+                }
                 let ri = run_info.read_poisoned();
                 let mut unit_markers = ri.unit_markers.lock().unwrap();
-                let markers: Vec<String> = markers_val
-                    .split_whitespace()
-                    .map(|s| s.to_owned())
-                    .collect();
-                if markers.is_empty() {
+                let existing = unit_markers
+                    .get(&unit_name)
+                    .map(|v| v.iter().filter_map(|m| marker_bit(m)).fold(0, |a, b| a | b))
+                    .unwrap_or(0);
+                let normalized = normalize_markers(existing & !mask, settings);
+                let list = render_markers(normalized);
+                if list.is_empty() {
                     unit_markers.remove(&unit_name);
                 } else {
-                    unit_markers.insert(unit_name.clone(), markers);
+                    unit_markers.insert(unit_name.clone(), list);
                 }
             }
             // Filter out Markers from props for disk persistence
@@ -8403,33 +8499,41 @@ pub fn execute_command(
         Command::ReloadOrRestart(unit_name) => {
             // reload-or-restart: try to reload, fall back to restart.
             if unit_name == "--marked" {
-                // --marked: restart all units with needs-restart marker, then clear markers
-                let units_to_restart: Vec<String> = {
+                // --marked: act on every marked unit per its (normalized,
+                // therefore single) effective marker, like upstream's
+                // ENQUEUE_MARKED: needs-restart -> restart, needs-reload ->
+                // reload, needs-start -> start, needs-stop -> stop.  Markers
+                // are cleared for every processed unit.
+                let marked: Vec<(String, Vec<String>)> = {
                     let ri = run_info.read_poisoned();
                     let markers = ri.unit_markers.lock().unwrap();
                     markers
                         .iter()
-                        .filter(|(_, v)| v.iter().any(|m| m == "needs-restart"))
-                        .map(|(k, _)| k.clone())
+                        .map(|(k, v)| (k.clone(), v.clone()))
                         .collect()
                 };
-                for name in &units_to_restart {
-                    if let Ok(id) = find_or_load_unit(name, &run_info) {
-                        let ri = run_info.read_poisoned();
-                        let _ = crate::units::reactivate_unit(id, &ri);
+                for (name, marks) in &marked {
+                    let cmd = if marks.iter().any(|m| m == "needs-stop") {
+                        Command::Stop(vec![name.clone()])
+                    } else if marks.iter().any(|m| m == "needs-restart") {
+                        Command::Restart(name.clone())
+                    } else if marks.iter().any(|m| m == "needs-start") {
+                        Command::Start(vec![name.clone()])
+                    } else if marks.iter().any(|m| m == "needs-reload") {
+                        Command::ReloadOrRestart(name.clone())
+                    } else {
+                        continue;
+                    };
+                    if let Err(e) = execute_command(cmd, run_info.clone()) {
+                        warn!("reload-or-restart --marked: {name}: {e}");
                     }
                 }
-                // Clear needs-restart markers
+                // Clear the markers of every processed unit.
                 {
                     let ri = run_info.read_poisoned();
                     let mut markers = ri.unit_markers.lock().unwrap();
-                    for name in &units_to_restart {
-                        if let Some(m) = markers.get_mut(name) {
-                            m.retain(|v| v != "needs-restart");
-                            if m.is_empty() {
-                                markers.remove(name);
-                            }
-                        }
+                    for (name, _) in &marked {
+                        markers.remove(name);
                     }
                 }
             } else {
