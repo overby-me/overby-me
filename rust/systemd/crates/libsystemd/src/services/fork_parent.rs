@@ -12,7 +12,7 @@ use crate::units::{CommandlinePrefix, ServiceType};
 
 /// Read a PID from a PIDFile path, retrying a few times to allow the forking
 /// daemon a moment to write the file.
-fn read_pid_file(path: &std::path::Path) -> Option<nix::unistd::Pid> {
+pub(crate) fn read_pid_file(path: &std::path::Path) -> Option<nix::unistd::Pid> {
     // The daemon may not have written the PIDFile yet at the instant
     // the parent exits, so retry with a short back-off.
     for attempt in 0..20 {

@@ -1254,6 +1254,44 @@ fn activate_units_recursive(
 ///
 /// This runs outside the activation thread pool so that `tpool.join()` can
 /// complete without waiting for potentially-infinite READY=1 waits.
+/// Kill the service's remaining processes, clear its runtime fds and mark it
+/// StoppedUnexpected — shared cleanup for the deferred start failure paths
+/// (start timeout, dbus-name timeout, exec confirmation failure, failing
+/// forking parent).  Mirrors the cleanup in Service::deactivate_service
+/// (PID, process_group, notification socket, stdout/stderr).
+fn deferred_start_fail_cleanup(
+    run_info: &ArcMutRuntimeInfo,
+    id: &UnitId,
+    name: &str,
+    reason: String,
+) {
+    if let Ok(ri) = run_info.try_read()
+        && let Some(unit) = ri.unit_table.get(id)
+    {
+        if let Specific::Service(svc) = &unit.specific {
+            let mut state = svc.state.write_poisoned();
+            state.srvc.kill_all_remaining_processes(&svc.conf, name);
+            state.srvc.pid = None;
+            state.srvc.process_group = None;
+            if let Some(path) = state.srvc.notifications_path.take() {
+                let _ = std::fs::remove_file(&path);
+            }
+            state.srvc.notifications = None;
+            state.srvc.stdout = None;
+            state.srvc.stderr = None;
+            drop(state);
+        }
+        // Transition to Stopped/Failed.
+        let mut status = unit.common.status.write_poisoned();
+        if matches!(&*status, UnitStatus::Starting) {
+            *status = UnitStatus::Stopped(
+                crate::units::status::StatusStopped::StoppedUnexpected,
+                vec![UnitOperationErrorReason::GenericStartError(reason)],
+            );
+        }
+    }
+}
+
 fn deferred_notify_wait_and_dispatch(
     id: UnitId,
     next_services_ids: Vec<UnitId>,
@@ -1264,37 +1302,76 @@ fn deferred_notify_wait_and_dispatch(
 ) {
     let name = id.name.clone();
 
-    // Extract the start timeout from the service config.
-    let timeout = {
+    // Extract the type-relevant service config under one brief read.  Every
+    // deferrable service type completes here: notify/notify-reload (READY=1),
+    // oneshot/forking (main process exit via main_exit_status), dbus (bus
+    // name appearing) and exec (exec confirmation window).
+    let (timeout, svc_type, dbus_name, stop_timeout) = {
         let ri = run_info.read_poisoned();
         if let Some(unit) = ri.unit_table.get(&id)
             && let Specific::Service(svc) = &unit.specific
         {
             let state = svc.state.read_poisoned();
-            state.srvc.get_start_timeout(&svc.conf)
+            (
+                state.srvc.get_start_timeout(&svc.conf),
+                svc.conf.srcv_type,
+                svc.conf.dbus_name.clone(),
+                state.srvc.get_stop_timeout(&svc.conf),
+            )
         } else {
-            None
+            (None, crate::units::ServiceType::Simple, None, None)
         }
     };
+    let is_oneshot = svc_type == crate::units::ServiceType::OneShot;
+    let is_forking = svc_type == crate::units::ServiceType::Forking;
+    let is_exec = svc_type == crate::units::ServiceType::Exec;
 
-    // Oneshot services are deferred here too (see services.rs).  Their
-    // completion signal is process exit (recorded in main_exit_status by the
-    // service exit handler), not a READY=1 notification.
-    let is_oneshot = {
-        let ri = run_info.read_poisoned();
-        ri.unit_table
-            .get(&id)
-            .map(|u| {
-                matches!(
-                    &u.specific,
-                    Specific::Service(svc)
-                        if svc.conf.srcv_type == crate::units::ServiceType::OneShot
-                )
-            })
-            .unwrap_or(false)
-    };
+    // Type=dbus: wait for the configured bus name to appear.  The wait blocks
+    // only this background thread and holds no locks (mirrors the inline
+    // fork_parent Dbus arm 1:1, including its own timeout handling).
+    let mut dbus_done = false;
+    if svc_type == crate::units::ServiceType::Dbus {
+        let Some(ref bus_name) = dbus_name else {
+            deferred_start_fail_cleanup(
+                &run_info,
+                &id,
+                &name,
+                "No BusName= configured for Type=dbus service".to_owned(),
+            );
+            return;
+        };
+        match crate::dbus_wait::wait_for_name_system_bus(bus_name, timeout) {
+            Ok(crate::dbus_wait::WaitResult::Ok) => {
+                trace!("deferred start: found dbus name {bus_name} for {name}");
+                dbus_done = true;
+            }
+            Ok(crate::dbus_wait::WaitResult::Timedout) => {
+                warn!("deferred start: {name} timed out waiting for dbus name {bus_name}");
+                deferred_start_fail_cleanup(
+                    &run_info,
+                    &id,
+                    &name,
+                    format!("Timed out waiting for bus name {bus_name} ({timeout:?})"),
+                );
+                return;
+            }
+            Err(e) => {
+                warn!("deferred start: dbus wait failed for {name}: {e}");
+                deferred_start_fail_cleanup(
+                    &run_info,
+                    &id,
+                    &name,
+                    format!("Error waiting for bus name {bus_name}: {e}"),
+                );
+                return;
+            }
+        }
+    }
 
     let start_time = std::time::Instant::now();
+    // Start-timeout escalation state: SIGTERM first, SIGKILL after the stop
+    // grace period (mirrors upstream KillSignal-then-SIGKILL semantics).
+    let mut term_sent_at: Option<std::time::Instant> = None;
 
     // Poll until READY=1 is received, the unit leaves Starting state
     // (e.g. process exited / was killed), or the start timeout expires.
@@ -1326,42 +1403,50 @@ fn deferred_notify_wait_and_dispatch(
             false
         };
         if timed_out {
-            warn!(
-                "deferred_notify_wait: {} timed out after {:?} waiting for READY=1",
-                name, timeout
-            );
-            // Kill the service process and clean up properly — matching the
-            // cleanup in Service::deactivate_service (PID, process_group,
-            // notification socket, stdout/stderr).
-            if let Ok(ri) = run_info.try_read()
-                && let Some(unit) = ri.unit_table.get(&id)
-            {
-                if let Specific::Service(svc) = &unit.specific {
-                    let mut state = svc.state.write_poisoned();
-                    state.srvc.kill_all_remaining_processes(&svc.conf, &name);
-                    state.srvc.pid = None;
-                    state.srvc.process_group = None;
-                    if let Some(path) = state.srvc.notifications_path.take() {
-                        let _ = std::fs::remove_file(&path);
-                    }
-                    state.srvc.notifications = None;
-                    state.srvc.stdout = None;
-                    state.srvc.stderr = None;
-                    drop(state);
-                }
-                // Transition to Stopped/Failed
-                let mut status = unit.common.status.write_poisoned();
-                if matches!(&*status, UnitStatus::Starting) {
-                    *status = UnitStatus::Stopped(
-                        crate::units::status::StatusStopped::StoppedUnexpected,
-                        vec![UnitOperationErrorReason::GenericStartError(format!(
-                            "Timed out waiting for READY=1 ({:?})",
-                            timeout
-                        ))],
+            match term_sent_at {
+                None => {
+                    warn!(
+                        "deferred start: {} timed out after {:?}; sending SIGTERM",
+                        name, timeout
                     );
+                    // Graceful stop first (upstream sends KillSignal, then
+                    // SIGKILL only after TimeoutStopSec).  The stored
+                    // process_group is a negative pid, so kill() signals the
+                    // whole group.
+                    if let Ok(ri) = run_info.try_read()
+                        && let Some(unit) = ri.unit_table.get(&id)
+                        && let Specific::Service(svc) = &unit.specific
+                    {
+                        let state = svc.state.read_poisoned();
+                        if let Some(pg) = state.srvc.process_group {
+                            let _ = nix::sys::signal::kill(pg, nix::sys::signal::Signal::SIGTERM);
+                        } else if let Some(pid) = state.srvc.pid {
+                            let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM);
+                        }
+                    }
+                    term_sent_at = Some(std::time::Instant::now());
+                    continue;
+                }
+                Some(t) => {
+                    // The SIGTERM'd process exiting normally flips the unit
+                    // out of Starting via the exit handler (handled below);
+                    // only escalate to SIGKILL after the stop grace period.
+                    let stop_grace = stop_timeout.unwrap_or(std::time::Duration::from_secs(90));
+                    if t.elapsed() > stop_grace {
+                        warn!(
+                            "deferred start: {} did not exit after SIGTERM; killing",
+                            name
+                        );
+                        deferred_start_fail_cleanup(
+                            &run_info,
+                            &id,
+                            &name,
+                            format!("Timed out starting ({timeout:?})"),
+                        );
+                        return;
+                    }
                 }
             }
-            return;
         }
 
         // Use try_read() to yield to pending writers (e.g., find_or_load_unit
@@ -1388,14 +1473,15 @@ fn deferred_notify_wait_and_dispatch(
             }
         }
 
-        // For oneshot services, completion is the ExecStart process exiting.
-        // main_exit_status is set by the service exit handler when the process
-        // is reaped, so it is a race-free "has it finished" signal.  On a clean
-        // exit fall through to the Started transition below; on a failing exit
-        // stop polling and let the exit handler own the failed/OnFailure/Restart
-        // transition (mirrors the inline wait_for_service oneshot semantics).
-        let oneshot_done = if is_oneshot {
-            let exit_success = if let Specific::Service(svc) = &unit.specific {
+        // For oneshot/forking services, completion is the ExecStart process
+        // exiting.  main_exit_status is set by the service exit handler when
+        // the process is reaped (and cleared on each new spawn), so it is a
+        // race-free "has it finished" signal.  On a clean exit fall through to
+        // the Started transition below; on a failing oneshot exit stop polling
+        // and let the exit handler own the failed/OnFailure/Restart transition
+        // (mirrors the inline wait_for_service semantics).
+        let exit_success = if is_oneshot || is_forking {
+            if let Specific::Service(svc) = &unit.specific {
                 let state = svc.state.read_poisoned();
                 state.srvc.main_exit_status.map(|code| {
                     code == 0
@@ -1409,12 +1495,104 @@ fn deferred_notify_wait_and_dispatch(
                 })
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
+        let oneshot_done = if is_oneshot {
             match exit_success {
                 Some(true) => true,
                 Some(false) => return,
                 None => false,
             }
+        } else {
+            false
+        };
+
+        // Type=forking: the parent exiting cleanly means the daemon is up.
+        // Pick up the daemon PID (PIDFile with retry, else MAINPID from
+        // sd_notify) and track it in the pid table, mirroring the inline
+        // fork_parent Forking arm.  The exit handler suppresses death
+        // processing for forking parents that exit while Starting.
+        let forking_done = if is_forking {
+            match exit_success {
+                Some(true) => {
+                    if let Specific::Service(svc) = &unit.specific {
+                        let mut state = svc.state.write_poisoned();
+                        // Consume the signal so the daemon's own later exit is
+                        // not mistaken for another parent exit.
+                        state.srvc.main_exit_status = None;
+                        let daemon_pid = if let Some(ref pid_file_path) = svc.conf.pid_file {
+                            let p = crate::services::fork_parent::read_pid_file(pid_file_path);
+                            if p.is_none() {
+                                warn!(
+                                    "deferred start: could not read PIDFile {:?} for {name}",
+                                    pid_file_path
+                                );
+                            }
+                            p
+                        } else {
+                            state.srvc.main_pid
+                        };
+                        if let Some(daemon_pid) = daemon_pid {
+                            state.srvc.pid = Some(daemon_pid);
+                            let now = crate::units::UnitTimestamps::now_usec();
+                            state.srvc.exec_main_start_timestamp = Some(now);
+                            state.srvc.exec_main_handoff_timestamp = Some(now);
+                            ri.pid_table.lock_poisoned().insert(
+                                daemon_pid,
+                                crate::runtime_info::PidEntry::Service(
+                                    id.clone(),
+                                    svc.conf.srcv_type,
+                                ),
+                            );
+                        } else {
+                            state.srvc.pid = None;
+                        }
+                    }
+                    true
+                }
+                Some(false) => {
+                    warn!("deferred start: forking parent of {name} exited with failure");
+                    drop(ri);
+                    deferred_start_fail_cleanup(
+                        &run_info,
+                        &id,
+                        &name,
+                        "Forking ExecStart parent exited with failure".to_owned(),
+                    );
+                    return;
+                }
+                None => false,
+            }
+        } else {
+            false
+        };
+
+        // Type=exec: watch for the exec helper's exit-203 (execv failed)
+        // within the confirmation window; the process surviving the window
+        // (or exiting with any other code, which the exit handler processes
+        // as a normal death) means exec() succeeded.  Mirrors the inline
+        // fork_parent Exec arm.
+        let exec_done = if is_exec {
+            let exec_failed = if let Specific::Service(svc) = &unit.specific {
+                let state = svc.state.read_poisoned();
+                state.srvc.main_exit_status == Some(203)
+            } else {
+                false
+            };
+            if exec_failed {
+                warn!("deferred start: exec() failed for {name} (status 203)");
+                drop(ri);
+                deferred_start_fail_cleanup(
+                    &run_info,
+                    &id,
+                    &name,
+                    "exec() of the service binary failed".to_owned(),
+                );
+                return;
+            }
+            start_time.elapsed() >= std::time::Duration::from_millis(500)
         } else {
             false
         };
@@ -1430,16 +1608,54 @@ fn deferred_notify_wait_and_dispatch(
             return;
         };
 
-        if ready || oneshot_done {
+        if ready || oneshot_done || forking_done || exec_done || dbus_done {
             info!(
-                "deferred_notify_wait: {} {}, transitioning to Started",
+                "deferred start: {} {}, transitioning to Started",
                 name,
                 if oneshot_done {
                     "oneshot ExecStart exited"
+                } else if forking_done {
+                    "forking parent exited"
+                } else if exec_done {
+                    "exec confirmed"
+                } else if dbus_done {
+                    "bus name acquired"
                 } else {
                     "received READY=1"
                 }
             );
+
+            // Run ExecStartPost= before flipping Started, mirroring the
+            // inline path (run_poststart after wait_for_service).  On failure
+            // run ExecStopPost and fail the start.  NOTE: this holds the
+            // RuntimeInfo read guard + state write lock across the bounded
+            // poststart helper wait; taking helper waits fully off the locks
+            // is UPSTREAM-MAP fix 2.
+            if let Specific::Service(svc) = &unit.specific
+                && !svc.conf.startpost.is_empty()
+            {
+                let poststart_res = {
+                    let mut state = svc.state.write_poisoned();
+                    state.srvc.run_poststart(&svc.conf, id.clone(), &name, &ri)
+                };
+                if let Err(e) = poststart_res {
+                    warn!("deferred start: ExecStartPost failed for {name}: {e}");
+                    {
+                        let mut state = svc.state.write_poisoned();
+                        let _ = state.srvc.run_poststop(&svc.conf, id.clone(), &name, &ri);
+                    }
+                    let mut status = unit.common.status.write_poisoned();
+                    if matches!(&*status, UnitStatus::Starting) {
+                        *status = UnitStatus::Stopped(
+                            crate::units::status::StatusStopped::StoppedUnexpected,
+                            vec![UnitOperationErrorReason::GenericStartError(format!(
+                                "ExecStartPost failed: {e}"
+                            ))],
+                        );
+                    }
+                    return;
+                }
+            }
 
             // Update service state and unit status under brief locks.
             if let Specific::Service(svc) = &unit.specific {
@@ -1526,37 +1742,7 @@ fn deferred_notify_wait_and_dispatch(
 /// `RuntimeInfo` read lock immediately instead of blocking on READY=1 / process
 /// exit and starving control-socket writers.
 pub(crate) fn spawn_deferred_service_wait(id: UnitId, run_info: ArcMutRuntimeInfo) {
-    let next_services_ids = {
-        let ri = run_info.read_poisoned();
-        ri.unit_table
-            .get(&id)
-            .map(|u| u.common.dependencies.before.clone())
-            .unwrap_or_default()
-    };
-    {
-        // Wake the notification handler so it collects the new service's
-        // notification socket and can process READY=1.
-        let ri = run_info.read_poisoned();
-        ri.notify_eventfds();
-    }
-    let name = id.name.clone();
-    let filter_ids = Arc::new(Vec::new());
-    let errors = Arc::new(Mutex::new(Vec::new()));
-    if let Err(e) = std::thread::Builder::new()
-        .name(format!("defer-wait-{name}"))
-        .spawn(move || {
-            deferred_notify_wait_and_dispatch(
-                id,
-                next_services_ids,
-                filter_ids,
-                run_info,
-                errors,
-                ActivationSource::Regular,
-            );
-        })
-    {
-        error!("Failed to spawn deferred service wait thread for {name}: {e}");
-    }
+    spawn_deferred_wait_thread(id, run_info, false);
 }
 
 /// Convenience wrapper for trigger paths (timer, path, udev, exit-handler)
@@ -1566,15 +1752,51 @@ pub(crate) fn spawn_deferred_service_wait(id: UnitId, run_info: ArcMutRuntimeInf
 /// enforces its start timeout and nothing transitions it to Started, so it
 /// can sit in `activating` forever.
 pub(crate) fn spawn_deferred_service_wait_if_starting(id: &UnitId, run_info: &ArcMutRuntimeInfo) {
-    let starting = {
-        let ri = run_info.read_poisoned();
-        ri.unit_table
-            .get(id)
-            .map(|u| matches!(&*u.common.status.read_poisoned(), UnitStatus::Starting))
-            .unwrap_or(false)
-    };
-    if starting {
-        spawn_deferred_service_wait(id.clone(), run_info.clone());
+    spawn_deferred_wait_thread(id.clone(), run_info.clone(), true);
+}
+
+/// Shared spawner for the deferred completion handler.  ALL RuntimeInfo lock
+/// acquisitions happen on the spawned thread: several callers invoke this
+/// while themselves holding a RuntimeInfo read guard (e.g. inside a match on
+/// an `activate_unit(&run_info.read_poisoned(), ..)` scrutinee, whose
+/// temporary guard lives to the end of the match), and a second same-thread
+/// read acquisition deadlocks against a queued writer on std's futex rwlock.
+fn spawn_deferred_wait_thread(id: UnitId, run_info: ArcMutRuntimeInfo, check_starting: bool) {
+    let name = id.name.clone();
+    if let Err(e) = std::thread::Builder::new()
+        .name(format!("defer-wait-{name}"))
+        .spawn(move || {
+            let next_services_ids = {
+                let ri = run_info.read_poisoned();
+                if check_starting {
+                    let starting = ri
+                        .unit_table
+                        .get(&id)
+                        .map(|u| matches!(&*u.common.status.read_poisoned(), UnitStatus::Starting))
+                        .unwrap_or(false);
+                    if !starting {
+                        return;
+                    }
+                }
+                // Wake the notification handler so it collects the new
+                // service's notification socket and can process READY=1.
+                ri.notify_eventfds();
+                ri.unit_table
+                    .get(&id)
+                    .map(|u| u.common.dependencies.before.clone())
+                    .unwrap_or_default()
+            };
+            deferred_notify_wait_and_dispatch(
+                id,
+                next_services_ids,
+                Arc::new(Vec::new()),
+                run_info,
+                Arc::new(Mutex::new(Vec::new())),
+                ActivationSource::Regular,
+            );
+        })
+    {
+        error!("Failed to spawn deferred service wait thread for {name}: {e}");
     }
 }
 

@@ -572,9 +572,14 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer
                         "Timer target {} is already running, attempting restart",
                         target_unit_name
                     );
+                    let id = unit.id.clone();
                     match unit.reactivate(&ri, ActivationSource::TriggerActivation) {
                         Ok(()) => {
                             info!("Timer fired: restarted {}", target_unit_name);
+                            // The restarted service's start wait may have been
+                            // deferred (unit left Starting) — hand completion
+                            // to the background handler.
+                            crate::units::spawn_deferred_service_wait_if_starting(&id, run_info);
                         }
                         Err(e) => {
                             warn!("Timer failed to restart {}: {}", target_unit_name, e);

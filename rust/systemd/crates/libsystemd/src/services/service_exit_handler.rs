@@ -627,6 +627,26 @@ pub(crate) fn service_exit_handler(
             .store(0, std::sync::atomic::Ordering::Release);
     }
 
+    // Type=forking: the ExecStart parent exiting while the unit is still
+    // Starting is the type's readiness signal, not a service death.  The
+    // deferred start completion handler consumes the main_exit_status
+    // recorded above, picks up the daemon PID from PIDFile/MAINPID and
+    // transitions the unit to Started (or failed) — suppress death
+    // processing here.  With the inline (non-deferred) wait this branch is
+    // unreachable: the activating thread holds the service state write lock
+    // across the wait, so this handler blocks above until activation has
+    // already moved the unit out of Starting.
+    if let Specific::Service(srvc) = &unit.specific
+        && srvc.conf.srcv_type == ServiceType::Forking
+        && matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting)
+    {
+        trace!(
+            "Service {}: forking parent exited while Starting, leaving completion to the deferred start handler",
+            srvc_id.name
+        );
+        return Ok((None, None));
+    }
+
     let success_exit_status = get_success_exit_status(unit);
 
     // ExitType=cgroup: if the service is configured to only be considered dead

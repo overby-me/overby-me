@@ -1007,11 +1007,15 @@ impl Service {
                                 ServiceType::Notify | ServiceType::NotifyReload
                             )
                     } else {
-                        // In stage-2, defer every blocking wait (notify + oneshot)
-                        // for any async-completing source so the calling thread
-                        // never holds the RuntimeInfo read lock across the wait
-                        // and cannot starve control-socket writers such as
-                        // `systemctl daemon-reload`.
+                        // In stage-2, defer every blocking wait for any
+                        // async-completing source so the calling thread never
+                        // holds the RuntimeInfo read lock across the wait and
+                        // cannot starve control-socket writers such as
+                        // `systemctl daemon-reload`.  This covers every service
+                        // type with a blocking start wait: notify (READY=1),
+                        // oneshot/forking (main process exit), dbus (bus name
+                        // appearing) and exec (exec confirmation window).
+                        // Simple/Idle have no wait and need no deferral.
                         matches!(
                             source,
                             ActivationSource::DeferNotifyWait
@@ -1019,7 +1023,12 @@ impl Service {
                                 | ActivationSource::TriggerActivation
                         ) && matches!(
                             conf.srcv_type,
-                            ServiceType::Notify | ServiceType::NotifyReload | ServiceType::OneShot
+                            ServiceType::Notify
+                                | ServiceType::NotifyReload
+                                | ServiceType::OneShot
+                                | ServiceType::Forking
+                                | ServiceType::Dbus
+                                | ServiceType::Exec
                         )
                     };
                     if defer_wait {
@@ -1576,7 +1585,7 @@ impl Service {
         self.helper_mount_ns = None;
         res
     }
-    fn run_poststart(
+    pub(crate) fn run_poststart(
         &mut self,
         conf: &ServiceConfig,
         id: UnitId,

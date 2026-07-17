@@ -1127,6 +1127,12 @@ fn start_service_with_filedescriptors(
             drop(exec_helper_conf_file);
             srvc.pid = Some(child);
             srvc.process_group = Some(nix::unistd::Pid::from_raw(-child.as_raw()));
+            // Clear the previous invocation's exit status: the deferred start
+            // completion handler uses main_exit_status as the race-free
+            // "main process exited" signal (set by the service exit handler),
+            // so a stale value from an earlier run would make a restarted
+            // oneshot/forking service appear instantly completed.
+            srvc.main_exit_status = None;
             let now = crate::units::UnitTimestamps::now_usec();
             srvc.exec_main_start_timestamp = Some(now);
             srvc.exec_main_handoff_timestamp = Some(now);
