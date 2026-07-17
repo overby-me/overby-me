@@ -103,4 +103,52 @@ disabled_rules = [
   "rust_path_join_absolute",
   "rust_oversized_module_file",
   "rust_serde_default_on_required_field",
+
+  # ── Backend crates (crates/appview + ballot-spec/store + spikes) ───────
+  # deslop scans this whole directory (its .deslop.toml lives here), so the
+  # AppView + ballot workspace is scanned under this config too. Its Rust rules
+  # assume a general backend service; the rules below flag patterns that are
+  # deliberate and reviewed in these crates (each verified a false positive, not
+  # a real defect):
+  #   - The AppView's firehose consumer is a deliberate fire-and-forget
+  #     background task (main.rs spawns it without owning a JoinHandle).
+  #   - The atproto OAuth wrapper (appview/oauth.rs, oauth-spike) models opaque
+  #     wire values and surfaces atrium's `Box<dyn Error>` verbatim.
+  #   - ballot-spec/ballot-store re-export the crypto + board types from their
+  #     crate roots on purpose (that IS the crate's public surface).
+  #   - PersistentBoard::cast/restore_entry mutate DB rows across an `.await`
+  #     inside the kill-9-proven BEGIN IMMEDIATE transaction (atomicity is the
+  #     DB's, not a broken in-memory invariant); ReplicaLog's two std Mutexes are
+  #     only ever taken file→last_error (no inverse path, no cycle) and only in
+  #     the SYNC `on_appended` (no await while held) — the one flagged site is a
+  #     single-threaded test.
+  #   - The WS relay uses `tokio::select!` (not `futures::select!`) over the
+  #     cancel-safe `rx.recv()` / `socket.recv()`; re-creating them each loop is
+  #     the idiomatic pattern (no fuse/pin needed).
+  #   - The durability harness deliberately builds a Tokio runtime per kill-9
+  #     iteration and `panic!`s on failure; CLI `main`s (migration-extractor,
+  #     durability-harness) and the dagcbor spike `expect()` to fail fast, and
+  #     the extractor reads a trusted, owner-provided local dump with
+  #     `read_to_string`. rebuild_from_replica's `.lines()` is a rare recovery
+  #     path, not hot.
+  "rust_detached_spawn_without_handle",
+  "rust_public_box_dyn_error",
+  "rust_root_reexport_wall",
+  "rust_async_invariant_broken_at_await",
+  "rust_async_lock_order_cycle",
+  "rust_async_std_mutex_await",
+  "rust_async_missing_fuse_pin",
+  "rust_async_recreate_future_in_select",
+  "rust_tokio_runtime_built_per_call",
+  "rust_runtime_builder_in_loop",
+  "panic_macro_leftover",
+  "expect_in_non_test_code",
+  "rust_unbounded_read_to_string",
+  "rust_lines_allocate_per_line",
+
+  # ── Module organization (frontend + crates) ───────────────────────────
+  # `mod.rs` files declare their submodules and re-export the module's public
+  # items — the idiomatic Rust module-index shape (e.g. components/layout/mod.rs),
+  # not an accidental catch-all.
+  "rust_mod_rs_catchall",
 ]
