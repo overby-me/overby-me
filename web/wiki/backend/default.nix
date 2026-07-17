@@ -23,18 +23,11 @@ let
       doCheck = true;
     };
 in {
-  devenvConfigurations.wiki-backend = {
-    pkgs,
-    inputs,
-    ...
-  }: {
-    imports = with inputs.self.devenvModules; [
-      devenv-root
-    ];
-
-    languages.rust.enable = true;
-
+  devShells.wiki-backend = pkgs: {
     packages = with pkgs; [
+      cargo
+      rustc
+      rust-analyzer
       openssl
       # scw: create/manage the Serverless Container + Container Registry.
       scaleway-cli
