@@ -371,6 +371,7 @@ fn main() {
     let mut positional: Vec<String> = Vec::new();
     let mut property_filter: Vec<String> = Vec::new();
     let mut value_only = false;
+    let mut timestamp_unix = false;
     let mut state_filter: Option<String> = None;
     let mut type_filter: Option<String> = None;
 
@@ -644,6 +645,22 @@ fn main() {
                 }
             }
             i += 1;
+            continue;
+        }
+
+        // Capture --timestamp=STYLE.  Only "unix" changes the output
+        // (timestamps become @<epoch-seconds>); other styles keep the
+        // default formatting.
+        if let Some(style) = arg.strip_prefix("--timestamp=") {
+            timestamp_unix = style == "unix";
+            i += 1;
+            continue;
+        }
+        if arg == "--timestamp" {
+            if i + 1 < args.len() {
+                timestamp_unix = args[i + 1] == "unix";
+            }
+            i += 2;
             continue;
         }
 
@@ -1764,6 +1781,7 @@ fn main() {
                         output_format.as_deref(),
                         &property_filter,
                         true,
+                        timestamp_unix,
                     );
                 }
                 Err(e) => {
@@ -1813,6 +1831,7 @@ fn main() {
                 output_format.as_deref(),
                 &property_filter,
                 has_unit_args,
+                timestamp_unix,
             );
             // --now: after enable → start units, after disable → stop units
             if now
@@ -1905,6 +1924,54 @@ fn main() {
 /// Handle the JSON-RPC response, with special exit code logic for
 /// `is-active`, `is-enabled`, and `is-failed`.
 #[allow(clippy::too_many_arguments)]
+/// With `--timestamp=unix`, convert a formatted UTC timestamp property value
+/// ("Sat 2026-07-18 00:00:00 UTC") to upstream's `@<epoch-seconds>` form.
+/// Non-timestamp values pass through unchanged.
+fn maybe_unix_timestamp(val: &str, enabled: bool) -> String {
+    if !enabled {
+        return val.to_owned();
+    }
+    let parts: Vec<&str> = val.split_whitespace().collect();
+    // Accept "Dow YYYY-MM-DD HH:MM:SS UTC" and "YYYY-MM-DD HH:MM:SS UTC".
+    let (date, time, tz) = match parts.as_slice() {
+        [_dow, date, time, tz] => (*date, *time, *tz),
+        [date, time, tz] => (*date, *time, *tz),
+        _ => return val.to_owned(),
+    };
+    if tz != "UTC" {
+        return val.to_owned();
+    }
+    let mut d = date.split('-');
+    let (Some(y), Some(mo), Some(da)) = (d.next(), d.next(), d.next()) else {
+        return val.to_owned();
+    };
+    let mut t = time.split(':');
+    let (Some(h), Some(mi), Some(sec)) = (t.next(), t.next(), t.next()) else {
+        return val.to_owned();
+    };
+    let (Ok(y), Ok(mo), Ok(da), Ok(h), Ok(mi), Ok(sec)) = (
+        y.parse::<i64>(),
+        mo.parse::<i64>(),
+        da.parse::<i64>(),
+        h.parse::<i64>(),
+        mi.parse::<i64>(),
+        sec.parse::<i64>(),
+    ) else {
+        return val.to_owned();
+    };
+    // days_from_civil (Hinnant): days since 1970-01-01 in the proleptic
+    // Gregorian calendar.
+    let y_adj = if mo <= 2 { y - 1 } else { y };
+    let era = if y_adj >= 0 { y_adj } else { y_adj - 399 } / 400;
+    let yoe = y_adj - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + da - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    format!("@{}", days * 86400 + h * 3600 + mi * 60 + sec)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn handle_response(
     command: &str,
     resp: &Value,
@@ -1915,6 +1982,7 @@ fn handle_response(
     output_format: Option<&str>,
     property_filter: &[String],
     has_unit_args: bool,
+    timestamp_unix: bool,
 ) {
     // Check for JSON-RPC error responses.
     if let Some(error) = resp.get("error") {
@@ -2049,7 +2117,15 @@ fn handle_response(
                     // --value mode: print only the values, one per line
                     for line in text.lines() {
                         if let Some((_key, val)) = line.split_once('=') {
-                            println!("{val}");
+                            println!("{}", maybe_unix_timestamp(val, timestamp_unix));
+                        }
+                    }
+                } else if timestamp_unix {
+                    for line in text.lines() {
+                        if let Some((key, val)) = line.split_once('=') {
+                            println!("{key}={}", maybe_unix_timestamp(val, timestamp_unix));
+                        } else {
+                            println!("{line}");
                         }
                     }
                 } else {
