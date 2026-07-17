@@ -9394,14 +9394,65 @@ pub fn execute_command(
                 }
                 let run_info_clone = run_info.clone();
                 std::thread::spawn(move || {
-                    let errs = crate::units::activate_needed_units(id, run_info_clone.clone());
+                    let errs =
+                        crate::units::activate_needed_units(id.clone(), run_info_clone.clone());
                     for err in &errs {
                         log::error!("Background activation error: {err}");
                     }
-                    // Clean up pending activations
-                    let ri = run_info_clone.read_poisoned();
-                    let mut pa = ri.pending_activations.lock().unwrap();
-                    pa.clear();
+                    // `activate_needed_units` returns as soon as no unit is
+                    // immediately startable.  Now that oneshot/notify/forking
+                    // starts are deferred to background completion handlers,
+                    // that happens long before the graph is actually active
+                    // (e.g. a `sleep 60` oneshot returns instantly and finishes
+                    // 60s later).  Clearing the whole pending_activations set
+                    // here would drop the "waiting" jobs `list-jobs` reports for
+                    // units still parked on an ordering dependency.  Instead,
+                    // drop each subgraph unit from the set only once it reaches a
+                    // terminal state, and stop monitoring when none remain (or
+                    // after a bounded grace period so a dependency that never
+                    // becomes ready cannot leak the entries forever).
+                    let subgraph = {
+                        let ri = run_info_clone.read_poisoned();
+                        let mut ids = vec![id.clone()];
+                        crate::units::collect_unit_start_subgraph(&mut ids, &ri.unit_table);
+                        ids
+                    };
+                    let deadline =
+                        std::time::Instant::now() + std::time::Duration::from_secs(15 * 60);
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        let remaining = {
+                            let ri = run_info_clone.read_poisoned();
+                            let mut pa = ri.pending_activations.lock().unwrap();
+                            let mut remaining = 0usize;
+                            for sid in &subgraph {
+                                let terminal = ri
+                                    .unit_table
+                                    .get(sid)
+                                    .map(|u| {
+                                        matches!(
+                                            &*u.common.status.read_poisoned(),
+                                            UnitStatus::Started(_) | UnitStatus::Stopped(_, _)
+                                        )
+                                    })
+                                    .unwrap_or(true);
+                                if terminal {
+                                    pa.remove(sid);
+                                } else {
+                                    remaining += 1;
+                                }
+                            }
+                            remaining
+                        };
+                        if remaining == 0 || std::time::Instant::now() > deadline {
+                            let ri = run_info_clone.read_poisoned();
+                            let mut pa = ri.pending_activations.lock().unwrap();
+                            for sid in &subgraph {
+                                pa.remove(sid);
+                            }
+                            break;
+                        }
+                    }
                 });
             }
         }
