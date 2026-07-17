@@ -25,6 +25,17 @@ reviewed (two independent agents attacking the diff) before any VM run:
 - **target Wants settle-on-start** (`bdd00cbc`): `systemctl start <target>`
   returned before pulled-in `Wants=` oneshots finished; the settle-wait now
   waits on requires ∪ wants (Wants failure stays non-fatal).
+- **`Result=start-limit-hit`** (`2e872733`): a restart-rate-limited service
+  reported `Result=exit-code`; added a `start_limit_hit` flag (mirroring the
+  timeout/watchdog flags) set when the limit refuses restart, cleared on start
+  and reset-failed.
+- **mqueue fd double-close crash** (`e5c86a11`): `07-pid1-mqueue-ownership`
+  panicked PID 1 with a libc GP-fault on stop. The mqueue socket `close()`
+  called `libc::close()` on an fd already owned (and dropped-closed) by the
+  `File` in its `Box`; under the manager's threads the number was reused
+  between the two closes, so the drop closed a live foreign fd. Found from the
+  kernel-panic dump; fixed to match the six sibling socket types whose
+  `close()` already delegate to the Box drop.
 
 **Practice adopted (from the Bun Zig→Rust rewrite writeup):** adversarial diff
 review before every expensive VM run. It has already caught, pre-commit, a
