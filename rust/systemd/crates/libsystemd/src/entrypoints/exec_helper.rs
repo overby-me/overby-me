@@ -2502,6 +2502,16 @@ pub fn run_exec_helper() {
         unsafe {
             std::env::set_var("PWD", &dir);
         }
+    } else {
+        // No WorkingDirectory= configured: system services default to running
+        // in the root directory.  chdir there and export $PWD="/" so shells
+        // (which read $PWD instead of calling getcwd) observe "/" rather than a
+        // stale or empty PWD inherited from PID 1.  Matches upstream systemd,
+        // which runs services from "/" unless WorkingDirectory= says otherwise.
+        let _ = std::env::set_current_dir("/");
+        unsafe {
+            std::env::set_var("PWD", "/");
+        }
     }
 
     // setup environment vars
