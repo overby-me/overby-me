@@ -1,23 +1,20 @@
 {lib, ...}: {
   packages = {
-    rust-perl = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-perl = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-perl";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
           fileset = lib.fileset.unions [
             ./Cargo.toml
             ./Cargo.lock
+            ./build.rs
             ./src
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A Perl interpreter written in Rust";
@@ -28,26 +25,23 @@
         };
       };
 
-    rust-perl-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-perl-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-perl-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
           fileset = lib.fileset.unions [
             ./Cargo.toml
             ./Cargo.lock
+            ./build.rs
             ./src
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
         meta = {
           description = "A Perl interpreter written in Rust (dev build, fast compile)";
