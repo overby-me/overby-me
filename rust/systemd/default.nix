@@ -13,10 +13,15 @@
   };
 
   packages = {
-    rust-systemd = {lib, ...}:
+    rust-systemd = {
+      lib,
+      wild,
+      ...
+    }:
       lib.buildCargoProject {
         pname = "rust-systemd";
         version = "unstable";
+        linker = wild;
 
         src = lib.fileset.toSource {
           root = ./.;
