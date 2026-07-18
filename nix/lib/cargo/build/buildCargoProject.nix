@@ -75,12 +75,53 @@ in
     };
     inherit (resolved) nodes;
 
-    profile = {
-      optLevel =
+    # Profile: defaults per release/dev, overridden by explicit keys in
+    # the workspace root's [profile.release]/[profile.dev] (cargo ignores
+    # profiles declared anywhere else).
+    profileToml =
+      (workspace.rootManifest.profile
+        or {
+      }).${
         if release
-        then "3"
-        else "0";
-      debug = !release;
+        then "release"
+        else "dev"
+      } or {
+      };
+    normLto = v:
+      if v == true || v == "fat"
+      then "fat"
+      else if v == "thin"
+      then "thin"
+      else "off";
+    normStrip = v:
+      if v == true || v == "symbols"
+      then "symbols"
+      else if v == "debuginfo"
+      then "debuginfo"
+      else "none";
+    normDebug = v:
+      if v == true
+      then "2"
+      else if v == false
+      then "0"
+      else toString v;
+    profile = {
+      optLevel = toString (profileToml."opt-level"
+        or (
+        if release
+        then 3
+        else 0
+      ));
+      debugInfo = normDebug (profileToml.debug
+        or (
+        if release
+        then 0
+        else 2
+      ));
+      lto = normLto (profileToml.lto or false);
+      strip = normStrip (profileToml.strip or false);
+      panic = profileToml.panic or "unwind";
+      codegenUnits = profileToml."codegen-units" or null;
     };
 
     linkerDir =

@@ -491,6 +491,105 @@ let
       value = m;
     }) (members ++ pathPackages));
   };
+  # Nearest ancestor of relDir (within src) whose manifest has a
+  # [workspace] table; standalone variant of the loadWorkspace-internal
+  # helper, for git checkout location.
+  nearestWorkspaceRoot = src: relDir: let
+    parent = d: let
+      m = match "(.*)/[^/]*" d;
+    in
+      if m == null
+      then ""
+      else builtins.head m;
+    go = d: let
+      mf = joinPath src (
+        if d == ""
+        then "Cargo.toml"
+        else "${d}/Cargo.toml"
+      );
+      manifest =
+        if pathExists mf
+        then loadManifest mf
+        else null;
+    in
+      if manifest != null && manifest ? workspace
+      then {
+        inherit manifest;
+        dir = d;
+      }
+      else if d == ""
+      then null
+      else go (parent d);
+  in
+    go relDir;
+
+  # Locate a package by name anywhere in a source tree (git checkouts):
+  # try the root workspace first (covers root packages and workspace
+  # members), then scan the tree for a matching [package].
+  locatePackage = src: name: let
+    viaWs =
+      if pathExists (joinPath src "Cargo.toml")
+      then (loadWorkspace src).byName.${name} or null
+      else null;
+
+    scan = relDir: let
+      base = joinPath src relDir;
+      entries = readDir base;
+      hasManifest = pathExists (joinPath base "Cargo.toml");
+      selfMatch =
+        if hasManifest
+        then let
+          m = loadManifest (joinPath base "Cargo.toml");
+        in
+          if m ? package && m.package.name or null == name
+          then [relDir]
+          else []
+        else [];
+      subdirs = filter (
+        n:
+          entries.${n}
+          == "directory"
+          && !(elem n [".git" "target" "node_modules"])
+      ) (attrNames entries);
+      deeper = concatLists (map (
+          n:
+            scan (
+              if relDir == ""
+              then n
+              else "${relDir}/${n}"
+            )
+        )
+        subdirs);
+    in
+      selfMatch ++ deeper;
+
+    viaScan = let
+      found = scan "";
+    in
+      if found == []
+      then null
+      else let
+        d = builtins.head found;
+        manifest = loadManifest (joinPath src "${d}/Cargo.toml");
+        root = nearestWorkspaceRoot src d;
+      in
+        normalizePackage {
+          dir = joinPath src d;
+          relDir = d;
+          wsRelDir =
+            if root == null
+            then d
+            else root.dir;
+          inherit manifest;
+          workspaceManifest =
+            if root == null
+            then manifest
+            else root.manifest;
+        };
+  in
+    if viaWs != null
+    then viaWs
+    else viaScan;
 in {
-  inherit loadManifest loadWorkspace normalizePackage normalizeDeps normalizeRel snakeName joinPath globMatch;
+  inherit loadManifest loadWorkspace normalizePackage normalizeDeps normalizeRel snakeName joinPath globMatch locatePackage;
 }

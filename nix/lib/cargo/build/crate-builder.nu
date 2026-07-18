@@ -272,8 +272,8 @@ def run-build-script [cfg: record, plan: record, rustc: string, base_env: record
       HOST: $cfg.target,
       NUM_JOBS: (sys cpu | length | into string),
       OPT_LEVEL: $cfg.profile.optLevel,
-      PROFILE: (if $cfg.profile.debug { "debug" } else { "release" }),
-      DEBUG: (if $cfg.profile.debug { "true" } else { "false" }),
+      PROFILE: (if $cfg.profile.debugInfo == "0" { "release" } else { "debug" }),
+      DEBUG: (if $cfg.profile.debugInfo == "0" { "false" } else { "true" }),
       RUSTC: $rustc,
       RUSTDOC: "rustdoc",
       CARGO: (which cargo | get -o 0.path | default "cargo"),
@@ -339,13 +339,42 @@ def collect-transitive-native [dep_outs: list<string>] {
   } | flatten
 }
 
-def profile-args [profile: record] {
+# Flags shared by lib and bin compiles. panic=abort is skipped for
+# proc-macro crates and build scripts, matching cargo.
+def profile-args [profile: record, is_proc_macro: bool] {
   ["-C", $"opt-level=($profile.optLevel)"]
-  | append (if $profile.debug { ["-C", "debuginfo=2"] } else { [] })
+  | append (if $profile.debugInfo != "0" { ["-C", $"debuginfo=($profile.debugInfo)"] } else { [] })
+  | append (
+    if ($profile | get -o codegenUnits) != null {
+      ["-C", $"codegen-units=($profile.codegenUnits)"]
+    } else { [] }
+  )
+  | append (
+    if $profile.panic == "abort" and (not $is_proc_macro) {
+      ["-C", "panic=abort"]
+    } else { [] }
+  )
+}
+
+# Extra flags for library compiles when LTO is enabled downstream.
+def lto-lib-args [profile: record, is_proc_macro: bool] {
+  if $profile.lto != "off" and (not $is_proc_macro) {
+    ["-C", "embed-bitcode=yes"]
+  } else { [] }
+}
+
+# Extra flags for the final bin links.
+def lto-bin-args [profile: record] {
+  (
+    if $profile.lto != "off" { ["-C", $"lto=($profile.lto)"] } else { [] }
+  )
+  | append (
+    if $profile.strip != "none" { ["-C", $"strip=($profile.strip)"] } else { [] }
+  )
 }
 
 # Compile the lib target; returns the artifact path recorded for dependents.
-def compile-lib [plan: record, rustc: string, base_env: record, common_args: list, bs: any, crate_hash: string, out: string] {
+def compile-lib [plan: record, rustc: string, base_env: record, common_args: list, extra_args: list, bs: any, crate_hash: string, out: string] {
   let lib = $plan.lib
   let types = ($lib.crateTypes | where {|t| $t in ["lib", "rlib", "proc-macro"]})
   let crate_types = (if ($types | is-empty) { ["lib"] } else { $types })
@@ -367,6 +396,7 @@ def compile-lib [plan: record, rustc: string, base_env: record, common_args: lis
     ]
     | append $proc_macro_extern
     | append $common_args
+    | append $extra_args
     | append (native-link-args $bs)
   )
   with-env ($base_env | merge {CARGO_CRATE_NAME: $lib.name}) { ^$rustc ...$args }
@@ -379,11 +409,12 @@ def compile-lib [plan: record, rustc: string, base_env: record, common_args: lis
   $artifact
 }
 
-def compile-bins [cfg: record, plan: record, rustc: string, base_env: record, common_args: list, bs: any, lib_artifact: any, out: string] {
+def compile-bins [cfg: record, plan: record, rustc: string, base_env: record, common_args: list, extra_args: list, bs: any, lib_artifact: any, out: string] {
   let bins = ($cfg.bins | default ($plan | get -o bins) | default [])
   mkdir ($out | path join "bin")
   let bin_common = (
     $common_args
+    | append $extra_args
     | append (
       if $lib_artifact != null {
         ["--extern", $"($plan.lib.name)=($lib_artifact)"]
@@ -463,8 +494,11 @@ def main [config_path: string] {
     }
   }
 
+  let is_proc_macro = (
+    ($plan | get -o lib) != null and ($plan.lib | get -o procMacro | default false)
+  )
   let common_args = (
-    (profile-args $cfg.profile)
+    (profile-args $cfg.profile $is_proc_macro)
     | append ($cfg | get -o linkArgs | default [])
     | append ($cfg | get -o rustcFlags | default [])
     | append (if $cfg.capLints { ["--cap-lints", "allow"] } else { [] })
@@ -476,14 +510,14 @@ def main [config_path: string] {
 
   let lib_artifact = (
     if ($plan | get -o lib) != null {
-      compile-lib $plan $rustc $base_env $common_args $bs $cfg.crateHash $out
+      compile-lib $plan $rustc $base_env $common_args (lto-lib-args $cfg.profile $is_proc_macro) $bs $cfg.crateHash $out
     } else {
       null
     }
   )
 
   if $cfg.buildBins {
-    compile-bins $cfg $plan $rustc $base_env $common_args $bs $lib_artifact $out
+    compile-bins $cfg $plan $rustc $base_env $common_args (lto-bin-args $cfg.profile) $bs $lib_artifact $out
   }
 
   if $bs != null and $bs_out_dir != null {
