@@ -1,11 +1,7 @@
 {
-  packages.rust-diffutils = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-diffutils = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-diffutils";
-      version = "0.1.0";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -16,9 +12,9 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
-      postInstall = ''
+      rootAttrs.postInstall = ''
         ln -s $out/bin/diff $out/bin/cmp
         ln -s $out/bin/diff $out/bin/sdiff
         ln -s $out/bin/diff $out/bin/diff3
