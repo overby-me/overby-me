@@ -321,6 +321,40 @@ Every issue in oxalica/nocargo's tracker checked against this library:
 | README | cross-compilation | not attempted |
 | README | workspace `exclude` semantics | ours is literal match; cargo treats entries as globs |
 
+## Landmine branch plan (nix-lib-cargo-landmines, 2026-07-19)
+
+Closing every actionable row of the audit above, in dependency order:
+
+1. **Shape hardening (#10 class).** Cargo.toml is polymorphic in ways the
+   undiagnosed nocargo crash likely hit. Coerce defensively in both
+   parsers (eval `manifest.nix`, sandbox `crate-builder.nu`):
+   `crate-type` string -> list, single `[bin]` table -> list, `authors`
+   string -> list, `edition`/`rust-version` numbers -> strings. Wrap
+   normalization in `addErrorContext` naming the crate so any surviving
+   shape surprise identifies itself. Fixture tests per shape.
+2. **Profile fidelity (#5).** Honor `[profile.release]`/`[profile.dev]`
+   from the workspace root: `lto` (deps get `-C embed-bitcode=yes`, bins
+   get `-C lto=thin|fat`), `strip`, `panic` (applied everywhere except
+   proc-macros and build scripts, matching cargo), `codegen-units`,
+   `debug` levels. Only explicit keys change behavior; defaults stay as
+   today. Verified by xz/wclip (both set `lto = true`, `strip = true`):
+   binaries must shrink and still pass their roundtrips.
+3. **Exclude globs.** `workspace.exclude` entries match as globs
+   (`*` within a segment, `**` across), not literals.
+4. **Git dependencies (#3, #14).** `builtins.fetchGit` by the lock's
+   resolved rev (pure; memoized per url+rev), package located in the
+   checkout by trying: root package, workspace member (nocargo #14),
+   then a bounded tree scan (nocargo #3); workspace inheritance resolved
+   against the checkout's own root. Builder sources come from the
+   checkout. Registry deps of git crates are already covered by the
+   snapshot (they appear in the lock). Live-tested against a git dep on
+   a workspace member of the serde repository, oracle-diffed.
+
+Explicitly out of scope for this branch: cross-compilation (a milestone
+needing per-unit host/target features and target toolchains, not a fix)
+and the irreducible remainder of #10 (unknown unknowns; the oracle and
+corpus remain the guard).
+
 ## Decision log
 
 - 2026-07-18 (evening): wild is the default linker for every
