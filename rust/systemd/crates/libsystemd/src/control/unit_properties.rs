@@ -207,6 +207,22 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
             insert(&mut props, "SubState", "plugged");
         }
 
+        // Socket units report `listening` when bound and idle, and `running`
+        // while one or more accepted connections are being serviced.  The
+        // generic mapping reports `running` for any Started unit; distinguish
+        // the two socket SubStates via the accepted-connection counter.
+        // TEST-07-PID1.socket-defer asserts `listening` right after start.
+        if matches!(&*status, UnitStatus::Started(_))
+            && let Specific::Socket(specific) = &unit.specific
+        {
+            let sub = if specific.state.read_poisoned().sock.active_accept_connections == 0 {
+                "listening"
+            } else {
+                "running"
+            };
+            insert(&mut props, "SubState", sub);
+        }
+
         // Override ActiveState for completed oneshot services with
         // RemainAfterExit=no: they are kept as Started for the boot
         // activation walker, but should report "inactive" (issue #27953).

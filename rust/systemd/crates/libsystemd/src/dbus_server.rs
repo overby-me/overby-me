@@ -70,6 +70,17 @@ mod inner {
             let ri = self.run_info.read_poisoned();
             if let Some(u) = ri.unit_table.values().find(|u| u.id.name == self.unit_name) {
                 let status = u.common.status.read_poisoned();
+                // Socket units report `listening` when bound and idle, and
+                // `running` while an accepted connection is being serviced.
+                if matches!(&*status, UnitStatus::Started(_))
+                    && let crate::units::Specific::Socket(specific) = &u.specific
+                {
+                    return if specific.state.read_poisoned().sock.active_accept_connections == 0 {
+                        "listening".to_string()
+                    } else {
+                        "running".to_string()
+                    };
+                }
                 map_active_sub(&status).1.to_string()
             } else {
                 "dead".to_string()
