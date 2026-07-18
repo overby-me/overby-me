@@ -304,6 +304,12 @@ manifest set in flake.lock.
 
 ## Decision log
 
+- 2026-07-18 (evening): wild is the default linker for every
+  buildCargoProject call (injected in the perSystemLib wiring; override
+  with `linker = null` or another package). rust-systemd additionally has
+  a `rust-systemd-dev` variant: debug profile, cranelift codegen, wild
+  linking, with `-Clinker-features=-lld` to opt out of nightly's rust-lld
+  default which would bypass the -B linker shim.
 - 2026-07-18: Library lives at `nix/lib/cargo/`, sibling of `nix/lib/deno`;
   exposed via `perSystemLib` like the deno lib. (Initially scaffolded at
   `nix/cargo/`, moved on user correction.)
