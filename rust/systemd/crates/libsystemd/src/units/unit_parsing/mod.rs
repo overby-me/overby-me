@@ -846,14 +846,25 @@ impl UnitCondition {
                 if *negate { !result } else { result }
             }
             UnitCondition::PathIsReadWrite { path, negate } => {
-                // Check whether the path is on a read-write filesystem.
-                // We use access(W_OK) which checks whether the process could
-                // write to the path — if the filesystem is read-only this
-                // will report false. For directories we check the directory
-                // itself; for files we check the file.
-                let is_rw = match nix::unistd::access(path.as_str(), nix::unistd::AccessFlags::W_OK)
-                {
-                    Ok(()) => true,
+                // True iff the path exists and its underlying filesystem is
+                // mounted read-write.  systemd checks the filesystem's
+                // read-only flag (statvfs ST_RDONLY), NOT whether the path
+                // itself is writable: e.g. /proc/sys/net/ lives on a
+                // read-write procfs even though the directory is not itself
+                // writable, so access(W_OK) wrongly reported it read-only and
+                // skipped systemd-sysctl.service
+                // (ConditionPathIsReadWrite=/proc/sys/net/).
+                let is_rw = match std::ffi::CString::new(path.as_bytes()) {
+                    Ok(c_path) => {
+                        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+                        if unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } == 0 {
+                            // ST_RDONLY set ⇒ read-only filesystem.
+                            (stat.f_flag & libc::ST_RDONLY) == 0
+                        } else {
+                            // statvfs() fails (e.g. ENOENT) ⇒ path absent.
+                            false
+                        }
+                    }
                     Err(_) => false,
                 };
                 if *negate { !is_rw } else { is_rw }
