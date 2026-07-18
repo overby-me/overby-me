@@ -1,12 +1,8 @@
 {
   packages = {
-    rust-pipewire = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-pipewire = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-pipewire";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,9 +13,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           # Multicall binary: every PipeWire tool/daemon name is a symlink
           # to rust-pipewire. argv[0] selects the dispatcher.
           for tool in \
@@ -41,13 +37,9 @@
         };
       };
 
-    rust-pipewire-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-pipewire-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-pipewire-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -58,11 +50,11 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           for tool in \
             pipewire pipewire-pulse pipewire-aes67 pipewire-avb pipewire-vulkan \
             pw-cli pw-mon pw-dump pw-link pw-metadata pw-loopback pw-config \
