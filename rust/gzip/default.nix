@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-gzip = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-gzip = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-gzip";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,8 +13,8 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
-        postInstall = ''
+        index = ../../nix/lib/cargo/index;
+        rootAttrs.postInstall = ''
           ln -s $out/bin/gzip $out/bin/gunzip
           ln -s $out/bin/gzip $out/bin/zcat
         '';
@@ -32,13 +28,9 @@
         };
       };
 
-    rust-gzip-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-gzip-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-gzip-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -49,10 +41,10 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
-        buildType = "debug";
+        index = ../../nix/lib/cargo/index;
+        release = false;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/gzip $out/bin/gunzip
           ln -s $out/bin/gzip $out/bin/zcat
         '';
