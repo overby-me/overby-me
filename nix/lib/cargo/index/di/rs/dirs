@@ -1,0 +1,1 @@
+{"name":"dirs","vers":"6.0.0","deps":[{"name":"dirs-sys","req":"^0.5.0","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e","features":{},"yanked":false,"pubtime":"2025-01-12T17:19:23Z"}

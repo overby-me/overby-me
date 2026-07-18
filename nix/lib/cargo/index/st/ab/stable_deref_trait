@@ -1,0 +1,1 @@
+{"name":"stable_deref_trait","vers":"1.2.1","deps":[],"cksum":"6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596","features":{"alloc":[],"default":["std"],"std":["alloc"]},"yanked":false,"pubtime":"2025-10-09T05:24:54Z"}

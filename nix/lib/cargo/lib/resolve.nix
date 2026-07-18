@@ -127,28 +127,42 @@ let
       )
       roots;
 
-    # Active dependency records per package id, with resolved target ids.
-    # Kind and cfg filtering happens here; optional-dep activation happens in
-    # the fixpoint. A dropped optional dep that the lock does not even
-    # contain is fine; a missing non-optional dep is an error.
+    # Dependency records that apply on this platform (kind and cfg
+    # filtering); optional-dep activation happens in the fixpoint.
+    wantedOf =
+      mapAttrs (
+        id: _pkg:
+          filter (
+            d:
+              (
+                d.kind
+                == "normal"
+                || d.kind == "build"
+                || (d.kind == "dev" && includeDev && elem id rootIds)
+              )
+              && (d.target == null || cfgLib.matchesTarget platform d.target)
+              && d.registry == null
+          )
+          metas.${id}.deps
+      )
+      lock.byId;
+
+    # Renames of platform-active deps: feature entries referencing a dep
+    # that is filtered out for this platform must be ignored entirely
+    # (resolver v2 semantics; e.g. tokio's "windows-sys/..." on linux).
+    activeRenamesOf =
+      mapAttrs (
+        _id: deps:
+          foldl' (acc: d: acc // {${d.name} = true;}) {} deps
+      )
+      wantedOf;
+
+    # Active dependency records with resolved target ids. A dropped
+    # optional dep that the lock does not even contain is fine; a missing
+    # non-optional dep is an error.
     edgesOf =
       mapAttrs (
-        id: _pkg: let
-          meta = metas.${id};
-          wanted =
-            filter (
-              d:
-                (
-                  d.kind
-                  == "normal"
-                  || d.kind == "build"
-                  || (d.kind == "dev" && includeDev && elem id rootIds)
-                )
-                && (d.target == null || cfgLib.matchesTarget platform d.target)
-                && d.registry == null
-            )
-            meta.deps;
-        in
+        id: _pkg:
           concatLists (map (
               d: let
                 targetId = lockLib.findDep lock lock.resolvedDeps.${id} d.package d.req;
@@ -164,7 +178,7 @@ let
                 then []
                 else throw "cargo resolve: ${id} dependency ${d.package} (req ${toString d.req}) not found in lock"
             )
-            wanted)
+            wantedOf.${id})
       )
       lock.byId;
 
@@ -230,20 +244,49 @@ let
           map (
             entry: let
               c = classifyEntry entry;
+              # Entries referencing a dep that is target-filtered on this
+              # platform are ignored entirely (resolver v2 semantics).
+              depActive = activeRenamesOf.${id} ? ${c.dep or ""};
             in
               if c.t == "dep"
-              then {depOn = setOf [c.dep];}
+              then
+                (
+                  if depActive
+                  then {depOn = setOf [c.dep];}
+                  else {}
+                )
               else if c.t == "strong"
-              then {
-                depOn = setOf [c.dep];
-                depFeat = {${c.dep} = setOf [c.feature];};
-              }
+              then
+                (
+                  if depActive
+                  then {
+                    depOn = setOf [c.dep];
+                    depFeat = {${c.dep} = setOf [c.feature];};
+                    # "R/F" also enables the feature R itself when R is a
+                    # feature (implicit or explicit); this is what weak
+                    # "R?/F" deliberately does not do. Crates referenced
+                    # only via dep:R have no such feature, so nothing is
+                    # added.
+                    features = setOf (filter (n: hasAttr n t) [c.dep]);
+                  }
+                  else {}
+                )
               else if c.t == "weak"
-              then {depFeatWeak = {${c.dep} = setOf [c.feature];};}
+              then
+                (
+                  if depActive
+                  then {depFeatWeak = {${c.dep} = setOf [c.feature];};}
+                  else {}
+                )
               else if hasAttr c.feature t
               then {features = setOf [c.feature];}
               else if isOptionalDep c.feature
-              then {depOn = setOf [c.feature];}
+              then
+                (
+                  if activeRenamesOf.${id} ? ${c.feature}
+                  then {depOn = setOf [c.feature];}
+                  else {}
+                )
               else throw "cargo resolve: package ${id} feature entry ${entry} names neither a feature nor an optional dependency"
           )
           entries
@@ -301,19 +344,22 @@ let
       then state
       else fix next;
 
+    # Root seeds tolerate features that a given member does not define:
+    # with several roots (cargo build --features at a virtual workspace
+    # root), a feature may exist on only some members.
     seed =
       foldl' (
         s: id:
           mergeInto s id (emptyNode
             // {
-              features = checkedFeatures id (
+              features = setOf (filter (f: hasAttr f effTables.${id}) (
                 rootFeatures
                 ++ (
                   if noDefaultFeatures
                   then []
                   else ["default"]
                 )
-              );
+              ));
             })
       ) {}
       rootIds;
@@ -341,6 +387,7 @@ let
               name = e.dep.name;
               package = e.dep.package;
               kind = e.dep.kind;
+              optional = e.dep.optional;
               inherit (e) targetId;
             })
             activeEdges;

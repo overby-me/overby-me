@@ -1,0 +1,2 @@
+{"name":"windows_x86_64_gnullvm","vers":"0.52.6","deps":[],"cksum":"24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2024-07-03T19:44:03Z"}
+{"name":"windows_x86_64_gnullvm","vers":"0.53.1","deps":[],"cksum":"0ffa179e2d07eee8ad8f57493436566c7cc30ac536a3379fdf008f47f6bb7ae1","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-10-06T17:34:01Z"}

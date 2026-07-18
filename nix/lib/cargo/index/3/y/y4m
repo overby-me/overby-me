@@ -1,0 +1,1 @@
+{"name":"y4m","vers":"0.8.0","deps":[{"name":"resize","req":"^0.4","features":[],"optional":false,"default_features":true,"target":null,"kind":"dev"}],"cksum":"7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448","features":{},"yanked":false,"pubtime":"2023-04-21T11:32:10Z"}

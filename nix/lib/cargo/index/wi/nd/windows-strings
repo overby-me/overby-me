@@ -1,0 +1,1 @@
+{"name":"windows-strings","vers":"0.5.1","deps":[{"name":"windows-link","req":"^0.2.1","features":[],"optional":false,"default_features":false,"target":null,"kind":"normal"}],"cksum":"7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091","features":{"default":["std"],"std":[]},"yanked":false,"rust_version":"1.82","pubtime":"2025-10-06T19:15:01Z"}

@@ -69,7 +69,12 @@
       runHook postBuild
     '';
 
-    dontInstall = true;
+    # The builder writes $out itself; the install phase only exists so that
+    # preInstall/postInstall overrides (e.g. extra symlinks) keep working.
+    installPhase = ''
+      runHook preInstall
+      runHook postInstall
+    '';
   };
 in
   stdenv.mkDerivation (base

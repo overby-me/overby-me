@@ -21,6 +21,7 @@ let
     readDir
     readFile
     replaceStrings
+    split
     ;
 
   joinPath = src: sub:
@@ -49,10 +50,11 @@ let
       if isString b
       then {version = b;}
       else b;
+    fromWs = !(isString spec) && (spec.workspace or false);
     s =
       if isString spec
       then {version = spec;}
-      else if spec.workspace or false
+      else if fromWs
       then
         base
         // {
@@ -72,6 +74,12 @@ let
     git = s.git or null;
     rev = s.rev or null;
     registry = s.registry or null;
+    # Paths from [workspace.dependencies] are relative to the workspace
+    # root, not the member directory.
+    pathBase =
+      if fromWs && (s.path or null) != null
+      then "workspace"
+      else "package";
   };
 
   # All dependency records of a manifest: plain sections plus [target.X]
@@ -210,6 +218,9 @@ let
   normalizePackage = {
     dir,
     relDir ? "",
+    # Directory (relative to src) of the workspace root this package
+    # inherits from; base for workspace-relative dependency paths.
+    wsRelDir ? "",
     manifest,
     workspaceManifest ? {},
   }: let
@@ -219,7 +230,7 @@ let
     field = name: default: resolveField wsPackage name (pkg.${name} or default);
     inherit (pkg) name;
   in {
-    inherit name relDir;
+    inherit name relDir wsRelDir;
     version = field "version" "0.0.0";
     edition = field "edition" "2015";
     description = field "description" "";
@@ -272,14 +283,46 @@ let
   in
     filter (d: !(elem d excludes)) all;
 
-  # Load a workspace (or standalone package) from a source root.
-  loadWorkspace = src: let
-    rootManifest = loadManifest (joinPath src "Cargo.toml");
+  # Lexically normalize a relative path: resolve "." and "..". Throws when
+  # the path escapes the source root, since such a path cannot exist inside
+  # a filtered flake source; callers must widen `src` and set `manifestDir`.
+  normalizeRel = p: let
+    parts = filter (s: isString s && s != "" && s != ".") (split "/" p);
+    step = acc: part:
+      if part == ".."
+      then
+        (
+          if acc == []
+          then throw "cargo manifest: path ${p} escapes the source root; pass a wider src with manifestDir"
+          else builtins.genList (builtins.elemAt acc) (builtins.length acc - 1)
+        )
+      else acc ++ [part];
+  in
+    builtins.concatStringsSep "/" (foldl' step [] parts);
+
+  # Load a workspace (or standalone package). Accepts either a source root
+  # or { src, manifestDir } when the workspace manifest is not at the root
+  # of src (needed for path dependencies on sibling projects).
+  #
+  # Result: members (workspace members), pathPackages (packages reached via
+  # path dependencies outside the workspace), and byName over both. All
+  # relDir values are relative to src.
+  loadWorkspace = arg: let
+    src =
+      if isAttrs arg
+      then arg.src
+      else arg;
+    manifestDir =
+      if isAttrs arg
+      then arg.manifestDir or ""
+      else "";
+    base = joinPath src manifestDir;
+    rootManifest = loadManifest (joinPath base "Cargo.toml");
     hasWs = rootManifest ? workspace;
     memberDirs =
       if hasWs
       then
-        expandMembers src (rootManifest.workspace.members or [])
+        expandMembers base (rootManifest.workspace.members or [])
         (rootManifest.workspace.exclude or [])
       else [];
     rootIsPkg = rootManifest ? package;
@@ -296,24 +339,116 @@ let
           manifest =
             if d == ""
             then rootManifest
-            else loadManifest (joinPath src "${d}/Cargo.toml");
+            else loadManifest (joinPath base "${d}/Cargo.toml");
+          relDir = normalizeRel (
+            if manifestDir == ""
+            then d
+            else "${manifestDir}/${d}"
+          );
         in
           normalizePackage {
-            dir = joinPath src d;
-            relDir = d;
-            inherit manifest;
+            dir = joinPath src relDir;
+            wsRelDir = normalizeRel manifestDir;
+            inherit relDir manifest;
             workspaceManifest = rootManifest;
           }
       )
       dirs;
-  in {
-    inherit rootManifest members;
-    byName = listToAttrs (map (m: {
-        inherit (m) name;
-        value = m;
+
+    # Path dependencies reaching outside the workspace: walk them
+    # transitively, loading each target as a standalone package. Inheritance
+    # is resolved against the target's own manifest (a standalone package or
+    # its own workspace root), not this workspace's.
+    pathDepDirs = pkg:
+      map (
+        d: let
+          baseDir =
+            if d.pathBase or "package" == "workspace"
+            then pkg.wsRelDir
+            else pkg.relDir;
+        in
+          normalizeRel (
+            if baseDir == ""
+            then d.path
+            else "${baseDir}/${d.path}"
+          )
+      )
+      (filter (d: d.path != null) pkg.deps);
+
+    memberDirSet = listToAttrs (map (m: {
+        name = m.relDir;
+        value = true;
       })
       members);
+
+    # For an external package using workspace inheritance, its workspace
+    # root is the nearest ancestor (within src) whose manifest has a
+    # [workspace] table; fall back to the package's own manifest.
+    parentDir = d: let
+      m = match "(.*)/[^/]*" d;
+    in
+      if m == null
+      then ""
+      else builtins.head m;
+
+    wsRootFor = d: let
+      mf = joinPath src (
+        if d == ""
+        then "Cargo.toml"
+        else "${d}/Cargo.toml"
+      );
+      manifest =
+        if pathExists mf
+        then loadManifest mf
+        else null;
+    in
+      if manifest != null && manifest ? workspace
+      then {
+        inherit manifest;
+        dir = d;
+      }
+      else if d == ""
+      then null
+      else wsRootFor (parentDir d);
+
+    walkExternal = seen: queue:
+      if queue == []
+      then seen
+      else let
+        d = builtins.head queue;
+        rest = builtins.tail queue;
+      in
+        if memberDirSet ? ${d} || seen ? ${d}
+        then walkExternal seen rest
+        else let
+          manifest = loadManifest (joinPath src "${d}/Cargo.toml");
+          found = wsRootFor d;
+          pkg = normalizePackage {
+            dir = joinPath src d;
+            relDir = d;
+            wsRelDir =
+              if found == null
+              then d
+              else found.dir;
+            inherit manifest;
+            workspaceManifest =
+              if found == null
+              then manifest
+              else found.manifest;
+          };
+        in
+          walkExternal (seen // {${d} = pkg;}) (rest ++ pathDepDirs pkg);
+
+    pathPackages =
+      builtins.attrValues
+      (walkExternal {} (concatLists (map pathDepDirs members)));
+  in {
+    inherit rootManifest members pathPackages;
+    byName = listToAttrs (map (m: {
+      inherit (m) name;
+      value = m;
+    }) (members ++ pathPackages));
   };
 in {
-  inherit loadManifest loadWorkspace normalizePackage normalizeDeps snakeName joinPath;
+  inherit loadManifest loadWorkspace normalizePackage normalizeDeps normalizeRel snakeName joinPath;
 }

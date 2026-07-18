@@ -1,0 +1,2 @@
+{"name":"windows_i686_gnullvm","vers":"0.52.6","deps":[],"cksum":"0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2024-07-03T19:43:50Z"}
+{"name":"windows_i686_gnullvm","vers":"0.53.1","deps":[],"cksum":"fa7359d10048f68ab8b09fa71c3daccfb0e9b559aed648a8f95469c27057180c","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-10-06T17:33:44Z"}

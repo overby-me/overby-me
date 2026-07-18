@@ -1,0 +1,2 @@
+{"name":"windows_x86_64_gnu","vers":"0.52.6","deps":[],"cksum":"147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2024-07-03T19:43:58Z"}
+{"name":"windows_x86_64_gnu","vers":"0.53.1","deps":[],"cksum":"9c3842cdd74a865a8066ab39c8a7a473c0778a3f29370b5fd6b4b9aa7df4a499","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-10-06T17:33:55Z"}

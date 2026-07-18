@@ -1,0 +1,1 @@
+{"name":"rustc-hash","vers":"2.1.1","deps":[{"name":"rand","req":"^0.8","features":[],"optional":true,"default_features":true,"target":null,"kind":"normal"}],"cksum":"357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d","features":{"default":["std"],"nightly":[],"std":[]},"features2":{"rand":["dep:rand","std"]},"yanked":false,"pubtime":"2025-02-05T18:34:34Z","v":2}

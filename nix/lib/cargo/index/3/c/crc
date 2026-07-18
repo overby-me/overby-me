@@ -1,0 +1,1 @@
+{"name":"crc","vers":"3.4.0","deps":[{"name":"crc-catalog","req":"^2.4.0","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"5eb8a2a1cd12ab0d987a5d5e825195d372001a4094a0376319d5a0ad71c1ba0d","features":{},"yanked":false,"rust_version":"1.83","pubtime":"2025-11-26T17:46:02Z"}

@@ -1,0 +1,1 @@
+{"name":"block-buffer","vers":"0.10.4","deps":[{"name":"generic-array","req":"^0.14","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71","features":{},"yanked":false,"pubtime":"2023-03-09T02:08:25Z"}

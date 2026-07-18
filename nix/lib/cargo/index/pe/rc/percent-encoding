@@ -1,0 +1,1 @@
+{"name":"percent-encoding","vers":"2.3.2","deps":[],"cksum":"9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220","features":{"alloc":[],"default":["std"],"std":["alloc"]},"yanked":false,"rust_version":"1.51","pubtime":"2025-08-21T08:46:50Z"}

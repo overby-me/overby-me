@@ -1,0 +1,2 @@
+{"name":"windows_x86_64_msvc","vers":"0.52.6","deps":[],"cksum":"589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2024-07-03T19:44:07Z"}
+{"name":"windows_x86_64_msvc","vers":"0.53.1","deps":[],"cksum":"d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-10-06T17:34:07Z"}

@@ -7,6 +7,7 @@
   nushell,
   fetchurl,
   writeText,
+  symlinkJoin,
 }: let
   cargoLib = import ../lib;
   buildCrate = import ./buildCrate.nix {inherit lib stdenv rustc nushell writeText;};
@@ -15,12 +16,15 @@ in
     src,
     # Path to a registry index checkout (snapshot mini-index or full index).
     index,
+    # Set when the workspace manifest is not at the root of src (projects
+    # with path dependencies on sibling directories).
+    manifestDir ? "",
     lockFile ? null,
     pname ? null,
     # Root package features.
     features ? [],
     noDefaultFeatures ? false,
-    # Workspace member to build. Defaults to the sole member.
+    # Workspace members to build. Defaults to all members.
     roots ? null,
     # Subset of [[bin]] targets to build (names). null builds all.
     bins ? null,
@@ -28,29 +32,26 @@ in
     # Per-crate derivation attribute merges, keyed by crate name:
     # { openssl-sys = { buildInputs = [ openssl ]; nativeBuildInputs = [ pkg-config ]; }; }
     crateOverrides ? {},
+    # Extra derivation attrs for the root crate (postInstall, env, ...).
+    rootAttrs ? {},
     meta ? {},
   }: let
     inherit (builtins) attrNames concatStringsSep elem filter foldl' hashString head length mapAttrs readFile substring;
 
     platform = cargoLib.cfg.platformFromSystem stdenv.hostPlatform.system;
-    workspace = cargoLib.manifest.loadWorkspace src;
+    workspace = cargoLib.manifest.loadWorkspace {inherit src manifestDir;};
     lock = cargoLib.lock.parseLock (readFile (
       if lockFile != null
       then lockFile
-      else cargoLib.manifest.joinPath src "Cargo.lock"
+      else cargoLib.manifest.joinPath (cargoLib.manifest.joinPath src manifestDir) "Cargo.lock"
     ));
 
     rootNames =
       if roots != null
       then roots
-      else if length workspace.members == 1
-      then [(head workspace.members).name]
-      else throw "buildCargoProject: workspace has ${toString (length workspace.members)} members; set roots = [ \"name\" ]";
+      else map (m: m.name) workspace.members;
 
-    rootName =
-      if length rootNames == 1
-      then head rootNames
-      else throw "buildCargoProject: exactly one root supported for now";
+    singleRoot = length rootNames == 1;
 
     resolved = cargoLib.resolve.resolve {
       inherit lock platform workspace;
@@ -130,7 +131,7 @@ in
     drvs = mapAttrs mkCrate nodes;
 
     mkCrate = id: node: let
-      isRoot = node.isWorkspaceMember && node.pkg.name == rootName;
+      isRoot = node.isWorkspaceMember && elem node.pkg.name rootNames;
       dedupeByName = edges:
         builtins.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
     in
@@ -169,21 +170,37 @@ in
         crateHash = hashOf id node;
         extraAttrs =
           (crateOverrides.${node.pkg.name} or {})
-          // lib.optionalAttrs isRoot {
-            pname =
-              if pname != null
-              then pname
-              else node.pkg.name;
-            inherit meta;
-            passthru =
-              {
-                crates = drvs;
-                inherit nodes;
-              }
-              // (crateOverrides.${node.pkg.name}.passthru or {});
-          };
+          // lib.optionalAttrs (isRoot && singleRoot) ({
+              pname =
+                if pname != null
+                then pname
+                else node.pkg.name;
+              inherit meta;
+              passthru =
+                {
+                  crates = drvs;
+                  inherit nodes;
+                }
+                // (crateOverrides.${node.pkg.name}.passthru or {});
+            }
+            // rootAttrs);
       };
 
     rootId = head resolved.rootIds;
   in
-    drvs.${rootId}
+    if singleRoot
+    then drvs.${rootId}
+    else
+      symlinkJoin ({
+          name =
+            if pname != null
+            then pname
+            else throw "buildCargoProject: set pname when building several workspace members";
+          paths = map (i: drvs.${i}) resolved.rootIds;
+          passthru = {
+            crates = drvs;
+            inherit nodes;
+          };
+          inherit meta;
+        }
+        // rootAttrs)

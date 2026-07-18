@@ -240,13 +240,17 @@ packages.my-tool = { lib, ... }:
 - [x] M5: `buildCrate.nix` + `buildCargoProject.nix`: wclip builds and runs.
 - [x] M6: xz `[[bin]]` builds and runs (native linking via overrides,
       dev-deps excluded); flakelight module + checks wired; README.md.
-- [ ] M7: differential oracle tool; all repo lockfiles resolve identically to
-      `cargo metadata` (features, graph) or have tracked exceptions.
+- [x] M7: differential oracle tool (`tools/diff-cargo.nu`, oracle is
+      `cargo tree`, which is feature-pruned where cargo metadata is not);
+      all 34 rust/* projects resolve identically to cargo (graph and
+      feature sets), including virtual workspaces and cross-project path
+      dependencies.
 - [ ] M8: resolver v2 (host/target split); migrate first real package in-repo.
 
 Later (not scheduled): rmeta pipelining, git dependencies, `[patch]`,
-workspaces with multiple members in one lock, tests/benches targets, cachix
-population job, scheduled oracle sweeps against crates.io top-N.
+tests/benches targets, cachix population job, scheduled oracle sweeps
+against crates.io top-N. (Multi-member workspaces and cross-project path
+dependencies landed with M7.)
 
 ## Decision log
 
