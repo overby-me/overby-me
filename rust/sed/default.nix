@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-sed = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-sed = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-sed";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,7 +13,7 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A GNU sed-compatible stream editor written in Rust";
@@ -28,13 +24,9 @@
         };
       };
 
-    rust-sed-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-sed-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-sed-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -45,9 +37,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
         meta = {
           description = "A GNU sed-compatible stream editor written in Rust (dev build, fast compile)";
