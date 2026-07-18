@@ -124,6 +124,17 @@ let
 
   snakeName = replaceStrings ["-"] ["_"];
 
+  # Cargo.toml is polymorphic in places (and real-world manifests abuse
+  # it further); coerce defensively instead of crashing mid-eval.
+  asString = v:
+    if isString v
+    then v
+    else toString v;
+  asList = v:
+    if builtins.isList v
+    then v
+    else [v];
+
   # Discover [[bin]] targets: explicit entries, src/main.rs, src/bin/*.
   discoverBins = dir: pkgName: manifest: let
     explicit =
@@ -141,7 +152,7 @@ let
           );
         requiredFeatures = b."required-features" or [];
       })
-      (manifest.bin or []);
+      (asList (manifest.bin or []));
     explicitNames = map (b: b.name) explicit;
     explicitPaths = map (b: b.path) explicit;
     autoMain =
@@ -203,13 +214,16 @@ let
       name = e.name or (snakeName pkgName);
       path = e.path or "src/lib.rs";
       inherit procMacro;
-      crateTypes =
+      # crate-type is specified as a list but appears as a bare string in
+      # the wild; accept both.
+      crateTypes = asList (
         e."crate-type"
         or (e.crate_type or (
           if procMacro
           then ["proc-macro"]
           else ["lib"]
-        ));
+        ))
+      );
     };
 
   # Normalize a member package.
@@ -229,27 +243,30 @@ let
     pkg = manifest.package;
     field = name: default: resolveField wsPackage name (pkg.${name} or default);
     inherit (pkg) name;
-  in {
-    inherit name relDir wsRelDir;
-    version = field "version" "0.0.0";
-    edition = field "edition" "2015";
-    description = field "description" "";
-    license = field "license" "";
-    repository = field "repository" "";
-    links = pkg.links or null;
-    hasBuildScript = pkg ? build || pathExists (joinPath dir "build.rs");
-    buildScript =
-      if pkg ? build && isString pkg.build
-      then pkg.build
-      else if pathExists (joinPath dir "build.rs")
-      then "build.rs"
-      else null;
-    deps = normalizeDeps wsDeps manifest;
-    features = manifest.features or {};
-    lib = discoverLib dir name manifest;
-    bins = discoverBins dir name manifest;
-    resolver = manifest.workspace.resolver or (pkg.resolver or null);
-  };
+  in
+    # Per-field error context: lazy fields forced later still identify
+    # their crate when a shape surprise throws.
+    builtins.mapAttrs (_: builtins.addErrorContext "while normalizing cargo package ${name} (${toString dir})") {
+      inherit name relDir wsRelDir;
+      version = asString (field "version" "0.0.0");
+      edition = asString (field "edition" "2015");
+      description = field "description" "";
+      license = field "license" "";
+      repository = field "repository" "";
+      links = pkg.links or null;
+      hasBuildScript = pkg ? build || pathExists (joinPath dir "build.rs");
+      buildScript =
+        if pkg ? build && isString pkg.build
+        then pkg.build
+        else if pathExists (joinPath dir "build.rs")
+        then "build.rs"
+        else null;
+      deps = normalizeDeps wsDeps manifest;
+      features = manifest.features or {};
+      lib = discoverLib dir name manifest;
+      bins = discoverBins dir name manifest;
+      resolver = manifest.workspace.resolver or (pkg.resolver or null);
+    };
 
   # Expand [workspace] member globs. Supports literals and a single
   # trailing "/*" component (the common cases).

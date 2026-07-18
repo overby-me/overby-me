@@ -29,15 +29,17 @@ def plan-from-manifest [root: string] {
   } else {
     let l = ($libt | default {})
     let proc = ($l | get -o proc-macro | default ($l | get -o proc_macro) | default false)
+    let ct = (
+      $l | get -o crate-type
+      | default ($l | get -o crate_type)
+      | default (if $proc { ["proc-macro"] } else { ["lib"] })
+    )
     {
       name: ($l | get -o name | default (snake $pkg.name)),
       path: ($l | get -o path | default "src/lib.rs"),
       procMacro: $proc,
-      crateTypes: (
-        $l | get -o crate-type
-        | default ($l | get -o crate_type)
-        | default (if $proc { ["proc-macro"] } else { ["lib"] })
-      ),
+      # Specified as a list, seen as a bare string in the wild.
+      crateTypes: (if ($ct | describe) == "string" { [$ct] } else { $ct }),
     }
   }
   let build_field = ($pkg | get -o build)
@@ -48,16 +50,17 @@ def plan-from-manifest [root: string] {
   } else {
     $build_field
   }
+  let authors0 = ($pkg | get -o authors | default [])
   {
     name: $pkg.name,
-    version: $pkg.version,
-    edition: ($pkg | get -o edition | default "2015"),
+    version: ($pkg.version | into string),
+    edition: ($pkg | get -o edition | default "2015" | into string),
     links: ($pkg | get -o links),
     description: ($pkg | get -o description | default ""),
     license: ($pkg | get -o license | default ""),
     repository: ($pkg | get -o repository | default ""),
-    authors: ($pkg | get -o authors | default []),
-    rustVersion: ($pkg | get -o rust-version | default ""),
+    authors: (if ($authors0 | describe) == "string" { [$authors0] } else { $authors0 }),
+    rustVersion: ($pkg | get -o rust-version | default "" | into string),
     lib: $lib_plan,
     build: $build,
     bins: [],

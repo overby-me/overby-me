@@ -9,7 +9,7 @@
     # Pure eval unit tests: importing a test file throws on failure, so
     # instantiating this derivation is the assertion.
     cargo-lib = pkgs: let
-      names = ["semver" "cfg" "lock" "index" "manifest" "resolve" "resolve-real"];
+      names = ["semver" "cfg" "lock" "index" "manifest" "shapes" "resolve" "resolve-real"];
       results = map (n: "${n}: ${import (./tests + "/${n}.nix")}") names;
     in
       pkgs.writeText "cargo-lib-tests" (builtins.concatStringsSep "\n" results);
