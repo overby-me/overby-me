@@ -252,6 +252,28 @@ tests/benches targets, cachix population job, scheduled oracle sweeps
 against crates.io top-N. (Multi-member workspaces and cross-project path
 dependencies landed with M7.)
 
+## Benchmark (rust/systemd, 2026-07-18)
+
+Largest workspace in the repo: 100 members, 322 locked crates, 80 binaries,
+measured on 22 cores (max-jobs 22) against `buildRustPackage` + `cargoLock`.
+Incremental = one comment line appended to `crates/cat/src/main.rs`.
+
+| Scenario | buildRustPackage | buildCargoProject |
+|---|---|---|
+| Cold build, full workspace | 2m32s | ~5m08s |
+| One-line edit in one member | 2m11s | 3.8s |
+| No-op rebuild | ~1s | 1.3s |
+
+Cold is ~2x slower: per-derivation sandbox setup for ~260 crates plus the
+lost cargo rmeta pipelining (the planned split-rmeta optimization attacks
+both). Incremental is ~34x faster: only the edited member and the symlink
+join rebuild, while buildRustPackage recompiles all 322 crates for any
+source change. Cold builds happen once per dependency-set change and are
+amortized further by the shared per-crate binary cache across the repo's
+34 Rust projects; the incremental case is every development iteration.
+(The new cold number is derived: 7m40s measured through an `--impure`
+harness minus its measured 2m32s fixed eval overhead.)
+
 ## Decision log
 
 - 2026-07-18: Library lives at `nix/lib/cargo/`, sibling of `nix/lib/deno`;
