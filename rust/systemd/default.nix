@@ -13,13 +13,9 @@
   };
 
   packages = {
-    rust-systemd = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-systemd = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-systemd";
-        version = "unstable";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -30,11 +26,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildFeatures = ["dbus_support"];
-
-        doCheck = false;
+        features = ["dbus_support"];
 
         meta = {
           description = "A service manager that is able to run \"traditional\" systemd services, written in rust";
