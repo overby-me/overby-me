@@ -2,12 +2,11 @@
   packages = {
     rust-xz = {
       lib,
-      rustPlatform,
+      pkg-config,
       xz,
     }:
-      rustPlatform.buildRustPackage {
+      lib.buildCargoProject {
         pname = "rust-xz";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -20,11 +19,14 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        nativeBuildInputs = [xz];
+        crateOverrides.liblzma-sys = {
+          nativeBuildInputs = [pkg-config];
+          buildInputs = [xz];
+        };
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/xz $out/bin/unxz
           ln -s $out/bin/xz $out/bin/xzcat
           ln -s $out/bin/xz $out/bin/lzma
@@ -45,12 +47,11 @@
     # trick `rust-awk-dev` uses.
     rust-xz-dev = {
       lib,
-      rustPlatform,
+      pkg-config,
       xz,
     }:
-      rustPlatform.buildRustPackage {
+      lib.buildCargoProject {
         pname = "rust-xz-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -63,13 +64,15 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
+        release = false;
 
-        nativeBuildInputs = [xz];
+        crateOverrides.liblzma-sys = {
+          nativeBuildInputs = [pkg-config];
+          buildInputs = [xz];
+        };
 
-        buildType = "debug";
-
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/xz $out/bin/unxz
           ln -s $out/bin/xz $out/bin/xzcat
           ln -s $out/bin/xz $out/bin/lzma
