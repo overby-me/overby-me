@@ -1,14 +1,12 @@
 {
   packages.rust-cachix = {
     lib,
-    rustPlatform,
     pkg-config,
-    openssl,
     xz,
+    ...
   }:
-    rustPlatform.buildRustPackage {
+    lib.buildCargoProject {
       pname = "rust-cachix";
-      version = "unstable";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -19,16 +17,12 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
-      nativeBuildInputs = [
-        pkg-config
-      ];
-
-      buildInputs = [
-        openssl
-        xz
-      ];
+      crateOverrides.lzma-sys = {
+        nativeBuildInputs = [pkg-config];
+        buildInputs = [xz];
+      };
 
       meta = {
         description = "Rust port of the Cachix CLI client for Nix binary cache hosting";
