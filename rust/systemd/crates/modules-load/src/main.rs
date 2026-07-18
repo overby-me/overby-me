@@ -36,8 +36,9 @@ const CONFIG_DIRS: &[&str] = &[
 #[derive(Parser, Debug)]
 #[command(name = "systemd-modules-load", version, about)]
 struct Cli {
-    /// Modules to load (overrides reading from configuration files)
-    modules: Vec<String>,
+    /// Configuration files to read (overrides the standard modules-load.d
+    /// directories). Each file lists module names, one per line.
+    config_files: Vec<PathBuf>,
 }
 
 /// Represents a module to load, with optional parameters.
@@ -201,19 +202,14 @@ fn load_module(module: &ModuleEntry, verbose: bool) -> bool {
     match cmd.status() {
         Ok(status) => {
             if status.success() {
-                if verbose {
-                    eprintln!(
-                        "systemd-modules-load: Successfully loaded module '{}'.",
-                        module.name
-                    );
-                }
+                // Report the insertion at info level (unconditionally, like
+                // systemd's log_info), so callers observing stderr see it.
+                eprintln!("Inserted module '{}'", module.name);
                 true
             } else {
-                eprintln!(
-                    "systemd-modules-load: Failed to load module '{}': modprobe exited with {}",
-                    module.name,
-                    status.code().unwrap_or(-1)
-                );
+                // Match systemd's message + format (line-start, no prefix) so
+                // callers can grep "^Failed to find module".
+                eprintln!("Failed to find module '{}'", module.name);
                 false
             }
         }
@@ -227,6 +223,38 @@ fn load_module(module: &ModuleEntry, verbose: bool) -> bool {
     }
 }
 
+/// Normalize a module name the way the kernel/modprobe does: a dash is
+/// equivalent to an underscore.  systemd-modules-load reports and deduplicates
+/// modules on the normalized name.
+fn normalize_name(name: &str) -> String {
+    name.replace('-', "_")
+}
+
+/// Parse `modules_load=` / `rd.modules_load=` entries from the kernel command
+/// line (honoring `$SYSTEMD_PROC_CMDLINE` for testing).  Each value is a
+/// comma-separated list of module names.
+fn cmdline_modules() -> Vec<String> {
+    let cmdline = std::env::var("SYSTEMD_PROC_CMDLINE")
+        .ok()
+        .or_else(|| fs::read_to_string("/proc/cmdline").ok())
+        .unwrap_or_default();
+    let mut out = Vec::new();
+    for tok in cmdline.split_whitespace() {
+        if let Some(val) = tok
+            .strip_prefix("modules_load=")
+            .or_else(|| tok.strip_prefix("rd.modules_load="))
+        {
+            for m in val.split(',') {
+                let m = m.trim();
+                if !m.is_empty() {
+                    out.push(m.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
 fn run() -> u8 {
     let cli = Cli::parse();
 
@@ -234,85 +262,67 @@ fn run() -> u8 {
         .map(|v| v == "debug" || v == "info")
         .unwrap_or(false);
 
-    let modules: Vec<ModuleEntry>;
-
-    if !cli.modules.is_empty() {
-        // Modules specified on the command line
-        modules = cli
-            .modules
-            .iter()
-            .map(|name| ModuleEntry { name: name.clone() })
-            .collect();
-        if verbose {
-            eprintln!(
-                "systemd-modules-load: Loading {} module(s) from command line.",
-                modules.len()
-            );
-        }
+    // Configuration files: the explicit ones given on the command line, or the
+    // standard modules-load.d directories when none were specified.  The
+    // positional arguments are *config file paths*, not module names (matching
+    // systemd-modules-load's `[CONFIGURATION FILE...]` interface).
+    let explicit = !cli.config_files.is_empty();
+    let config_files = if explicit {
+        cli.config_files.clone()
     } else {
-        // Read from configuration files
-        let config_files = discover_config_files();
-        if verbose {
-            eprintln!(
-                "systemd-modules-load: Found {} configuration file(s).",
-                config_files.len()
-            );
-        }
+        discover_config_files()
+    };
 
-        let mut all_modules = Vec::new();
-        let mut seen = BTreeSet::new();
+    let mut all_modules: Vec<ModuleEntry> = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut config_error = false;
 
-        for path in &config_files {
-            match parse_config_file(path) {
-                Ok(file_modules) => {
-                    if verbose {
-                        eprintln!(
-                            "systemd-modules-load: Read {} module(s) from {}",
-                            file_modules.len(),
-                            path.display()
-                        );
-                    }
-                    for m in file_modules {
-                        if seen.insert(m.name.clone()) {
-                            all_modules.push(m);
-                        }
+    for path in &config_files {
+        match parse_config_file(path) {
+            Ok(file_modules) => {
+                for m in file_modules {
+                    // Normalize (dashes -> underscores, like the kernel) and
+                    // deduplicate on the normalized name.
+                    let norm = normalize_name(&m.name);
+                    if seen.insert(norm.clone()) {
+                        all_modules.push(ModuleEntry { name: norm });
                     }
                 }
-                Err(e) => {
-                    eprintln!(
-                        "systemd-modules-load: Failed to read {}: {}",
-                        path.display(),
-                        e
-                    );
+            }
+            Err(e) => {
+                eprintln!(
+                    "systemd-modules-load: Failed to read {}: {}",
+                    path.display(),
+                    e
+                );
+                // Failing to read an explicitly-specified configuration file is
+                // fatal; a missing standard directory is not.
+                if explicit {
+                    config_error = true;
                 }
             }
         }
-
-        modules = all_modules;
     }
 
-    if modules.is_empty() {
-        if verbose {
-            eprintln!("systemd-modules-load: No modules to load.");
-        }
-        return EXIT_SUCCESS;
-    }
-
-    if verbose {
-        eprintln!(
-            "systemd-modules-load: Loading {} module(s)...",
-            modules.len()
-        );
-    }
-
-    let mut any_failed = false;
-    for module in &modules {
-        if !load_module(module, verbose) {
-            any_failed = true;
+    // Kernel command-line modules_load= entries, matching the boot-time
+    // invocation (only when no explicit config files were requested).
+    if !explicit {
+        for m in cmdline_modules() {
+            let norm = normalize_name(&m);
+            if seen.insert(norm.clone()) {
+                all_modules.push(ModuleEntry { name: norm });
+            }
         }
     }
 
-    if any_failed {
+    // Load each module.  Individual load failures are reported (see
+    // load_module) but are not fatal — only an unreadable explicit config file
+    // makes us exit non-zero, matching systemd-modules-load.
+    for module in &all_modules {
+        let _ = load_module(module, verbose);
+    }
+
+    if config_error {
         EXIT_FAILURE
     } else {
         EXIT_SUCCESS
