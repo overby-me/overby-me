@@ -317,6 +317,52 @@ fn check_poll_rate_limit(run_info: &ArcMutRuntimeInfo, info: &SocketActivationIn
     false
 }
 
+/// Whether the target service is currently blocked from being started by a
+/// `Conflicts=` unit that is activating (Starting) or active (Started).  The
+/// implicit `shutdown.target` conflict added by DefaultDependencies is ignored:
+/// it is a passive artifact present on every unit and must not block socket
+/// activation (only a real shutdown, which stops everything, matters).
+fn conflict_blocks_activation(
+    deps: &crate::units::Dependencies,
+    unit_table: &crate::runtime_info::UnitTable,
+) -> bool {
+    deps.conflicts.iter().any(|cid| {
+        // The implicit Conflicts=shutdown.target (from DefaultDependencies) is
+        // not a real activation conflict; ignore it.
+        if cid.name == "shutdown.target" {
+            return false;
+        }
+        let Some(cu) = unit_table.get(cid) else {
+            return false;
+        };
+        // A unit that is activating (Starting) or active (Started) blocks the
+        // conflicting service from starting. Drop the status lock before we
+        // reach for the service state lock below.
+        let started = {
+            match &*cu.common.status.read_poisoned() {
+                UnitStatus::Starting => return true,
+                UnitStatus::Started(_) => true,
+                _ => false,
+            }
+        };
+        if !started {
+            return false;
+        }
+        // A clean-exited oneshot with RemainAfterExit=no keeps its status as
+        // Started only so the boot activation graph walker can see it as
+        // completed, but it is effectively inactive (issue #27953) and must
+        // not keep a deferred socket blocked. Mirror the `is-active` check.
+        if let Specific::Service(srvc) = &cu.specific
+            && srvc.conf.srcv_type == crate::units::ServiceType::OneShot
+            && !srvc.conf.remain_after_exit
+            && srvc.state.read_poisoned().srvc.pid.is_none()
+        {
+            return false;
+        }
+        true
+    })
+}
+
 /// Handle socket activation for Accept=no sockets (traditional mode).
 fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
     // Check poll rate limit before processing
@@ -357,6 +403,40 @@ fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
         let status_locked = &*srvc_unit.common.status.read_poisoned();
         status_locked.clone()
     };
+
+    // DeferTrigger=: if the target service has a Conflicts= unit that is
+    // currently activating (Starting) or active (Started), starting the service
+    // now would be blocked.  Instead of failing, enter the `deferred` state and
+    // let the wait loop retry once the conflict clears (or fail after
+    // DeferTriggerMaxSec=).  Only applies when DeferTrigger= is Yes/Patient.
+    let defer_trigger = match unit_table.get(&info.socket_id).map(|u| &u.specific) {
+        Some(Specific::Socket(s)) => s.conf.defer_trigger.clone(),
+        _ => crate::units::DeferTrigger::No,
+    };
+    if !matches!(defer_trigger, crate::units::DeferTrigger::No) {
+        let conflict_active =
+            conflict_blocks_activation(&srvc_unit.common.dependencies, unit_table);
+        if conflict_active {
+            if let Some(Specific::Socket(specific)) =
+                unit_table.get(&info.socket_id).map(|u| &u.specific)
+            {
+                let mut st = specific.state.write_poisoned();
+                // We are deferring: undo the activated mark set above so the
+                // service is not considered running, and record the deferral.
+                st.sock.activated = false;
+                if !st.sock.deferred {
+                    st.sock.deferred = true;
+                    st.sock.deferred_since = Some(std::time::Instant::now());
+                }
+                st.sock.deferred_service = Some(service_id.clone());
+            }
+            trace!(
+                "Socket {} deferring activation: a Conflicts= unit is still active",
+                info.socket_id.name
+            );
+            return;
+        }
+    }
 
     if srvc_status == UnitStatus::Started(StatusStarted::WaitingForSocket)
         || srvc_status == UnitStatus::NeverStarted
@@ -685,7 +765,7 @@ fn count_connections_per_source(run_info: &ArcMutRuntimeInfo, socket_name: &str,
 
 pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, String> {
     let eventfd = { run_info.read_poisoned().socket_activation_eventfd };
-    let (mut fdset, fd_to_sock_id, mut select_timeout) = {
+    let (mut fdset, fd_to_sock_id, mut select_timeout, un_deferred_ids) = {
         // Use try_read() to yield to pending writers (e.g., find_or_load_unit).
         let run_info_locked = match run_info.try_read() {
             Ok(g) => g,
@@ -699,8 +779,77 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
         let fd_to_sock_id = run_info_locked.fd_store.read_poisoned().global_fds_to_ids();
         let mut fdset = nix::sys::select::FdSet::new();
         let mut earliest_resume: Option<Instant> = None;
+        // Sockets whose DeferTrigger= deferral just cleared this cycle; they are
+        // returned as triggered so the caller re-runs handle_accept_no and
+        // activates the service (the original connection may no longer keep the
+        // fd readable, so we cannot rely on select() re-reporting it).
+        let mut un_deferred_ids: Vec<UnitId> = Vec::new();
         {
             let unit_table_locked = &run_info_locked.unit_table;
+
+            // Re-evaluate DeferTrigger= deferred sockets: if the blocking
+            // Conflicts= unit has cleared, un-defer so the socket's fd is
+            // re-included below and handle_accept_no retries the activation.
+            // Read the conflict statuses WITHOUT holding the socket state write
+            // lock, to avoid a lock-order inversion with the service exit
+            // handler (which takes a service status lock then a socket state
+            // lock while re-arming sockets).
+            for (_fd, id) in &fd_to_sock_id {
+                let Some(unit) = unit_table_locked.get(id) else {
+                    continue;
+                };
+                let Specific::Socket(specific) = &unit.specific else {
+                    continue;
+                };
+                let (svc_id, deferred_since) = {
+                    let st = specific.state.read_poisoned();
+                    if !st.sock.deferred {
+                        continue;
+                    }
+                    (st.sock.deferred_service.clone(), st.sock.deferred_since)
+                };
+                // DeferTriggerMaxSec=: fail the socket if it stayed deferred too
+                // long.  Set activated=true so it is excluded from the select
+                // set (no re-trigger) and transition the unit to failed.
+                if let Some(max) = specific.conf.defer_trigger_max_sec
+                    && let Some(since) = deferred_since
+                    && now.duration_since(since) >= std::time::Duration::from_secs(max)
+                {
+                    {
+                        let mut st = specific.state.write_poisoned();
+                        st.sock.deferred = false;
+                        st.sock.deferred_since = None;
+                        st.sock.deferred_service = None;
+                        st.sock.activated = true;
+                    }
+                    {
+                        let mut status = unit.common.status.write_poisoned();
+                        *status = UnitStatus::Stopped(
+                            StatusStopped::StoppedFinal,
+                            vec![UnitOperationErrorReason::GenericStartError(
+                                "DeferTriggerMaxSec= elapsed".to_string(),
+                            )],
+                        );
+                    }
+                    continue;
+                }
+                let still_blocked = svc_id
+                    .as_ref()
+                    .and_then(|sid| unit_table_locked.get(sid))
+                    .map(|svc| conflict_blocks_activation(&svc.common.dependencies, unit_table_locked))
+                    .unwrap_or(false);
+                if !still_blocked {
+                    {
+                        let mut st = specific.state.write_poisoned();
+                        st.sock.deferred = false;
+                        st.sock.deferred_since = None;
+                        st.sock.deferred_service = None;
+                    }
+                    // Re-run activation now that the conflict has cleared.
+                    un_deferred_ids.push((*id).clone());
+                }
+            }
+
             for (fd, id) in &fd_to_sock_id {
                 let Some(unit) = unit_table_locked.get(id) else {
                     // Unit was removed (e.g. during daemon-reload) but its
@@ -728,6 +877,17 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
                             state.sock.poll_timestamps.clear();
                         }
                     }
+                    // DeferTrigger=: a deferred socket is excluded from the
+                    // select set and re-checked on a short timer (the re-eval
+                    // pass above clears `deferred` once the conflict lifts).
+                    if state.sock.deferred {
+                        let recheck = now + std::time::Duration::from_millis(200);
+                        earliest_resume = Some(match earliest_resume {
+                            Some(e) => e.min(recheck),
+                            None => recheck,
+                        });
+                        continue;
+                    }
                     // For Accept=yes sockets, always keep listening (never mark activated)
                     // For Accept=no sockets, skip if already activated
                     if !state.sock.activated || specific.conf.accept {
@@ -752,7 +912,7 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
             tv
         });
 
-        (fdset, fd_to_sock_id, timeout)
+        (fdset, fd_to_sock_id, timeout, un_deferred_ids)
     };
 
     let result =
@@ -770,6 +930,13 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
             for (fd, id) in &fd_to_sock_id {
                 if fdset.contains(unsafe { borrow_fd(*fd) }) {
                     activated_ids.push(id.clone());
+                }
+            }
+            // Sockets whose DeferTrigger= deferral cleared this cycle must be
+            // (re)activated even if their fd is no longer readable.
+            for id in un_deferred_ids {
+                if !activated_ids.contains(&id) {
+                    activated_ids.push(id);
                 }
             }
             Ok(activated_ids)

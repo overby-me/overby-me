@@ -411,4 +411,14 @@ pub struct Socket {
     pub poll_timestamps: Vec<std::time::Instant>,
     /// When set, the socket is paused due to poll rate limiting until this instant.
     pub poll_limit_paused_until: Option<std::time::Instant>,
+    /// DeferTrigger=: true when socket activation is deferred because the
+    /// triggered service is blocked by an activating Conflicts= unit. While
+    /// deferred the socket is excluded from the select() set and re-checked on
+    /// a timer (SubState `deferred`).
+    pub deferred: bool,
+    /// When the socket entered the deferred state (for DeferTriggerMaxSec=).
+    pub deferred_since: Option<std::time::Instant>,
+    /// The service unit whose Conflicts= caused the deferral, so the wait loop
+    /// can re-check whether the conflict has cleared without re-resolving it.
+    pub deferred_service: Option<crate::units::UnitId>,
 }

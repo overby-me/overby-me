@@ -137,6 +137,7 @@ fn parse_socket_section(
     let netlinks = section.remove("LISTENNETLINK");
     let specials = section.remove("LISTENSPECIAL");
     let defer_trigger = section.remove("DEFERTRIGGER");
+    let defer_trigger_max_sec = section.remove("DEFERTRIGGERMAXSEC");
     let accept = section.remove("ACCEPT");
     let max_connections = section.remove("MAXCONNECTIONS");
     let max_connections_per_source = section.remove("MAXCONNECTIONSPERSOURCE");
@@ -490,6 +491,28 @@ fn parse_socket_section(
             }
         }
         None => crate::units::DeferTrigger::No,
+    };
+
+    let defer_trigger_max_sec: Option<u64> = match defer_trigger_max_sec {
+        Some(vec) => {
+            if vec.len() == 1 {
+                let val = vec[0].1.trim();
+                if val.is_empty() {
+                    None
+                } else {
+                    match super::service_unit::parse_timeout(val) {
+                        super::Timeout::Duration(d) => Some(d.as_secs()),
+                        super::Timeout::Infinity => None,
+                    }
+                }
+            } else {
+                return Err(ParsingErrorReason::SettingTooManyValues(
+                    "DeferTriggerMaxSec".to_owned(),
+                    super::map_tuples_to_second(vec),
+                ));
+            }
+        }
+        None => None,
     };
 
     let pass_credentials = match pass_credentials {
@@ -1347,6 +1370,7 @@ fn parse_socket_section(
         symlinks,
         timestamping,
         defer_trigger,
+        defer_trigger_max_sec,
         writable,
         backlog,
         bind_ipv6_only,

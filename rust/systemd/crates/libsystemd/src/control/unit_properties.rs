@@ -215,17 +215,24 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         if matches!(&*status, UnitStatus::Started(_))
             && let Specific::Socket(specific) = &unit.specific
         {
-            let running = {
-                let st = specific.state.read_poisoned();
-                if specific.conf.accept {
-                    // Accept=yes: running while accepted connections are serviced.
-                    st.sock.active_accept_connections > 0
+            let st = specific.state.read_poisoned();
+            let sub = if st.sock.deferred {
+                // DeferTrigger=: a connection is pending but activation is
+                // deferred because a Conflicts= unit is currently activating.
+                "deferred"
+            } else if specific.conf.accept {
+                // Accept=yes: running while accepted connections are serviced.
+                if st.sock.active_accept_connections > 0 {
+                    "running"
                 } else {
-                    // Accept=no: running while the triggered service is active.
-                    st.sock.activated
+                    "listening"
                 }
+            } else if st.sock.activated {
+                // Accept=no: running while the triggered service is active.
+                "running"
+            } else {
+                "listening"
             };
-            let sub = if running { "running" } else { "listening" };
             insert(&mut props, "SubState", sub);
         }
 

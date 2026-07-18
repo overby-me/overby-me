@@ -1989,9 +1989,12 @@ pub struct ParsedSocketSection {
 
     /// DeferTrigger= — controls whether to defer triggering the associated
     /// service when a connection comes in. Takes a boolean or "patient".
-    /// Defaults to No. Parsed and stored; no runtime enforcement yet.
-    /// See systemd.socket(5).
+    /// Defaults to No. See systemd.socket(5).
     pub defer_trigger: DeferTrigger,
+
+    /// DeferTriggerMaxSec= — maximum time (seconds) the socket may stay in the
+    /// deferred state before it fails. None = no limit. See systemd.socket(5).
+    pub defer_trigger_max_sec: Option<u64>,
 
     /// Writable= — whether to open the FIFO or special file for writing
     /// as well (i.e. O_RDWR rather than O_RDONLY). Defaults to false.
