@@ -22,7 +22,7 @@ use std::process::{self, Command};
 )]
 struct Cli {
     /// List active mount points
-    #[arg(long, short)]
+    #[arg(long)]
     list: bool,
 
     /// Don't truncate output (no-op for our compact `--list` output, but
