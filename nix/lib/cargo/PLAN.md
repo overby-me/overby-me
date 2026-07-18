@@ -248,9 +248,11 @@ packages.my-tool = { lib, ... }:
 - [ ] M8: resolver v2 (host/target split); migrate first real package in-repo.
 
 Later (not scheduled): rmeta pipelining, git dependencies, `[patch]`,
-tests/benches targets, cachix population job, scheduled oracle sweeps
-against crates.io top-N. (Multi-member workspaces and cross-project path
-dependencies landed with M7.)
+tests/benches targets (a store-backed fake sparse registry, pnpm-style,
+is the right tool and doubles as the dyn-drvs planner later), profile
+fidelity (lto/strip), workspace exclude globs, cachix population job,
+scheduled oracle sweeps against crates.io top-N. (Multi-member
+workspaces and cross-project path dependencies landed with M7.)
 
 ## Benchmark (rust/systemd, 2026-07-18)
 
@@ -301,6 +303,23 @@ little on top for debug links. Incremental rebuilds are sub-second in all
 variants: the per-crate model makes the edited member the only work.
 Nightly-with-cranelift stays reproducible because rust-overlay pins its
 manifest set in flake.lock.
+
+## nocargo landmine audit (2026-07-19)
+
+Every issue in oxalica/nocargo's tracker checked against this library:
+
+| nocargo | Landmine | Status here |
+|---|---|---|
+| #16 | phantom build-script detection on plain bins | defused (wclip, corpus) |
+| #7 | build-deps missing from build.rs compile | defused (buildExterns; zstd-sys, liblzma-sys) |
+| #9 | index path case-folding (CoreFoundation-sys) | defused (relPath lowercases, unit test) |
+| #4 | index schema v2 / features2 | defused day one (merge + v>2 guard) |
+| #19, #21 | time-macros / deranged proc-macros | defused, live-tested: `time` project resolves identically to cargo, builds, macro output correct. Root cause difference: manifest-driven crate-type detection instead of nocargo's hardcoded proc-macro list |
+| #10 | manifest shape polymorphism ("list while a set was expected", trigger never diagnosed) | open class; guarded by the oracle and corpus, not provably closed |
+| #5 | LTO unsupported | honest gap here too: `[profile]` lto/strip are ignored (rust/xz sets both) |
+| #3, #14 | git deps (subfolders, workspaces) | deliberately unsupported, fails loud; tracked below |
+| README | cross-compilation | not attempted |
+| README | workspace `exclude` semantics | ours is literal match; cargo treats entries as globs |
 
 ## Decision log
 
