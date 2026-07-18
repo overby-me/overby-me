@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-make = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-make = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-make";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,9 +13,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/make $out/bin/gmake
         '';
 
@@ -32,13 +28,9 @@
         };
       };
 
-    rust-make-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-make-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-make-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -49,11 +41,11 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/make $out/bin/gmake
         '';
 
