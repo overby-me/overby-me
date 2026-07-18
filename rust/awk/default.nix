@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-awk = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-awk = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-awk";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,9 +13,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/awk $out/bin/gawk
         '';
 
@@ -32,13 +28,9 @@
         };
       };
 
-    rust-awk-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-awk-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-awk-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -49,11 +41,11 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/awk $out/bin/gawk
         '';
 
