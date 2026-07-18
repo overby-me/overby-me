@@ -41,15 +41,14 @@
         };
       };
 
-    # Fast-iteration development build: debug profile, cranelift codegen,
-    # wild linker. ~52s cold rebuilds of the whole workspace and sub-second
-    # single-member rebuilds (see nix/lib/cargo/PLAN.md benchmarks). The
-    # nightly toolchain is pinned through the rust-overlay input.
-    rust-systemd-dev = {
-      lib,
-      rust-bin,
-      ...
-    }:
+    # Fast-iteration development build used as the integration-test manager:
+    # debug profile, default LLVM codegen, wild linker.  ~15s hot rebuilds
+    # after a libsystemd change (vs ~49s release).  More importantly, the debug
+    # profile keeps integer-overflow checks and debug_assert!s compiled in, so
+    # latent manager bugs surface as visible PID 1 panics instead of the silent
+    # wraparound a release build would produce.  Behavior otherwise matches the
+    # release build; only optimization and these runtime checks differ.
+    rust-systemd-dev = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd-dev";
         version = "unstable";
@@ -68,18 +67,8 @@
         features = ["dbus_support"];
         release = false;
 
-        toolchain = rust-bin.nightly.latest.default.override {
-          extensions = ["rustc-codegen-cranelift-preview"];
-        };
-        rustcFlags = [
-          "-Zcodegen-backend=cranelift"
-          # Nightly defaults to rust-lld on x86_64-linux, which would bypass
-          # the wild -B shim; opt out so wild links here too.
-          "-Clinker-features=-lld"
-        ];
-
         meta = {
-          description = "rust-systemd built for fast development iteration (debug, cranelift, wild)";
+          description = "rust-systemd built for fast development iteration (debug + wild)";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/systemd";
           license = lib.licenses.mit;
           mainProgram = "systemd";
@@ -148,12 +137,20 @@
     rust-systemd-systemd = {
       runCommand,
       makeBinaryWrapper,
-      rust-systemd,
+      rust-systemd-dev,
       kbd,
       kmod,
       util-linuxMinimal,
       systemd,
-    }:
+      # `rust-systemd` (the release build) is still passed by the package
+      # framework; absorb it with `...` since we build from the dev variant.
+      ...
+    }: let
+      # Build the integration-test manager from the fast debug+wild dev build
+      # (see rust-systemd-dev above): quick rebuilds plus debug_assert!/overflow
+      # checks that surface manager bugs a release build would hide.
+      rust-systemd = rust-systemd-dev;
+    in
       runCommand "rust-systemd-systemd-${rust-systemd.version}"
       {
         nativeBuildInputs = [makeBinaryWrapper];

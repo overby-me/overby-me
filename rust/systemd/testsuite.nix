@@ -580,7 +580,10 @@ in
 
       # Give the VM enough resources for tests
       virtualisation = {
-        memorySize = 2048;
+        # The integration-test manager is built from the debug dev profile
+        # (rust-systemd-dev): its unoptimized PID 1 binary needs more RAM than
+        # the release build, so give the VM headroom to avoid an early-boot OOM.
+        memorySize = 4096;
         cores = 2;
       };
     };
