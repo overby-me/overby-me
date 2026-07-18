@@ -723,6 +723,20 @@ fn parse_timestamp(s: &str) -> Result<u64, String> {
         }
     }
 
+    // Bare time-of-day "HH:MM:SS" or "HH:MM" — systemd interprets these as
+    // today at that time (e.g. TEST-07-PID1.prefix-shell filters with
+    // `--since "$(date +%H:%M:%S)"`).
+    for fmt in &["%H:%M:%S", "%H:%M"] {
+        if let Ok(t) = chrono::NaiveTime::parse_from_str(s, fmt) {
+            let today = chrono::Local::now().date_naive();
+            if let chrono::LocalResult::Single(ldt) =
+                today.and_time(t).and_local_timezone(chrono::Local)
+            {
+                return Ok(ldt.timestamp_micros() as u64);
+            }
+        }
+    }
+
     Err(format!("Could not parse timestamp: {}", s))
 }
 
