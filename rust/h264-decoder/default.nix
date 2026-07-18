@@ -5,13 +5,9 @@
     ];
   };
 
-  packages.rust-h264-decoder = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-h264-decoder = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-h264-decoder";
-      version = "unstable";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -22,9 +18,7 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
-
-      doCheck = false;
+      index = ../../nix/lib/cargo/index;
 
       meta = {
         description = "A pure Rust H.264 decoder library";
