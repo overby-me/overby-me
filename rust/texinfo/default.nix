@@ -1,11 +1,7 @@
 {
-  packages.rust-texinfo = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-texinfo = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-texinfo";
-      version = "0.1.0";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -16,10 +12,10 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
       # Provide texi2any as an alias (some build systems use it)
-      postInstall = ''
+      rootAttrs.postInstall = ''
         ln -s $out/bin/makeinfo $out/bin/texi2any
       '';
 
