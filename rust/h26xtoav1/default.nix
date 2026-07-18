@@ -5,13 +5,9 @@
     ];
   };
 
-  packages.rust-h26xtoav1 = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-h26xtoav1 = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-h26xtoav1";
-      version = "unstable";
 
       src = lib.fileset.toSource {
         root = ./..;
@@ -28,11 +24,9 @@
         ];
       };
 
-      sourceRoot = "source/h26xtoav1";
+      manifestDir = "h26xtoav1";
 
-      cargoLock.lockFile = ./Cargo.lock;
-
-      doCheck = false;
+      index = ../../nix/lib/cargo/index;
 
       meta = {
         description = "A CLI tool to transcode H.264/H.265 video to AV1 using h264-decode, h265-decode, and rav1e";
