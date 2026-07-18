@@ -222,6 +222,12 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
             let mut last_fired: std::collections::HashMap<String, Instant> =
                 std::collections::HashMap::new();
 
+            // For DeferReactivation= timers: track whether the triggered unit
+            // was seen active since the last fire, so we can re-anchor the
+            // calendar reference to its deactivation time.
+            let mut defer_seen_active: std::collections::HashMap<String, bool> =
+                std::collections::HashMap::new();
+
             loop {
                 // Detect clock/timezone changes before checking timers
                 let tz_changed = change_detector.timezone_changed(&run_info);
@@ -238,6 +244,7 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
                     &run_info,
                     boot_instant,
                     &mut last_fired,
+                    &mut defer_seen_active,
                     tz_changed,
                     clock_changed,
                     pre_jump_wallclock,
@@ -256,6 +263,7 @@ fn check_and_fire_timers(
     run_info: &ArcMutRuntimeInfo,
     boot_instant: Instant,
     last_fired: &mut std::collections::HashMap<String, Instant>,
+    defer_seen_active: &mut std::collections::HashMap<String, bool>,
     timezone_changed: bool,
     clock_changed: bool,
     pre_jump_wallclock: Option<SystemTime>,
@@ -285,7 +293,48 @@ fn check_and_fire_timers(
                 let timer_name = &unit.id.name;
                 let target_unit = &conf.unit;
 
-                if should_fire_timer(
+                // DeferReactivation=: gate a repeating timer on the triggered
+                // unit's lifecycle. The next elapse is re-anchored to when the
+                // triggered unit deactivates rather than when the timer fired,
+                // and the timer will not fire again while it is still active.
+                if conf.defer_reactivation {
+                    let target_active = ri
+                        .unit_table
+                        .values()
+                        .find(|u| u.id.name == *target_unit)
+                        .map(|u| {
+                            !matches!(
+                                &*u.common.status.read_poisoned(),
+                                UnitStatus::Stopped(..) | UnitStatus::NeverStarted
+                            )
+                        })
+                        .unwrap_or(false);
+
+                    if !defer_seen_active.contains_key(timer_name) {
+                        // First time we see this armed timer: anchor the
+                        // calendar reference to now so the first elapse is the
+                        // next calendar boundary rather than an immediate,
+                        // boot-referenced fire.
+                        defer_seen_active.insert(timer_name.clone(), false);
+                        last_fired.insert(timer_name.clone(), now);
+                        continue;
+                    }
+                    if target_active {
+                        // Triggered unit still running — defer the next elapse.
+                        defer_seen_active.insert(timer_name.clone(), true);
+                        continue;
+                    }
+                    if defer_seen_active.get(timer_name).copied().unwrap_or(false) {
+                        // Triggered unit just deactivated — re-anchor the
+                        // calendar reference to now so the next elapse is
+                        // measured from the deactivation.
+                        last_fired.insert(timer_name.clone(), now);
+                        defer_seen_active.insert(timer_name.clone(), false);
+                        continue;
+                    }
+                }
+
+                let fire = should_fire_timer(
                     conf,
                     timer_name,
                     elapsed_since_boot,
@@ -294,7 +343,8 @@ fn check_and_fire_timers(
                     timezone_changed,
                     clock_changed,
                     pre_jump_wallclock,
-                ) {
+                );
+                if fire {
                     timers_to_fire.push((unit.id.clone(), target_unit.clone()));
                 }
             }
@@ -754,6 +804,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -788,6 +839,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -822,6 +874,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -857,6 +910,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -896,6 +950,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -935,6 +990,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -974,6 +1030,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1016,6 +1073,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1050,6 +1108,7 @@ mod tests {
             persistent: true,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1123,6 +1182,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1158,6 +1218,7 @@ mod tests {
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: false,
             on_timezone_change: false,
             unit: "test.service".into(),
@@ -1194,6 +1255,7 @@ mod tests {
                 persistent: false,
                 wake_system: false,
                 remain_after_elapse: true,
+            defer_reactivation: false,
                 on_clock_change: false,
                 on_timezone_change: false,
                 unit: "test.service".into(),
@@ -1215,6 +1277,7 @@ mod tests {
                 persistent: false,
                 wake_system: false,
                 remain_after_elapse: true,
+            defer_reactivation: false,
                 on_clock_change: false,
                 on_timezone_change: false,
                 unit: "test.service".into(),

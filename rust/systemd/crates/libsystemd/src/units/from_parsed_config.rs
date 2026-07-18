@@ -474,6 +474,7 @@ pub fn unit_from_parsed_timer(conf: ParsedTimerConfig) -> Result<Unit, String> {
         persistent: conf.timer.persistent,
         wake_system: conf.timer.wake_system,
         remain_after_elapse: conf.timer.remain_after_elapse,
+        defer_reactivation: conf.timer.defer_reactivation,
         on_clock_change: conf.timer.on_clock_change,
         on_timezone_change: conf.timer.on_timezone_change,
         unit: target_unit,

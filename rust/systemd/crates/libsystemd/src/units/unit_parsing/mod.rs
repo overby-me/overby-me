@@ -244,6 +244,9 @@ pub struct ParsedTimerSection {
     pub wake_system: bool,
     /// RemainAfterElapse= — if true, timer stays loaded after elapsing (default true).
     pub remain_after_elapse: bool,
+    /// DeferReactivation= — if true, re-arm a repeating calendar timer relative
+    /// to when the triggered unit deactivates, not when the timer fired.
+    pub defer_reactivation: bool,
     /// OnClockChange= — if true, the timer is triggered when the system clock
     /// jumps relative to the monotonic clock (e.g. DST change, NTP correction).
     /// See systemd.timer(5).

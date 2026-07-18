@@ -1063,6 +1063,11 @@ pub struct TimerConfig {
     pub wake_system: bool,
     /// RemainAfterElapse= — if true, timer stays loaded after elapsing (default true).
     pub remain_after_elapse: bool,
+    /// DeferReactivation= — if true, the next elapse of a repeating calendar
+    /// timer is computed relative to when the triggered unit last deactivated,
+    /// not when the timer fired, and the timer will not fire again while the
+    /// triggered unit is still active. See systemd.timer(5). Defaults to false.
+    pub defer_reactivation: bool,
     /// OnClockChange= — if true, the timer is triggered when the system clock
     /// jumps relative to the monotonic clock (e.g. DST change, NTP correction).
     /// See systemd.timer(5).

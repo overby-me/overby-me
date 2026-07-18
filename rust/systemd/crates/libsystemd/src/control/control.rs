@@ -4781,6 +4781,7 @@ fn create_transient_unit(
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
+            defer_reactivation: false,
             on_clock_change: params.on_clock_change,
             on_timezone_change: params.on_timezone_change,
             unit: service_unit_name.clone(),
