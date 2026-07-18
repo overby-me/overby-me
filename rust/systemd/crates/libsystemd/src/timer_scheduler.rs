@@ -293,6 +293,27 @@ fn check_and_fire_timers(
                 let timer_name = &unit.id.name;
                 let target_unit = &conf.unit;
 
+                // Persistent= timers whose saved last-trigger predates this boot
+                // must rebase their reference to boot time, so RandomizedDelaySec=
+                // still applies during boot and the timer does not fire
+                // immediately for the elapsed-while-off run (matches upstream).
+                // Seed last_fired to boot the first time we see such a timer so
+                // should_fire_timer computes the next elapse from boot rather
+                // than from the ancient stamp (which would elapse at once).
+                if conf.persistent && !last_fired.contains_key(timer_name) {
+                    let stamp_usec = timer_specific.state.read_poisoned().last_trigger_usec;
+                    if let Some(usec) = stamp_usec {
+                        let boot_wall = SystemTime::now()
+                            .checked_sub(elapsed_since_boot)
+                            .unwrap_or(SystemTime::UNIX_EPOCH);
+                        let stamp_wall =
+                            SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(usec);
+                        if stamp_wall < boot_wall {
+                            last_fired.insert(timer_name.clone(), boot_instant);
+                        }
+                    }
+                }
+
                 // DeferReactivation=: gate a repeating timer on the triggered
                 // unit's lifecycle. The next elapse is re-anchored to when the
                 // triggered unit deactivates rather than when the timer fired,
