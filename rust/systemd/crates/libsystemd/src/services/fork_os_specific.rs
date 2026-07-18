@@ -43,29 +43,6 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
         // service would fail with "File exists" when creating sub-cgroups.
         remove_delegate_children(&srvc.platform_specific.cgroup_path);
 
-        // When Delegate is enabled, chown the cgroup directory to the service user
-        // so the service process can manage its own sub-cgroup hierarchy.
-        if srvc.delegate != Delegate::No {
-            let uid = super::start_service::resolve_uid(&srvc.exec_config.user)
-                .map_err(|e| format!("Couldn't resolve user for cgroup delegation: {e}"))?;
-            let uid = nix::unistd::Uid::from_raw(uid);
-            let gid = super::start_service::resolve_gid(&srvc.exec_config.group)
-                .map_err(|e| format!("Couldn't resolve group for cgroup delegation: {e}"))?;
-            let gid = nix::unistd::Gid::from_raw(gid);
-            trace!(
-                "Delegating cgroup {:?} to uid={} gid={}",
-                &srvc.platform_specific.cgroup_path, uid, gid
-            );
-            nix::unistd::chown(&srvc.platform_specific.cgroup_path, Some(uid), Some(gid)).map_err(
-                |e| {
-                    format!(
-                        "Couldnt chown service cgroup ({:?}) to uid={} gid={}: {}",
-                        srvc.platform_specific.cgroup_path, uid, gid, e
-                    )
-                },
-            )?;
-        }
-
         // Enable required cgroup controllers on the parent before writing limits.
         // We collect which controllers are needed based on the configured directives
         // and enable them all at once.
@@ -110,6 +87,66 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
                     trace!(
                         "Could not enable cgroup controllers {:?} for {:?}: {}",
                         needed_controllers, &srvc.platform_specific.cgroup_path, e
+                    );
+                }
+            }
+        }
+
+        // When Delegate is enabled, hand the service's cgroup to the service
+        // user so it can manage its own sub-hierarchy. This runs AFTER
+        // controllers are enabled on the parent, so controller-specific
+        // interface files (memory.oom.group, memory.reclaim) already exist and
+        // can be chowned. Mirrors systemd's cg_set_access(): the directory
+        // plus a fixed set of delegation control files. Best-effort on the
+        // files: those absent on the current kernel/controller set are skipped.
+        if srvc.delegate != Delegate::No {
+            use std::os::unix::fs::PermissionsExt;
+            let uid = super::start_service::resolve_uid(&srvc.exec_config.user)
+                .map_err(|e| format!("Couldn't resolve user for cgroup delegation: {e}"))?;
+            let uid = nix::unistd::Uid::from_raw(uid);
+            let gid = super::start_service::resolve_gid(&srvc.exec_config.group)
+                .map_err(|e| format!("Couldn't resolve group for cgroup delegation: {e}"))?;
+            let gid = nix::unistd::Gid::from_raw(gid);
+            trace!(
+                "Delegating cgroup {:?} to uid={} gid={}",
+                &srvc.platform_specific.cgroup_path, uid, gid
+            );
+            // Directory: mode 0755, owned by the service user.
+            let _ = std::fs::set_permissions(
+                &srvc.platform_specific.cgroup_path,
+                std::fs::Permissions::from_mode(0o755),
+            );
+            nix::unistd::chown(&srvc.platform_specific.cgroup_path, Some(uid), Some(gid)).map_err(
+                |e| {
+                    format!(
+                        "Couldnt chown service cgroup ({:?}) to uid={} gid={}: {}",
+                        srvc.platform_specific.cgroup_path, uid, gid, e
+                    )
+                },
+            )?;
+            // Delegation control files: mode 0644, owned by the service user.
+            // The chmod is essential (not just chown): the kernel exposes some
+            // attributes read-only by default (e.g. cgroup.threads in a domain
+            // cgroup), so without restoring the owner-write bit the delegated
+            // user cannot manage them. Mirrors systemd's chmod_and_chown() in
+            // cg_set_access(). Best-effort: attributes absent on the current
+            // kernel/controller set are skipped.
+            for attr in [
+                "cgroup.procs",
+                "cgroup.subtree_control",
+                "cgroup.threads",
+                "memory.oom.group",
+                "memory.reclaim",
+            ] {
+                let attr_path = srvc.platform_specific.cgroup_path.join(attr);
+                let _ = std::fs::set_permissions(
+                    &attr_path,
+                    std::fs::Permissions::from_mode(0o644),
+                );
+                if let Err(e) = nix::unistd::chown(&attr_path, Some(uid), Some(gid)) {
+                    trace!(
+                        "Couldn't chown delegation file {:?} to uid={} gid={}: {} (continuing)",
+                        attr_path, uid, gid, e
                     );
                 }
             }
