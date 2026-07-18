@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-file = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-file = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-file";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,7 +13,7 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A GNU file-compatible file type detection tool written in Rust";
@@ -28,13 +24,9 @@
         };
       };
 
-    rust-file-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-file-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-file-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -45,9 +37,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
         meta = {
           description = "A GNU file-compatible file type detection tool written in Rust (dev build, fast compile)";
