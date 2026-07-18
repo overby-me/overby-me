@@ -56,8 +56,15 @@
 
     nativeBuildInputs = [rustc nushell];
 
-    # Registry .crate files are gzipped tarballs with an unknown extension.
-    unpackCmd = ''tar xzf "$curSrc"'';
+    # Registry .crate files are gzipped tarballs with an unknown extension;
+    # workspace member sources are plain directories.
+    unpackCmd = ''
+      if [ -f "$curSrc" ]; then
+        tar xzf "$curSrc"
+      else
+        cp -pr --reflink=auto -- "$curSrc" "$(stripHash "$curSrc")"
+      fi
+    '';
 
     dontConfigure = true;
     # rlibs are ar archives of bitcode/objects; stripping mangles them.

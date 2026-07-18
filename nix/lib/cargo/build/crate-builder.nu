@@ -277,11 +277,22 @@ def run-build-script [cfg: record, plan: record, rustc: string, base_env: record
   {directives: (parse-directives $res.stdout), out_dir: $out_dir}
 }
 
+# Rewrite build-sandbox OUT_DIR paths to their persisted $out/out location.
+# Link-search values may carry a kind prefix ("native=/path", "all=/path",
+# ...) which must be preserved while the path part is rewritten.
 def rewrite-out-dir [p: string, out_dir: any, out: string] {
-  if $out_dir != null and ($p | str starts-with $out_dir) {
-    $"($out)/out($p | str substring ($out_dir | str length)..)"
-  } else {
+  if $out_dir == null {
     $p
+  } else {
+    let parts = ($p | split row -n 2 "=")
+    let has_kind = (($parts | length) == 2 and not ($parts | get 0 | str contains "/"))
+    let kind = (if $has_kind { ($parts | get 0) + "=" } else { "" })
+    let path = (if $has_kind { $parts | get 1 } else { $p })
+    if ($path | str starts-with $out_dir) {
+      $"($kind)($out)/out($path | str substring ($out_dir | str length)..)"
+    } else {
+      $p
+    }
   }
 }
 
@@ -325,6 +336,11 @@ def compile-lib [plan: record, rustc: string, base_env: record, common_args: lis
   let types = ($lib.crateTypes | where {|t| $t in ["lib", "rlib", "proc-macro"]})
   let crate_types = (if ($types | is-empty) { ["lib"] } else { $types })
   mkdir ($out | path join "lib")
+  # rustc does not link the compiler's proc_macro crate on its own; cargo
+  # passes --extern proc_macro (sysroot, no path) for proc-macro compiles.
+  let proc_macro_extern = (
+    if "proc-macro" in $crate_types { ["--extern", "proc_macro"] } else { [] }
+  )
   let args = (
     [
       $lib.path,
@@ -335,6 +351,7 @@ def compile-lib [plan: record, rustc: string, base_env: record, common_args: lis
       "-C", $"extra-filename=-($crate_hash)",
       "--out-dir", ($out | path join "lib"),
     ]
+    | append $proc_macro_extern
     | append $common_args
     | append (native-link-args $bs)
   )
