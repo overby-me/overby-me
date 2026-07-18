@@ -391,6 +391,22 @@ fn detect_container() -> Option<&'static str> {
         }
     }
 
+    // 8. The root PID namespace has a hardcoded inode number of 0xEFFFFFFC
+    //    (PROC_PID_INIT_INO, stable since kernel 3.8).  If our PID namespace
+    //    inode differs, we are in a non-root PID namespace, which systemd
+    //    reports as an unknown container manager — this is detect_container()'s
+    //    final fallback (running_in_pidns()) and is what makes
+    //    `unshare --pid systemd-detect-virt --container` succeed.
+    {
+        use std::os::unix::fs::MetadataExt;
+        const PROC_PID_INIT_INO: u64 = 0xEFFF_FFFC;
+        if let Ok(meta) = fs::metadata("/proc/self/ns/pid")
+            && meta.ino() != PROC_PID_INIT_INO
+        {
+            return Some("container-other");
+        }
+    }
+
     None
 }
 
