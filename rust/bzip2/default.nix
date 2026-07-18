@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-bzip2 = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-bzip2 = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-bzip2";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,9 +13,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/bzip2 $out/bin/bunzip2
           ln -s $out/bin/bzip2 $out/bin/bzcat
         '';
@@ -33,13 +29,9 @@
         };
       };
 
-    rust-bzip2-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-bzip2-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-bzip2-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -50,11 +42,11 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/bzip2 $out/bin/bunzip2
           ln -s $out/bin/bzip2 $out/bin/bzcat
         '';
