@@ -237,8 +237,8 @@ packages.my-tool = { lib, ... }:
 - [x] M3: `resolve.nix` stage 1 (unified features) green on fixtures; wclip
       and xz lockfiles resolve without error.
 - [x] M4: `snapshot-index.nu` + committed `index/` covering wclip + xz.
-- [ ] M5: `buildCrate.nix` + `buildCargoProject.nix`: wclip builds and runs.
-- [ ] M6: xz `[[bin]]` builds and runs (native linking via overrides,
+- [x] M5: `buildCrate.nix` + `buildCargoProject.nix`: wclip builds and runs.
+- [x] M6: xz `[[bin]]` builds and runs (native linking via overrides,
       dev-deps excluded); flakelight module + checks wired; README.md.
 - [ ] M7: differential oracle tool; all repo lockfiles resolve identically to
       `cargo metadata` (features, graph) or have tracked exceptions.

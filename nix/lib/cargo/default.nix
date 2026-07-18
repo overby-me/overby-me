@@ -6,4 +6,9 @@
   # Pure resolution primitives (semver, cfg, lock, index, manifest, resolve);
   # system-independent, exposed per-system for convenience.
   perSystemLib.cargoLib = _pkgs: import ./lib;
+
+  perSystemLib.buildCargoProject = pkgs:
+    import ./build/buildCargoProject.nix {
+      inherit (pkgs) lib stdenv rustc python3 fetchurl writeText;
+    };
 }

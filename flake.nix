@@ -182,6 +182,7 @@
         ./nix/flake/modules/homeConfigurations.nix
         ./nix/flake/modules/lib.nix
         ./nix/flake/modules/perSystemLib.nix
+        ./nix/lib/cargo/checks.nix
         ./nix/flake/modules/secrets.nix
         ./nix/flake/modules/users.nix
         ./nix/flake/modules/zedExtensions.nix

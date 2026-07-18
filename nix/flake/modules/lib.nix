@@ -45,7 +45,20 @@
         else importLibDir path
       else {};
   in
-    lib.foldl' (acc: name: acc // (processEntry name)) {} names;
+    # Merge perSystemLib one level deep: several lib directories each
+    # contribute perSystemLib entries, and a shallow // would keep only the
+    # alphabetically last directory's set.
+    lib.foldl' (
+      acc: name: let
+        e = processEntry name;
+      in
+        acc
+        // e
+        // lib.optionalAttrs (acc ? perSystemLib || e ? perSystemLib) {
+          perSystemLib = (acc.perSystemLib or {}) // (e.perSystemLib or {});
+        }
+    ) {}
+    names;
 
   discovered =
     if hasLibDir

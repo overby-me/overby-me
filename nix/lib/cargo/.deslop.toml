@@ -1,0 +1,44 @@
+# deslop configuration for the nix-cargo build driver.
+#
+# crate_builder.py is a build orchestrator: it translates cargo's build
+# protocol (build scripts, directives, env contract) into rustc invocations
+# inside the sandbox. The rules below misfire on that shape; the actionable
+# findings from earlier runs (buffered writes, hoisted loop invariants,
+# tuple startswith, env validation, line-wise file reads) were fixed in code.
+
+disabled_rules = [
+  # The phases are already split (pkg_env, run_build_script, compile_lib,
+  # compile_bins, persist_build_script); what remains in main and the
+  # persist step is inherently sequenced orchestration, not separable
+  # concerns.
+  "mixed_concerns_function",
+  "god_function",
+
+  # Fires on fully annotated functions (all params and returns are typed,
+  # via the Json alias); this is an internal sandbox script, not a public
+  # API surface.
+  "public_api_missing_type_hints",
+
+  # The flagged loops accumulate flag pairs while reading dependency files
+  # line by line; a comprehension would need nested with-blocks and reads
+  # worse.
+  "builtin_reduction_candidate",
+
+  # Flags `any(...) or any(...)` over two different subjects, which cannot
+  # be merged into one tuple-argument startswith call.
+  "string_startswith_endswith_chain",
+
+  # Fires on f-strings whose interpolated values vary per iteration
+  # (env keys, extern pairs, directive messages); nothing is invariant to
+  # hoist.
+  "repeated_string_format_invariant_template",
+
+  # The rustc-flags tokenizer is an index-based scanner; len() in the loop
+  # condition is the loop guard, not a repeated computation to cache.
+  "repeated_len_in_loop",
+
+  # print(..., file=sys.stderr) is the intended diagnostics channel of a
+  # sandbox build script (surfaces in the nix build log), not leftover
+  # debugging.
+  "print_debugging_leftover",
+]

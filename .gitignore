@@ -14,6 +14,8 @@ tmp
 build
 !rust/*/src/build
 !rust/*/src/build/**
+!nix/lib/cargo/build
+!nix/lib/cargo/build/**
 dist
 target/
 deployment.zip
