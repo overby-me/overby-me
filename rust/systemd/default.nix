@@ -16,6 +16,7 @@
     rust-systemd = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd";
+        version = "unstable";
 
         src = lib.fileset.toSource {
           root = ./.;
