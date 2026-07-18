@@ -11,7 +11,7 @@ which OOMs on this repo's check count).
 
 ## 2026-07-18 — socket activation + notify-timestamp fixes (branch `rust-systemd-complete`)
 
-Continuation. Head `49860d1d`. Four fixes landed this arc, each adversarially
+Continuation. Head `6a35bc90`. Five fixes landed this arc, each adversarially
 reviewed before the VM run and validated with a regression set:
 
 - **notify ActiveEnterTimestamp race (07-pid1-exec-timestamps)** — a
@@ -44,6 +44,23 @@ reviewed before the VM run and validated with a regression set:
   reset, `Conflicts=`, daemon-reload all pass); only the `deferred`-SubState
   feature (the test's namesake, deferred-activation-on-conflict) remains.
   `49860d1d`.
+- **socket DeferTrigger deferred activation (07-pid1-socket-defer, greens it)**:
+  implemented the `DeferTrigger=` state machine so a connection whose target
+  service is blocked by an activating/active `Conflicts=` unit enters the socket
+  `deferred` SubState (survives `daemon-reload`) and activates once the conflict
+  clears, or fails the socket after `DeferTriggerMaxSec=`. Two root causes made
+  the deferral never clear. First, every unit carries an implicit
+  `Conflicts=shutdown.target` from DefaultDependencies, which the conflict check
+  counted as active, so `conflict_blocks_activation` now ignores
+  `shutdown.target`. Second, the blocking `Conflicts=` unit is a `Type=oneshot`
+  (`RemainAfterExit=no`) that, on clean exit, deliberately keeps its status as
+  `Started` for the boot activation-graph walker (issue #27953); `is-active`
+  special-cases that to `inactive`, but the conflict check read the raw
+  `Started` and kept the socket deferred forever. Fix: the conflict check mirrors
+  the `is-active` exclusion (a `Started` oneshot with `RemainAfterExit=no` and no
+  PID does not block). Full test green including the `DeferTriggerMaxSec=` fail
+  path; regression set (socket-on-failure, socket-pass-fds, 01-basic) clean.
+  `6a35bc90`.
 
 ## 2026-07-17 (later) — adversarial-review-driven fixes (branch `rust-systemd-complete`)
 
