@@ -274,6 +274,34 @@ amortized further by the shared per-crate binary cache across the repo's
 (The new cold number is derived: 7m40s measured through an `--impure`
 harness minus its measured 2m32s fixed eval overhead.)
 
+### Wild linker and cranelift (added later on 2026-07-18)
+
+Same systemd workspace, harness overhead subtracted (the fixed ~152s
+impure-eval cost of the benchmark harness; flake-attr builds pay seconds).
+
+Release builds, wild linker (`linker = pkgs.wild`, adopted for systemd):
+
+| Scenario | stock | wild |
+|---|---|---|
+| Cold full build | ~5m08s | ~3m41s |
+| One-line incremental (marginal) | ~2.5s | ~1.7s |
+
+Dev builds (`release = false`), nightly + cranelift
+(`toolchain = rust-bin.nightly...` with the codegen-cranelift component,
+`rustcFlags = ["-Zcodegen-backend=cranelift"]`):
+
+| Scenario (net) | stock | cranelift | cranelift + wild |
+|---|---|---|---|
+| Cold full build | 2m03s | 52s | 49s |
+| One-line incremental (marginal) | <1s | <1s | <1s |
+
+Cranelift cuts dev codegen ~2.4x across the 260-crate graph; wild's win
+concentrates in release links (80 bins + proc-macro dylibs) and adds
+little on top for debug links. Incremental rebuilds are sub-second in all
+variants: the per-crate model makes the edited member the only work.
+Nightly-with-cranelift stays reproducible because rust-overlay pins its
+manifest set in flake.lock.
+
 ## Decision log
 
 - 2026-07-18: Library lives at `nix/lib/cargo/`, sibling of `nix/lib/deno`;
