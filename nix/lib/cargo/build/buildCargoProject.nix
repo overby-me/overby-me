@@ -39,6 +39,12 @@ in
     # Alternative linker package (e.g. pkgs.wild or pkgs.mold); its main
     # program is exposed as `ld` to cc via -B.
     linker ? null,
+    # Extra flags for every rustc invocation, e.g.
+    # ["-Zcodegen-backend=cranelift"] together with a nightly toolchain.
+    rustcFlags ? [],
+    # Toolchain override (e.g. rust-bin.nightly.latest.default with the
+    # rustc-codegen-cranelift-preview extension).
+    toolchain ? null,
     # Extra derivation attrs for the root crate (postInstall, env, ...).
     rootAttrs ? {},
     meta ? {},
@@ -115,9 +121,14 @@ in
       )
       nodes;
 
+    effectiveRustcVersion =
+      if toolchain != null
+      then toolchain.version
+      else rustc.version;
+
     hashOf = id: node:
       substring 0 16 (hashString "sha256"
-        "${id}:${concatStringsSep "," node.features}:${rustc.version}:v1");
+        "${id}:${concatStringsSep "," node.features}:${effectiveRustcVersion}:v1");
 
     filterSrc = dir:
       builtins.filterSource (
@@ -186,7 +197,7 @@ in
         buildDepDrvs = map (i: drvs.${i}) (attrNames buildClosureSet.${id});
         linksDepDrvs = map (e: drvs.${e.targetId}) (normalEdges node);
         target = platform.triple;
-        inherit profile linkArgs;
+        inherit profile linkArgs rustcFlags toolchain;
         capLints = !node.isWorkspaceMember;
         buildBins = isRoot;
         crateHash = hashOf id node;

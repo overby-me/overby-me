@@ -251,6 +251,7 @@ def run-build-script [cfg: record, plan: record, rustc: string, base_env: record
       "-C", "opt-level=0",
       "--out-dir", $bs_dir,
     ]
+    | append ($cfg | get -o rustcFlags | default [])
     | append (if $cfg.capLints { ["--cap-lints", "allow"] } else { [] })
     | append (feature-cfg-args $cfg.features)
     | append (extern-args $cfg.buildExterns)
@@ -462,6 +463,7 @@ def main [config_path: string] {
   let common_args = (
     (profile-args $cfg.profile)
     | append ($cfg | get -o linkArgs | default [])
+    | append ($cfg | get -o rustcFlags | default [])
     | append (if $cfg.capLints { ["--cap-lints", "allow"] } else { [] })
     | append (feature-cfg-args $cfg.features)
     | append (if $bs == null { [] } else { $bs.cfgs | each {|c| ["--cfg", $c]} | flatten })

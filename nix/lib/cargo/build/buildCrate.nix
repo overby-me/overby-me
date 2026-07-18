@@ -31,6 +31,12 @@
   # Extra rustc flags for link steps (lib/dylib/bin compiles), e.g. an
   # alternative linker via ["-C" "link-arg=-B/path/with/ld"].
   linkArgs ? [],
+  # Extra flags for every rustc invocation (including build scripts), e.g.
+  # ["-Zcodegen-backend=cranelift"] with a nightly toolchain.
+  rustcFlags ? [],
+  # Toolchain override (a package providing bin/rustc); defaults to the
+  # rustc this library was imported with.
+  toolchain ? null,
   # crateOverrides merge (buildInputs, env, patches, ...).
   extraAttrs ? {},
 }: let
@@ -54,13 +60,21 @@
       buildDepOuts = map (d: "${d}") buildDepDrvs;
       linksDeps = map (d: "${d}") linksDepDrvs;
     }
-    // lib.optionalAttrs (linkArgs != []) {inherit linkArgs;}));
+    // lib.optionalAttrs (linkArgs != []) {inherit linkArgs;}
+    // lib.optionalAttrs (rustcFlags != []) {inherit rustcFlags;}));
 
   base = {
     pname = crateName;
     inherit version src;
 
-    nativeBuildInputs = [rustc nushell];
+    nativeBuildInputs = [
+      (
+        if toolchain != null
+        then toolchain
+        else rustc
+      )
+      nushell
+    ];
 
     # Registry .crate files are gzipped tarballs with an unknown extension;
     # workspace member sources are plain directories.
