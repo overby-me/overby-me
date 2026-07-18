@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-binutils = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-binutils = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-binutils";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,9 +13,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           # Create symlinks for all binutils tools (multicall binary)
           for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld elfedit; do
             ln -s $out/bin/rust-binutils $out/bin/$tool
@@ -34,13 +30,9 @@
         };
       };
 
-    rust-binutils-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-binutils-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-binutils-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -51,11 +43,11 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           # Create symlinks for all binutils tools (multicall binary)
           for tool in ar ranlib nm objdump readelf objcopy strings size addr2line c++filt strip as ld elfedit; do
             ln -s $out/bin/rust-binutils $out/bin/$tool
