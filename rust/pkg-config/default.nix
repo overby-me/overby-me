@@ -5,13 +5,9 @@
     ];
   };
 
-  packages.rust-pkg-config = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-pkg-config = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-pkg-config";
-      version = "unstable";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -23,11 +19,11 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
-      setupHook = ./setup-hook.sh;
+      rootAttrs.setupHook = ./setup-hook.sh;
 
-      postInstall = ''
+      rootAttrs.postInstall = ''
         ln -s $out/bin/pkgconf $out/bin/pkg-config
       '';
 
