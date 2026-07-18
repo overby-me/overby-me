@@ -2263,6 +2263,11 @@ fn is_list_setting(key: &str) -> bool {
             | "EnvironmentFile"
             | "PassEnvironment"
             | "UnsetEnvironment"
+            // StandardInputText=/StandardInputData= accumulate into a single
+            // stdin buffer across the fragment and drop-ins (reset with an
+            // empty value), so drop-in merging must not drop earlier values.
+            | "StandardInputText"
+            | "StandardInputData"
             // Dependency directives accumulate
             | "Requires"
             | "Wants"
