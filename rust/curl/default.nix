@@ -1,12 +1,8 @@
 {
   packages = {
-    rust-curl = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-curl = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-curl";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,7 +13,7 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A curl-compatible HTTP client written in Rust";
@@ -28,13 +24,9 @@
         };
       };
 
-    rust-curl-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-curl-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-curl-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -45,9 +37,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
         meta = {
           description = "A curl-compatible HTTP client written in Rust (dev build, fast compile)";
