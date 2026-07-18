@@ -1,11 +1,7 @@
 {
-  packages.rust-bison = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-bison = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-bison";
-      version = "0.1.0";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -16,7 +12,7 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
       meta = {
         description = "A POSIX yacc/bison-compatible parser generator written in Rust";
