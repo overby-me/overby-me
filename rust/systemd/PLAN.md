@@ -9,6 +9,42 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 Run the whole tree's checks: `just check` (never plain `nix flake check`,
 which OOMs on this repo's check count).
 
+## 2026-07-18 — socket activation + notify-timestamp fixes (branch `rust-systemd-complete`)
+
+Continuation. Head `49860d1d`. Four fixes landed this arc, each adversarially
+reviewed before the VM run and validated with a regression set:
+
+- **notify ActiveEnterTimestamp race (07-pid1-exec-timestamps)** — a
+  `Type=notify` service that signals `READY=1` then exits immediately
+  (`systemd-notify --ready; exit 1`) recorded `ActiveEnterTimestamp=0` because
+  the deferred-activation poll (`deferred_notify_wait_and_dispatch`) bails out
+  when the SIGCHLD exit handler moves the unit out of `Starting` before
+  `record_active_enter` runs. Fix: record active-enter in the global
+  notification handler at the point `READY=1` is processed, clamped to the main
+  exit timestamp so `start ≤ handoff ≤ active ≤ exit` holds regardless of the
+  notify-thread vs SIGCHLD-thread interleaving. Deterministic (passed 3× incl.
+  `--rebuild` reruns), where a prior attempt was flaky. `bfaf71de`.
+- **socket SubState listening/running** — sockets now report `listening` vs
+  `running`: Accept=yes via `active_accept_connections > 0`, Accept=no via
+  `sock.activated`. `83e751b3` + `abda807b`.
+- **non-Accept socket activation triggers the same-name service** — a
+  `foo.socket` with no `Service=` (and a `foo.service` with no `Sockets=`) never
+  started its service on connection because `gather_socket_info` left
+  `service_id=None`; added a same-name fallback (`foo.socket → foo.service`).
+  `abda807b`.
+- **same-name socket↔service link on demand load** — the batch resolver
+  (`apply_sockets_to_services`) only runs at boot/daemon-reload, so units
+  written at runtime and loaded via `find_or_load_unit` never got the implicit
+  `names_match` association → the service's `conf.sockets` stayed empty →
+  `sock.activated` was never reset on stop (socket stuck `running`). Fix:
+  `insert_new_unit_lenient` now establishes the same-name socket↔service
+  association (conf lists + ordering + `Requires`) for on-demand loads,
+  mirroring the batch resolver with dedup guards. Takes 07-pid1-socket-defer
+  from failing at its first assertion to ~95% through (activation, SubState,
+  reset, `Conflicts=`, daemon-reload all pass); only the `deferred`-SubState
+  feature (the test's namesake, deferred-activation-on-conflict) remains.
+  `49860d1d`.
+
 ## 2026-07-17 (later) — adversarial-review-driven fixes (branch `rust-systemd-complete`)
 
 Continuation. Head `bdd00cbc`. Three fixes landed this arc, each adversarially
