@@ -146,6 +146,29 @@ pub fn find_symlink_aliases(
             if !meta.file_type().is_symlink() {
                 continue;
             }
+            let target_name = fs::read_link(entry.path())
+                .ok()
+                .and_then(|t| t.file_name().map(|f| f.to_string_lossy().to_string()))
+                .unwrap_or_default();
+            // A symlink whose target is a *template* (e.g. bar-alias@2.service
+            // -> yup@.service) aliases the target template instantiated with
+            // the CANDIDATE symlink's OWN instance (yup@2), not this find_name
+            // in general.  Match it only against that specific instance —
+            // otherwise the canonical-path check below spuriously attaches it
+            // to every yup@N, because a non-existent instance's unit_path falls
+            // back to the shared template file that both canonicalize to.
+            if let Some((tgt_prefix, tgt_suffix)) = target_name.split_once("@.") {
+                if let Some((_, cand_inst)) =
+                    crate::units::loading::directory_deps::parse_template_instance(&name)
+                    && !cand_inst.is_empty()
+                {
+                    let resolved = format!("{tgt_prefix}@{cand_inst}.{tgt_suffix}");
+                    if resolved == find_name && !aliases.contains(&name) {
+                        aliases.push(name);
+                    }
+                }
+                continue;
+            }
             // Check by canonical path (works for regular files)
             if let Some(ref canonical) = canonical
                 && let Ok(c) = fs::canonicalize(entry.path())
@@ -157,14 +180,8 @@ pub fn find_symlink_aliases(
             }
             // Check by symlink target name (works for template instances
             // where the target file doesn't exist on disk)
-            if let Ok(target) = fs::read_link(entry.path()) {
-                let target_name = target
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                if target_name == find_name && !aliases.contains(&name) {
-                    aliases.push(name);
-                }
+            if !target_name.is_empty() && target_name == find_name && !aliases.contains(&name) {
+                aliases.push(name);
             }
         }
     }
