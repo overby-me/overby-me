@@ -106,6 +106,18 @@ fn open_openfile_entry(entry: &str) -> Result<Option<(std::os::fd::OwnedFd, Stri
         openfile_unescape(&ident_raw)
     };
 
+    // systemd distinguishes a socket from a regular file by stat()ing the
+    // path (S_ISSOCK), not via an option — in `OpenFile=PATH:NAME:OPTIONS`
+    // the middle field is the fd NAME (e.g. the ":socket:" in the test), not a
+    // flag.  Detect an AF_UNIX socket here so it is connect()ed rather than
+    // open()ed (open() on a socket inode returns ENXIO).
+    if !is_socket
+        && let Ok(md) = std::fs::metadata(&path)
+        && std::os::unix::fs::FileTypeExt::is_socket(&md.file_type())
+    {
+        is_socket = true;
+    }
+
     if is_socket {
         // Connect to a UNIX stream socket at `path`.
         use std::os::unix::net::UnixStream;
@@ -505,11 +517,16 @@ fn start_service_with_filedescriptors(
         }
     }
 
-    // Process OpenFile= entries. Each entry is "PATH:IDENTIFIER:OPTIONS".
-    // Path may contain \x3A for escaped colons. Identifier defaults to basename.
-    // Options (comma-separated): read-only, append, truncate, graceful, socket.
-    // Socket option connects to a UNIX socket instead of opening a file.
-    // Graceful option skips if the file is missing.
+    // User/group resolution and OpenFile= failures are deferred to the child
+    // process (the parent returns success, matching real systemd, where the
+    // executor handles them and they surface as an ExecMainStatus exit code).
+    let mut deferred_exec_error: Option<i32> = None;
+
+    // Process OpenFile= entries: "PATH:IDENTIFIER:OPTIONS".  Path may contain
+    // \x3A for escaped colons; identifier defaults to the basename.  Options
+    // (comma-separated): read-only, append, truncate, graceful.  A path that
+    // stat()s as an AF_UNIX socket is connect()ed rather than opened.  The
+    // graceful option skips a missing file.
     let mut openfile_fds: Vec<std::os::fd::OwnedFd> = Vec::new();
     for entry in &conf.open_file {
         match open_openfile_entry(entry) {
@@ -524,17 +541,15 @@ fn start_service_with_filedescriptors(
                 trace!("Service {name}: OpenFile={entry} — file missing, skipping (graceful)");
             }
             Err(e) => {
-                return Err(RunCmdError::SpawnError(
-                    name.to_owned(),
-                    format!("OpenFile={entry}: {e}"),
-                ));
+                // A non-graceful OpenFile= failure must fail the service with
+                // EXIT_FDS (202), like the executor in real systemd — defer it
+                // to the child (which exits 202) rather than failing the start.
+                trace!("Service {name}: OpenFile={entry} failed: {e}");
+                deferred_exec_error = Some(202); // EXIT_FDS
+                break;
             }
         }
     }
-
-    // For Type=simple, user/group resolution errors are deferred to the
-    // child process (the parent returns success, matching real systemd).
-    let mut deferred_exec_error: Option<i32> = None;
 
     // We first exec into our own executable again and apply this config
     // We transfer the config via a anonymous shared memory file
