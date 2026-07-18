@@ -75,10 +75,18 @@ mod inner {
                 if matches!(&*status, UnitStatus::Started(_))
                     && let crate::units::Specific::Socket(specific) = &u.specific
                 {
-                    return if specific.state.read_poisoned().sock.active_accept_connections == 0 {
-                        "listening".to_string()
-                    } else {
+                    let running = {
+                        let st = specific.state.read_poisoned();
+                        if specific.conf.accept {
+                            st.sock.active_accept_connections > 0
+                        } else {
+                            st.sock.activated
+                        }
+                    };
+                    return if running {
                         "running".to_string()
+                    } else {
+                        "listening".to_string()
                     };
                 }
                 map_active_sub(&status).1.to_string()

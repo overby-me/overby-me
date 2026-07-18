@@ -189,6 +189,22 @@ fn gather_socket_info(
         }
     }
 
+    // Strategy 3 for Accept=no: fall back to the same-name service
+    // (foo.socket -> foo.service).  systemd implicitly triggers the service
+    // named like the socket when neither Service= nor the service's Sockets=
+    // establishes the association.
+    if !is_accept && service_id.is_none() {
+        let base = socket_id
+            .name
+            .strip_suffix(".socket")
+            .unwrap_or(&socket_id.name);
+        let candidate = format!("{base}.service");
+        service_id = unit_table
+            .values()
+            .find(|u| u.id.name == candidate)
+            .map(|u| u.id.clone());
+    }
+
     Some(SocketActivationInfo {
         socket_id: socket_id.clone(),
         is_accept,

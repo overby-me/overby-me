@@ -215,11 +215,17 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         if matches!(&*status, UnitStatus::Started(_))
             && let Specific::Socket(specific) = &unit.specific
         {
-            let sub = if specific.state.read_poisoned().sock.active_accept_connections == 0 {
-                "listening"
-            } else {
-                "running"
+            let running = {
+                let st = specific.state.read_poisoned();
+                if specific.conf.accept {
+                    // Accept=yes: running while accepted connections are serviced.
+                    st.sock.active_accept_connections > 0
+                } else {
+                    // Accept=no: running while the triggered service is active.
+                    st.sock.activated
+                }
             };
+            let sub = if running { "running" } else { "listening" };
             insert(&mut props, "SubState", sub);
         }
 
