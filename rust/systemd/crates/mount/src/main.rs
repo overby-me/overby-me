@@ -17,8 +17,7 @@ use std::process::{self, Command};
 #[command(
     name = "systemd-mount",
     about = "Establish and destroy transient mount or auto-mount points",
-    version,
-    trailing_var_arg = true
+    version
 )]
 struct Cli {
     /// List active mount points
@@ -47,6 +46,15 @@ struct Cli {
     /// Mount type (e.g., ext4, tmpfs, nfs)
     #[arg(short = 't', long = "type")]
     fstype: Option<String>,
+
+    /// Mount a tmpfs at the given path (WHERE only, no source needed)
+    #[arg(long)]
+    tmpfs: bool,
+
+    /// Canonicalize the mount path, resolving symlinks and `..` (default yes).
+    /// With `=no`, refuse to mount through a symlink or `..` component.
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "yes")]
+    canonicalize: Option<String>,
 
     /// Mount options (comma-separated)
     #[arg(short, long)]
@@ -373,30 +381,67 @@ fn do_mount(
     fstype: Option<&str>,
     options: Option<&str>,
     read_only: bool,
-    mkdir: bool,
+    _mkdir: bool,
 ) -> Result<(), String> {
-    // Create mount point if requested
-    if mkdir && let Err(e) = fs::create_dir_all(where_) {
-        return Err(format!("Failed to create mount point {}: {}", where_, e));
+    // Auto-create the mount point inode if it does not exist, matching upstream
+    // systemd-mount (which sets up the mount point itself). For a bind mount of
+    // a regular file, create a file; otherwise create a directory.
+    if !Path::new(where_).exists() {
+        let is_file_bind = options.map(|o| o.split(',').any(|x| x == "bind")).unwrap_or(false)
+            && Path::new(what).is_file();
+        let res = if is_file_bind {
+            match Path::new(where_).parent() {
+                Some(parent) => {
+                    fs::create_dir_all(parent).and_then(|_| fs::File::create(where_).map(|_| ()))
+                }
+                None => fs::File::create(where_).map(|_| ()),
+            }
+        } else {
+            fs::create_dir_all(where_)
+        };
+        if let Err(e) = res {
+            return Err(format!("Failed to create mount point {}: {}", where_, e));
+        }
     }
 
-    // Check if mount point exists
-    if !Path::new(where_).exists() {
-        return Err(format!(
-            "Mount point {} does not exist (use --mkdir to create it)",
-            where_
-        ));
+    // For overlay mounts, create the upperdir and workdir referenced in the
+    // options if they do not exist yet: the overlay driver requires them to
+    // exist, and the caller normally does not pre-create them.
+    if fstype == Some("overlay")
+        && let Some(opts) = options
+    {
+        for opt in opts.split(',') {
+            if let Some(dir) = opt
+                .strip_prefix("upperdir=")
+                .or_else(|| opt.strip_prefix("workdir="))
+            {
+                let _ = fs::create_dir_all(dir);
+            }
+        }
     }
 
     let mut cmd = Command::new("mount");
 
-    if let Some(ft) = fstype {
+    // Use the explicit `--bind` form for bind mounts: passing `-o bind` alone
+    // lets util-linux fall through to loop-mounting a file source, which fails.
+    let is_bind = options
+        .map(|o| o.split(',').any(|x| x.trim() == "bind"))
+        .unwrap_or(false);
+    if is_bind {
+        cmd.arg("--bind");
+    } else if let Some(ft) = fstype {
         cmd.arg("-t").arg(ft);
     }
 
+    // Collect the remaining mount options, dropping the `bind` pseudo-option
+    // (already handled via --bind above).
     let mut mount_opts = Vec::new();
     if let Some(o) = options {
-        mount_opts.push(o.to_string());
+        for opt in o.split(',') {
+            if opt.trim() != "bind" {
+                mount_opts.push(opt.to_string());
+            }
+        }
     }
     if read_only {
         mount_opts.push("ro".to_string());
@@ -501,6 +546,63 @@ fn display_mounts() {
 
 // ── Main ──────────────────────────────────────────────────────────────────
 
+/// Resolve/validate the mount-point path per `--canonicalize`.
+///
+/// With `canonicalize=true` (default) symlinks and `..` in the existing prefix
+/// are resolved. With `canonicalize=false` we refuse to operate through a
+/// symlinked ancestor or a `..` component, matching upstream's safety check.
+fn resolve_mount_point(where_: &str, canonicalize: bool) -> Result<String, String> {
+    use std::path::Component;
+    let path = Path::new(where_);
+    if !canonicalize {
+        if path.components().any(|c| matches!(c, Component::ParentDir)) {
+            return Err(format!(
+                "Path \"{}\" contains \"..\"; refusing with --canonicalize=no",
+                where_
+            ));
+        }
+        let mut cur = PathBuf::new();
+        for comp in path.components() {
+            cur.push(comp.as_os_str());
+            if let Ok(md) = fs::symlink_metadata(&cur)
+                && md.file_type().is_symlink()
+            {
+                return Err(format!(
+                    "Path component \"{}\" is a symlink; refusing with --canonicalize=no",
+                    cur.display()
+                ));
+            }
+        }
+        Ok(where_.to_string())
+    } else {
+        // Canonicalize the deepest existing ancestor, then re-append the
+        // not-yet-existing trailing components.
+        let mut tail: Vec<std::ffi::OsString> = Vec::new();
+        let mut base = path.to_path_buf();
+        while !base.exists() {
+            match base.file_name() {
+                Some(name) => {
+                    tail.push(name.to_os_string());
+                    match base.parent() {
+                        Some(p) => base = p.to_path_buf(),
+                        None => break,
+                    }
+                }
+                None => break,
+            }
+        }
+        let mut resolved = if base.as_os_str().is_empty() {
+            fs::canonicalize(".").map_err(|e| format!("canonicalize: {e}"))?
+        } else {
+            fs::canonicalize(&base).map_err(|e| format!("canonicalize {}: {e}", base.display()))?
+        };
+        for name in tail.iter().rev() {
+            resolved.push(name);
+        }
+        Ok(resolved.to_string_lossy().into_owned())
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -541,19 +643,38 @@ fn main() {
             process::exit(1);
         }
 
-        let what = &cli.args[0];
+        let canonicalize = cli.canonicalize.as_deref().map(|v| v != "no").unwrap_or(true);
 
-        // Determine WHERE
-        let where_ = if cli.args.len() >= 2 {
-            cli.args[1].clone()
+        // With --tmpfs the single positional is WHERE and the source is a
+        // synthetic "tmpfs"; otherwise the first positional is WHAT and the
+        // optional second is WHERE.
+        let (what_string, where_raw) = if cli.tmpfs {
+            ("tmpfs".to_string(), cli.args[0].clone())
+        } else if cli.args.len() >= 2 {
+            (cli.args[0].clone(), cli.args[1].clone())
         } else {
-            // Auto-generate mount point from WHAT
-            // e.g., /dev/sdb1 -> /run/media/system/sdb1
-            let base = Path::new(what)
+            let what = cli.args[0].clone();
+            let base = Path::new(&what)
                 .file_name()
                 .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            format!("/run/media/system/{}", base)
+            (what, format!("/run/media/system/{}", base))
+        };
+        let what = what_string.as_str();
+
+        // Resolve/validate WHERE according to --canonicalize.
+        let where_ = match resolve_mount_point(&where_raw, canonicalize) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("{}", e);
+                process::exit(1);
+            }
+        };
+
+        let effective_fstype = if cli.tmpfs {
+            Some("tmpfs")
+        } else {
+            cli.fstype.as_deref()
         };
 
         // Generate unit name for informational purposes
@@ -565,7 +686,7 @@ fn main() {
             let mount_content = generate_mount_unit(
                 what,
                 &where_,
-                cli.fstype.as_deref(),
+                effective_fstype,
                 cli.options.as_deref(),
                 cli.description.as_deref(),
                 cli.read_only,
@@ -606,7 +727,7 @@ fn main() {
             if let Err(e) = do_mount(
                 what,
                 &where_,
-                cli.fstype.as_deref(),
+                effective_fstype,
                 cli.options.as_deref(),
                 cli.read_only,
                 cli.mkdir,
@@ -619,7 +740,7 @@ fn main() {
             if let Err(e) = do_mount(
                 what,
                 &where_,
-                cli.fstype.as_deref(),
+                effective_fstype,
                 cli.options.as_deref(),
                 cli.read_only,
                 cli.mkdir,
