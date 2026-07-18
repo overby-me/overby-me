@@ -5,6 +5,7 @@
     ./fwupd.nix
     ./ironclaw.nix
     ./kanata.nix
+    ./netbird.nix
     ./ollama.nix
     ./openssh.nix
     ./printing.nix
