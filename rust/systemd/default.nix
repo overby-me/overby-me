@@ -13,15 +13,10 @@
   };
 
   packages = {
-    rust-systemd = {
-      lib,
-      wild,
-      ...
-    }:
+    rust-systemd = {lib, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd";
         version = "unstable";
-        linker = wild;
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -41,6 +36,52 @@
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/systemd";
           license = lib.licenses.mit;
           maintainers = with lib.maintainers; [overby-me];
+          mainProgram = "systemd";
+          platforms = lib.platforms.linux;
+        };
+      };
+
+    # Fast-iteration development build: debug profile, cranelift codegen,
+    # wild linker. ~52s cold rebuilds of the whole workspace and sub-second
+    # single-member rebuilds (see nix/lib/cargo/PLAN.md benchmarks). The
+    # nightly toolchain is pinned through the rust-overlay input.
+    rust-systemd-dev = {
+      lib,
+      rust-bin,
+      ...
+    }:
+      lib.buildCargoProject {
+        pname = "rust-systemd-dev";
+        version = "unstable";
+
+        src = lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.unions [
+            ./Cargo.toml
+            ./Cargo.lock
+            ./crates
+          ];
+        };
+
+        index = ../../nix/lib/cargo/index;
+
+        features = ["dbus_support"];
+        release = false;
+
+        toolchain = rust-bin.nightly.latest.default.override {
+          extensions = ["rustc-codegen-cranelift-preview"];
+        };
+        rustcFlags = [
+          "-Zcodegen-backend=cranelift"
+          # Nightly defaults to rust-lld on x86_64-linux, which would bypass
+          # the wild -B shim; opt out so wild links here too.
+          "-Clinker-features=-lld"
+        ];
+
+        meta = {
+          description = "rust-systemd built for fast development iteration (debug, cranelift, wild)";
+          homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/systemd";
+          license = lib.licenses.mit;
           mainProgram = "systemd";
           platforms = lib.platforms.linux;
         };
