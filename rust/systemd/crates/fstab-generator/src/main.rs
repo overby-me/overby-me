@@ -85,6 +85,12 @@ fn main() -> ExitCode {
     let rd_fstab_disabled = cmdline_flag_off(&cmdline, "rd.fstab");
     let swap_disabled = cmdline_flag_off(&cmdline, "systemd.swap");
     let skip_fstab = fstab_disabled || (in_initrd && rd_fstab_disabled);
+    // `root=fstab` means the real root's filesystems are declared in the main
+    // fstab (via x-initrd.mount) and must be mounted under /sysroot in the
+    // initrd.  Without it, the main fstab is the initrd's OWN fstab and its
+    // entries are initrd-local (never /sysroot-prefixed).
+    let root_is_fstab =
+        parse_cmdline_kv(&cmdline, "root=").map(|v| v == "fstab").unwrap_or(false);
 
     // In initrd, we may have TWO fstabs to process:
     //   * SYSTEMD_FSTAB — the initrd's own fstab (treated as regular entries)
@@ -97,12 +103,18 @@ fn main() -> ExitCode {
         match load_fstab(&fstab_path) {
             Ok(entries) => {
                 for e in entries {
-                    // In the initrd, entries flagged x-initrd.mount are the real
-                    // root's filesystems and must be mounted under /sysroot (so
-                    // they are in place before switch-root). In particular the
-                    // root entry `/` becomes `/sysroot` → sysroot.mount. Entries
-                    // without the flag are initrd-local mounts, used as-is.
-                    let prefix = in_initrd && parse_csv(&e.options).contains(&"x-initrd.mount");
+                    // Only with `root=fstab` is the main fstab the real root's
+                    // fstab, whose x-initrd.mount entries are mounted under
+                    // /sysroot (the `/` entry becoming sysroot.mount) before
+                    // switch-root.  Otherwise the main fstab is the initrd's
+                    // OWN fstab: its entries are initrd-local mounts used as-is
+                    // and are NEVER /sysroot-prefixed, even when flagged
+                    // x-initrd.mount.  TEST-81 initrd-initrd-fstab verifies
+                    // `/initrd/mount` → initrd-mount.mount (not sysroot-…);
+                    // the initrd_sysroot.rs test covers the root=fstab case.
+                    let prefix = in_initrd
+                        && root_is_fstab
+                        && parse_csv(&e.options).contains(&"x-initrd.mount");
                     all_entries.push((e, prefix));
                 }
             }
