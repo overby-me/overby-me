@@ -1308,21 +1308,43 @@ impl Service {
         run_info: &RuntimeInfo,
         working_directory: Option<&std::path::PathBuf>,
     ) -> Result<(), RunCmdError> {
-        let mut cmd = Command::new(&cmdline.cmd);
-        if cmdline.prefixes.contains(&CommandlinePrefix::AtSign) {
+        // '|' login-shell prefix: run the command line through `sh -c "..."`
+        // (argv[0] = "-sh") so shell builtins, PATH resolution, and
+        // redirections work — matching the main ExecStart exec-helper path
+        // (exec_helper.rs login-shell wrapping). Without this, helper commands
+        // like ExecStartPre=|@echo a >/tmp/flag would exec the bare command
+        // directly, so the redirection is lost and bare command names fail to
+        // resolve. The '@' argv0 prefix is subsumed by the shell wrapping.
+        let mut cmd = if cmdline.prefixes.contains(&CommandlinePrefix::Pipe) {
+            use std::os::unix::process::CommandExt;
+            let mut cmd_str = cmdline.cmd.clone();
+            for arg in &cmdline.args {
+                cmd_str.push(' ');
+                cmd_str.push_str(arg);
+            }
+            let mut c = Command::new("/bin/sh");
+            c.arg0("-sh");
+            c.arg("-c");
+            c.arg(cmd_str);
+            c
+        } else if cmdline.prefixes.contains(&CommandlinePrefix::AtSign) {
             // With '@' prefix: first arg becomes argv[0], remaining args are normal arguments
             use std::os::unix::process::CommandExt;
+            let mut c = Command::new(&cmdline.cmd);
             if let Some(argv0) = cmdline.args.first() {
-                cmd.arg0(argv0);
+                c.arg0(argv0);
             }
             for part in cmdline.args.iter().skip(1) {
-                cmd.arg(part);
+                c.arg(part);
             }
+            c
         } else {
+            let mut c = Command::new(&cmdline.cmd);
             for part in &cmdline.args {
-                cmd.arg(part);
+                c.arg(part);
             }
-        }
+            c
+        };
         if let Some(dir) = working_directory {
             cmd.current_dir(dir);
         }
