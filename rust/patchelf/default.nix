@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-patchelf = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-patchelf = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-patchelf";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,7 +13,7 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A patchelf-compatible ELF binary patching tool written in Rust";
@@ -28,13 +24,9 @@
         };
       };
 
-    rust-patchelf-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-patchelf-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-patchelf-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -45,9 +37,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
         meta = {
           description = "A patchelf-compatible ELF binary patching tool written in Rust (dev build, fast compile)";
