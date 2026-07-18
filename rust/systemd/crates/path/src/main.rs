@@ -388,6 +388,14 @@ fn known_paths() -> BTreeMap<&'static str, PathBuf> {
         PathBuf::from("/etc/credstore.encrypted:/run/credstore.encrypted:/usr/local/lib/credstore.encrypted:/usr/lib/credstore.encrypted"),
     );
 
+    // System configuration drop-in search path (base for e.g. sysctl.d,
+    // tmpfiles.d): /etc, /run, /usr/local/lib, /usr/lib. `--suffix=sysctl.d`
+    // turns this into the sysctl.d search path.
+    m.insert(
+        "system-search-configuration",
+        PathBuf::from("/etc:/run:/usr/local/lib:/usr/lib"),
+    );
+
     // Search network
     m.insert(
         "systemd-search-network",
