@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-ninja = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-ninja = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-ninja";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,7 +13,7 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A Ninja-compatible build system written in Rust";
@@ -28,13 +24,9 @@
         };
       };
 
-    rust-ninja-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-ninja-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-ninja-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -45,9 +37,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
         meta = {
           description = "A Ninja-compatible build system written in Rust (dev build, fast compile)";
