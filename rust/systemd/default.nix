@@ -211,10 +211,15 @@
                 # Make copied binaries writable so rust-systemd can overwrite them
                 chmod -R u+w $out/bin
 
-                # Overwrite with rust-systemd binaries (takes precedence)
+                # Overwrite with rust-systemd binaries (takes precedence).
+                # Dereference (-L): the cargo abstraction ships these as
+                # symlinks into per-crate store paths (udevadm-0.1.0, …), and
+                # the stage-1 initrd's self-contained `extra-utils` refuses to
+                # reference those derivations. Copying the real binaries (which
+                # link only glibc) keeps this package reference-clean.
                 for bin in ${rust-systemd}/bin/*; do
                   name=$(basename "$bin")
-                  cp -a "$bin" "$out/bin/$name"
+                  cp -aL "$bin" "$out/bin/$name"
                 done
 
                 # Provide sbin as a symlink to bin (matching systemd layout)
@@ -238,7 +243,7 @@
                   name=$(basename "$bin")
                   if [ -e "$out/lib/systemd/$name" ]; then
                     rm -f "$out/lib/systemd/$name"
-                    cp -a "$bin" "$out/lib/systemd/$name"
+                    cp -aL "$bin" "$out/lib/systemd/$name"
                   fi
                 done
 
@@ -246,7 +251,7 @@
                 # These are new binaries implemented in rust-systemd without a C counterpart.
                 for name in systemd-bsod systemd-journal-gatewayd systemd-journal-remote systemd-journal-upload; do
                   if [ -e "${rust-systemd}/bin/$name" ] && [ ! -e "$out/lib/systemd/$name" ]; then
-                    cp -a "${rust-systemd}/bin/$name" "$out/lib/systemd/$name"
+                    cp -aL "${rust-systemd}/bin/$name" "$out/lib/systemd/$name"
                   fi
                 done
 
@@ -257,7 +262,7 @@
                 # at the canonical location.
                 if [ -e "${rust-systemd}/bin/systemd-fstab-generator" ]; then
                   mkdir -p "$out/lib/systemd/system-generators"
-                  cp -a "${rust-systemd}/bin/systemd-fstab-generator" \
+                  cp -aL "${rust-systemd}/bin/systemd-fstab-generator" \
                     "$out/lib/systemd/system-generators/systemd-fstab-generator"
                 fi
 
