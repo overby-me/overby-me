@@ -6358,12 +6358,25 @@ pub fn execute_command(
                 // loses to everything).
                 let mut settings: u32 = 0;
                 let mut mask: u32 = 0;
+                let mut some_absolute = false;
+                let mut some_plus_minus = false;
                 for word in markers_val.split_whitespace() {
                     let (on, name) = match word.as_bytes().first() {
-                        Some(b'+') => (true, &word[1..]),
-                        Some(b'-') => (false, &word[1..]),
+                        Some(b'+') => {
+                            some_plus_minus = true;
+                            (true, &word[1..])
+                        }
+                        Some(b'-') => {
+                            some_plus_minus = true;
+                            (false, &word[1..])
+                        }
                         _ => {
-                            settings = 0; // bare word: last one wins
+                            // Bare (absolute) marker: last one wins, so reset
+                            // `settings` before applying this word — mirrors
+                            // upstream parse_unit_marker's `if (!some_plus_minus)
+                            // *settings = 0`.
+                            some_absolute = true;
+                            settings = 0;
                             (true, word)
                         }
                     };
@@ -6376,6 +6389,18 @@ pub fn execute_command(
                         settings &= !bit;
                     }
                     mask |= bit;
+                }
+                // Mixing absolute (bare) markers with +/- increments is rejected,
+                // and any absolute word makes the whole assignment a replacement:
+                // the mask becomes all-bits so the previous markers are cleared
+                // before `settings` is applied.  Mirrors upstream dbus-unit.c
+                // bus_unit_set_transient_property (Markers): `if (some_absolute)
+                // mask = UINT_MAX; u->markers = normalize(markers & ~mask, settings)`.
+                if some_plus_minus && some_absolute {
+                    return Err("Bad marker syntax.".to_owned());
+                }
+                if some_absolute {
+                    mask = u32::MAX;
                 }
                 let ri = run_info.read_poisoned();
                 let mut unit_markers = ri.unit_markers.lock().unwrap();
