@@ -1,11 +1,7 @@
 {
-  packages.rust-gcc = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-gcc = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-gcc";
-      version = "0.1.0";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -17,11 +13,9 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
-      doCheck = false;
-
-      postInstall = ''
+      rootAttrs.postInstall = ''
         # Create standard GCC symlinks
         ln -s $out/bin/gcc $out/bin/cc
         ln -s $out/bin/gcc $out/bin/x86_64-unknown-linux-gnu-gcc
