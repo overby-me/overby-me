@@ -1,11 +1,7 @@
 {
-  packages.rust-help2man = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-help2man = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-help2man";
-      version = "0.1.0";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -16,7 +12,7 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
       meta = {
         description = "A GNU help2man-compatible man page generator written in Rust";
