@@ -231,12 +231,12 @@ packages.my-tool = { lib, ... }:
 
 ## Milestones
 
-- [ ] M0: PLAN.md (this file), directory scaffold.
-- [ ] M1: `semver.nix` + `cfg.nix` with unit tests green.
-- [ ] M2: `lock.nix`, `index.nix`, `manifest.nix` with unit tests green.
-- [ ] M3: `resolve.nix` stage 1 (unified features) green on fixtures; wclip
+- [x] M0: PLAN.md (this file), directory scaffold.
+- [x] M1: `semver.nix` + `cfg.nix` with unit tests green.
+- [x] M2: `lock.nix`, `index.nix`, `manifest.nix` with unit tests green.
+- [x] M3: `resolve.nix` stage 1 (unified features) green on fixtures; wclip
       and xz lockfiles resolve without error.
-- [ ] M4: `snapshot-index.nu` + committed `index/` covering wclip + xz.
+- [x] M4: `snapshot-index.nu` + committed `index/` covering wclip + xz.
 - [ ] M5: `buildCrate.nix` + `buildCargoProject.nix`: wclip builds and runs.
 - [ ] M6: xz `[[bin]]` builds and runs (native linking via overrides,
       dev-deps excluded); flakelight module + checks wired; README.md.

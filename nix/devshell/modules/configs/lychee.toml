@@ -1,6 +1,11 @@
 # Run `touch .envrc && direnv export json` to apply changes to the repository.
 accept = [200, 201, 202, 203, 204, 206, 207, 429, 403]
-exclude_path = ["nix/devshell/modules/configs/lychee.toml"]
+exclude_path = [
+  "nix/devshell/modules/configs/lychee.toml",
+  # Registry index snapshot data, not documents
+  "nix/lib/cargo/index",
+  "nix/lib/cargo/tests/fixtures/index",
+]
 exclude = [
   '\$\{',
   "x-access-token",
@@ -8,6 +13,8 @@ exclude = [
   # Raw `{...}` template placeholders in source (e.g. `.../profile/{handle}`)
   # are not real links; skip them like the `%7B`/`${` encoded forms above.
   '\{',
+  # Nushell string interpolation `($var)` in URLs (e.g. snapshot-index.nu)
+  '\(\$',
   "localhost",
   '127\.0\.0\.1',
   'host\.docker\.internal',

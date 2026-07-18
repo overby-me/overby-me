@@ -114,5 +114,9 @@ extend-exclude = [
   "rust/gcc/include/",
   # Auto-generated bash 5.3 help text (upstream wording triggers false positives)
   "rust/bash/src/builtins/help_data.rs",
+  # Registry index snapshot data (JSON lines fetched from index.crates.io);
+  # contains target names like target_os = "nto" that look like typos
+  "nix/lib/cargo/index/",
+  "nix/lib/cargo/tests/fixtures/index/",
 ]
 ignore-hidden = false
