@@ -28,6 +28,7 @@ let
   cfgLib = import ./cfg.nix;
   lockLib = import ./lock.nix;
   indexLib = import ./index.nix;
+  manifestLib = import ./manifest.nix;
 
   # Feature table entry classification:
   #   "dep:R"  -> enable optional dep R
@@ -93,6 +94,24 @@ let
     noDefaultFeatures ? false,
     includeDev ? false,
   }: let
+    # One fetchGit per distinct (url, rev), shared by all packages from
+    # that repository. Pure: the lock pins the resolved commit.
+    gitCheckouts = foldl' (
+      acc: p: let
+        key = "${p.sourceInfo.url}#${p.sourceInfo.rev}";
+      in
+        acc
+        // {
+          # .outPath: fetchGit returns an attrset, downstream wants
+          # the store path.
+          ${key} =
+            (builtins.fetchGit {
+              inherit (p.sourceInfo) url rev;
+              allRefs = true;
+            }).outPath;
+        }
+    ) {} (filter (p: p.sourceInfo.type == "git") lock.packages);
+
     # Metadata per lock package id (lazy; only forced for active nodes).
     metas =
       mapAttrs (
@@ -110,7 +129,16 @@ let
               if e.cksum != pkg.checksum
               then throw "cargo resolve: checksum mismatch for ${id}: lock ${pkg.checksum} vs index ${e.cksum} (stale index snapshot?)"
               else e
-          else throw "cargo resolve: git dependencies are not supported yet (${pkg.name})"
+          else let
+            key = "${pkg.sourceInfo.url}#${pkg.sourceInfo.rev}";
+            checkout = gitCheckouts.${key};
+            found = manifestLib.locatePackage checkout pkg.name;
+          in
+            if found == null
+            then throw "cargo resolve: package ${pkg.name} not found in git checkout ${pkg.sourceInfo.url} (rev ${pkg.sourceInfo.rev})"
+            else if found.version != pkg.version
+            then throw "cargo resolve: git package ${pkg.name} is ${found.version} in the checkout but ${pkg.version} in the lock"
+            else found // {srcBase = checkout;}
       )
       lock.byId;
 

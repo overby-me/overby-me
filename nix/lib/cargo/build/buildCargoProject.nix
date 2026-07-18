@@ -211,8 +211,8 @@ in
         crateName = node.pkg.name;
         inherit (node.pkg) version;
         src =
-          if node.isWorkspaceMember
-          then filterSrc (cargoLib.manifest.joinPath src node.meta.relDir)
+          if node.pkg.sourceInfo.type != "registry"
+          then filterSrc (cargoLib.manifest.joinPath (node.meta.srcBase or src) node.meta.relDir)
           else
             fetchurl {
               name = "${node.pkg.name}-${node.pkg.version}.crate";
@@ -220,7 +220,7 @@ in
               sha256 = node.pkg.checksum;
             };
         plan =
-          if node.isWorkspaceMember
+          if node.pkg.sourceInfo.type != "registry"
           then planFor node isRoot
           else null;
         inherit (node) features;

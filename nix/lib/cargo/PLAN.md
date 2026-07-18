@@ -247,12 +247,13 @@ packages.my-tool = { lib, ... }:
       dependencies.
 - [ ] M8: resolver v2 (host/target split); migrate first real package in-repo.
 
-Later (not scheduled): rmeta pipelining, git dependencies, `[patch]`,
-tests/benches targets (a store-backed fake sparse registry, pnpm-style,
-is the right tool and doubles as the dyn-drvs planner later), profile
-fidelity (lto/strip), workspace exclude globs, cachix population job,
-scheduled oracle sweeps against crates.io top-N. (Multi-member
-workspaces and cross-project path dependencies landed with M7.)
+Later (not scheduled): rmeta pipelining, `[patch]`, tests/benches
+targets (a store-backed fake sparse registry, pnpm-style, is the right
+tool and doubles as the dyn-drvs planner later), cross-compilation,
+cachix population job, scheduled oracle sweeps against crates.io top-N.
+(Multi-member workspaces and cross-project path deps landed with M7;
+git deps, profile fidelity, and exclude globs landed on the landmines
+branch.)
 
 ## Benchmark (rust/systemd, 2026-07-18)
 
@@ -315,11 +316,11 @@ Every issue in oxalica/nocargo's tracker checked against this library:
 | #9 | index path case-folding (CoreFoundation-sys) | defused (relPath lowercases, unit test) |
 | #4 | index schema v2 / features2 | defused day one (merge + v>2 guard) |
 | #19, #21 | time-macros / deranged proc-macros | defused, live-tested: `time` project resolves identically to cargo, builds, macro output correct. Root cause difference: manifest-driven crate-type detection instead of nocargo's hardcoded proc-macro list |
-| #10 | manifest shape polymorphism ("list while a set was expected", trigger never diagnosed) | open class; guarded by the oracle and corpus, not provably closed |
-| #5 | LTO unsupported | honest gap here too: `[profile]` lto/strip are ignored (rust/xz sets both) |
-| #3, #14 | git deps (subfolders, workspaces) | deliberately unsupported, fails loud; tracked below |
+| #10 | manifest shape polymorphism ("list while a set was expected", trigger never diagnosed) | hardened on the landmines branch: defensive coercions in both parsers + per-crate error context; irreducible remainder guarded by oracle and corpus |
+| #5 | LTO unsupported | fixed on the landmines branch: profile lto/strip/panic/codegen-units/debug honored; xz shrank 38%, wclip 40% |
+| #3, #14 | git deps (subfolders, workspaces) | fixed on the landmines branch: fetchGit by lock rev, package located via workspace or tree scan; live-tested against a serde workspace member |
 | README | cross-compilation | not attempted |
-| README | workspace `exclude` semantics | ours is literal match; cargo treats entries as globs |
+| README | workspace `exclude` semantics | fixed on the landmines branch: glob matching (`*`, `**`, `?`) |
 
 ## Landmine branch plan (nix-lib-cargo-landmines, 2026-07-19)
 
