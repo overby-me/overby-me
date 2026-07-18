@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-grep = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-grep = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-grep";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./..;
@@ -20,11 +16,11 @@
           ];
         };
 
-        sourceRoot = "source/grep";
+        manifestDir = "grep";
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/grep $out/bin/egrep
           ln -s $out/bin/grep $out/bin/fgrep
         '';
