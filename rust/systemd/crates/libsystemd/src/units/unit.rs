@@ -110,7 +110,16 @@ impl UnitTimestamps {
     }
 
     pub fn record_active_enter(&mut self) {
-        let now = Self::now_usec();
+        self.record_active_enter_at(Self::now_usec());
+    }
+
+    /// Record the active-enter timestamp at an explicit time.  Used when a
+    /// Type=notify service signals READY=1 and then exits almost immediately:
+    /// the timestamp is clamped to the main exit time so the exec timestamps
+    /// stay ordered (start <= handoff <= active <= exit) regardless of the
+    /// interleaving between the notification thread and the SIGCHLD exit
+    /// handler.
+    pub fn record_active_enter_at(&mut self, now: u64) {
         self.active_enter = Some(now);
         self.state_change = Some(now);
     }

@@ -288,6 +288,34 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                                 &srvc_unit.id.name,
                             );
 
+                            // A Type=notify service that signals READY=1 and then
+                            // exits almost immediately (e.g. `systemd-notify --ready;
+                            // exit 1`) can have its deferred activation bail out when
+                            // the SIGCHLD exit handler moves the unit out of Starting
+                            // before the activation path records ActiveEnterTimestamp,
+                            // leaving it unset (0). Record it here — the point where
+                            // READY=1 is definitively processed — so the exec
+                            // timestamps stay consistent (start <= handoff <= active
+                            // <= exit). Clamp to the recorded main exit time when the
+                            // service has already exited so active-enter never exceeds
+                            // exit regardless of the interleaving between this thread
+                            // and the exit handler.
+                            if mut_state.srvc.signaled_ready {
+                                // Check-and-set under a single timestamps write guard
+                                // so we don't race the deferred activation thread
+                                // (which also records active_enter via record_active_enter)
+                                // between a separate read and write.
+                                let mut ts = srvc_unit.common.timestamps.write_poisoned();
+                                if ts.active_enter.is_none() {
+                                    let now = crate::units::UnitTimestamps::now_usec();
+                                    let active_ts = match mut_state.srvc.exec_main_exit_timestamp {
+                                        Some(e) if e < now => e,
+                                        _ => now,
+                                    };
+                                    ts.record_active_enter_at(active_ts);
+                                }
+                            }
+
                             // Now handle FDSTORE with any received file descriptors.
                             if !received_fds.is_empty() {
                                 handle_received_fds(
