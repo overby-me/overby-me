@@ -1,11 +1,7 @@
 {
-  packages.rust-pcre2 = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-pcre2 = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-pcre2";
-      version = "0.1.0";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -16,7 +12,7 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
       meta = {
         description = "A pure Rust implementation of PCRE2 (Perl Compatible Regular Expressions)";
