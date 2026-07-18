@@ -2291,7 +2291,13 @@ fn handle_response(
                     println!("{id:>6} {unit:<48} {jtype:<15} {state}");
                 }
                 if !no_legend {
-                    println!("\n{} jobs listed.", arr.len());
+                    if arr.is_empty() {
+                        // Mirror upstream systemctl-list-jobs.c: an empty job
+                        // list prints "No jobs running." rather than a count.
+                        println!("No jobs running.");
+                    } else {
+                        println!("\n{} jobs listed.", arr.len());
+                    }
                 }
             }
         }
