@@ -168,6 +168,9 @@ struct SysusersEntry {
     entry_type: EntryType,
     /// Whether the '+' modifier was present (only create if not existing).
     plus: bool,
+    /// Whether the '!' modifier was present (create the user with a locked
+    /// account, i.e. shadow expiration set so `userdbctl` reports locked=true).
+    locked: bool,
     /// The user or group name.
     name: String,
     /// The ID specification.
@@ -253,20 +256,20 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
 
     // Parse type field
     let type_str = &fields[0];
-    let (entry_type, plus) = match type_str.as_str() {
-        // `u`: create system user, `u+`: ensure system user (don't error if
-        // already exists with different fields), `u!`: create system user
-        // and lock the password (no login).  `u!+` combines both modifiers.
-        // We don't currently implement password locking, so `u!` and `u!+`
-        // create the user identically to `u` / `u+`.
-        "u" => (EntryType::CreateUser, false),
-        "u+" => (EntryType::CreateUser, true),
-        "u!" => (EntryType::CreateUser, false),
-        "u!+" | "u+!" => (EntryType::CreateUser, true),
-        "g" => (EntryType::CreateGroup, false),
-        "g+" => (EntryType::CreateGroup, true),
-        "m" => (EntryType::AddToGroup, false),
-        "r" => (EntryType::ReserveRange, false),
+    // `u`: create system user, `u+`: ensure system user (don't error if it
+    // already exists with different fields), `u!`: create system user with a
+    // locked account, `u!+`/`u+!`: both modifiers.  The `!` lock is applied by
+    // setting the shadow expiration so `userdbctl` reports locked=true (see
+    // create_user); it matches upstream sysusers' `sp_expire = 1`.
+    let (entry_type, plus, locked) = match type_str.as_str() {
+        "u" => (EntryType::CreateUser, false, false),
+        "u+" => (EntryType::CreateUser, true, false),
+        "u!" => (EntryType::CreateUser, false, true),
+        "u!+" | "u+!" => (EntryType::CreateUser, true, true),
+        "g" => (EntryType::CreateGroup, false, false),
+        "g+" => (EntryType::CreateGroup, true, false),
+        "m" => (EntryType::AddToGroup, false, false),
+        "r" => (EntryType::ReserveRange, false, false),
         other => {
             eprintln!(
                 "systemd-sysusers: {}:{}: unknown type '{}', ignoring.",
@@ -329,6 +332,7 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<SysusersE
     Some(SysusersEntry {
         entry_type,
         plus,
+        locked,
         name,
         id,
         gecos,
@@ -617,6 +621,31 @@ fn create_user(
                         "systemd-sysusers: Successfully created user '{}'.",
                         entry.name
                     );
+                }
+                // For `u!` entries, lock the account. `useradd --system` does
+                // not apply an expiration, so set the shadow expiration to day 1
+                // (1970-01-02) afterwards with chage. Upstream sysusers encodes
+                // the lock as sp_expire=1, which `userdbctl` reports as
+                // locked=true (an unlocked account leaves the field unset).
+                if entry.locked {
+                    let mut chage = Command::new("chage");
+                    chage.arg("-E").arg("1970-01-02");
+                    if root != Path::new("/") {
+                        chage.arg("--root").arg(root);
+                    }
+                    chage.arg(&entry.name);
+                    match chage.status() {
+                        Ok(st) if st.success() => {}
+                        Ok(st) => eprintln!(
+                            "systemd-sysusers: chage failed to lock user '{}' (exit {}).",
+                            entry.name,
+                            st.code().unwrap_or(-1),
+                        ),
+                        Err(e) => eprintln!(
+                            "systemd-sysusers: failed to run chage to lock user '{}': {}",
+                            entry.name, e
+                        ),
+                    }
                 }
                 true
             } else {

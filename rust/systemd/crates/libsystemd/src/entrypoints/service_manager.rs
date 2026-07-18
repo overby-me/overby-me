@@ -80,6 +80,10 @@ pub fn run_service_manager() {
     // path (config filters directories by existence at load time).
     let _ = std::fs::create_dir_all("/run/systemd/system");
     let _ = std::fs::create_dir_all("/run/systemd/transient");
+    // The userdb runtime directory is where user-database services drop their
+    // varlink sockets. Tools (and tests) expect it to exist even when no such
+    // service is running, matching upstream systemd.
+    let _ = std::fs::create_dir_all("/run/systemd/userdb");
 
     let (log_conf, mut conf) = config::load_config();
     kmsg(&format!(
