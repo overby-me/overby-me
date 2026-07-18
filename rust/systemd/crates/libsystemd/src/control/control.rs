@@ -10109,6 +10109,63 @@ pub fn execute_command(
                 run_info.unit_table.remove(&id);
             }
 
+            // issue-3171: a socket unit that is kept alive above (still
+            // Started) but whose on-disk fragment has been removed must stop
+            // accepting new connections — upstream leaves such a UNIT_NOT_FOUND
+            // socket active with its socket file intact, yet refuses further
+            // connects until an explicit restart.  Close its listening fds
+            // here (without unlinking the socket file, so `stat --format=%G`
+            // still reports the SocketGroup, and without changing its status).
+            // daemon-reload never re-opens the fds; only `systemctl restart`
+            // re-listens.
+            for unit in run_info.unit_table.values() {
+                let Specific::Socket(sock_spec) = &unit.specific else {
+                    continue;
+                };
+                // Fragment reappeared / never left this reload → still valid.
+                if fresh_names.contains(&unit.id.name) {
+                    continue;
+                }
+                // Only running sockets hold listening fds worth closing.
+                {
+                    let status = unit.common.status.read_poisoned();
+                    if !matches!(&*status, UnitStatus::Started(_)) {
+                        continue;
+                    }
+                }
+                match &unit.common.unit.fragment_path {
+                    None => continue,
+                    Some(p) => {
+                        // Transient sockets live only at runtime; their
+                        // absence from disk is expected, not a removal.
+                        if p.starts_with("/run/systemd/transient") {
+                            continue;
+                        }
+                        // A template instance whose template is still on disk
+                        // is not gone — the disk scan just doesn't
+                        // re-enumerate instances.  Mirror the stale-unit keep
+                        // rule above.
+                        if let Some((template_name, _)) =
+                            crate::units::loading::directory_deps::parse_template_instance(
+                                &unit.id.name,
+                            )
+                            && run_info
+                                .config
+                                .unit_dirs
+                                .iter()
+                                .any(|d| d.join(&template_name).exists())
+                        {
+                            continue;
+                        }
+                    }
+                }
+                crate::sockets::close_listening_fds_keep_file(
+                    &sock_spec.conf,
+                    &unit.id.name,
+                    &mut run_info.fd_store.write_poisoned(),
+                );
+            }
+
             // Update existing units' configuration (preserving runtime status)
             for (new_id, new_unit) in updated_units {
                 // Find the existing unit by name
