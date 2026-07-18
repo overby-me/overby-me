@@ -552,6 +552,68 @@ pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo
             existing.common.dependencies.wants.push(new_id.clone());
             unit.common.dependencies.wanted_by.push(existing.id.clone());
         }
+
+        // Implicit same-name socket<->service association (foo.socket <->
+        // foo.service), mirroring apply_sockets_to_services' names_match rule.
+        // The batch resolver (fill_dependencies) runs only at boot/daemon-reload,
+        // so establish it here for on-demand (find_or_load_unit) loads too —
+        // otherwise a socket-activated service loaded on demand never learns
+        // about its socket (empty conf.sockets), which breaks re-arming the
+        // socket when the service stops and passing the socket fd to the service.
+        if unit.id.name_without_suffix() == existing.id.name_without_suffix() {
+            let new_is_socket = matches!(&unit.specific, units::Specific::Socket(_))
+                && matches!(&existing.specific, units::Specific::Service(_));
+            let new_is_service = matches!(&unit.specific, units::Specific::Service(_))
+                && matches!(&existing.specific, units::Specific::Socket(_));
+            if new_is_socket {
+                if let units::Specific::Socket(s) = &mut unit.specific
+                    && !s.conf.services.contains(&existing.id)
+                {
+                    s.conf.services.push(existing.id.clone());
+                }
+                if let units::Specific::Service(s) = &mut existing.specific
+                    && !s.conf.sockets.contains(&new_id)
+                {
+                    s.conf.sockets.push(new_id.clone());
+                }
+                // socket Before/RequiredBy service; service After/Requires socket
+                if !unit.common.dependencies.before.contains(&existing.id) {
+                    unit.common.dependencies.before.push(existing.id.clone());
+                }
+                if !unit.common.dependencies.required_by.contains(&existing.id) {
+                    unit.common.dependencies.required_by.push(existing.id.clone());
+                }
+                if !existing.common.dependencies.after.contains(&new_id) {
+                    existing.common.dependencies.after.push(new_id.clone());
+                }
+                if !existing.common.dependencies.requires.contains(&new_id) {
+                    existing.common.dependencies.requires.push(new_id.clone());
+                }
+            } else if new_is_service {
+                if let units::Specific::Service(s) = &mut unit.specific
+                    && !s.conf.sockets.contains(&existing.id)
+                {
+                    s.conf.sockets.push(existing.id.clone());
+                }
+                if let units::Specific::Socket(s) = &mut existing.specific
+                    && !s.conf.services.contains(&new_id)
+                {
+                    s.conf.services.push(new_id.clone());
+                }
+                if !unit.common.dependencies.after.contains(&existing.id) {
+                    unit.common.dependencies.after.push(existing.id.clone());
+                }
+                if !unit.common.dependencies.requires.contains(&existing.id) {
+                    unit.common.dependencies.requires.push(existing.id.clone());
+                }
+                if !existing.common.dependencies.before.contains(&new_id) {
+                    existing.common.dependencies.before.push(new_id.clone());
+                }
+                if !existing.common.dependencies.required_by.contains(&new_id) {
+                    existing.common.dependencies.required_by.push(new_id.clone());
+                }
+            }
+        }
     }
 
     trace!("Leniently inserted unit: {}", unit.id.name);
