@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-tar = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-tar = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-tar";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,7 +13,7 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A GNU tar-compatible archive tool written in Rust";
@@ -28,13 +24,9 @@
         };
       };
 
-    rust-tar-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-tar-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-tar-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -45,9 +37,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
         meta = {
           description = "A GNU tar-compatible archive tool written in Rust (dev build, fast compile)";
@@ -79,7 +71,6 @@
     }:
       stdenv.mkDerivation {
         pname = "gnutar-test-harness";
-        version = "1.35";
         inherit (gnutar) src;
 
         nativeBuildInputs = [
