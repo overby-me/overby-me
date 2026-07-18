@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-patch = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-patch = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-patch";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,7 +13,7 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A GNU patch-compatible diff application tool written in Rust";
@@ -28,13 +24,9 @@
         };
       };
 
-    rust-patch-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-patch-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-patch-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -45,9 +37,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
         meta = {
           description = "A GNU patch-compatible diff application tool written in Rust (dev build, fast compile)";
