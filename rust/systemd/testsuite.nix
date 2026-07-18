@@ -386,7 +386,8 @@ in
                  ${config.systemd.package}/example/systemd/system/systemd-journald@.socket \
                  ${config.systemd.package}/example/systemd/system/systemd-journald-varlink@.socket \
                  ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.service \
-                 ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.socket; do
+                 ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.socket \
+                 ${config.systemd.package}/lib/systemd/system/systemd-bsod.service; do
           name=$(basename "$f")
           [ -e "/usr/lib/systemd/system/$name" ] || ln -sfn "$f" "/usr/lib/systemd/system/$name"
         done
