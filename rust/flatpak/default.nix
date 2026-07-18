@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-flatpak = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-flatpak = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-flatpak";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,7 +13,7 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A Flatpak-compatible application sandboxing and distribution tool written in Rust";
@@ -28,13 +24,9 @@
         };
       };
 
-    rust-flatpak-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-flatpak-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-flatpak-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -45,9 +37,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
         meta = {
           description = "A Flatpak-compatible application sandboxing and distribution tool written in Rust (dev build, fast compile)";
