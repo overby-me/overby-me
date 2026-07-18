@@ -2298,6 +2298,15 @@ fn create_transient_slice(
             .find(|u| u.id.name == slice_name)
             .ok_or_else(|| format!("Transient slice {slice_name} not found after creation"))?;
 
+        // Capture the drop-in Documentation= entries (already applied by
+        // create_or_update_implicit_slice) so they can be re-appended after
+        // the transient properties.  This reproduces systemd's "loaded twice"
+        // behaviour for transient slices, where the config is applied, then
+        // the transient properties, then the config again — and Documentation=
+        // is not deduplicated.  15-DROPIN testcase_transient_slice_dropins
+        // asserts this exact ordering.
+        let dropin_docs = unit.common.unit.documentation.clone();
+
         // Transient values first — fill in fields the dropin didn't set.
         if let Some(ref desc) = params.description
             && unit.common.unit.description.is_empty()
@@ -2325,6 +2334,10 @@ fn create_transient_slice(
             }
         }
 
+        // Re-append the drop-in Documentation= entries (see `dropin_docs`
+        // above) to reproduce the "loaded twice" ordering.
+        unit.common.unit.documentation.extend(dropin_docs);
+
         // Scalar cgroup/resource values — only set if the dropin didn't.
         if let crate::units::Specific::Slice(ref mut slice) = unit.specific {
             for prop in &params.properties {
@@ -2351,10 +2364,30 @@ fn create_transient_slice(
             }
         }
 
-        // Mark as transient so `systemctl show -P Transient` returns yes.
+        // Mark as transient so `systemctl show -P Transient` returns yes, and
+        // write the transient fragment to disk carrying the caller-provided
+        // [Unit] properties.  On `systemctl daemon-reload` the slice is
+        // re-loaded from this fragment plus the filesystem drop-ins, which
+        // (with Documentation= accumulating) yields the fragment values
+        // followed by the drop-in values — the post-reload ordering asserted by
+        // 15-DROPIN testcase_transient_slice_dropins.
         let transient_dir = std::path::Path::new("/run/systemd/transient");
         let _ = std::fs::create_dir_all(transient_dir);
-        unit.common.unit.fragment_path = Some(transient_dir.join(&slice_name));
+        let fragment_path = transient_dir.join(&slice_name);
+        let mut fragment = String::from("[Unit]\n");
+        if let Some(ref desc) = params.description {
+            fragment.push_str(&format!("Description={desc}\n"));
+        }
+        for prop in &params.properties {
+            if let Some((k, v)) = prop.split_once('=')
+                && k == "Documentation"
+            {
+                fragment.push_str(&format!("Documentation={v}\n"));
+            }
+        }
+        fragment.push_str("\n[Slice]\n");
+        let _ = std::fs::write(&fragment_path, fragment);
+        unit.common.unit.fragment_path = Some(fragment_path);
 
         Ok(unit.id.clone())
     }
@@ -10249,6 +10282,17 @@ pub fn execute_command(
                         if !preserve_transient {
                             existing_unit.common.unit = new_unit.common.unit;
                             existing_unit.common.dependencies = new_unit.common.dependencies;
+                        } else {
+                            // Even for a preserved transient unit, refresh
+                            // Documentation= from the re-parsed fragment + drop-
+                            // ins: the transient fragment on disk carries the
+                            // caller-provided Documentation, so the re-loaded
+                            // value (fragment first, then drop-ins) is now
+                            // authoritative.  15-DROPIN
+                            // testcase_transient_slice_dropins checks the
+                            // post-reload ordering "drop5 drop1..drop4".
+                            existing_unit.common.unit.documentation =
+                                new_unit.common.unit.documentation;
                         }
                         updated_units_names.push(Value::String(existing_id.name.clone()));
                     }

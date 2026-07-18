@@ -2268,6 +2268,10 @@ fn is_list_setting(key: &str) -> bool {
             // empty value), so drop-in merging must not drop earlier values.
             | "StandardInputText"
             | "StandardInputData"
+            // Documentation= accumulates across fragment and drop-ins and is
+            // not deduplicated (systemd.unit(5)), so drop-in merging must
+            // append rather than replace.
+            | "Documentation"
             // Dependency directives accumulate
             | "Requires"
             | "Wants"
