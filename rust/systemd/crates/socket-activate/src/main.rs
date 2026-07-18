@@ -156,7 +156,12 @@ fn create_socket(addr: &str, datagram: bool, backlog: i32) -> io::Result<Listeni
 
     // Try parsing as a bare port number
     if let Ok(port) = addr.parse::<u16>() {
-        let bind_addr: SocketAddr = ([0, 0, 0, 0], port).into();
+        // Bind bare ports on IPv6 [::] in dual-stack mode (IPV6_V6ONLY=0, set in
+        // create_tcp_socket) so both IPv6 (::1) and IPv4 (127.0.0.1, as a
+        // v4-mapped address) clients can connect, matching upstream
+        // systemd-socket-activate. Binding 0.0.0.0 would refuse `localhost`
+        // connections on hosts that resolve it to ::1 first.
+        let bind_addr: SocketAddr = (std::net::Ipv6Addr::UNSPECIFIED, port).into();
         return if datagram {
             create_udp_socket(&bind_addr, addr)
         } else {
@@ -405,6 +410,23 @@ fn create_tcp_socket(addr: &SocketAddr, name: &str, backlog: i32) -> io::Result<
             (&optval as *const libc::c_int).cast(),
             std::mem::size_of::<libc::c_int>() as libc::socklen_t,
         );
+    }
+
+    // Enable dual-stack for IPv6 sockets so a [::] bind also accepts IPv4
+    // clients (as v4-mapped addresses), regardless of the bindv6only sysctl.
+    // A bare-port listener must serve `localhost` whether it resolves to ::1
+    // or 127.0.0.1.
+    if domain == libc::AF_INET6 {
+        let off: libc::c_int = 0;
+        unsafe {
+            libc::setsockopt(
+                fd,
+                libc::IPPROTO_IPV6,
+                libc::IPV6_V6ONLY,
+                (&off as *const libc::c_int).cast(),
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
     }
 
     // Bind (with retry + SOCK_DESTROY for orphaned LISTEN sockets)
