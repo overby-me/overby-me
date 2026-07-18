@@ -1322,6 +1322,17 @@ impl Service {
                 cmd_str.push(' ');
                 cmd_str.push_str(arg);
             }
+            // systemd env-expands the command (unescaping $$ -> $) before
+            // handing it to the shell, unless the ':' prefix disables
+            // expansion. Match that: without it, ExecStart=|@echo ...$$SHELL
+            // hands a raw $$ to the shell, which expands it to the shell's PID
+            // instead of the intended literal $SHELL (which the shell then
+            // expands itself).
+            let cmd_str = if cmdline.prefixes.contains(&CommandlinePrefix::Colon) {
+                cmd_str
+            } else {
+                crate::entrypoints::exec_helper::expand_env_str(&cmd_str)
+            };
             let mut c = Command::new("/bin/sh");
             c.arg0("-sh");
             c.arg("-c");
@@ -1416,6 +1427,20 @@ impl Service {
             // MONITOR_INVOCATION_ID is required but we don't track invocation IDs yet;
             // use a placeholder so handler scripts that check -z don't fail.
             cmd.env("MONITOR_INVOCATION_ID", "0");
+        }
+
+        // Apply the unit's Environment= to helper commands (ExecStartPre=/Post=,
+        // ExecStop=, and the preliminary ExecStart= of multi-command oneshots).
+        // systemd exports these to helper processes too; e.g. the prefix-shell
+        // test sets SHLVL= and expects the '|'-wrapped login shell to increment
+        // it, which only works if the child actually sees it.
+        if let Some(unit) = run_info.unit_table.get(&id)
+            && let crate::units::Specific::Service(srvc) = &unit.specific
+            && let Some(env_vars) = srvc.conf.exec_config.environment.as_ref()
+        {
+            for (k, v) in &env_vars.vars {
+                cmd.env(k, v);
+            }
         }
 
         // JoinsNamespaceOf=: join the target service's mount namespace so

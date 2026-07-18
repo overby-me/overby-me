@@ -4503,7 +4503,7 @@ pub fn write_utmp_dead_record(
 /// - `${VARNAME}` → value of env var (empty string if unset)
 /// - `$VARNAME` → value of env var (only valid identifiers: [A-Za-z_][A-Za-z0-9_]*)
 /// - Other `$` usage → left as-is
-fn expand_env_str(s: &str) -> String {
+pub(crate) fn expand_env_str(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let bytes = s.as_bytes();
     let mut i = 0;
