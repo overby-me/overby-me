@@ -1,11 +1,7 @@
 {
-  packages.rust-direnv = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-direnv = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-direnv";
-      version = "2.36.0";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -16,7 +12,7 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
       meta = {
         description = "A Rust rewrite of direnv - unclutter your .profile";
