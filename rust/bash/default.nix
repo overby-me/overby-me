@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-bash = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-bash = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-bash";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,9 +13,9 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/bash $out/bin/sh
         '';
 
@@ -32,13 +28,9 @@
         };
       };
 
-    rust-bash-dev = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-bash-dev = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-bash-dev";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -49,11 +41,11 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
-        buildType = "debug";
+        release = false;
 
-        postInstall = ''
+        rootAttrs.postInstall = ''
           ln -s $out/bin/bash $out/bin/sh
         '';
 
