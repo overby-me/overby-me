@@ -2470,6 +2470,17 @@ pub fn run_exec_helper() {
     // change working directory if configured
     if let Some(ref dir) = config.working_directory {
         let dir = if dir == Path::new("~") {
+            // WorkingDirectory=~ resolves to the home directory of the unit's
+            // user.  DynamicUser=yes is incompatible with `~` (a dynamic user
+            // context has no home directory), so upstream systemd rejects the
+            // combination even when an explicit User= is also given — fail the
+            // service rather than silently falling back to a resolved HOME.
+            if config.dynamic_user {
+                log::error!(
+                    "WorkingDirectory=~ is not valid with DynamicUser=yes: no home directory"
+                );
+                std::process::exit(200); // EXIT_CHDIR
+            }
             // Resolve ~ to the home directory from config.env (which is
             // populated from User= in start_service) or fall back to the
             // process environment.
