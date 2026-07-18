@@ -9,6 +9,6 @@
 
   perSystemLib.buildCargoProject = pkgs:
     import ./build/buildCargoProject.nix {
-      inherit (pkgs) lib stdenv rustc python3 fetchurl writeText;
+      inherit (pkgs) lib stdenv rustc nushell fetchurl writeText;
     };
 }

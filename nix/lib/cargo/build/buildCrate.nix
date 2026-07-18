@@ -4,7 +4,7 @@
   lib,
   stdenv,
   rustc,
-  python3,
+  nushell,
   writeText,
 }: {
   crateName,
@@ -54,7 +54,7 @@
     pname = crateName;
     inherit version src;
 
-    nativeBuildInputs = [rustc python3];
+    nativeBuildInputs = [rustc nushell];
 
     # Registry .crate files are gzipped tarballs with an unknown extension.
     unpackCmd = ''tar xzf "$curSrc"'';
@@ -63,11 +63,9 @@
     # rlibs are ar archives of bitcode/objects; stripping mangles them.
     dontStrip = true;
 
-    MANIFEST_PLAN_PY = ./manifest_plan.py;
-
     buildPhase = ''
       runHook preBuild
-      python3 ${./crate_builder.py} ${config}
+      nu --no-config-file ${./crate-builder.nu} ${config}
       runHook postBuild
     '';
 

@@ -4,12 +4,12 @@
   lib,
   stdenv,
   rustc,
-  python3,
+  nushell,
   fetchurl,
   writeText,
 }: let
   cargoLib = import ../lib;
-  buildCrate = import ./buildCrate.nix {inherit lib stdenv rustc python3 writeText;};
+  buildCrate = import ./buildCrate.nix {inherit lib stdenv rustc nushell writeText;};
 in
   {
     src,
