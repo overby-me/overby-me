@@ -812,6 +812,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             timer_slack_nsec: parsed.timer_slack_nsec,
             standard_input_text: parsed.standard_input_text,
             standard_input_data: parsed.standard_input_data,
+            stdin_inputs: parsed.stdin_inputs,
             set_login_environment: parsed.set_login_environment,
         })
     }

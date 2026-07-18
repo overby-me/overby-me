@@ -2580,21 +2580,29 @@ fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf])
                         "StandardInputText" => {
                             if value.is_empty() {
                                 svc.conf.exec_config.standard_input_text.clear();
+                                svc.conf.exec_config.stdin_inputs.clear();
                             } else {
                                 svc.conf
                                     .exec_config
                                     .standard_input_text
                                     .push(value.to_string());
+                                svc.conf.exec_config.stdin_inputs.push(
+                                    crate::units::unit_parsing::StdinInput::Text(value.to_string()),
+                                );
                             }
                         }
                         "StandardInputData" => {
                             if value.is_empty() {
                                 svc.conf.exec_config.standard_input_data.clear();
+                                svc.conf.exec_config.stdin_inputs.clear();
                             } else {
                                 svc.conf
                                     .exec_config
                                     .standard_input_data
                                     .push(value.to_string());
+                                svc.conf.exec_config.stdin_inputs.push(
+                                    crate::units::unit_parsing::StdinInput::Data(value.to_string()),
+                                );
                             }
                         }
                         _ => {
@@ -3319,6 +3327,7 @@ fn create_transient_unit(
         timer_slack_nsec: None,
         standard_input_text: vec![],
         standard_input_data: vec![],
+        stdin_inputs: vec![],
         set_login_environment: None,
     };
 
@@ -4317,21 +4326,29 @@ fn create_transient_unit(
                 "StandardInputText" => {
                     if value.is_empty() {
                         service_conf.exec_config.standard_input_text.clear();
+                        service_conf.exec_config.stdin_inputs.clear();
                     } else {
                         service_conf
                             .exec_config
                             .standard_input_text
                             .push(value.to_string());
+                        service_conf.exec_config.stdin_inputs.push(
+                            crate::units::unit_parsing::StdinInput::Text(value.to_string()),
+                        );
                     }
                 }
                 "StandardInputData" => {
                     if value.is_empty() {
                         service_conf.exec_config.standard_input_data.clear();
+                        service_conf.exec_config.stdin_inputs.clear();
                     } else {
                         service_conf
                             .exec_config
                             .standard_input_data
                             .push(value.to_string());
+                        service_conf.exec_config.stdin_inputs.push(
+                            crate::units::unit_parsing::StdinInput::Data(value.to_string()),
+                        );
                     }
                 }
                 "UtmpIdentifier" => {

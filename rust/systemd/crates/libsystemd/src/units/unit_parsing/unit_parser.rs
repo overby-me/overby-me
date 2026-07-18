@@ -1254,6 +1254,47 @@ fn parse_space_separated_list(vec: Option<Vec<(u32, String)>>) -> Vec<String> {
     }
 }
 
+/// Merge `StandardInputText=` and `StandardInputData=` directives into a single
+/// list ordered by their position in the (already fragment+drop-in merged)
+/// unit file.  systemd feeds both kinds into one stdin buffer in appearance
+/// order, and an empty value of either resets everything accumulated so far.
+/// The `u32` in each entry is the source line index, so sorting by it recovers
+/// the true directive order across the fragment and its drop-ins.
+fn build_stdin_inputs(
+    text: Option<&[(u32, String)]>,
+    data: Option<&[(u32, String)]>,
+) -> Vec<super::StdinInput> {
+    let mut merged: Vec<(u32, bool, &str)> = Vec::new();
+    if let Some(text) = text {
+        for (idx, line) in text {
+            merged.push((*idx, false, line.trim()));
+        }
+    }
+    if let Some(data) = data {
+        for (idx, line) in data {
+            merged.push((*idx, true, line.trim()));
+        }
+    }
+    // Stable sort by line index preserves within-line order for equal keys.
+    merged.sort_by_key(|(idx, _, _)| *idx);
+
+    let mut out: Vec<super::StdinInput> = Vec::new();
+    for (_idx, is_data, value) in merged {
+        if value.is_empty() {
+            out.clear();
+            continue;
+        }
+        for token in value.split_whitespace() {
+            if is_data {
+                out.push(super::StdinInput::Data(token.to_owned()));
+            } else {
+                out.push(super::StdinInput::Text(token.to_owned()));
+            }
+        }
+    }
+    out
+}
+
 /// Like `parse_space_separated_list` but handles backslash-escaped spaces and
 /// colons in path entries (matching C systemd's `extract_first_word` with
 /// `EXTRACT_UNQUOTE`).  Backslash-space (`\ `) keeps the space in the token,
@@ -3163,6 +3204,10 @@ pub fn parse_exec_section(
 
         // ── Misc directives ─────────────────────────────────────────
         timer_slack_nsec: parse_optional_single_string("TimerSlackNSec", timer_slack_nsec)?,
+        stdin_inputs: build_stdin_inputs(
+            standard_input_text.as_deref(),
+            standard_input_data.as_deref(),
+        ),
         standard_input_text: parse_space_separated_list(standard_input_text),
         standard_input_data: parse_space_separated_list(standard_input_data),
         set_login_environment: parse_optional_bool("SetLoginEnvironment", set_login_environment)?,

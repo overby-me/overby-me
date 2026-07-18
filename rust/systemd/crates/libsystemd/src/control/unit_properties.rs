@@ -1667,23 +1667,29 @@ fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
     // IP address allow/deny (from ServiceConfig but stored in ExecConfig vicinity)
     // These are on ServiceConfig, not ExecConfig, so handled in insert_service_config.
 
-    // StandardInputData= is reported as the base64 encoding of the
-    // concatenation of every StandardInputText= value (each suffixed with
-    // "\n") followed by every StandardInputData= value (pre-decoded from
-    // base64).  `systemctl show -P StandardInputData` expects this merged
-    // base64 form.  Matches upstream behaviour exercised by 15-DROPIN
-    // testcase_transient_service_dropins.
+    // StandardInputData= is reported as the base64 encoding of every
+    // StandardInputText=/StandardInputData= directive concatenated in the
+    // order the directives appear across the fragment and drop-ins (text
+    // values suffixed with "\n"; data values pre-decoded from base64).  The
+    // ordering comes from `stdin_inputs`; the two legacy vecs cannot represent
+    // an interleaving where a data directive precedes a text one.  Matches
+    // upstream behaviour exercised by 15-DROPIN testcase_transient_service_dropins.
     {
+        use crate::units::unit_parsing::StdinInput;
         use base64::Engine;
         let engine = base64::engine::general_purpose::STANDARD;
         let mut bytes: Vec<u8> = Vec::new();
-        for s in &conf.standard_input_text {
-            bytes.extend_from_slice(s.as_bytes());
-            bytes.push(b'\n');
-        }
-        for s in &conf.standard_input_data {
-            if let Ok(decoded) = engine.decode(s) {
-                bytes.extend(decoded);
+        for item in &conf.stdin_inputs {
+            match item {
+                StdinInput::Text(s) => {
+                    bytes.extend_from_slice(s.as_bytes());
+                    bytes.push(b'\n');
+                }
+                StdinInput::Data(s) => {
+                    if let Ok(decoded) = engine.decode(s) {
+                        bytes.extend(decoded);
+                    }
+                }
             }
         }
         if !bytes.is_empty() {

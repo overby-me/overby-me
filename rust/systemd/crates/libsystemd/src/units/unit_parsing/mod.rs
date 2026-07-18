@@ -2666,6 +2666,22 @@ pub struct ParsedInstallSection {
     /// Matches systemd's `DefaultInstance=` setting in the `[Install]` section.
     pub default_instance: Option<String>,
 }
+
+/// A single `StandardInputText=` or `StandardInputData=` directive, retained
+/// in the order the directives appear across the fragment and its drop-ins.
+/// systemd feeds both kinds into one stdin buffer in appearance order, so the
+/// relative ordering must be preserved to reconstruct the merged
+/// `StandardInputData` property correctly (see 15-DROPIN
+/// testcase_transient_service_dropins).
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub enum StdinInput {
+    /// `StandardInputText=` value — raw text; a trailing newline is appended
+    /// when materialized into the stdin buffer.
+    Text(String),
+    /// `StandardInputData=` value — base64-encoded bytes.
+    Data(String),
+}
+
 pub struct ParsedExecSection {
     pub user: Option<String>,
     pub group: Option<String>,
@@ -3295,6 +3311,10 @@ pub struct ParsedExecSection {
     /// specified in Base64 encoding. Useful for binary data.
     /// Multiple directives accumulate. See systemd.exec(5).
     pub standard_input_data: Vec<String>,
+    /// StandardInputText=/StandardInputData= directives in the order they
+    /// appear across the fragment and drop-ins. Used to reconstruct the
+    /// merged `StandardInputData` property while preserving directive order.
+    pub stdin_inputs: Vec<StdinInput>,
     /// SetLoginEnvironment= — if true, the `$XDG_SESSION_ID`,
     /// `$XDG_RUNTIME_DIR` and similar PAM login session environment
     /// variables are set. Defaults to unset (determined by `PAMName=`

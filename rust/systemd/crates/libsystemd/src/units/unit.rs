@@ -3328,6 +3328,11 @@ pub struct ExecConfig {
     /// specified in Base64 encoding. Multiple directives accumulate.
     /// See systemd.exec(5).
     pub standard_input_data: Vec<String>,
+    /// StandardInputText=/StandardInputData= directives in the order they
+    /// appear across the fragment and drop-ins.  Preserves the interleaving
+    /// the two legacy vecs above cannot represent, so the merged
+    /// `StandardInputData` property is reconstructed in the correct order.
+    pub stdin_inputs: Vec<crate::units::unit_parsing::StdinInput>,
     /// SetLoginEnvironment= — if true, PAM login session environment
     /// variables are set. See systemd.exec(5).
     pub set_login_environment: Option<bool>,
