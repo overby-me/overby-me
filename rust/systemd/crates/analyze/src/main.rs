@@ -1219,7 +1219,27 @@ fn verify_unit_file(path: &str) -> Vec<String> {
 
 // ── Main ──────────────────────────────────────────────────────────────────
 
+/// Exit successfully when our stdout consumer closes the pipe early, e.g.
+/// `systemd-analyze timespan 1us | grep -q 1us` under `set -o pipefail`: grep
+/// exits after the first match and closes the pipe, so any further write from
+/// us hits EPIPE. Rust ignores SIGPIPE by default, turning such a write into a
+/// panic ("failed printing to stdout: Broken pipe") and a non-zero exit that
+/// pipefail then reports as a failure. The C tools finish with status 0 here
+/// (their buffered output flushes in a single write before the reader leaves),
+/// so match that observable behaviour with a clean, successful exit.
+extern "C" fn exit_on_sigpipe(_sig: libc::c_int) {
+    // _exit is async-signal-safe; process::exit()/exit() is not.
+    unsafe { libc::_exit(0) }
+}
+
 fn main() {
+    // SAFETY: installing a signal handler at startup, before spawning threads.
+    unsafe {
+        libc::signal(
+            libc::SIGPIPE,
+            exit_on_sigpipe as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+    }
     let cli = Cli::parse();
 
     match cli.command {
