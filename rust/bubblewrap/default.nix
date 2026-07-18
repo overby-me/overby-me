@@ -1,11 +1,7 @@
 {
-  packages.rust-bubblewrap = {
-    lib,
-    rustPlatform,
-  }:
-    rustPlatform.buildRustPackage {
+  packages.rust-bubblewrap = {lib, ...}:
+    lib.buildCargoProject {
       pname = "rust-bubblewrap";
-      version = "0.1.0";
 
       src = lib.fileset.toSource {
         root = ./.;
@@ -16,7 +12,7 @@
         ];
       };
 
-      cargoLock.lockFile = ./Cargo.lock;
+      index = ../../nix/lib/cargo/index;
 
       meta = {
         description = "A bubblewrap-compatible unprivileged sandboxing tool written in Rust";
