@@ -1,12 +1,8 @@
 {lib, ...}: {
   packages = {
-    rust-meson = {
-      lib,
-      rustPlatform,
-    }:
-      rustPlatform.buildRustPackage {
+    rust-meson = {lib, ...}:
+      lib.buildCargoProject {
         pname = "rust-meson";
-        version = "0.1.0";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -17,7 +13,7 @@
           ];
         };
 
-        cargoLock.lockFile = ./Cargo.lock;
+        index = ../../nix/lib/cargo/index;
 
         meta = {
           description = "A Meson build system compatible implementation in Rust";
