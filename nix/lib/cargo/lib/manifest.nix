@@ -268,6 +268,23 @@ let
       resolver = manifest.workspace.resolver or (pkg.resolver or null);
     };
 
+  # Glob matching for workspace member/exclude patterns:
+  # `*` within a path segment, `**` across segments, `?` single char.
+  globMatch = pat: s: let
+    esc =
+      replaceStrings
+      ["\\" "." "[" "]" "(" ")" "{" "}" "+" "^" "$" "|"]
+      ["\\\\" "\\." "\\[" "\\]" "\\(" "\\)" "\\{" "\\}" "\\+" "\\^" "\\$" "\\|"]
+      pat;
+    gs = replaceStrings ["**"] ["@@GLOBSTAR@@"] esc;
+    star = replaceStrings ["*"] ["[^/]*"] gs;
+    qm = replaceStrings ["?"] ["[^/]"] star;
+    rx = replaceStrings ["@@GLOBSTAR@@"] [".*"] qm;
+  in
+    match rx s != null;
+
+  hasGlob = pat: match ".*[*?].*" pat != null;
+
   # Expand [workspace] member globs. Supports literals and a single
   # trailing "/*" component (the common cases).
   expandMembers = src: patterns: excludes: let
@@ -297,8 +314,16 @@ let
           else null
       ) (attrNames entries));
     all = concatLists (map expand patterns);
+    excluded = d:
+      builtins.any (
+        e:
+          if hasGlob e
+          then globMatch e d
+          else e == d
+      )
+      excludes;
   in
-    filter (d: !(elem d excludes)) all;
+    filter (d: !(excluded d)) all;
 
   # Lexically normalize a relative path: resolve "." and "..". Throws when
   # the path escapes the source root, since such a path cannot exist inside
@@ -467,5 +492,5 @@ let
     }) (members ++ pathPackages));
   };
 in {
-  inherit loadManifest loadWorkspace normalizePackage normalizeDeps normalizeRel snakeName joinPath;
+  inherit loadManifest loadWorkspace normalizePackage normalizeDeps normalizeRel snakeName joinPath globMatch;
 }
