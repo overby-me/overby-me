@@ -8,6 +8,7 @@
   fetchurl,
   writeText,
   symlinkJoin,
+  runCommand,
 }: let
   cargoLib = import ../lib;
   buildCrate = import ./buildCrate.nix {inherit lib stdenv rustc nushell writeText;};
@@ -21,6 +22,9 @@ in
     manifestDir ? "",
     lockFile ? null,
     pname ? null,
+    # Version for the aggregate output of multi-root workspace builds
+    # (single-root builds take the version from the crate manifest).
+    version ? null,
     # Root package features.
     features ? [],
     noDefaultFeatures ? false,
@@ -32,6 +36,9 @@ in
     # Per-crate derivation attribute merges, keyed by crate name:
     # { openssl-sys = { buildInputs = [ openssl ]; nativeBuildInputs = [ pkg-config ]; }; }
     crateOverrides ? {},
+    # Alternative linker package (e.g. pkgs.wild or pkgs.mold); its main
+    # program is exposed as `ld` to cc via -B.
+    linker ? null,
     # Extra derivation attrs for the root crate (postInstall, env, ...).
     rootAttrs ? {},
     meta ? {},
@@ -69,6 +76,19 @@ in
         else "0";
       debug = !release;
     };
+
+    linkerDir =
+      if linker == null
+      then null
+      else
+        runCommand "cargo-nix-ld" {} ''
+          mkdir -p $out/bin
+          ln -s ${lib.getExe linker} $out/bin/ld
+        '';
+    linkArgs =
+      if linker == null
+      then []
+      else ["-C" "link-arg=-B${linkerDir}/bin"];
 
     normalEdges = node: filter (e: e.kind == "normal") node.edges;
     buildEdges = node: filter (e: e.kind == "build") node.edges;
@@ -154,17 +174,19 @@ in
         inherit (node) features;
         externs = map (e: {
           inherit (e) name;
+          renamed = e.name != e.package;
           drv = drvs.${e.targetId};
         }) (dedupeByName (normalEdges node));
         buildExterns = map (e: {
           inherit (e) name;
+          renamed = e.name != e.package;
           drv = drvs.${e.targetId};
         }) (dedupeByName (buildEdges node));
         depDrvs = map (i: drvs.${i}) (attrNames closureSet.${id});
         buildDepDrvs = map (i: drvs.${i}) (attrNames buildClosureSet.${id});
         linksDepDrvs = map (e: drvs.${e.targetId}) (normalEdges node);
         target = platform.triple;
-        inherit profile;
+        inherit profile linkArgs;
         capLints = !node.isWorkspaceMember;
         buildBins = isRoot;
         crateHash = hashOf id node;
@@ -196,6 +218,10 @@ in
             if pname != null
             then pname
             else throw "buildCargoProject: set pname when building several workspace members";
+          version =
+            if version != null
+            then version
+            else "0.0.0";
           paths = map (i: drvs.${i}) resolved.rootIds;
           passthru = {
             crates = drvs;

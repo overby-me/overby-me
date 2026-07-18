@@ -28,27 +28,33 @@
   buildBins ? false,
   bins ? null,
   crateHash,
+  # Extra rustc flags for link steps (lib/dylib/bin compiles), e.g. an
+  # alternative linker via ["-C" "link-arg=-B/path/with/ld"].
+  linkArgs ? [],
   # crateOverrides merge (buildInputs, env, patches, ...).
   extraAttrs ? {},
 }: let
-  config = writeText "cargo-nix-config-${crateName}-${version}.json" (builtins.toJSON {
-    inherit plan features target profile capLints buildBins bins crateHash;
-    externs =
-      map (e: {
-        inherit (e) name;
-        out = "${e.drv}";
-      })
-      externs;
-    buildExterns =
-      map (e: {
-        inherit (e) name;
-        out = "${e.drv}";
-      })
-      buildExterns;
-    depOuts = map (d: "${d}") depDrvs;
-    buildDepOuts = map (d: "${d}") buildDepDrvs;
-    linksDeps = map (d: "${d}") linksDepDrvs;
-  });
+  config = writeText "cargo-nix-config-${crateName}-${version}.json" (builtins.toJSON ({
+      inherit plan features target profile capLints buildBins bins crateHash;
+      externs =
+        map (e: {
+          inherit (e) name;
+          renamed = e.renamed or false;
+          out = "${e.drv}";
+        })
+        externs;
+      buildExterns =
+        map (e: {
+          inherit (e) name;
+          renamed = e.renamed or false;
+          out = "${e.drv}";
+        })
+        buildExterns;
+      depOuts = map (d: "${d}") depDrvs;
+      buildDepOuts = map (d: "${d}") buildDepDrvs;
+      linksDeps = map (d: "${d}") linksDepDrvs;
+    }
+    // lib.optionalAttrs (linkArgs != []) {inherit linkArgs;}));
 
   base = {
     pname = crateName;

@@ -122,7 +122,17 @@ def extern-args [externs: list] {
     if not ($marker | path exists) {
       error make {msg: $"dependency ($e.name) \(($e.out)\) has no lib artifact"}
     }
-    ["--extern", $"(snake $e.name)=(open --raw $marker | str trim)"]
+    # Cargo's extern name is the dependency's lib target name (e.g. crate
+    # md-5 exposes lib "md5"), unless the manifest renames the dependency.
+    let libname_marker = ($e.out | path join "nix-support/libname")
+    let name = (
+      if ($e | get -o renamed | default false) or (not ($libname_marker | path exists)) {
+        snake $e.name
+      } else {
+        open --raw $libname_marker | str trim
+      }
+    )
+    ["--extern", $"($name)=(open --raw $marker | str trim)"]
   } | flatten
 }
 
@@ -361,6 +371,7 @@ def compile-lib [plan: record, rustc: string, base_env: record, common_args: lis
   let dylibs = ($produced | where {|f| ($f | str ends-with ".so") or ($f | str ends-with ".dylib")})
   let artifact = ($rlibs | append $dylibs | first)
   $artifact | save -f ($out | path join "nix-support/extern")
+  $lib.name | save -f ($out | path join "nix-support/libname")
   $artifact
 }
 
@@ -450,6 +461,7 @@ def main [config_path: string] {
 
   let common_args = (
     (profile-args $cfg.profile)
+    | append ($cfg | get -o linkArgs | default [])
     | append (if $cfg.capLints { ["--cap-lints", "allow"] } else { [] })
     | append (feature-cfg-args $cfg.features)
     | append (if $bs == null { [] } else { $bs.cfgs | each {|c| ["--cfg", $c]} | flatten })
