@@ -1695,7 +1695,6 @@ fn allocate_space(
 // mkfs support
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 fn run_mkfs(device_path: &str, fstype: &str, label: &str, _uuid: &str) -> Result<(), String> {
     let (cmd, args): (&str, Vec<String>) = match fstype {
         "ext4" => (
@@ -1759,6 +1758,80 @@ fn run_mkfs(device_path: &str, fstype: &str, label: &str, _uuid: &str) -> Result
     }
 
     Ok(())
+}
+
+/// Format newly created partitions inside an image file. The image is attached
+/// to a loop device with partition scanning so each partition appears as
+/// `/dev/loopNp<num>`, then mkfs is run on each. Best-effort: the partition
+/// table is already written, so a formatting failure is surfaced but does not
+/// undo it. Requires privileges + loop device support (available in the test VM).
+fn format_new_partitions(
+    device_path: &str,
+    matched: &[MatchedPartition],
+    defs: &[PartitionDefinition],
+) -> Result<(), String> {
+    use std::process::Command;
+
+    // Collect (kernel partition number, fstype, label) for partitions that
+    // need a filesystem. Kernel partition nodes are numbered 1-based in GPT
+    // slot order, so the node for slot S is loopNp(S+1).
+    let mut to_format: Vec<(u32, String, String)> = Vec::new();
+    for m in matched {
+        if !m.is_new || m.allocated_size == 0 {
+            continue;
+        }
+        let def = &defs[m.definition_index];
+        if let Some(ref fstype) = def.format
+            && fstype != "empty"
+        {
+            to_format.push((m.slot_index + 1, fstype.clone(), m.assigned_label.clone()));
+        }
+    }
+    if to_format.is_empty() {
+        return Ok(());
+    }
+
+    // Attach the image to a loop device with a scanned partition table.
+    let out = Command::new("losetup")
+        .args(["--find", "--show", "--partscan", "--nooverlap", device_path])
+        .output()
+        .map_err(|e| format!("Failed to run losetup: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "losetup failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let loopdev = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    // Let the partition device nodes appear.
+    let _ = Command::new("udevadm")
+        .args(["settle", "--timeout=10"])
+        .status();
+
+    let mut format_err: Option<String> = None;
+    for (partnum, fstype, label) in &to_format {
+        let part_dev = format!("{loopdev}p{partnum}");
+        // Wait briefly for the node in case udev is slow.
+        for _ in 0..30 {
+            if std::path::Path::new(&part_dev).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if let Err(e) = run_mkfs(&part_dev, fstype, label, "") {
+            format_err = Some(format!("mkfs {part_dev} ({fstype}): {e}"));
+            break;
+        }
+    }
+
+    // Detach the loop device regardless of the formatting outcome.
+    let _ = Command::new("losetup").args(["-d", &loopdev]).status();
+
+    match format_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2562,20 +2635,12 @@ fn run(argv: &[String]) -> Result<i32, String> {
 
     eprintln!("Partition table written successfully.");
 
-    // Format new partitions if requested (only works on image files via loopback)
-    // For now, we just log what would be formatted
-    for m in &matched {
-        if m.is_new && m.allocated_size > 0 {
-            let def = &defs[m.definition_index];
-            if let Some(ref fstype) = def.format
-                && fstype != "empty"
-            {
-                eprintln!(
-                    "Note: Partition '{}' should be formatted as {} (use loopback device to format)",
-                    def.filename, fstype
-                );
-            }
-        }
+    // Format new partitions inside the image via a loop device. Only for image
+    // files (a loop device is attached to the whole image and partition-scanned).
+    if is_file
+        && let Err(e) = format_new_partitions(&device_path, &matched, &defs)
+    {
+        eprintln!("Warning: partition formatting failed: {e}");
     }
 
     Ok(0)
