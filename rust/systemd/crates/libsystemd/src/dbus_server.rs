@@ -820,10 +820,15 @@ mod inner {
             env!("CARGO_PKG_VERSION").to_string()
         }
 
-        /// Returns the architecture string (e.g. "x86-64").
+        /// Returns the architecture string in systemd's canonical spelling
+        /// (e.g. "x86-64", not Rust's "x86_64"), matching
+        /// `architecture_to_string(uname_architecture())`.
         #[zbus(property)]
         fn architecture(&self) -> String {
-            std::env::consts::ARCH.to_string()
+            vpick_core::native_arch()
+                .map(vpick_core::arch_to_string)
+                .unwrap_or(std::env::consts::ARCH)
+                .to_string()
         }
 
         /// Number of loaded units.
