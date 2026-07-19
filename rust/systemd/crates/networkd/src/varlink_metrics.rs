@@ -8,6 +8,7 @@
 //! loop here keeps it self-contained).
 
 use std::io::{BufRead, BufReader, Write};
+use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -43,37 +44,102 @@ const FAMILIES: &[(&str, &str, &str)] = &[
 /// Create the socket and spawn the accept loop. Best-effort: failures are
 /// logged and ignored (metrics are non-essential to networkd's operation).
 pub fn spawn_metrics_server() {
-    let path = Path::new(SOCKET_PATH);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755));
-    }
-    let _ = std::fs::remove_file(path); // clear a stale socket
-
-    let listener = match UnixListener::bind(path) {
-        Ok(l) => l,
-        Err(e) => {
-            log::warn!("Failed to bind metrics varlink socket {SOCKET_PATH}: {e}");
-            return;
+    // Prefer a socket-activated fd: the systemd-networkd-varlink-metrics.socket
+    // unit (FileDescriptorName=varlink-metrics) binds the socket and passes it
+    // to networkd via LISTEN_FDS. Self-binding then fails with EADDRINUSE, so we
+    // must adopt the passed fd instead.
+    let listener = if let Some(fd) = find_listen_fd() {
+        let l = unsafe { UnixListener::from_raw_fd(fd) };
+        let _ = l.set_nonblocking(false);
+        log::info!("Adopting socket-activated metrics fd {fd} for {SOCKET_PATH}");
+        l
+    } else {
+        let path = Path::new(SOCKET_PATH);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755));
+        }
+        let _ = std::fs::remove_file(path); // clear a stale socket
+        match UnixListener::bind(path) {
+            Ok(l) => {
+                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o666));
+                l
+            }
+            Err(e) => {
+                log::warn!("Failed to bind metrics varlink socket {SOCKET_PATH}: {e}");
+                return;
+            }
         }
     };
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o666));
 
     std::thread::Builder::new()
         .name("varlink-metrics".to_string())
-        .spawn(move || {
-            for conn in listener.incoming() {
-                match conn {
-                    Ok(stream) => {
-                        // Each connection is short-lived; handle inline.
-                        let _ = handle_connection(stream);
-                    }
-                    Err(e) => log::debug!("metrics varlink accept error: {e}"),
-                }
-            }
-        })
+        .spawn(move || serve(listener))
         .ok();
     log::info!("Serving io.systemd.Metrics at {SOCKET_PATH}");
+}
+
+/// Find the socket-activation fd for the metrics socket among `$LISTEN_FDS`,
+/// identified by the `varlink-metrics` name (`$LISTEN_FDNAMES`) or by its bound
+/// path. Returns the raw fd, or `None` when not socket-activated.
+fn find_listen_fd() -> Option<i32> {
+    // LISTEN_PID must match our own pid (systemd passes fds to a specific pid).
+    let listen_pid: i32 = std::env::var("LISTEN_PID").ok()?.parse().ok()?;
+    if listen_pid != std::process::id() as i32 {
+        return None;
+    }
+    let count: i32 = std::env::var("LISTEN_FDS").ok()?.parse().ok()?;
+    let names: Vec<String> = std::env::var("LISTEN_FDNAMES")
+        .unwrap_or_default()
+        .split(':')
+        .map(|s| s.to_string())
+        .collect();
+
+    const SD_LISTEN_FDS_START: i32 = 3;
+    for i in 0..count {
+        let fd = SD_LISTEN_FDS_START + i;
+        if names.get(i as usize).map(String::as_str) == Some("varlink-metrics")
+            || fd_bound_to(fd, SOCKET_PATH)
+        {
+            return Some(fd);
+        }
+    }
+    None
+}
+
+/// Whether the listening socket `fd` is bound to `path` (via getsockname).
+fn fd_bound_to(fd: i32, path: &str) -> bool {
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockname(fd, &mut addr as *mut _ as *mut libc::sockaddr, &mut len)
+    };
+    if rc != 0 || addr.sun_family != libc::AF_UNIX as libc::sa_family_t {
+        return false;
+    }
+    let bytes: Vec<u8> = addr
+        .sun_path
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
+    String::from_utf8_lossy(&bytes) == path
+}
+
+/// Accept loop. Each connection is handled on its own thread so a slow or
+/// half-closed client can never stall the acceptor (which previously left the
+/// socket bound but unresponsive, so callers saw EAGAIN).
+fn serve(listener: UnixListener) {
+    for conn in listener.incoming() {
+        match conn {
+            Ok(stream) => {
+                std::thread::spawn(move || {
+                    let _ = handle_connection(stream);
+                });
+            }
+            Err(e) => log::debug!("metrics varlink accept error: {e}"),
+        }
+    }
 }
 
 fn handle_connection(stream: UnixStream) -> std::io::Result<()> {
@@ -314,6 +380,62 @@ mod tests {
         let desc = r[0]["parameters"]["description"].as_str().unwrap();
         assert!(desc.contains("method List"));
         assert!(desc.contains("method Describe"));
+    }
+
+    #[test]
+    fn live_listener_answers_getinfo_after_misbehaving_client() {
+        use std::io::Read;
+        use std::time::Duration;
+
+        let path = std::env::temp_dir().join(format!("vlm-test-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        std::thread::spawn(move || serve(listener));
+
+        // Client A mimics a report metrics call that closes early, mid-stream.
+        {
+            let a = UnixStream::connect(&path).unwrap();
+            let mut w = &a;
+            let mut m = serde_json::to_vec(
+                &json!({"method": "io.systemd.Metrics.List", "parameters": {}, "more": true}),
+            )
+            .unwrap();
+            m.push(0);
+            w.write_all(&m).unwrap();
+            let mut b = [0u8; 1];
+            let _ = (&a).read(&mut b);
+            drop(a);
+        }
+
+        // Client B is a varlinkctl-style GetInfo: write, shutdown write, timed read.
+        // It must get a response and never see EAGAIN, even though A misbehaved.
+        let b = UnixStream::connect(&path).unwrap();
+        b.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        {
+            let mut w = &b;
+            let mut m =
+                serde_json::to_vec(&json!({"method": "org.varlink.service.GetInfo", "parameters": {}}))
+                    .unwrap();
+            m.push(0);
+            w.write_all(&m).unwrap();
+        }
+        b.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut reader = BufReader::new(&b);
+        let mut buf = Vec::new();
+        let n = reader.read_until(0, &mut buf).expect("must read a reply, not EAGAIN");
+        assert!(n > 0, "server sent no response");
+        if buf.last() == Some(&0) {
+            buf.pop();
+        }
+        let reply: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert!(
+            reply["parameters"]["interfaces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "io.systemd.Metrics")
+        );
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
