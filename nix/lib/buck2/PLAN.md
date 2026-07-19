@@ -1,3 +1,5 @@
+<!-- rumdl-disable MD046 -->
+
 # nix-buck2: pure-eval Buck2 builds, one derivation per action
 
 Build upstream [Buck2](https://github.com/facebook/buck2) projects with Nix,
@@ -393,23 +395,36 @@ packages.hello = { lib, ... }:
 
 ## Milestones
 
-- [ ] M0: PLAN.md (this file), directory scaffold, flake wiring stubs.
-- [ ] M1: skylark lexer + parser, unit tests green on the `no_prelude`
-      constructs and a Starlark-spec subset.
-- [ ] M2: skylark evaluator + standard builtins, unit tests green (scalars,
-      collections, functions, control flow, comprehensions, mutation, load).
-- [ ] M3: buck2 load phase: `.buckconfig`, labels, loader, `glob`, rule /
-      provider / attrs / struct / host_info / oncall globals; `no_prelude`
-      BUCK files evaluate to the expected unconfigured target graph.
-- [ ] M4: buck2 analysis phase: attr coercion, `ctx` / `ctx.actions`, artifact
+- [x] M0: PLAN.md (this file), directory scaffold, flake wiring.
+- [x] M1: skylark lexer + parser, unit tests green on the `no_prelude`
+      constructs (13 lexer + 35 parser cases, including parsing every real
+      `no_prelude` file).
+- [x] M2: skylark evaluator + standard builtins, unit tests green (58 cases:
+      scalars, collections, functions, control flow, comprehensions,
+      mutation-by-rebind, the late-binding closure, `load`).
+- [x] M3: buck2 load phase: `.buckconfig`, labels + cell resolution, loader,
+      `glob`, rule / provider / attrs / struct / host_info / oncall globals;
+      `no_prelude` BUCK files evaluate to the expected unconfigured target
+      graph (13 label + 15 load cases).
+- [x] M4: buck2 analysis phase: attr coercion, `ctx` / `ctx.actions`, artifact
       and `cmd_args` model, provider indexing; cpp/rust targets produce the
-      expected action DAG (asserted in tests, nothing built yet).
-- [ ] M5: lowering + cpp/rust builds: `//cpp/hello_world:main`,
-      `//cpp/library:library`, `//rust:main` build and run as flake checks;
-      `buildBuck2Project` API and README.
-- [ ] M6: go vertical: `download_file` to `fetchurl`, `write` with
-      `allow_args`, symlink, full `cmd_args`; `//go:main` builds and runs;
-      `//...` builds.
+      expected action DAG (10 analysis cases, nothing built).
+- [x] M5: lowering + cpp/rust builds. All three non-go `no_prelude` build
+      targets build (one derivation per action, no IFD) and are flake checks:
+      `//cpp/hello_world:main` (`buck2-build-cpp`, runs, prints "Hello from
+      C++!"), `//cpp/library:library` (`buck2-build-cpp-library`, produces a
+      `lib.so` exporting `print_hello`), and `//rust:main` (`buck2-build-rust`,
+      runs, prints "Hello from Rust!"). Plus the `buildBuck2Project` API and
+      README.
+- [ ] M6: go vertical. `download_file` -> `fetchurl` and `write` / `cmd_args`
+      `format`/`delimiter` are implemented, but `//go:main` does not build yet:
+      the Go toolchain's unpack `write` embeds the (declared) output path in
+      its script while the extract `run` consumes that script and produces the
+      output, a mutual reference that our absolute-store-path rendering turns
+      into infinite recursion. Buck2 avoids this with `buck-out`-relative paths
+      (`cmd_args(relative_to = ...)`), so the fix is a relative-path artifact
+      model plus the `default_only` label source for `symlink.bat`. Then
+      `//...` (which also needs target discovery, not just explicit labels).
 - [ ] M7: conformance widening (Starlark spec subset), a minimal
       `with_prelude`-style example, oracle diff where `buck2` is available.
 

@@ -1,0 +1,53 @@
+# Flakelight module: checks for the buck2 library. Imported explicitly from
+# flake.nix (the nix/lib autoloader only routes default.nix).
+#
+# Run one: nix build .#checks.x86_64-linux.buck2-build-cpp
+# (never `nix flake check`, see the repo rules)
+{
+  checks = {
+    # Pure eval unit tests (label/cell resolution, load phase, analysis).
+    buck2-lib = pkgs: let
+      names = ["labels" "load" "analysis"];
+      results = map (n: "${n}: ${import (./tests + "/${n}.nix")}") names;
+    in
+      pkgs.writeText "buck2-lib-tests" (builtins.concatStringsSep "\n" results);
+
+    # End-to-end: build the no_prelude C++ binary (one derivation per action,
+    # no IFD) and run it.
+    buck2-build-cpp = pkgs: let
+      drv = pkgs.lib.buildBuck2Project {
+        src = ./tests/fixtures/no_prelude;
+        target = "//cpp/hello_world:main";
+      };
+    in
+      pkgs.runCommand "buck2-build-cpp" {} ''
+        ${drv}/main > $out
+        grep -q "Hello from C++!" $out
+      '';
+
+    # End-to-end: build the no_prelude C++ shared library and check its symbol.
+    buck2-build-cpp-library = pkgs: let
+      drv = pkgs.lib.buildBuck2Project {
+        src = ./tests/fixtures/no_prelude;
+        target = "//cpp/library:library";
+      };
+    in
+      pkgs.runCommand "buck2-build-cpp-library" {} ''
+        test -f ${drv}/lib.so
+        grep -q print_hello ${drv}/lib.so
+        touch $out
+      '';
+
+    # End-to-end: build the no_prelude Rust binary and run it.
+    buck2-build-rust = pkgs: let
+      drv = pkgs.lib.buildBuck2Project {
+        src = ./tests/fixtures/no_prelude;
+        target = "//rust:main";
+      };
+    in
+      pkgs.runCommand "buck2-build-rust" {} ''
+        ${drv}/main > $out
+        grep -q "Hello from Rust!" $out
+      '';
+  };
+}
