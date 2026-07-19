@@ -19,7 +19,7 @@ fn main() -> ExitCode {
     for a in &args[1..] {
         match a.as_str() {
             "--more" | "-m" | "-E" => more = true,
-            "--json=short" | "--json=pretty" | "-J" => {} // accepted, no-op formatting hints
+            "--json=short" | "--json=pretty" | "-J" | "-j" => {} // accepted, no-op formatting hints
             _ => rest.push(a.clone()),
         }
     }
@@ -33,6 +33,7 @@ fn main() -> ExitCode {
         "introspect" => cmd_introspect(&rest[1..]),
         "info" => cmd_info(&rest[1..]),
         "list-methods" => cmd_list_methods(&rest[1..]),
+        "list-interfaces" => cmd_list_interfaces(&rest[1..]),
         other => {
             eprintln!("varlinkctl: unknown command '{other}'");
             ExitCode::FAILURE
@@ -125,6 +126,43 @@ fn cmd_list_methods(args: &[String]) -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+/// varlinkctl list-interfaces <target> — print the names of the interfaces the
+/// service exposes (via org.varlink.service.GetInfo), one per line.
+fn cmd_list_interfaces(args: &[String]) -> ExitCode {
+    if args.is_empty() {
+        eprintln!("Usage: varlinkctl list-interfaces <target>");
+        return ExitCode::FAILURE;
+    }
+    let request = serde_json::json!({
+        "method": "org.varlink.service.GetInfo",
+        "parameters": {},
+    });
+    match varlink_request(&args[0], &request) {
+        Ok(response) => {
+            if let Some(error) = response.get("error") {
+                eprintln!("varlinkctl: error: {error}");
+                return ExitCode::FAILURE;
+            }
+            let interfaces = response
+                .get("parameters")
+                .and_then(|p| p.get("interfaces"))
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for iface in interfaces {
+                if let Some(name) = iface.as_str() {
+                    println!("{name}");
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("varlinkctl: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Send a request to a varlink target. The target is either a socket path
@@ -382,11 +420,17 @@ fn stream_more(stream: &UnixStream, request: &serde_json::Value) -> Result<ExitC
             eprintln!("varlinkctl: error: {error}");
             return Ok(ExitCode::FAILURE);
         }
-        if let Some(params) = reply.get("parameters") {
-            println!("{}", serde_json::to_string_pretty(params).unwrap());
-        } else {
-            println!("{}", serde_json::to_string_pretty(&reply).unwrap());
-        }
+        // Emit as a JSON text sequence (RFC 7464): an RS (0x1e) byte, the
+        // compact JSON, then a newline. This matches upstream `varlinkctl
+        // --more` output, is what `jq --seq` consumes, and keeps one line per
+        // reply (so `wc -l` counts replies).
+        let payload = reply.get("parameters").unwrap_or(&reply);
+        let compact = serde_json::to_string(payload).unwrap();
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(&[0x1e]);
+        let _ = out.write_all(compact.as_bytes());
+        let _ = out.write_all(b"\n");
+        let _ = out.flush();
         let continues = reply.get("continues").and_then(|v| v.as_bool()).unwrap_or(false);
         if !continues {
             break;
@@ -395,37 +439,65 @@ fn stream_more(stream: &UnixStream, request: &serde_json::Value) -> Result<ExitC
     Ok(ExitCode::SUCCESS)
 }
 
-/// varlinkctl introspect <socket_path> [interface]
+/// varlinkctl introspect <target> [interface] — print the Varlink interface
+/// definition(s) the service exposes. Without an explicit interface, every
+/// interface from GetInfo is described (via GetInterfaceDescription).
 fn cmd_introspect(args: &[String]) -> ExitCode {
     if args.is_empty() {
-        eprintln!("Usage: varlinkctl introspect <socket_path> [interface]");
+        eprintln!("Usage: varlinkctl introspect <target> [interface]");
         return ExitCode::FAILURE;
     }
+    let target = &args[0];
 
-    let socket_path = &args[0];
-
-    // First get the service info
-    let request = serde_json::json!({
-        "method": "org.varlink.service.GetInfo",
-        "parameters": {},
-    });
-
-    match varlink_request(socket_path, &request) {
-        Ok(response) => {
-            if let Some(error) = response.get("error") {
-                eprintln!("varlinkctl: error: {error}");
+    // Determine the interfaces to describe: either the one explicitly named, or
+    // every interface reported by GetInfo.
+    let interfaces: Vec<String> = if args.len() >= 2 {
+        vec![args[1].clone()]
+    } else {
+        let info_req = serde_json::json!({
+            "method": "org.varlink.service.GetInfo",
+            "parameters": {},
+        });
+        match varlink_request(target, &info_req) {
+            Ok(response) => {
+                if let Some(error) = response.get("error") {
+                    eprintln!("varlinkctl: error: {error}");
+                    return ExitCode::FAILURE;
+                }
+                response
+                    .get("parameters")
+                    .and_then(|p| p.get("interfaces"))
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_default()
+            }
+            Err(e) => {
+                eprintln!("varlinkctl: {e}");
                 return ExitCode::FAILURE;
             }
-            if let Some(params) = response.get("parameters") {
-                println!("{}", serde_json::to_string_pretty(params).unwrap());
-            } else {
-                println!("{}", serde_json::to_string_pretty(&response).unwrap());
-            }
-            ExitCode::SUCCESS
         }
-        Err(e) => {
-            eprintln!("varlinkctl: {e}");
-            ExitCode::FAILURE
+    };
+
+    for iface in &interfaces {
+        let desc_req = serde_json::json!({
+            "method": "org.varlink.service.GetInterfaceDescription",
+            "parameters": { "interface": iface },
+        });
+        match varlink_request(target, &desc_req) {
+            Ok(r) => {
+                if let Some(desc) = r
+                    .get("parameters")
+                    .and_then(|p| p.get("description"))
+                    .and_then(|v| v.as_str())
+                {
+                    println!("{desc}");
+                }
+            }
+            Err(e) => {
+                eprintln!("varlinkctl: {e}");
+                return ExitCode::FAILURE;
+            }
         }
     }
+    ExitCode::SUCCESS
 }

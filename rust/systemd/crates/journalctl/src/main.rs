@@ -53,6 +53,8 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod varlink;
+
 // ---------------------------------------------------------------------------
 // CLI definition
 // ---------------------------------------------------------------------------
@@ -1672,6 +1674,13 @@ fn main() {
     // Ignore SIGPIPE so piping output to grep/head/etc. doesn't panic.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
+    // Socket-activated io.systemd.JournalAccess Varlink server mode: when a
+    // connected socket is passed on fd 3 (systemd-journalctl.socket, Accept=yes)
+    // serve the interface and exit instead of parsing CLI arguments.
+    if varlink::invoked_as_varlink() {
+        varlink::serve();
     }
 
     let cli = Cli::parse_from(preprocess_boot_args(std::env::args()));

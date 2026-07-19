@@ -471,6 +471,38 @@ in
           ln -sfn ../systemd-mute-console.socket /usr/lib/systemd/system/sockets.target.wants/systemd-mute-console.socket
         fi
 
+        # The rust-systemd package doesn't enable systemd-journalctl.socket by
+        # default, so provide it inline for TEST-04-JOURNAL.journalctl-varlink:
+        # the introspect/call of /run/systemd/io.systemd.JournalAccess needs a
+        # listening Accept=yes varlink socket that spawns journalctl per
+        # connection (the accepted connection is passed as fd 3 via LISTEN_FDS,
+        # and journalctl serves io.systemd.JournalAccess.GetEntries).
+        if [ ! -e /usr/lib/systemd/system/systemd-journalctl.socket ]; then
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Journal Log Access Socket' \
+            'DefaultDependencies=no' \
+            'Before=sockets.target' \
+            '[Socket]' \
+            'ListenStream=/run/systemd/io.systemd.JournalAccess' \
+            'FileDescriptorName=varlink' \
+            'SocketMode=0666' \
+            'Accept=yes' \
+            'MaxConnectionsPerSource=16' \
+            '[Install]' \
+            'WantedBy=sockets.target' \
+            > /usr/lib/systemd/system/systemd-journalctl.socket
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Journal Log Access' \
+            'DefaultDependencies=no' \
+            '[Service]' \
+            'ExecStart=/usr/bin/journalctl' \
+            > /usr/lib/systemd/system/systemd-journalctl@.service
+          mkdir -p /usr/lib/systemd/system/sockets.target.wants
+          ln -sfn ../systemd-journalctl.socket /usr/lib/systemd/system/sockets.target.wants/systemd-journalctl.socket
+        fi
+
         # Symlink helper binaries (systemd-sysctl, etc.) so tests referencing
         # /usr/lib/systemd/systemd-* can find them (NixOS puts them in the store)
         for bin in ${config.systemd.package}/lib/systemd/systemd-*; do
