@@ -416,17 +416,21 @@ packages.hello = { lib, ... }:
       `lib.so` exporting `print_hello`), and `//rust:main` (`buck2-build-rust`,
       runs, prints "Hello from Rust!"). Plus the `buildBuck2Project` API and
       README.
-- [ ] M6: go vertical. `download_file` -> `fetchurl` and `write` / `cmd_args`
-      `format`/`delimiter` are implemented, but `//go:main` does not build yet:
-      the Go toolchain's unpack `write` embeds the (declared) output path in
-      its script while the extract `run` consumes that script and produces the
-      output, a mutual reference that our absolute-store-path rendering turns
-      into infinite recursion. Buck2 avoids this with `buck-out`-relative paths
-      (`cmd_args(relative_to = ...)`), so the fix is a relative-path artifact
-      model plus the `default_only` label source for `symlink.bat`. Then
-      `//...` (which also needs target discovery, not just explicit labels).
-- [ ] M7: conformance widening (Starlark spec subset), a minimal
-      `with_prelude`-style example, oracle diff where `buck2` is available.
+- [x] M6: go vertical. `//go:main` builds and runs (`buck2-build-go`,
+      "Hello from Go!"). This exercises the full toolchain dance:
+      `download_file` -> `fetchurl` (pure, sha256 in the source), `write` of the
+      unpack script with `allow_args`, extract, and the `ln -sf` symlink, plus
+      `cmd_args` `format` / `delimiter` / `prepend` / `relative_to`. The fix was
+      the buck-out-relative artifact model (see Phase 3): artifact references
+      render as working-dir-relative paths (strings), so the unpack `write`
+      no longer takes a store-path dependency on the output it names, which
+      removes the write<->extract cycle. Downloaded prebuilt binaries are made
+      runnable with `autoPatchelfHook`. Known cost: each action carries the
+      producer's whole tree (the Go dir is copied a few times); a content-
+      addressed or symlink-farm staging is the optimization.
+- [ ] M7: `//...` target discovery (currently only explicit labels build),
+      conformance widening (Starlark spec subset), a minimal `with_prelude`-
+      style example, oracle diff where `buck2` is available.
 
 ## Decision log
 

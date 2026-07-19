@@ -7,11 +7,11 @@ no import-from-derivation and no `buck2` binary in the loop. Built on the
 reusable Starlark interpreter in [`../skylark`](../skylark); design,
 milestones, and the value/effect model are in [PLAN.md](./PLAN.md).
 
-Status: the `examples/no_prelude` C++ binary, C++ shared library, and Rust
-binary build (one derivation per action) as flake checks. The Go vertical does
-not build yet (it needs a `buck-out`-relative artifact model for
-`cmd_args(relative_to = ...)`), and `select()` / configuration are stubbed. See
-PLAN.md.
+Status: all four `examples/no_prelude` build targets build (one derivation per
+action) and run as flake checks: the C++ binary, the C++ shared library, the
+Rust binary, and the Go binary (whose toolchain is downloaded, unpacked, and
+symlinked entirely through Buck2 actions). `select()` / configuration and
+`//...` target discovery are not implemented yet. See PLAN.md.
 
 ## How it works
 
@@ -29,14 +29,19 @@ PLAN.md.
    actions into a threaded action registry and mint artifacts. The impl returns
    providers (`DefaultInfo`, `RunInfo`, ...). Still plain Nix data, still no
    IFD.
-3. **Lowering.** Each action becomes one derivation: `ctx.actions.run` a
-   `runCommand` with the toolchain on `PATH`, `ctx.actions.write` a text file,
-   `ctx.actions.download_file` a `fetchurl` fixed-output derivation (the sha256
-   is in the Starlark source, so it stays pure). Source artifacts enter the
-   sandbox via `builtins.path` (staged at their package-relative path so
-   `#include`s resolve); dependency outputs are wired through store-path
-   interpolation. A target's default output is its `DefaultInfo` default output
-   lowered to the producing action's derivation.
+3. **Lowering.** Each action becomes one derivation over a virtual `buck-out`:
+   every artifact has a stable working-directory-relative path, and command
+   lines / generated scripts reference those relative paths (honoring
+   `cmd_args(relative_to = ...)`), not store paths, so an action that only needs
+   a peer's path (a script naming an output it does not build) creates no
+   dependency and no cycle. Each derivation stages its inputs into a working
+   tree (sources via `builtins.path`; a producer's whole tree copied in, so
+   transitive files and symlink targets travel along), runs, and exports the
+   tree as `$out`. `ctx.actions.run` is a `runCommand` with the toolchain on
+   `PATH`, `write` a text file, `download_file` a `fetchurl` fixed-output
+   derivation (sha256 from the source, so it stays pure); downloaded prebuilt
+   binaries are made runnable with `autoPatchelfHook`. A target's default output
+   is its `DefaultInfo` default output in the producing action's tree.
 
 The upstream "local" toolchains (`command = "clang++"` / `"rustc"`) are made
 hermetic by mapping the command string to a nixpkgs package

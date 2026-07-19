@@ -49,5 +49,20 @@
         ${drv}/main > $out
         grep -q "Hello from Rust!" $out
       '';
+
+    # End-to-end: build the no_prelude Go binary and run it. Exercises the full
+    # toolchain dance: download_file (Go tarball via fetchurl), write (unpack
+    # script), extract, symlink, then `go build`. Network-heavy (fetches the Go
+    # toolchain) but pure (fixed sha256 in the Starlark source).
+    buck2-build-go = pkgs: let
+      drv = pkgs.lib.buildBuck2Project {
+        src = ./tests/fixtures/no_prelude;
+        target = "//go:main";
+      };
+    in
+      pkgs.runCommand "buck2-build-go" {} ''
+        ${drv}/main > $out
+        grep -q "Hello from Go!" $out
+      '';
   };
 }

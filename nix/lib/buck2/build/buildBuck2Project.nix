@@ -35,7 +35,7 @@
   buildOne = tgt: let
     node = analysis.analyzeTarget "" tgt;
     lowered = lower.lowerNode node;
-    inherit (lowered) defaultOutputDrv defaultOutputName;
+    inherit (lowered) defaultOutputDrv defaultOutputName defaultOutputRel;
   in
     pkgs.runCommand (nameOf tgt) {
       passthru = {
@@ -47,11 +47,7 @@
       };
     } ''
       mkdir -p $out
-      if [ -d ${defaultOutputDrv} ]; then
-        cp -r ${defaultOutputDrv}/. $out/
-      else
-        cp ${defaultOutputDrv} "$out/${defaultOutputName}"
-      fi
+      cp -r --reflink=auto ${defaultOutputDrv}/${defaultOutputRel} "$out/${defaultOutputName}"
     '';
 in
   if target != null
