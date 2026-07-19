@@ -1252,58 +1252,115 @@ fn print_version() {
     eprintln!("systemd-network-generator (rust-systemd)");
 }
 
-fn run(cmdline_path: &str, output_dir: &Path) -> i32 {
-    let cmdline = match read_cmdline(cmdline_path) {
-        Ok(s) => s,
-        Err(e) => {
-            // Not having /proc/cmdline is fine (e.g. in containers).
-            log::info!("Could not read {}: {}", cmdline_path, e);
-            return 0;
+/// Copy credential-provided network config into place. For each file in
+/// `$CREDENTIALS_DIRECTORY` whose name starts with one of the table prefixes,
+/// write it to `<target_dir>/<rest><suffix>` (mode 0644). Mirrors upstream
+/// systemd-network-generator's `pick_up_credentials()` (src/shared/creds-util.c),
+/// which runs unconditionally alongside the kernel-command-line handling.
+fn pick_up_credentials() -> io::Result<()> {
+    // (credential name prefix, target directory, target filename suffix)
+    const TABLE: &[(&str, &str, &str)] = &[
+        ("network.conf.", "/run/systemd/networkd.conf.d/", ".conf"),
+        ("network.link.", "/run/systemd/network/", ".link"),
+        ("network.netdev.", "/run/systemd/network/", ".netdev"),
+        ("network.network.", "/run/systemd/network/", ".network"),
+    ];
+
+    let cred_dir = match std::env::var_os("CREDENTIALS_DIRECTORY") {
+        Some(d) => PathBuf::from(d),
+        None => {
+            log::debug!("No credentials directory set, skipping credential pick-up.");
+            return Ok(());
         }
     };
 
-    let config = parse_cmdline(&cmdline);
+    let entries = match fs::read_dir(&cred_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
 
-    // If there are no network parameters, nothing to do.
-    if config.ip_configs.is_empty()
-        && config.routes.is_empty()
-        && config.nameservers.is_empty()
-        && config.vlans.is_empty()
-        && config.bonds.is_empty()
-        && config.bridges.is_empty()
-        && config.teams.is_empty()
-        && config.ifnames.is_empty()
-        && config.net_ifnames.is_none()
-    {
-        log::info!("No network parameters on kernel command line.");
-        return 0;
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        for (prefix, target_dir, suffix) in TABLE {
+            let Some(rest) = name.strip_prefix(prefix) else {
+                continue;
+            };
+            let filename = format!("{rest}{suffix}");
+            // Reject anything that wouldn't resolve to a plain filename.
+            if rest.is_empty() || filename.contains('/') || filename == "." || filename == ".." {
+                log::warn!("Credential '{name}' yields invalid filename '{filename}', ignoring.");
+                break;
+            }
+            fs::create_dir_all(target_dir)?;
+            let target = Path::new(target_dir).join(&filename);
+            fs::copy(entry.path(), &target)?;
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&target, fs::Permissions::from_mode(0o644));
+            log::info!("Installed {} from credential.", target.display());
+            break; // matched this credential; move on to the next one
+        }
     }
 
-    let files = generate(&config);
+    Ok(())
+}
 
-    if files.files.is_empty() {
-        log::info!("No configuration files to generate.");
-        return 0;
-    }
+fn run(cmdline_path: &str, output_dir: &Path) -> i32 {
+    let mut ret = 0;
 
-    match files.write_to(output_dir) {
-        Ok(count) => {
-            log::info!(
-                "Generated {} configuration file(s) in {}",
-                count,
-                output_dir.display()
-            );
-            0
+    // Kernel command line → .network files.
+    match read_cmdline(cmdline_path) {
+        Ok(cmdline) => {
+            let config = parse_cmdline(&cmdline);
+            // If there are no network parameters, there is nothing to generate.
+            if config.ip_configs.is_empty()
+                && config.routes.is_empty()
+                && config.nameservers.is_empty()
+                && config.vlans.is_empty()
+                && config.bonds.is_empty()
+                && config.bridges.is_empty()
+                && config.teams.is_empty()
+                && config.ifnames.is_empty()
+                && config.net_ifnames.is_none()
+            {
+                log::info!("No network parameters on kernel command line.");
+            } else {
+                let files = generate(&config);
+                if files.files.is_empty() {
+                    log::info!("No configuration files to generate.");
+                } else if let Err(e) = files.write_to(output_dir) {
+                    log::error!(
+                        "Failed to write configuration files to {}: {}",
+                        output_dir.display(),
+                        e
+                    );
+                    ret = 1;
+                } else {
+                    log::info!("Generated configuration file(s) in {}", output_dir.display());
+                }
+            }
         }
         Err(e) => {
-            log::error!(
-                "Failed to write configuration files to {}: {}",
-                output_dir.display(),
-                e
-            );
-            1
+            // Not having /proc/cmdline is fine (e.g. in containers).
+            log::info!("Could not read {}: {}", cmdline_path, e);
         }
     }
+
+    // Credentials → networkd.conf.d/.network/.netdev/.link files. This runs
+    // regardless of the kernel command line, matching upstream.
+    if let Err(e) = pick_up_credentials() {
+        log::warn!("Failed to pick up credentials: {e}");
+        if ret == 0 {
+            ret = 1;
+        }
+    }
+
+    ret
 }
 
 fn setup_logging() {

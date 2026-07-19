@@ -392,6 +392,23 @@ in
           [ -e "/usr/lib/systemd/system/$name" ] || ln -sfn "$f" "/usr/lib/systemd/system/$name"
         done
 
+        # The rust-systemd package doesn't ship systemd-network-generator.service
+        # in its unit dir, so provide it inline for TEST-74-AUX-UTILS.network-generator.
+        # No ConditionKernelCommandLine so the credential-only path still runs the
+        # generator; the binary is symlinked into /usr/lib/systemd/ just below.
+        if [ ! -e /usr/lib/systemd/system/systemd-network-generator.service ]; then
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Generate network units from Kernel command line and credentials' \
+            'DefaultDependencies=no' \
+            'Before=network-pre.target' \
+            '[Service]' \
+            'Type=oneshot' \
+            'RemainAfterExit=yes' \
+            'ExecStart=/usr/lib/systemd/systemd-network-generator' \
+            > /usr/lib/systemd/system/systemd-network-generator.service
+        fi
+
         # Symlink helper binaries (systemd-sysctl, etc.) so tests referencing
         # /usr/lib/systemd/systemd-* can find them (NixOS puts them in the store)
         for bin in ${config.systemd.package}/lib/systemd/systemd-*; do

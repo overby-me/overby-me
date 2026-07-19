@@ -2238,12 +2238,15 @@ pub fn parse_exec_section(
                         creds.clear();
                         continue;
                     }
-                    if let Some((id, path)) = trimmed.split_once(':') {
-                        let id = id.trim();
-                        let path = path.trim();
-                        if !id.is_empty() && !path.is_empty() {
-                            creds.push((id.to_owned(), path.to_owned()));
-                        }
+                    // `LoadCredential=ID:PATH`, or bare `LoadCredential=ID` where
+                    // the path defaults to the ID (resolved from the credential
+                    // stores, e.g. /run/credstore/<ID>).
+                    let (id, path) = match trimmed.split_once(':') {
+                        Some((id, path)) => (id.trim(), path.trim()),
+                        None => (trimmed, trimmed),
+                    };
+                    if !id.is_empty() && !path.is_empty() {
+                        creds.push((id.to_owned(), path.to_owned()));
                     }
                 }
                 creds
@@ -2262,12 +2265,13 @@ pub fn parse_exec_section(
                         creds.clear();
                         continue;
                     }
-                    if let Some((id, path)) = trimmed.split_once(':') {
-                        let id = id.trim();
-                        let path = path.trim();
-                        if !id.is_empty() && !path.is_empty() {
-                            creds.push((id.to_owned(), path.to_owned()));
-                        }
+                    // `ID:PATH`, or bare `ID` where the path defaults to the ID.
+                    let (id, path) = match trimmed.split_once(':') {
+                        Some((id, path)) => (id.trim(), path.trim()),
+                        None => (trimmed, trimmed),
+                    };
+                    if !id.is_empty() && !path.is_empty() {
+                        creds.push((id.to_owned(), path.to_owned()));
                     }
                 }
                 creds
