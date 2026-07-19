@@ -2944,6 +2944,16 @@ fn handle_cat_arg(arg: &str) -> bool {
         return true;
     }
 
+    // Absolute path to an existing special file (e.g. /dev/null, which is a
+    // character device, not a regular file). Upstream `udevadm cat` chases any
+    // explicit path and cats it as a rules file — /dev/null reads as empty and
+    // is a success. Handle it here so the arg doesn't fall through to the
+    // basename search (which would fail with "no rules file matching").
+    if p.is_absolute() && p.exists() {
+        print_rules_file(p);
+        return true;
+    }
+
     // Basename — search standard dirs.  Accept with or without `.rules`.
     let target = if arg.ends_with(".rules") {
         arg.to_owned()
