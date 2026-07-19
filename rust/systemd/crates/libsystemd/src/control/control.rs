@@ -10181,6 +10181,70 @@ pub fn execute_command(
             let fresh_names: std::collections::HashSet<String> =
                 units.values().map(|u| u.id.name.clone()).collect();
 
+            // Alias-rename migration: when a freshly-loaded canonical unit's
+            // aliases include the name of an existing RUNNING unit (its old
+            // fragment was replaced by a symlink alias pointing at the new
+            // canonical name), re-key that running unit to the canonical name so
+            // its runtime state (MainPID, active) is preserved under the new
+            // name instead of being left as a separate stale/inactive entry.
+            // Mirrors upstream systemd's unit-rename preservation on
+            // daemon-reload (TEST-07-PID1.alias-rename).
+            {
+                let mut migrations: Vec<(crate::units::UnitId, String)> = Vec::new();
+                for fresh in units.values() {
+                    if existing_names.contains(&fresh.id.name) {
+                        continue; // canonical already tracked: an ordinary update
+                    }
+                    for alias in &fresh.common.unit.aliases {
+                        // Only a genuine rename: the old name must have vanished
+                        // as a standalone fresh unit (it now survives only as
+                        // this canonical unit's alias). If the alias name is
+                        // still loaded as its own fresh unit, this is an ordinary
+                        // shared-alias relationship, not a rename — skip it so we
+                        // never wrongly re-key an unrelated running unit.
+                        if fresh_names.contains(alias) {
+                            continue;
+                        }
+                        let Some(old_id) = run_info
+                            .unit_table
+                            .keys()
+                            .find(|id| &id.name == alias)
+                            .cloned()
+                        else {
+                            continue;
+                        };
+                        let running = matches!(
+                            &*run_info.unit_table[&old_id].common.status.read_poisoned(),
+                            UnitStatus::Started(_) | UnitStatus::Starting | UnitStatus::Restarting
+                        );
+                        if running {
+                            migrations.push((old_id, fresh.id.name.clone()));
+                            break;
+                        }
+                    }
+                }
+                for (old_id, canonical) in migrations {
+                    if let Some(mut unit) = run_info.unit_table.remove(&old_id) {
+                        let new_id = crate::units::UnitId {
+                            name: canonical,
+                            kind: old_id.kind,
+                        };
+                        unit.id = new_id.clone();
+                        if !unit.common.unit.aliases.contains(&old_id.name) {
+                            unit.common.unit.aliases.push(old_id.name.clone());
+                        }
+                        run_info.unit_table.insert(new_id, unit);
+                    }
+                }
+            }
+            // Re-collect names after any alias-rename migration above so the
+            // now-canonical running unit is treated as an update, not a new one.
+            let existing_names: Vec<String> = run_info
+                .unit_table
+                .values()
+                .map(|unit| unit.id.name.clone())
+                .collect();
+
             // Separate into new and updated units
             let mut ignored_units_names = Vec::new();
             let mut new_units_names = Vec::new();

@@ -676,7 +676,9 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
         }
 
         // Find the unit in the table and get its ServiceType.
-        if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) {
+        if let Some(unit) = ri.unit_table
+            .values()
+            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name)) {
             if let crate::units::Specific::Service(srvc) = &unit.specific {
                 pid_table.insert(pid, PidEntry::Service(unit.id.clone(), srvc.conf.srcv_type));
                 restored += 1;
@@ -715,7 +717,9 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
             }
             let unit_name = parts[0];
             let target_status = parts[1];
-            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) {
+            if let Some(unit) = ri.unit_table
+            .values()
+            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name)) {
                 let current = unit.common.status.read_poisoned();
                 // Only restore if the unit wasn't already handled by PID
                 // restoration above (which sets Started(Running) for
@@ -781,7 +785,9 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
                 trace!("Reexec: fd {raw_fd} for {unit_name}:{fd_name} is no longer open, skipping");
                 continue;
             }
-            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name)
+            if let Some(unit) = ri.unit_table
+            .values()
+            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name))
                 && let crate::units::Specific::Service(srvc) = &unit.specific
             {
                 let mut state = srvc.state.write_poisoned();
@@ -806,7 +812,9 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
                 "frozen-by-parent" => crate::units::FreezerState::FrozenByParent,
                 _ => continue,
             };
-            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) {
+            if let Some(unit) = ri.unit_table
+            .values()
+            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name)) {
                 crate::control::unit_properties::set_freezer_state(unit, freezer_state);
                 info!(
                     "Reexec: restored freezer state '{}' for {unit_name}",
