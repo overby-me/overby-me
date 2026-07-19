@@ -434,6 +434,11 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub protect_system: String,
 
+    /// MemoryTHP= mode ("inherit"/"disable"/"madvise"/"system"), applied via
+    /// prctl(PR_SET_THP_DISABLE). See systemd.exec(5).
+    #[serde(default)]
+    pub memory_thp: String,
+
     /// ProtectHome= — mount namespace isolation for home directories.
     /// "no" = disabled, "yes" = /home, /root, /run/user inaccessible,
     /// "read-only" = read-only, "tmpfs" = empty tmpfs. See systemd.exec(5).
@@ -2262,6 +2267,32 @@ pub fn run_exec_helper() {
                 nsec,
                 std::io::Error::last_os_error()
             );
+        }
+    }
+
+    // Apply MemoryTHP= via prctl(PR_SET_THP_DISABLE, ...). See systemd.exec(5).
+    {
+        const PR_SET_THP_DISABLE: libc::c_int = 41;
+        // Bit 1 of the disable flags: keep THPs only where explicitly madvised
+        // (kernels >= 6.18). Older kernels reject it with EINVAL.
+        const PR_THP_DISABLE_EXCEPT_ADVISED: libc::c_long = 1 << 1;
+        let thp_args: Option<(libc::c_long, libc::c_long)> = match config.memory_thp.as_str() {
+            "disable" => Some((1, 0)),
+            "madvise" => Some((1, PR_THP_DISABLE_EXCEPT_ADVISED)),
+            "system" => Some((0, 0)),
+            _ => None, // "inherit" (default) or unset: leave THP setting untouched
+        };
+        if let Some((arg2, arg3)) = thp_args {
+            let ret = unsafe { libc::prctl(PR_SET_THP_DISABLE, arg2, arg3, 0, 0) };
+            if ret != 0 {
+                // Best-effort, mirroring upstream: EINVAL just means the kernel
+                // lacks support for the requested flag (e.g. madvise pre-6.18).
+                log::warn!(
+                    "Failed to apply MemoryTHP={}: {}",
+                    config.memory_thp,
+                    std::io::Error::last_os_error()
+                );
+            }
         }
     }
 

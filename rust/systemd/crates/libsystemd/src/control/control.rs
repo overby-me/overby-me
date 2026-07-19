@@ -3216,6 +3216,20 @@ fn create_transient_unit(
         return Err("Too many extra log fields.".to_string());
     }
 
+    // MemoryTHP= from `-p MemoryTHP=disable` etc. (last assignment wins).
+    let memory_thp = params
+        .properties
+        .iter()
+        .rev()
+        .find_map(|p| p.strip_prefix("MemoryTHP="))
+        .map(|v| match v.trim().to_lowercase().as_str() {
+            "disable" => crate::units::MemoryThp::Disable,
+            "madvise" => crate::units::MemoryThp::Madvise,
+            "system" => crate::units::MemoryThp::System,
+            _ => crate::units::MemoryThp::Inherit,
+        })
+        .unwrap_or_default();
+
     // Build a minimal ExecConfig with the requested user/group/workdir.
     // Use the correct concrete types for ExecConfig fields.
     // Non-optional enums use their Default impl; bools use systemd defaults.
@@ -3269,6 +3283,7 @@ fn create_transient_unit(
         system_call_filter: vec![],
         system_call_log: vec![],
         protect_system: crate::units::ProtectSystem::No,
+        memory_thp,
         restrict_namespaces: crate::units::RestrictNamespaces::No,
         restrict_realtime: false,
         restrict_address_families: vec![],

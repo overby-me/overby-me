@@ -2832,6 +2832,9 @@ pub struct ParsedExecSection {
     /// the OS file system hierarchy. Parsed and stored; no runtime enforcement
     /// yet (requires mount namespace support). See systemd.exec(5).
     pub protect_system: ProtectSystem,
+    /// MemoryTHP= — the transparent-huge-page policy applied to the service's
+    /// processes via prctl(PR_SET_THP_DISABLE). See systemd.exec(5).
+    pub memory_thp: MemoryThp,
     /// RestrictNamespaces= — restricts access to Linux namespace types for the
     /// service. Can be a boolean (`yes` restricts all, `no` allows all) or a
     /// space-separated list of namespace type identifiers (cgroup, ipc, net,
@@ -3464,6 +3467,23 @@ pub enum ProtectSystem {
     /// /proc, /sys, and API mount points. Implies `ReadWritePaths=`,
     /// `ReadOnlyPaths=`, `InaccessiblePaths=` are still honoured.
     Strict,
+}
+
+/// `MemoryTHP=` — control the transparent-huge-page policy of a service's
+/// processes via `prctl(PR_SET_THP_DISABLE, ...)`. See systemd.exec(5).
+#[derive(
+    Clone, Copy, Eq, PartialEq, Hash, Debug, serde::Serialize, serde::Deserialize, Default,
+)]
+pub enum MemoryThp {
+    /// Do not touch the inherited THP setting (default).
+    #[default]
+    Inherit,
+    /// Disable THPs completely for the process.
+    Disable,
+    /// Disable THPs for the process except where explicitly madvised.
+    Madvise,
+    /// Restore the system default THP setting for the process.
+    System,
 }
 
 /// ProtectHome= — controls whether /home, /root, and /run/user are

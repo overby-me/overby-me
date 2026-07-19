@@ -9,7 +9,8 @@ use crate::units::{
     DevicePolicy, EnvVars, ExitType, FileDescriptorStorePreserve, IOSchedulingClass, IoDeviceLimit,
     IoWeight, KeyringMode, KillMode, MemoryLimit, MemoryPressureWatch, NotifyKind, OOMPolicy,
     OnFailureJobMode, ParsedMountSection, ParsedSliceSection, ParsedSwapSection, ProcSubset,
-    ProtectControlGroupsEx, ProtectHome, ProtectProc, ProtectSystem, ResourceLimit, RestartMode,
+    MemoryThp, ProtectControlGroupsEx, ProtectHome, ProtectProc, ProtectSystem, ResourceLimit,
+    RestartMode,
     RestrictNamespaces, RuntimeDirectoryPreserve, ServiceRestart, ServiceType, StandardInput,
     StatusStarted, StatusStopped, StdIoOption, TasksMax, Timeout, TimeoutFailureMode, Timestamping,
     UnitAction, UnitCondition, UnitId, UnitIdKind, UnitOperationError, UnitOperationErrorReason,
@@ -2853,6 +2854,9 @@ pub struct ExecConfig {
     /// the OS file system hierarchy. Parsed and stored; no runtime enforcement
     /// yet (requires mount namespace support). See systemd.exec(5).
     pub protect_system: ProtectSystem,
+    /// MemoryTHP= — the transparent-huge-page policy applied to the service's
+    /// processes via prctl(PR_SET_THP_DISABLE). See systemd.exec(5).
+    pub memory_thp: MemoryThp,
     /// RestrictNamespaces= — restricts access to Linux namespace types for the
     /// service. Can be a boolean (`yes` restricts all, `no` allows all) or a
     /// space-separated list of namespace type identifiers (cgroup, ipc, net,

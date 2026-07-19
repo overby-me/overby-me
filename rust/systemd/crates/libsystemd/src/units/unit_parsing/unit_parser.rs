@@ -1410,6 +1410,7 @@ pub fn parse_exec_section(
     let system_call_filter = section.remove("SYSTEMCALLFILTER");
     let system_call_log = section.remove("SYSTEMCALLLOG");
     let protect_system = section.remove("PROTECTSYSTEM");
+    let memory_thp = section.remove("MEMORYTHP");
     let restrict_namespaces = section.remove("RESTRICTNAMESPACES");
     let restrict_realtime = section.remove("RESTRICTREALTIME");
     let restrict_address_families = section.remove("RESTRICTADDRESSFAMILIES");
@@ -2438,6 +2439,21 @@ pub fn parse_exec_section(
                 }
             }
             None => super::ProtectSystem::default(),
+        },
+        memory_thp: match memory_thp {
+            Some(vec) => match vec.last().map(|(_, v)| v.trim().to_lowercase()).as_deref() {
+                Some("inherit") | None => super::MemoryThp::Inherit,
+                Some("disable") => super::MemoryThp::Disable,
+                Some("madvise") => super::MemoryThp::Madvise,
+                Some("system") => super::MemoryThp::System,
+                Some(other) => {
+                    return Err(ParsingErrorReason::UnknownSetting(
+                        "MemoryTHP".to_owned(),
+                        other.to_owned(),
+                    ));
+                }
+            },
+            None => super::MemoryThp::default(),
         },
         restrict_namespaces: match restrict_namespaces {
             Some(vec) => {

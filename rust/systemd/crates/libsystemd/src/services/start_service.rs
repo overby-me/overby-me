@@ -980,6 +980,12 @@ fn start_service_with_filedescriptors(
             crate::units::ProtectSystem::Full => "full".to_owned(),
             crate::units::ProtectSystem::Strict => "strict".to_owned(),
         },
+        memory_thp: match conf.exec_config.memory_thp {
+            crate::units::MemoryThp::Inherit => "inherit".to_owned(),
+            crate::units::MemoryThp::Disable => "disable".to_owned(),
+            crate::units::MemoryThp::Madvise => "madvise".to_owned(),
+            crate::units::MemoryThp::System => "system".to_owned(),
+        },
         protect_home: match conf.exec_config.protect_home {
             crate::units::ProtectHome::No => "no".to_owned(),
             crate::units::ProtectHome::Yes => "yes".to_owned(),
