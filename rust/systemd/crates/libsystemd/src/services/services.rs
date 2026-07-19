@@ -447,6 +447,10 @@ pub struct Service {
     pub reloading: bool,
     /// Set to true when the service sends STOPPING=1 via sd_notify.
     pub stopping: bool,
+    /// When STOPPING=1 arrived. Once a service enters its stop phase it is no
+    /// longer subject to RuntimeMaxSec; TimeoutStopSec (extendable via
+    /// EXTEND_TIMEOUT_USEC) applies instead, measured from this instant.
+    pub stopping_timestamp: Option<std::time::Instant>,
     /// Timestamp of the last WATCHDOG=1 ping from the service.
     /// Used with WatchdogSec= to detect unresponsive services.
     pub watchdog_last_ping: Option<std::time::Instant>,

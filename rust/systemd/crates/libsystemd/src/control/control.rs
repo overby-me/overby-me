@@ -2638,6 +2638,20 @@ fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf])
                                 );
                             }
                         }
+                        // RuntimeMaxSec= from a drop-in (e.g. a `[Scope]` override
+                        // added to a running transient scope + daemon-reload) must
+                        // update the enforced deadline. Mirrors the transient-create
+                        // parsing; 0/infinity means no limit.
+                        "RuntimeMaxSec" => {
+                            let trimmed = value.trim_end_matches('s');
+                            svc.conf.runtime_max_sec = match trimmed.parse::<u64>() {
+                                Ok(0) => None,
+                                Ok(secs) => Some(crate::units::unit_parsing::Timeout::Duration(
+                                    std::time::Duration::from_secs(secs),
+                                )),
+                                Err(_) => None,
+                            };
+                        }
                         _ => {
                             // Other properties are not applied to transient units for now
                         }
@@ -4699,6 +4713,7 @@ fn create_transient_unit(
                     signaled_ready: false,
                     reloading: false,
                     stopping: false,
+                    stopping_timestamp: None,
                     watchdog_last_ping: None,
                     notify_errno: None,
                     notify_bus_error: None,
@@ -10377,6 +10392,20 @@ pub fn execute_command(
 
             let mut response_object = serde_json::Map::new();
             insert_new_units(new_units, run_info)?;
+
+            // The disk loader has no `.scope` branch, so transient scopes are not
+            // re-read on daemon-reload the way transient services are — their
+            // post-creation drop-ins (e.g. a `[Scope] RuntimeMaxSec=` override added
+            // to a running scope) would otherwise never be applied. Re-apply drop-ins
+            // to each scope in place, preserving its runtime state (started-at, PIDs).
+            {
+                let unit_dirs = run_info.config.unit_dirs.clone();
+                for unit in run_info.unit_table.values_mut() {
+                    if unit.id.name.ends_with(".scope") {
+                        apply_dropins_to_transient(unit, &unit_dirs);
+                    }
+                }
+            }
 
             // Detect and break ordering cycles in the updated unit table,
             // recording transaction IDs for each cycle found.

@@ -75,17 +75,21 @@ pub fn wait_for_service(
                 }
 
                 if let Some(duration_timeout) = duration_timeout {
-                    // Check EXTEND_TIMEOUT_USEC: if the service has sent an
-                    // extension, measure timeout from the extension timestamp
-                    // using the extension duration instead of the original.
-                    let timed_out = if let (Some(ext_usec), Some(ext_ts)) =
+                    // EXTEND_TIMEOUT_USEC extends the start deadline; it must
+                    // never SHORTEN it below the base TimeoutStartSec. Time out
+                    // only once BOTH the base deadline and the extension deadline
+                    // have elapsed (the later of the two) — a lone/infrequent
+                    // extension shorter than the remaining base time must not
+                    // cause an early kill.
+                    let base_elapsed = start_time.elapsed() > duration_timeout;
+                    let ext_elapsed = if let (Some(ext_usec), Some(ext_ts)) =
                         (srvc.extend_timeout_usec, srvc.extend_timeout_timestamp)
                     {
-                        let ext_dur = std::time::Duration::from_micros(ext_usec);
-                        ext_ts.elapsed() > ext_dur
+                        ext_ts.elapsed() > std::time::Duration::from_micros(ext_usec)
                     } else {
-                        start_time.elapsed() > duration_timeout
+                        true
                     };
+                    let timed_out = base_elapsed && ext_elapsed;
                     if timed_out {
                         trace!("[FORK_PARENT] Service {name} notification timed out");
                         return Err(RunCmdError::Timeout(

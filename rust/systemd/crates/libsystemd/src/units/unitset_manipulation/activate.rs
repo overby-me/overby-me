@@ -1422,10 +1422,13 @@ fn deferred_notify_wait_and_dispatch(
             continue;
         }
 
-        // Check timeout, respecting EXTEND_TIMEOUT_USEC if set.
+        // Check timeout, respecting EXTEND_TIMEOUT_USEC if set. EXTEND_TIMEOUT_USEC
+        // extends (never shortens) the start deadline, so time out only once BOTH
+        // the base TimeoutStartSec deadline and any extension deadline have elapsed
+        // (mirrors the inline fork_parent notify wait).
         let timed_out = if let Some(timeout) = timeout {
-            // Check if the service sent EXTEND_TIMEOUT_USEC
-            if let Ok(ri) = run_info.try_read()
+            let base_elapsed = start_time.elapsed() > timeout;
+            let ext_elapsed = if let Ok(ri) = run_info.try_read()
                 && let Some(unit) = ri.unit_table.get(&id)
                 && let Specific::Service(svc) = &unit.specific
             {
@@ -1434,15 +1437,13 @@ fn deferred_notify_wait_and_dispatch(
                     state.srvc.extend_timeout_usec,
                     state.srvc.extend_timeout_timestamp,
                 ) {
-                    (Some(usec), Some(ts)) => {
-                        let ext_dur = std::time::Duration::from_micros(usec);
-                        ts.elapsed() > ext_dur
-                    }
-                    _ => start_time.elapsed() > timeout,
+                    (Some(usec), Some(ts)) => ts.elapsed() > std::time::Duration::from_micros(usec),
+                    _ => true,
                 }
             } else {
-                start_time.elapsed() > timeout
-            }
+                true
+            };
+            base_elapsed && ext_elapsed
         } else {
             false
         };

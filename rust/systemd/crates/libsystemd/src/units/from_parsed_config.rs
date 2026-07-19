@@ -202,6 +202,7 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     signaled_ready: false,
                     reloading: false,
                     stopping: false,
+                    stopping_timestamp: None,
                     watchdog_last_ping: None,
                     notify_errno: None,
                     notify_bus_error: None,

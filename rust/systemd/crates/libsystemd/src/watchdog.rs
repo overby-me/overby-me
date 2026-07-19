@@ -125,23 +125,70 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
                 continue;
             }
 
+            // --- Stop-phase timeout (STOPPING=1) enforcement ---
+            // A service that has reported STOPPING=1 is in its stop phase and is
+            // no longer subject to RuntimeMaxSec; TimeoutStopSec applies instead,
+            // measured from when STOPPING=1 arrived. Skipping RuntimeMaxSec here
+            // lets a service legitimately spend up to TimeoutStopSec shutting down
+            // even when its RuntimeMaxSec is shorter. EXTEND_TIMEOUT_USEC extends
+            // (never shortens) the stop deadline, so the effective deadline is the
+            // MAX of the base TimeoutStopSec deadline and the extend deadline.
+            if srvc.stopping {
+                // Base stop deadline: explicit TimeoutStopSec / TimeoutSec, else
+                // the upstream DefaultTimeoutStopSec (90s); Infinity disables it.
+                let stop_dur = match srvc_specific
+                    .conf
+                    .stoptimeout
+                    .as_ref()
+                    .or(srvc_specific.conf.generaltimeout.as_ref())
+                {
+                    Some(Timeout::Duration(d)) => Some(*d),
+                    Some(Timeout::Infinity) => None,
+                    None => Some(std::time::Duration::from_secs(90)),
+                };
+                if let (Some(stopping_ts), Some(stop_dur)) = (srvc.stopping_timestamp, stop_dur) {
+                    let base_elapsed = now.duration_since(stopping_ts) >= stop_dur;
+                    let ext_elapsed = if let (Some(ext_usec), Some(ext_ts)) =
+                        (srvc.extend_timeout_usec, srvc.extend_timeout_timestamp)
+                    {
+                        now.duration_since(ext_ts) >= std::time::Duration::from_micros(ext_usec)
+                    } else {
+                        true
+                    };
+                    if base_elapsed && ext_elapsed {
+                        let effective_pid = srvc.main_pid.or(srvc.pid);
+                        runtime_max_timed_out.push(RuntimeMaxTimeout {
+                            unit_name: unit.id.name.clone(),
+                            pid: effective_pid,
+                            process_group: srvc.process_group,
+                            elapsed: now.duration_since(stopping_ts),
+                            limit: stop_dur,
+                        });
+                    }
+                }
+                // A stopping service is never subject to RuntimeMaxSec or the
+                // watchdog ping check — skip the rest of this iteration.
+                continue;
+            }
+
             // --- RuntimeMaxSec enforcement ---
-            // If the service has sent EXTEND_TIMEOUT_USEC, use the extended
-            // deadline (extend_timeout_timestamp + extend_timeout_usec) instead
-            // of the original RuntimeMaxSec deadline.
+            // EXTEND_TIMEOUT_USEC extends (never shortens) the RuntimeMaxSec
+            // deadline: the service times out only once BOTH the base deadline
+            // (started_at + RuntimeMaxSec) and any extend deadline
+            // (extend_timeout_timestamp + extend_timeout_usec) have elapsed.
             if let Some(started_at) = srvc.runtime_started_at
                 && let Some(max_dur) = effective_runtime_max(&srvc_specific.conf.runtime_max_sec)
             {
-                let timed_out = if let (Some(ext_usec), Some(ext_ts)) =
+                let base_elapsed = now.duration_since(started_at) >= max_dur;
+                let ext_elapsed = if let (Some(ext_usec), Some(ext_ts)) =
                     (srvc.extend_timeout_usec, srvc.extend_timeout_timestamp)
                 {
-                    let ext_dur = std::time::Duration::from_micros(ext_usec);
-                    now.duration_since(ext_ts) >= ext_dur
+                    now.duration_since(ext_ts) >= std::time::Duration::from_micros(ext_usec)
                 } else {
-                    now.duration_since(started_at) >= max_dur
+                    true
                 };
                 let elapsed = now.duration_since(started_at);
-                if timed_out {
+                if base_elapsed && ext_elapsed {
                     let effective_pid = srvc.main_pid.or(srvc.pid);
                     runtime_max_timed_out.push(RuntimeMaxTimeout {
                         unit_name: unit.id.name.clone(),
@@ -382,6 +429,7 @@ mod tests {
             signaled_ready: false,
             reloading: false,
             stopping: false,
+            stopping_timestamp: None,
             watchdog_last_ping: None,
             notify_errno: None,
             notify_bus_error: None,

@@ -908,6 +908,13 @@ pub fn handle_notification_message(msg: &str, srvc: &mut Service, name: &str) {
         }
         "STOPPING" => {
             if split.len() > 1 && split[1] == "1" {
+                // Record when the service entered its stop phase on the first
+                // STOPPING=1 so the watchdog can enforce TimeoutStopSec from here
+                // (and stop applying RuntimeMaxSec). Don't reset the clock on a
+                // repeated STOPPING=1.
+                if !srvc.stopping {
+                    srvc.stopping_timestamp = Some(std::time::Instant::now());
+                }
                 srvc.stopping = true;
                 trace!("Service {name}: entering stopping state (STOPPING=1)");
             }
@@ -1134,6 +1141,7 @@ mod tests {
             signaled_ready: false,
             reloading: false,
             stopping: false,
+            stopping_timestamp: None,
             watchdog_last_ping: None,
             notify_errno: None,
             notify_bus_error: None,
