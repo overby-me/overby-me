@@ -88,7 +88,10 @@ def main [out_dir: string, manifest: path] {
     } else {
       $toml.target | columns | each {|t| deps-from ($toml.target | get $t) $t } | flatten
     }
-    let deps = ($plain | append $targeted)
+    # cargo emits index deps sorted by name; match it so the generated
+    # index is byte-order-compatible with a sparse-index snapshot (edge
+    # order leaks into crate derivation inputs downstream).
+    let deps = ($plain | append $targeted | sort-by name)
 
     let entry = {
       name: $it.name

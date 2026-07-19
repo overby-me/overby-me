@@ -82,10 +82,18 @@ supported strategies:
    `tools/tarball-index.nu` reads those `Cargo.toml`s inside a derivation and
    re-emits the mini-index; `lib/index.nix` reads the output at eval time.
    Pure and cacheable (content-verified tarballs, no network, no sandbox
-   relaxation) but pays one IFD on the eval path. Verified: an IFD-built index
-   yields a byte-identical final derivation to the committed snapshot for
-   `rust/wclip`. Removes the per-project snapshot chore for callers that
-   accept IFD.
+   relaxation) but pays one IFD on the eval path. Removes the per-project
+   snapshot chore for callers that accept IFD.
+
+   Verified byte-for-byte: on the 322-crate `rust/systemd` workspace an
+   IFD-built index yields derivations identical to the committed snapshot for
+   all 322 crates (the generator sorts index deps by name to match cargo's
+   ordering; edge order otherwise leaks into crate build inputs). Cost, tarballs
+   already fetched (a build fetches them anyway): the ~1 MB / 224-file mini-index
+   derivation builds in ~5-6s, and once built the eval overhead is nil (warm eval
+   ~4.7s vs ~5.8s for the committed snapshot, within noise). This supersedes the
+   older impure-harness figure below, which measured whole-flake eval overhead
+   rather than index generation.
 
 The library takes `index` as a plain path argument (or null for strategy 3),
 and tests use tiny hand-trimmed fixtures.
