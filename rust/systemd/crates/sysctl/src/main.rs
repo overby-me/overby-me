@@ -18,7 +18,7 @@
 //! A key prefixed with '-' means errors applying that setting are ignored.
 //! Glob patterns in keys are supported (e.g. net.ipv4.conf.*.rp_filter).
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, BufRead};
@@ -428,7 +428,14 @@ fn run() -> u8 {
 
     // Parse all files and collect entries. Later entries for the same key
     // override earlier ones (last writer wins), matching systemd behavior.
-    let mut settings: BTreeMap<String, SysctlEntry> = BTreeMap::new();
+    //
+    // Settings are applied in the order they are read (config files in sorted
+    // order, then line order within each file) — NOT sorted by key. Some
+    // settings are order-dependent: e.g. kernel.core_pattern must be applied
+    // before fs.suid_dumpable=2, otherwise the kernel marks the coredump pipe
+    // unsafe. A key-sorted map applied "fs.*" before "kernel.*" and broke this.
+    let mut order: Vec<String> = Vec::new();
+    let mut settings: HashMap<String, SysctlEntry> = HashMap::new();
 
     for path in &config_files {
         match parse_config_file(path) {
@@ -442,7 +449,11 @@ fn run() -> u8 {
                 }
                 for entry in entries {
                     // For glob patterns, use the pattern itself as the key
-                    // (they'll be expanded at apply time)
+                    // (they'll be expanded at apply time). Preserve first-seen
+                    // position; update the value in place (last writer wins).
+                    if !settings.contains_key(&entry.key) {
+                        order.push(entry.key.clone());
+                    }
                     settings.insert(entry.key.clone(), entry);
                 }
             }
@@ -465,7 +476,7 @@ fn run() -> u8 {
 
     // Prefix filtering now happens inside apply_sysctl (after glob expansion),
     // but we can still skip entries whose non-glob keys clearly don't match.
-    let entries_to_apply: Vec<&SysctlEntry> = settings.values().collect();
+    let entries_to_apply: Vec<&SysctlEntry> = order.iter().map(|k| &settings[k]).collect();
 
     if verbose {
         eprintln!(
@@ -495,6 +506,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::io::Write;
 
     #[test]
