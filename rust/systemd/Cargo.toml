@@ -73,6 +73,7 @@ members = [
   "crates/systemd",
   "crates/sysusers",
   "crates/test-journal-append",
+  "crates/test-sleep",
   "crates/timedatectl",
   "crates/timedated",
   "crates/timesyncd",

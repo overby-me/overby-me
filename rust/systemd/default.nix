@@ -343,7 +343,7 @@
 
                 # Install test binaries at paths expected by upstream integration tests.
                 mkdir -p $out/lib/systemd/tests/unit-tests/manual
-                for name in test-journal-append; do
+                for name in test-journal-append test-sleep; do
                   if [ -e "${rust-systemd}/bin/$name" ]; then
                     cp -a "${rust-systemd}/bin/$name" "$out/lib/systemd/tests/unit-tests/manual/$name"
                   fi
