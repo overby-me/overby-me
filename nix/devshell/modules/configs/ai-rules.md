@@ -16,6 +16,32 @@
   - `rtk discover` — find missed RTK opportunities
   - `rtk proxy <cmd>` — run raw command without filtering (for debugging)
 
+## Scripting rules
+
+- **Always write scripts in nushell (`.nu`), never bash/sh/POSIX shell or
+  Python.** This repository standardises on [nushell](https://www.nushell.sh/)
+  for all scripting: build helpers, test fixtures, tool stubs, and one-off
+  automation. When you create a new script, give it a `.nu` extension and a
+  `#!/usr/bin/env nu` shebang (or, for a script sourced by a Nix builder, no
+  shebang). When you edit an existing `.sh`/`.bash`/`.py` script, port it to
+  nushell rather than extending the old language.
+
+- **The only permitted exceptions are scripts whose consumer requires another
+  language.** Two files in the tree stay as bash by protocol, not by choice:
+  `rust/direnv/src/stdlib.sh` (direnv evaluates `.envrc` content with bash) and
+  `rust/pkg-config/setup-hook.sh` (Nix stdenv sources setup hooks with bash).
+  Do not "modernise" these to nushell; doing so breaks the product. If you
+  believe a new script genuinely needs bash or Python, say why before writing
+  it.
+
+- **Nushell is not bash.** Set environment variables with `$env.VAR = "value"`;
+  sequence commands with `;` (there are no `&&`/`||` operators, use `if`/`try`);
+  use command substitution `(cmd)` not `$(cmd)`; prefer nushell built-ins
+  (`ls`, `where`, `open`, `save`, `str`, `path join`) over POSIX idioms. Prefix
+  an external command with `^` (e.g. `^grep`, `^sed`) when you specifically need
+  the binary rather than a nushell built-in of the same name. Validate every
+  script you write with `nu-check --debug <file>.nu` before considering it done.
+
 ## Version control rules
 
 - **Use `jj` (Jujutsu) instead of `git` for all version control operations.** This project uses Jujutsu as its VCS. Common mappings:
