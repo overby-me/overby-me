@@ -475,7 +475,20 @@ fn try_create_transient_unit(
     use std::io::Write;
     use std::os::unix::net::UnixStream;
 
-    let socket_path = "/run/systemd/rust-systemd-notify/control.socket";
+    // `--user` connects to the per-user manager's control socket under
+    // $XDG_RUNTIME_DIR (see run_user_manager); the system manager uses its own
+    // fixed path.
+    let user_socket_path;
+    let socket_path: &str = if cli.user {
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() }));
+        user_socket_path = format!("{runtime_dir}/systemd/control.socket");
+        &user_socket_path
+    } else {
+        "/run/systemd/rust-systemd-notify/control.socket"
+    };
 
     let stream = match UnixStream::connect(socket_path) {
         Ok(s) => s,

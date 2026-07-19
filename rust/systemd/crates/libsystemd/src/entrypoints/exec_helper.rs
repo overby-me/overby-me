@@ -1730,13 +1730,33 @@ pub fn run_exec_helper() {
 
     let dynamic = config.dynamic_user;
 
+    // ExecDirectory= base paths. In user-manager mode (SYSTEMD_USER_MANAGER=1,
+    // set by run_user_manager) State/Configuration resolve to the XDG base
+    // directories under $HOME; otherwise the system paths. Returns the system
+    // default byte-for-byte when not a user manager, so the system code path is
+    // unchanged.
+    let managed_dir_base = |system: &str, user_env: &str, user_rel: &str| -> std::path::PathBuf {
+        if std::env::var_os("SYSTEMD_USER_MANAGER").is_none() {
+            return std::path::PathBuf::from(system);
+        }
+        std::env::var_os(user_env)
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::var_os("HOME")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| std::path::PathBuf::from("/root"))
+                    .join(user_rel)
+            })
+    };
+
     if !config.state_directory.is_empty() {
-        let base = Path::new("/var/lib");
+        let base = managed_dir_base("/var/lib", "XDG_STATE_HOME", ".local/state");
         let mode = config.state_directory_mode.unwrap_or(0o755);
         let full_paths: Vec<String> = config
             .state_directory
             .iter()
-            .map(|d| create_managed_dir(base, d, mode, dynamic))
+            .map(|d| create_managed_dir(&base, d, mode, dynamic))
             .collect();
         unsafe { std::env::set_var("STATE_DIRECTORY", full_paths.join(":")) };
     }
@@ -1778,12 +1798,12 @@ pub fn run_exec_helper() {
     // ── Create ConfigurationDirectory= directories under /etc/ ────────
     // ConfigurationDirectory never uses private/ even with DynamicUser=yes.
     if !config.configuration_directory.is_empty() {
-        let base = Path::new("/etc");
+        let base = managed_dir_base("/etc", "XDG_CONFIG_HOME", ".config");
         let mode = config.configuration_directory_mode.unwrap_or(0o755);
         let full_paths: Vec<String> = config
             .configuration_directory
             .iter()
-            .map(|d| create_managed_dir(base, d, mode, false))
+            .map(|d| create_managed_dir(&base, d, mode, false))
             .collect();
         // TODO: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("CONFIGURATION_DIRECTORY", full_paths.join(":")) };

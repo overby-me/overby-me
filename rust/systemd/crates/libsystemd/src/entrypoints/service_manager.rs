@@ -322,6 +322,12 @@ pub fn run_service_manager() {
 /// `$XDG_RUNTIME_DIR/systemd/control.socket` (`systemctl --user`,
 /// `systemd-run --user`).
 pub fn run_user_manager() {
+    // Mark this process — and its exec_helper children, which inherit the
+    // environment — as a user manager, so ExecDirectory= handling uses the XDG
+    // base directories ($HOME/.local/state, $HOME/.config, …) instead of the
+    // system /var/lib, /etc, … Set while still single-threaded, since
+    // std::env::set_var is not thread-safe.
+    unsafe { std::env::set_var("SYSTEMD_USER_MANAGER", "1") };
     let conf = build_user_config();
 
     // A user manager logs to stderr; the journal captures it via user@.service.
@@ -412,6 +418,14 @@ pub fn run_user_manager() {
     crate::path_watcher::start_path_watcher_thread(run_info.clone());
     crate::watchdog::start_watchdog_thread(run_info.clone());
 
+    // Signal readiness to the system manager. user@<uid>.service is
+    // Type=notify-reload, so without this `systemctl start user@<uid>.service`
+    // blocks for TimeoutStartSec (~90s) and is then killed. Send READY=1 now —
+    // the control socket and handlers are up, so the manager can already serve
+    // `systemctl --user` / `systemd-run --user` — rather than after the
+    // possibly slow default.target activation below.
+    sd_notify_user_manager("READY=1\n");
+
     // Activate the user's default.target if present. A user manager with no
     // default.target is still useful (it idles, serving transient units from
     // `systemd-run --user`), so a missing target must not be fatal.
@@ -494,6 +508,28 @@ fn build_user_config() -> config::Config {
         target_unit: "default.target".to_owned(),
         notification_sockets_dir: sockets_dir,
         self_path,
+    }
+}
+
+/// Send an `sd_notify` message to `$NOTIFY_SOCKET`, if set.
+///
+/// A user manager is itself a service (`user@<uid>.service`) and must signal
+/// readiness to the system manager that started it, exactly like any other
+/// `Type=notify` service. Best-effort: a missing or unreachable socket is
+/// silently ignored.
+fn sd_notify_user_manager(msg: &str) {
+    let Ok(sock_path) = std::env::var("NOTIFY_SOCKET") else {
+        return;
+    };
+    // Abstract sockets are named with a leading '@' (mapped to a NUL byte);
+    // rust-systemd uses filesystem paths, but handle both like sd_notify(3).
+    let path = if let Some(stripped) = sock_path.strip_prefix('@') {
+        format!("\0{stripped}")
+    } else {
+        sock_path
+    };
+    if let Ok(sock) = std::os::unix::net::UnixDatagram::unbound() {
+        let _ = sock.send_to(msg.as_bytes(), &path);
     }
 }
 
