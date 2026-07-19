@@ -450,7 +450,19 @@ fn start_service_with_filedescriptors(
         }
     };
 
-    super::fork_os_specific::pre_fork_os_specific(conf).map_err(RunCmdError::Generic)?;
+    // Allocate the DynamicUser=yes UID/GID once, up front, so cgroup
+    // delegation (in pre_fork_os_specific) chowns the delegated files to the
+    // service's dynamic user rather than root, and the exec-helper config
+    // below reuses the same value instead of allocating a second UID.
+    let dynamic_uid: Option<u32> =
+        if conf.exec_config.dynamic_user && conf.exec_config.user.is_none() {
+            Some(allocate_dynamic_uid())
+        } else {
+            None
+        };
+
+    super::fork_os_specific::pre_fork_os_specific(conf, dynamic_uid)
+        .map_err(RunCmdError::Generic)?;
 
     let mut fds = Vec::new();
     let mut names = Vec::new();
@@ -1058,7 +1070,10 @@ fn start_service_with_filedescriptors(
     // Also apply implied security settings (see systemd.exec(5)).
     if conf.exec_config.dynamic_user {
         if conf.exec_config.user.is_none() {
-            let dynamic_id = allocate_dynamic_uid();
+            // Reuse the UID allocated before pre_fork_os_specific so cgroup
+            // delegation and the service process share the same dynamic user.
+            let dynamic_id = dynamic_uid
+                .expect("dynamic_uid is allocated when dynamic_user && user is unset");
             exec_helper_conf.user = dynamic_id;
             if conf.exec_config.group.is_none() {
                 exec_helper_conf.group = dynamic_id;

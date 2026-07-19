@@ -3538,6 +3538,29 @@ fn create_transient_unit(
                 "DynamicUser" => {
                     service_conf.exec_config.dynamic_user = matches!(value, "yes" | "true" | "1");
                 }
+                "Delegate" => {
+                    // systemd-run forwards `--property=Delegate=<v>` verbatim.
+                    // An empty value (`--property="Delegate="`) enables
+                    // delegation, mirroring upstream where systemd-run maps it
+                    // to DelegateControllers=[] and PID 1 sets delegate=true.
+                    // A boolean toggles delegation; any other value is a
+                    // space-separated controller list.
+                    service_conf.delegate = if value.is_empty()
+                        || matches!(value, "yes" | "true" | "on" | "1")
+                    {
+                        Delegate::Yes
+                    } else if matches!(value, "no" | "false" | "off" | "0") {
+                        Delegate::No
+                    } else {
+                        let controllers: Vec<String> =
+                            value.split_whitespace().map(|s| s.to_owned()).collect();
+                        if controllers.is_empty() {
+                            Delegate::No
+                        } else {
+                            Delegate::Controllers(controllers)
+                        }
+                    };
+                }
                 "OpenFile" => {
                     if value.is_empty() {
                         service_conf.open_file.clear();

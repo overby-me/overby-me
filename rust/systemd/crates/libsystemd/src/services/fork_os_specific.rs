@@ -28,7 +28,16 @@ fn remove_delegate_children(path: &std::path::Path) {
 }
 
 /// This is the place to do anything that is not standard unix but specific to one os. Like cgroups
-pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
+///
+/// `dynamic_uid` carries the UID/GID allocated for `DynamicUser=yes` services
+/// (allocated once by the caller before the fork). Cgroup delegation must chown
+/// the delegated files to this UID; resolving `exec_config.user` would give root
+/// because the dynamic user is not recorded there.
+#[cfg_attr(not(feature = "cgroups"), allow(unused_variables))]
+pub fn pre_fork_os_specific(
+    srvc: &ServiceConfig,
+    dynamic_uid: Option<u32>,
+) -> Result<(), String> {
     #[cfg(feature = "cgroups")]
     {
         std::fs::create_dir_all(&srvc.platform_specific.cgroup_path).map_err(|e| {
@@ -101,11 +110,21 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
         // files: those absent on the current kernel/controller set are skipped.
         if srvc.delegate != Delegate::No {
             use std::os::unix::fs::PermissionsExt;
-            let uid = super::start_service::resolve_uid(&srvc.exec_config.user)
-                .map_err(|e| format!("Couldn't resolve user for cgroup delegation: {e}"))?;
+            // For DynamicUser=yes the allocated UID is passed in via
+            // `dynamic_uid` (exec_config.user is None, which resolve_uid would
+            // map to root). Otherwise resolve the explicit User=/Group=.
+            let uid = match dynamic_uid {
+                Some(u) => u,
+                None => super::start_service::resolve_uid(&srvc.exec_config.user)
+                    .map_err(|e| format!("Couldn't resolve user for cgroup delegation: {e}"))?,
+            };
             let uid = nix::unistd::Uid::from_raw(uid);
-            let gid = super::start_service::resolve_gid(&srvc.exec_config.group)
-                .map_err(|e| format!("Couldn't resolve group for cgroup delegation: {e}"))?;
+            let gid = match dynamic_uid {
+                // DynamicUser=yes uses GID == UID unless Group= is explicit.
+                Some(g) if srvc.exec_config.group.is_none() => g,
+                _ => super::start_service::resolve_gid(&srvc.exec_config.group)
+                    .map_err(|e| format!("Couldn't resolve group for cgroup delegation: {e}"))?,
+            };
             let gid = nix::unistd::Gid::from_raw(gid);
             trace!(
                 "Delegating cgroup {:?} to uid={} gid={}",
