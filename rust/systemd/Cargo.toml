@@ -5,6 +5,7 @@ members = [
   "crates/analyze",
   "crates/ask-password",
   "crates/backlight",
+  "crates/battery-check",
   "crates/binfmt",
   "crates/bootctl",
   "crates/bsod",

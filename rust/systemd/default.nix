@@ -246,7 +246,7 @@
 
                 # Install rust-only binaries that don't exist in the C systemd package.
                 # These are new binaries implemented in rust-systemd without a C counterpart.
-                for name in systemd-bsod systemd-journal-gatewayd systemd-journal-remote systemd-journal-upload; do
+                for name in systemd-bsod systemd-journal-gatewayd systemd-journal-remote systemd-journal-upload systemd-battery-check; do
                   if [ -e "${rust-systemd}/bin/$name" ] && [ ! -e "$out/lib/systemd/$name" ]; then
                     cp -aL "${rust-systemd}/bin/$name" "$out/lib/systemd/$name"
                   fi
