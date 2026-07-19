@@ -3547,6 +3547,22 @@ fn create_transient_unit(
                 "RemainAfterExit" => {
                     service_conf.remain_after_exit = matches!(value, "yes" | "true" | "1");
                 }
+                // Accounting toggles enable the matching cgroup controller for
+                // the unit (and its ancestor slices). Without these a transient
+                // `--property=IOAccounting=yes` was dropped, so the io/cpu/etc.
+                // controller was never enabled on the unit's cgroup.
+                "IOAccounting" => {
+                    service_conf.io_accounting = Some(matches!(value, "yes" | "true" | "1"));
+                }
+                "MemoryAccounting" => {
+                    service_conf.memory_accounting = Some(matches!(value, "yes" | "true" | "1"));
+                }
+                "CPUAccounting" => {
+                    service_conf.cpu_accounting = Some(matches!(value, "yes" | "true" | "1"));
+                }
+                "TasksAccounting" => {
+                    service_conf.tasks_accounting = Some(matches!(value, "yes" | "true" | "1"));
+                }
                 "DynamicUser" => {
                     service_conf.exec_config.dynamic_user = matches!(value, "yes" | "true" | "1");
                 }
