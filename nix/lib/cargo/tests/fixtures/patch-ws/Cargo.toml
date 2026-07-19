@@ -1,0 +1,10 @@
+[package]
+name = "patch-root"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mycrate = "1"
+
+[patch.crates-io]
+mycrate = { path = "vendor/mycrate" }

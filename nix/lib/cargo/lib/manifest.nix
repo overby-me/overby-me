@@ -417,6 +417,27 @@ let
       )
       (filter (d: d.path != null) pkg.deps);
 
+    # [patch] source overrides. A `[patch.<registry>]` entry redirecting a
+    # crate to a local path makes that crate appear in the lock as a path
+    # package (no source), so it must be discovered like an external path
+    # dependency. Git patches carry a git source in the lock and resolve
+    # through the normal git path, so only path patches need seeding here.
+    # Paths are relative to the workspace root manifest (base).
+    patchDirs = let
+      patchTables = rootManifest.patch or {};
+      allSpecs = concatLists (map (reg: builtins.attrValues patchTables.${reg}) (attrNames patchTables));
+      pathSpecs = filter (s: isAttrs s && (s.path or null) != null) allSpecs;
+    in
+      map (
+        s:
+          normalizeRel (
+            if manifestDir == ""
+            then s.path
+            else "${manifestDir}/${s.path}"
+          )
+      )
+      pathSpecs;
+
     memberDirSet = listToAttrs (map (m: {
         name = m.relDir;
         value = true;
@@ -483,7 +504,7 @@ let
 
     pathPackages =
       builtins.attrValues
-      (walkExternal {} (concatLists (map pathDepDirs members)));
+      (walkExternal {} (concatLists (map pathDepDirs members) ++ patchDirs));
   in {
     inherit rootManifest members pathPackages;
     byName = listToAttrs (map (m: {

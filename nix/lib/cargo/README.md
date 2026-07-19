@@ -119,13 +119,20 @@ the cranelift codegen backend, and wild linking; the whole 100-member
 workspace cold-builds in under a minute and single-member edits rebuild in
 seconds.
 
+## Patches
+
+`[patch]` source overrides in the workspace root are honored. A patch
+pointing a crate at a git source resolves through the locked git revision
+like any git dependency; a patch pointing at a local path (within `src`) is
+discovered and built from that directory. Both are picked up automatically
+from the manifest, no parameter needed.
+
 ## Not supported (yet)
 
-`[patch]`, running test/bench targets (covered by
-per-project sandbox checks until a store-backed registry lands; see
-PLAN.md), rmeta pipelining for cold-build speed. `rust/perl` is broken for
-reasons predating this library (its build.rs references an absolute
-dev-machine path).
+Running test/bench targets (covered by per-project sandbox checks until a
+store-backed registry lands; see PLAN.md), rmeta pipelining for cold-build
+speed. `rust/perl` is broken for reasons predating this library (its build.rs
+references an absolute dev-machine path).
 
 ## Files
 
