@@ -464,8 +464,8 @@
 | ✅ | 2D Renderer | [Vello 🦀](https://github.com/linebender/vello) | | 🆗 | [Skia 💣](https://github.com/google/skia), [Cairo 💣](https://en.wikipedia.org/wiki/Cairo_(graphics)) |
 | ✅ | 3D Renderer | [Wgpu 🦀](https://github.com/gfx-rs/wgpu) | | [Vulkan 📖](https://www.vulkan.org) | |
 | ✅ | Compositor Framework | [Smithay 🦀](https://github.com/Smithay/smithay) | | 🆗 | [Mutter 💣](https://gitlab.gnome.org/GNOME/mutter) |
-| 🚧 | UI Toolkit | [React 🐒](https://react.dev) | [Dioxus 🦀](https://github.com/dioxusLabs/dioxus) | [Web Component 📖](https://www.webcomponents.org/) | |
-| 🚧 | UI Components | [MUI 🐒](https://mui.com) | [Dioxus Components 🦀](https://github.com/DioxusLabs/components) | 🆗 | |
+| 🚧 | UI Toolkit | [Dioxus 🦀](https://github.com/dioxusLabs/dioxus) | | [Web Component 📖](https://www.webcomponents.org/) | [React 🐒](https://react.dev) |
+| 🚧 | UI Components | [Dioxus Components 🦀](https://github.com/DioxusLabs/components) | [Material 3 🦀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki-dioxus/src/components/ui) | 🆗 | [MUI 🐒](https://mui.com) |
 | 🚫 | XR Toolkit | [Stereokit 💣](https://github.com/StereoKit/StereoKit) | | 🆗 | |
 | 🚧 | Browser Engine | [Gecko 🦀💣](https://en.wikipedia.org/wiki/Gecko_(software)) | [Servo 🦀](https://github.com/servo/servo) | ⬅️ | |
 | 🚫 | ECMAScript Engine | [V8 💣](https://v8.dev) | [Boa 🦀](https://github.com/boa-dev/boa), [Nova 🦀](https://github.com/trynova/nova) | 🆗 | |
