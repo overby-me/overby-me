@@ -1439,7 +1439,7 @@ fn setup_stdin(config: &ExecHelperConfig) {
 /// [`crate::kmsg_log::KmsgLogger`], which survives mount namespace
 /// changes unlike stderr.
 pub fn run_exec_helper() {
-    let config: ExecHelperConfig = match serde_json::from_reader(std::io::stdin()) {
+    let mut config: ExecHelperConfig = match serde_json::from_reader(std::io::stdin()) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[EXEC_HELPER] FATAL: failed to parse config from stdin: {e}");
@@ -1750,14 +1750,77 @@ pub fn run_exec_helper() {
             })
     };
 
+    // Parse an ExecDirectory= entry "SRC[:DEST[:FLAGS]]" into (src, dest, ro).
+    // DEST is an optional symlink alias (State/Runtime only); FLAGS may contain
+    // "ro" for a read-only directory.
+    fn parse_exec_dir_entry(entry: &str) -> (String, Option<String>, bool) {
+        let mut parts = entry.splitn(3, ':');
+        let src = parts.next().unwrap_or("").to_owned();
+        let dest = parts.next().filter(|s| !s.is_empty()).map(str::to_owned);
+        let flags = parts.next().unwrap_or("");
+        let read_only = flags.split([':', ',']).any(|f| f == "ro");
+        (src, dest, read_only)
+    }
+    // Relative path from `from` to `to` (both absolute). e.g. state→config gives
+    // "../../.config", so a symlink at <state>/foo can target "../../.config/foo".
+    fn path_make_relative(from: &Path, to: &Path) -> std::path::PathBuf {
+        let from_c: Vec<_> = from.components().collect();
+        let to_c: Vec<_> = to.components().collect();
+        let common = from_c
+            .iter()
+            .zip(&to_c)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let mut rel = std::path::PathBuf::new();
+        for _ in common..from_c.len() {
+            rel.push("..");
+        }
+        for c in &to_c[common..] {
+            rel.push(c.as_os_str());
+        }
+        rel
+    }
+
+    // ExecDirectory= entries flagged `:ro` — collected here and enforced as
+    // read-only bind mounts once the mount namespace is set up.
+    let mut read_only_exec_dirs: Vec<std::path::PathBuf> = Vec::new();
+
     if !config.state_directory.is_empty() {
         let base = managed_dir_base("/var/lib", "XDG_STATE_HOME", ".local/state");
+        let config_base = managed_dir_base("/etc", "XDG_CONFIG_HOME", ".config");
+        let user = std::env::var_os("SYSTEMD_USER_MANAGER").is_some();
         let mode = config.state_directory_mode.unwrap_or(0o755);
-        let full_paths: Vec<String> = config
-            .state_directory
-            .iter()
-            .map(|d| create_managed_dir(&base, d, mode, dynamic))
-            .collect();
+        let mut full_paths: Vec<String> = Vec::new();
+        for entry in &config.state_directory {
+            let (src, dest, ro) = parse_exec_dir_entry(entry);
+            let src_path = base.join(&src);
+            // Migrate-to-symlink: if the state directory is missing but a matching
+            // configuration directory exists, create a relative symlink into it so
+            // both share storage (mirrors upstream's update-compat symlink). Gated
+            // to user mode to leave the system code path unchanged.
+            let full = if user && !src_path.exists() && config_base.join(&src).exists() {
+                let target = path_make_relative(&base, &config_base).join(&src);
+                let _ = std::fs::remove_file(&src_path);
+                if let Err(e) = std::os::unix::fs::symlink(&target, &src_path) {
+                    log::warn!("Failed to symlink {src_path:?} -> {target:?}: {e}");
+                }
+                src_path.to_string_lossy().into_owned()
+            } else {
+                create_managed_dir(&base, &src, mode, dynamic)
+            };
+            // Optional destination: a symlink alias pointing at the source dir.
+            if let Some(dest) = dest {
+                let dest_path = base.join(&dest);
+                let _ = std::fs::remove_file(&dest_path);
+                if let Err(e) = std::os::unix::fs::symlink(&src, &dest_path) {
+                    log::warn!("Failed to symlink {dest_path:?} -> {src:?}: {e}");
+                }
+            }
+            if ro {
+                read_only_exec_dirs.push(base.join(&src));
+            }
+            full_paths.push(full);
+        }
         unsafe { std::env::set_var("STATE_DIRECTORY", full_paths.join(":")) };
     }
 
@@ -1803,10 +1866,27 @@ pub fn run_exec_helper() {
         let full_paths: Vec<String> = config
             .configuration_directory
             .iter()
-            .map(|d| create_managed_dir(&base, d, mode, false))
+            .map(|d| {
+                // ConfigurationDirectory does not support a symlink destination,
+                // but may carry a `:ro` flag; take only the source name.
+                let (src, _dest, ro) = parse_exec_dir_entry(d);
+                if ro {
+                    read_only_exec_dirs.push(base.join(&src));
+                }
+                create_managed_dir(&base, &src, mode, false)
+            })
             .collect();
         // TODO: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("CONFIGURATION_DIRECTORY", full_paths.join(":")) };
+    }
+
+    // ExecDirectory= entries flagged `:ro` are made read-only for the service by
+    // reusing the ReadOnlyPaths= machinery: appending them forces a mount
+    // namespace (see needs_mount_ns below) and bind-mounts each read-only.
+    for dir in &read_only_exec_dirs {
+        config
+            .read_only_paths
+            .push(dir.to_string_lossy().into_owned());
     }
 
     // ── Namespace-based isolation (must happen before privilege drop) ──
