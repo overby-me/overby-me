@@ -404,6 +404,10 @@ struct Args {
     verity_data: Option<String>,
     json_mode: JsonMode,
     no_legend: bool,
+    /// --mkdir: create the mount point directory before mounting.
+    mkdir: bool,
+    /// --rmdir: remove the mount point directory after unmounting.
+    rmdir: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -439,6 +443,8 @@ impl Default for Args {
             verity_data: None,
             json_mode: JsonMode::Off,
             no_legend: false,
+            mkdir: false,
+            rmdir: false,
         }
     }
 }
@@ -500,6 +506,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             }
             "--no-pager" => { /* accepted and ignored */ }
             "--no-legend" => args.no_legend = true,
+            "--mkdir" => args.mkdir = true,
+            "--rmdir" => args.rmdir = true,
             _ if !arg.starts_with('-') => {
                 positionals.push(arg.clone());
             }
@@ -1426,6 +1434,8 @@ Commands:
   (default)       Show image partition table and info
   --mount         Mount the image at a given path
   --umount        Unmount a previously mounted image
+  --mkdir         Create the mount point directory before mounting
+  --rmdir         Remove the mount point directory after unmounting
   --list          List partitions in the image
   --copy-from     Copy a file out of the image
   --copy-to       Copy a file into the image
@@ -1469,7 +1479,12 @@ fn run(argv: &[String]) -> Result<(), String> {
                 .mount_path
                 .as_ref()
                 .ok_or("--umount requires a mount point path")?;
-            return cmd_umount(mount_path);
+            cmd_umount(mount_path)?;
+            // --rmdir: remove the (now-empty) mount point directory.
+            if args.rmdir {
+                let _ = std::fs::remove_dir(mount_path);
+            }
+            return Ok(());
         }
         _ => {}
     }
@@ -1495,6 +1510,11 @@ fn run(argv: &[String]) -> Result<(), String> {
                 .mount_path
                 .as_ref()
                 .ok_or("--mount requires a mount point path after the image")?;
+            // --mkdir: create the mount point (and parents) before mounting.
+            if args.mkdir {
+                std::fs::create_dir_all(mount_path)
+                    .map_err(|e| format!("Failed to create mount point {mount_path:?}: {e}"))?;
+            }
             cmd_mount(image, mount_path)?;
         }
         Command::CopyFrom => {
