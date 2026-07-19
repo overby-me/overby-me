@@ -52,4 +52,8 @@ exclude = [
   # links.
   '//(10|192\.168|169\.254)\.\d',
   "//ep/",
+  # Go toolchain download endpoint in the buck2 no_prelude test fixture: the
+  # real URL is built at analysis time (base + version + platform + ext), so
+  # the bare base 404s and is not link-checkable.
+  'go\.dev/dl',
 ]

@@ -1,0 +1,12 @@
+load("//cpp:rules.bzl", "cpp_library")
+
+oncall("build_infra")
+
+cpp_library(
+    name = "library",
+    srcs = glob(["*.cpp"]),
+    headers = glob(["*.hpp"]),
+    toolchain = "toolchains//:cpp",
+    visibility = ["PUBLIC"],
+    deps = [],
+)
