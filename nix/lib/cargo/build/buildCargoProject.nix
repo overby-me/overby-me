@@ -66,6 +66,13 @@ in
 
     singleRoot = length rootNames == 1;
 
+    fetchCrate = pkg:
+      fetchurl {
+        name = "${pkg.name}-${pkg.version}.crate";
+        url = "https://static.crates.io/crates/${pkg.name}/${pkg.name}-${pkg.version}.crate";
+        sha256 = pkg.checksum;
+      };
+
     resolved = cargoLib.resolve.resolve {
       inherit lock platform workspace;
       indexDir = index;
@@ -75,53 +82,9 @@ in
     };
     inherit (resolved) nodes;
 
-    # Profile: defaults per release/dev, overridden by explicit keys in
-    # the workspace root's [profile.release]/[profile.dev] (cargo ignores
-    # profiles declared anywhere else).
-    profileToml =
-      (workspace.rootManifest.profile
-        or {
-      }).${
-        if release
-        then "release"
-        else "dev"
-      } or {
-      };
-    normLto = v:
-      if v == true || v == "fat"
-      then "fat"
-      else if v == "thin"
-      then "thin"
-      else "off";
-    normStrip = v:
-      if v == true || v == "symbols"
-      then "symbols"
-      else if v == "debuginfo"
-      then "debuginfo"
-      else "none";
-    normDebug = v:
-      if v == true
-      then "2"
-      else if v == false
-      then "0"
-      else toString v;
-    profile = {
-      optLevel = toString (profileToml."opt-level"
-        or (
-        if release
-        then 3
-        else 0
-      ));
-      debugInfo = normDebug (profileToml.debug
-        or (
-        if release
-        then 0
-        else 2
-      ));
-      lto = normLto (profileToml.lto or false);
-      strip = normStrip (profileToml.strip or false);
-      panic = profileToml.panic or "unwind";
-      codegenUnits = profileToml."codegen-units" or null;
+    profiles = cargoLib.profile.mkProfiles {
+      inherit (workspace) rootManifest;
+      inherit release;
     };
 
     linkerDir =
@@ -136,7 +99,6 @@ in
       if linker == null
       then []
       else ["-C" "link-arg=-B${linkerDir}/bin"];
-
     normalEdges = node: filter (e: e.kind == "normal") node.edges;
     buildEdges = node: filter (e: e.kind == "build") node.edges;
 
@@ -213,12 +175,7 @@ in
         src =
           if node.pkg.sourceInfo.type != "registry"
           then filterSrc (cargoLib.manifest.joinPath (node.meta.srcBase or src) node.meta.relDir)
-          else
-            fetchurl {
-              name = "${node.pkg.name}-${node.pkg.version}.crate";
-              url = "https://static.crates.io/crates/${node.pkg.name}/${node.pkg.name}-${node.pkg.version}.crate";
-              sha256 = node.pkg.checksum;
-            };
+          else fetchCrate node.pkg;
         plan =
           if node.pkg.sourceInfo.type != "registry"
           then planFor node isRoot
@@ -238,7 +195,8 @@ in
         buildDepDrvs = map (i: drvs.${i}) (attrNames buildClosureSet.${id});
         linksDepDrvs = map (e: drvs.${e.targetId}) (normalEdges node);
         target = platform.triple;
-        inherit profile linkArgs rustcFlags toolchain;
+        profile = profiles.forPackage node.pkg.name node.isWorkspaceMember;
+        inherit linkArgs rustcFlags toolchain;
         capLints = !node.isWorkspaceMember;
         buildBins = isRoot;
         crateHash = hashOf id node;

@@ -6,4 +6,5 @@
   index = import ./index.nix;
   manifest = import ./manifest.nix;
   resolve = import ./resolve.nix;
+  profile = import ./profile.nix;
 }
