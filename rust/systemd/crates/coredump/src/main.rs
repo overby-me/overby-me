@@ -657,6 +657,20 @@ fn enrich_from_proc(meta: &mut CoreDumpMeta) {
     meta.cmdline = read_proc_cmdline(meta.pid);
     meta.cgroup = read_proc_cgroup(meta.pid);
     meta.environ = read_proc_environ(meta.pid);
+    // comm and the executable path are not passed via the kernel core_pattern
+    // argv; read them from /proc/PID/ while the crashed process is still around
+    // (the kernel keeps it until this pipe handler exits). Only fill if empty so
+    // an explicitly-provided value (e.g. --backtrace mode) is preserved.
+    if meta.comm.is_empty()
+        && let Ok(comm) = std::fs::read_to_string(format!("/proc/{}/comm", meta.pid))
+    {
+        meta.comm = comm.trim_end().to_string();
+    }
+    if meta.exe.is_empty()
+        && let Ok(path) = std::fs::read_link(format!("/proc/{}/exe", meta.pid))
+    {
+        meta.exe = path.to_string_lossy().into_owned();
+    }
 }
 
 #[cfg(test)]
@@ -1252,8 +1266,16 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
         .map_err(|e| format!("invalid RLIMIT: {e}"))?;
 
     let hostname = iter.next().ok_or("missing HOSTNAME")?.clone();
-    let comm = iter.next().ok_or("missing COMM")?.clone();
-    let exe = iter.next().cloned().unwrap_or_default();
+    // The remaining core_pattern specifiers are %d (dumpable) and %F (pidfd);
+    // both were added to the kernel core_pattern in later versions and so are
+    // optional. Crucially, comm and the executable path are NOT passed via argv
+    // — upstream reads them from /proc/PID/ (see enrich_from_proc). Previously
+    // this code mistook %d/%F for comm/exe, storing e.g. COREDUMP_EXE="3" (a
+    // pidfd number), so `coredumpctl list <exe>` could never match the dump.
+    let _dumpable = iter.next();
+    let _pidfd = iter.next();
+    let comm = String::new();
+    let exe = String::new();
 
     Ok(Args {
         meta: CoreDumpMeta {
@@ -1936,6 +1958,8 @@ mod tests {
 
     #[test]
     fn test_parse_args_basic() {
+        // Kernel core_pattern args: %P %u %g %s %t %c %h %d %F. The last two are
+        // dumpable and pidfd; comm/exe are NOT in argv (they come from /proc).
         let args: Vec<String> = vec![
             "systemd-coredump",
             "1234",
@@ -1945,8 +1969,8 @@ mod tests {
             "1700000000",
             "18446744073709551615",
             "myhost",
-            "myapp",
-            "/usr/bin/myapp",
+            "1", // %d dumpable
+            "3", // %F pidfd
         ]
         .into_iter()
         .map(String::from)
@@ -1960,8 +1984,9 @@ mod tests {
         assert_eq!(parsed.meta.timestamp, 1700000000);
         assert_eq!(parsed.meta.rlimit, u64::MAX);
         assert_eq!(parsed.meta.hostname, "myhost");
-        assert_eq!(parsed.meta.comm, "myapp");
-        assert_eq!(parsed.meta.exe, "/usr/bin/myapp");
+        // comm/exe are populated later from /proc, not from argv.
+        assert_eq!(parsed.meta.comm, "");
+        assert_eq!(parsed.meta.exe, "");
         assert!(!parsed.meta.backtrace);
     }
 
