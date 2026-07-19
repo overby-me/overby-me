@@ -4440,6 +4440,51 @@ fn remove_device_tags(event: &UEvent) {
 // ---------------------------------------------------------------------------
 
 /// Create device symlinks in /dev/.
+/// Serialize updates to a device symlink via udev's `/run/udev/links.lock/`
+/// directory, mirroring upstream systemd-udevd. Holding the guard keeps an
+/// exclusive flock for the duration of the symlink update; dropping it removes
+/// the lock file and releases the lock, so `/run/udev/links.lock/` exists but
+/// is left empty once all events have been processed (which the udev test
+/// suite asserts, e.g. TEST-17-UDEV.diskseq).
+struct SymlinkLock {
+    file: fs::File,
+    path: PathBuf,
+}
+
+impl SymlinkLock {
+    fn acquire(link_path: &Path) -> Option<Self> {
+        // Upstream creates both the symlink "stack" directory and its lock dir.
+        let _ = fs::create_dir_all("/run/udev/links");
+        fs::create_dir_all("/run/udev/links.lock").ok()?;
+        // Encode the symlink path into a flat lock-file name (leading slash
+        // dropped, remaining slashes escaped) — enough for per-symlink locking.
+        let name = link_path
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .replace('/', "\\x2f");
+        let path = Path::new("/run/udev/links.lock").join(name);
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .ok()?;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return None;
+        }
+        Some(SymlinkLock { file, path })
+    }
+}
+
+impl Drop for SymlinkLock {
+    fn drop(&mut self) {
+        // Remove the lock file while still holding the lock, then release, so
+        // the lock directory ends up empty (mirrors upstream make_lock_file).
+        let _ = fs::remove_file(&self.path);
+        let _ = unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
 fn create_device_symlinks(event: &UEvent, symlinks: &[String]) {
     for link in symlinks {
         let link_path = if link.starts_with('/') {
@@ -4447,6 +4492,9 @@ fn create_device_symlinks(event: &UEvent, symlinks: &[String]) {
         } else {
             PathBuf::from("/dev").join(link)
         };
+
+        // Serialize the update against other workers via udev's symlink lock.
+        let _lock = SymlinkLock::acquire(&link_path);
 
         if let Some(parent) = link_path.parent() {
             let _ = fs::create_dir_all(parent);
