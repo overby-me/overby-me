@@ -23,6 +23,8 @@
   # Direct normal deps whose links metadata feeds DEP_* env vars.
   linksDepDrvs ? [],
   target,
+  # Path to a file with the toolchain's `rustc --print cfg` output.
+  rustcCfgFile ? null,
   profile,
   capLints ? true,
   buildBins ? false,
@@ -42,6 +44,10 @@
 }: let
   config = writeText "cargo-nix-config-${crateName}-${version}.json" (builtins.toJSON ({
       inherit plan features target profile capLints buildBins bins crateHash;
+      rustcCfgFile =
+        if rustcCfgFile == null
+        then null
+        else "${rustcCfgFile}";
       externs =
         map (e: {
           inherit (e) name;

@@ -101,9 +101,17 @@ def pkg-env [plan: record, features: list<string>] {
   $e
 }
 
-# CARGO_CFG_* for build scripts, from the compiler's own cfg set.
-def rustc-cfg-env [rustc: string] {
-  ^$rustc --print cfg | lines | reduce --fold {} {|line, acc|
+# CARGO_CFG_* for build scripts, from the compiler's own cfg set. Reads
+# the shared per-toolchain cfg file when provided (P5), falling back to
+# invoking rustc.
+def rustc-cfg-env [rustc: string, cfg_file: any] {
+  (
+    if $cfg_file != null and ($cfg_file | path exists) {
+      open --raw $cfg_file
+    } else {
+      ^$rustc --print cfg
+    }
+  ) | lines | reduce --fold {} {|line, acc|
     if ($line | str contains "=") {
       let kv = ($line | split row -n 2 "=")
       let key = $"CARGO_CFG_(upperize $kv.0)"
@@ -264,7 +272,7 @@ def run-build-script [cfg: record, plan: record, rustc: string, base_env: record
 
   let script_env = (
     $base_env
-    | merge (rustc-cfg-env $rustc)
+    | merge (rustc-cfg-env $rustc ($cfg | get -o rustcCfgFile))
     | merge (dep-links-env $cfg.linksDeps)
     | merge {
       OUT_DIR: $out_dir,

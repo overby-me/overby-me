@@ -73,6 +73,21 @@ in
         sha256 = pkg.checksum;
       };
 
+    # P5: the compiler cfg set is a pure function of the toolchain; run
+    # `rustc --print cfg` once instead of in every build-script sandbox.
+    rustcCfgFile =
+      runCommand "rustc-cfg-${effectiveRustcVersion}" {
+        nativeBuildInputs = [
+          (
+            if toolchain != null
+            then toolchain
+            else rustc
+          )
+        ];
+      } ''
+        rustc --print cfg > $out
+      '';
+
     resolved = cargoLib.resolve.resolve {
       inherit lock platform workspace;
       indexDir = index;
@@ -195,6 +210,7 @@ in
         buildDepDrvs = map (i: drvs.${i}) (attrNames buildClosureSet.${id});
         linksDepDrvs = map (e: drvs.${e.targetId}) (normalEdges node);
         target = platform.triple;
+        inherit rustcCfgFile;
         profile = profiles.forPackage node.pkg.name node.isWorkspaceMember;
         inherit linkArgs rustcFlags toolchain;
         capLints = !node.isWorkspaceMember;

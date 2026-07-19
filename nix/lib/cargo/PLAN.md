@@ -363,12 +363,12 @@ lands only with a benchmark proving it helped.
 
 | # | Lever | Expected | Status |
 |---|---|---|---|
-| P1 | Dev: `-Zthreads` parallel rustc frontend (nightly) | 20-40% off frontend-bound crates | implementing |
-| P2 | Dev: `-C prefer-dynamic` (dynamic libstd, 80 bins stop static-linking std) | large cut of dev link time | implementing |
-| P3 | Per-package profile overrides (`[profile.dev.package."*"]` opt-level) | dev ergonomics parity with cargo | implementing |
-| P4 | `debug = "line-tables-only"` support | cheaper debuginfo, keeps backtraces | free with P3 plumbing |
-| P5 | Shared `rustc --print cfg` derivation (drop per-build-script subprocess) | seconds of aggregate CPU | implementing |
-| P6 | Shared unpack derivation per crate version (stop re-untarring per variant) | seconds; dedups across feature variants | implementing |
+| P1 | Dev: `-Zthreads` parallel rustc frontend (nightly) | 20-40% off frontend-bound crates | benchmarked, not adopted: -3% cold, noise elsewhere; crate-level parallelism already saturates the cores (systemd dev, cranelift+wild, high-performance governor) |
+| P2 | Dev: `-C prefer-dynamic` (dynamic libstd, 80 bins stop static-linking std) | large cut of dev link time | benchmarked, not adopted: -1% cold, incremental identical to no-op; wild already made links free |
+| P3 | Per-package profile overrides (`[profile.dev.package."*"]` opt-level) | dev ergonomics parity with cargo | done (lib/profile.nix, unit-tested; wildcard hits dependencies, named overrides beat it, members keep base) |
+| P4 | `debug = "line-tables-only"` support | cheaper debuginfo, keeps backtraces | done with P3 |
+| P5 | Shared `rustc --print cfg` derivation (drop per-build-script subprocess) | seconds of aggregate CPU | done: wall-neutral (195.92s vs 195.88s baseline), kept for the cleaner architecture |
+| P6 | Shared unpack derivation per crate version (stop re-untarring per variant) | seconds; dedups across feature variants | benchmarked and REVERTED: +14s cold (224 extra sandbox setups outweigh the shared unpack; variant-sharing too rare to pay for it) |
 | P7 | rmeta pipelining: metadata drv + rlib drv per crate, dependents compile against rmeta | recovers most of the remaining ~1.45x cold gap vs cargo | implementing (pure crates first; proc-macros and build-script crates stay unpipelined, as in cargo) |
 | P8 | Content-addressed rmeta drvs: early cutoff on impl-only dep changes | skips entire dependent subtrees; beyond cargo | blocked on enabling ca-derivations fleet-wide; flag prepared |
 | P9 | Build-script run as its own derivation (keyed on build.rs + build-deps) | lib edits stop re-running scripts | after P7 (same graph surgery) |
