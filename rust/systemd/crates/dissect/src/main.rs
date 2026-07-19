@@ -1363,7 +1363,11 @@ fn mount_partitioned_image(
             targets.push((i + 1, mp.to_string()));
         }
     }
-    targets.sort_by_key(|(_, mp)| mp.matches('/').count());
+    // Mount by increasing path depth so a parent is always mounted before its
+    // children: "/" (depth 0) first, then "/usr", "/home" (depth 1), etc.
+    // Otherwise a child mounted first would be shadowed when the root mounts
+    // over the mount point.
+    targets.sort_by_key(|(_, mp)| mp.trim_matches('/').split('/').filter(|s| !s.is_empty()).count());
 
     let mut mount_err: Option<String> = None;
     for (partnum, mp) in &targets {
