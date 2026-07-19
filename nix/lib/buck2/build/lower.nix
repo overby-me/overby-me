@@ -179,9 +179,10 @@
     };
 
   # Baseline env for run actions (harmless for cc/rustc; lets the vendored Go
-  # toolchain build a single-file main without a module).
+  # toolchain build a single-file main without a module). Caches live under
+  # $NIX_BUILD_TOP, not the working tree ($out), so they never leak into output.
   runEnvPrelude = ''
-    export HOME="$PWD/.home" GOCACHE="$PWD/.gocache" GOPATH="$PWD/.gopath"
+    export HOME="$NIX_BUILD_TOP/.home" GOCACHE="$NIX_BUILD_TOP/.gocache" GOPATH="$NIX_BUILD_TOP/.gopath"
     export GO111MODULE=off CGO_ENABLED=0 GOPROXY=off GOTOOLCHAIN=local
     mkdir -p "$HOME"
   '';
@@ -212,13 +213,11 @@
       if a.kind == "run"
       then lib.unique (map producerId (filter (x: x.kind != "source") (collectInputs (a.cmd.parts ++ a.cmd.hidden))))
       else [];
-    # Only actions that carry downloaded prebuilt binaries need autoPatchelf.
-    # Skipping it for from-source builds (cpp/rust) keeps them fast; scanning +
-    # patching adds seconds even for a tiny tree.
-    needsPatch = id: let
-      a = actionById.${id};
-    in
-      a.kind == "download" || builtins.any needsPatch (runDepIds a);
+    # An action needs autoPatchelf only when it materializes real files from a
+    # download (e.g. untars the Go toolchain): its direct input is a download.
+    # Consumers symlink to the already-patched tree, so they never re-scan.
+    # Skipping this for from-source builds (cpp/rust) keeps them fast.
+    stagesDownload = a: builtins.any (id: actionById.${id}.kind == "download") (runDepIds a);
 
     # ---- per-action derivations ----------------------------------------
     mkRun = a: let
@@ -231,35 +230,40 @@
       argv = builtins.concatStringsSep " " (map esc (argStrings a.cmd));
       strings = litStrings a.cmd.parts;
       tcPkgs = map (k: toolchainPackages.${k}) (filter (k: builtins.elem k strings) (builtins.attrNames toolchainPackages));
-      patch = needsPatch a.id;
-      # Copy each producer's whole tree in; chmod +w after each so the next
-      # copy can merge into the (store-read-only) directories.
-      stageDeps = builtins.concatStringsSep "\n" (map (id: "cp -r --reflink=auto ${drvById.${id}}/. ./\nchmod -R u+w . 2>/dev/null || true") depIds);
+      patch = stagesDownload a;
+      # Build the working tree directly in $out (no separate export copy).
+      # Dependency trees are symlinked in (cp -rs: real dirs, file symlinks
+      # into the producer's store path), so a large toolchain is never copied
+      # and its patched binaries / symlink targets are reached through the link.
+      stageDeps = builtins.concatStringsSep "\n" (map (id: "cp -rsf --no-preserve=mode ${drvById.${id}}/. ./") depIds);
+      # Sources are copied (real files) so relative #include / sibling lookups
+      # resolve within the staged package directory.
       stageSrcs = builtins.concatStringsSep "\n" (map (s: "install -Dm644 ${srcStorePath s} ${esc (artPath s)}") srcs);
       mkOutDirs = builtins.concatStringsSep "\n" (map (o: ''mkdir -p "$(dirname ${esc (artPath o)})"'') outs);
-      # autoPatchelfHook makes downloaded prebuilt binaries in $out runnable on
-      # Nix by fixing their ELF interpreter. runCommand bypasses fixupPhase, so
-      # the hook's function is invoked directly. No extra buildInputs: glibc
-      # here would pollute the C++ header path, and the patched interpreter
-      # finds libc via its own default search.
-      patchCall = lib.optionalString patch ''
-        chmod -R u+w "$out" 2>/dev/null || true
-        autoPatchelf "$out" || true
-      '';
+      # autoPatchelf makes freshly-materialized downloaded binaries runnable on
+      # Nix by fixing their ELF interpreter (runs once, in the untar action).
+      # No extra buildInputs: glibc here would pollute the C++ header path, and
+      # the patched interpreter finds libc via its own default search.
+      patchCall = lib.optionalString patch ''autoPatchelf "$out" || true'';
     in
       pkgs.runCommand (sanDrv a.id) ({
-          nativeBuildInputs = [pkgs.stdenv.cc] ++ lib.optional patch pkgs.autoPatchelfHook ++ tcPkgs;
+          nativeBuildInputs =
+            # stdenv.cc for compiler toolchains (linking) and for autoPatchelf's
+            # dynamic-linker; omitted from pure shell actions (extract, symlink).
+            lib.optional (tcPkgs != [] || patch) pkgs.stdenv.cc
+            ++ tcPkgs
+            ++ lib.optional patch pkgs.autoPatchelfHook;
           dontStrip = true;
+          preferLocalBuild = true;
         }
         // lib.optionalAttrs patch {autoPatchelfIgnoreMissingDeps = true;}) ''
         ${runEnvPrelude}
+        mkdir -p $out
+        cd $out
         ${stageDeps}
         ${stageSrcs}
-        chmod -R u+w . 2>/dev/null || true
         ${mkOutDirs}
         ${argv}
-        mkdir -p $out
-        if [ -e bo ]; then cp -r --reflink=auto bo $out/; fi
         ${patchCall}
       '';
 
