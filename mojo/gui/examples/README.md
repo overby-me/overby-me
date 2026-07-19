@@ -113,8 +113,8 @@ cd mojo-gui/web
 # Build all examples (compiles Mojo → WASM, bundles JS runtime)
 just build
 
-# Or use the build_examples.sh script:
-bash scripts/build_examples.sh
+# Or use the build-examples.nu script:
+nu scripts/build-examples.nu
 
 # Serve locally:
 just serve

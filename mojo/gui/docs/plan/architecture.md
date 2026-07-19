@@ -278,9 +278,9 @@ mojo-gui/
 │   │   ├── counter.test.ts
 │   │   └── ...
 │   ├── scripts/                      # Build pipeline (Mojo → WASM)
-│   │   ├── build_test_binaries.sh
-│   │   ├── run_test_binaries.sh
-│   │   ├── build_examples.sh         # Builds all shared examples for web target
+│   │   ├── build-test-binaries.nu
+│   │   ├── run-test-binaries.nu
+│   │   ├── build-examples.nu         # Builds all shared examples for web target
 │   │   └── precompile.mojo
 │   ├── deno.json
 │   ├── justfile
