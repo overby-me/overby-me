@@ -9,8 +9,14 @@ fn main() {
     // are the system manager is being PID 1, so dispatch on that first (a name
     // match still covers being started as `systemd` from a non-PID-1 context).
     let is_pid1 = std::process::id() == 1;
+    // `systemd --user` starts a per-user manager instance (never PID 1). Check
+    // this before the system-manager name match, since argv[0] is still
+    // `…/systemd` in that case.
+    let is_user = !is_pid1 && std::env::args().any(|a| a == "--user");
     if exec_name.ends_with("exec_helper") {
         libsystemd::entrypoints::run_exec_helper();
+    } else if is_user {
+        libsystemd::entrypoints::run_user_manager();
     } else if is_pid1
         || exec_name.ends_with("rust-systemd")
         || exec_name.ends_with("systemd_rs")

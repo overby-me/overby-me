@@ -306,6 +306,197 @@ pub fn run_service_manager() {
     handle.join().unwrap();
 }
 
+/// Entry point for the per-user service manager (`systemd --user`).
+///
+/// Unlike [`run_service_manager`], this boots a lightweight manager for a
+/// single user: it performs NO PID 1 / system setup (no API-filesystem
+/// mounting, no cgroup-root move, no generators, no device coldplug) and does
+/// NOT start the varlink server (its path is the hardcoded system socket
+/// `/run/systemd/io.systemd.Manager`, which a user manager must never touch).
+/// It reuses the shared machinery — signal handling, the control socket, the
+/// notification/stdout/stderr handlers, socket activation and the
+/// timer/path/watchdog threads — driven by a user-mode [`config::Config`] whose
+/// paths live under `$XDG_RUNTIME_DIR` and the XDG user unit directories.
+///
+/// Started by `user@<uid>.service`; clients reach it via
+/// `$XDG_RUNTIME_DIR/systemd/control.socket` (`systemctl --user`,
+/// `systemd-run --user`).
+pub fn run_user_manager() {
+    let conf = build_user_config();
+
+    // A user manager logs to stderr; the journal captures it via user@.service.
+    let log_conf = config::LoggingConfig {
+        log_to_stdout: true,
+        log_to_disk: false,
+        log_dir: std::path::PathBuf::from("/dev/null"),
+    };
+    let _ = logging::setup_logging(&log_conf);
+
+    info!(
+        "systemd --user starting (uid={}, {} unit dir(s), runtime={})",
+        nix::unistd::Uid::current().as_raw(),
+        conf.unit_dirs.len(),
+        conf.notification_sockets_dir.display(),
+    );
+
+    // Ensure the runtime dirs the manager writes into exist: the sockets dir
+    // (holds the control socket) and the transient dir (`systemd-run --user`).
+    let _ = std::fs::create_dir_all(&conf.notification_sockets_dir);
+    let _ = std::fs::create_dir_all(conf.notification_sockets_dir.join("transient"));
+
+    // A user manager reaps its own service descendants.
+    crate::platform::become_subreaper(true);
+
+    let run_info = prepare_runtimeinfo(&conf, false);
+
+    // Reset the signal mask before registering handlers (see the identical note
+    // in run_service_manager: an inherited non-empty mask would swallow SIGCHLD).
+    {
+        let empty = nix::sys::signal::SigSet::empty();
+        let _ = nix::sys::signal::sigprocmask(
+            nix::sys::signal::SigmaskHow::SIG_SETMASK,
+            Some(&empty),
+            None,
+        );
+    }
+
+    let mut sig_list = vec![
+        signal_hook::consts::SIGCHLD,
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGQUIT,
+    ];
+    sig_list.extend(signal_handler::sigrtmin_signals());
+    let signals = match Signals::new(sig_list) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("systemd --user: could not set up signal handling: {e}");
+            return;
+        }
+    };
+    let handle = start_signal_handler_thread(signals, run_info.clone());
+
+    // Bind the user control socket ($XDG_RUNTIME_DIR/systemd/control.socket)
+    // and serve control connections. Deliberately no varlink server here (see
+    // the doc comment above).
+    {
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixListener;
+        let control_sock_path = conf.notification_sockets_dir.join("control.socket");
+        if control_sock_path.exists() {
+            let _ = std::fs::remove_file(&control_sock_path);
+        }
+        match UnixListener::bind(&control_sock_path) {
+            Ok(unixsock) => {
+                let _ = std::fs::set_permissions(
+                    &control_sock_path,
+                    std::fs::Permissions::from_mode(0o666),
+                );
+                control::accept_control_connections_unix_socket(run_info.clone(), unixsock);
+            }
+            Err(e) => {
+                error!(
+                    "systemd --user: failed to bind control socket {}: {e}",
+                    control_sock_path.display()
+                );
+                return;
+            }
+        }
+    }
+
+    start_notification_handler_thread(run_info.clone());
+    start_stdout_handler_thread(run_info.clone());
+    start_stderr_handler_thread(run_info.clone());
+    socket_activation::start_socketactivation_thread(run_info.clone());
+    crate::timer_scheduler::start_timer_scheduler_thread(run_info.clone());
+    crate::path_watcher::start_path_watcher_thread(run_info.clone());
+    crate::watchdog::start_watchdog_thread(run_info.clone());
+
+    // Activate the user's default.target if present. A user manager with no
+    // default.target is still useful (it idles, serving transient units from
+    // `systemd-run --user`), so a missing target must not be fatal.
+    let target_name = conf.target_unit.clone();
+    let target_id: Option<units::UnitId> = {
+        let ri = run_info.read_poisoned();
+        ri.unit_table
+            .values()
+            .find(|u| u.id.name == target_name)
+            .or_else(|| {
+                ri.unit_table
+                    .values()
+                    .find(|u| u.common.unit.aliases.iter().any(|a| a == &target_name))
+            })
+            .map(|u| u.id.clone())
+    };
+    if let Some(target_id) = target_id {
+        units::set_active_goal(&target_id.name);
+        spawn_active_goal_redrive(run_info.clone());
+        units::activate_needed_units(target_id, run_info);
+    } else {
+        info!("systemd --user: no {target_name} present; idling for transient units");
+    }
+
+    handle.join().unwrap();
+}
+
+/// Build a user-mode [`config::Config`] rooted at the XDG base directories.
+///
+/// `notification_sockets_dir` becomes `$XDG_RUNTIME_DIR/systemd` so the control
+/// socket lands at `$XDG_RUNTIME_DIR/systemd/control.socket`, matching where
+/// `systemctl --user` / `systemd-run --user` look.
+fn build_user_config() -> config::Config {
+    let uid = nix::unistd::Uid::current().as_raw();
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("/run/user/{uid}"));
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/root".to_owned());
+    let config_home = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{home}/.config"));
+    let self_path =
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/proc/self/exe"));
+
+    let sockets_dir = std::path::PathBuf::from(format!("{runtime_dir}/systemd"));
+
+    // Create the runtime unit dirs this manager owns, so they exist before the
+    // existence filter below and give `systemd-run --user` somewhere to drop
+    // transient units.
+    for sub in ["transient", "user.control", "user"] {
+        let _ = std::fs::create_dir_all(sockets_dir.join(sub));
+    }
+
+    // User unit search dirs, highest priority first (mirrors systemd's user
+    // manager search path): transient + runtime control units, then per-user
+    // config, then system-wide user units. Only existing directories are kept —
+    // the unit loader errors on a missing search path, and the optional
+    // system-wide user dirs (/etc/systemd/user, /usr/lib/systemd/user, …) may be
+    // absent.
+    let unit_dirs: Vec<std::path::PathBuf> = [
+        sockets_dir.join("transient"),
+        sockets_dir.join("user.control"),
+        std::path::PathBuf::from(format!("{config_home}/systemd/user")),
+        std::path::PathBuf::from("/etc/systemd/user"),
+        sockets_dir.join("user"),
+        std::path::PathBuf::from("/usr/local/lib/systemd/user"),
+        std::path::PathBuf::from("/usr/lib/systemd/user"),
+    ]
+    .into_iter()
+    .filter(|p| p.is_dir())
+    .collect();
+
+    config::Config {
+        unit_dirs,
+        target_unit: "default.target".to_owned(),
+        notification_sockets_dir: sockets_dir,
+        self_path,
+    }
+}
+
 /// Background re-drive for the current activation goal.
 ///
 /// rust-systemd's activation is a forward walk that can return before its goal
