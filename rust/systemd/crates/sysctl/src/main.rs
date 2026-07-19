@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::{self, BufRead};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -58,7 +58,14 @@ struct Cli {
     #[arg(long)]
     strict: bool,
 
-    /// Specific sysctl.d config files to read (instead of scanning directories)
+    /// Treat the positional arguments as literal `key=value` settings rather
+    /// than as file paths (e.g. `systemd-sysctl --inline "net.ipv4.ip_forward=1"`).
+    #[arg(long)]
+    inline: bool,
+
+    /// Specific sysctl.d config files to read (instead of scanning directories).
+    /// A single `-` reads settings from standard input. With `--inline`, these
+    /// are literal `key=value` settings instead.
     files: Vec<PathBuf>,
 }
 
@@ -264,72 +271,81 @@ fn discover_config_files() -> Vec<PathBuf> {
     result
 }
 
+/// Parse a single `key=value` sysctl setting (as found on a config-file line,
+/// on stdin, or as an `--inline` argument). A leading `-` on the key means
+/// errors applying it are ignored. Returns `None` for blank, comment, or
+/// malformed lines (with a diagnostic for the malformed case).
+fn parse_config_line(line: &str, source: &Path, line_number: usize) -> Option<SysctlEntry> {
+    let trimmed = line.trim();
+
+    // Skip empty lines and comments
+    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+        return None;
+    }
+
+    // Parse key=value or key = value
+    let (key_part, value_part) = if let Some(pos) = trimmed.find('=') {
+        (trimmed[..pos].trim(), trimmed[pos + 1..].trim())
+    } else {
+        eprintln!(
+            "systemd-sysctl: {}:{}: line is not a valid key=value pair, ignoring: {}",
+            source.display(),
+            line_number,
+            trimmed
+        );
+        return None;
+    };
+
+    if key_part.is_empty() {
+        eprintln!(
+            "systemd-sysctl: {}:{}: empty key, ignoring.",
+            source.display(),
+            line_number,
+        );
+        return None;
+    }
+
+    // Check for '-' prefix (ignore errors)
+    let (key, ignore_error) = if let Some(stripped) = key_part.strip_prefix('-') {
+        (stripped.trim(), true)
+    } else {
+        (key_part, false)
+    };
+
+    if key.is_empty() {
+        eprintln!(
+            "systemd-sysctl: {}:{}: empty key after prefix, ignoring.",
+            source.display(),
+            line_number,
+        );
+        return None;
+    }
+
+    Some(SysctlEntry {
+        key: key.to_string(),
+        value: value_part.to_string(),
+        ignore_error,
+        source: source.to_path_buf(),
+        line_number,
+    })
+}
+
+/// Parse sysctl settings from a buffered reader (a file or stdin).
+fn parse_config_reader<R: io::BufRead>(reader: R, source: &Path) -> io::Result<Vec<SysctlEntry>> {
+    let mut entries = Vec::new();
+    for (line_idx, line) in reader.lines().enumerate() {
+        let line = line?;
+        if let Some(entry) = parse_config_line(&line, source, line_idx + 1) {
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
+}
+
 /// Parse a single sysctl.d config file and return sysctl entries.
 fn parse_config_file(path: &Path) -> io::Result<Vec<SysctlEntry>> {
     let file = fs::File::open(path)?;
-    let reader = io::BufReader::new(file);
-    let mut entries = Vec::new();
-
-    for (line_idx, line) in reader.lines().enumerate() {
-        let line = line?;
-        let line_number = line_idx + 1;
-        let trimmed = line.trim();
-
-        // Skip empty lines and comments
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
-            continue;
-        }
-
-        // Parse key=value or key = value
-        let (key_part, value_part) = if let Some(pos) = trimmed.find('=') {
-            let k = trimmed[..pos].trim();
-            let v = trimmed[pos + 1..].trim();
-            (k, v)
-        } else {
-            eprintln!(
-                "systemd-sysctl: {}:{}: line is not a valid key=value pair, ignoring: {}",
-                path.display(),
-                line_number,
-                trimmed
-            );
-            continue;
-        };
-
-        if key_part.is_empty() {
-            eprintln!(
-                "systemd-sysctl: {}:{}: empty key, ignoring.",
-                path.display(),
-                line_number,
-            );
-            continue;
-        }
-
-        // Check for '-' prefix (ignore errors)
-        let (key, ignore_error) = if let Some(stripped) = key_part.strip_prefix('-') {
-            (stripped.trim(), true)
-        } else {
-            (key_part, false)
-        };
-
-        if key.is_empty() {
-            eprintln!(
-                "systemd-sysctl: {}:{}: empty key after prefix, ignoring.",
-                path.display(),
-                line_number,
-            );
-            continue;
-        }
-
-        entries.push(SysctlEntry {
-            key: key.to_string(),
-            value: value_part.to_string(),
-            ignore_error,
-            source: path.to_path_buf(),
-            line_number,
-        });
-    }
-
-    Ok(entries)
+    parse_config_reader(io::BufReader::new(file), path)
 }
 
 /// Normalize a prefix from /path/style to dot.style.
@@ -405,6 +421,24 @@ fn apply_sysctl(entry: &SysctlEntry, verbose: bool, strict: bool, prefixes: &[St
     all_ok
 }
 
+/// Merge parsed entries into the ordered settings map. Later entries for the
+/// same key override earlier ones (last writer wins), but the first-seen
+/// position is preserved so application order is stable.
+fn merge_entries(
+    entries: Vec<SysctlEntry>,
+    order: &mut Vec<String>,
+    settings: &mut HashMap<String, SysctlEntry>,
+) {
+    for entry in entries {
+        // For glob patterns, use the pattern itself as the key (expanded at
+        // apply time). Preserve first-seen position; update value in place.
+        if !settings.contains_key(&entry.key) {
+            order.push(entry.key.clone());
+        }
+        settings.insert(entry.key.clone(), entry);
+    }
+}
+
 fn run() -> u8 {
     let cli = Cli::parse();
 
@@ -412,22 +446,7 @@ fn run() -> u8 {
         .map(|v| v == "debug" || v == "info")
         .unwrap_or(false);
 
-    // Collect config files to read
-    let config_files = if !cli.files.is_empty() {
-        cli.files.clone()
-    } else {
-        discover_config_files()
-    };
-
-    if verbose {
-        eprintln!(
-            "systemd-sysctl: Found {} configuration file(s).",
-            config_files.len()
-        );
-    }
-
-    // Parse all files and collect entries. Later entries for the same key
-    // override earlier ones (last writer wins), matching systemd behavior.
+    // Parse all sources and collect entries.
     //
     // Settings are applied in the order they are read (config files in sorted
     // order, then line order within each file) — NOT sorted by key. Some
@@ -437,28 +456,58 @@ fn run() -> u8 {
     let mut order: Vec<String> = Vec::new();
     let mut settings: HashMap<String, SysctlEntry> = HashMap::new();
 
-    for path in &config_files {
-        match parse_config_file(path) {
-            Ok(entries) => {
-                if verbose {
-                    eprintln!(
-                        "systemd-sysctl: Read {} setting(s) from {}",
-                        entries.len(),
-                        path.display()
-                    );
-                }
-                for entry in entries {
-                    // For glob patterns, use the pattern itself as the key
-                    // (they'll be expanded at apply time). Preserve first-seen
-                    // position; update the value in place (last writer wins).
-                    if !settings.contains_key(&entry.key) {
-                        order.push(entry.key.clone());
+    if cli.inline {
+        // Positional arguments are literal `key=value` settings, parsed with
+        // the same rules as config-file lines (including the '-' ignore prefix).
+        let source = PathBuf::from("(command line)");
+        let entries: Vec<SysctlEntry> = cli
+            .files
+            .iter()
+            .enumerate()
+            .filter_map(|(i, arg)| parse_config_line(&arg.to_string_lossy(), &source, i + 1))
+            .collect();
+        merge_entries(entries, &mut order, &mut settings);
+    } else {
+        // Collect config files to read (a single `-` means standard input).
+        let config_files = if !cli.files.is_empty() {
+            cli.files.clone()
+        } else {
+            discover_config_files()
+        };
+
+        if verbose {
+            eprintln!(
+                "systemd-sysctl: Found {} configuration file(s).",
+                config_files.len()
+            );
+        }
+
+        for path in &config_files {
+            let is_stdin = path.as_os_str() == "-";
+            let label = if is_stdin {
+                "(standard input)".to_string()
+            } else {
+                path.display().to_string()
+            };
+            let parsed = if is_stdin {
+                parse_config_reader(io::stdin().lock(), Path::new("(standard input)"))
+            } else {
+                parse_config_file(path)
+            };
+            match parsed {
+                Ok(entries) => {
+                    if verbose {
+                        eprintln!(
+                            "systemd-sysctl: Read {} setting(s) from {}",
+                            entries.len(),
+                            label
+                        );
                     }
-                    settings.insert(entry.key.clone(), entry);
+                    merge_entries(entries, &mut order, &mut settings);
                 }
-            }
-            Err(e) => {
-                eprintln!("systemd-sysctl: Failed to read {}: {}", path.display(), e);
+                Err(e) => {
+                    eprintln!("systemd-sysctl: Failed to read {}: {}", label, e);
+                }
             }
         }
     }
