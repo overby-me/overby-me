@@ -185,6 +185,7 @@
         ./nix/lib/cargo/checks.nix
         ./nix/lib/skylark/checks.nix
         ./nix/lib/buck2/checks.nix
+        ./nix/lib/ninja/checks.nix
         ./nix/flake/modules/secrets.nix
         ./nix/flake/modules/users.nix
         ./nix/flake/modules/zedExtensions.nix

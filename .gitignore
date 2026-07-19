@@ -18,6 +18,8 @@ build
 !nix/lib/cargo/build/**
 !nix/lib/buck2/build
 !nix/lib/buck2/build/**
+!nix/lib/ninja/build
+!nix/lib/ninja/build/**
 dist
 target/
 deployment.zip
