@@ -31,15 +31,16 @@ pkgs.testers.nixosTest {
         pkgs.gzip
         pkgs.util-linux # for unshare, mount, etc.
         pkgs.python3 # for HTTP test server (Cat 13 network tests)
+        pkgs.nushell # test scripts are nushell
       ];
 
       # Copy test scripts into /etc/flatpak-vmtests so they're available in the VM
-      etc."flatpak-vmtests/libtest-nix.sh" = {
-        source = ./vmtests/libtest-nix.sh;
+      etc."flatpak-vmtests/libtest-nix.nu" = {
+        source = ./vmtests/libtest-nix.nu;
         mode = "0755";
       };
-      etc."flatpak-vmtests/vm-${name}.sh" = {
-        source = ./vmtests/vm-${name}.sh;
+      etc."flatpak-vmtests/vm-${name}.nu" = {
+        source = ./vmtests/vm-${name}.nu;
         mode = "0755";
       };
     };
@@ -72,9 +73,9 @@ pkgs.testers.nixosTest {
     # Prepare working directory and copy test scripts
     machine.succeed(
         "mkdir -p /tmp/flatpak-vmtest/vmtests && "
-        "cp /etc/flatpak-vmtests/libtest-nix.sh /tmp/flatpak-vmtest/vmtests/ && "
-        "cp /etc/flatpak-vmtests/vm-${name}.sh /tmp/flatpak-vmtest/vmtests/ && "
-        "chmod +x /tmp/flatpak-vmtest/vmtests/*.sh && "
+        "cp /etc/flatpak-vmtests/libtest-nix.nu /tmp/flatpak-vmtest/vmtests/ && "
+        "cp /etc/flatpak-vmtests/vm-${name}.nu /tmp/flatpak-vmtest/vmtests/ && "
+        "chmod +x /tmp/flatpak-vmtest/vmtests/*.nu && "
         "chown -R testuser:users /tmp/flatpak-vmtest && "
         "mkdir -p /home/testuser/.local/share/flatpak && "
         "chown -R testuser:users /home/testuser/.local"
@@ -87,7 +88,7 @@ pkgs.testers.nixosTest {
         "export WORK=/tmp/flatpak-vmtest; "
         "export HOME=/home/testuser; "
         "cd /tmp/flatpak-vmtest/vmtests && "
-        "bash -x ./vm-${name}.sh 2>&1"
+        "nu ./vm-${name}.nu 2>&1"
         "'",
         timeout=${toString testTimeout}
     )

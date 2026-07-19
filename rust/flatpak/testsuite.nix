@@ -10,7 +10,7 @@
   name,
 }:
 pkgs.runCommand "rust-flatpak-test-${name}" {
-  nativeBuildInputs = [pkgs.rust-flatpak-dev pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.diffutils pkgs.bash];
+  nativeBuildInputs = [pkgs.rust-flatpak-dev pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.diffutils pkgs.bash pkgs.nushell];
 } ''
   export WORK="$(mktemp -d)"
   export HOME="$WORK/home"
@@ -19,7 +19,7 @@ pkgs.runCommand "rust-flatpak-test-${name}" {
 
   echo "Running flatpak test: ${name}"
 
-  bash ${./tests/${name}.sh}
+  nu ${./tests/${name}.nu}
 
   touch $out
 ''
