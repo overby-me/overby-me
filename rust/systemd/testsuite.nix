@@ -388,6 +388,7 @@ in
                  ${config.systemd.package}/example/systemd/system/systemd-journald@.service \
                  ${config.systemd.package}/example/systemd/system/systemd-journald@.socket \
                  ${config.systemd.package}/example/systemd/system/systemd-journald-varlink@.socket \
+                 ${config.systemd.package}/example/systemd/system/systemd-sysusers.service \
                  ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.service \
                  ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.socket \
                  ${config.systemd.package}/lib/systemd/system/systemd-bsod.service; do
