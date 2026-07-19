@@ -382,7 +382,7 @@ def lto-bin-args [profile: record] {
 }
 
 # Compile the lib target; returns the artifact path recorded for dependents.
-def compile-lib [plan: record, rustc: string, base_env: record, common_args: list, extra_args: list, bs: any, crate_hash: string, out: string] {
+def compile-lib [plan: record, rustc: string, base_env: record, common_args: list, extra_args: list, bs: any, crate_hash: string, out: string, metadata_only: bool] {
   let lib = $plan.lib
   let types = ($lib.crateTypes | where {|t| $t in ["lib", "rlib", "proc-macro"]})
   let crate_types = (if ($types | is-empty) { ["lib"] } else { $types })
@@ -402,6 +402,7 @@ def compile-lib [plan: record, rustc: string, base_env: record, common_args: lis
       "-C", $"extra-filename=-($crate_hash)",
       "--out-dir", ($out | path join "lib"),
     ]
+    | append (if $metadata_only { ["--emit=metadata"] } else { [] })
     | append $proc_macro_extern
     | append $common_args
     | append $extra_args
@@ -409,9 +410,12 @@ def compile-lib [plan: record, rustc: string, base_env: record, common_args: lis
   )
   with-env ($base_env | merge {CARGO_CRATE_NAME: $lib.name}) { ^$rustc ...$args }
   let produced = (ls ($out | path join "lib") | get name | sort)
+  let rmetas = ($produced | where {|f| $f | str ends-with ".rmeta"})
   let rlibs = ($produced | where {|f| $f | str ends-with ".rlib"})
   let dylibs = ($produced | where {|f| ($f | str ends-with ".so") or ($f | str ends-with ".dylib")})
-  let artifact = ($rlibs | append $dylibs | first)
+  let artifact = (
+    if $metadata_only { $rmetas | first } else { $rlibs | append $dylibs | first }
+  )
   $artifact | save -f ($out | path join "nix-support/extern")
   $lib.name | save -f ($out | path join "nix-support/libname")
   $artifact
@@ -420,8 +424,16 @@ def compile-lib [plan: record, rustc: string, base_env: record, common_args: lis
 def compile-bins [cfg: record, plan: record, rustc: string, base_env: record, common_args: list, extra_args: list, bs: any, lib_artifact: any, out: string] {
   let bins = ($cfg.bins | default ($plan | get -o bins) | default [])
   mkdir ($out | path join "bin")
+  let link_dep_outs = ($cfg | get -o linkDepOuts | default $cfg.depOuts)
   let bin_common = (
-    $common_args
+    (profile-args $cfg.profile false)
+    | append ($cfg | get -o linkArgs | default [])
+    | append ($cfg | get -o rustcFlags | default [])
+    | append (if $cfg.capLints { ["--cap-lints", "allow"] } else { [] })
+    | append (feature-cfg-args $cfg.features)
+    | append (if $bs == null { [] } else { $bs.cfgs | each {|c| ["--cfg", $c]} | flatten })
+    | append (extern-args ($cfg | get -o linkExterns | default $cfg.externs))
+    | append (dep-dir-args $link_dep_outs)
     | append $extra_args
     | append (
       if $lib_artifact != null {
@@ -431,7 +443,7 @@ def compile-bins [cfg: record, plan: record, rustc: string, base_env: record, co
       }
     )
     | append (native-link-args $bs)
-    | append (collect-transitive-native $cfg.depOuts)
+    | append (collect-transitive-native $link_dep_outs)
   )
   for b in $bins {
     let crate_name = (snake $b.name)
@@ -486,6 +498,45 @@ def main [config_path: string] {
   }
   let rustc = $rustc_row.path
   let plan = (if $cfg.plan == null { plan-from-manifest "." } else { $cfg.plan })
+
+  # P7 pipelining. Eligibility is decided here, in the sandbox, because
+  # evaluation cannot know a registry crate's targets. The rmeta
+  # derivation of an ineligible crate falls back to a full build; the
+  # full derivation then just copies its artifacts.
+  let want_meta = ($cfg | get -o emitMetadataOnly | default false)
+  let eligible = (
+    ($plan | get -o lib) != null
+    and (not ($plan.lib | get -o procMacro | default false))
+    and ($plan | get -o build) == null
+  )
+  let fallback = ($cfg | get -o fallbackFrom)
+  if (not $want_meta) and $fallback != null {
+    let mode_file = ($fallback | path join "nix-support/pipeline-mode")
+    if ($mode_file | path exists) and (open --raw $mode_file | str trim) == "full" {
+      # The rmeta derivation already did the full build.
+      mkdir $out
+      cp -r ($fallback | path join "lib") ($out | path join "lib")
+      cp -r ($fallback | path join "nix-support") ($out | path join "nix-support")
+      if (($fallback | path join "out") | path exists) {
+        cp -r ($fallback | path join "out") ($out | path join "out")
+      }
+      # Store copies arrive read-only; the marker rewrites below need +w.
+      ^chmod -R u+w $out
+      # Rewrite the extern marker to this derivation's copy.
+      let old_extern = (open --raw ($out | path join "nix-support/extern") | str trim)
+      ($old_extern | str replace $fallback $out) | save -f ($out | path join "nix-support/extern")
+      let links = ($out | path join "nix-support/cargo-links")
+      if ($links | path exists) {
+        (open --raw $links | str replace -a $fallback $out) | save -f $links
+      }
+      let rl = ($out | path join "nix-support/rustc-link")
+      if ($rl | path exists) {
+        (open --raw $rl | str replace -a $fallback $out) | save -f $rl
+      }
+      return
+    }
+  }
+  let metadata_only = ($want_meta and $eligible)
   mut base_env = (pkg-env $plan $cfg.features)
 
   mkdir ($out | path join "nix-support")
@@ -518,11 +569,17 @@ def main [config_path: string] {
 
   let lib_artifact = (
     if ($plan | get -o lib) != null {
-      compile-lib $plan $rustc $base_env $common_args (lto-lib-args $cfg.profile $is_proc_macro) $bs $cfg.crateHash $out
+      # The metadata pass must be flag-identical to the full pass (same
+      # SVH), differing only in --emit.
+      compile-lib $plan $rustc $base_env $common_args (lto-lib-args $cfg.profile $is_proc_macro) $bs $cfg.crateHash $out $metadata_only
     } else {
       null
     }
   )
+  if $want_meta {
+    (if $metadata_only { "metadata" } else { "full" })
+    | save -f ($out | path join "nix-support/pipeline-mode")
+  }
 
   if $cfg.buildBins {
     compile-bins $cfg $plan $rustc $base_env $common_args (lto-bin-args $cfg.profile) $bs $lib_artifact $out

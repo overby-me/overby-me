@@ -33,6 +33,13 @@ in
     # Subset of [[bin]] targets to build (names). null builds all.
     bins ? null,
     release ? true,
+    # P7 (experimental): rmeta pipelining. Dependents compile against
+    # dependency crate metadata so codegen leaves the critical path; bins
+    # still link real rlibs. Requires a nightly toolchain with
+    # -Zalways-encode-mir in rustcFlags: stable's standalone
+    # --emit=metadata produces check-grade rmeta without the optimized
+    # MIR dependents need for codegen.
+    pipeline ? false,
     # Per-crate derivation attribute merges, keyed by crate name:
     # { openssl-sys = { buildInputs = [ openssl ]; nativeBuildInputs = [ pkg-config ]; }; }
     crateOverrides ? {},
@@ -179,6 +186,65 @@ in
 
     drvs = mapAttrs mkCrate nodes;
 
+    # Metadata-only derivations for pipelining. Members are excluded
+    # (they are roots and build bins); everything else gets one, and the
+    # sandbox decides eligibility (falling back to a full build for
+    # proc-macros and build-script crates).
+    rmetaDrvs =
+      mapAttrs (
+        id: node:
+          if !pipeline || node.isWorkspaceMember
+          then null
+          else mkRmeta id node
+      )
+      nodes;
+
+    # The derivation a lib compile should take its extern for `id` from.
+    metaDrvOf = id:
+      if rmetaDrvs.${id} != null
+      then rmetaDrvs.${id}
+      else drvs.${id};
+
+    mkRmeta = id: node: let
+      dedupeByName = edges:
+        builtins.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
+    in
+      buildCrate {
+        crateName = "${node.pkg.name}-rmeta";
+        inherit (node.pkg) version;
+        src =
+          if node.pkg.sourceInfo.type != "registry"
+          then filterSrc (cargoLib.manifest.joinPath (node.meta.srcBase or src) node.meta.relDir)
+          else fetchCrate node.pkg;
+        plan =
+          if node.pkg.sourceInfo.type != "registry"
+          then planFor node false
+          else null;
+        inherit (node) features;
+        emitMetadataOnly = true;
+        externs = map (e: {
+          inherit (e) name;
+          renamed = e.name != e.package;
+          drv = metaDrvOf e.targetId;
+        }) (dedupeByName (normalEdges node));
+        buildExterns = map (e: {
+          inherit (e) name;
+          renamed = e.name != e.package;
+          drv = drvs.${e.targetId};
+        }) (dedupeByName (buildEdges node));
+        depDrvs = map metaDrvOf (attrNames closureSet.${id});
+        buildDepDrvs = map (i: drvs.${i}) (attrNames buildClosureSet.${id});
+        linksDepDrvs = map (e: metaDrvOf e.targetId) (normalEdges node);
+        target = platform.triple;
+        inherit rustcCfgFile;
+        profile = profiles.forPackage node.pkg.name node.isWorkspaceMember;
+        inherit linkArgs rustcFlags toolchain;
+        capLints = true;
+        buildBins = false;
+        crateHash = hashOf id node;
+        extraAttrs = crateOverrides.${node.pkg.name} or {};
+      };
+
     mkCrate = id: node: let
       isRoot = node.isWorkspaceMember && elem node.pkg.name rootNames;
       dedupeByName = edges:
@@ -199,16 +265,47 @@ in
         externs = map (e: {
           inherit (e) name;
           renamed = e.name != e.package;
-          drv = drvs.${e.targetId};
+          drv =
+            if pipeline
+            then metaDrvOf e.targetId
+            else drvs.${e.targetId};
         }) (dedupeByName (normalEdges node));
+        linkExterns =
+          if !pipeline
+          then null
+          else
+            map (e: {
+              inherit (e) name;
+              renamed = e.name != e.package;
+              drv = drvs.${e.targetId};
+            }) (dedupeByName (normalEdges node));
+        linkDepOuts =
+          if !pipeline
+          then null
+          else map (i: drvs.${i}) (attrNames closureSet.${id});
+        fallbackFrom =
+          if pipeline && !node.isWorkspaceMember
+          then rmetaDrvs.${id}
+          else null;
+        emitMetadataOnly = false;
         buildExterns = map (e: {
           inherit (e) name;
           renamed = e.name != e.package;
           drv = drvs.${e.targetId};
         }) (dedupeByName (buildEdges node));
-        depDrvs = map (i: drvs.${i}) (attrNames closureSet.${id});
+        depDrvs = map (
+          i:
+            if pipeline
+            then metaDrvOf i
+            else drvs.${i}
+        ) (attrNames closureSet.${id});
         buildDepDrvs = map (i: drvs.${i}) (attrNames buildClosureSet.${id});
-        linksDepDrvs = map (e: drvs.${e.targetId}) (normalEdges node);
+        linksDepDrvs = map (
+          e:
+            if pipeline
+            then metaDrvOf e.targetId
+            else drvs.${e.targetId}
+        ) (normalEdges node);
         target = platform.triple;
         inherit rustcCfgFile;
         profile = profiles.forPackage node.pkg.name node.isWorkspaceMember;

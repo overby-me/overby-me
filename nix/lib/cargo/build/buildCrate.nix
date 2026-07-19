@@ -39,6 +39,16 @@
   # Toolchain override (a package providing bin/rustc); defaults to the
   # rustc this library was imported with.
   toolchain ? null,
+  # P7 pipelining: emit only crate metadata (.rmeta) when the crate is
+  # eligible (lib target, no build script, not a proc-macro); ineligible
+  # crates fall back to a full build inside this derivation.
+  emitMetadataOnly ? false,
+  # In full mode: the crate's rmeta derivation. When that derivation fell
+  # back to a full build, artifacts are copied instead of recompiling.
+  fallbackFrom ? null,
+  # Bin links need real rlibs even when lib compiles use rmeta.
+  linkExterns ? null,
+  linkDepOuts ? null,
   # crateOverrides merge (buildInputs, env, patches, ...).
   extraAttrs ? {},
 }: let
@@ -67,7 +77,21 @@
       linksDeps = map (d: "${d}") linksDepDrvs;
     }
     // lib.optionalAttrs (linkArgs != []) {inherit linkArgs;}
-    // lib.optionalAttrs (rustcFlags != []) {inherit rustcFlags;}));
+    // lib.optionalAttrs (rustcFlags != []) {inherit rustcFlags;}
+    // lib.optionalAttrs emitMetadataOnly {inherit emitMetadataOnly;}
+    // lib.optionalAttrs (fallbackFrom != null) {fallbackFrom = "${fallbackFrom}";}
+    // lib.optionalAttrs (linkExterns != null) {
+      linkExterns =
+        map (e: {
+          inherit (e) name;
+          renamed = e.renamed or false;
+          out = "${e.drv}";
+        })
+        linkExterns;
+    }
+    // lib.optionalAttrs (linkDepOuts != null) {
+      linkDepOuts = map (d: "${d}") linkDepOuts;
+    }));
 
   base = {
     pname = crateName;
