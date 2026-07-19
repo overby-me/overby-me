@@ -1547,7 +1547,14 @@ fn allocate_space(
             let size = (req.min_bytes + share)
                 .min(req.max_bytes)
                 .max(req.min_bytes);
-            let aligned_size = align_up(size, sector_size);
+            // Round DOWN to the sector size. The weight shares already sum to
+            // exactly the free space, so rounding each partition UP would push
+            // the total past the available region and leave the last partition
+            // with nowhere to go ("no free region of N available"). Rounding
+            // down keeps the sum within the region (min is sector-aligned, so a
+            // partition never drops below its minimum) at the cost of a tiny
+            // unused tail.
+            let aligned_size = align_down(size, sector_size);
             m.allocated_size = aligned_size;
 
             // Assign UUID
