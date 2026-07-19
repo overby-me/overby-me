@@ -269,10 +269,16 @@ packages.my-tool = { lib, ... }:
       dependencies.
 - [ ] M8: resolver v2 (host/target split); migrate first real package in-repo.
 
-Later (not scheduled): rmeta pipelining, `[patch]`, tests/benches
-targets (a store-backed fake sparse registry, pnpm-style, is the right
-tool and doubles as the dyn-drvs planner later), cross-compilation,
-cachix population job, scheduled oracle sweeps against crates.io top-N.
+Done since: `[patch]` source overrides (path patches discovered through the
+external-path walk; git patches resolve via the locked git source), and
+`runTests` — per-member unit + `tests/*.rs` integration test compilation and
+execution in the sandbox, on a separate dev-inclusive resolution so the
+package's own derivations are unchanged.
+
+Later (not scheduled): rmeta pipelining, bench targets and doctests (a
+store-backed fake sparse registry, pnpm-style, is the right tool and doubles
+as the dyn-drvs planner later), cachix population job, scheduled oracle
+sweeps against crates.io top-N.
 (Multi-member workspaces and cross-project path deps landed with M7;
 git deps, profile fidelity, and exclude globs landed on the landmines
 branch.)

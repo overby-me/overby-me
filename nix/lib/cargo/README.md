@@ -106,6 +106,7 @@ nix shell nixpkgs#cargo -c nu nix/lib/cargo/tools/diff-cargo.nu sweep rust/*/
 | `crossTarget` | `null` | Cross-compile to a platform key (e.g. `"aarch64-linux"`); build scripts and proc-macros stay host, needs a toolchain with the target std |
 | `crossCC` | `null` | Cross C compiler for linking (e.g. `pkgsCross.aarch64-multiplatform.stdenv.cc`) |
 | `pipeline` | `false` | Experimental rmeta pipelining; blocked on upstream rustc (see PLAN) |
+| `runTests` | `false` | Compile and run each root member's test targets (unit + `tests/*.rs`) with dev-deps; exposed as `passthru.tests.<member>` |
 | `crateOverrides` | `{}` | Per-crate derivation attr merges, e.g. `{liblzma-sys = {nativeBuildInputs = [pkg-config]; buildInputs = [xz];};}` |
 | `rootAttrs` | `{}` | Extra derivation attrs for the root output (`postInstall`, `setupHook`, ...) |
 | `meta` | `{}` | Nixpkgs meta for the root output |
@@ -127,12 +128,21 @@ like any git dependency; a patch pointing at a local path (within `src`) is
 discovered and built from that directory. Both are picked up automatically
 from the manifest, no parameter needed.
 
+## Tests
+
+`runTests = true` compiles and runs each root member's test targets in the
+sandbox: unit tests (the lib and every bin, compiled with `--test`) and
+integration tests (`tests/*.rs`, linked against the crate's lib). Resolution
+for the test graph includes dev-dependencies and stays separate from the
+package's own build, so enabling it never changes the package derivations. A
+nonzero test exit fails the build. Results are per member under
+`passthru.tests.<crate-name>` (e.g. `nix build .#my-tool.tests.my-tool`).
+
 ## Not supported (yet)
 
-Running test/bench targets (covered by per-project sandbox checks until a
-store-backed registry lands; see PLAN.md), rmeta pipelining for cold-build
-speed. `rust/perl` is broken for reasons predating this library (its build.rs
-references an absolute dev-machine path).
+Running bench targets, rmeta pipelining for cold-build speed. `rust/perl` is
+broken for reasons predating this library (its build.rs references an
+absolute dev-machine path).
 
 ## Files
 

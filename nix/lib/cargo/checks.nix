@@ -26,6 +26,15 @@
         grep -q "wclip 0.1.0" $out
       '';
 
+    # End-to-end: compile and run wclip's unit tests through runTests.
+    cargo-test-wclip = pkgs:
+      (pkgs.lib.buildCargoProject {
+        src = ../../../rust/wclip;
+        index = ./index;
+        runTests = true;
+      })
+      .tests."rust-wclip";
+
     # End-to-end: xz with native liblzma linking through crateOverrides and
     # dev-deps excluded (criterion must not be built).
     cargo-build-xz = pkgs: let

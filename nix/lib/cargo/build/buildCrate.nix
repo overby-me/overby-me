@@ -53,6 +53,10 @@
   # Bin links need real rlibs even when lib compiles use rmeta.
   linkExterns ? null,
   linkDepOuts ? null,
+  # Test mode: after the normal lib/build-script compile, compile the
+  # crate's test targets (lib/bin unit tests and tests/*.rs integration
+  # tests) with --test and run them; a nonzero exit fails the build.
+  testMode ? false,
   # crateOverrides merge (buildInputs, env, patches, ...).
   extraAttrs ? {},
 }: let
@@ -83,6 +87,7 @@
     // lib.optionalAttrs (linkArgs != []) {inherit linkArgs;}
     // lib.optionalAttrs (rustcFlags != []) {inherit rustcFlags;}
     // lib.optionalAttrs emitMetadataOnly {inherit emitMetadataOnly;}
+    // lib.optionalAttrs testMode {inherit testMode;}
     // lib.optionalAttrs (crossTarget != null) {inherit crossTarget;}
     // lib.optionalAttrs (hostTriple != null) {inherit hostTriple;}
     // lib.optionalAttrs (fallbackFrom != null) {fallbackFrom = "${fallbackFrom}";}

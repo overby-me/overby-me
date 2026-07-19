@@ -64,11 +64,15 @@ in
     # Toolchain override (e.g. rust-bin.nightly.latest.default with the
     # rustc-codegen-cranelift-preview extension).
     toolchain ? null,
+    # Compile and run each root member's test targets (unit + tests/*.rs
+    # integration tests, with dev-dependencies). Exposed as passthru.tests.<member>;
+    # does not change the package's own derivations.
+    runTests ? false,
     # Extra derivation attrs for the root crate (postInstall, env, ...).
     rootAttrs ? {},
     meta ? {},
   }: let
-    inherit (builtins) attrNames concatStringsSep elem filter foldl' hashString head length mapAttrs readFile substring;
+    inherit (builtins) attrNames concatStringsSep elem filter foldl' hashString head length listToAttrs mapAttrs readFile substring;
 
     hostPlatformDesc = cargoLib.cfg.platformFromSystem stdenv.hostPlatform.system;
     platform =
@@ -442,11 +446,132 @@ in
                 {
                   crates = drvs;
                   inherit nodes;
+                  tests = testRunners;
                 }
                 // (crateOverrides.${node.pkg.name}.passthru or {});
             }
             // rootAttrs);
       };
+
+    # Test graph (only when runTests): a parallel, host-only, dev-inclusive
+    # resolution and drv set, kept separate from the main graph so enabling
+    # tests never alters the package's own derivations.
+    resolvedTests =
+      if !runTests
+      then null
+      else
+        cargoLib.resolve.resolve {
+          inherit lock workspace;
+          platform = hostPlatformDesc;
+          hostPlatform = hostPlatformDesc;
+          indexDir = effectiveIndex;
+          roots = rootNames;
+          rootFeatures = features;
+          inherit noDefaultFeatures;
+          includeDev = true;
+        };
+
+    testRunners =
+      if resolvedTests == null
+      then {}
+      else let
+        tnodes = resolvedTests.nodes;
+        dedupeByName = edges: builtins.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
+        tnormal = node: filter (e: e.kind == "normal") node.edges;
+        tbuild = node: filter (e: e.kind == "build") node.edges;
+        # Test targets link normal + dev deps.
+        tcompile = node: filter (e: e.kind == "normal" || e.kind == "dev") node.edges;
+        tClosure =
+          mapAttrs (
+            _id: node:
+              foldl' (acc: e: acc // {${e.targetId} = true;} // tClosure.${e.targetId}) {} (tnormal node)
+          )
+          tnodes;
+        tBuildClosure =
+          mapAttrs (
+            _id: node:
+              foldl' (acc: e: acc // {${e.targetId} = true;} // tClosure.${e.targetId}) {} (tbuild node)
+          )
+          tnodes;
+        tdrvs =
+          mapAttrs (
+            id: node:
+              buildCrate {
+                crateName = node.pkg.name;
+                inherit (node.pkg) version;
+                src =
+                  if node.pkg.sourceInfo.type != "registry"
+                  then filterSrc (cargoLib.manifest.joinPath (node.meta.srcBase or src) node.meta.relDir)
+                  else fetchCrate node.pkg;
+                plan =
+                  if node.pkg.sourceInfo.type != "registry"
+                  then planFor node false
+                  else null;
+                inherit (node) features;
+                externs = map (e: {
+                  inherit (e) name;
+                  renamed = e.name != e.package;
+                  drv = tdrvs.${e.targetId};
+                }) (dedupeByName (tnormal node));
+                buildExterns = map (e: {
+                  inherit (e) name;
+                  renamed = e.name != e.package;
+                  drv = tdrvs.${e.targetId};
+                }) (dedupeByName (tbuild node));
+                depDrvs = map (i: tdrvs.${i}) (attrNames tClosure.${id});
+                buildDepDrvs = map (i: tdrvs.${i}) (attrNames tBuildClosure.${id});
+                linksDepDrvs = map (e: tdrvs.${e.targetId}) (tnormal node);
+                target = hostPlatformDesc.triple;
+                inherit rustcCfgFile;
+                profile = profiles.forPackage node.pkg.name node.isWorkspaceMember;
+                inherit rustcFlags toolchain;
+                capLints = !node.isWorkspaceMember;
+                buildBins = false;
+                crateHash = hashOf id node;
+                extraAttrs = crateOverrides.${node.pkg.name} or {};
+              }
+          )
+          tnodes;
+        mkRunner = id: let
+          node = tnodes.${id};
+          runClosure =
+            foldl' (acc: e: acc // {${e.targetId} = true;} // tClosure.${e.targetId}) {} (tcompile node);
+        in
+          buildCrate {
+            crateName = "${node.pkg.name}-tests";
+            inherit (node.pkg) version;
+            src = filterSrc (cargoLib.manifest.joinPath (node.meta.srcBase or src) node.meta.relDir);
+            plan = planFor node true;
+            inherit (node) features;
+            externs = map (e: {
+              inherit (e) name;
+              renamed = e.name != e.package;
+              drv = tdrvs.${e.targetId};
+            }) (dedupeByName (tcompile node));
+            buildExterns = map (e: {
+              inherit (e) name;
+              renamed = e.name != e.package;
+              drv = tdrvs.${e.targetId};
+            }) (dedupeByName (tbuild node));
+            depDrvs = map (i: tdrvs.${i}) (attrNames runClosure);
+            buildDepDrvs = map (i: tdrvs.${i}) (attrNames tBuildClosure.${id});
+            linksDepDrvs = map (e: tdrvs.${e.targetId}) (tcompile node);
+            target = hostPlatformDesc.triple;
+            inherit rustcCfgFile;
+            profile = profiles.forPackage node.pkg.name node.isWorkspaceMember;
+            inherit rustcFlags toolchain;
+            capLints = false;
+            buildBins = false;
+            crateHash = hashOf id node;
+            testMode = true;
+            extraAttrs = crateOverrides.${node.pkg.name} or {};
+          };
+      in
+        listToAttrs (map (id: {
+            name = tnodes.${id}.pkg.name;
+            value = mkRunner id;
+          })
+          resolvedTests.rootIds);
 
     rootId = head resolved.rootIds;
   in
@@ -466,6 +591,7 @@ in
           passthru = {
             crates = drvs;
             inherit nodes;
+            tests = testRunners;
           };
           inherit meta;
         }

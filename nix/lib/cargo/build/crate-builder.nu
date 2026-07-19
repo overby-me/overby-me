@@ -497,6 +497,81 @@ def persist-build-script [plan: record, bs: any, bs_out_dir: any, out: string] {
   }
 }
 
+# Compile and run the crate's test targets. Unit tests come from the lib and
+# each bin source compiled with --test; integration tests from tests/*.rs
+# compiled with --test and linked against the crate's own lib. Each harness
+# binary is executed and a nonzero exit fails the build. cfg.externs already
+# carries normal + dev dependencies (the eval side resolves with dev deps).
+def run-tests [cfg: record, plan: record, rustc: string, base_env: record, bs: any, lib_artifact: any, out: string] {
+  let link_dep_outs = ($cfg | get -o linkDepOuts | default $cfg.depOuts)
+  let cross = ($cfg | get -o crossTarget | default "")
+  let link_common = (
+    (profile-args $cfg.profile false)
+    | append ($cfg | get -o linkArgs | default [])
+    | append ($cfg | get -o rustcFlags | default [])
+    | append (if $cfg.capLints { ["--cap-lints", "allow"] } else { [] })
+    | append (feature-cfg-args $cfg.features)
+    | append (if $bs == null { [] } else { $bs.cfgs | each {|c| ["--cfg", $c]} | flatten })
+    | append (extern-args $cfg.externs)
+    | append (dep-dir-args $link_dep_outs)
+    | append (native-link-args $bs)
+    | append (collect-transitive-native $link_dep_outs)
+    | append (if $cross != "" { ["--target", $cross] } else { [] })
+  )
+  let test_dir = ($env.PWD | path join ".test-bins")
+  mkdir $test_dir
+
+  # Unit-test targets: the lib and every bin source (own = false: the target
+  # IS the crate, no self-extern). Integration targets: tests/*.rs linked
+  # against the crate's lib (own = true).
+  # The lib target IS the crate (own = false: no self-extern). Bins in a
+  # lib+bin crate reference the crate's lib, so they link it like an
+  # integration test does (own = true; a no-op when the crate has no lib).
+  let unit_targets = (
+    (if ($plan | get -o lib) != null { [{name: $plan.lib.name, path: $plan.lib.path, own: false}] } else { [] })
+    | append (($plan | get -o bins | default []) | each {|b| {name: (snake $b.name), path: $b.path, own: true}})
+  )
+  let tests_dir = ($env.PWD | path join "tests")
+  let integration_targets = (
+    if ($tests_dir | path exists) {
+      ls $tests_dir
+      | where {|f| ($f.name | str ends-with ".rs")}
+      | get name
+      | each {|p| {name: $"it_(($p | path basename) | str replace '.rs' '')", path: $p, own: true}}
+    } else {
+      []
+    }
+  )
+  let targets = ($unit_targets | append $integration_targets)
+
+  mut ran = 0
+  for t in $targets {
+    let cname = (snake $t.name)
+    let bin = ($test_dir | path join $cname)
+    let own_lib = (
+      if $t.own and $lib_artifact != null {
+        ["--extern", $"($plan.lib.name)=($lib_artifact)"]
+      } else {
+        []
+      }
+    )
+    let args = (
+      [$t.path, "--crate-name", $cname, "--edition", $plan.edition, "--test", "-o", $bin]
+      | append $own_lib
+      | append $link_common
+    )
+    with-env ($base_env | merge {CARGO_CRATE_NAME: $cname}) { ^$rustc ...$args }
+    let res = (with-env $base_env { ^$bin } | complete)
+    print $res.stdout
+    if $res.stderr != "" { print -e $res.stderr }
+    if $res.exit_code != 0 {
+      error make {msg: $"test target ($t.name) failed \(exit ($res.exit_code)\)"}
+    }
+    $ran = $ran + 1
+  }
+  ($"ran ($ran) test target\(s\)\n") | save -f ($out | path join "test-result")
+}
+
 def main [config_path: string] {
   let cfg = (open $config_path)
   let out = $env.out
@@ -584,6 +659,14 @@ def main [config_path: string] {
       null
     }
   )
+  if ($cfg | get -o testMode | default false) {
+    if $bs != null and $bs_out_dir != null {
+      persist-build-script $plan $bs $bs_out_dir $out
+    }
+    run-tests $cfg $plan $rustc $base_env $bs $lib_artifact $out
+    return
+  }
+
   if $want_meta {
     (if $metadata_only { "metadata" } else { "full" })
     | save -f ($out | path join "nix-support/pipeline-mode")
