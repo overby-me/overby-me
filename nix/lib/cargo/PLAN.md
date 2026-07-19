@@ -374,7 +374,7 @@ lands only with a benchmark proving it helped.
 | P9 | Build-script run as its own derivation (keyed on build.rs + build-deps) | lib edits stop re-running scripts | after P7 (same graph surgery) |
 | P10 | Raw nu builder (skip stdenv phases) | ~200-400ms x 264 drvs of CPU | deferred: conflicts with stdenv-based crateOverrides; revisit |
 | P11 | Remote builders across the colmena fleet + cachix | cold builds beat monolithic cargo outright | infra config, not library code; user action |
-| P12 | Cross-compilation: dual-platform resolution (host edges vs target edges), `--target` compiles, host proc-macros/build scripts, pkgsCross cc for linking | capability, not speed | implementing minimal (pure-Rust + libc corpus first) |
+| P12 | Cross-compilation: dual-platform resolution (host edges vs target edges), `--target` compiles, host proc-macros/build scripts, pkgsCross cc for linking | capability, not speed | minimal version done: `crossTarget`/`crossCC` params; wclip cross-built to aarch64 (build script host-compiled, libc target-compiled) and RAN under qemu binfmt. Known limit: crates needed by both worlds get separate host variants; proc-macro-heavy graphs untested |
 | P13 | Within-crate incremental compilation | out of reach: rustc incr cache is stateful/nondeterministic, irreconcilable with hermetic builds; cranelift compensates | rejected |
 
 ## Decision log

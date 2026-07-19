@@ -87,7 +87,11 @@ let
   resolve = {
     lock, # lockLib.parseLock result
     indexDir,
-    platform, # cfgLib platform attrset
+    platform, # cfgLib platform attrset (the TARGET platform)
+    # Platform for build-dependencies and dev-dependencies (the machine
+    # running build scripts and tests). Defaults to the target platform
+    # (native builds).
+    hostPlatform ? platform,
     workspace, # manifestLib.loadWorkspace result (or compatible)
     roots, # list of workspace member package names
     rootFeatures ? [],
@@ -161,14 +165,21 @@ let
       mapAttrs (
         id: _pkg:
           filter (
-            d:
-              (
+            d: let
+              wantKind =
                 d.kind
                 == "normal"
                 || d.kind == "build"
-                || (d.kind == "dev" && includeDev && elem id rootIds)
-              )
-              && (d.target == null || cfgLib.matchesTarget platform d.target)
+                || (d.kind == "dev" && includeDev && elem id rootIds);
+              # Build (and dev) deps run on the host; normal deps target
+              # the target platform.
+              plat =
+                if d.kind == "normal"
+                then platform
+                else hostPlatform;
+            in
+              wantKind
+              && (d.target == null || cfgLib.matchesTarget plat d.target)
               && d.registry == null
           )
           metas.${id}.deps

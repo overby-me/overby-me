@@ -23,6 +23,10 @@
   # Direct normal deps whose links metadata feeds DEP_* env vars.
   linksDepDrvs ? [],
   target,
+  # Cross-compilation: pass --target for lib/bin compiles (build scripts
+  # and proc-macros stay host); hostTriple feeds the HOST env var.
+  crossTarget ? null,
+  hostTriple ? null,
   # Path to a file with the toolchain's `rustc --print cfg` output.
   rustcCfgFile ? null,
   profile,
@@ -79,6 +83,8 @@
     // lib.optionalAttrs (linkArgs != []) {inherit linkArgs;}
     // lib.optionalAttrs (rustcFlags != []) {inherit rustcFlags;}
     // lib.optionalAttrs emitMetadataOnly {inherit emitMetadataOnly;}
+    // lib.optionalAttrs (crossTarget != null) {inherit crossTarget;}
+    // lib.optionalAttrs (hostTriple != null) {inherit hostTriple;}
     // lib.optionalAttrs (fallbackFrom != null) {fallbackFrom = "${fallbackFrom}";}
     // lib.optionalAttrs (linkExterns != null) {
       linkExterns =

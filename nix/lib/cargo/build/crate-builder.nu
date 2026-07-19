@@ -277,7 +277,7 @@ def run-build-script [cfg: record, plan: record, rustc: string, base_env: record
     | merge {
       OUT_DIR: $out_dir,
       TARGET: $cfg.target,
-      HOST: $cfg.target,
+      HOST: ($cfg | get -o hostTriple | default $cfg.target),
       NUM_JOBS: (sys cpu | length | into string),
       OPT_LEVEL: $cfg.profile.optLevel,
       PROFILE: (if $cfg.profile.debugInfo == "0" { "release" } else { "debug" }),
@@ -382,7 +382,7 @@ def lto-bin-args [profile: record] {
 }
 
 # Compile the lib target; returns the artifact path recorded for dependents.
-def compile-lib [plan: record, rustc: string, base_env: record, common_args: list, extra_args: list, bs: any, crate_hash: string, out: string, metadata_only: bool] {
+def compile-lib [plan: record, rustc: string, base_env: record, common_args: list, extra_args: list, bs: any, crate_hash: string, out: string, metadata_only: bool, cross: string] {
   let lib = $plan.lib
   let types = ($lib.crateTypes | where {|t| $t in ["lib", "rlib", "proc-macro"]})
   let crate_types = (if ($types | is-empty) { ["lib"] } else { $types })
@@ -402,6 +402,12 @@ def compile-lib [plan: record, rustc: string, base_env: record, common_args: lis
       "-C", $"extra-filename=-($crate_hash)",
       "--out-dir", ($out | path join "lib"),
     ]
+    | append (
+      # Cross-compilation: proc-macros must stay host binaries.
+      if $cross != "" and (not ($lib | get -o procMacro | default false)) {
+        ["--target", $cross]
+      } else { [] }
+    )
     | append (if $metadata_only { ["--emit=metadata"] } else { [] })
     | append $proc_macro_extern
     | append $common_args
@@ -445,6 +451,7 @@ def compile-bins [cfg: record, plan: record, rustc: string, base_env: record, co
     | append (native-link-args $bs)
     | append (collect-transitive-native $link_dep_outs)
   )
+  let cross = ($cfg | get -o crossTarget | default "")
   for b in $bins {
     let crate_name = (snake $b.name)
     let args = (
@@ -455,6 +462,7 @@ def compile-bins [cfg: record, plan: record, rustc: string, base_env: record, co
         "--edition", $plan.edition,
         "-o", ($out | path join "bin" $b.name),
       ]
+      | append (if $cross != "" { ["--target", $cross] } else { [] })
       | append $bin_common
     )
     with-env ($base_env | merge {CARGO_CRATE_NAME: $crate_name}) { ^$rustc ...$args }
@@ -571,7 +579,7 @@ def main [config_path: string] {
     if ($plan | get -o lib) != null {
       # The metadata pass must be flag-identical to the full pass (same
       # SVH), differing only in --emit.
-      compile-lib $plan $rustc $base_env $common_args (lto-lib-args $cfg.profile $is_proc_macro) $bs $cfg.crateHash $out $metadata_only
+      compile-lib $plan $rustc $base_env $common_args (lto-lib-args $cfg.profile $is_proc_macro) $bs $cfg.crateHash $out $metadata_only ($cfg | get -o crossTarget | default "")
     } else {
       null
     }

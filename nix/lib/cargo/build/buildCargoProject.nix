@@ -33,6 +33,14 @@ in
     # Subset of [[bin]] targets to build (names). null builds all.
     bins ? null,
     release ? true,
+    # Cross-compilation (minimal): a cfg platform key like
+    # "aarch64-linux". Normal deps resolve and compile for the target;
+    # build scripts, their dependency closures, and proc-macros stay on
+    # the host. Requires a toolchain carrying the target's std and a
+    # crossCC for linking.
+    crossTarget ? null,
+    # Cross C compiler (e.g. pkgsCross.aarch64-multiplatform.stdenv.cc).
+    crossCC ? null,
     # P7 (experimental): rmeta pipelining. Dependents compile against
     # dependency crate metadata so codegen leaves the critical path; bins
     # still link real rlibs. Requires a nightly toolchain with
@@ -58,7 +66,11 @@ in
   }: let
     inherit (builtins) attrNames concatStringsSep elem filter foldl' hashString head length mapAttrs readFile substring;
 
-    platform = cargoLib.cfg.platformFromSystem stdenv.hostPlatform.system;
+    hostPlatformDesc = cargoLib.cfg.platformFromSystem stdenv.hostPlatform.system;
+    platform =
+      if crossTarget != null
+      then cargoLib.cfg.platformFromSystem crossTarget
+      else hostPlatformDesc;
     workspace = cargoLib.manifest.loadWorkspace {inherit src manifestDir;};
     lock = cargoLib.lock.parseLock (readFile (
       if lockFile != null
@@ -92,11 +104,16 @@ in
           )
         ];
       } ''
-        rustc --print cfg > $out
+        rustc --print cfg ${
+          if crossTarget != null
+          then "--target ${platform.triple}"
+          else ""
+        } > $out
       '';
 
     resolved = cargoLib.resolve.resolve {
       inherit lock platform workspace;
+      hostPlatform = hostPlatformDesc;
       indexDir = index;
       roots = rootNames;
       rootFeatures = features;
@@ -118,9 +135,16 @@ in
           ln -s ${lib.getExe linker} $out/bin/ld
         '';
     linkArgs =
-      if linker == null
-      then []
-      else ["-C" "link-arg=-B${linkerDir}/bin"];
+      (
+        if linker == null
+        then []
+        else ["-C" "link-arg=-B${linkerDir}/bin"]
+      )
+      ++ (
+        if crossCC != null
+        then ["-C" "linker=${crossCC}/bin/${crossCC.targetPrefix}cc"]
+        else []
+      );
     normalEdges = node: filter (e: e.kind == "normal") node.edges;
     buildEdges = node: filter (e: e.kind == "build") node.edges;
 
@@ -186,6 +210,53 @@ in
 
     drvs = mapAttrs mkCrate nodes;
 
+    # Host-platform variants for the build-dependency world (build
+    # scripts and everything they link run on the compiling machine).
+    # Native builds alias the main map so nothing changes.
+    hostDrvs =
+      if crossTarget == null
+      then drvs
+      else mapAttrs mkHostCrate nodes;
+
+    mkHostCrate = id: node: let
+      dedupeByName = edges:
+        builtins.attrValues (foldl' (acc: e: acc // {${e.name} = e;}) {} edges);
+    in
+      buildCrate {
+        crateName = "${node.pkg.name}-host";
+        inherit (node.pkg) version;
+        src =
+          if node.pkg.sourceInfo.type != "registry"
+          then filterSrc (cargoLib.manifest.joinPath (node.meta.srcBase or src) node.meta.relDir)
+          else fetchCrate node.pkg;
+        plan =
+          if node.pkg.sourceInfo.type != "registry"
+          then planFor node false
+          else null;
+        inherit (node) features;
+        externs = map (e: {
+          inherit (e) name;
+          renamed = e.name != e.package;
+          drv = hostDrvs.${e.targetId};
+        }) (dedupeByName (normalEdges node));
+        buildExterns = map (e: {
+          inherit (e) name;
+          renamed = e.name != e.package;
+          drv = hostDrvs.${e.targetId};
+        }) (dedupeByName (buildEdges node));
+        depDrvs = map (i: hostDrvs.${i}) (attrNames closureSet.${id});
+        buildDepDrvs = map (i: hostDrvs.${i}) (attrNames buildClosureSet.${id});
+        linksDepDrvs = map (e: hostDrvs.${e.targetId}) (normalEdges node);
+        target = hostPlatformDesc.triple;
+        inherit rustcCfgFile;
+        profile = profiles.forPackage node.pkg.name node.isWorkspaceMember;
+        inherit rustcFlags toolchain;
+        capLints = true;
+        buildBins = false;
+        crateHash = hashOf id node;
+        extraAttrs = crateOverrides.${node.pkg.name} or {};
+      };
+
     # Metadata-only derivations for pipelining. Members are excluded
     # (they are roots and build bins); everything else gets one, and the
     # sandbox decides eligibility (falling back to a full build for
@@ -230,10 +301,10 @@ in
         buildExterns = map (e: {
           inherit (e) name;
           renamed = e.name != e.package;
-          drv = drvs.${e.targetId};
+          drv = hostDrvs.${e.targetId};
         }) (dedupeByName (buildEdges node));
         depDrvs = map metaDrvOf (attrNames closureSet.${id});
-        buildDepDrvs = map (i: drvs.${i}) (attrNames buildClosureSet.${id});
+        buildDepDrvs = map (i: hostDrvs.${i}) (attrNames buildClosureSet.${id});
         linksDepDrvs = map (e: metaDrvOf e.targetId) (normalEdges node);
         target = platform.triple;
         inherit rustcCfgFile;
@@ -291,7 +362,7 @@ in
         buildExterns = map (e: {
           inherit (e) name;
           renamed = e.name != e.package;
-          drv = drvs.${e.targetId};
+          drv = hostDrvs.${e.targetId};
         }) (dedupeByName (buildEdges node));
         depDrvs = map (
           i:
@@ -299,7 +370,7 @@ in
             then metaDrvOf i
             else drvs.${i}
         ) (attrNames closureSet.${id});
-        buildDepDrvs = map (i: drvs.${i}) (attrNames buildClosureSet.${id});
+        buildDepDrvs = map (i: hostDrvs.${i}) (attrNames buildClosureSet.${id});
         linksDepDrvs = map (
           e:
             if pipeline
@@ -307,6 +378,14 @@ in
             else drvs.${e.targetId}
         ) (normalEdges node);
         target = platform.triple;
+        crossTarget =
+          if crossTarget != null
+          then platform.triple
+          else null;
+        hostTriple =
+          if crossTarget != null
+          then hostPlatformDesc.triple
+          else null;
         inherit rustcCfgFile;
         profile = profiles.forPackage node.pkg.name node.isWorkspaceMember;
         inherit linkArgs rustcFlags toolchain;

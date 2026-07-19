@@ -75,6 +75,9 @@ nix shell nixpkgs#cargo -c nu nix/lib/cargo/tools/diff-cargo.nu sweep rust/*/
 | `linker` | `pkgs.wild` | Linker exposed to cc as `ld`; `null` for the stdenv default |
 | `toolchain` | import-time `rustc` | Toolchain override (e.g. `rust-bin.nightly...` with the cranelift component) |
 | `rustcFlags` | `[]` | Extra flags for every rustc invocation (e.g. `["-Zcodegen-backend=cranelift"]`) |
+| `crossTarget` | `null` | Cross-compile to a platform key (e.g. `"aarch64-linux"`); build scripts and proc-macros stay host, needs a toolchain with the target std |
+| `crossCC` | `null` | Cross C compiler for linking (e.g. `pkgsCross.aarch64-multiplatform.stdenv.cc`) |
+| `pipeline` | `false` | Experimental rmeta pipelining; blocked on upstream rustc (see PLAN) |
 | `crateOverrides` | `{}` | Per-crate derivation attr merges, e.g. `{liblzma-sys = {nativeBuildInputs = [pkg-config]; buildInputs = [xz];};}` |
 | `rootAttrs` | `{}` | Extra derivation attrs for the root output (`postInstall`, `setupHook`, ...) |
 | `meta` | `{}` | Nixpkgs meta for the root output |
@@ -90,7 +93,7 @@ seconds.
 
 ## Not supported (yet)
 
-Cross-compilation, `[patch]`, running test/bench targets (covered by
+`[patch]`, running test/bench targets (covered by
 per-project sandbox checks until a store-backed registry lands; see
 PLAN.md), rmeta pipelining for cold-build speed. `rust/perl` is broken for
 reasons predating this library (its build.rs references an absolute
