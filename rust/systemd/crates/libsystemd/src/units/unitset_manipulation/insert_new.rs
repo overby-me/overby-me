@@ -12,9 +12,10 @@ fn find_new_unit_path(unit_dirs: &[PathBuf], find_name: &str) -> Result<Option<P
     for dir in unit_dirs {
         let read_dir = match fs::read_dir(dir) {
             Ok(rd) => rd,
-            Err(e) => {
-                return Err(format!("Error while opening dir {dir:?}: {e}"));
-            }
+            // A search-path entry may be absent (e.g. the system.control
+            // override dirs before the first `systemctl set-property`); skip it
+            // rather than failing the whole lookup.
+            Err(_) => continue,
         };
         for entry in read_dir {
             let entry = match entry {

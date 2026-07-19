@@ -23,6 +23,11 @@ pub use unit_parser::*;
 use log::trace;
 use std::path::PathBuf;
 
+/// Maximum number of `LogExtraFields=` entries kept for a unit, matching
+/// systemd's `LOG_EXTRA_FIELDS_MAX` (`ENTRY_FIELD_COUNT_MAX` 1024 - 10). Excess
+/// fields in a unit file are ignored; over the bus the assignment is rejected.
+pub const LOG_EXTRA_FIELDS_MAX: usize = 1014;
+
 pub struct ParsedCommonConfig {
     pub unit: ParsedUnitSection,
     pub install: ParsedInstallSection,

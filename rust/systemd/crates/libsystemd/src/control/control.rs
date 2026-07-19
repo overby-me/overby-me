@@ -3204,6 +3204,18 @@ fn create_transient_unit(
         let _ = std::fs::create_dir_all("/run/systemd/transient");
     }
 
+    // LogExtraFields= assignments from `-p LogExtraFields=...`. Matching the
+    // upstream bus path, reject when the count exceeds LOG_EXTRA_FIELDS_MAX
+    // rather than silently truncating (unit-file parsing truncates instead).
+    let log_extra_fields: Vec<String> = params
+        .properties
+        .iter()
+        .filter_map(|p| p.strip_prefix("LogExtraFields=").map(|s| s.to_owned()))
+        .collect();
+    if log_extra_fields.len() > crate::units::unit_parsing::LOG_EXTRA_FIELDS_MAX {
+        return Err("Too many extra log fields.".to_string());
+    }
+
     // Build a minimal ExecConfig with the requested user/group/workdir.
     // Use the correct concrete types for ExecConfig fields.
     // Non-optional enums use their Default impl; bools use systemd defaults.
@@ -3252,7 +3264,7 @@ fn create_transient_unit(
         pass_environment: vec![],
         unset_environment: vec![],
         oom_score_adjust: None,
-        log_extra_fields: vec![],
+        log_extra_fields,
         dynamic_user: false,
         system_call_filter: vec![],
         system_call_log: vec![],

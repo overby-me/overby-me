@@ -2405,7 +2405,14 @@ pub fn parse_exec_section(
             None => Vec::new(),
         },
         log_extra_fields: match log_extra_fields {
-            Some(vec) => vec.into_iter().map(|(_, val)| val).collect(),
+            Some(vec) => {
+                // systemd caps the number of extra log fields at
+                // ENTRY_FIELD_COUNT_MAX (1024) - 10; excess fields are ignored.
+                vec.into_iter()
+                    .map(|(_, val)| val)
+                    .take(super::LOG_EXTRA_FIELDS_MAX)
+                    .collect()
+            }
             None => Vec::new(),
         },
         protect_system: match protect_system {
