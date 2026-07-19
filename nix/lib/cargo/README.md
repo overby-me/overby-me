@@ -1,10 +1,13 @@
 # nix-cargo
 
 Nix builder for Rust projects with per-crate derivations. Parses `Cargo.lock`
-and a registry index snapshot at evaluation time: no import-from-derivation,
-no generated `Cargo.nix`, no cargo inside the sandbox (rustc is invoked
-directly by a nushell driver). Compiled dependency crates are shared between
-all projects in the repo and cacheable per crate+version+features.
+and a registry index at evaluation time: no generated `Cargo.nix`, no cargo
+inside the sandbox (rustc is invoked directly by a nushell driver). The
+default index is a committed snapshot, so evaluation stays free of
+import-from-derivation; pointing `index` at a full crates.io index is an
+optional alternative (pure as a `flake = false` input, or IFD if you supply a
+derivation-built one). Compiled dependency crates are shared between all
+projects in the repo and cacheable per crate+version+features.
 
 Design, milestones, benchmarks, and the nocargo landmine audit:
 [PLAN.md](./PLAN.md). Headline numbers (rust/systemd, 100 members, 322
@@ -25,12 +28,26 @@ workspace recompile `buildRustPackage` pays; cranelift dev builds go
    inside the checkout, including workspace members). The manifest is
    parsed inside the sandbox and `build/crate-builder.nu` drives rustc and
    the cargo build-script protocol (`OUT_DIR`, `CARGO_FEATURE_*`,
-   `DEP_*_*`, `cargo:rustc-*` directives, links metadata, proc-macros).
+   `DEP_*_*`, `cargo:rustc-*` directives, links metadata, proc-macros). The
+   `rustc --print cfg` set is computed once per toolchain and shared across
+   every build-script sandbox rather than recomputed per crate.
 3. The registry metadata that is not in the lock (dep kinds, features,
-   optionality, cfg gates) comes from a committed mini-index snapshot
-   produced by `tools/snapshot-index.nu` from the sparse index.
-4. `[profile.release]`/`[profile.dev]` from the workspace root are honored:
-   `lto`, `strip`, `panic`, `codegen-units`, `debug`.
+   optionality, cfg gates) comes from an index checkout. By default that is a
+   committed mini-index snapshot produced by `tools/snapshot-index.nu` from
+   the sparse index: small, diff-friendly, no IFD. Pointing `index` at a full
+   crates.io index checkout also works (see the `index` parameter).
+4. `[profile.release]`/`[profile.dev]` from the workspace root are honored
+   (`lto`, `strip`, `panic`, `codegen-units`, `debug`, including
+   `debug = "line-tables-only"`), plus per-package overrides:
+   `[profile.<p>.package."<name>"]` targets one crate and
+   `[profile.<p>.package."*"]` applies to every dependency (workspace members
+   keep the base profile unless named explicitly).
+5. Cross-compilation is minimal but real: pass `crossTarget` (a platform key
+   like `"aarch64-linux"`) and a `crossCC`. Resolution runs dual-platform
+   (normal edges filtered by the target cfg, build/dev edges by the host cfg);
+   libraries and binaries compile with `--target` and link through the cross
+   cc, while build scripts and proc-macros compile in a parallel host closure.
+   Needs a toolchain carrying the target's std.
 
 ## Usage
 
