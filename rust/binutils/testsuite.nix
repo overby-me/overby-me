@@ -23,9 +23,11 @@ in
       pkgs.diffutils
       pkgs.gnused
       pkgs.gcc
+      pkgs.nushell
     ];
     binutilsSrc = pkgs.binutils-unwrapped.src;
-    testScript = ./tests/${tool}/${name}.sh;
+    testScript = ./tests/${tool}/${name}.nu;
+    testHelpers = ./tests/helpers.nu;
   } ''
     # Extract the upstream source
     tar xf $binutilsSrc
@@ -42,32 +44,14 @@ in
     export REF="${pkgs.binutils-unwrapped}/bin/${binName}"
     export RUST="${pkgs.rust-binutils-dev}/bin/${binName}"
 
-    # Helper: compare outputs with normalization
-    compare() {
-      local ref_out="$TMPDIR/expected"
-      local rust_out="$TMPDIR/actual"
-
-      # Normalize nix store paths
-      sed -i -E 's|/nix/store/[a-z0-9]{32}-[^/[:space:]]+/bin/[a-z+]+|TOOL|g' "$ref_out" "$rust_out"
-      sed -i -E 's|/nix/store/[a-z0-9]{32}-[^/[:space:]]+|NIXPATH|g' "$ref_out" "$rust_out"
-
-      # Strip trailing whitespace
-      sed -i 's/[[:space:]]*$//' "$ref_out" "$rust_out"
-
-      if diff --text "$rust_out" "$ref_out"; then
-        echo "PASS: $1"
-      else
-        echo "FAIL: $1"
-        echo "--- expected (GNU ${tool}) ---"
-        cat "$ref_out"
-        echo "--- actual (rust-binutils ${tool}) ---"
-        cat "$rust_out"
-        exit 1
-      fi
-    }
+    # Lay the fixture out one directory below helpers.nu, mirroring the
+    # repository layout so the fixture's `source ../helpers.nu` resolves.
+    cp $testHelpers helpers.nu
+    mkdir fixture
+    cp $testScript fixture/test.nu
 
     echo "Running test: ${tool}/${name}"
-    source $testScript
+    nu fixture/test.nu
 
     touch $out
   ''
