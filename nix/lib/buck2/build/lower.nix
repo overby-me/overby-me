@@ -203,6 +203,22 @@
     producerId = art:
       outputToAction.${art.id}
       or (throw "buck2: no action produces artifact '${art.id}'");
+    actionById = listToAttrs (map (a: {
+        name = a.id;
+        value = a;
+      })
+      actions);
+    runDepIds = a:
+      if a.kind == "run"
+      then lib.unique (map producerId (filter (x: x.kind != "source") (collectInputs (a.cmd.parts ++ a.cmd.hidden))))
+      else [];
+    # Only actions that carry downloaded prebuilt binaries need autoPatchelf.
+    # Skipping it for from-source builds (cpp/rust) keeps them fast; scanning +
+    # patching adds seconds even for a tiny tree.
+    needsPatch = id: let
+      a = actionById.${id};
+    in
+      a.kind == "download" || builtins.any needsPatch (runDepIds a);
 
     # ---- per-action derivations ----------------------------------------
     mkRun = a: let
@@ -215,23 +231,27 @@
       argv = builtins.concatStringsSep " " (map esc (argStrings a.cmd));
       strings = litStrings a.cmd.parts;
       tcPkgs = map (k: toolchainPackages.${k}) (filter (k: builtins.elem k strings) (builtins.attrNames toolchainPackages));
+      patch = needsPatch a.id;
       # Copy each producer's whole tree in; chmod +w after each so the next
       # copy can merge into the (store-read-only) directories.
       stageDeps = builtins.concatStringsSep "\n" (map (id: "cp -r --reflink=auto ${drvById.${id}}/. ./\nchmod -R u+w . 2>/dev/null || true") depIds);
       stageSrcs = builtins.concatStringsSep "\n" (map (s: "install -Dm644 ${srcStorePath s} ${esc (artPath s)}") srcs);
       mkOutDirs = builtins.concatStringsSep "\n" (map (o: ''mkdir -p "$(dirname ${esc (artPath o)})"'') outs);
+      # autoPatchelfHook makes downloaded prebuilt binaries in $out runnable on
+      # Nix by fixing their ELF interpreter. runCommand bypasses fixupPhase, so
+      # the hook's function is invoked directly. No extra buildInputs: glibc
+      # here would pollute the C++ header path, and the patched interpreter
+      # finds libc via its own default search.
+      patchCall = lib.optionalString patch ''
+        chmod -R u+w "$out" 2>/dev/null || true
+        autoPatchelf "$out" || true
+      '';
     in
-      pkgs.runCommand (sanDrv a.id) {
-        # autoPatchelfHook makes any downloaded prebuilt binaries in the output
-        # tree (e.g. the Go toolchain fetched by download_file) runnable on Nix
-        # by fixing their ELF interpreter; a no-op for from-source outputs like
-        # the cpp/rust binaries. No extra buildInputs: adding glibc here would
-        # pollute the C++ header search path, and the patched interpreter finds
-        # libc via its own default search.
-        nativeBuildInputs = [pkgs.stdenv.cc pkgs.autoPatchelfHook] ++ tcPkgs;
-        autoPatchelfIgnoreMissingDeps = true;
-        dontStrip = true;
-      } ''
+      pkgs.runCommand (sanDrv a.id) ({
+          nativeBuildInputs = [pkgs.stdenv.cc] ++ lib.optional patch pkgs.autoPatchelfHook ++ tcPkgs;
+          dontStrip = true;
+        }
+        // lib.optionalAttrs patch {autoPatchelfIgnoreMissingDeps = true;}) ''
         ${runEnvPrelude}
         ${stageDeps}
         ${stageSrcs}
@@ -240,10 +260,7 @@
         ${argv}
         mkdir -p $out
         if [ -e bo ]; then cp -r --reflink=auto bo $out/; fi
-        # runCommand bypasses fixupPhase, so invoke the hook's function
-        # directly to make any downloaded ELF binaries in $out runnable.
-        chmod -R u+w "$out" 2>/dev/null || true
-        autoPatchelf "$out" || true
+        ${patchCall}
       '';
 
     mkWrite = a: let
