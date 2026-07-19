@@ -3288,6 +3288,9 @@ pub struct ExecConfig {
     /// NetworkNamespacePath= — run the service in the specified existing
     /// network namespace. See systemd.exec(5).
     pub network_namespace_path: Option<String>,
+    /// UserNamespacePath= — run the service in the specified existing user
+    /// namespace. See systemd.exec(5).
+    pub user_namespace_path: Option<String>,
 
     // ── Security directives ──────────────────────────────────────────
     /// SecureBits= — controls the secure-bits flags of the executed process.

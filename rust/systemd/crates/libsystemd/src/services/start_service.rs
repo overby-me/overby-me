@@ -1001,6 +1001,7 @@ fn start_service_with_filedescriptors(
         mount_flags: conf.exec_config.mount_flags.clone(),
         private_ipc: conf.exec_config.private_ipc.unwrap_or(false),
         network_namespace_path: conf.exec_config.network_namespace_path.clone(),
+        user_namespace_path: conf.exec_config.user_namespace_path.clone(),
         ipc_namespace_path: conf.exec_config.ipc_namespace_path.clone(),
         timer_slack_nsec: conf
             .exec_config

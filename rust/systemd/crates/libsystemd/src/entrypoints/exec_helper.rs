@@ -493,6 +493,12 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub network_namespace_path: Option<String>,
 
+    /// UserNamespacePath= — path to an existing user namespace to join
+    /// (e.g. /proc/PID/ns/user). Joins that namespace via setns instead of
+    /// creating a fresh one with PrivateUsers=.
+    #[serde(default)]
+    pub user_namespace_path: Option<String>,
+
     /// IPCNamespacePath= — path to an existing IPC namespace to join.
     /// Mutually exclusive with PrivateIPC=.
     #[serde(default)]
@@ -2096,6 +2102,36 @@ pub fn run_exec_helper() {
                 "Failed to create IPC namespace for PrivateIPC=: {}",
                 std::io::Error::last_os_error()
             );
+        }
+    }
+
+    // ── UserNamespacePath= — join an existing user namespace ───────────
+    // Enter the caller-specified user namespace (usually /proc/PID/ns/user)
+    // via setns(2) instead of creating a fresh one with PrivateUsers=. This
+    // runs AFTER the network/IPC namespace setup above so those setns/unshare
+    // calls execute while we still hold host CAP_SYS_ADMIN (needed to
+    // setns(CLONE_NEWNET) into an existing netns owned by the target user
+    // namespace); joining the user namespace last avoids losing that
+    // privilege. setns(CLONE_NEWUSER) requires the caller to be
+    // single-threaded, which holds for this freshly-exec'd helper.
+    if let Some(ref ns_path) = config.user_namespace_path
+        && !config.privileged_prefix
+    {
+        match std::fs::File::open(ns_path) {
+            Ok(f) => {
+                use std::os::unix::io::AsRawFd;
+                let ret = unsafe { libc::setns(f.as_raw_fd(), libc::CLONE_NEWUSER) };
+                if ret != 0 {
+                    log::warn!(
+                        "Failed to join user namespace {}: {}",
+                        ns_path,
+                        std::io::Error::last_os_error()
+                    );
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to open UserNamespacePath={}: {}", ns_path, e);
+            }
         }
     }
 

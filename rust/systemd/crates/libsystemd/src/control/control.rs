@@ -3378,6 +3378,7 @@ fn create_transient_unit(
         private_pids: None,
         ipc_namespace_path: None,
         network_namespace_path: None,
+        user_namespace_path: None,
         secure_bits: vec![],
         personality: None,
         selinux_context: None,
@@ -4516,6 +4517,9 @@ fn create_transient_unit(
                 }
                 "NetworkNamespacePath" => {
                     service_conf.exec_config.network_namespace_path = Some(value.to_string());
+                }
+                "UserNamespacePath" => {
+                    service_conf.exec_config.user_namespace_path = Some(value.to_string());
                 }
                 "IPCNamespacePath" => {
                     service_conf.exec_config.ipc_namespace_path = Some(value.to_string());

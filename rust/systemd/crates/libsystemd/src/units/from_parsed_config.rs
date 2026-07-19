@@ -798,6 +798,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             private_pids: parsed.private_pids,
             ipc_namespace_path: parsed.ipc_namespace_path,
             network_namespace_path: parsed.network_namespace_path,
+            user_namespace_path: parsed.user_namespace_path,
 
             // Security directives
             secure_bits: parsed.secure_bits,

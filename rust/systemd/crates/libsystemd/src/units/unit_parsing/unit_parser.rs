@@ -1516,6 +1516,7 @@ pub fn parse_exec_section(
     let private_pids = section.remove("PRIVATEPIDS");
     let ipc_namespace_path = section.remove("IPCNAMESPACEPATH");
     let network_namespace_path = section.remove("NETWORKNAMESPACEPATH");
+    let user_namespace_path = section.remove("USERNAMESPACEPATH");
 
     // ── Security directives ──────────────────────────────────────────
     let secure_bits = section.remove("SECUREBITS");
@@ -3213,6 +3214,10 @@ pub fn parse_exec_section(
         network_namespace_path: parse_optional_single_string(
             "NetworkNamespacePath",
             network_namespace_path,
+        )?,
+        user_namespace_path: parse_optional_single_string(
+            "UserNamespacePath",
+            user_namespace_path,
         )?,
 
         // ── Security directives ──────────────────────────────────────

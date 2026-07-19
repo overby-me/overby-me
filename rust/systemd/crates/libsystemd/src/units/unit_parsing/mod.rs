@@ -3272,6 +3272,10 @@ pub struct ParsedExecSection {
     /// (usually under /proc/PID/ns/net or /run/netns/NAME).
     /// See systemd.exec(5).
     pub network_namespace_path: Option<String>,
+    /// UserNamespacePath= — run the service in the specified existing user
+    /// namespace. Takes a file path to a user namespace file (usually under
+    /// /proc/PID/ns/user). See systemd.exec(5).
+    pub user_namespace_path: Option<String>,
 
     // ── Security directives ──────────────────────────────────────────
     /// SecureBits= — controls the secure-bits flags of the executed
