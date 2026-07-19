@@ -432,6 +432,71 @@ packages.hello = { lib, ... }:
       conformance widening (Starlark spec subset), a minimal `with_prelude`-
       style example, oracle diff where `buck2` is available.
 
+## Benchmark and performance (no_prelude, 2026-07-19)
+
+Against upstream buck2 (`unstable-2026-04-15`) building the same targets with
+the same nixpkgs clang/rustc; Go downloaded by the rule for both. buck2 keeps a
+warm daemon; nix-buck2 is stateless and re-evaluates on every invocation.
+
+| Scenario | buck2 | nix-buck2 |
+|---|---|---|
+| Hot / no-op (cpp+rust) | 10 ms | 610 ms |
+| Cold (cpp+rust) | 0.88 s | ~3.3 s |
+| Incremental, edit cpp | 0.67 s | ~3.6 s |
+| Incremental, edit rust | 0.44 s | ~3.3 s |
+| Go incremental (warm toolchain) | 0.14 s | ~6.0 s |
+| Go cold (incl. ~100 MB download) | 14.1 s | ~14 s |
+
+Where nix-buck2's wall time goes (measured): per-invocation eval ~0.57 s
+(~0.27 s nixpkgs import + ~0.30 s the Starlark interpreter + analysis +
+lowering); the clang/rustc compile itself (~1.4 s, `#include <iostream>` is
+heavy, paid by buck2 too); per-action stdenv/derivation setup (~0.3-0.5 s
+each). Go's incremental floor is the cold GOCACHE: every sandboxed `go build`
+recompiles the stdlib, whereas buck2 keeps GOCACHE warm in `buck-out`.
+
+### Structural differences
+
+1. **No daemon.** nix-buck2 re-runs load+analysis+lowering on every `nix
+   build`; buck2 caches parsed and analyzed state in a persistent daemon (its
+   ~10 ms hot rebuild). This is the whole story for hot and a fixed ~0.6 s
+   floor on everything.
+2. **Per-action derivations.** Sandbox + stdenv setup per action vs in-process
+   execution against one `buck-out`.
+3. **Cold compiler caches.** GOCACHE and rustc's incremental cache are stateful
+   and nondeterministic, irreconcilable with hermetic per-derivation
+   sandboxing (the same wall the cargo library hit for rustc incrementality).
+
+nix-buck2's advantages are structural rather than latency: global
+content-addressed caching shared across projects and machines (cachix) vs
+per-project `buck-out`, hermetic pinned toolchains (buck2 uses whatever is on
+`PATH`), and Nix-native builds (the downloaded Go toolchain runs even in the
+pure sandbox / on NixOS via autoPatchelf, where a bare download would not).
+
+### Optimizations applied and measured
+
+- **Symlink-farm staging** (`cp -rs`), build directly in `$out`, and
+  autoPatchelf only in the action that materializes a download: the ~500 MB Go
+  SDK is never copied per consumer. Go incremental 8.3 s -> 6.0 s; cpp/rust
+  unchanged (no large deps to stage). A real disk/IO win, neutral on the tiny
+  from-source targets.
+- **Opt-in `ifdAnalysis`.** Analysis in a derivation keyed on build files +
+  file-name structure only, so source edits never re-interpret (verified: a
+  source edit rebuilds only the compile action, not analysis). Net slower on
+  no_prelude, the fixed eval-time cost of the content-keyed analysis source
+  plus the JSON round-trip exceeds the cheap ~0.3 s interpreter. Intended for
+  large prelude graphs where interpretation dominates; off by default.
+
+### Remaining levers (not taken)
+
+- load/analysis memoization: negligible on no_prelude, prevents re-analysis
+  blowup on real diamond-dependency graphs.
+- Warm compiler caches (GOCACHE/rustc) staged from the toolchain derivation:
+  would fix Go incremental but fights hermeticity.
+- Remote builders + cachix + ca-derivations: scale cold builds out and share
+  per-action outputs across the repo/fleet, the design's real payoff over a
+  per-project `buck-out`.
+- `//...` target discovery (only explicit labels build today).
+
 ## Decision log
 
 - 2026-07-19: Two libraries, `nix/lib/skylark` (reusable interpreter) and

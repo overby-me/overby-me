@@ -106,6 +106,20 @@ tests and advanced use.
   `nix build .#checks.x86_64-linux.buck2-build-cpp` and `...buck2-build-rust`.
   Never `nix flake check` in this repo.
 
+## Performance
+
+On the trivial `no_prelude` targets, upstream buck2 is 4-60x faster: it keeps a
+warm daemon (hot rebuild ~10 ms) while nix-buck2 re-evaluates load+analysis+
+lowering on every invocation (~0.6 s) and pays per-derivation setup plus cold
+compiler caches (Go's GOCACHE recompiles the stdlib each sandboxed build). The
+clang/rustc compile itself (~1.4 s, dominated by `#include <iostream>`) is paid
+by both. nix-buck2's advantages are structural rather than latency: global
+content-addressed caching shared across projects and machines, hermetic pinned
+toolchains, and Nix-native builds (a downloaded toolchain runs even in the pure
+sandbox via autoPatchelf). Dependency trees are staged by symlink so a large
+toolchain is never copied per consumer. Full numbers, the wall-time breakdown,
+the structural analysis, and the optimization notes are in [PLAN.md](./PLAN.md).
+
 ## Files
 
 - `default.nix` flakelight module: `buildBuck2Project` and `buck2Lib` via
