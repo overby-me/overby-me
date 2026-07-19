@@ -3354,6 +3354,18 @@ fn create_transient_unit(
     let effective_slice = params
         .slice
         .clone()
+        // Slice= may also arrive as a `--property` (e.g. systemd-run
+        // --property="Slice=system-foo-bar-baz.slice"). It must feed the
+        // cgroup path computed below, otherwise the service lands in a flat
+        // system.slice/<unit> cgroup instead of the nested slice hierarchy.
+        .or_else(|| {
+            params
+                .properties
+                .iter()
+                .rev()
+                .find_map(|p| p.strip_prefix("Slice=").map(|s| s.to_owned()))
+                .filter(|s| !s.is_empty())
+        })
         .or_else(|| Some("system.slice".to_owned()));
 
     let platform_specific = PlatformSpecificServiceFields {
