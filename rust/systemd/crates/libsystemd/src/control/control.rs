@@ -3158,40 +3158,27 @@ fn create_transient_unit(
         Some(other) => return Err(format!("Unknown service type: {other}")),
     };
 
-    // Build the main commands from the command line.  Matching upstream
-    // systemd-run, a literal `;` argument splits the command list into
-    // multiple ExecStart= entries (shell-escaped as `\;` on the invoking
-    // command line).  Used by tests like TEST-78-SIGQUEUE:
+    // Build the main command from the command line.  Matching upstream
+    // systemd-run (src/run/run.c), the entire argument list becomes a single
+    // ExecStart= entry; systemd-run never splits on a literal `;`.  A `;` in
+    // the command is an ordinary argument passed through verbatim to the
+    // executed program.  This matters for TEST-78-SIGQUEUE:
     //   `systemd-run -p Type=notify -- env … systemd-notify --exec --ready \; sleep infinity`
+    // where the `;` is systemd-notify's own `--exec` separator (src/notify/
+    // notify.c): systemd-notify sends READY=1 then execs the command after
+    // `;` (`sleep infinity`), inheriting env's blocked-signal mask.  Splitting
+    // here would strip the `env … systemd-notify` prefix and run the bare
+    // `sleep infinity`, so READY=1 is never sent and the signal mask is lost.
     let main_cmds: Vec<Commandline> = params
         .command
         .as_ref()
         .filter(|cmd_parts| !cmd_parts.is_empty())
         .map(|cmd_parts| {
-            let mut cmds = Vec::new();
-            let mut current: Vec<String> = Vec::new();
-            for part in cmd_parts.iter() {
-                if part == ";" {
-                    if !current.is_empty() {
-                        cmds.push(Commandline {
-                            cmd: current[0].clone(),
-                            args: current[1..].to_vec(),
-                            prefixes: vec![],
-                        });
-                        current = Vec::new();
-                    }
-                } else {
-                    current.push(part.clone());
-                }
-            }
-            if !current.is_empty() {
-                cmds.push(Commandline {
-                    cmd: current[0].clone(),
-                    args: current[1..].to_vec(),
-                    prefixes: vec![],
-                });
-            }
-            cmds
+            vec![Commandline {
+                cmd: cmd_parts[0].clone(),
+                args: cmd_parts[1..].to_vec(),
+                prefixes: vec![],
+            }]
         })
         .unwrap_or_default();
     let exec: Vec<Commandline> = Vec::new();
