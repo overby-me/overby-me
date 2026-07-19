@@ -1277,6 +1277,15 @@ fn cmd_mount(image: &Path, mount_path: &Path) -> Result<(), String> {
 
     // Analyze the image to verify it's valid
     let info = analyze_image(image)?;
+
+    // Partitioned image: set it up on a loop device and mount the discoverable
+    // partitions (root at the mount point, /usr, /home, ESP, … beneath it),
+    // mirroring systemd-dissect assembling an OS tree.
+    #[cfg(target_os = "linux")]
+    if !info.gpt_partitions.is_empty() {
+        return mount_partitioned_image(image, mount_path, &info);
+    }
+
     if info.table_type == PartitionTableType::None && info.gpt_partitions.is_empty() {
         eprintln!("Warning: No partition table detected. Attempting raw filesystem mount.");
     }
@@ -1316,6 +1325,86 @@ fn cmd_mount(image: &Path, mount_path: &Path) -> Result<(), String> {
     Err("Mount is only supported on Linux.".to_string())
 }
 
+/// Mount a partitioned image via a loop device. Attaches the image with
+/// partition scanning, then mounts each partition whose GPT type has a
+/// well-known mount point (root at the mount point itself, /usr, /home, ESP,
+/// … at sub-paths). Kernel partition N corresponds to GPT slot N-1.
+#[cfg(target_os = "linux")]
+fn mount_partitioned_image(
+    image: &Path,
+    mount_path: &Path,
+    info: &ImageInfo,
+) -> Result<(), String> {
+    use std::process::Command;
+    let types = known_partition_types();
+
+    let out = Command::new("losetup")
+        .args(["--find", "--show", "--partscan", "--nooverlap"])
+        .arg(image)
+        .output()
+        .map_err(|e| format!("Failed to run losetup: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "losetup failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let loopdev = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let _ = Command::new("udevadm")
+        .args(["settle", "--timeout=10"])
+        .status();
+
+    // Collect (kernel partition number, mount point) for the partitions we can
+    // place, shallowest first so parent mount points are mounted before their
+    // children (e.g. "/" before "/usr").
+    let mut targets: Vec<(usize, String)> = Vec::new();
+    for (i, p) in info.gpt_partitions.iter().enumerate() {
+        if let Some(mp) = types.get(&p.type_guid).and_then(|t| t.mount_point) {
+            targets.push((i + 1, mp.to_string()));
+        }
+    }
+    targets.sort_by_key(|(_, mp)| mp.matches('/').count());
+
+    let mut mount_err: Option<String> = None;
+    for (partnum, mp) in &targets {
+        let dev = format!("{loopdev}p{partnum}");
+        for _ in 0..30 {
+            if Path::new(&dev).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let target = if mp == "/" {
+            mount_path.to_path_buf()
+        } else {
+            mount_path.join(mp.trim_start_matches('/'))
+        };
+        if mp != "/" {
+            let _ = fs::create_dir_all(&target);
+        }
+        match Command::new("mount").arg(&dev).arg(&target).status() {
+            Ok(s) if s.success() => {}
+            Ok(s) => {
+                mount_err = Some(format!("mount {dev} at {}: {s}", target.display()));
+                break;
+            }
+            Err(e) => {
+                mount_err = Some(format!("mount {dev}: {e}"));
+                break;
+            }
+        }
+    }
+
+    if let Some(e) = mount_err {
+        let _ = Command::new("umount").arg("-R").arg(mount_path).status();
+        let _ = Command::new("losetup").args(["-d", &loopdev]).status();
+        return Err(e);
+    }
+
+    eprintln!("Mounted {} at {}.", image.display(), mount_path.display());
+    Ok(())
+}
+
 fn cmd_umount(mount_path: &Path) -> Result<(), String> {
     if !mount_path.exists() {
         return Err(format!("Mount point not found: {}", mount_path.display()));
@@ -1323,17 +1412,42 @@ fn cmd_umount(mount_path: &Path) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        let mount_c = std::ffi::CString::new(mount_path.to_string_lossy().as_bytes())
-            .map_err(|e| e.to_string())?;
+        use std::process::Command;
 
-        let ret = unsafe { libc::umount2(mount_c.as_ptr(), 0) };
-        if ret != 0 {
-            let err = io::Error::last_os_error();
-            return Err(format!(
-                "Failed to unmount {}: {}",
-                mount_path.display(),
-                err
-            ));
+        // Resolve the backing loop device (if any) before unmounting, so it can
+        // be detached afterwards. /dev/loopNpM -> /dev/loopN.
+        let loopdev = Command::new("findmnt")
+            .args(["-n", "-o", "SOURCE", "--target"])
+            .arg(mount_path)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| s.starts_with("/dev/loop"))
+            .map(|s| match s.rsplit_once('p') {
+                Some((base, num)) if num.chars().all(|c| c.is_ascii_digit()) => base.to_string(),
+                _ => s,
+            });
+
+        // Recursively unmount so partition sub-mounts (/usr, /home, …) go first.
+        let status = Command::new("umount")
+            .arg("-R")
+            .arg(mount_path)
+            .status()
+            .map_err(|e| format!("Failed to run umount: {e}"))?;
+        if !status.success() {
+            // Fall back to a direct umount of just this path.
+            let mount_c = std::ffi::CString::new(mount_path.to_string_lossy().as_bytes())
+                .map_err(|e| e.to_string())?;
+            let ret = unsafe { libc::umount2(mount_c.as_ptr(), 0) };
+            if ret != 0 {
+                let err = io::Error::last_os_error();
+                return Err(format!("Failed to unmount {}: {}", mount_path.display(), err));
+            }
+        }
+
+        if let Some(ld) = loopdev {
+            let _ = Command::new("losetup").args(["-d", &ld]).status();
         }
 
         eprintln!("Unmounted {}.", mount_path.display());
