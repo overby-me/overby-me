@@ -33,6 +33,11 @@ pub struct Config {
 /// order.  This matches the paths systemd itself searches.
 const SYSTEM_UNIT_DIRS: &[&str] = &[
     "/run/systemd/transient",
+    // `systemctl set-property` persists per-property drop-ins under
+    // system.control/<unit>.d/; they must be on the search path so
+    // daemon-reload re-applies them (highest precedence, runtime overrides).
+    "/etc/systemd/system.control",
+    "/run/systemd/system.control",
     "/etc/systemd/system",
     "/run/systemd/system",
     "/usr/local/lib/systemd/system",
@@ -242,7 +247,11 @@ pub fn load_config() -> (LoggingConfig, Config) {
     let mut unit_dirs: Vec<PathBuf> = SYSTEM_UNIT_DIRS
         .iter()
         .map(PathBuf::from)
-        .filter(|p| p.is_dir())
+        // The system.control dirs are created at runtime by `systemctl
+        // set-property`, so they may not exist at boot; keep them on the search
+        // path unconditionally so a later daemon-reload re-applies those
+        // overrides (the loader skips them while they are absent).
+        .filter(|p| p.is_dir() || p.ends_with("system.control"))
         .collect();
 
     if let Some(pkg_dir) = package_unit_dir()

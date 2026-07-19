@@ -152,8 +152,10 @@ pub enum Command {
     /// `list-jobs` — list currently running/waiting jobs.
     ListJobs,
     /// `set-property <unit> <property>=<value>...` — set runtime properties on a unit.
-    /// Creates a drop-in file at `/etc/systemd/system/<unit>.d/50-set-property.conf`
-    /// (or `/run/systemd/system/<unit>.d/` with `--runtime`).
+    /// Creates one drop-in file per property under
+    /// `/etc/systemd/system.control/<unit>.d/50-<Property>.conf` (or
+    /// `/run/systemd/system.control/<unit>.d/` with `--runtime`), named after the
+    /// D-Bus property (e.g. a percentage TasksMax -> `50-TasksMaxScale.conf`).
     SetProperty(String, Vec<String>),
     /// `edit <unit>` — query the unit's fragment path so the client can open an editor.
     /// Returns the fragment path and existing drop-in override content (if any).
@@ -5261,15 +5263,28 @@ fn parse_memory_limit(s: &str) -> crate::units::unit_parsing::MemoryLimit {
 }
 
 /// Parse a TasksMax value like "50", "infinity", or "80%".
+/// The drop-in file base name systemd uses for a `set-property` assignment: the
+/// D-Bus property name. A percentage `TasksMax` is sent as the scaled property
+/// `TasksMaxScale` (so `50-TasksMaxScale.conf`); other properties use their key
+/// name directly (e.g. `50-MemoryMax.conf`).
+fn set_property_dropin_name(key: &str, value: &str) -> String {
+    if key == "TasksMax" && value.ends_with('%') {
+        return "TasksMaxScale".to_string();
+    }
+    key.to_string()
+}
+
 fn parse_tasks_max(s: &str) -> crate::units::unit_parsing::TasksMax {
     use crate::units::unit_parsing::TasksMax;
     if s == "infinity" {
         return TasksMax::Infinity;
     }
     if let Some(pct) = s.strip_suffix('%')
-        && let Ok(p) = pct.parse::<u64>()
+        && let Ok(p) = pct.trim().parse::<f64>()
     {
-        return TasksMax::Percent(p);
+        // Accept both integer ("40%") and scaled ("40.00%") percentages; the
+        // latter is what set-property persists for TasksMaxScale.
+        return TasksMax::Percent(p.round() as u64);
     }
     if let Ok(n) = s.parse::<u64>() {
         TasksMax::Value(n)
@@ -6546,12 +6561,14 @@ pub fn execute_command(
                 "After",
                 "Before",
             ];
-            // Normalize properties (e.g. CPUQuota=10% -> CPUQuota=10.00%)
+            // Normalize scaled percentages to two decimals, matching how
+            // systemd persists them (e.g. CPUQuota=10% -> CPUQuota=10.00%,
+            // TasksMax=40% -> TasksMax=40.00%).
             let props: Vec<String> = props
                 .into_iter()
                 .map(|prop| {
                     if let Some((key, val)) = prop.split_once('=')
-                        && key == "CPUQuota"
+                        && matches!(key, "CPUQuota" | "TasksMax")
                         && let Some(pct) = val.strip_suffix('%')
                         && let Ok(n) = pct.parse::<f64>()
                     {
@@ -6560,20 +6577,6 @@ pub fn execute_command(
                     prop
                 })
                 .collect();
-
-            let mut unit_section_lines = Vec::new();
-            let mut specific_section_lines = Vec::new();
-            for prop in &props {
-                if let Some((key, _val)) = prop.split_once('=') {
-                    if unit_props.contains(&key) {
-                        unit_section_lines.push(prop.as_str());
-                    } else {
-                        specific_section_lines.push(prop.as_str());
-                    }
-                } else {
-                    log::warn!("set-property: ignoring malformed property: {prop}");
-                }
-            }
 
             // Determine the specific section name from the unit suffix.
             let section_name = if unit_name.ends_with(".service") {
@@ -6594,27 +6597,12 @@ pub fn execute_command(
                 "Service"
             };
 
-            // Build the drop-in content.
-            let mut content = String::new();
-            if !unit_section_lines.is_empty() {
-                content.push_str("[Unit]\n");
-                for line in &unit_section_lines {
-                    content.push_str(line);
-                    content.push('\n');
-                }
-                content.push('\n');
-            }
-            if !specific_section_lines.is_empty() {
-                let _ = writeln!(content, "[{section_name}]");
-                for line in &specific_section_lines {
-                    content.push_str(line);
-                    content.push('\n');
-                }
-                content.push('\n');
-            }
-
-            // Write the drop-in file.
-            // Use system.control directory (matches systemd behavior for set-property)
+            // Write one drop-in file per property, named after the D-Bus
+            // property (matching upstream systemd): e.g. a percentage TasksMax
+            // is the scaled property TasksMaxScale, persisted as
+            // 50-TasksMaxScale.conf. daemon-reload reads every *.conf in the
+            // directory, so per-property files carry the same effect as one
+            // combined file while matching the filenames systemd uses.
             let base_dir = if is_runtime {
                 "/run/systemd/system.control"
             } else {
@@ -6627,18 +6615,29 @@ pub fn execute_command(
                     dropin_dir.display()
                 ));
             }
-            let dropin_path = dropin_dir.join("50-set-property.conf");
-            if let Err(e) = std::fs::write(&dropin_path, &content) {
-                return Err(format!(
-                    "Failed to write drop-in file {}: {e}",
-                    dropin_path.display()
-                ));
+            let mut written: Vec<String> = Vec::new();
+            for prop in &props {
+                let Some((key, value)) = prop.split_once('=') else {
+                    log::warn!("set-property: ignoring malformed property: {prop}");
+                    continue;
+                };
+                let section = if unit_props.contains(&key) {
+                    "Unit"
+                } else {
+                    section_name
+                };
+                let file_base = set_property_dropin_name(key, value);
+                let file_content = format!("[{section}]\n{prop}\n");
+                let dropin_path = dropin_dir.join(format!("50-{file_base}.conf"));
+                if let Err(e) = std::fs::write(&dropin_path, &file_content) {
+                    return Err(format!(
+                        "Failed to write drop-in file {}: {e}",
+                        dropin_path.display()
+                    ));
+                }
+                written.push(file_base);
             }
-            info!(
-                "set-property {}: wrote drop-in {}",
-                unit_name,
-                dropin_path.display()
-            );
+            info!("set-property {unit_name}: wrote drop-in(s) {}", written.join(", "));
 
             // Apply properties to the in-memory unit immediately (like real systemd).
             {
@@ -6743,7 +6742,7 @@ pub fn execute_command(
             }
 
             return Ok(serde_json::json!({
-                "dropin": dropin_path.display().to_string(),
+                "dropin": dropin_dir.display().to_string(),
                 "properties": props,
             }));
         }

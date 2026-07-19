@@ -433,6 +433,12 @@ fn parse_all_units(
     dir_deps: &mut Vec<DirectoryDependency>,
     dropins: &mut HashMap<String, Vec<(String, String)>>,
 ) -> Result<(), ParsingError> {
+    // A search-path entry may not exist (e.g. the system.control override dirs
+    // before the first `systemctl set-property`); skip it rather than failing
+    // the whole load/reload.
+    if !path.is_dir() {
+        return Ok(());
+    }
     let files = get_file_list(path).map_err(|e| ParsingError::new(e, path.clone()))?;
     for entry in files {
         let entry_path = entry.path();

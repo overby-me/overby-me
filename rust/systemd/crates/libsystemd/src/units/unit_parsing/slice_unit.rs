@@ -135,12 +135,15 @@ fn parse_slice_section(
                 } else if trimmed.eq_ignore_ascii_case("infinity") {
                     slice.tasks_max = Some(super::TasksMax::Infinity);
                 } else if let Some(pct) = trimmed.strip_suffix('%') {
-                    let pct_val = pct.trim().parse::<u64>().map_err(|_| {
+                    // Accept both integer ("50%") and scaled ("40.00%")
+                    // percentages; set-property persists TasksMaxScale as the
+                    // latter (e.g. "TasksMax=40.00%").
+                    let pct_val = pct.trim().parse::<f64>().map_err(|_| {
                         ParsingErrorReason::Generic(format!(
                             "TasksMax percentage is not a valid number: {value}"
                         ))
                     })?;
-                    slice.tasks_max = Some(super::TasksMax::Percent(pct_val));
+                    slice.tasks_max = Some(super::TasksMax::Percent(pct_val.round() as u64));
                 } else {
                     let num = trimmed.parse::<u64>().map_err(|_| {
                         ParsingErrorReason::Generic(format!(
