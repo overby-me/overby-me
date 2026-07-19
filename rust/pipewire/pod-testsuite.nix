@@ -15,8 +15,9 @@ pkgs.runCommand "rust-pipewire-pod-test-${name}" {
     pkgs.diffutils
     pkgs.gnused
     pkgs.xxd
+    pkgs.nushell
   ];
-  testScript = ./tests/spa-pod/${name}.sh;
+  testScript = ./tests/spa-pod/${name}.nu;
 } ''
   export TMPDIR="$(mktemp -d)"
   export LC_ALL=C
@@ -31,7 +32,7 @@ pkgs.runCommand "rust-pipewire-pod-test-${name}" {
   export RUST_PIPEWIRE_DEV
 
   # Run the test, with the rust-pipewire wrapper resolved from PATH.
-  bash "$testScript" || exit 1
+  nu "$testScript" || exit 1
 
   touch $out
 ''

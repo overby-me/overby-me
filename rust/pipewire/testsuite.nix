@@ -18,9 +18,12 @@ pkgs.runCommand "rust-pipewire-test-${tool}-${name}" {
     pkgs.coreutils
     pkgs.diffutils
     pkgs.gnused
+    pkgs.gnugrep
+    pkgs.nushell
   ];
   pipewireSrc = pkgs.pipewire.src;
-  testScript = ./tests/${tool}/${name}.sh;
+  testScript = ./tests/${tool}/${name}.nu;
+  testHelpers = ./tests/helpers.nu;
 } ''
   # Make the upstream pipewire source available so individual tests can
   # reach for fixtures (config files, JSON samples, ...). pkgs.pipewire.src
@@ -43,37 +46,14 @@ pkgs.runCommand "rust-pipewire-test-${tool}-${name}" {
   export REF="${pkgs.pipewire}/bin/$binName"
   export RUST="${pkgs.rust-pipewire-dev}/bin/$binName"
 
-  # Helper: compare normalized outputs.
-  compare() {
-    local ref_out="$TMPDIR/expected"
-    local rust_out="$TMPDIR/actual"
-
-    # Normalize nix store /bin/<tool> paths to a sentinel so the binary
-    # names don't matter. Match common shapes: paths ending in /bin/<tool>
-    # or just /bin/<tool>.
-    sed -i -E 's|/nix/store/[a-z0-9]{32}-[^/[:space:]]+/bin/[^[:space:]]+|TOOL|g' \
-      "$ref_out" "$rust_out"
-    sed -i -E 's|/nix/store/[a-z0-9]{32}-[^[:space:]]+|NIXPATH|g' \
-      "$ref_out" "$rust_out"
-
-    # Strip trailing whitespace; PipeWire's printers occasionally emit
-    # trailing spaces that differ between toolchains.
-    sed -i 's/[[:space:]]*$//' "$ref_out" "$rust_out"
-
-    if diff --text "$rust_out" "$ref_out"; then
-      echo "PASS: $1"
-    else
-      echo "FAIL: $1"
-      echo "--- expected (C ${tool}) ---"
-      cat "$ref_out"
-      echo "--- actual (rust-pipewire ${tool}) ---"
-      cat "$rust_out"
-      exit 1
-    fi
-  }
+  # Lay the fixture out one directory below helpers.nu, mirroring the
+  # repository layout so the fixture's `source ../helpers.nu` resolves.
+  cp $testHelpers helpers.nu
+  mkdir fixture
+  cp $testScript fixture/test.nu
 
   echo "Running test: ${tool}/${name}"
-  source $testScript
+  nu fixture/test.nu
 
   touch $out
 ''

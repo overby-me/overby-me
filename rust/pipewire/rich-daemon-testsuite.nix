@@ -15,8 +15,10 @@ pkgs.runCommand "rust-pipewire-rich-daemon-test-${tool}-${name}" {
     pkgs.gnugrep
     pkgs.gnused
     pkgs.gawk
+    pkgs.nushell
   ];
-  testScript = ./tests/${tool}/${name}.sh;
+  testScript = ./tests/${tool}/${name}.nu;
+  testHelpers = ./tests/helpers.nu;
 } ''
   export TMPDIR="$(mktemp -d)"
   export LC_ALL=C
@@ -112,29 +114,14 @@ pkgs.runCommand "rust-pipewire-rich-daemon-test-${tool}-${name}" {
   export REF="${pkgs.pipewire}/bin/$binName"
   export RUST="${pkgs.rust-pipewire-dev}/bin/$binName"
 
-  compare() {
-    local label="$1"
-    local ref_out="$TMPDIR/expected"
-    local rust_out="$TMPDIR/actual"
-    sed -i -E 's|/nix/store/[a-z0-9]{32}-[^/[:space:]]+/bin/[^[:space:]]+|TOOL|g' \
-      "$ref_out" "$rust_out"
-    sed -i -E 's|/nix/store/[a-z0-9]{32}-[^[:space:]]+|NIXPATH|g' \
-      "$ref_out" "$rust_out"
-    sed -i 's/[[:space:]]*$//' "$ref_out" "$rust_out"
-    if diff --text "$rust_out" "$ref_out"; then
-      echo "PASS: $label"
-    else
-      echo "FAIL: $label"
-      echo "--- expected ---"
-      cat "$ref_out"
-      echo "--- actual ---"
-      cat "$rust_out"
-      exit 1
-    fi
-  }
+  # Lay the fixture out one directory below helpers.nu, mirroring the
+  # repository layout so the fixture's `source ../helpers.nu` resolves.
+  cp $testHelpers helpers.nu
+  mkdir fixture
+  cp $testScript fixture/test.nu
 
   echo "Running rich-daemon test: ${tool}/${name}"
-  source "$testScript"
+  nu fixture/test.nu
 
   touch $out
 ''

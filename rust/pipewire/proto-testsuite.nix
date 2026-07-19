@@ -11,8 +11,9 @@ pkgs.runCommand "rust-pipewire-proto-test-${name}" {
     pkgs.coreutils
     pkgs.gnugrep
     pkgs.gnused
+    pkgs.nushell
   ];
-  testScript = ./tests/proto/${name}.sh;
+  testScript = ./tests/proto/${name}.nu;
 } ''
   export TMPDIR="$(mktemp -d)"
   export LC_ALL=C
@@ -25,7 +26,7 @@ pkgs.runCommand "rust-pipewire-proto-test-${name}" {
   RUST="${pkgs.rust-pipewire-dev}/bin/rust-pipewire"
   export RUST
 
-  bash "$testScript" || exit 1
+  nu "$testScript" || exit 1
 
   touch $out
 ''
