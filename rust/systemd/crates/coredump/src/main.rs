@@ -1366,20 +1366,22 @@ fn run() -> Result<(), String> {
         }
     }
 
-    // Send to journal if Storage is Journal or Both.
-    if config.storage == Storage::Journal || config.storage == Storage::Both {
-        // For journal-only storage, we still need to set filename for metadata
-        // even though no file was written to disk.
-        if config.storage == Storage::Journal {
-            meta.core_size = data.len() as u64;
-            meta.filename = build_filename(&meta, Compression::None);
-        }
-        send_to_journal(&meta);
-        eprintln!(
-            "Sent coredump metadata to journal for PID {} ({})",
-            meta.pid, meta.comm
-        );
+    // For journal-only storage, record the size (no external file was written).
+    if config.storage == Storage::Journal {
+        meta.core_size = data.len() as u64;
+        meta.filename = build_filename(&meta, Compression::None);
     }
+
+    // Always send the coredump metadata message to the journal. coredumpctl
+    // enumerates dumps by reading these journal entries (matched by
+    // MESSAGE_ID), so even externally-stored dumps need one — with
+    // Storage=external the entry carries COREDUMP_FILENAME pointing at the file
+    // under /var/lib/systemd/coredump/. (Storage=none already returned early.)
+    send_to_journal(&meta);
+    eprintln!(
+        "Sent coredump metadata to journal for PID {} ({})",
+        meta.pid, meta.comm
+    );
 
     // Vacuum old dumps (only relevant if we store externally).
     if config.storage == Storage::External || config.storage == Storage::Both {
