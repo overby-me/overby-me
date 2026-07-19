@@ -1975,6 +1975,7 @@ dependencies = [
  "libsystemd",
  "log",
  "nix",
+ "serde_json",
  "sha2",
  "signal-hook",
  "tempfile",

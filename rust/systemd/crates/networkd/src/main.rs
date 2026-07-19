@@ -24,6 +24,7 @@ mod link;
 mod manager;
 mod netdev;
 mod netdev_create;
+mod varlink_metrics;
 
 use std::collections::HashMap;
 use std::fs;
@@ -591,6 +592,10 @@ fn main() {
 
     setup_logging();
     log::info!("systemd-networkd starting");
+
+    // Serve io.systemd.Network metrics at /run/systemd/report/io.systemd.Network
+    // so systemd-report can enumerate per-interface network metrics.
+    varlink_metrics::spawn_metrics_server();
 
     // Set up signal handling.
     let shutdown = Arc::new(AtomicBool::new(false));
