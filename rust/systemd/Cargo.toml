@@ -60,6 +60,7 @@ members = [
   "crates/portabled",
   "crates/pstore",
   "crates/random-seed",
+  "crates/report",
   "crates/repart",
   "crates/resolvectl",
   "crates/resolved",
