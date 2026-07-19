@@ -65,6 +65,8 @@ fn init_logging() {
 
 use clap::{Parser, Subcommand};
 
+mod verify;
+
 /// udevadm — udev management tool
 #[derive(Parser, Debug)]
 // `disable_version_flag`: udevadm defines its own `-V/--version` bool below
@@ -3153,6 +3155,16 @@ fn main() -> ExitCode {
     }
 
     init_logging();
+
+    // `verify` follows upstream getopt semantics (e.g. `-N help` exits 0,
+    // unknown options exit 1, its own `-h`/`-V`) that clap cannot express, so
+    // handle it before clap ever sees the arguments.
+    {
+        let raw: Vec<String> = std::env::args().collect();
+        if raw.get(1).map(String::as_str) == Some("verify") {
+            return verify::verify_main(&raw[2..]);
+        }
+    }
 
     let cli = Cli::parse();
 
