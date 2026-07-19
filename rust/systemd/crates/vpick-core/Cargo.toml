@@ -1,13 +1,12 @@
 [package]
-name = "systemd-vpick"
+name = "vpick-core"
 version = "0.1.0"
 authors = ["Niclas Overby <niclas@overby.me>"]
 edition = "2024"
 
-[[bin]]
-name = "systemd-vpick"
-path = "src/main.rs"
+[lib]
+name = "vpick_core"
+path = "src/lib.rs"
 
 [dependencies]
 libc = "0.2"
-vpick-core = { path = "../vpick-core" }

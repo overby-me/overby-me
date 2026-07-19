@@ -1146,6 +1146,32 @@ fn json_escape(s: &str) -> String {
 // Output: discover
 // ---------------------------------------------------------------------------
 
+/// Resolve a versioned (`NAME.v/`) directory to its best entry, trying a raw
+/// disk image first (`*.raw`, regular file) then a directory tree. Returns the
+/// `(type, resolved_path)` or `None` when nothing suitable was found.
+fn resolve_versioned_dir(path: &Path) -> Option<(&'static str, PathBuf)> {
+    use vpick_core::{PickFilter, dt_bit, path_pick, PICK_DEFAULT};
+
+    let raw_filter = PickFilter {
+        type_mask: dt_bit(libc::DT_REG as u32),
+        suffix: Some(".raw".to_string()),
+        ..Default::default()
+    };
+    if let Ok(Some(r)) = path_pick(path, &raw_filter, PICK_DEFAULT) {
+        return Some(("raw", r.path));
+    }
+
+    let dir_filter = PickFilter {
+        type_mask: dt_bit(libc::DT_DIR as u32),
+        ..Default::default()
+    };
+    if let Ok(Some(r)) = path_pick(path, &dir_filter, PICK_DEFAULT) {
+        return Some(("directory", r.path));
+    }
+
+    None
+}
+
 fn cmd_discover(no_legend: bool) {
     if !no_legend {
         println!("{:<12} {:<10} {:<40} PATH", "TYPE", "SIZE", "NAME");
@@ -1170,6 +1196,25 @@ fn cmd_discover(no_legend: bool) {
 
             // Skip hidden files
             if name.starts_with('.') {
+                continue;
+            }
+
+            // A versioned (`NAME.v/`) directory is resolved to its best entry:
+            // first as a raw disk image, then as a directory tree.
+            if path.is_dir() && name.ends_with(".v") {
+                if let Some((img_type, resolved)) = resolve_versioned_dir(&path) {
+                    let size_str = if img_type == "raw" {
+                        format_size(fs::metadata(&resolved).map(|m| m.len()).unwrap_or(0))
+                    } else {
+                        "-".to_string()
+                    };
+                    let rname = resolved
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| name.clone());
+                    println!("{:<12} {:<10} {:<40} {}", img_type, size_str, rname, resolved.display());
+                    found += 1;
+                }
                 continue;
             }
 

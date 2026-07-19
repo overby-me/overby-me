@@ -981,6 +981,7 @@ dependencies = [
  "signal-hook",
  "tempfile",
  "threadpool",
+ "vpick-core",
  "which",
  "zbus",
  "zstd",
@@ -1758,6 +1759,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "tempfile",
+ "vpick-core",
 ]
 
 [[package]]
@@ -2236,6 +2238,7 @@ name = "systemd-vpick"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "vpick-core",
 ]
 
 [[package]]
@@ -2509,6 +2512,13 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vpick-core"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "wasi"

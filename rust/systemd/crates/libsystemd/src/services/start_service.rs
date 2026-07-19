@@ -181,6 +181,32 @@ fn allocate_dynamic_uid() -> u32 {
 
 /// Resolve a User= value (name or numeric UID) to a raw `uid_t`.
 /// Falls back to the current process UID if `user` is `None`.
+/// Resolve a `RootDirectory=` value that points at a versioned (`NAME.v/`)
+/// directory to the concrete, newest matching subdirectory. Non-`.v` paths are
+/// returned unchanged. When a `.v` path has no valid entry we leave the
+/// original path in place: the subsequent chroot + exec then fails naturally,
+/// which is the desired outcome for a service whose root cannot be resolved.
+fn resolve_root_directory(root_directory: &Option<String>) -> Option<String> {
+    let orig = root_directory.as_ref()?;
+    let p = Path::new(orig);
+    if !vpick_core::path_uses_vpick(p) {
+        return Some(orig.clone());
+    }
+
+    let filter = vpick_core::PickFilter {
+        type_mask: vpick_core::dt_bit(libc::DT_DIR as u32),
+        ..Default::default()
+    };
+    match vpick_core::path_pick(p, &filter, vpick_core::PICK_DEFAULT | vpick_core::PICK_RESOLVE) {
+        Ok(Some(r)) => {
+            let resolved = r.path.to_string_lossy().into_owned();
+            trace!("Resolved RootDirectory .v path '{orig}' to '{resolved}'");
+            Some(resolved)
+        }
+        _ => Some(orig.clone()),
+    }
+}
+
 pub fn resolve_uid(user: &Option<String>) -> Result<libc::uid_t, String> {
     match user {
         Some(user_str) => {
@@ -836,7 +862,7 @@ fn start_service_with_filedescriptors(
         deferred_exec_error,
 
         working_directory: conf.exec_config.working_directory.clone(),
-        root_directory: conf.exec_config.root_directory.clone(),
+        root_directory: resolve_root_directory(&conf.exec_config.root_directory),
         state_directory: conf.exec_config.state_directory.clone(),
         logs_directory: conf.exec_config.logs_directory.clone(),
         logs_directory_mode: conf.exec_config.logs_directory_mode,

@@ -86,6 +86,7 @@ members = [
   "crates/varlinkctl",
   "crates/vconsole-setup",
   "crates/vpick",
+  "crates/vpick-core",
   "crates/veritysetup",
 ]
 exclude = ["crates/sd-boot", "crates/sd-stub"]
