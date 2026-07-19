@@ -1772,10 +1772,10 @@ fn format_new_partitions(
 ) -> Result<(), String> {
     use std::process::Command;
 
-    // Collect (kernel partition number, fstype, label) for partitions that
-    // need a filesystem. Kernel partition nodes are numbered 1-based in GPT
+    // Collect (kernel partition number, fstype, label, def index) for partitions
+    // that need a filesystem. Kernel partition nodes are numbered 1-based in GPT
     // slot order, so the node for slot S is loopNp(S+1).
-    let mut to_format: Vec<(u32, String, String)> = Vec::new();
+    let mut to_format: Vec<(u32, String, String, usize)> = Vec::new();
     for m in matched {
         if !m.is_new || m.allocated_size == 0 {
             continue;
@@ -1784,7 +1784,12 @@ fn format_new_partitions(
         if let Some(ref fstype) = def.format
             && fstype != "empty"
         {
-            to_format.push((m.slot_index + 1, fstype.clone(), m.assigned_label.clone()));
+            to_format.push((
+                m.slot_index + 1,
+                fstype.clone(),
+                m.assigned_label.clone(),
+                m.definition_index,
+            ));
         }
     }
     if to_format.is_empty() {
@@ -1810,7 +1815,7 @@ fn format_new_partitions(
         .status();
 
     let mut format_err: Option<String> = None;
-    for (partnum, fstype, label) in &to_format {
+    for (partnum, fstype, label, def_idx) in &to_format {
         let part_dev = format!("{loopdev}p{partnum}");
         // Wait briefly for the node in case udev is slow.
         for _ in 0..30 {
@@ -1823,6 +1828,14 @@ fn format_new_partitions(
             format_err = Some(format!("mkfs {part_dev} ({fstype}): {e}"));
             break;
         }
+        // Emit user.validatefs.* xattrs on filesystems that support them (i.e.
+        // not vfat/swap). Failures here are non-fatal — the filesystem is
+        // already created.
+        if !matches!(fstype.as_str(), "vfat" | "fat" | "fat32" | "fat16" | "swap")
+            && let Err(e) = write_validatefs_xattrs(&part_dev, defs, *def_idx)
+        {
+            eprintln!("Warning: failed to set validatefs xattrs on {part_dev}: {e}");
+        }
     }
 
     // Detach the loop device regardless of the formatting outcome.
@@ -1831,6 +1844,128 @@ fn format_new_partitions(
     match format_err {
         Some(e) => Err(e),
         None => Ok(()),
+    }
+}
+
+/// Mount a freshly formatted partition and write the `user.validatefs.*`
+/// extended attributes to its filesystem root, mirroring upstream
+/// systemd-repart's AddValidateFS= behaviour. The label / type-uuid attributes
+/// gather the partition and its verity siblings (partitions sharing the same
+/// VerityMatchKey=); the mount-point attribute comes from MountPoint= or the
+/// partition type's well-known mount point.
+fn write_validatefs_xattrs(
+    part_dev: &str,
+    defs: &[PartitionDefinition],
+    def_idx: usize,
+) -> Result<(), String> {
+    use std::process::Command;
+    let def = &defs[def_idx];
+
+    // Gather this partition and its verity siblings (same non-empty
+    // VerityMatchKey=), then collect their labels and type UUIDs, sorted for a
+    // reproducible order.
+    let mut labels: Vec<String> = Vec::new();
+    let mut type_uuids: Vec<String> = Vec::new();
+    let has_sibling_key = def.verity_match_key.as_deref().is_some_and(|k| !k.is_empty());
+    for (i, d) in defs.iter().enumerate() {
+        let is_self = i == def_idx;
+        let is_sibling = has_sibling_key && d.verity_match_key == def.verity_match_key;
+        if is_self || is_sibling {
+            labels.push(d.effective_label());
+            type_uuids.push(d.type_uuid.clone());
+        }
+    }
+    labels.sort();
+    labels.dedup();
+    type_uuids.sort();
+    type_uuids.dedup();
+
+    // Mount point: explicit MountPoint= wins, else the type's default.
+    let mount_point = def
+        .mount_point
+        .clone()
+        .or_else(|| default_mount_point(&def.type_uuid).map(str::to_owned));
+
+    // Mount the partition on a temporary directory.
+    let tmp = format!("/tmp/.repart-validatefs-{}", std::process::id());
+    let _ = std::fs::create_dir_all(&tmp);
+    let status = Command::new("mount")
+        .arg(part_dev)
+        .arg(&tmp)
+        .status()
+        .map_err(|e| format!("mount: {e}"))?;
+    if !status.success() {
+        let _ = std::fs::remove_dir(&tmp);
+        return Err(format!("mount {part_dev} at {tmp} failed"));
+    }
+
+    let set = |name: &str, values: &[String]| -> Result<(), String> {
+        // Values are joined with NUL and NUL-terminated, matching upstream's
+        // strv encoding (which setfattr cannot express via argv).
+        let mut buf: Vec<u8> = Vec::new();
+        for v in values {
+            buf.extend_from_slice(v.as_bytes());
+            buf.push(0);
+        }
+        setxattr_at(&tmp, name, &buf)
+    };
+
+    let mut xattr_err: Option<String> = None;
+    if let Err(e) = set("user.validatefs.gpt_label", &labels) {
+        xattr_err = Some(e);
+    } else if let Err(e) = set("user.validatefs.gpt_type_uuid", &type_uuids) {
+        xattr_err = Some(e);
+    } else if let Some(mp) = mount_point
+        && let Err(e) = set("user.validatefs.mount_point", &[mp])
+    {
+        xattr_err = Some(e);
+    }
+
+    let _ = Command::new("umount").arg(&tmp).status();
+    let _ = std::fs::remove_dir(&tmp);
+
+    match xattr_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// Set an extended attribute on a path via the raw syscall (setfattr cannot
+/// carry NUL-separated values through argv).
+fn setxattr_at(path: &str, name: &str, value: &[u8]) -> Result<(), String> {
+    let c_path = std::ffi::CString::new(path).map_err(|e| e.to_string())?;
+    let c_name = std::ffi::CString::new(name).map_err(|e| e.to_string())?;
+    let ret = unsafe {
+        libc::setxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+            0,
+        )
+    };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
+}
+
+/// The well-known mount point for a GPT partition type, used when no explicit
+/// MountPoint= is set. ESP/swap/verity have none (not validatefs-mounted here).
+fn default_mount_point(type_uuid: &str) -> Option<&'static str> {
+    let id = type_uuid_to_identifier(type_uuid)?;
+    if id.starts_with("root") && !id.contains("verity") {
+        Some("/")
+    } else if id.starts_with("usr") && !id.contains("verity") {
+        Some("/usr")
+    } else {
+        match id {
+            "home" => Some("/home"),
+            "srv" => Some("/srv"),
+            "var" => Some("/var"),
+            "tmp" => Some("/var/tmp"),
+            _ => None,
+        }
     }
 }
 
