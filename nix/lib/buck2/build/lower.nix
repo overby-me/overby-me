@@ -11,11 +11,13 @@
 # runs, and exports the resulting tree as $out. Dependencies flow through
 # store-path interpolation in the staging commands only.
 #
-# mkLower { pkgs; root; analysis; toolchainPackages; } -> { lowerNode; }
+# mkLower { pkgs; root; toolchainPackages; } -> { lowerGraph; }
+# lowerGraph { actions; defaultOutput; } -> { defaultOutputDrv; defaultOutputRel; ... }
+# The graph may be rich (from analysis.nix, functions ignored) or plain (from
+# fromJSON of the IFD analysis); lowering touches only data fields.
 {
   pkgs,
   root,
-  analysis,
   toolchainPackages,
 }: let
   inherit (pkgs) lib;
@@ -187,8 +189,8 @@
     mkdir -p "$HOME"
   '';
 
-  lowerNode = rootNode: let
-    actions = analysis.collectActions rootNode;
+  lowerGraph = graph: let
+    inherit (graph) actions;
     actionOutputs = a:
       if a.kind == "run"
       then collectOutputs (a.cmd.parts ++ a.cmd.hidden)
@@ -307,12 +309,12 @@
       })
       actions);
 
-    defaultOut = analysis.defaultOutputForNode rootNode;
+    defaultOut = graph.defaultOutput;
   in {
     inherit drvById actions;
     defaultOutputDrv =
       if defaultOut == null
-      then throw "buck2: target '${rootNode.label}' has no DefaultInfo default output"
+      then throw "buck2: target has no DefaultInfo default output"
       else drvById.${producerId defaultOut};
     defaultOutputRel =
       if defaultOut == null
@@ -324,5 +326,5 @@
       else defaultOut.name;
   };
 in {
-  inherit lowerNode;
+  inherit lowerGraph;
 }

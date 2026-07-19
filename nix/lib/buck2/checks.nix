@@ -50,6 +50,20 @@
         grep -q "Hello from Rust!" $out
       '';
 
+    # End-to-end via the opt-in IFD analysis path (analysis runs in a cached
+    # derivation, not at eval time). Same output; guards the IFD path.
+    buck2-build-cpp-ifd = pkgs: let
+      drv = pkgs.lib.buildBuck2Project {
+        src = ./tests/fixtures/no_prelude;
+        target = "//cpp/hello_world:main";
+        ifdAnalysis = true;
+      };
+    in
+      pkgs.runCommand "buck2-build-cpp-ifd" {} ''
+        ${drv}/main > $out
+        grep -q "Hello from C++!" $out
+      '';
+
     # End-to-end: build the no_prelude Go binary and run it. Exercises the full
     # toolchain dance: download_file (Go tarball via fetchurl), write (unpack
     # script), extract, symlink, then `go build`. Network-heavy (fetches the Go

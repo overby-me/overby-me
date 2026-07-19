@@ -449,3 +449,14 @@ packages.hello = { lib, ... }:
 - 2026-07-19: Local toolchains map their `command` string to nixpkgs packages
   for hermeticity, overridable via `toolchainPackages`; `download_file`
   toolchains (Go) stay faithful through `fetchurl`.
+- 2026-07-19: Staging is by symlink (`cp -rs`), and downloaded binaries are
+  autoPatchelf'd once in the action that materializes them, so a large
+  toolchain is never copied per consumer. Actions build directly in `$out`.
+- 2026-07-19: Analysis was factored to a plain JSON-able action graph
+  (`lib/analyze.nix` + `lib/serialize.nix`) feeding `build/lower.nix`. An
+  opt-in `ifdAnalysis` runs that analysis in a derivation keyed only on build
+  files + file-name structure (one IFD), so source edits never re-interpret.
+  Measured slower than pure eval on `no_prelude` (the eval-time cost of the
+  content-keyed analysis source plus JSON round-trip exceeds the cheap
+  interpreter); kept off by default, intended for large prelude graphs. The
+  pure path stays the strict no-IFD default.

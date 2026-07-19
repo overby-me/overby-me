@@ -70,6 +70,22 @@ The result's `$out` holds the target's default output (e.g. `result/main`).
 | `targets` | `null` | A list of labels (produces a `symlinkJoin`) |
 | `system` | `pkgs`'s system | Platform key feeding `host_info()` and toolchains |
 | `toolchainPackages` | clang/rustc/go map | Toolchain command name to nixpkgs package |
+| `ifdAnalysis` | `false` | Run load+analysis in a cached derivation (one IFD) instead of at eval time; see below |
+
+### `ifdAnalysis` (experimental)
+
+By default, analysis (parsing the Starlark and running the rule impls) happens
+during Nix evaluation on every build. With `ifdAnalysis = true`, it runs once
+inside a derivation that emits the action graph as JSON, which Nix then imports
+(one import-from-derivation). That derivation is keyed on the build files
+(`.bzl` / `BUCK` / `.buckconfig`) and the file-name structure only, not source
+contents, so editing a source never re-runs the interpreter and a no-op rebuild
+reuses the cached graph.
+
+This only pays off when interpretation is expensive (large, prelude-based
+projects). On small projects the eval-time cost of building the content-keyed
+analysis source plus the JSON round-trip exceeds the interpreter cost, so it is
+measurably slower there; it stays opt-in and off by default.
 
 `lib.buck2Lib` exposes the pure phases (`buckconfig`, `labels`, `loader`,
 `analysis`, `globals`, `actions`, `cmd_args`) and the `skylark` interpreter for
