@@ -555,6 +555,19 @@ fn process_question(question: &PasswordQuestion, console: Option<&str>) -> bool 
         return false;
     }
 
+    // Automation hook: if $SYSTEMD_ASK_PASSWORD_AGENT_PASSWORD is set, reply to
+    // every question with its value instead of prompting on the console.
+    // Mirrors upstream systemd-tty-ask-password-agent.
+    if let Ok(canned) = std::env::var("SYSTEMD_ASK_PASSWORD_AGENT_PASSWORD") {
+        return match question.send_response(&canned) {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("Failed to send password response: {e}");
+                false
+            }
+        };
+    }
+
     let prompt = if let Some(pid) = question.pid {
         format!("{} (PID {})", question.message, pid)
     } else {

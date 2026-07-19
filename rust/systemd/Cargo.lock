@@ -1659,6 +1659,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
+ "serde_json",
  "uuid",
 ]
 
@@ -2488,6 +2489,7 @@ dependencies = [
 name = "varlinkctl"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde_json",
 ]
 

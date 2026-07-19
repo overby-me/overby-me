@@ -38,7 +38,7 @@
 use clap::Parser;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::os::unix::net::UnixDatagram;
+use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{Duration, Instant};
@@ -502,7 +502,193 @@ fn output_password(password: &str, no_newline: bool, keyname: Option<&str>) -> !
     process::exit(0);
 }
 
+// ---------------------------------------------------------------------------
+// Varlink server (io.systemd.AskPassword)
+// ---------------------------------------------------------------------------
+
+/// The io.systemd.AskPassword interface description, returned by
+/// `org.varlink.service.GetInterfaceDescription`.
+const ASK_PASSWORD_INTERFACE: &str = "\
+interface io.systemd.AskPassword
+
+method Ask(
+  message: ?string,
+  keyname: ?string,
+  icon: ?string,
+  id: ?string,
+  timeoutUSec: ?int,
+  untilUSec: ?int,
+  acceptCached: ?bool,
+  pushCache: ?bool,
+  echo: ?string
+) -> (
+  passwords: []string
+)
+
+error NoPasswordAvailable()
+error TimeoutReached()
+";
+
+/// Serve the `io.systemd.AskPassword` Varlink interface. Entered when invoked
+/// via socket activation or `varlinkctl call <exe>` — both set `LISTEN_FDS` and
+/// pass the socket as fd 3.
+fn serve_varlink() -> i32 {
+    use std::os::fd::{FromRawFd, RawFd};
+    const FD: RawFd = 3;
+
+    // Is fd 3 a listening socket (socket activation) or an already-connected
+    // stream (`varlinkctl` exec mode)?
+    let listening = unsafe {
+        let mut val: libc::c_int = 0;
+        let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+        libc::getsockopt(
+            FD,
+            libc::SOL_SOCKET,
+            libc::SO_ACCEPTCONN,
+            &mut val as *mut _ as *mut libc::c_void,
+            &mut len,
+        ) == 0
+            && val != 0
+    };
+
+    if listening {
+        let listener = unsafe { UnixListener::from_raw_fd(FD) };
+        for conn in listener.incoming() {
+            match conn {
+                Ok(stream) => handle_varlink_conn(stream),
+                Err(_) => break,
+            }
+        }
+    } else {
+        let stream = unsafe { UnixStream::from_raw_fd(FD) };
+        handle_varlink_conn(stream);
+    }
+    0
+}
+
+/// Read NUL-delimited JSON requests from one connection and reply to each.
+fn handle_varlink_conn(mut stream: UnixStream) {
+    let mut buf = Vec::new();
+    let mut read_buf = [0u8; 4096];
+    loop {
+        let n = match stream.read(&mut read_buf) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => n,
+        };
+        buf.extend_from_slice(&read_buf[..n]);
+        while let Some(pos) = buf.iter().position(|&b| b == 0) {
+            let msg: Vec<u8> = buf[..pos].to_vec();
+            buf.drain(..=pos);
+            let response = dispatch_varlink(&msg);
+            let mut out = serde_json::to_vec(&response).unwrap_or_default();
+            out.push(0);
+            if stream.write_all(&out).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+/// Parse and dispatch a single Varlink message.
+fn dispatch_varlink(msg_bytes: &[u8]) -> serde_json::Value {
+    let msg: serde_json::Value = match serde_json::from_slice(msg_bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            return serde_json::json!({
+                "error": "org.varlink.service.InvalidParameter",
+                "parameters": {"parameter": format!("JSON parse error: {e}")}
+            });
+        }
+    };
+    let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
+    let params = msg
+        .get("parameters")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    match method {
+        "org.varlink.service.GetInfo" => serde_json::json!({
+            "parameters": {
+                "vendor": "The systemd (rust) Project",
+                "product": "systemd-ask-password",
+                "version": env!("CARGO_PKG_VERSION"),
+                "url": "https://systemd.io/",
+                "interfaces": ["org.varlink.service", "io.systemd.AskPassword"]
+            }
+        }),
+        "org.varlink.service.GetInterfaceDescription" => serde_json::json!({
+            "parameters": {"description": ASK_PASSWORD_INTERFACE}
+        }),
+        "io.systemd.AskPassword.Ask" => vl_method_ask(&params),
+        _ => serde_json::json!({
+            "error": "org.varlink.service.MethodNotFound",
+            "parameters": {"method": method}
+        }),
+    }
+}
+
+/// The `io.systemd.AskPassword.Ask` method: run the agent flow and return the
+/// collected passwords. Mirrors upstream `vl_method_ask`.
+fn vl_method_ask(params: &serde_json::Value) -> serde_json::Value {
+    let str_field = |k: &str| params.get(k).and_then(|v| v.as_str()).map(String::from);
+    let message = str_field("message").unwrap_or_else(|| "Password:".to_string());
+    let keyname = str_field("keyname");
+    let accept_cached = params
+        .get("acceptCached")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    // timeoutUSec is microseconds; 0 means cache-only (do not ask agents).
+    let (timeout_secs, no_agent) = match params.get("timeoutUSec").and_then(|v| v.as_u64()) {
+        Some(0) => (0u64, true),
+        Some(us) => (us / 1_000_000, false),
+        None => (90, false),
+    };
+
+    let cli = Cli {
+        icon: str_field("icon"),
+        id: str_field("id"),
+        keyname: keyname.clone(),
+        credential: None,
+        timeout: timeout_secs.max(1),
+        echo: false,
+        no_newline: false,
+        accept_cached,
+        no_tty: true,
+        multiple: false,
+        no_agent,
+        message,
+    };
+
+    // Check the kernel keyring cache first, like the CLI path.
+    if let Some(ref kn) = keyname
+        && let Some(cached) = keyring_cache_get(kn)
+    {
+        return serde_json::json!({ "parameters": {"passwords": [cached]} });
+    }
+
+    if no_agent {
+        return serde_json::json!({ "error": "io.systemd.AskPassword.NoPasswordAvailable" });
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(cli.timeout);
+    let question = match QuestionFile::create(&cli, deadline) {
+        Ok(q) => q,
+        Err(_) => return serde_json::json!({ "error": "io.systemd.AskPassword.NoPasswordAvailable" }),
+    };
+    match question.wait_for_response(Duration::from_secs(cli.timeout)) {
+        Ok(Some(pw)) => serde_json::json!({ "parameters": {"passwords": [pw]} }),
+        Ok(None) => serde_json::json!({ "error": "io.systemd.AskPassword.TimeoutReached" }),
+        Err(_) => serde_json::json!({ "error": "io.systemd.AskPassword.NoPasswordAvailable" }),
+    }
+}
+
 fn main() {
+    // Socket-activated / `varlinkctl`-invoked Varlink server mode: LISTEN_FDS is
+    // set and the (listening or connected) socket is passed as fd 3.
+    if std::env::var_os("LISTEN_FDS").is_some() {
+        std::process::exit(serve_varlink());
+    }
+
     let cli = Cli::parse();
 
     let timeout = Duration::from_secs(cli.timeout);

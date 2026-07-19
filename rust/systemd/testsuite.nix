@@ -412,6 +412,33 @@ in
             > /usr/lib/systemd/system/systemd-network-generator.service
         fi
 
+        # The rust-systemd package doesn't ship systemd-ask-password.socket/.service,
+        # so provide them inline for TEST-74-AUX-UTILS.ask-password: the varlink
+        # introspect of /run/systemd/io.systemd.AskPassword needs a listening socket
+        # that activates systemd-ask-password in its Varlink server mode (LISTEN_FDS).
+        if [ ! -e /usr/lib/systemd/system/systemd-ask-password.socket ]; then
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Query the User Interactively for a Password' \
+            'DefaultDependencies=no' \
+            'Before=sockets.target' \
+            '[Socket]' \
+            'ListenStream=/run/systemd/io.systemd.AskPassword' \
+            'SocketMode=0666' \
+            '[Install]' \
+            'WantedBy=sockets.target' \
+            > /usr/lib/systemd/system/systemd-ask-password.socket
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Query the User Interactively for a Password' \
+            'DefaultDependencies=no' \
+            '[Service]' \
+            'ExecStart=-/usr/bin/systemd-ask-password --no-tty' \
+            > /usr/lib/systemd/system/systemd-ask-password.service
+          mkdir -p /usr/lib/systemd/system/sockets.target.wants
+          ln -sfn ../systemd-ask-password.socket /usr/lib/systemd/system/sockets.target.wants/systemd-ask-password.socket
+        fi
+
         # Symlink helper binaries (systemd-sysctl, etc.) so tests referencing
         # /usr/lib/systemd/systemd-* can find them (NixOS puts them in the store)
         for bin in ${config.systemd.package}/lib/systemd/systemd-*; do
