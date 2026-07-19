@@ -356,6 +356,27 @@ needing per-unit host/target features and target toolchains, not a fix)
 and the irreducible remainder of #10 (unknown unknowns; the oracle and
 corpus remain the guard).
 
+## Performance roadmap (2026-07-19)
+
+Every known remaining lever, with expected magnitude and status. Each item
+lands only with a benchmark proving it helped.
+
+| # | Lever | Expected | Status |
+|---|---|---|---|
+| P1 | Dev: `-Zthreads` parallel rustc frontend (nightly) | 20-40% off frontend-bound crates | implementing |
+| P2 | Dev: `-C prefer-dynamic` (dynamic libstd, 80 bins stop static-linking std) | large cut of dev link time | implementing |
+| P3 | Per-package profile overrides (`[profile.dev.package."*"]` opt-level) | dev ergonomics parity with cargo | implementing |
+| P4 | `debug = "line-tables-only"` support | cheaper debuginfo, keeps backtraces | free with P3 plumbing |
+| P5 | Shared `rustc --print cfg` derivation (drop per-build-script subprocess) | seconds of aggregate CPU | implementing |
+| P6 | Shared unpack derivation per crate version (stop re-untarring per variant) | seconds; dedups across feature variants | implementing |
+| P7 | rmeta pipelining: metadata drv + rlib drv per crate, dependents compile against rmeta | recovers most of the remaining ~1.45x cold gap vs cargo | implementing (pure crates first; proc-macros and build-script crates stay unpipelined, as in cargo) |
+| P8 | Content-addressed rmeta drvs: early cutoff on impl-only dep changes | skips entire dependent subtrees; beyond cargo | blocked on enabling ca-derivations fleet-wide; flag prepared |
+| P9 | Build-script run as its own derivation (keyed on build.rs + build-deps) | lib edits stop re-running scripts | after P7 (same graph surgery) |
+| P10 | Raw nu builder (skip stdenv phases) | ~200-400ms x 264 drvs of CPU | deferred: conflicts with stdenv-based crateOverrides; revisit |
+| P11 | Remote builders across the colmena fleet + cachix | cold builds beat monolithic cargo outright | infra config, not library code; user action |
+| P12 | Cross-compilation: dual-platform resolution (host edges vs target edges), `--target` compiles, host proc-macros/build scripts, pkgsCross cc for linking | capability, not speed | implementing minimal (pure-Rust + libc corpus first) |
+| P13 | Within-crate incremental compilation | out of reach: rustc incr cache is stateful/nondeterministic, irreconcilable with hermetic builds; cranelift compensates | rejected |
+
 ## Decision log
 
 - 2026-07-18 (evening): wild is the default linker for every
