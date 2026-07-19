@@ -45,6 +45,7 @@ members = [
   "crates/machinectl",
   "crates/machined",
   "crates/modules-load",
+  "crates/mute-console",
   "crates/mount",
   "crates/network-generator",
   "crates/networkctl",

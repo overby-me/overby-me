@@ -440,6 +440,37 @@ in
           ln -sfn ../systemd-ask-password.socket /usr/lib/systemd/system/sockets.target.wants/systemd-ask-password.socket
         fi
 
+        # The rust-systemd package doesn't enable systemd-mute-console.socket by
+        # default, so provide it inline for TEST-74-AUX-UTILS.mute-console: the
+        # introspect/call of /run/systemd/io.systemd.MuteConsole needs a listening
+        # Accept=yes varlink socket that spawns systemd-mute-console per connection
+        # (the accepted connection is passed as fd 3 via LISTEN_FDS).
+        if [ ! -e /usr/lib/systemd/system/systemd-mute-console.socket ]; then
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Console Output Muting Service Socket' \
+            'DefaultDependencies=no' \
+            'Before=sockets.target' \
+            '[Socket]' \
+            'ListenStream=/run/systemd/io.systemd.MuteConsole' \
+            'FileDescriptorName=varlink' \
+            'SocketMode=0600' \
+            'Accept=yes' \
+            'MaxConnectionsPerSource=16' \
+            '[Install]' \
+            'WantedBy=sockets.target' \
+            > /usr/lib/systemd/system/systemd-mute-console.socket
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=Console Output Muting Service' \
+            'DefaultDependencies=no' \
+            '[Service]' \
+            'ExecStart=/usr/bin/systemd-mute-console' \
+            > /usr/lib/systemd/system/systemd-mute-console@.service
+          mkdir -p /usr/lib/systemd/system/sockets.target.wants
+          ln -sfn ../systemd-mute-console.socket /usr/lib/systemd/system/sockets.target.wants/systemd-mute-console.socket
+        fi
+
         # Symlink helper binaries (systemd-sysctl, etc.) so tests referencing
         # /usr/lib/systemd/systemd-* can find them (NixOS puts them in the store)
         for bin in ${config.systemd.package}/lib/systemd/systemd-*; do

@@ -1958,6 +1958,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "systemd-mute-console"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+]
+
+[[package]]
 name = "systemd-network-generator"
 version = "0.1.0"
 dependencies = [

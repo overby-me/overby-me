@@ -1,0 +1,13 @@
+[package]
+name = "systemd-mute-console"
+version = "0.1.0"
+authors = ["Niclas Overby <niclas@overby.me>"]
+edition = "2024"
+
+[[bin]]
+name = "systemd-mute-console"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+serde_json = "1"

@@ -18,7 +18,7 @@ fn main() -> ExitCode {
     let mut rest: Vec<String> = Vec::new();
     for a in &args[1..] {
         match a.as_str() {
-            "--more" | "-m" => more = true,
+            "--more" | "-m" | "-E" => more = true,
             "--json=short" | "--json=pretty" | "-J" => {} // accepted, no-op formatting hints
             _ => rest.push(a.clone()),
         }
@@ -149,27 +149,33 @@ fn varlink_request(
     }
 }
 
-/// Exec `exe` as a varlink server, passing a connected socket as fd 3 with
-/// `LISTEN_FDS=1`/`LISTEN_PID=<child>`, and run one request/response exchange.
-fn exec_and_request(
-    exe: &str,
-    request: &serde_json::Value,
-) -> Result<serde_json::Value, String> {
+/// Fork+exec `exe` as a varlink server, passing a connected socket as fd 3 with
+/// `LISTEN_FDS=1`/`LISTEN_PID=<child>` (the systemd socket-activation
+/// convention). Returns the running child and our end of the connection.
+fn spawn_varlink_server(exe: &str) -> Result<(std::process::Child, UnixStream), String> {
     use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
 
     let (parent, child) = UnixStream::pair().map_err(|e| format!("socketpair failed: {e}"))?;
     let child_fd = child.as_raw_fd();
     let listen_pid_key = std::ffi::CString::new("LISTEN_PID").unwrap();
+    let listen_fds_key = std::ffi::CString::new("LISTEN_FDS").unwrap();
+    let listen_fds_val = std::ffi::CString::new("1").unwrap();
 
     let mut cmd = std::process::Command::new(exe);
-    cmd.env("LISTEN_FDS", "1");
+    // NB: do NOT set LISTEN_FDS via cmd.env(). Setting any env through Command
+    // makes Rust build an explicit envp array that REPLACES `environ` *after*
+    // our pre_exec closure runs, which would discard the LISTEN_PID we setenv()
+    // below (its value, the child's own pid, is unknowable before fork). Set
+    // both LISTEN_* vars via setenv() in pre_exec so the inherited `environ`
+    // (used by execvp) carries them through to the server.
     unsafe {
         cmd.pre_exec(move || {
             // Move the child socket to fd 3 (dup2 clears CLOEXEC so it survives exec).
             if libc::dup2(child_fd, 3) < 0 {
                 return Err(std::io::Error::last_os_error());
             }
+            libc::setenv(listen_fds_key.as_ptr(), listen_fds_val.as_ptr(), 1);
             // LISTEN_PID must be the server's own pid (getpid in this child).
             if let Ok(val) = std::ffi::CString::new(std::process::id().to_string()) {
                 libc::setenv(listen_pid_key.as_ptr(), val.as_ptr(), 1);
@@ -178,11 +184,19 @@ fn exec_and_request(
         });
     }
 
-    let mut server = cmd
+    let server = cmd
         .spawn()
         .map_err(|e| format!("Failed to exec {exe}: {e}"))?;
     drop(child); // only the server should hold the child end now
+    Ok((server, parent))
+}
 
+/// Exec `exe` as a varlink server and run one request/response exchange.
+fn exec_and_request(
+    exe: &str,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let (mut server, parent) = spawn_varlink_server(exe)?;
     parent.set_read_timeout(Some(Duration::from_secs(30))).ok();
     parent.set_write_timeout(Some(Duration::from_secs(5))).ok();
     let result = varlink_request_stream(&parent, request);
@@ -228,17 +242,32 @@ fn varlink_request_stream(
     }
 }
 
-/// varlinkctl call <socket_path> <method> [parameters_json]
-fn cmd_call(args: &[String], more: bool) -> ExitCode {
-    if args.len() < 2 {
-        eprintln!("Usage: varlinkctl [--more] call <socket_path> <method> [parameters_json]");
+/// varlinkctl [-E|--more|-m] call <target> <method> [parameters_json]
+///
+/// Flags may appear after the `call` verb too (upstream accepts, e.g.,
+/// `varlinkctl call -E ADDRESS METHOD PARAMS`). `-E` is short for
+/// `--more --timeout=infinity`.
+fn cmd_call(args: &[String], more_leading: bool) -> ExitCode {
+    let mut more = more_leading;
+    let mut positional: Vec<String> = Vec::with_capacity(args.len());
+    for a in args {
+        match a.as_str() {
+            "-E" | "--more" | "-m" => more = true,
+            "-O" | "--oneway" | "-J" | "--collect" | "-q" | "--quiet" => {} // accepted, no-op
+            s if s.starts_with("--timeout") || s.starts_with("--json") => {} // accepted, no-op
+            _ => positional.push(a.clone()),
+        }
+    }
+
+    if positional.len() < 2 {
+        eprintln!("Usage: varlinkctl [-E|--more] call <target> <method> [parameters_json]");
         return ExitCode::FAILURE;
     }
 
-    let socket_path = &args[0];
-    let method = &args[1];
-    let parameters: serde_json::Value = if args.len() >= 3 {
-        match serde_json::from_str(&args[2]) {
+    let socket_path = &positional[0];
+    let method = &positional[1];
+    let parameters: serde_json::Value = if positional.len() >= 3 {
+        match serde_json::from_str(&positional[2]) {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("varlinkctl: invalid parameters JSON: {e}");
@@ -266,17 +295,8 @@ fn cmd_call(args: &[String], more: bool) -> ExitCode {
     };
 
     if more {
-        match varlink_request_more(socket_path, &request) {
-            Ok(replies) => {
-                for r in &replies {
-                    if let Some(error) = r.get("error") {
-                        eprintln!("varlinkctl: error: {error}");
-                        return ExitCode::FAILURE;
-                    }
-                    print_reply(r);
-                }
-                ExitCode::SUCCESS
-            }
+        match varlink_call_more(socket_path, &request) {
+            Ok(code) => code,
             Err(e) => {
                 eprintln!("varlinkctl: {e}");
                 ExitCode::FAILURE
@@ -300,36 +320,55 @@ fn cmd_call(args: &[String], more: bool) -> ExitCode {
     }
 }
 
-/// Send one request and read a stream of NUL-framed replies until one lacks
-/// `"continues": true` (or EOF). Used for `--more` calls.
-fn varlink_request_more(
-    target: &str,
-    request: &serde_json::Value,
-) -> Result<Vec<serde_json::Value>, String> {
+/// A `--more`/`-E` call: send `request` over an established connection (socket
+/// target) or a freshly exec'd server (executable target), then print each
+/// NUL-framed reply until one lacks `"continues": true` (or EOF).
+///
+/// The write side is deliberately NOT shut down. Keep-open methods reply with
+/// `continues=true` and hold the call open for the lifetime of the connection;
+/// they observe our disconnect only when this process exits or is killed. That
+/// matches upstream `-E` (= `--more --timeout=infinity`): the read blocks
+/// indefinitely (no read timeout) until the server sends a final reply or we
+/// are terminated.
+fn varlink_call_more(target: &str, request: &serde_json::Value) -> Result<ExitCode, String> {
     let is_socket = std::fs::metadata(target)
         .map(|m| m.file_type().is_socket())
         .unwrap_or(false);
-    if !is_socket {
-        // For exec-mode targets a single exchange is sufficient for our uses.
-        return varlink_request(target, request).map(|r| vec![r]);
+
+    if is_socket {
+        let stream =
+            UnixStream::connect(target).map_err(|e| format!("Failed to connect to {target}: {e}"))?;
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        stream_more(&stream, request)
+    } else {
+        let (mut server, parent) = spawn_varlink_server(target)?;
+        parent.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        let result = stream_more(&parent, request);
+        // Closing our end lets a keep-open server observe EOF and restore.
+        drop(parent);
+        let _ = server.wait();
+        result
     }
+}
 
-    let stream = UnixStream::connect(target).map_err(|e| format!("Failed to connect to {target}: {e}"))?;
-    stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
-    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
-
-    let mut writer = &stream;
+/// Send `request` (without shutting the write side) and print each streamed
+/// reply until one is final (`continues` unset/false) or the peer closes.
+fn stream_more(stream: &UnixStream, request: &serde_json::Value) -> Result<ExitCode, String> {
+    let mut writer = stream;
     let mut msg = serde_json::to_vec(request).map_err(|e| format!("JSON encode error: {e}"))?;
     msg.push(0);
-    writer.write_all(&msg).map_err(|e| format!("Failed to send request: {e}"))?;
+    writer
+        .write_all(&msg)
+        .map_err(|e| format!("Failed to send request: {e}"))?;
 
-    let mut reader = BufReader::new(&stream);
-    let mut replies = Vec::new();
+    let mut reader = BufReader::new(stream);
     loop {
         let mut buf = Vec::new();
-        let n = reader.read_until(0, &mut buf).map_err(|e| format!("Failed to read response: {e}"))?;
+        let n = reader
+            .read_until(0, &mut buf)
+            .map_err(|e| format!("Failed to read response: {e}"))?;
         if n == 0 {
-            break; // EOF
+            break; // EOF: peer closed
         }
         if buf.last() == Some(&0) {
             buf.pop();
@@ -339,13 +378,21 @@ fn varlink_request_more(
         }
         let reply: serde_json::Value =
             serde_json::from_slice(&buf).map_err(|e| format!("Invalid JSON response: {e}"))?;
+        if let Some(error) = reply.get("error") {
+            eprintln!("varlinkctl: error: {error}");
+            return Ok(ExitCode::FAILURE);
+        }
+        if let Some(params) = reply.get("parameters") {
+            println!("{}", serde_json::to_string_pretty(params).unwrap());
+        } else {
+            println!("{}", serde_json::to_string_pretty(&reply).unwrap());
+        }
         let continues = reply.get("continues").and_then(|v| v.as_bool()).unwrap_or(false);
-        replies.push(reply);
         if !continues {
             break;
         }
     }
-    Ok(replies)
+    Ok(ExitCode::SUCCESS)
 }
 
 /// varlinkctl introspect <socket_path> [interface]
