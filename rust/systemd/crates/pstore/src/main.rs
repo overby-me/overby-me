@@ -25,9 +25,9 @@
 
 use std::fs;
 use std::io;
+use std::os::unix::net::UnixDatagram;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::time::SystemTime;
 
 const PSTORE_SOURCE: &str = "/sys/fs/pstore";
 const PSTORE_ARCHIVE: &str = "/var/lib/systemd/pstore";
@@ -152,13 +152,106 @@ fn load_config() -> Config {
     config
 }
 
-/// Generate a unique subdirectory name based on the current timestamp.
-fn archive_dir_name() -> String {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
+/// Log a processed pstore file to the journal: a MESSAGE plus, when the file
+/// has content, a binary `FILE=` field carrying the raw bytes. The native
+/// journal protocol's length-prefixed binary field form is used so multi-line
+/// content round-trips — a plain `KEY=value\n` line cannot carry embedded
+/// newlines. Mirrors systemd-pstore's `sd_journal_sendv()` (src/pstore/pstore.c).
+fn journal_log_pstore(message: &str, content: &[u8]) {
+    let sock = match UnixDatagram::unbound() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    // Leave the socket blocking: systemd-pstore is a short-lived helper (not
+    // PID 1), so it must wait for journald to drain rather than dropping a
+    // datagram when the burst of per-file messages fills the socket buffer —
+    // otherwise a reconstructed dmesg loses a chunk in the FILE= stream.
 
-    format!("{}.{:06}", now.as_secs(), now.subsec_micros())
+    let mut payload: Vec<u8> = Vec::new();
+    payload.extend_from_slice(format!("MESSAGE={message}\n").as_bytes());
+    payload.extend_from_slice(b"PRIORITY=6\n");
+    payload.extend_from_slice(b"SYSLOG_IDENTIFIER=systemd-pstore\n");
+    if !content.is_empty() {
+        // Binary field: `FILE\n` + 8-byte little-endian length + bytes + `\n`.
+        payload.extend_from_slice(b"FILE\n");
+        payload.extend_from_slice(&(content.len() as u64).to_le_bytes());
+        payload.extend_from_slice(content);
+        payload.push(b'\n');
+    }
+
+    let _ = sock.send_to(&payload, "/run/systemd/journal/socket");
+}
+
+/// Build `archive_base[/subdir1[/subdir2]]`.
+fn archive_subdir(archive_base: &Path, subdir1: Option<&str>, subdir2: Option<&str>) -> PathBuf {
+    let mut dir = archive_base.to_path_buf();
+    if let Some(s1) = subdir1 {
+        dir.push(s1);
+    }
+    if let Some(s2) = subdir2 {
+        dir.push(s2);
+    }
+    dir
+}
+
+/// Log a pstore file to the journal (always) and, when Storage=external, copy
+/// it into the archive at `archive_base[/subdir1[/subdir2]]/name`. Removes the
+/// original from pstore when `unlink` is set. Mirrors upstream `move_file()`.
+#[allow(clippy::too_many_arguments)]
+fn move_file(
+    source: &Path,
+    archive_base: &Path,
+    name: &str,
+    content: &[u8],
+    subdir1: Option<&str>,
+    subdir2: Option<&str>,
+    external: bool,
+    unlink: bool,
+) {
+    let dir = archive_subdir(archive_base, subdir1, subdir2);
+    let dst_file = dir.join(name);
+
+    // Always log to the journal, carrying the file content in FILE=.
+    let message = if external {
+        format!("PStore {} moved to {}", name, dst_file.display())
+    } else {
+        format!("PStore {}.", name)
+    };
+    journal_log_pstore(&message, content);
+
+    if external {
+        let _ = fs::create_dir_all(&dir);
+        if let Err(e) = fs::write(&dst_file, content) {
+            eprintln!("Warning: failed to archive {}: {}", name, e);
+            return;
+        }
+        eprintln!("Archived {} -> {}", name, dst_file.display());
+    }
+
+    if unlink {
+        let _ = fs::remove_file(source.join(name));
+    }
+}
+
+/// Append a dmesg chunk's content to the reconstructed `dmesg.txt` under
+/// `archive_base[/subdir1[/subdir2]]` (external storage only). Mirrors upstream
+/// `append_dmesg()`.
+fn append_dmesg(
+    archive_base: &Path,
+    subdir1: Option<&str>,
+    subdir2: Option<&str>,
+    content: &[u8],
+) {
+    if content.is_empty() {
+        return;
+    }
+    let dir = archive_subdir(archive_base, subdir1, subdir2);
+    let _ = fs::create_dir_all(&dir);
+    let path = dir.join("dmesg.txt");
+    use std::io::Write;
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = f.write_all(content);
+    }
 }
 
 /// List entries in the pstore source directory.
@@ -173,7 +266,10 @@ fn list_pstore_entries(source: &Path) -> io::Result<Vec<fs::DirEntry>> {
     Ok(entries)
 }
 
-/// Archive pstore entries to the archive directory.
+/// Archive pstore entries. dmesg chunks (EFI/ERST backends) are reconstructed
+/// into a single `dmesg.txt` under a per-record subdirectory, and every file is
+/// logged to the journal with its content in a `FILE=` field. Mirrors upstream
+/// systemd-pstore's `process_dmesg_files()` + `move_file()` (src/pstore/pstore.c).
 fn archive_entries(source: &Path, archive_base: &Path, config: &Config) -> io::Result<usize> {
     let entries = match list_pstore_entries(source) {
         Ok(e) => e,
@@ -192,43 +288,105 @@ fn archive_entries(source: &Path, archive_base: &Path, config: &Config) -> io::R
         return Ok(0);
     }
 
-    // Create the archive subdirectory.
-    let subdir_name = archive_dir_name();
-    let archive_dir = archive_base.join(&subdir_name);
+    let external = config.storage == Storage::External;
 
-    fs::create_dir_all(&archive_dir)?;
+    // Read each entry's name and content up front. list_pstore_entries returns
+    // them sorted by name; dmesg chunks are processed in reverse order so the
+    // parts append into the original dmesg order.
+    let mut items: Vec<(String, Vec<u8>, bool)> = entries
+        .iter()
+        .map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let content = fs::read(e.path()).unwrap_or_default();
+            (name, content, false)
+        })
+        .collect();
 
-    let mut archived = 0;
+    // Pass 1: reconstruct dmesg files (EFI and ERST backends).
+    let mut last_record_id: u64 = 0;
+    let mut erst_subdir: Option<String> = None;
+    for i in (0..items.len()).rev() {
+        if items[i].2 {
+            continue;
+        }
+        let name = items[i].0.clone();
+        // `.enc.z` indicates an encrypted/compressed record we can't reassemble.
+        if name.ends_with(".enc.z") || !name.starts_with("dmesg-") {
+            continue;
+        }
+        let content = items[i].1.clone();
 
-    for entry in &entries {
-        let src_path = entry.path();
-        let file_name = entry.file_name();
-        let dst_path = archive_dir.join(&file_name);
-
-        match fs::copy(&src_path, &dst_path) {
-            Ok(_) => {
-                eprintln!("Archived {} -> {}", src_path.display(), dst_path.display());
-                archived += 1;
-
-                // Remove the original if configured.
-                if config.unlink
-                    && let Err(e) = fs::remove_file(&src_path)
-                {
-                    eprintln!("Warning: failed to remove {}: {}", src_path.display(), e);
-                }
+        if let Some(rid) = name
+            .strip_prefix("dmesg-efi-")
+            .or_else(|| name.strip_prefix("dmesg-efi_pstore-"))
+        {
+            // EFI record id: <timestamp><part(2)><count(3)>. Group by the base
+            // record id (timestamp) and the count; the 2-digit part is dropped.
+            if rid.len() < 6 {
+                continue;
             }
-            Err(e) => {
-                eprintln!("Warning: failed to archive {}: {}", src_path.display(), e);
+            let s1 = rid[..rid.len() - 5].to_owned();
+            let s2 = rid[rid.len() - 3..].to_owned();
+            move_file(
+                source,
+                archive_base,
+                &name,
+                &content,
+                Some(&s1),
+                Some(&s2),
+                external,
+                config.unlink,
+            );
+            if external {
+                append_dmesg(archive_base, Some(&s1), Some(&s2), &content);
             }
+            items[i].2 = true;
+        } else if let Some(rid) = name.strip_prefix("dmesg-erst-") {
+            // ERST record id is a monotonically increasing number. A break in
+            // the sequence starts a new group whose subdir is that record id.
+            let Ok(record_id) = rid.parse::<u64>() else {
+                continue;
+            };
+            if last_record_id.wrapping_sub(1) != record_id {
+                erst_subdir = Some(rid.to_owned());
+            }
+            move_file(
+                source,
+                archive_base,
+                &name,
+                &content,
+                erst_subdir.as_deref(),
+                None,
+                external,
+                config.unlink,
+            );
+            if external {
+                append_dmesg(archive_base, erst_subdir.as_deref(), None, &content);
+            }
+            last_record_id = record_id;
+            items[i].2 = true;
         }
     }
 
-    if archived == 0 && !entries.is_empty() {
-        // Remove the empty archive directory if nothing was archived.
-        let _ = fs::remove_dir(&archive_dir);
+    // Pass 2: any remaining (non-dmesg) files go straight to the archive root.
+    for item in &mut items {
+        if item.2 {
+            continue;
+        }
+        move_file(
+            source,
+            archive_base,
+            &item.0,
+            &item.1,
+            None,
+            None,
+            external,
+            config.unlink,
+        );
+        item.2 = true;
     }
 
-    Ok(archived)
+    Ok(items.iter().filter(|it| it.2).count())
 }
 
 fn run(source: &Path, archive: &Path) -> i32 {
@@ -414,17 +572,6 @@ mod tests {
     }
 
     #[test]
-    fn test_archive_dir_name_format() {
-        let name = archive_dir_name();
-        // Should be in "seconds.microseconds" format.
-        assert!(name.contains('.'));
-        let parts: Vec<&str> = name.split('.').collect();
-        assert_eq!(parts.len(), 2);
-        assert!(parts[0].parse::<u64>().is_ok());
-        assert!(parts[1].parse::<u32>().is_ok());
-    }
-
-    #[test]
     fn test_list_pstore_entries_empty_dir() {
         let dir = temp_dir();
         let entries = list_pstore_entries(dir.path()).unwrap();
@@ -487,20 +634,16 @@ mod tests {
         let count = archive_entries(&source, &archive, &config).unwrap();
         assert_eq!(count, 2);
 
-        // Check that the archive directory was created with entries.
-        let subdirs: Vec<_> = fs::read_dir(&archive)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .collect();
-        assert_eq!(subdirs.len(), 1);
-
-        let subdir = subdirs[0].path();
-        let archived_files: Vec<String> = fs::read_dir(&subdir)
+        // Non-EFI/ERST backends aren't reconstructed: each file is archived
+        // directly under the archive root (matching upstream move_file()).
+        let archived_files: Vec<String> = fs::read_dir(&archive)
             .unwrap()
             .filter_map(|e| e.ok())
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(archived_files.len(), 2);
+        assert!(archive.join("dmesg-ramoops-0").is_file());
+        assert!(archive.join("console-ramoops-0").is_file());
 
         // Source files should still exist (unlink=false).
         assert!(source.join("dmesg-ramoops-0").exists());
@@ -579,15 +722,8 @@ mod tests {
 
         archive_entries(&source, &archive, &config).unwrap();
 
-        // Find the archived file and check its content.
-        let subdir = fs::read_dir(&archive)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .next()
-            .unwrap()
-            .path();
-
-        let archived = fs::read_to_string(subdir.join("dmesg-ramoops-0")).unwrap();
+        // Non-EFI/ERST files are archived directly under the archive root.
+        let archived = fs::read_to_string(archive.join("dmesg-ramoops-0")).unwrap();
         assert_eq!(archived, crash_data);
     }
 
