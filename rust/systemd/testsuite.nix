@@ -381,6 +381,9 @@ in
         # upstream units because loading hundreds of extra units at boot can
         # overwhelm PID 1.
         mkdir -p /usr/lib/systemd/system
+        # Writable network config dir for tests that write .network/.netdev/.link
+        # files under /usr/lib/systemd/network/ (TEST-74-AUX-UTILS.networkctl.sh).
+        mkdir -p /usr/lib/systemd/network
         for f in ${config.systemd.package}/example/systemd/system/systemd-importd.service \
                  ${config.systemd.package}/example/systemd/system/systemd-journald@.service \
                  ${config.systemd.package}/example/systemd/system/systemd-journald@.socket \
