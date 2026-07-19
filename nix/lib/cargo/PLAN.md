@@ -37,7 +37,10 @@ Allowed at eval time:
 
 Banned:
 
-- Reading any derivation output at eval time (IFD).
+- Reading any derivation output at eval time (IFD). One opt-in exception:
+  when `index` is omitted, the mini-index is reconstructed from the crate
+  tarballs by a pure derivation and read via IFD (see Index sourcing). Passing
+  a committed snapshot keeps evaluation strictly IFD-free.
 - Running cargo at eval time, or committing generated Nix.
 - Unpinned network access at eval time.
 
@@ -57,8 +60,8 @@ assignment. Everything else moves to build time where reading files is free.
 
 ## Index sourcing
 
-The registry index is the one input that is neither in the repo nor derivable
-from the lock. Two supported strategies:
+The registry index metadata is not in the lock and not in the repo. Three
+supported strategies:
 
 1. **Snapshot (default here).** A committed mini-index containing only the
    exact `name@version` entries appearing in the repo's lockfiles, in the
@@ -72,9 +75,20 @@ from the lock. Two supported strategies:
    `flake = false`. Fully pure and covers any lockfile with zero per-project
    steps, at the cost of a very large input. Supported by taking the index
    path as an argument; not wired into this repo's flake by default.
+3. **IFD from the crate tarballs (`index` omitted).** The metadata *is*
+   derivable from the lock after all: each crate's published `Cargo.toml` is
+   what crates.io turns into its index entry, and we already fetch every
+   `.crate` tarball as a fixed-output derivation (hash from the lock).
+   `tools/tarball-index.nu` reads those `Cargo.toml`s inside a derivation and
+   re-emits the mini-index; `lib/index.nix` reads the output at eval time.
+   Pure and cacheable (content-verified tarballs, no network, no sandbox
+   relaxation) but pays one IFD on the eval path. Verified: an IFD-built index
+   yields a byte-identical final derivation to the committed snapshot for
+   `rust/wclip`. Removes the per-project snapshot chore for callers that
+   accept IFD.
 
-The library takes `index` as a plain path argument so both work, and tests use
-tiny hand-trimmed fixtures.
+The library takes `index` as a plain path argument (or null for strategy 3),
+and tests use tiny hand-trimmed fixtures.
 
 Index entry schema notes: JSON lines with `name`, `vers`, `deps[]` (`name`,
 `req`, `features`, `optional`, `default_features`, `target`, `kind`,

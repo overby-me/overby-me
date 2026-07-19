@@ -2,12 +2,12 @@
 
 Nix builder for Rust projects with per-crate derivations. Parses `Cargo.lock`
 and a registry index at evaluation time: no generated `Cargo.nix`, no cargo
-inside the sandbox (rustc is invoked directly by a nushell driver). The
-default index is a committed snapshot, so evaluation stays free of
-import-from-derivation; pointing `index` at a full crates.io index is an
-optional alternative (pure as a `flake = false` input, or IFD if you supply a
-derivation-built one). Compiled dependency crates are shared between all
-projects in the repo and cacheable per crate+version+features.
+inside the sandbox (rustc is invoked directly by a nushell driver). Pass a
+committed index snapshot to keep evaluation free of import-from-derivation, or
+omit `index` and the mini-index is reconstructed from the crates' own
+tarballs by a pure IFD derivation (no network, no cargo). Compiled dependency
+crates are shared between all projects in the repo and cacheable per
+crate+version+features.
 
 Design, milestones, benchmarks, and the nocargo landmine audit:
 [PLAN.md](./PLAN.md). Headline numbers (rust/systemd, 100 members, 322
@@ -32,10 +32,16 @@ workspace recompile `buildRustPackage` pays; cranelift dev builds go
    `rustc --print cfg` set is computed once per toolchain and shared across
    every build-script sandbox rather than recomputed per crate.
 3. The registry metadata that is not in the lock (dep kinds, features,
-   optionality, cfg gates) comes from an index checkout. By default that is a
-   committed mini-index snapshot produced by `tools/snapshot-index.nu` from
-   the sparse index: small, diff-friendly, no IFD. Pointing `index` at a full
-   crates.io index checkout also works (see the `index` parameter).
+   optionality, cfg gates) comes from an index checkout. Passing a committed
+   mini-index snapshot (produced by `tools/snapshot-index.nu` from the sparse
+   index: small, diff-friendly, no IFD) is the pure default; a full crates.io
+   index checkout also works. When `index` is omitted, `tools/tarball-index.nu`
+   rebuilds the mini-index inside a derivation by reading each crate's
+   published `Cargo.toml` out of the same fixed-output `.crate` tarballs the
+   build already fetches, and `lib/index.nix` reads that output at eval time.
+   That is the library's one import-from-derivation, and it stays pure: the
+   tarballs are content-verified by the lock checksums, so no network and no
+   sandbox relaxation are involved.
 4. `[profile.release]`/`[profile.dev]` from the workspace root are honored
    (`lto`, `strip`, `panic`, `codegen-units`, `debug`, including
    `debug = "line-tables-only"`), plus per-package overrides:
@@ -61,6 +67,11 @@ packages.my-tool = {lib, ...}:
   };
 ```
 
+Drop `index` entirely to let the builder reconstruct the mini-index from the
+crate tarballs by IFD: no committed snapshot to maintain, at the cost of one
+import-from-derivation on the eval path (and losing pure-eval strictness).
+Passing a snapshot stays the recommended default for checked-in projects.
+
 After updating a `Cargo.lock`, refresh the snapshot:
 
 ```console
@@ -79,7 +90,7 @@ nix shell nixpkgs#cargo -c nu nix/lib/cargo/tools/diff-cargo.nu sweep rust/*/
 | Parameter | Default | Description |
 |---|---|---|
 | `src` | required | Source root containing the workspace |
-| `index` | required | Registry index checkout (snapshot or full crates.io index) |
+| `index` | `null` | Registry index checkout (snapshot or full crates.io index); `null` reconstructs the mini-index from the crate tarballs by IFD |
 | `manifestDir` | `""` | Workspace manifest location inside `src` (for path deps on sibling projects) |
 | `lockFile` | `src/manifestDir/Cargo.lock` | Lock file override |
 | `pname` | root crate name | Package name (required for multi-root workspaces) |
@@ -124,6 +135,8 @@ dev-machine path).
 - `build/` per-crate rustc driver (`crate-builder.nu`) and derivation
   wrappers
 - `tools/snapshot-index.nu` sparse-index snapshotter
+- `tools/tarball-index.nu` IFD fallback: rebuilds the mini-index from crate
+  tarballs when `index` is omitted
 - `tools/diff-cargo.nu` differential oracle against `cargo tree`
 - `index/` committed snapshot covering this repo's lockfiles
 - `tests/` eval unit tests (`nix eval -f nix/lib/cargo/tests/<mod>.nix`)
