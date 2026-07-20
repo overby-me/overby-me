@@ -21,6 +21,14 @@ fn main() {
         || exec_name.ends_with("rust-systemd")
         || exec_name.ends_with("systemd_rs")
         || exec_name.ends_with("systemd")
+        // Being invoked as `init` (basename) is the system-manager signal too:
+        // systemd-nspawn runs a container payload it doesn't recognise as
+        // systemd *as PID 2* (with its own stub as PID 1), exec'ing the
+        // container's `/sbin/init` (here a symlink to us) under argv[0]
+        // `/bin/init`. In that case is_pid1 is false, so match the name.
+        || std::path::Path::new(&exec_name)
+            .file_name()
+            .is_some_and(|s| s == "init")
     {
         libsystemd::entrypoints::run_service_manager();
     } else {
