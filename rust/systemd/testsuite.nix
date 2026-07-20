@@ -738,7 +738,12 @@ in
       # "prerequisite missing, skip") creates /skipped even when the script
       # didn't touch it itself (e.g. TEST-83-BTRFS exits 77 on non-btrfs root
       # without writing /skipped).
-      test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}bash -c './${testName}.sh; rc=$?; [ $rc -eq 77 ] && touch /skipped; exit $rc' 2>&1 | tee /dev/ttyS0"
+      # Run the test in its OWN session (setsid) so it is not a background
+      # process group of the backdoor shell's controlling tty (/dev/hvc0).
+      # Without this, util-linux `script`'s tcsetattr(STDIN, raw) generates
+      # SIGTTOU and hangs forever (task #51: blocks networkctl-edit + pty-forward).
+      # `-w` waits for the child so the /testok check below still works.
+      test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}setsid -w bash -c './${testName}.sh; rc=$?; [ $rc -eq 77 ] && touch /skipped; exit $rc' 2>&1 | tee /dev/ttyS0"
 
       try:
           (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
