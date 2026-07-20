@@ -3526,6 +3526,20 @@ fn builtin_net_setup_link(event: &mut UEvent) {
             .insert("ID_NET_LINK_FILE_ALTNAMES".to_string(), alt_names.join(" "));
     }
 
+    // Apply Alias= directly to the interface (IFLA_IFALIAS via sysfs) so
+    // `ip link show` reports `alias <value>`. Unlike the ID_NET_LINK_FILE_*
+    // exports above this is a real device setting; it persists across a
+    // subsequent NamePolicy rename since it is an interface attribute.
+    if let Some(ref alias) = link.link_section.alias {
+        let ifalias_path = format!("/sys/class/net/{original_name}/ifalias");
+        if let Err(e) = std::fs::write(&ifalias_path, alias) {
+            log::debug!(
+                "net_setup_link: could not set ifalias for '{}': {}",
+                original_name, e
+            );
+        }
+    }
+
     // .link file Property=/UnsetProperty=/ImportProperty= apply only on
     // add/bind/move events.  Upstream `link_apply_config` early-returns
     // for any other action (notably 'change') so re-processing a device

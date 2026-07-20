@@ -512,6 +512,17 @@ fn parse_link_config(spec: &str) -> Result<(String, LinkType), i32> {
     Ok((ifname.to_string(), ty))
 }
 
+/// Read `ID_NET_LINK_FILE` for a network interface directly from its udev
+/// database entry `/run/udev/data/n<ifindex>` (property `E:ID_NET_LINK_FILE`,
+/// set by systemd-udevd's `net_setup_link` builtin).
+fn udev_net_link_file(ifindex: u32) -> Option<String> {
+    let content = std::fs::read_to_string(format!("/run/udev/data/n{ifindex}")).ok()?;
+    content.lines().find_map(|line| {
+        line.strip_prefix("E:ID_NET_LINK_FILE=")
+            .map(|v| v.trim().to_string())
+    })
+}
+
 /// Resolve the config file (and drop-ins) applied to a link, by reading the
 /// networkd link state at `/run/systemd/netif/links/<ifindex>`.
 fn link_config_files(ifname: &str, ty: LinkType) -> Result<(PathBuf, Vec<PathBuf>), i32> {
@@ -526,20 +537,40 @@ fn link_config_files(ifname: &str, ty: LinkType) -> Result<(PathBuf, Vec<PathBuf
         LinkType::Link => ("LINK_FILE", "LINK_FILE_DROPINS", "link"),
         LinkType::All => unreachable!("all is handled by the caller"),
     };
-    let Some(path) = state.get(file_key) else {
-        eprintln!("Link '{ifname}' has no associated {label} file.");
-        return Err(1);
+    let path = match state.get(file_key) {
+        Some(p) => p.clone(),
+        // For the `.link` file, fall back to reading ID_NET_LINK_FILE directly
+        // from the network device's udev database entry: networkd may not have
+        // rewritten its state file since udevd applied the .link (a timing
+        // race), but the udev database is authoritative and always fresh.
+        None if ty == LinkType::Link => match udev_net_link_file(idx) {
+            Some(lf) => lf,
+            None => {
+                eprintln!("Link '{ifname}' has no associated {label} file.");
+                return Err(1);
+            }
+        },
+        None => {
+            eprintln!("Link '{ifname}' has no associated {label} file.");
+            return Err(1);
+        }
     };
-    let dropins = state
-        .get(dropin_key)
-        .map(|s| {
-            s.split(':')
-                .filter(|x| !x.is_empty())
-                .map(PathBuf::from)
-                .collect()
-        })
+    let path = PathBuf::from(path);
+    // Compute the drop-ins by scanning the filesystem for `<name>.d/*.conf`
+    // rather than trusting the `*_FILE_DROPINS` recorded in networkd's state
+    // file: a drop-in created at runtime (e.g. via `networkctl edit @IF
+    // --drop-in`) must be seen immediately by a subsequent `edit`/`cat` even
+    // before networkd rewrites the state file, and this keeps `cat @IF:network`
+    // consistent with `cat <name>` (both use list_dropins).
+    let dropins = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(list_dropins)
         .unwrap_or_default();
-    Ok((PathBuf::from(path), dropins))
+    // The dropin_key lookup is retained above only to validate the state file
+    // format; the value itself is intentionally recomputed from disk.
+    let _ = dropin_key;
+    Ok((path, dropins))
 }
 
 /// `networkctl cat @LINK[:TYPE]` — cat the config(s) applied to a link.

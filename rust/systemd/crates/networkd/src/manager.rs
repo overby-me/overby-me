@@ -1218,6 +1218,29 @@ impl NetworkManager {
             .join(":")
     }
 
+    /// Read the `.link` file (and its drop-ins) that systemd-udevd applied to a
+    /// network interface, from its udev database entry
+    /// `/run/udev/data/n<ifindex>` (properties `E:ID_NET_LINK_FILE` and
+    /// `E:ID_NET_LINK_FILE_DROPINS`, set by udev's `net_setup_link` builtin).
+    fn udev_link_file(ifindex: u32) -> Option<(String, Vec<std::path::PathBuf>)> {
+        let content = std::fs::read_to_string(format!("/run/udev/data/n{ifindex}")).ok()?;
+        let mut file: Option<String> = None;
+        let mut dropins: Vec<std::path::PathBuf> = Vec::new();
+        for line in content.lines() {
+            if let Some(v) = line.strip_prefix("E:ID_NET_LINK_FILE=") {
+                file = Some(v.trim().to_string());
+            } else if let Some(v) = line.strip_prefix("E:ID_NET_LINK_FILE_DROPINS=") {
+                dropins = v
+                    .trim()
+                    .split(':')
+                    .filter(|x| !x.is_empty())
+                    .map(std::path::PathBuf::from)
+                    .collect();
+            }
+        }
+        file.map(|f| (f, dropins))
+    }
+
     /// Write runtime state files to `/run/systemd/netif/`.
     pub fn write_state_files(&self) {
         let state_dir = std::path::Path::new("/run/systemd/netif/links");
@@ -1259,6 +1282,19 @@ impl NetworkManager {
                 if !dropins.is_empty() {
                     content.push_str(&format!(
                         "NETDEV_FILE_DROPINS={}\n",
+                        Self::dropins_field(&dropins)
+                    ));
+                }
+            }
+            // Record the .link file that systemd-udevd applied to this
+            // interface, read from the network device's udev database entry
+            // (property ID_NET_LINK_FILE), so `networkctl cat @IF:link` can
+            // resolve it.
+            if let Some((link_file, dropins)) = Self::udev_link_file(managed.link.index) {
+                content.push_str(&format!("LINK_FILE={link_file}\n"));
+                if !dropins.is_empty() {
+                    content.push_str(&format!(
+                        "LINK_FILE_DROPINS={}\n",
                         Self::dropins_field(&dropins)
                     ));
                 }
