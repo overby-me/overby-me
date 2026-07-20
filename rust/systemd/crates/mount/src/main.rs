@@ -96,6 +96,12 @@ struct Cli {
     #[arg(long)]
     collect: bool,
 
+    /// Run a file-system check before mounting (default yes). Accepted for
+    /// compatibility with systemd-mount callers; the transient mount does not
+    /// currently pull in a separate systemd-fsck@ unit.
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "yes")]
+    fsck: Option<String>,
+
     /// Unmount mode (when invoked as systemd-umount)
     #[arg(short, long)]
     umount: bool,
@@ -123,6 +129,27 @@ struct Cli {
     /// Property to set on the transient unit (KEY=VALUE)
     #[arg(short, long)]
     property: Vec<String>,
+
+    /// Probe the device before mounting to discover its filesystem type and
+    /// labels.  Accepted for compatibility; when a WHERE is given the mount
+    /// proceeds letting the kernel auto-detect the type (as without `--type=`).
+    #[arg(long)]
+    discover: bool,
+
+    /// Operate on the given machine/container (`.host` is the local system).
+    /// Accepted for parity; only the local system is supported.
+    #[arg(short = 'M', long, value_name = "NAME")]
+    machine: Option<String>,
+
+    /// For an automount, bind its lifetime to the backing device unit.
+    /// Accepted for compatibility.
+    #[arg(long)]
+    bind_device: bool,
+
+    /// Property to set on the generated automount unit (KEY=VALUE).  Accepted
+    /// for compatibility.
+    #[arg(long)]
+    automount_property: Vec<String>,
 
     /// Positional arguments: WHAT [WHERE] for mount, WHERE for umount
     args: Vec<String>,
