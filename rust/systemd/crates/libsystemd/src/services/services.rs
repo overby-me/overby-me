@@ -1303,15 +1303,19 @@ impl Service {
         }
     }
 
-    fn run_cmd(
+    /// Build and spawn a helper child process (ExecStartPre=/Post=, ExecStop=,
+    /// ExecCondition=, and the preliminary ExecStart= commands of multi-command
+    /// oneshots) and insert it into the pid_table as a Helper entry. Returns the
+    /// spawned `Child` WITHOUT waiting, so a caller can wait on it via the
+    /// pid_table Arc without holding the RuntimeInfo table lock.
+    fn spawn_helper_child(
         &mut self,
         cmdline: &Commandline,
         id: UnitId,
         name: &str,
-        timeout: Option<std::time::Duration>,
         run_info: &RuntimeInfo,
         working_directory: Option<&std::path::PathBuf>,
-    ) -> Result<(), RunCmdError> {
+    ) -> std::io::Result<std::process::Child> {
         // '|' login-shell prefix: run the command line through `sh -c "..."`
         // (argv[0] = "-sh") so shell builtins, PATH resolution, and
         // redirections work — matching the main ExecStart exec-helper path
@@ -1492,6 +1496,23 @@ impl Service {
                 PidEntry::Helper(id.clone(), name.to_string()),
             );
         }
+        spawn_result
+    }
+
+    /// Spawn a helper command and wait for it to complete, processing its exit
+    /// status and captured stdout/stderr. Thin wrapper over
+    /// [`Self::spawn_helper_child`] + `wait_for_helper_child`.
+    fn run_cmd(
+        &mut self,
+        cmdline: &Commandline,
+        id: UnitId,
+        name: &str,
+        timeout: Option<std::time::Duration>,
+        run_info: &RuntimeInfo,
+        working_directory: Option<&std::path::PathBuf>,
+    ) -> Result<(), RunCmdError> {
+        let spawn_result =
+            self.spawn_helper_child(cmdline, id.clone(), name, run_info, working_directory);
         match spawn_result {
             Ok(mut child) => {
                 trace!("Wait for {cmdline:?} for service: {name}");
