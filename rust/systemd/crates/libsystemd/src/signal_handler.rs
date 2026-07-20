@@ -655,6 +655,18 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
     let mut pid_table = ri.pid_table.lock_poisoned();
     let mut restored = 0u32;
 
+    // Names of every unit present in the serialized running-state stream.
+    // Used below to protect against stale-alias corruption: a serialized entry
+    // may only be restored onto a unit via one of its ALIASES if that unit's
+    // canonical name is NOT itself serialized here. Otherwise the canonical
+    // unit restores its own state by name, and the alias entry is stale (e.g.
+    // sus.service symlinked onto a running legit.service) and must not
+    // overwrite it. TEST-07-PID1.alias-corruption.
+    let serialized_names: std::collections::HashSet<&str> = content
+        .lines()
+        .filter_map(|l| l.split('\t').next())
+        .collect();
+
     for line in content.lines() {
         let parts: Vec<&str> = line.split('\t').collect();
         if parts.len() < 2 {
@@ -675,10 +687,21 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
             continue;
         }
 
-        // Find the unit in the table and get its ServiceType.
-        if let Some(unit) = ri.unit_table
+        // Find the unit in the table and get its ServiceType. Prefer an exact
+        // name match; fall back to an alias match only if the aliased unit's
+        // canonical name is not itself serialized (see serialized_names above),
+        // so a stale alias can't overwrite a running canonical unit's PID.
+        if let Some(unit) = ri
+            .unit_table
             .values()
-            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name)) {
+            .find(|u| u.id.name == unit_name)
+            .or_else(|| {
+                ri.unit_table.values().find(|u| {
+                    !serialized_names.contains(u.id.name.as_str())
+                        && u.common.unit.aliases.iter().any(|a| a == unit_name)
+                })
+            })
+        {
             if let crate::units::Specific::Service(srvc) = &unit.specific {
                 pid_table.insert(pid, PidEntry::Service(unit.id.clone(), srvc.conf.srcv_type));
                 restored += 1;
@@ -710,6 +733,12 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
     let status_path = state_path.with_extension("status");
     let mut status_restored = 0u32;
     if let Ok(status_content) = std::fs::read_to_string(&status_path) {
+        // Same stale-alias protection as the PID restore above, keyed on the
+        // status stream's own unit names.
+        let status_names: std::collections::HashSet<&str> = status_content
+            .lines()
+            .filter_map(|l| l.split('\t').next())
+            .collect();
         for line in status_content.lines() {
             let parts: Vec<&str> = line.split('\t').collect();
             if parts.len() < 2 {
@@ -717,9 +746,17 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
             }
             let unit_name = parts[0];
             let target_status = parts[1];
-            if let Some(unit) = ri.unit_table
-            .values()
-            .find(|u| u.id.name == unit_name || u.common.unit.aliases.iter().any(|a| a == unit_name)) {
+            if let Some(unit) = ri
+                .unit_table
+                .values()
+                .find(|u| u.id.name == unit_name)
+                .or_else(|| {
+                    ri.unit_table.values().find(|u| {
+                        !status_names.contains(u.id.name.as_str())
+                            && u.common.unit.aliases.iter().any(|a| a == unit_name)
+                    })
+                })
+            {
                 let current = unit.common.status.read_poisoned();
                 // Only restore if the unit wasn't already handled by PID
                 // restoration above (which sets Started(Running) for
