@@ -85,12 +85,12 @@ known up front. Strategy, in order of preference:
   A large win over the ~45-minute full build, though not seconds-level — see
   configure-stability below.
 - [x] **M5 — depfile-precise staging.** For each compile edge (identified by a
-  gcc/msvc `deps` mode, a non-empty `depfile`, and a source-file input — the
+  gcc/msvc `deps` mode, a non-empty `depfile`, and a source-file input; the
   last excludes CMake link edges, which also carry `deps = gcc` + a `link.d`),
   run a preprocess-only `-M` scan (`build/lower.nix` `scanDepsOf`) with the
   rewrite roots mounted, parse the emitted depfile (`parseDepfile`) for the
   exact set of headers read (including source-relative `#include "../x.h"` that
-  no `-I` covers), and stage precisely those files — dropping the coarse
+  no `-I` covers), and stage precisely those files, dropping the coarse
   `-I`-dir staging. Keeps per-file incrementality correct for multi-target
   builds and for the Darling launcher. The scan command drops output/`-c`/`-M*`
   flags and appends `-M -MF "$DEPS_OUT"`. Checks: `ninja-build-{cmake,cmake-lib}`
