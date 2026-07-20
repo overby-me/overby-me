@@ -74,6 +74,22 @@
       path = src + "/${rel}";
       name = "ninja-src-" + lib.strings.sanitizeDerivationName rel;
     };
+
+  # CMake (and generated wrappers like mig) hardcode a handful of host tool
+  # paths (/bin/mkdir, /usr/bin/env, ...) that do not exist in the pure edge
+  # sandbox. Rewrite them to PATH-relative so the edge toolchain provides them.
+  # /bin/sh is intentionally left alone (Nix mounts it). rmdir is listed before
+  # rm so the longer path wins the left-to-right replaceStrings scan.
+  toolPathSubs = concatMap (t: [
+    {
+      from = "/usr/bin/${t}";
+      to = t;
+    }
+    {
+      from = "/bin/${t}";
+      to = t;
+    }
+  ]) ["mkdir" "rmdir" "rm" "mv" "cp" "ln" "cat" "chmod" "chown" "touch" "test" "true" "false" "env" "sed"];
 in {
   lowerGraph = graph: let
     inherit (graph) edges;
@@ -149,13 +165,56 @@ in {
         name = "src-" + lib.strings.sanitizeDerivationName (relUnder p);
       };
 
-    # Strip every root prefix from a command: `<root>/x` -> `x`, and a bare
-    # `<root>` (e.g. `-I<builddir>`) -> `.` (the working-tree root). The `/`
-    # form is listed first so it wins where both could match.
+    # True if `p` is itself a symlink. `builtins.readFileType` follows symlinks
+    # (so it never returns "symlink"); the parent's `readDir` is lstat-based and
+    # does report "symlink". Staging a symlink via `builtins.path` aborts eval,
+    # so callers skip these — the real target is reachable under its own path.
+    # `builtins.path`/`readFileType` *abort* (and NOT tryEval-catchable — the
+    # error propagates through `tryEval`) when any component of the path is a
+    # symlink. CMake produces such paths (e.g. `.../libsyscall/foo` where
+    # `libsyscall` is a symlink to the top-level libsyscall). So detect symlink
+    # components without ever traversing one: walk from the (real) rewrite root
+    # down via `readDir` of real dirs, stopping at the first symlink.
+    hasSymlinkComponent = p: let
+      root = rootFor p;
+      parts = filter (x: x != "") (lib.splitString "/" (relUnder p));
+      walk = dir: ps:
+        if ps == []
+        then false
+        else let
+          h = builtins.head ps;
+          entries = builtins.readDir dir;
+        in
+          if !(entries ? ${h})
+          then false # missing; pathExists handles it
+          else if entries.${h} == "symlink"
+          then true
+          else if entries.${h} == "directory"
+          then walk (dir + "/${h}") (builtins.tail ps)
+          else false; # regular file component
+    in
+      if root == null
+      then false
+      else walk (toString root) parts;
+
+    # Stageable via `builtins.path` only if it exists and neither it nor any
+    # ancestor is a symlink; `safeRegular` additionally requires a regular file.
+    safeNotSymlink = p: builtins.pathExists p && !(hasSymlinkComponent p);
+    safeRegular = p: safeNotSymlink p && builtins.readFileType p == "regular";
+
+    # Rewrite every root prefix in a command to the edge's own `$out` (the
+    # merged working tree the edge runs in): `<root>/x` -> `$out/x`, and a bare
+    # `<root>` (e.g. `-I<builddir>`) -> `$out`. The `/` form is listed first so
+    # it wins where both could match. Using the absolute `$out` (expanded by the
+    # builder shell) rather than a relative "" keeps output paths and `cd`
+    # targets consistent: CMake custom commands that `cd` into a subdirectory
+    # before writing a build-root-relative output would otherwise have that
+    # output resolved against the subdirectory and doubled
+    # (`sub/dir/sub/dir/out`). `$out`-absolute paths are immune to the `cd`.
     stripRoots = cmd:
       builtins.replaceStrings
       (concatMap (r: [(toString r + "/") (toString r)]) rewriteRoots)
-      (concatMap (_: ["" "."]) rewriteRoots)
+      (concatMap (_: ["$out/" "$out"]) rewriteRoots)
       cmd;
 
     # Absolute include directories the command references under a root
@@ -233,13 +292,64 @@ in {
     # The exact project files (under a rewrite root) a compile edge reads,
     # discovered by scanning. System headers (toolchain store paths) are already
     # mounted and need no staging, so they are filtered out here.
+    #
+    # A generated input (a source/header produced by another edge, e.g. a bison
+    # `parser.c` or a mig header) exists in neither mounted tree — it is built,
+    # not configured — so the raw command's absolute `<root>/<gen>` reference
+    # would be a missing file and the scan would abort. Rewrite each such
+    # reference to the producing edge's output (which the string then pulls in
+    # as a dependency) so the preprocessor can read it. Non-generated inputs are
+    # untouched and still resolve through the mounted source/configured trees.
     scanDepsOf = e: let
+      # Each generated input (produced by another edge), normalised to the
+      # build-dir-relative path the producer writes plus that producer's drv.
+      # An input may be listed absolutely (`<root>/rel`, CMake's usual form and
+      # also the producer's implicit output) or relatively (`rel`).
+      genPairs =
+        concatMap (
+          g: let
+            ids = realProducers g;
+          in
+            lib.optionals (ids != []) [
+              {
+                rel =
+                  if underAnyRoot g
+                  then relUnder g
+                  else g;
+                pdrv = edgeDrvs.${toString (builtins.head ids)};
+              }
+            ]
+        )
+        (filter isProduced (edgeInputs e));
+      # (a) Rewrite every `<root>/rel` the command could use to the producer's
+      # copy, so a generated file referenced by path resolves (and the string
+      # pulls the producer in as a dependency).
+      genSubs =
+        concatMap (
+          x:
+            map (r: {
+              from = toString r + "/" + x.rel;
+              to = "${x.pdrv}/" + x.rel;
+            })
+            rewriteRoots
+        )
+        genPairs;
+      # (b) Add each producer output's directory as an include path, so a
+      # generated header pulled in by name (`#include "parser.h"`, a bison `-d`
+      # output next to a flex `lexer.c`) resolves during the preprocess even
+      # though it lives in a different producer's output.
+      genIncs =
+        lib.unique (map (x: "-I${x.pdrv}/" + builtins.dirOf x.rel) genPairs);
+      scanCmd =
+        builtins.replaceStrings
+        (map (s: s.from) genSubs) (map (s: s.to) genSubs)
+        (scanCommand e.command);
       scanDrv =
         pkgs.runCommand "ninja-scan-${sanDrv (builtins.head (edgeOutputs e))}" {
           nativeBuildInputs = toolchain ++ scanMounts;
         } ''
           export DEPS_OUT=$out
-          ${scanCommand e.command}
+          ${scanCmd} ${lib.concatStringsSep " " genIncs}
         '';
     in
       filter underAnyRoot (parseDepfile (builtins.readFile scanDrv));
@@ -256,23 +366,47 @@ in {
       # (source + all headers, including source-relative ones); otherwise the
       # explicit inputs plus a copy of each `-I` directory.
       useScan = depfilePrecise && isCompile e;
-      relSrcs = lib.unique (concatMap realSources ins);
+      relSrcs = lib.unique (filter
+        (r: safeNotSymlink (src + "/${r}"))
+        (concatMap realSources ins));
+      # An `-I` dir or explicit input can point at a path that is absent from the
+      # store copy of a root (an empty dir Nix does not preserve, or an optional
+      # include CMake emits unconditionally). Staging it via `builtins.path`
+      # would abort eval, so skip anything that no longer exists; clang tolerates
+      # a missing `-I` dir.
       rootSrcs =
         if useScan
-        then scanDepsOf e
-        else lib.unique (filter underAnyRoot ins);
+        then filter builtins.pathExists (scanDepsOf e)
+        else
+          # Declared under-root inputs, plus under-root *files named in the
+          # command* that CMake did not declare (custom commands often reference
+          # a helper script/template like `awk -f .../mig.awk` without listing it
+          # in DEPENDS). Directories and not-yet-produced outputs are excluded.
+          lib.unique (
+            (filter (p: underAnyRoot p && safeNotSymlink p) ins)
+            ++ (filter
+              (p: underAnyRoot p && safeRegular p)
+              (lib.splitString " " e.command))
+          );
+      # `builtins.path` aborts on a symlink root, and some CMake `-I` dirs are
+      # symlinks (e.g. libsystem_kernel/libsyscall -> the top-level libsyscall);
+      # skip them — the real directory is reachable and staged under its own path.
       rootIncs =
         if useScan
         then []
-        else incAbsDirs e.command;
+        else filter safeNotSymlink (incAbsDirs e.command);
 
       command = let
         stripped =
           if rewriteRoots == []
           then e.command
           else stripRoots e.command;
+        withSubs =
+          builtins.replaceStrings (map (s: s.from) subs) (map (s: s.to) subs) stripped;
       in
-        builtins.replaceStrings (map (s: s.from) subs) (map (s: s.to) subs) stripped;
+        builtins.replaceStrings
+        (map (s: s.from) toolPathSubs) (map (s: s.to) toolPathSubs)
+        withSubs;
 
       stageDeps =
         lib.concatMapStringsSep "\n"
@@ -289,13 +423,18 @@ in {
       stageIncs =
         lib.concatMapStringsSep "\n"
         (p: ''
+          # A prior dir copy (a peer `-I` whose tree contains this path as a
+          # child symlink) may have recreated this target as a dangling symlink;
+          # `mkdir -p` then fails "File exists". Drop it first (only if it is a
+          # broken symlink — never a real dir or a valid link).
+          if [ -L ${esc (relUnder p)} ] && [ ! -e ${esc (relUnder p)} ]; then rm -f ${esc (relUnder p)}; fi
           mkdir -p ${esc (relUnder p)}
           cp -rsf --no-preserve=mode ${indivOf p}/. ${esc (relUnder p)}/
         '')
         rootIncs;
       mkOutDirs =
         lib.concatMapStringsSep "\n"
-        (o: ''mkdir -p "$(dirname ${esc o})"'')
+        (o: ''realize_writable "$(dirname ${esc o})"'')
         outs;
       rspStage = lib.optionalString (e.rspfile != null && e.rspfile != "") ''
         mkdir -p "$(dirname ${esc e.rspfile})"
@@ -304,6 +443,35 @@ in {
       rspClean =
         lib.optionalString (e.rspfile != null && e.rspfile != "")
         ''rm -f ${esc e.rspfile}'';
+      # A generated script output (e.g. the mig `build-mig` wrapper) carries an
+      # absolute `#!/bin/bash` shebang that the pure edge sandbox lacks; rewrite
+      # it to the toolchain bash so a downstream edge can exec it. `/bin/sh` is
+      # left alone (Nix mounts it). We use a direct sed rather than
+      # `patchShebangs`, which silently leaves the line when it cannot resolve
+      # the interpreter in the edge's minimal PATH. No-op for non-script outputs.
+      patchOutShebangs =
+        lib.concatMapStringsSep "\n"
+        (o: let
+          # An output may be named absolutely (`<root>/rel`, the implicit-output
+          # form) or relatively; the command writes it at `$out/rel`, so target
+          # that (cwd is $out).
+          rel =
+            if underAnyRoot o
+            then relUnder o
+            else o;
+        in ''
+          # Absolute $out path: the edge command may have cd'd into a
+          # WORKING_DIRECTORY subdir and not returned, so a relative path would
+          # miss the file.
+          if [ -f "$out/${rel}" ] && [ "$(head -c2 "$out/${rel}" 2>/dev/null)" = "#!" ]; then
+            chmod u+w "$out/${rel}" || true
+            sed -i \
+              -e "1s|^#! *\(/usr\)\?/bin/bash|#!${pkgs.bash}/bin/bash|" \
+              -e "1s|^#! */usr/bin/env  *bash|#!${pkgs.bash}/bin/bash|" \
+              "$out/${rel}"
+          fi
+        '')
+        outs;
     in
       pkgs.runCommand (sanDrv (builtins.head outs)) {
         nativeBuildInputs = toolchain ++ extraInputs;
@@ -313,13 +481,41 @@ in {
       } ''
         mkdir -p $out
         cd $out
+        # Make an output directory real and writable. cp -rs stages -I dirs as
+        # read-only symlinks into the source/configured store; when an edge (e.g.
+        # mig) both reads inputs from and writes outputs into such a dir, writing
+        # fails EACCES. Walk the path, and for each symlinked component replace it
+        # with a real dir that re-links the original target's content (inputs stay
+        # readable, new outputs are writable).
+        realize_writable() {
+          local p="$1" cur="" comp tgt oldIFS="$IFS"
+          IFS='/'; set -- $p; IFS="$oldIFS"
+          for comp in "$@"; do
+            [ -z "$comp" ] && continue
+            if [ -z "$cur" ]; then cur="$comp"; else cur="$cur/$comp"; fi
+            if [ -L "$cur" ]; then
+              tgt="$(readlink -f "$cur" 2>/dev/null || true)"
+              rm -f "$cur"; mkdir -p "$cur"
+              if [ -n "$tgt" ] && [ -d "$tgt" ]; then
+                cp -rsf --no-preserve=mode "$tgt"/. "$cur"/ 2>/dev/null || true
+              fi
+            else
+              mkdir -p "$cur"
+            fi
+          done
+        }
         ${stageDeps}
         ${stageRelSrcs}
         ${stageRootSrcs}
         ${stageIncs}
+        # Prune broken symlinks the cp -rs staging carried in from copied dir
+        # trees (a child symlink whose target was not itself staged); left in
+        # place they break the edge command's own mkdir/cd on those paths.
+        find . -xtype l -delete 2>/dev/null || true
         ${mkOutDirs}
         ${rspStage}
         ${command}
+        ${patchOutShebangs}
         ${rspClean}
       '';
 
