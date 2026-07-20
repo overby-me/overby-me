@@ -3,7 +3,7 @@ use regex::Regex;
 
 use super::start_service::start_service;
 use crate::lock_ext::{MutexExt, RwLockExt};
-use crate::runtime_info::{PidEntry, RuntimeInfo};
+use crate::runtime_info::{ArcMutPidTable, PidEntry, RuntimeInfo};
 use crate::units::{
     ActivationSource, Commandline, CommandlinePrefix, KillMode, NotifyKind, ServiceConfig,
     ServiceType, Specific, Timeout, UnitId, UnitStatus,
@@ -1496,7 +1496,7 @@ impl Service {
             Ok(mut child) => {
                 trace!("Wait for {cmdline:?} for service: {name}");
                 let wait_result: Result<(), RunCmdError> = match wait_for_helper_child(
-                    &child, run_info, timeout,
+                    &child, &run_info.pid_table, timeout,
                 ) {
                     WaitResult::InTime(Err(e)) => {
                         return Err(RunCmdError::WaitError(cmdline.to_string(), format!("{e}")));
@@ -1842,7 +1842,7 @@ enum WaitResult {
 /// that has not been ported to rust
 fn wait_for_helper_child(
     child: &std::process::Child,
-    run_info: &RuntimeInfo,
+    pid_table: &ArcMutPidTable,
     time_out: Option<std::time::Duration>,
 ) -> WaitResult {
     let pid = nix::unistd::Pid::from_raw(child.id() as i32);
@@ -1855,7 +1855,7 @@ fn wait_for_helper_child(
             return WaitResult::TimedOut;
         }
         {
-            let mut pid_table_locked = run_info.pid_table.lock_poisoned();
+            let mut pid_table_locked = pid_table.lock_poisoned();
             match pid_table_locked.get(&pid) {
                 Some(entry) => {
                     match entry {
