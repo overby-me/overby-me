@@ -149,6 +149,26 @@ impl ManagedLink {
         }
         OperState::Configured
     }
+
+    /// Operational-state string for the `OPER_STATE=` field of the per-link
+    /// state file, using systemd's operational-state vocabulary
+    /// (off/no-carrier/carrier/degraded/routable). networkd's internal
+    /// `OperState` is a setup-oriented model (configuring/configured/pending)
+    /// whose Display strings are NOT recognised by consumers such as
+    /// systemd-networkd-wait-online (which map anything unknown to "missing").
+    /// Translate so that, e.g., a link that has carrier reports at least
+    /// "carrier" and a fully-configured link reports "routable".
+    pub fn operational_state_str(&self) -> &'static str {
+        match self.oper_state() {
+            OperState::Unmanaged => "off",
+            OperState::NoCarrier => "no-carrier",
+            // Carrier is present but layer-3 configuration is not finished yet
+            // (still applying addresses, or waiting for a DHCP lease).
+            OperState::Configuring | OperState::Pending => "carrier",
+            OperState::Degraded => "degraded",
+            OperState::Configured => "routable",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +388,32 @@ impl NetworkManager {
         self.update_global_dns();
 
         Ok(())
+    }
+
+    /// Re-read managed links' carrier (running) state from the kernel and
+    /// update `has_carrier`. The kernel sets IFF_RUNNING slightly after IFF_UP
+    /// (asynchronously, via the linkwatch work queue), so a link that
+    /// `configure_link` has just brought up only reports carrier a moment
+    /// later. Refreshing here on each main-loop iteration keeps the exported
+    /// per-link state files in sync with reality without waiting for the next
+    /// full reload; `systemd-networkd-wait-online` reads those state files to
+    /// decide when a link has carrier. Returns true if any link changed.
+    pub fn refresh_carrier_states(&mut self) -> bool {
+        let system_links = match link::list_links() {
+            Ok(l) => l,
+            Err(_) => return false,
+        };
+        let mut changed = false;
+        for li in &system_links {
+            if let Some(managed) = self.links.get_mut(&li.index) {
+                let carrier = li.is_running() || li.is_loopback();
+                if managed.has_carrier != carrier {
+                    managed.has_carrier = carrier;
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 
     /// Configure a single link.
@@ -1148,7 +1194,7 @@ impl NetworkManager {
             let mut content = String::new();
             content.push_str("# systemd-networkd state file\n");
             content.push_str(&format!("ADMIN_STATE={}\n", managed.admin_state));
-            content.push_str(&format!("OPER_STATE={}\n", managed.oper_state()));
+            content.push_str(&format!("OPER_STATE={}\n", managed.operational_state_str()));
             if let Some(ref cfg) = managed.config {
                 content.push_str(&format!("NETWORK_FILE={}\n", cfg.path.display()));
             }

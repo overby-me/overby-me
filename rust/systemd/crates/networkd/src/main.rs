@@ -828,6 +828,11 @@ fn main() {
             if let Err(e) = mgr.configure_links() {
                 log::warn!("Failed to reconfigure links on reload: {}", e);
             }
+            // Persist per-link state files for any links added or changed by the
+            // reload (e.g. a runtime .netdev added via `networkctl edit`), so
+            // systemd-networkd-wait-online can see the new interface instead of
+            // reporting it as missing until the next state-file write.
+            mgr.write_state_files();
             update_shared_state(&shared_state, &mgr);
             sd_notify(&format!("STATUS={}", mgr.overall_state()));
         }
@@ -1171,6 +1176,15 @@ fn main() {
 
         // Check SLAAC address lifetimes (deprecation and expiration).
         if mgr.check_ra_address_lifetimes() {
+            mgr.write_state_files();
+            update_shared_state(&shared_state, &mgr);
+        }
+
+        // Refresh link carrier state from the kernel. A link brought up on a
+        // recent reload gains IFF_RUNNING (carrier) a moment later via the
+        // kernel linkwatch queue, so re-read here and rewrite the state files
+        // when carrier changes. systemd-networkd-wait-online reads those files.
+        if mgr.refresh_carrier_states() {
             mgr.write_state_files();
             update_shared_state(&shared_state, &mgr);
         }
