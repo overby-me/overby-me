@@ -1177,6 +1177,47 @@ impl NetworkManager {
         }
     }
 
+    /// List drop-ins for a config file as `<name>.d/*.conf` across the network
+    /// config directories, deduped by filename (highest-precedence dir wins)
+    /// and sorted by filename. Mirrors networkctl's `list_dropins` so the
+    /// `*_FILE_DROPINS` fields written to the link state file match exactly what
+    /// `networkctl cat <name>` produces from the filesystem.
+    fn config_dropins(config_file: &std::path::Path) -> Vec<std::path::PathBuf> {
+        const NETWORK_DIRS: [&str; 3] = [
+            "/etc/systemd/network",
+            "/run/systemd/network",
+            "/usr/lib/systemd/network",
+        ];
+        let Some(name) = config_file.file_name() else {
+            return Vec::new();
+        };
+        let name = name.to_string_lossy();
+        let mut m: std::collections::BTreeMap<String, std::path::PathBuf> =
+            std::collections::BTreeMap::new();
+        for dir in NETWORK_DIRS {
+            let dropin_dir = std::path::Path::new(dir).join(format!("{name}.d"));
+            if let Ok(rd) = std::fs::read_dir(&dropin_dir) {
+                for e in rd.flatten() {
+                    let fname = e.file_name().to_string_lossy().into_owned();
+                    if fname.ends_with(".conf") {
+                        m.entry(fname).or_insert_with(|| e.path());
+                    }
+                }
+            }
+        }
+        m.into_values().collect()
+    }
+
+    /// Format a drop-in path list as the colon-separated value used by the
+    /// `*_FILE_DROPINS` state-file fields.
+    fn dropins_field(dropins: &[std::path::PathBuf]) -> String {
+        dropins
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+
     /// Write runtime state files to `/run/systemd/netif/`.
     pub fn write_state_files(&self) {
         let state_dir = std::path::Path::new("/run/systemd/netif/links");
@@ -1197,6 +1238,30 @@ impl NetworkManager {
             content.push_str(&format!("OPER_STATE={}\n", managed.operational_state_str()));
             if let Some(ref cfg) = managed.config {
                 content.push_str(&format!("NETWORK_FILE={}\n", cfg.path.display()));
+                let dropins = Self::config_dropins(&cfg.path);
+                if !dropins.is_empty() {
+                    content.push_str(&format!(
+                        "NETWORK_FILE_DROPINS={}\n",
+                        Self::dropins_field(&dropins)
+                    ));
+                }
+            }
+            // Record the .netdev file that created this interface (matched by
+            // the configured device name), so `networkctl cat @IF:netdev` can
+            // resolve it from the state file.
+            if let Some(ndev) = self
+                .netdev_configs
+                .iter()
+                .find(|c| c.netdev_section.name == managed.link.name)
+            {
+                content.push_str(&format!("NETDEV_FILE={}\n", ndev.path.display()));
+                let dropins = Self::config_dropins(&ndev.path);
+                if !dropins.is_empty() {
+                    content.push_str(&format!(
+                        "NETDEV_FILE_DROPINS={}\n",
+                        Self::dropins_field(&dropins)
+                    ));
+                }
             }
             for dns in &managed.dns_servers {
                 content.push_str(&format!("DNS={dns}\n"));
