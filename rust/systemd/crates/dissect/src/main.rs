@@ -408,6 +408,9 @@ struct Args {
     mkdir: bool,
     /// --rmdir: remove the mount point directory after unmounting.
     rmdir: bool,
+    /// --loop-ref=NAME: free-form reference stored in the loop device's
+    /// lo_file_name, exposed by udev as /dev/disk/by-loop-ref/NAME.
+    loop_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -420,6 +423,8 @@ enum Command {
     CopyTo,
     Discover,
     Validate,
+    Attach,
+    Detach,
     Help,
 }
 
@@ -445,6 +450,7 @@ impl Default for Args {
             no_legend: false,
             mkdir: false,
             rmdir: false,
+            loop_ref: None,
         }
     }
 }
@@ -483,6 +489,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--copy-to" => args.command = Command::CopyTo,
             "--discover" => args.command = Command::Discover,
             "--validate" => args.command = Command::Validate,
+            "--attach" => args.command = Command::Attach,
+            "--detach" => args.command = Command::Detach,
+            "--loop-ref" => {
+                let v = value_or_next(argv, &mut i, value, "--loop-ref")?;
+                args.loop_ref = Some(v);
+            }
             "--root-hash" => {
                 let v = value_or_next(argv, &mut i, value, "--root-hash")?;
                 args.root_hash = Some(v);
@@ -521,7 +533,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
 
     // Assign positionals based on command
     match args.command {
-        Command::Show | Command::List | Command::Validate => {
+        Command::Show | Command::List | Command::Validate | Command::Attach | Command::Detach => {
+            // --attach IMAGE ; --detach IMAGE-or-LOOPDEV
             if let Some(p) = positionals.first() {
                 args.image = Some(PathBuf::from(p));
             }
@@ -1624,6 +1637,119 @@ well-known partition types per the Discoverable Partitions Specification."
 // Main
 // ---------------------------------------------------------------------------
 
+// Loopback device ioctls (from <linux/loop.h>) for --attach/--detach.
+const LOOP_SET_FD: libc::c_ulong = 0x4C00;
+const LOOP_CLR_FD: libc::c_ulong = 0x4C01;
+const LOOP_SET_STATUS64: libc::c_ulong = 0x4C04;
+const LOOP_CTL_GET_FREE: libc::c_ulong = 0x4C82;
+const LO_FLAGS_PARTSCAN: u32 = 8;
+
+#[repr(C)]
+struct LoopInfo64 {
+    lo_device: u64,
+    lo_inode: u64,
+    lo_rdev: u64,
+    lo_offset: u64,
+    lo_sizelimit: u64,
+    lo_number: u32,
+    lo_encrypt_type: u32,
+    lo_encrypt_key_size: u32,
+    lo_flags: u32,
+    lo_file_name: [u8; 64],
+    lo_crypt_name: [u8; 64],
+    lo_encrypt_key: [u8; 32],
+    lo_init: [u64; 2],
+}
+
+impl Default for LoopInfo64 {
+    fn default() -> Self {
+        // SAFETY: LoopInfo64 is a plain C struct of integers/byte arrays, so an
+        // all-zero bit pattern is a valid value.
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+/// `systemd-dissect --attach IMAGE [--loop-ref=NAME]` — attach IMAGE to a free
+/// loop device with partition scanning and print its path. The loop device
+/// persists after exit (no LO_FLAGS_AUTOCLEAR). When `--loop-ref` is given its
+/// value is stored in the loop device's `lo_file_name`, which udev exposes as
+/// `/dev/disk/by-loop-ref/NAME`.
+fn cmd_attach(image: &Path, loop_ref: Option<&str>) -> Result<String, String> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let ctrl = unsafe { libc::open(c"/dev/loop-control".as_ptr(), libc::O_RDWR) };
+    if ctrl < 0 {
+        return Err("Failed to open /dev/loop-control".to_string());
+    }
+    let nr = unsafe { libc::ioctl(ctrl, LOOP_CTL_GET_FREE as _) };
+    unsafe { libc::close(ctrl) };
+    if nr < 0 {
+        return Err("LOOP_CTL_GET_FREE failed".to_string());
+    }
+    let dev = format!("/dev/loop{nr}");
+
+    let cdev = std::ffi::CString::new(dev.as_bytes()).map_err(|_| "bad loop path")?;
+    let loop_fd = unsafe { libc::open(cdev.as_ptr(), libc::O_RDWR) };
+    if loop_fd < 0 {
+        return Err(format!("Failed to open {dev}"));
+    }
+    let cimg = std::ffi::CString::new(image.as_os_str().as_bytes()).map_err(|_| "bad image path")?;
+    let img_fd = unsafe { libc::open(cimg.as_ptr(), libc::O_RDWR) };
+    if img_fd < 0 {
+        unsafe { libc::close(loop_fd) };
+        return Err(format!("Failed to open image {}", image.display()));
+    }
+    if unsafe { libc::ioctl(loop_fd, LOOP_SET_FD as _, img_fd) } < 0 {
+        unsafe {
+            libc::close(img_fd);
+            libc::close(loop_fd);
+        }
+        return Err(format!("LOOP_SET_FD failed for {dev}"));
+    }
+    let mut info = LoopInfo64 {
+        lo_flags: LO_FLAGS_PARTSCAN,
+        ..Default::default()
+    };
+    if let Some(r) = loop_ref {
+        let b = r.as_bytes();
+        let n = b.len().min(info.lo_file_name.len() - 1);
+        info.lo_file_name[..n].copy_from_slice(&b[..n]);
+    }
+    if unsafe { libc::ioctl(loop_fd, LOOP_SET_STATUS64 as _, &info as *const LoopInfo64) } < 0 {
+        unsafe {
+            libc::ioctl(loop_fd, LOOP_CLR_FD as _);
+            libc::close(img_fd);
+            libc::close(loop_fd);
+        }
+        return Err(format!("LOOP_SET_STATUS64 failed for {dev}"));
+    }
+    unsafe {
+        libc::close(img_fd);
+        libc::close(loop_fd);
+    }
+    // Let udev process the new device so its /dev/disk/by-* symlinks appear.
+    let _ = std::process::Command::new("udevadm")
+        .args(["trigger", "--settle", "--action=add", &dev])
+        .status();
+    Ok(dev)
+}
+
+/// `systemd-dissect --detach LOOPDEV` — detach a loop device.
+fn cmd_detach(dev: &Path) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt;
+    let cdev = std::ffi::CString::new(dev.as_os_str().as_bytes()).map_err(|_| "bad path")?;
+    let fd = unsafe { libc::open(cdev.as_ptr(), libc::O_RDWR) };
+    if fd < 0 {
+        return Err(format!("Failed to open {}", dev.display()));
+    }
+    let r = unsafe { libc::ioctl(fd, LOOP_CLR_FD as _) };
+    unsafe { libc::close(fd) };
+    if r < 0 {
+        return Err(format!("LOOP_CLR_FD failed for {}", dev.display()));
+    }
+    Ok(())
+}
+
 fn run(argv: &[String]) -> Result<(), String> {
     let args = parse_args(argv)?;
 
@@ -1693,6 +1819,13 @@ fn run(argv: &[String]) -> Result<(), String> {
                 .as_ref()
                 .ok_or("--copy-to requires a source path")?;
             cmd_copy_to(image, source, args.dest.as_deref())?;
+        }
+        Command::Attach => {
+            let dev = cmd_attach(image, args.loop_ref.as_deref())?;
+            println!("{dev}");
+        }
+        Command::Detach => {
+            cmd_detach(image)?;
         }
         _ => unreachable!(),
     }

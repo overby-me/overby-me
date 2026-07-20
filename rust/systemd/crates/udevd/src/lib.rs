@@ -3847,6 +3847,66 @@ fn udev_encode(bytes: &[u8]) -> String {
     out
 }
 
+/// `LOOP_GET_STATUS64` ioctl number (from `<linux/loop.h>`).
+const LOOP_GET_STATUS64: libc::c_ulong = 0x4C05;
+
+/// Subset of the kernel's `struct loop_info64` (`<linux/loop.h>`). The layout
+/// must match the kernel exactly so `LOOP_GET_STATUS64` fills the right fields.
+#[repr(C)]
+struct UdevLoopInfo64 {
+    lo_device: u64,
+    lo_inode: u64,
+    lo_rdev: u64,
+    lo_offset: u64,
+    lo_sizelimit: u64,
+    lo_number: u32,
+    lo_encrypt_type: u32,
+    lo_encrypt_key_size: u32,
+    lo_flags: u32,
+    lo_file_name: [u8; 64],
+    lo_crypt_name: [u8; 64],
+    lo_encrypt_key: [u8; 32],
+    lo_init: [u64; 2],
+}
+
+/// Read the loopback backing-file identity (device number, inode, and the
+/// free-form `lo_file_name` reference) of a loop block device. Mirrors
+/// systemd's `read_loopback_backing_inode()` in udev-builtin-blkid.c: the
+/// `lo_file_name` is the arbitrary userspace-provided string (e.g. set by
+/// `systemd-dissect --attach --loop-ref=NAME`), NOT the `loop/backing_file`
+/// sysfs attribute (which is always an absolute path). Returns `None` on any
+/// ioctl failure (e.g. the device is not actually a loop device).
+fn read_loopback_backing(devnode: &Path) -> Option<(u64, u64, Option<String>)> {
+    use std::os::unix::ffi::OsStrExt;
+    let cpath = std::ffi::CString::new(devnode.as_os_str().as_bytes()).ok()?;
+    let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return None;
+    }
+    // SAFETY: an all-zero loop_info64 is a valid initial value; the ioctl fills it.
+    let mut info: UdevLoopInfo64 = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::ioctl(fd, LOOP_GET_STATUS64 as _, &mut info as *mut UdevLoopInfo64) };
+    unsafe { libc::close(fd) };
+    if rc < 0 {
+        return None;
+    }
+    // lo_file_name is NUL-padded. Suppress it when empty or possibly truncated
+    // (all 63 usable bytes consumed), exactly as upstream does, since the
+    // kernel silently truncates over-long names.
+    let cap = info.lo_file_name.len() - 1; // 63
+    let used = info
+        .lo_file_name
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(info.lo_file_name.len());
+    let fname = if used == 0 || used >= cap {
+        None
+    } else {
+        Some(String::from_utf8_lossy(&info.lo_file_name[..used]).into_owned())
+    };
+    Some((info.lo_device, info.lo_inode, fname))
+}
+
 /// Format a 16-byte binary UUID as the canonical 8-4-4-4-12 hex string.
 fn format_uuid(u: &[u8]) -> String {
     format!(
@@ -4129,6 +4189,32 @@ fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
                                 event.env.insert(key, val);
                             }
                         }
+                    }
+                }
+
+                // Loopback backing-file identity — the blkid builtin also picks
+                // up the loop device's backing inode/device and free-form
+                // lo_file_name reference, which 60-persistent-storage.rules turns
+                // into /dev/disk/by-loop-inode/* and by-loop-ref/* symlinks.
+                let sysname = event.devpath.rsplit('/').next().unwrap_or("");
+                if sysname.starts_with("loop")
+                    && let Some((devno, inode, fname)) = read_loopback_backing(&devnode)
+                {
+                    let major = ((devno >> 8) & 0xfff) | ((devno >> 32) & !0xfff);
+                    let minor = (devno & 0xff) | ((devno >> 12) & !0xff);
+                    event
+                        .env
+                        .insert("ID_LOOP_BACKING_DEVICE".into(), format!("{major}:{minor}"));
+                    event
+                        .env
+                        .insert("ID_LOOP_BACKING_INODE".into(), inode.to_string());
+                    if let Some(fname) = fname {
+                        event
+                            .env
+                            .insert("ID_LOOP_BACKING_FILENAME_ENC".into(), udev_encode(fname.as_bytes()));
+                        event
+                            .env
+                            .insert("ID_LOOP_BACKING_FILENAME".into(), fname);
                     }
                 }
             }
@@ -4643,8 +4729,14 @@ fn set_device_permissions(event: &UEvent, result: &RuleResult) {
         }
     }
 
-    // Set mode
-    if let Some(mode) = result.mode {
+    // Set mode. Mirror upstream udev-node.c node_apply_permissions: when a
+    // GROUP is assigned (gid > 0) but no explicit MODE rule matched, "upgrade"
+    // the mode to 0660 so the group actually gains access. Without this, a loop
+    // device keeps the kernel's 0600 default on the `add` event, yet
+    // 60-block.rules sets 0660 on the detach `change` event, so
+    // TEST-17-UDEV.loop-own sees the mode flip 600->660 and never "restores".
+    let mode = result.mode.or_else(|| (gid > 0).then_some(0o660));
+    if let Some(mode) = mode {
         unsafe {
             let path_c = std::ffi::CString::new(devnode.to_string_lossy().as_bytes()).ok();
             if let Some(path_c) = path_c {
