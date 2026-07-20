@@ -927,67 +927,96 @@ impl Service {
                 self.current_exec_argv = None;
             }
 
-            // Fork the last ExecStart command as the main process.
+            // Fork the last ExecStart command as the main process.  Extracted
+            // into fork_main_and_maybe_defer so the deferred multi-command
+            // oneshot driver can invoke the same main-fork for the final command
+            // without holding the RuntimeInfo table lock across the preliminary
+            // ExecStart= waits (07-pid1-exec-deserialization).
+            if let Some(deferred) =
+                self.fork_main_and_maybe_defer(conf, id.clone(), name, run_info, source, common)?
             {
-                let has_minus_prefix = conf
-                    .exec
-                    .last()
-                    .map(|e| e.prefixes.contains(&CommandlinePrefix::Minus))
-                    .unwrap_or(false);
-                {
-                    let mut pid_table_locked = run_info.pid_table.lock_poisoned();
-                    // This mainly just forks the process. The waiting (if necessary) is done below
-                    // Doing it under the lock of the pid_table prevents races between processes exiting very
-                    // fast and inserting the new pid into the pid table
-                    match start_service(
-                        &run_info.config.self_path,
-                        self,
-                        conf,
-                        name,
-                        &run_info.fd_store.read_poisoned(),
-                    ) {
-                        Ok(()) => {
-                            if let Some(new_pid) = self.pid {
-                                pid_table_locked
-                                    .insert(new_pid, PidEntry::Service(id.clone(), conf.srcv_type));
-                            }
+                return Ok(deferred);
+            }
+        } else {
+            // Exec-less oneshot service (e.g. systemd-reboot.service).
+            // No main process to fork — the service succeeds immediately.
+            trace!("Service {name} has no ExecStart, treating as immediately successful oneshot");
+        }
+        self.finish_start_tail(conf, id, name, run_info)
+    }
+
+    /// Fork the last ExecStart= command as the service's main process, copy the
+    /// MainPID/InvocationID to the lock-free Common fields, and either defer the
+    /// completion wait to a background thread (`Ok(Some(DeferredNotifyWait))`) or
+    /// perform it inline. Returns `Ok(None)` when the service is fully started
+    /// inline and the caller should run the post-start tail.
+    fn fork_main_and_maybe_defer(
+        &mut self,
+        conf: &ServiceConfig,
+        id: UnitId,
+        name: &str,
+        run_info: &RuntimeInfo,
+        source: ActivationSource,
+        common: &crate::units::Common,
+    ) -> Result<Option<StartResult>, ServiceErrorReason> {
+        {
+            let has_minus_prefix = conf
+                .exec
+                .last()
+                .map(|e| e.prefixes.contains(&CommandlinePrefix::Minus))
+                .unwrap_or(false);
+            {
+                let mut pid_table_locked = run_info.pid_table.lock_poisoned();
+                // This mainly just forks the process. The waiting (if necessary) is done below
+                // Doing it under the lock of the pid_table prevents races between processes exiting very
+                // fast and inserting the new pid into the pid table
+                match start_service(
+                    &run_info.config.self_path,
+                    self,
+                    conf,
+                    name,
+                    &run_info.fd_store.read_poisoned(),
+                ) {
+                    Ok(()) => {
+                        if let Some(new_pid) = self.pid {
+                            pid_table_locked
+                                .insert(new_pid, PidEntry::Service(id.clone(), conf.srcv_type));
                         }
-                        Err(e) if has_minus_prefix => {
-                            // ExecStart=- prefix: ignore spawn errors (e.g. binary not found).
-                            // Record the error exit status for ExecMainStatus property.
-                            trace!(
-                                "Ignore spawn error for ExecStart with '-' prefix for {name}: {e}"
-                            );
-                            self.main_exit_status = Some(203); // EXIT_EXEC (exec format error)
-                        }
-                        Err(e) => return Err(ServiceErrorReason::StartFailed(e)),
                     }
+                    Err(e) if has_minus_prefix => {
+                        // ExecStart=- prefix: ignore spawn errors (e.g. binary not found).
+                        // Record the error exit status for ExecMainStatus property.
+                        trace!("Ignore spawn error for ExecStart with '-' prefix for {name}: {e}");
+                        self.main_exit_status = Some(203); // EXIT_EXEC (exec format error)
+                    }
+                    Err(e) => return Err(ServiceErrorReason::StartFailed(e)),
                 }
+            }
 
-                // Copy InvocationID to the lock-free Common field so that
-                // `systemctl show -P InvocationID` can read it even while
-                // the service state write-lock is held during wait_for_service.
-                if let Some(ref inv_id) = self.invocation_id {
-                    *common.invocation_id.lock().unwrap() = inv_id.clone();
-                }
+            // Copy InvocationID to the lock-free Common field so that
+            // `systemctl show -P InvocationID` can read it even while
+            // the service state write-lock is held during wait_for_service.
+            if let Some(ref inv_id) = self.invocation_id {
+                *common.invocation_id.lock().unwrap() = inv_id.clone();
+            }
 
-                // Copy MainPID to the lock-free Common field so that
-                // `systemctl show -P MainPID` works during oneshot activation.
-                if let Some(pid) = self.pid {
-                    common
-                        .main_pid
-                        .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
-                    common
-                        .main_exit_pid
-                        .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
-                }
+            // Copy MainPID to the lock-free Common field so that
+            // `systemctl show -P MainPID` works during oneshot activation.
+            if let Some(pid) = self.pid {
+                common
+                    .main_pid
+                    .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
+                common
+                    .main_exit_pid
+                    .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
+            }
 
-                // Only wait for the service if it was actually spawned (has a PID).
-                // NonBlocking: skip the READY=1 wait so the calling thread
-                // releases the RuntimeInfo read lock quickly.  The process is
-                // started (InvocationID set) but Type=notify services remain
-                // in Starting state instead of transitioning to Started.
-                if self.pid.is_some() && !matches!(source, ActivationSource::NonBlocking) {
+            // Only wait for the service if it was actually spawned (has a PID).
+            // NonBlocking: skip the READY=1 wait so the calling thread
+            // releases the RuntimeInfo read lock quickly.  The process is
+            // started (InvocationID set) but Type=notify services remain
+            // in Starting state instead of transitioning to Started.
+            if self.pid.is_some() && !matches!(source, ActivationSource::NonBlocking) {
                     // DeferNotifyWait: for Type=notify/NotifyReload services,
                     // defer the READY=1 wait to a background thread so the
                     // calling thread (in the activation thread pool) releases
@@ -1055,7 +1084,7 @@ impl Service {
                         )
                     };
                     if defer_wait {
-                        return Ok(StartResult::DeferredNotifyWait);
+                        return Ok(Some(StartResult::DeferredNotifyWait));
                     }
                     super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
                         |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
@@ -1067,12 +1096,19 @@ impl Service {
                     )?;
                 }
             }
-        } else {
-            // Exec-less oneshot service (e.g. systemd-reboot.service).
-            // No main process to fork — the service succeeds immediately.
-            trace!("Service {name} has no ExecStart, treating as immediately successful oneshot");
-        }
+        Ok(None)
+    }
 
+    /// Post-start tail shared by the inline start path and the deferred
+    /// multi-command oneshot driver: initialise the watchdog reference
+    /// timestamp, clear MONITOR_* env vars, and run ExecStartPost=.
+    fn finish_start_tail(
+        &mut self,
+        conf: &ServiceConfig,
+        id: UnitId,
+        name: &str,
+        run_info: &RuntimeInfo,
+    ) -> Result<StartResult, ServiceErrorReason> {
         // For non-notify services, initialize the watchdog reference
         // timestamp now (the process has been forked and is running).
         // For Type=notify services this will be overwritten when READY=1
