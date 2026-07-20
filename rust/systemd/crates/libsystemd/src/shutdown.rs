@@ -112,10 +112,15 @@ fn get_next_service_to_shutdown(unit_table: &UnitTable) -> Option<UnitId> {
             .before
             .iter()
             .filter(|&next_id| {
-                let unit = unit_table.get(next_id).unwrap();
-                let status = &unit.common.status;
-                let status_locked = status.read_poisoned();
-                status_locked.is_started()
+                // A `before` dependency that is no longer in the unit table has
+                // already been removed (stopped), so it cannot hold up this
+                // unit's shutdown. Unwrapping here panicked the shutdown thread,
+                // which is what stalled the reboot (09-reboot): PID1 died before
+                // reaching the systemd-shutdown handoff.
+                let Some(dep) = unit_table.get(next_id) else {
+                    return false;
+                };
+                dep.common.status.read_poisoned().is_started()
             })
             .cloned()
             .collect::<Vec<_>>();
