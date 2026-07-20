@@ -58,13 +58,20 @@ const DEFAULT_EXTERNAL_SIZE_MAX: u64 = 2 * 1024 * 1024 * 1024;
 /// Default maximum size of a core dump to process at all (2 GiB).
 const DEFAULT_PROCESS_SIZE_MAX: u64 = 2 * 1024 * 1024 * 1024;
 
-/// Default maximum total disk usage for stored core dumps (default: 10% of
-/// filesystem or 10 GiB, whichever is smaller — we use a fixed 10 GiB).
-const DEFAULT_MAX_USE: u64 = 10 * 1024 * 1024 * 1024;
+/// Sentinel meaning "MaxUse= is unset": resolve it at vacuum time as a fraction
+/// of the filesystem size (10%, capped at 4 GiB), mirroring upstream
+/// systemd-coredump. A fixed byte default here is wrong: on a small disk (e.g.
+/// a test VM) a fixed 10 GiB KeepFree makes every fresh dump get vacuumed away.
+const DEFAULT_MAX_USE: u64 = u64::MAX;
 
-/// Default minimum free disk space to maintain (15% of filesystem or 10 GiB,
-/// whichever is smaller — we use a fixed 10 GiB).
-const DEFAULT_KEEP_FREE: u64 = 10 * 1024 * 1024 * 1024;
+/// Sentinel meaning "KeepFree= is unset": resolve it at vacuum time as 15% of
+/// the filesystem size, mirroring upstream systemd-coredump.
+const DEFAULT_KEEP_FREE: u64 = u64::MAX;
+
+/// Cap for the auto-computed MaxUse (upstream systemd caps at 4 GiB).
+const MAX_USE_UPPER: u64 = 4 * 1024 * 1024 * 1024;
+/// Floor for the auto-computed MaxUse (upstream systemd floors at 1 MiB).
+const MAX_USE_LOWER: u64 = 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -1131,6 +1138,10 @@ fn vacuum(coredump_dir: &Path, config: &Config) {
         return;
     }
 
+    // Resolve MaxUse=/KeepFree= (filesystem-relative when left at their unset
+    // sentinel), so a fresh dump is not vacuumed away on a small filesystem.
+    let (max_use, keep_free) = resolve_disk_limits(coredump_dir, config);
+
     // Calculate total size.
     let mut total_size: u64 = 0;
     for (core_path, meta_path, _) in &entries {
@@ -1143,7 +1154,7 @@ fn vacuum(coredump_dir: &Path, config: &Config) {
     }
 
     // Remove oldest entries while over limits.
-    while total_size > config.max_use && !entries.is_empty() {
+    while total_size > max_use && !entries.is_empty() {
         let (core_path, meta_path, _) = entries.remove(0);
 
         let mut freed: u64 = 0;
@@ -1161,11 +1172,10 @@ fn vacuum(coredump_dir: &Path, config: &Config) {
     }
 
     // Check keep-free against available disk space.
-    if config.keep_free > 0
+    if keep_free > 0
         && let Some(avail) = available_disk_space(coredump_dir)
     {
-        while avail + freed_so_far(&entries, coredump_dir) < config.keep_free && !entries.is_empty()
-        {
+        while avail + freed_so_far(&entries, coredump_dir) < keep_free && !entries.is_empty() {
             let (core_path, meta_path, _) = entries.remove(0);
             let _ = fs::remove_file(&core_path);
             let _ = fs::remove_file(&meta_path);
@@ -1197,6 +1207,51 @@ fn available_disk_space(path: &Path) -> Option<u64> {
     {
         None
     }
+}
+
+/// Total size (bytes) of the filesystem containing `path`, via statvfs.
+fn total_disk_space(path: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let c_path = CString::new(path.as_os_str().as_bytes()).ok()?;
+
+        unsafe {
+            let mut stat: libc::statvfs = std::mem::zeroed();
+            if libc::statvfs(c_path.as_ptr(), &mut stat) == 0 {
+                Some(stat.f_blocks * stat.f_frsize)
+            } else {
+                None
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
+/// Resolve the effective `MaxUse=` / `KeepFree=` limits, computing filesystem
+/// relative defaults (10% / 15% of the fs, MaxUse capped at 4 GiB) when the
+/// configured value is the "unset" sentinel — mirroring systemd-coredump.
+fn resolve_disk_limits(coredump_dir: &Path, config: &Config) -> (u64, u64) {
+    let fs_size = total_disk_space(coredump_dir);
+    let max_use = if config.max_use == DEFAULT_MAX_USE {
+        fs_size
+            .map(|s| (s / 10).clamp(MAX_USE_LOWER, MAX_USE_UPPER))
+            .unwrap_or(MAX_USE_UPPER)
+    } else {
+        config.max_use
+    };
+    let keep_free = if config.keep_free == DEFAULT_KEEP_FREE {
+        fs_size.map(|s| s * 15 / 100).unwrap_or(0)
+    } else {
+        config.keep_free
+    };
+    (max_use, keep_free)
 }
 
 /// Helper — not actually used for iterative removal, just a placeholder
