@@ -1621,9 +1621,20 @@ fn match_token(token: &RuleToken, event: &UEvent, program_result: &mut String) -
             event.env.get("TAGS").cloned()
         }
         "TEST" => {
-            // TEST checks if a file/path exists
-            let path = expand_substitutions(&token.value, event, program_result.as_str(), "", &[]);
-            let exists = Path::new(&path).exists();
+            // TEST checks if a file/path exists. A relative path is resolved
+            // against the device's sysfs directory (matching upstream udev's
+            // test_action in udev-rules.c); only an absolute path is used
+            // as-is. Without this, e.g. `TEST!="loop/backing_file"` on a loop
+            // device always reported "absent" (it was checked against udevd's
+            // CWD), so `SYSTEMD_READY=0` was set even for a loop with a backing
+            // file and its `.device` unit never became active.
+            let raw = expand_substitutions(&token.value, event, program_result.as_str(), "", &[]);
+            let path = if raw.starts_with('/') {
+                std::path::PathBuf::from(&raw)
+            } else {
+                event.syspath().join(&raw)
+            };
+            let exists = path.exists();
             let matches = match token.op {
                 RuleOp::Match => exists,
                 RuleOp::Nomatch => !exists,
