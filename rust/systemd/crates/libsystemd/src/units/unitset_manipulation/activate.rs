@@ -1180,6 +1180,26 @@ fn activate_units_recursive(
                         false
                     };
 
+                    // Distinguish a deferred multi-command oneshot (its
+                    // preliminary ExecStart= commands were deferred and no main
+                    // PID has been forked yet) from a deferred notify/main wait,
+                    // so we route to the correct background driver.
+                    let is_oneshot_prelim = if let Some(unit) =
+                        ri_guard.unit_table.get(&id_saved)
+                        && let Specific::Service(svc) = &unit.specific
+                    {
+                        // Use the lock-free common.main_pid atomic (0 = no main
+                        // forked yet) rather than svc.state: acquiring the
+                        // per-unit state lock while holding the table read guard
+                        // deadlocks against a fast-exiting service's exit handler
+                        // (which holds state.write and wants table.write).
+                        svc.conf.srcv_type == crate::units::ServiceType::OneShot
+                            && svc.conf.exec.len() > 1
+                            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
+                    } else {
+                        false
+                    };
+
                     // Drop the read lock before triggering OnFailure= (which
                     // may need a write lock via find_or_load_unit).
                     drop(ri_guard);
@@ -1208,19 +1228,35 @@ fn activate_units_recursive(
                         let id_bg = id_saved;
                         let filter_ids_bg = filter_ids_copy;
                         let errors_bg = errors_copy;
-                        std::thread::Builder::new()
-                            .name(format!("notify-wait-{}", unit_name))
-                            .spawn(move || {
-                                deferred_notify_wait_and_dispatch(
-                                    id_bg,
-                                    next_services_ids,
-                                    filter_ids_bg,
-                                    run_info_bg,
-                                    errors_bg,
-                                    source,
-                                );
-                            })
-                            .expect("Failed to spawn deferred notify wait thread");
+                        if is_oneshot_prelim {
+                            std::thread::Builder::new()
+                                .name(format!("oneshot-exec-{}", unit_name))
+                                .spawn(move || {
+                                    deferred_oneshot_exec_drive(
+                                        id_bg,
+                                        next_services_ids,
+                                        filter_ids_bg,
+                                        run_info_bg,
+                                        errors_bg,
+                                        source,
+                                    );
+                                })
+                                .expect("Failed to spawn deferred oneshot exec thread");
+                        } else {
+                            std::thread::Builder::new()
+                                .name(format!("notify-wait-{}", unit_name))
+                                .spawn(move || {
+                                    deferred_notify_wait_and_dispatch(
+                                        id_bg,
+                                        next_services_ids,
+                                        filter_ids_bg,
+                                        run_info_bg,
+                                        errors_bg,
+                                        source,
+                                    );
+                                })
+                                .expect("Failed to spawn deferred notify wait thread");
+                        }
                     } else {
                         // Normal path: dispatch before-chain immediately.
                         if !next_services_ids.is_empty() {
@@ -1325,6 +1361,136 @@ fn deferred_start_fail_cleanup(
                 crate::units::status::StatusStopped::StoppedUnexpected,
                 vec![UnitOperationErrorReason::GenericStartError(reason)],
             );
+        }
+    }
+}
+
+/// Background driver for a multi-command Type=oneshot service whose preliminary
+/// (non-last) `ExecStart=` commands were deferred by `Service::start` (returning
+/// `StartResult::DeferredOneshotExec`). It runs each non-last command to
+/// completion WITHOUT holding the RuntimeInfo table read lock across the wait —
+/// the child is spawned under a short read guard, then waited on via the
+/// pid_table Arc with no table lock held — so a concurrent `systemctl
+/// daemon-reload` can commit between commands and the final command reflects the
+/// reloaded config (07-pid1-exec-deserialization). Each iteration re-reads the
+/// exec list and relocates via `current_exec_argv`, mirroring the inline loop in
+/// `Service::start`. Once only the last command remains it forks it as the main
+/// process via `fork_main_and_maybe_defer` and hands completion + before-chain
+/// dispatch to `deferred_notify_wait_and_dispatch`.
+fn deferred_oneshot_exec_drive(
+    id: UnitId,
+    next_services_ids: Vec<UnitId>,
+    filter_ids: Arc<Vec<UnitId>>,
+    run_info: ArcMutRuntimeInfo,
+    errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    source: ActivationSource,
+) {
+    let name = id.name.clone();
+    // Clone the pid_table Arc once so helper waits need no table guard.
+    let pid_table = run_info.read_poisoned().pid_table.clone();
+
+    enum Step {
+        Wait(std::process::Child, Option<std::time::Duration>),
+        Forked(Result<Option<crate::services::StartResult>, ServiceErrorReason>),
+        Completed,
+        SpawnErr(String),
+    }
+
+    loop {
+        let step = {
+            let ri = run_info.read_poisoned();
+            let Some(unit) = ri.unit_table.get(&id) else {
+                break;
+            };
+            let Specific::Service(svc) = &unit.specific else {
+                break;
+            };
+            let conf = &svc.conf;
+            let exec_list = conf.exec.clone();
+            let working_dir = conf.exec_config.working_directory.clone();
+            let mut st = svc.state.write_poisoned();
+            let timeout = st.srvc.get_start_timeout(conf);
+
+            // Relocate in the (possibly reloaded) exec list via the argv of the
+            // command we just ran, exactly like Service::start's inline loop.
+            let mut idx = 0usize;
+            let mut removed = false;
+            if let Some(last_argv) = st.srvc.current_exec_argv.take() {
+                match exec_list.iter().position(|c| c.to_string() == last_argv) {
+                    Some(pos) => idx = pos + 1,
+                    None => removed = true,
+                }
+            }
+
+            if removed {
+                // The currently-running command vanished from the reloaded
+                // config: finish the oneshot without running any further command
+                // (empty log), matching upstream ("the currently executed
+                // command vanished ... simply finish executing the unit"). Signal
+                // completion via main_exit_status=0; deferred_notify_wait_and_dispatch
+                // performs the Started transition + before-chain dispatch.
+                st.srvc.current_exec_argv = None;
+                st.srvc.main_exit_status = Some(0);
+                Step::Completed
+            } else if idx + 1 >= exec_list.len() {
+                // Only the last command remains: fork it as the main process.
+                Step::Forked(st.srvc.fork_main_and_maybe_defer(
+                    conf,
+                    id.clone(),
+                    &name,
+                    &ri,
+                    source,
+                    &unit.common,
+                ))
+            } else {
+                let cmd = exec_list[idx].clone();
+                st.srvc.current_exec_argv = Some(cmd.to_string());
+                match st
+                    .srvc
+                    .spawn_helper_child(&cmd, id.clone(), &name, &ri, working_dir.as_ref())
+                {
+                    Ok(child) => Step::Wait(child, timeout),
+                    Err(e) => Step::SpawnErr(format!("{e}")),
+                }
+            }
+        };
+
+        match step {
+            Step::Wait(child, timeout) => {
+                crate::services::wait_for_helper_child(&child, &pid_table, timeout);
+            }
+            Step::Forked(Ok(_)) | Step::Completed => {
+                // Main process forked (its completion wait is itself deferred),
+                // or the oneshot finished with no further command (Completed, via
+                // main_exit_status=0). Reuse the notify-wait poller to perform the
+                // Started transition + before-chain dispatch, like the inline path.
+                deferred_notify_wait_and_dispatch(
+                    id,
+                    next_services_ids,
+                    filter_ids,
+                    run_info,
+                    errors,
+                    source,
+                );
+                return;
+            }
+            Step::Forked(Err(e)) => {
+                errors.lock_poisoned().push(UnitOperationError {
+                    unit_name: name.clone(),
+                    unit_id: id.clone(),
+                    reason: UnitOperationErrorReason::ServiceStartError(e),
+                });
+                return;
+            }
+            Step::SpawnErr(e) => {
+                error!("deferred oneshot {name}: failed to spawn preliminary command: {e}");
+                errors.lock_poisoned().push(UnitOperationError {
+                    unit_name: name.clone(),
+                    unit_id: id.clone(),
+                    reason: UnitOperationErrorReason::GenericStartError(e),
+                });
+                return;
+            }
         }
     }
 }

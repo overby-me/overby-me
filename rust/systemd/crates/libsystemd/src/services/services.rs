@@ -682,6 +682,11 @@ pub enum StartResult {
     /// Process started but READY=1 wait deferred to a background thread.
     /// Only returned for Type=notify/NotifyReload services with DeferNotifyWait source.
     DeferredNotifyWait,
+    /// Multi-command Type=oneshot service whose preliminary (non-last)
+    /// ExecStart= commands are deferred to `deferred_oneshot_exec_drive` so a
+    /// concurrent `daemon-reload` can commit between commands. The service is
+    /// left in the Starting state with no main PID yet (07-pid1-exec-deserialization).
+    DeferredOneshotExec,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -874,6 +879,19 @@ impl Service {
             // position is at the end, we drop out of the preliminary loop
             // and let the main-process path dispatch the now-last command.
             if conf.srcv_type == ServiceType::OneShot && conf.exec.len() > 1 {
+                // Defer the preliminary (non-last) ExecStart= commands to
+                // deferred_oneshot_exec_drive so a concurrent `systemctl
+                // daemon-reload` can commit between commands and the final
+                // command reflects the reloaded config — the synchronous loop
+                // below would hold the RuntimeInfo table read lock across the
+                // run_cmd waits and block daemon-reload
+                // (07-pid1-exec-deserialization).  Only for the thread-pool
+                // activation path (DeferNotifyWait), whose pool closure spawns
+                // the driver; other sources run the loop inline.
+                if matches!(source, ActivationSource::DeferNotifyWait) {
+                    self.current_exec_argv = None;
+                    return Ok(StartResult::DeferredOneshotExec);
+                }
                 let timeout = self.get_start_timeout(conf);
                 let mut idx: usize = 0;
                 #[allow(clippy::while_let_loop)]
@@ -950,7 +968,7 @@ impl Service {
     /// completion wait to a background thread (`Ok(Some(DeferredNotifyWait))`) or
     /// perform it inline. Returns `Ok(None)` when the service is fully started
     /// inline and the caller should run the post-start tail.
-    fn fork_main_and_maybe_defer(
+    pub(crate) fn fork_main_and_maybe_defer(
         &mut self,
         conf: &ServiceConfig,
         id: UnitId,
@@ -1344,7 +1362,7 @@ impl Service {
     /// oneshots) and insert it into the pid_table as a Helper entry. Returns the
     /// spawned `Child` WITHOUT waiting, so a caller can wait on it via the
     /// pid_table Arc without holding the RuntimeInfo table lock.
-    fn spawn_helper_child(
+    pub(crate) fn spawn_helper_child(
         &mut self,
         cmdline: &Commandline,
         id: UnitId,
@@ -1887,7 +1905,7 @@ impl Service {
     }
 }
 
-enum WaitResult {
+pub(crate) enum WaitResult {
     TimedOut,
     InTime(std::io::Result<crate::signal_handler::ChildTermination>),
 }
@@ -1897,7 +1915,7 @@ enum WaitResult {
 /// This might also happen because it was collected by the `signal_handler`.
 /// This could be fixed by using the `waitid()` with WNOWAIT in the signal handler but
 /// that has not been ported to rust
-fn wait_for_helper_child(
+pub(crate) fn wait_for_helper_child(
     child: &std::process::Child,
     pid_table: &ArcMutPidTable,
     time_out: Option<std::time::Duration>,

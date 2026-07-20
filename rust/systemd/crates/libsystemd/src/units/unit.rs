@@ -451,6 +451,12 @@ impl ServiceState {
                 run_info.notify_eventfds();
                 Ok(UnitStatus::Starting)
             }
+            Ok(crate::services::StartResult::DeferredOneshotExec) => {
+                // Multi-command oneshot whose preliminary ExecStart= commands
+                // are deferred to deferred_oneshot_exec_drive.  Status stays
+                // Starting (no main PID yet); the pool closure spawns the driver.
+                Ok(UnitStatus::Starting)
+            }
             Err(e) => {
                 let mut status = status.write_poisoned();
                 // Always set StoppedUnexpected on failure.  The service
@@ -710,6 +716,11 @@ impl ServiceState {
             Ok(crate::services::StartResult::DeferredNotifyWait) => {
                 // Reactivation with deferred notify wait — keep Starting status.
                 run_info.notify_eventfds();
+                Ok(())
+            }
+            Ok(crate::services::StartResult::DeferredOneshotExec) => {
+                // Reactivation of a multi-command oneshot with deferred
+                // preliminary ExecStart= — keep Starting; the driver completes it.
                 Ok(())
             }
             Err(e) => {
