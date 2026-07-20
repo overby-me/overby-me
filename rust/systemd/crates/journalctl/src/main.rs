@@ -2131,11 +2131,17 @@ fn main() {
                 // Current boot (most recent)
                 boots.last().map(|b| b.boot_id.clone())
             } else if let Ok(offset) = boot_spec.parse::<i64>() {
-                // Numeric offset: 0 = current, -1 = previous, etc.
-                let idx = if offset >= 0 {
-                    offset as usize
+                // Numeric offset per journalctl(1): a POSITIVE N selects the Nth
+                // boot from the beginning (1 = oldest, 2 = second oldest, ...);
+                // 0/-0 is the last (current) boot; a negative -N is N boots before
+                // last. `boots` is chronological (oldest first, last = current).
+                let idx = if offset > 0 {
+                    (offset as usize).saturating_sub(1)
+                } else if offset == 0 {
+                    boots.len().saturating_sub(1)
                 } else {
-                    boots.len().saturating_sub((-offset) as usize)
+                    // -1 = boot before last, -N = N boots before last.
+                    boots.len().saturating_sub(1 + (-offset) as usize)
                 };
                 boots.get(idx).map(|b| b.boot_id.clone())
             } else {
