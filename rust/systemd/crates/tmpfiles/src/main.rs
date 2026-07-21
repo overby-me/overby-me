@@ -61,6 +61,19 @@ const CONFIG_DIRS: &[&str] = &[
     "/lib/tmpfiles.d",
 ];
 
+/// System-wide directories searched for per-user (`--user`) tmpfiles.d
+/// configuration, in priority order. The per-user XDG directories
+/// (`$XDG_CONFIG_HOME/user-tmpfiles.d`, `$XDG_RUNTIME_DIR/user-tmpfiles.d`) are
+/// prepended at runtime and take precedence over these.
+const USER_CONFIG_DIRS: &[&str] = &[
+    "/etc/user-tmpfiles.d",
+    "/run/user-tmpfiles.d",
+    "/usr/local/share/user-tmpfiles.d",
+    "/usr/share/user-tmpfiles.d",
+    "/usr/local/lib/user-tmpfiles.d",
+    "/usr/lib/user-tmpfiles.d",
+];
+
 /// systemd-tmpfiles — Create, delete, and clean up temporary files and directories
 #[derive(Parser, Debug)]
 #[command(name = "systemd-tmpfiles", version, about)]
@@ -80,6 +93,10 @@ struct Cli {
     /// Also execute lines with an exclamation mark (for early boot)
     #[arg(long)]
     boot: bool,
+
+    /// Execute rules for the per-user instance (read user-tmpfiles.d)
+    #[arg(long)]
+    user: bool,
 
     /// Only apply rules with paths that start with the specified prefix
     #[arg(long = "prefix")]
@@ -868,14 +885,31 @@ fn parse_config_file(path: &Path, root: Option<&Path>) -> io::Result<Vec<Tmpfile
 
 /// Discover all .conf files across the config directories, respecting priority.
 /// Files in earlier directories shadow files with the same name in later directories.
-fn discover_config_files() -> Vec<PathBuf> {
+fn discover_config_files(user: bool) -> Vec<PathBuf> {
     let mut seen_names: BTreeSet<String> = BTreeSet::new();
     let mut result = Vec::new();
 
-    // Collect files from directories in priority order (etc > run > usr/lib > lib).
+    // Build the search path. In --user mode the per-user XDG directories take
+    // precedence over the system-wide user-tmpfiles.d directories.
+    let dirs: Vec<PathBuf> = if user {
+        let mut d = Vec::new();
+        if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
+            d.push(PathBuf::from(config_home).join("user-tmpfiles.d"));
+        } else if let Ok(home) = std::env::var("HOME") {
+            d.push(PathBuf::from(home).join(".config/user-tmpfiles.d"));
+        }
+        if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+            d.push(PathBuf::from(runtime).join("user-tmpfiles.d"));
+        }
+        d.extend(USER_CONFIG_DIRS.iter().map(PathBuf::from));
+        d
+    } else {
+        CONFIG_DIRS.iter().map(PathBuf::from).collect()
+    };
+
+    // Collect files from directories in priority order (highest first).
     // When the same filename exists in multiple directories, the highest-priority one wins.
-    for dir in CONFIG_DIRS {
-        let dir_path = Path::new(dir);
+    for dir_path in &dirs {
         if !dir_path.is_dir() {
             continue;
         }
@@ -887,7 +921,11 @@ fn discover_config_files() -> Vec<PathBuf> {
                 .filter(|p| p.extension().map(|ext| ext == "conf").unwrap_or(false))
                 .collect(),
             Err(e) => {
-                eprintln!("systemd-tmpfiles: Failed to read directory {}: {}", dir, e);
+                eprintln!(
+                    "systemd-tmpfiles: Failed to read directory {}: {}",
+                    dir_path.display(),
+                    e
+                );
                 continue;
             }
         };
@@ -2545,7 +2583,7 @@ fn run() -> u8 {
             .cloned()
             .collect()
     } else {
-        discover_config_files()
+        discover_config_files(cli.user)
     };
 
     if verbose {
