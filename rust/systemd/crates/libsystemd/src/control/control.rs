@@ -7982,6 +7982,28 @@ pub fn execute_command(
                 props.insert("Markers".to_string(), markers_val);
             }
 
+            // TriggeredBy — the reverse of the trigger relationship. The property
+            // builder only sees this unit's own config, so scan the unit table
+            // here (where it is available) for timers/paths/sockets whose target
+            // is this unit.
+            {
+                let mut triggered_by: Vec<String> = ri
+                    .unit_table
+                    .values()
+                    .filter(|other| match &other.specific {
+                        Specific::Timer(t) => t.conf.unit == unit.id.name,
+                        Specific::Path(p) => p.conf.unit == unit.id.name,
+                        Specific::Socket(s) => {
+                            s.conf.services.iter().any(|svc| svc.name == unit.id.name)
+                        }
+                        _ => false,
+                    })
+                    .map(|other| other.id.name.clone())
+                    .collect();
+                triggered_by.sort();
+                props.insert("TriggeredBy".to_string(), triggered_by.join(" "));
+            }
+
             // Compute Effective* resource-control properties by traversing
             // the slice hierarchy and finding the minimum limit.
             {
