@@ -34,7 +34,14 @@
 
     : "systemctl disable removes WantedBy symlink"
     systemctl disable enable-wb-test.service
-    (! systemctl is-enabled enable-wb-test.service) || true
+    # disable must remove the WantedBy symlink so is-enabled reports the unit
+    # as no longer enabled (non-zero exit, not "enabled").
+    if systemctl is-enabled enable-wb-test.service 2>/dev/null; then
+      echo "FAIL: enable-wb-test still enabled after disable" >&2
+      exit 1
+    fi
+    test ! -e /run/systemd/system/multi-user.target.wants/enable-wb-test.service \
+      -a ! -e /etc/systemd/system/multi-user.target.wants/enable-wb-test.service
     EWEOF
     chmod +x TEST-74-AUX-UTILS.enable-wantedby.sh
   '';

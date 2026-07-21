@@ -6,8 +6,9 @@
   # DynamicUser credential loading now works (env var expansion implemented).
   patchScript = ''
     sed -i '/^(! unshare -m/d' TEST-54-CREDS.sh
-    # Exit before the qemu/nspawn credential checks and remaining
-    # ImportCredential/varlink-dependent sections
-    sed -i '/^if systemd-detect-virt -q -c/i touch /testok; exit 0' TEST-54-CREDS.sh
+    # Honestly SKIP (not fake-pass) before the qemu/nspawn credential checks and
+    # remaining ImportCredential/varlink-dependent sections: mark /skipped so the
+    # check stays green without claiming the unimplemented sections passed.
+    sed -i '/^if systemd-detect-virt -q -c/i touch /skipped; exit 0' TEST-54-CREDS.sh
   '';
 }

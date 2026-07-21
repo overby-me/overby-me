@@ -15,8 +15,8 @@
     : "systemctl list-dependencies --reverse shows reverse deps"
     systemctl list-dependencies --reverse systemd-journald.service --no-pager > /dev/null
 
-    : "systemctl list-dependencies --all shows all"
-    systemctl list-dependencies --all multi-user.target --no-pager > /dev/null || true
+    : "systemctl list-dependencies --all recurses without error"
+    systemctl list-dependencies --all multi-user.target --no-pager >/dev/null
     LDEOF
     chmod +x TEST-74-AUX-UTILS.list-deps-advanced.sh
   '';

@@ -22,9 +22,14 @@
     UEOF
     systemctl daemon-reload
     systemctl enable "$UNIT.service"
-    systemctl is-enabled "$UNIT.service"
+    test "$(systemctl is-enabled "$UNIT.service")" = "enabled"
     systemctl disable "$UNIT.service"
-    (! systemctl is-enabled "$UNIT.service" 2>/dev/null) || true
+    # disable must remove the WantedBy symlink: is-enabled now reports the
+    # unit as not enabled (non-zero exit) and must not print "enabled".
+    if systemctl is-enabled "$UNIT.service" 2>/dev/null; then
+      echo "FAIL: $UNIT still enabled after disable" >&2
+      exit 1
+    fi
     rm -f "/run/systemd/system/$UNIT.service"
     systemctl daemon-reload
     ENEOF
