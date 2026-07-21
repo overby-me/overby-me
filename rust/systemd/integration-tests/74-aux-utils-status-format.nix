@@ -9,20 +9,21 @@
     set -eux
     set -o pipefail
 
-    : "systemctl status shows unit info"
-    systemctl status systemd-journald.service --no-pager > /dev/null || true
+    # `systemctl status` exits non-zero to encode inactive/failed state (not
+    # command failure), so capture output and assert on its content.
+    : "systemctl status shows the human-readable header (name + loaded + active)"
+    OUT="$(systemctl status systemd-journald.service --no-pager 2>&1 || true)"
+    grep -qi "journald" <<<"$OUT"
+    grep -qi "loaded" <<<"$OUT"
+    grep -qi "active" <<<"$OUT"
 
-    : "systemctl status with --lines limits output"
-    systemctl status systemd-journald.service --no-pager --lines=3 > /dev/null || true
+    : "systemctl status renders a status block, not a raw JSON dump"
+    ! grep -q '"Name"' <<<"$OUT"
 
-    : "systemctl status with --full shows full lines"
-    systemctl status systemd-journald.service --no-pager --full > /dev/null || true
-
-    : "systemctl status for multiple units"
-    systemctl status systemd-journald.service init.scope --no-pager > /dev/null || true
-
-    : "systemctl status shows loaded state"
-    systemctl status systemd-journald.service --no-pager 2>&1 | grep -qi "loaded" || true
+    : "systemctl status for multiple units shows each of them"
+    OUT="$(systemctl status systemd-journald.service systemd-udevd.service --no-pager 2>&1 || true)"
+    grep -qi "journald" <<<"$OUT"
+    grep -qi "udevd" <<<"$OUT"
     SFEOF
     chmod +x TEST-74-AUX-UTILS.status-format.sh
   '';

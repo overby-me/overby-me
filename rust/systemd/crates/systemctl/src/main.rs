@@ -2384,11 +2384,21 @@ fn handle_response(
             }
         }
         "status" => {
-            // Print the result
+            // Print the result as systemd's human-readable status block (or as
+            // JSON when --output=json was requested).
             if !quiet && let Some(result) = result {
                 let is_empty = result.is_null() || result.as_array().is_some_and(|a| a.is_empty());
                 if !is_empty {
-                    println!("{}", serde_json::to_string_pretty(result).unwrap());
+                    if output_format == Some("json") {
+                        println!("{}", serde_json::to_string_pretty(result).unwrap());
+                    } else if let Some(arr) = result.as_array() {
+                        for (i, unit) in arr.iter().enumerate() {
+                            if i > 0 {
+                                println!();
+                            }
+                            print_status_block(unit);
+                        }
+                    }
                 }
             }
             // Exit 3 if the service is not active (matching C systemd behavior).
@@ -2416,6 +2426,50 @@ fn handle_response(
                 }
             }
         }
+    }
+}
+
+/// Render one unit's `systemctl status` header block, human-readable, from the
+/// fields the status query returns. Mirrors the head of real systemd output:
+///   ● name - Description
+///        Loaded: loaded
+///        Active: active (running)
+fn print_status_block(unit: &Value) {
+    let name = unit.get("Name").and_then(|v| v.as_str()).unwrap_or("");
+    let raw_status = unit.get("Status").and_then(|v| v.as_str()).unwrap_or("");
+    let (active, sub) = status_to_active_sub(raw_status);
+    let bullet = match active {
+        "active" | "activating" => "●",
+        "failed" => "×",
+        _ => "○",
+    };
+    let desc = unit
+        .get("Description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if desc.is_empty() {
+        println!("{bullet} {name}");
+    } else {
+        println!("{bullet} {name} - {desc}");
+    }
+    println!("     Loaded: loaded");
+    println!("     Active: {active} ({sub})");
+}
+
+/// Map rust-systemd's internal unit Status string (the Debug form of
+/// UnitStatus, e.g. "Started(Running)") to systemd's ActiveState/SubState
+/// vocabulary shown by `systemctl status`.
+fn status_to_active_sub(status: &str) -> (&'static str, &'static str) {
+    if status.starts_with("Started") {
+        ("active", "running")
+    } else if status.starts_with("Starting") {
+        ("activating", "start")
+    } else if status.starts_with("Stopping") {
+        ("deactivating", "stop")
+    } else if status.contains("Failed") || status.contains("failed") {
+        ("failed", "failed")
+    } else {
+        ("inactive", "dead")
     }
 }
 
