@@ -773,6 +773,14 @@ fn main() {
                 "{}.device",
                 libsystemd::unit_name::unit_name_path_escape(arg),
             );
+        } else if arg.starts_with('/') {
+            // Any other absolute path is a mount point: resolve it to the
+            // corresponding `.mount` unit (e.g. `/tmp/x` -> `tmp-x.mount`), as
+            // upstream `systemctl show /tmp/x` does.
+            *arg = format!(
+                "{}.mount",
+                libsystemd::unit_name::unit_name_path_escape(arg),
+            );
         }
     }
 

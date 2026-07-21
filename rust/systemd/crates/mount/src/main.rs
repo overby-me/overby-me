@@ -65,7 +65,15 @@ struct Cli {
     description: Option<String>,
 
     /// Create an automount unit instead of a mount unit
-    #[arg(short = 'A', long)]
+    #[arg(
+        short = 'A',
+        long,
+        num_args = 0..=1,
+        require_equals = true,
+        default_value = "no",
+        default_missing_value = "yes",
+        value_parser = parse_systemd_bool
+    )]
     automount: bool,
 
     /// Automount idle timeout
@@ -323,6 +331,42 @@ fn path_to_unit_name(path: &str, suffix: &str) -> String {
 }
 
 // ── Transient unit creation ───────────────────────────────────────────────
+
+/// Parse a systemd-style boolean (used for `--automount=BOOL`). Matches the
+/// vocabulary accepted by upstream `parse_boolean`: yes/true/1/on and
+/// no/false/0/off (case-insensitive).
+fn parse_systemd_bool(s: &str) -> Result<bool, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "yes" | "true" | "1" | "on" => Ok(true),
+        "no" | "false" | "0" | "off" => Ok(false),
+        other => Err(format!("invalid boolean value '{other}'")),
+    }
+}
+
+/// Probe an ext2/3/4 filesystem's volume label directly from the superblock.
+/// Used by `--discover` to derive the transient unit Description, matching
+/// upstream systemd-mount which reads the discovered fs label. Returns None for
+/// non-ext filesystems or an unlabeled/unreadable device.
+fn probe_ext_label(devnode: &str) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = fs::File::open(devnode).ok()?;
+    // The ext superblock begins at offset 1024; s_magic (0xEF53) is at +0x38,
+    // s_volume_name (16 bytes, NUL-padded) at +0x78.
+    let mut magic = [0u8; 2];
+    f.seek(SeekFrom::Start(1024 + 0x38)).ok()?;
+    f.read_exact(&mut magic).ok()?;
+    if u16::from_le_bytes(magic) != 0xEF53 {
+        return None;
+    }
+    let mut label = [0u8; 16];
+    f.seek(SeekFrom::Start(1024 + 0x78)).ok()?;
+    f.read_exact(&mut label).ok()?;
+    let end = label.iter().position(|&b| b == 0).unwrap_or(label.len());
+    if end == 0 {
+        return None;
+    }
+    std::str::from_utf8(&label[..end]).ok().map(str::to_string)
+}
 
 /// Generate a transient mount unit file content.
 fn generate_mount_unit(
@@ -681,13 +725,36 @@ fn main() {
             (cli.args[0].clone(), cli.args[1].clone())
         } else {
             let what = cli.args[0].clone();
-            let base = Path::new(&what)
-                .file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_else(|| "unknown".to_string());
+            // No WHERE given: name the mount directory after the filesystem
+            // label (as upstream systemd-mount does), falling back to the
+            // device basename when there is no label.
+            let base = probe_ext_label(&what).unwrap_or_else(|| {
+                Path::new(&what)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            });
             (what, format!("/run/media/system/{}", base))
         };
         let what = what_string.as_str();
+
+        // `--discover` (no explicit --description) sets the unit Description to
+        // the discovered filesystem label, matching upstream systemd-mount.
+        let discovered_label = if cli.discover && cli.description.is_none() {
+            probe_ext_label(what)
+        } else {
+            None
+        };
+        // A Description can also arrive via `--property=Description=...`.
+        let property_description = cli
+            .property
+            .iter()
+            .find_map(|p| p.strip_prefix("Description=").map(str::to_owned));
+        let effective_description = cli
+            .description
+            .as_deref()
+            .or(property_description.as_deref())
+            .or(discovered_label.as_deref());
 
         // Resolve/validate WHERE according to --canonicalize.
         let where_ = match resolve_mount_point(&where_raw, canonicalize) {
@@ -715,13 +782,13 @@ fn main() {
                 &where_,
                 effective_fstype,
                 cli.options.as_deref(),
-                cli.description.as_deref(),
+                effective_description,
                 cli.read_only,
                 &cli.property,
             );
             let automount_content = generate_automount_unit(
                 &where_,
-                cli.description.as_deref(),
+                effective_description,
                 cli.timeout_idle_sec.as_deref(),
             );
 
@@ -763,6 +830,32 @@ fn main() {
                 process::exit(1);
             }
         } else {
+            // Register a .mount fragment in /run/systemd/system BEFORE mounting,
+            // so PID 1 knows the unit (with its Description — e.g. the
+            // `--discover` filesystem label, or an explicit --description) before
+            // the mount appears in /proc/self/mountinfo, and reflects it via
+            // `systemctl show`. Additive: the direct mount below still
+            // establishes the mount, so plain-mount behavior is unchanged.
+            if effective_description.is_some()
+                || cli.options.is_some()
+                || !cli.property.is_empty()
+            {
+                let content = generate_mount_unit(
+                    what,
+                    &where_,
+                    effective_fstype,
+                    cli.options.as_deref(),
+                    effective_description,
+                    cli.read_only,
+                    &cli.property,
+                );
+                let sysdir = PathBuf::from("/run/systemd/system");
+                let _ = fs::create_dir_all(&sysdir);
+                if fs::write(sysdir.join(&unit_name), &content).is_ok() {
+                    let _ = Command::new("systemctl").arg("daemon-reload").status();
+                }
+            }
+
             // Direct mount
             if let Err(e) = do_mount(
                 what,
