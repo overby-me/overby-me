@@ -16,8 +16,8 @@
     : "systemctl daemon-reload succeeds"
     systemctl daemon-reload
 
-    : "systemctl list-machines shows at least header"
-    systemctl list-machines --no-pager > /dev/null || true
+    : "systemctl list-machines lists the local machine"
+    systemctl list-machines --no-pager | grep -q "\.host"
 
     : "systemctl show --property=Version"
     systemctl show --property=Version | grep -q "Version="

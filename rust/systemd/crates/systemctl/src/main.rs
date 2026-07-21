@@ -354,6 +354,23 @@ fn main() {
         return;
     }
 
+    // `systemctl list-machines` is a systemd-machined feature; rust-systemd has
+    // no machined, so the only machine is the local host. Handle it client-side,
+    // mirroring real `systemctl list-machines` output on a container-less system.
+    if let Some(sub) = args.iter().find(|a| !a.starts_with('-'))
+        && sub == "list-machines"
+    {
+        let no_legend = args.iter().any(|a| a == "--no-legend");
+        if !no_legend {
+            println!("{:<12} {:<8} {:<7} {}", "NAME", "STATE", "FAILED", "JOBS");
+        }
+        println!("{:<12} {:<8} {:<7} {}", ".host", "running", "0", "0");
+        if !no_legend {
+            println!("\n1 machines listed.");
+        }
+        return;
+    }
+
     // Determine the control socket address.
     let addr = if let Ok(env_addr) = std::env::var("SYSTEMCTL_ADDR") {
         env_addr
