@@ -796,6 +796,21 @@ fn main() {
         }
     }
 
+    // run0 approximates a login session: ensure the target user's manager is
+    // running so a command like `systemd-run --user` run as that user can reach
+    // its user bus at /run/user/<uid>/bus. Real run0 does this via a PAM/logind
+    // session (pam_systemd -> logind -> user@<uid>.service); we start the unit
+    // directly. Best-effort and skipped for root.
+    if invoked_as_run0
+        && let Some(user) = cli.uid.as_deref()
+        && !matches!(user, "0" | "root")
+        && let Ok((uid, _, _, _)) = lookup_user(user)
+    {
+        let _ = std::process::Command::new("systemctl")
+            .args(["start", &format!("user@{uid}.service")])
+            .status();
+    }
+
     // Handle -M/--machine: parse "user@machine" format.
     // Only ".host" (local machine) is supported — translate to --uid for
     // the user part, allowing `systemd-run --user -M testuser@.host cmd`
