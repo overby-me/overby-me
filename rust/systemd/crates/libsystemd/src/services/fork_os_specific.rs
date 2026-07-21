@@ -169,6 +169,36 @@ pub fn pre_fork_os_specific(
                     );
                 }
             }
+
+            // DelegateSubgroup=NAME: create the named subgroup under the (now
+            // delegated) service cgroup and delegate it to the same user. The
+            // service's own process is placed here (post_fork), keeping the main
+            // delegated cgroup free of internal processes so it can carry child
+            // cgroups + controllers (cgroup v2 no-internal-process rule).
+            if let Some(ref sub) = srvc.delegate_subgroup {
+                let subpath = srvc.platform_specific.cgroup_path.join(sub);
+                if let Err(e) = std::fs::create_dir_all(&subpath) {
+                    trace!("Could not create delegate subgroup {:?}: {}", subpath, e);
+                }
+                let _ =
+                    std::fs::set_permissions(&subpath, std::fs::Permissions::from_mode(0o755));
+                let _ = nix::unistd::chown(&subpath, Some(uid), Some(gid));
+                // Beyond the main-cgroup delegation files, a subgroup also gets
+                // cgroup.max.depth / cgroup.max.descendants delegated so the owner
+                // can bound its own subtree (TEST-19-CGROUP.delegate testcase_subgroup).
+                for attr in [
+                    "cgroup.procs",
+                    "cgroup.subtree_control",
+                    "cgroup.threads",
+                    "cgroup.max.depth",
+                    "cgroup.max.descendants",
+                ] {
+                    let ap = subpath.join(attr);
+                    let _ =
+                        std::fs::set_permissions(&ap, std::fs::Permissions::from_mode(0o644));
+                    let _ = nix::unistd::chown(&ap, Some(uid), Some(gid));
+                }
+            }
         }
 
         // Apply TasksMax limit via the pids cgroup controller
@@ -397,14 +427,20 @@ pub fn post_fork_os_specific(conf: &PlatformSpecificServiceFields) -> Result<(),
     #[cfg(feature = "cgroups")]
     {
         use log::trace;
-        trace!("Move service to cgroup: {:?}", &conf.cgroup_path);
+        // With DelegateSubgroup=NAME the process runs in the named subgroup
+        // beneath the delegated service cgroup rather than the cgroup itself.
+        let target = match &conf.delegate_subgroup {
+            Some(sub) => conf.cgroup_path.join(sub),
+            None => conf.cgroup_path.clone(),
+        };
+        trace!("Move service to cgroup: {:?}", &target);
         // Ensure the cgroup directory exists before moving into it.
         // For socket-activated services, PID 1 may not have created the
         // cgroup yet when the exec helper runs.
-        if let Err(e) = std::fs::create_dir_all(&conf.cgroup_path) {
-            trace!("Could not create cgroup dir {:?}: {}", &conf.cgroup_path, e);
+        if let Err(e) = std::fs::create_dir_all(&target) {
+            trace!("Could not create cgroup dir {:?}: {}", &target, e);
         }
-        cgroups::move_self_to_cgroup(&conf.cgroup_path)
+        cgroups::move_self_to_cgroup(&target)
             .map_err(|e| format!("postfork os specific: {}", e))?;
     }
     let _ = conf;

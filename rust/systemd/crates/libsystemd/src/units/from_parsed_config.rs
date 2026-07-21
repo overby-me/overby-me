@@ -68,6 +68,8 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
     let platform_specific = PlatformSpecificServiceFields {
         #[cfg(target_os = "linux")]
         cgroup_path: make_cgroup_path(&conf.common.name, conf.srvc.slice.as_deref())?,
+        #[cfg(target_os = "linux")]
+        delegate_subgroup: conf.srvc.delegate_subgroup.clone(),
     };
 
     let fragment_path = conf.common.fragment_path.clone();

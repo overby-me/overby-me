@@ -3360,6 +3360,10 @@ pub struct ExecConfig {
 #[derive(Clone, Eq, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PlatformSpecificServiceFields {
     pub cgroup_path: std::path::PathBuf,
+    /// DelegateSubgroup= — when set, the service's process runs in this named
+    /// child cgroup beneath `cgroup_path` (kept in sync with the ServiceConfig
+    /// field so the post-fork child, which only sees this struct, can join it).
+    pub delegate_subgroup: Option<String>,
 }
 
 #[cfg(not(target_os = "linux"))]

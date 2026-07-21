@@ -3427,6 +3427,8 @@ fn create_transient_unit(
                     .join(unit_name)
             }
         },
+        #[cfg(target_os = "linux")]
+        delegate_subgroup: None,
     };
 
     let mut service_conf = ServiceConfig {
@@ -3609,6 +3611,21 @@ fn create_transient_unit(
                 }
                 "DynamicUser" => {
                     service_conf.exec_config.dynamic_user = matches!(value, "yes" | "true" | "1");
+                }
+                "DelegateSubgroup" => {
+                    // The delegated subgroup name: PID 1 creates <unit-cgroup>/<name>,
+                    // delegates it, and runs the service's process inside it.  Keep
+                    // the platform_specific copy (seen by the post-fork child) in sync.
+                    let v = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    };
+                    #[cfg(target_os = "linux")]
+                    {
+                        service_conf.platform_specific.delegate_subgroup = v.clone();
+                    }
+                    service_conf.delegate_subgroup = v;
                 }
                 "Delegate" => {
                     // systemd-run forwards `--property=Delegate=<v>` verbatim.
