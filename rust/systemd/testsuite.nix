@@ -13,6 +13,9 @@
   testEnv ? {},
   testTimeout ? 1800,
   useUpstreamSystemd ? false,
+  # Attach a software TPM (swtpm -> /dev/tpmrm0) to the VM. Needed by TEST-70-TPM2,
+  # whose systemd-tpm2-setup/tpm2 tooling requires a TPM2 device.
+  enableTpm ? false,
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -696,6 +699,8 @@ in
         # the release build, so give the VM headroom to avoid an early-boot OOM.
         memorySize = 4096;
         cores = 2;
+        # Software TPM for TEST-70-TPM2 (opt-in per test via enableTpm).
+        tpm.enable = enableTpm;
       };
     };
 

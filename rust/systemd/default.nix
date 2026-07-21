@@ -409,6 +409,7 @@
               extraPackages = (t.extraPackages or (_: [])) pkgs;
               testEnv = t.testEnv or {};
               testTimeout = t.testTimeout or 1800;
+              enableTpm = t.enableTpm or false;
             };
         })
         tests)
@@ -422,6 +423,7 @@
               extraPackages = (t.extraPackages or (_: [])) pkgs;
               testEnv = t.testEnv or {};
               testTimeout = t.testTimeout or 1800;
+              enableTpm = t.enableTpm or false;
               useUpstreamSystemd = true;
             };
         })
