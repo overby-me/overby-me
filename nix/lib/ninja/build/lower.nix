@@ -539,9 +539,25 @@ in {
         + lib.optionalString (useScan && generatedHeaderIncs != [])
         (" " + lib.concatStringsSep " " generatedHeaderIncs);
 
+      # `cp -rs` each producer's whole output tree in. A path one producer
+      # provides as a real dir may already be a symlink (or under a symlinked
+      # parent) from an earlier producer — cp cannot overwrite a non-dir with a
+      # dir. For each dir this producer contributes whose dest is currently a
+      # non-dir, realize_writable it first (de-symlinks the path, re-linking the
+      # content) so cp merges into a real dir; the exit is tolerated for any
+      # residual conflict. The test is cheap and realize_writable runs only on
+      # the rare conflict.
       stageDeps =
         lib.concatMapStringsSep "\n"
-        (id: "cp -rsf --no-preserve=mode ${edgeDrvs.${toString id}}/. ./")
+        (id: let
+          d = edgeDrvs.${toString id};
+        in ''
+          (cd ${d} && find . -mindepth 1 -type d) | while IFS= read -r sub; do
+            s=''${sub#./}
+            if [ -L "$s" ] || { [ -e "$s" ] && [ ! -d "$s" ]; }; then realize_writable "$s"; fi
+          done
+          cp -rsf --no-preserve=mode ${d}/. ./ || true
+        '')
         depIds;
       # Skip if the path is already staged: the same header can be both a scanned
       # input here and a producer output copied in by stageDeps (a source header
