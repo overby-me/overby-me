@@ -561,6 +561,19 @@ in {
             if [ -L "$s" ] || { [ -e "$s" ] && [ ! -d "$s" ]; }; then realize_writable "$s"; fi
           done
           cp -rsf --no-preserve=mode ${d}/. ./ || true
+          # Replace staged executable *tools* (not libraries) with real copies: a
+          # tool that resolves its own argv[0] and execs a sibling by that resolved
+          # dir would otherwise look inside the producer store path, which lacks
+          # siblings staged from other producers (cctools `ar` execs a co-located
+          # `ranlib`, built by a separate edge). Libraries are excluded — they are
+          # linked, not run, and are large.
+          (cd ${d} && find . -type f -perm -u+x ! -name '*.dylib' ! -name '*.so' ! -name '*.so.*' ! -name '*.a' ! -name '*.o') | while IFS= read -r f; do
+            g=''${f#./}
+            if [ -L "$g" ]; then
+              t=$(readlink -f "$g" 2>/dev/null) || continue
+              [ -f "$t" ] && { rm -f "$g"; cp --no-preserve=mode "$t" "$g" && chmod +x "$g"; } || true
+            fi
+          done
         '')
         depIds;
       # Skip if the path is already staged: the same header can be both a scanned
@@ -713,6 +726,28 @@ in {
         in
           shebangSed ''"$out/${rel}"'')
         outs;
+      # A ninja link/archive command whose linker step fails does not abort the
+      # edge (the body has no `set -e`), so it exits 0 having produced no dylib/
+      # archive; the missing artifact then surfaces only far downstream at the
+      # consuming link. Fail such an edge in place when it did not produce its
+      # declared library output, so the real error is visible in *this* edge's
+      # log. Limited to .dylib/.a to avoid tripping edges that legitimately skip
+      # an implicit output.
+      checkOutputs =
+        lib.concatMapStringsSep "\n"
+        (o: let
+          rel =
+            if underAnyRoot o
+            then relUnder o
+            else o;
+        in
+          lib.optionalString (lib.hasSuffix ".dylib" o || lib.hasSuffix ".a" o) ''
+            if [ ! -e "$out/${rel}" ]; then
+              echo "nix-ninja: edge produced no library output ${rel}" >&2
+              exit 1
+            fi
+          '')
+        e.outputs;
     in
       pkgs.runCommand (sanDrv (builtins.head outs)) {
         nativeBuildInputs = toolchain ++ extraInputs;
@@ -760,6 +795,7 @@ in {
         ${command}
         ${patchOutShebangs}
         ${rspClean}
+        ${checkOutputs}
       '';
 
     # Memoized derivations, keyed by stringified edge index. No-op edges
