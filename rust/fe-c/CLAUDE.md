@@ -85,7 +85,7 @@ call. Add each new check to `nix flake check` as you go.
 
 ### Phase A — foundation (mode-independent)
 
-**A1. Workspace + toolchain + nix skeleton.**
+**A1. Workspace + toolchain + nix skeleton.** *(done 2026-07-21)*
 Three crates, `rust-toolchain.toml` pinned nightly (shared with `../libc`),
 flakelight module wiring through `nix/lib/cargo`.
 *Before writing any nix*, answer the six API questions in

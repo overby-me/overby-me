@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/cargo-fe-c",
+  "crates/cementite",
+  "crates/fe-c-driver",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+repository = "https://tangled.org/overby.me/overby.me"
+license = "MIT"
+
+[profile.release]
+# The runtime ships inside hardened binaries; keep frames walkable for
+# violation reports.
+debug = "line-tables-only"

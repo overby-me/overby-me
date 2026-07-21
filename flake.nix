@@ -218,6 +218,7 @@
         ./rust/curl
         ./rust/diffutils
         ./rust/direnv
+        ./rust/fe-c
         ./rust/file
         ./rust/flatpak
         ./rust/gcc

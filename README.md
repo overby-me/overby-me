@@ -87,6 +87,7 @@
 | [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/curl) | curl-compatible HTTP client using Rustls |
 | [Diffutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/diffutils) | GNU diffutils-compatible file comparison tools |
 | [Direnv-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/direnv) | Direnv reimplementation |
+| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
 | [File-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/file) | GNU file-compatible file type detection tool |
 | [Flatpak-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/flatpak) | Flatpak-compatible application sandboxing and distribution tool |
 | [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gcc) | GCC-compatible C compiler written in Rust |
@@ -96,6 +97,7 @@
 | [H265-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h265-decoder) | Pure Rust H.265/HEVC decoder library |
 | [H26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h26xtoav1) | CLI tool for transcoding H.264/H.265 video to AV1 |
 | [Help2man-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/help2man) | GNU help2man-compatible man page generator |
+| [Libc-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
 | [Make-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/make) | GNU Make-compatible build system driver |
 | [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/meson) | Meson build system compatible implementation |
 | [NixOS-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixos) | NixOS distribution with Rust user space |

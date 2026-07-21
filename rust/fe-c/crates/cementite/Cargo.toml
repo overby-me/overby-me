@@ -1,0 +1,7 @@
+[package]
+name = "cementite"
+version.workspace = true
+edition.workspace = true
+description = "Fe-C runtime: allocation table, capability checks, quarantining allocator, libc interposition"
+repository.workspace = true
+license.workspace = true
