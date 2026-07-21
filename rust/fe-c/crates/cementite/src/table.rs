@@ -28,6 +28,7 @@ use core::sync::atomic::{
 };
 use std::sync::Mutex;
 
+use crate::arena::{Arena, NONE};
 use crate::cap::{ALLOC_ID_LIMIT, AllocId, Cap, CapFlags, PackedCap};
 use crate::liveness::LivenessBitmap;
 use crate::sys::alloc_zeroed_forever;
@@ -43,10 +44,6 @@ const VA_LIMIT: usize = 1 << VA_BITS;
 const LEVEL_BITS: u32 = 12;
 const LEVEL_LEN: usize = 1 << LEVEL_BITS;
 const LEVEL_MASK: usize = LEVEL_LEN - 1;
-
-/// Sentinel "no index". Index 0 is never allocated from the arenas, so
-/// zero-initialized leaves read as empty without an init pass.
-const NONE: u32 = 0;
 
 const INLINE_ENTRIES: usize = 4;
 const OVERFLOW_CAP: usize = 30;
@@ -96,60 +93,6 @@ struct Record {
 type L3 = [PageSlot; LEVEL_LEN];
 type L2 = [AtomicPtr<L3>; LEVEL_LEN];
 type L1 = [AtomicPtr<L2>; LEVEL_LEN];
-
-const SEG_BITS: u32 = 16;
-const SEG_LEN: usize = 1 << SEG_BITS;
-const SEG_COUNT: usize = 1 << 12;
-
-/// Grow-only, index-addressed arena. Index 0 is reserved as [`NONE`].
-/// Allocation and freeing happen under the table's write mutex; the
-/// freelist head therefore needs no CAS loop.
-struct Arena<T> {
-    segs: [AtomicPtr<T>; SEG_COUNT],
-    next: AtomicU32,
-    free_head: AtomicU32,
-}
-
-impl<T> Arena<T> {
-    const fn new() -> Arena<T> {
-        Arena {
-            segs: [const { AtomicPtr::new(core::ptr::null_mut()) }; SEG_COUNT],
-            next: AtomicU32::new(1),
-            free_head: AtomicU32::new(NONE),
-        }
-    }
-
-    fn get(&self, idx: u32) -> &T {
-        debug_assert_ne!(idx, NONE);
-        let seg = self.segs[(idx >> SEG_BITS) as usize].load(Ordering::Acquire);
-        debug_assert!(!seg.is_null());
-        // SAFETY: segments are live forever-mappings; idx < next is upheld
-        // by construction (indices only come from bump()).
-        unsafe { &*seg.add(idx as usize & (SEG_LEN - 1)) }
-    }
-
-    /// Bump-allocates a fresh index, mapping its segment on demand.
-    fn bump(&self) -> u32 {
-        let idx = self.next.fetch_add(1, Ordering::Relaxed);
-        assert!(
-            (idx as usize) < SEG_LEN * SEG_COUNT,
-            "cementite: metadata arena exhausted"
-        );
-        let seg_slot = &self.segs[(idx >> SEG_BITS) as usize];
-        if seg_slot.load(Ordering::Acquire).is_null() {
-            let fresh = alloc_zeroed_forever(SEG_LEN * size_of::<T>()).cast::<T>();
-            // A lost race would leave the loser's segment unused; cannot
-            // happen under the write mutex, kept defensive anyway.
-            let _ = seg_slot.compare_exchange(
-                core::ptr::null_mut(),
-                fresh,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            );
-        }
-        idx
-    }
-}
 
 /// The table singleton plus every piece of state it owns.
 struct Table {

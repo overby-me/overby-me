@@ -12,15 +12,20 @@
 //!   checks compare at the dereference and never re-resolve from the
 //!   faulting address.
 //!
-//! Current contents: capability types and the allocation table plus
-//! liveness bitmap (Task A2). The allocator (A3), libc interposition (A4)
-//! and the check surface (phase B) build on these.
+//! Current contents: capability types, the allocation table plus liveness
+//! bitmap (Task A2), and the quarantining global allocator (Task A3). Libc
+//! interposition (A4) and the check surface (phase B) build on these.
 
 #![warn(missing_docs)]
 
+mod alloc;
+mod arena;
 mod cap;
 mod liveness;
 mod sys;
 pub mod table;
 
+pub use alloc::{
+    DEFAULT_QUARANTINE_BYTES, FecAlloc, quarantine_budget, quarantine_bytes, set_quarantine_budget,
+};
 pub use cap::{ALLOC_ID_BITS, ALLOC_ID_LIMIT, AllocId, Cap, CapFlags, PackedCap};

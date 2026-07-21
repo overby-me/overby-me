@@ -104,7 +104,7 @@ See `docs/cementite-api.md`.
 ✅ Unit tests; Miri-clean; a criterion bench reporting root-resolve cost
 (reference point: ~2 ns for a dense-table lookup, warm cache, single thread).
 
-**A3. Allocator.**
+**A3. Allocator.** *(done 2026-07-22)*
 `FecAlloc` as `#[global_allocator]`; register/deregister; quarantine with a
 byte budget and FIFO eviction.
 ✅ Liveness bit provably cleared before memory release (I7 — write the test

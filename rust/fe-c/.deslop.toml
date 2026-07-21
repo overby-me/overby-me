@@ -22,4 +22,25 @@ disabled_rules = [
   # names, and the MIR pass resolves them by path. A facade root is the
   # API, not a wall hiding structure.
   "rust_root_reexport_wall",
+
+  # cementite IS the trusted base: raw pointers, the global allocator, the
+  # table and the interceptors are unavoidably unsafe. Every unsafe block
+  # carries a prose SAFETY rationale, but the heuristic does not recognize
+  # trait-impl (`GlobalAlloc`) and fn-level `unsafe fn` forms. Same call as
+  # rust/bash's config: the density is inherent, not a lint gap.
+  "unsafe_without_safety_comment",
+
+  # The allocation table and quarantine are deliberately global,
+  # mutex-guarded singletons (I2: one authoritative table). That is the
+  # architecture, not accidental shared mutable state.
+  "rust_global_lock_state",
+
+  # Struct-field access inside the table/quarantine scan and eviction loops
+  # is the data structure doing its job (radix leaves, FIFO nodes), not an
+  # array-of-structs hot-path mistake.
+  "rust_aos_hot_path",
+
+  # The global-allocator integration test uses a plain HashMap; a
+  # DoS-resistant hasher is irrelevant to allocator-traffic exercise.
+  "rust_hashmap_default_hasher",
 ]
