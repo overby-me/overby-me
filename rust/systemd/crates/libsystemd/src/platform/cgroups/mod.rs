@@ -341,6 +341,30 @@ pub fn remove_cgroup(cgroup_path: &std::path::Path) -> Result<(), CgroupError> {
     fs::remove_dir(cgroup_path).map_err(|e| CgroupError::IOErr(e, format!("{cgroup_path:?}")))
 }
 
+/// Recursively remove a cgroup directory: remove every descendant cgroup
+/// subdirectory depth-first, then the directory itself. A delegated cgroup can
+/// contain child cgroups created by the (untrusted) payload — a plain
+/// `remove_dir` on the parent then fails with `ENOTEMPTY` and leaks the whole
+/// tree. Child removal is best-effort: a subdirectory that cannot be removed
+/// (still holds processes, or is owned by another user and its own children are
+/// not writable by us) is skipped rather than aborting, so as much of the tree
+/// is reclaimed as possible. Mirrors systemd's cg_trim.
+pub fn remove_cgroup_recursive(cgroup_path: &std::path::Path) -> Result<(), CgroupError> {
+    if let Ok(entries) = fs::read_dir(cgroup_path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // Only real cgroup subdirectories need recursion; the controller
+            // pseudo-files (cgroup.procs, cgroup.subtree_control, ...) are
+            // removed together with the directory itself.
+            if path.is_dir() && !fs::symlink_metadata(&path).map(|m| m.is_symlink()).unwrap_or(true)
+            {
+                let _ = remove_cgroup_recursive(&path);
+            }
+        }
+    }
+    fs::remove_dir(cgroup_path).map_err(|e| CgroupError::IOErr(e, format!("{cgroup_path:?}")))
+}
+
 /// kill all processes that are currently in this cgroup.
 /// You should use `wait_frozen` before or make in another way sure
 /// there are no more processes spawned while killing

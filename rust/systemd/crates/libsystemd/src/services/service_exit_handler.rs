@@ -1535,7 +1535,11 @@ pub(crate) fn service_exit_handler(
                     .map(|s| s.trim().is_empty())
                     .unwrap_or(true);
                 if is_empty {
-                    if let Err(e) = std::fs::remove_dir(cgroup_path) {
+                    // Recursive: a Delegate=yes payload may have created child
+                    // cgroups (including ones chown'd to another user) under the
+                    // service cgroup; a plain remove_dir would fail ENOTEMPTY and
+                    // leak the tree. See TEST-19-CGROUP.delegate testcase_user_unpriv.
+                    if let Err(e) = crate::platform::cgroups::remove_cgroup_recursive(cgroup_path) {
                         trace!(
                             "Could not remove cgroup dir {}: {}",
                             cgroup_path.display(),
