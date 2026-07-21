@@ -13,14 +13,21 @@
 //!   faulting address.
 //!
 //! Current contents: capability types, the allocation table plus liveness
-//! bitmap (Task A2), and the quarantining global allocator (Task A3). Libc
-//! interposition (A4) and the check surface (phase B) build on these.
+//! bitmap (Task A2), the quarantining global allocator (Task A3), and libc
+//! allocator interposition (Task A4, behind the `interpose` feature). The
+//! check surface (phase B) builds on these.
 
 #![warn(missing_docs)]
+// `#[thread_local]` powers the interposition reentrancy guard without
+// allocating; the crate is nightly-pinned so the feature is always
+// available.
+#![cfg_attr(feature = "interpose", feature(thread_local))]
 
 mod alloc;
 mod arena;
 mod cap;
+#[cfg(feature = "interpose")]
+mod interpose;
 mod liveness;
 mod sys;
 pub mod table;

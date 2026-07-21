@@ -219,8 +219,9 @@ impl Quarantine {
             // SAFETY: `ptr` is the original allocation pointer (provenance
             // intact); `len`/`align` reconstruct the exact layout the
             // system allocator handed out; the address left instrumented
-            // circulation when it entered quarantine.
-            unsafe { System.dealloc(ptr, layout) };
+            // circulation when it entered quarantine. Bracketed so the
+            // interposed free (if compiled in) does not re-process it.
+            bracket_system(|| unsafe { System.dealloc(ptr, layout) });
         }
         table::release_record(freed);
 
@@ -229,6 +230,17 @@ impl Quarantine {
         unsafe { self.node(idx) }.next = self.nodes.free_head.load(Ordering::Relaxed);
         self.nodes.free_head.store(idx, Ordering::Relaxed);
     }
+}
+
+/// Runs `f` with the interposition reentrancy guard held when the
+/// `interpose` feature is compiled in, so the `#[no_mangle]` malloc/free
+/// this build also defines do not *re-register* an allocation this layer is
+/// already tracking. A plain call otherwise.
+#[inline]
+fn bracket_system<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(feature = "interpose")]
+    let _g = crate::interpose::enter_reentrant();
+    f()
 }
 
 /// The Fe-C global allocator. Install in a hardened binary with
@@ -242,7 +254,7 @@ unsafe impl GlobalAlloc for FecAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: forwarded verbatim; layout is a valid non-zero layout by
         // the GlobalAlloc contract.
-        let ptr = unsafe { System.alloc(layout) };
+        let ptr = bracket_system(|| unsafe { System.alloc(layout) });
         if !ptr.is_null() {
             table::register(ptr as usize, layout.size(), CapFlags::EMPTY, 0);
         }
@@ -251,7 +263,7 @@ unsafe impl GlobalAlloc for FecAlloc {
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         // SAFETY: forwarded verbatim.
-        let ptr = unsafe { System.alloc_zeroed(layout) };
+        let ptr = bracket_system(|| unsafe { System.alloc_zeroed(layout) });
         if !ptr.is_null() {
             table::register(ptr as usize, layout.size(), CapFlags::EMPTY, 0);
         }
@@ -266,7 +278,7 @@ unsafe impl GlobalAlloc for FecAlloc {
             // Not registered (allocated before install, or a zero-size
             // request the runtime skipped): free straight through.
             // SAFETY: ptr/layout came from a matching System allocation.
-            None => unsafe { System.dealloc(ptr, layout) },
+            None => bracket_system(|| unsafe { System.dealloc(ptr, layout) }),
         }
     }
 }

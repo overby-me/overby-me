@@ -111,7 +111,7 @@ byte budget and FIFO eviction.
 that fails if the order is swapped); quarantine stays inside its budget under
 a churn stress test.
 
-**A4. libc interposition, tier 1.**
+**A4. libc interposition, tier 1.** *(done 2026-07-22)*
 `malloc`/`calloc`/`realloc`/`free`/`posix_memalign` via `dlsym(RTLD_NEXT)`.
 ✅ A small C harness's allocations appear in the table with correct bounds;
 `strdup`-style libc-internal allocations too.

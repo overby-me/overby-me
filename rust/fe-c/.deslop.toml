@@ -43,4 +43,14 @@ disabled_rules = [
   # The global-allocator integration test uses a plain HashMap; a
   # DoS-resistant hasher is irrelevant to allocator-traffic exercise.
   "rust_hashmap_default_hasher",
+
+  # libc interposition (interpose.rs) is quintessential FFI: dlsym returns
+  # `*mut c_void` that must be transmuted to typed fn pointers, and the
+  # bootstrap buffer does raw pointer arithmetic. Same call as rust/bash.
+  "rust_unsafe_raw_pointer_cast",
+
+  # deslop indexes one file at a time, so cross-module calls (`table::…`)
+  # and extern-C calls (`strdup`, the C harness) read as unresolved/
+  # hallucinated even though they compile and link fine.
+  "hallucinated_local_call",
 ]

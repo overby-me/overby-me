@@ -7,7 +7,11 @@
 //! Not run under Miri: the metadata backend uses real `mmap` off the global
 //! allocator path, which Miri cannot execute. Miri coverage of the same
 //! unsafe lives in the crate's unit tests via direct `GlobalAlloc` calls.
-#![cfg(not(miri))]
+//!
+//! Excluded when the `interpose` feature is on: that build's `#[no_mangle]`
+//! malloc override plus a `#[global_allocator]` would register Rust
+//! allocations twice. Interposition is exercised by `tests/interpose_c.rs`.
+#![cfg(all(not(miri), not(feature = "interpose")))]
 
 use std::collections::HashMap;
 

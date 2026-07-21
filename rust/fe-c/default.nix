@@ -132,14 +132,24 @@ in {
         cargo fmt --check
       '';
 
+    # --all-features so the interpose module and its C harness are linted
+    # too (the C harness is compiled by build.rs via the sandbox cc).
     fe-c-clippy = pkgs:
       cargoCheck pkgs "clippy" ''
-        cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+        cargo clippy --workspace --all-targets --all-features --offline --locked -- -D warnings
       '';
 
     fe-c-unit = pkgs:
       cargoCheck pkgs "unit" ''
         cargo test --workspace --offline --locked
+      '';
+
+    # libc interposition (A4): builds the cementite test binary with the
+    # #[no_mangle] malloc overrides and a cc-compiled C harness, asserting
+    # foreign/libc-internal allocations register with correct bounds.
+    fe-c-interpose = pkgs:
+      cargoCheck pkgs "interpose" ''
+        cargo test -p cementite --features interpose --offline --locked
       '';
 
     # cementite's own unsafe under Miri (the miri-runtime tier from
