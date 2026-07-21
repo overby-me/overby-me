@@ -289,6 +289,63 @@ in {
     in
       lib.unique (filter (t: t != "" && t != "\\") toks);
 
+    # A generated header may be `#include <...>`d by a compile edge that does not
+    # declare a dependency on it: the monolithic build only satisfies the ordering
+    # by luck of build order, which the ninja graph never encodes (e.g. libsyscall's
+    # mach_init.c includes the generated `darlingserver/rpc.h`, yet the libsyscall
+    # target's order-only barrier lists no darlingserver output). Collect once,
+    # across the whole graph, every generated header's containing directories (each
+    # ancestor up to the producing derivation's root) as -I flags, so any compile
+    # scan can resolve such an include whatever prefix names it. clang ignores -I
+    # dirs that do not exist, so the (deliberate) over-inclusion is harmless.
+    headerExts = [".h" ".hpp" ".hxx" ".hh" ".ipp" ".inc" ".def" ".defs"];
+    isHeaderPath = o: lib.any (ext: lib.hasSuffix ext o) headerExts;
+    # True if edge `i` reaches a compile edge through its real producers. A
+    # compile edge's derivation forces a scan that itself references
+    # `generatedHeaderIncs`, so a header producer that transitively depends on one
+    # (e.g. a mig edge, via migcom) cannot appear in that set without forming an
+    # eval cycle. This is pure graph analysis (indices only, never a derivation),
+    # so it is itself cycle-free. Pure generators (a python/awk codegen reading
+    # only sources — e.g. the darlingserver rpc.h generator) are false, and their
+    # headers are exactly the undeclared ones the scan cannot otherwise resolve;
+    # a mig header, by contrast, already resolves through its declared producer.
+    dependsOnCompileMemo = listToAttrs (map (i: {
+        name = toString i;
+        value = let
+          e = elemAt edges i;
+        in
+          isCompile e
+          || lib.any (j: dependsOnCompileMemo.${toString j})
+          (concatMap realProducers (edgeInputs e));
+      })
+      (indices edges));
+    generatedHeaderIncs = lib.unique (concatMap (
+        i: let
+          e = elemAt edges i;
+          pdrv = edgeDrvs.${toString i};
+        in
+          concatMap (
+            o: let
+              rel =
+                if underAnyRoot o
+                then relUnder o
+                else o;
+              dirs = lib.init (filter (x: x != "") (lib.splitString "/" rel));
+              ancestors =
+                lib.genList (n: builtins.concatStringsSep "/" (lib.take n dirs))
+                (length dirs + 1);
+            in
+              map (a: "-I${pdrv}" + lib.optionalString (a != "") "/${a}") ancestors
+          )
+          (filter isHeaderPath (edgeOutputs e))
+      )
+      (filter
+        (i:
+          !(isNoOp (elemAt edges i))
+          && !dependsOnCompileMemo.${toString i}
+          && lib.any isHeaderPath (edgeOutputs (elemAt edges i)))
+        (indices edges)));
+
     # The exact project files (under a rewrite root) a compile edge reads,
     # discovered by scanning. System headers (toolchain store paths) are already
     # mounted and need no staging, so they are filtered out here.
@@ -334,12 +391,26 @@ in {
             rewriteRoots
         )
         genPairs;
-      # (b) Add each producer output's directory as an include path, so a
-      # generated header pulled in by name (`#include "parser.h"`, a bison `-d`
-      # output next to a flex `lexer.c`) resolves during the preprocess even
-      # though it lives in a different producer's output.
-      genIncs =
-        lib.unique (map (x: "-I${x.pdrv}/" + builtins.dirOf x.rel) genPairs);
+      # (b) Add producer output directories as include paths so a generated
+      # header pulled in by name resolves during the preprocess:
+      #   - directly next to another producer output (`#include "parser.h"`, a
+      #     bison `-d` header beside a flex `lexer.c`), and
+      #   - via `<...>` by mirroring the compile's own under-root -I dirs onto
+      #     each *declared* producer of this edge (flattening phony order-only
+      #     barriers, so a mig header like `<mach/mach_port_internal.h>` resolves
+      #     from the mig edge that wrote it). This stays a DAG — an edge's own
+      #     declared producers are upstream of it — so unlike the graph-wide
+      #     `generatedHeaderIncs` it needs no compile-dependency filter. clang
+      #     ignores -I dirs that do not exist.
+      genDrvs =
+        lib.unique (map (i: edgeDrvs.${toString i})
+          (concatMap realProducers (filter isProduced (edgeInputs e))));
+      genIncs = lib.unique (
+        (map (x: "-I${x.pdrv}/" + builtins.dirOf x.rel) genPairs)
+        ++ concatMap
+        (pd: map (d: "-I${pd}/${relUnder d}") (filter underAnyRoot (incAbsDirs e.command)))
+        genDrvs
+      );
       scanCmd =
         builtins.replaceStrings
         (map (s: s.from) genSubs) (map (s: s.to) genSubs)
@@ -349,7 +420,7 @@ in {
           nativeBuildInputs = toolchain ++ scanMounts;
         } ''
           export DEPS_OUT=$out
-          ${scanCmd} ${lib.concatStringsSep " " genIncs}
+          ${scanCmd} ${lib.concatStringsSep " " (genIncs ++ generatedHeaderIncs)}
         '';
     in
       filter underAnyRoot (parseDepfile (builtins.readFile scanDrv));
@@ -395,6 +466,16 @@ in {
         if useScan
         then []
         else filter safeNotSymlink (incAbsDirs e.command);
+      # -I dirs, inputs and command-named paths that traverse a symlink
+      # (`.../libsyscall/mach/x.defs`, libsyscall -> ../../../libsyscall). The
+      # symlink they go through is otherwise pruned as broken (its target is not
+      # staged), so the reference dangles. `builtins.path` (via indivOf) *does*
+      # follow symlinks whose target exists, so stage the followed real content
+      # directly at the reference's own path (only when it exists — a broken
+      # symlink would abort eval, so pathExists filters those out).
+      symlinkTargets = lib.unique (filter
+        (p: underAnyRoot p && hasSymlinkComponent p && builtins.pathExists p)
+        (incAbsDirs e.command ++ ins ++ lib.splitString " " e.command));
 
       command = let
         stripped =
@@ -414,11 +495,21 @@ in {
         depIds;
       stageRelSrcs =
         lib.concatMapStringsSep "\n"
-        (s: "install -Dm644 ${srcStorePath s} ${esc s}")
+        (s: ''
+          install -Dm644 ${srcStorePath s} ${esc s}
+          if [ -x ${srcStorePath s} ]; then chmod +x ${esc s}; ${shebangSed (esc s)} fi
+        '')
         relSrcs;
       stageRootSrcs =
         lib.concatMapStringsSep "\n"
-        (p: "install -Dm644 ${indivOf p} ${esc (relUnder p)}")
+        # Preserve the execute bit: a command may run a staged file directly (the
+        # darlingserver rpc.h generator is `.../generate-rpc-wrappers.py <args>`),
+        # which needs +x, while data inputs stay 0644. `builtins.path` keeps the
+        # source's exec bit, so test the content-addressed copy.
+        (p: ''
+          install -Dm644 ${indivOf p} ${esc (relUnder p)}
+          if [ -x ${indivOf p} ]; then chmod +x ${esc (relUnder p)}; ${shebangSed (esc (relUnder p))} fi
+        '')
         rootSrcs;
       stageIncs =
         lib.concatMapStringsSep "\n"
@@ -429,9 +520,50 @@ in {
           # broken symlink — never a real dir or a valid link).
           if [ -L ${esc (relUnder p)} ] && [ ! -e ${esc (relUnder p)} ]; then rm -f ${esc (relUnder p)}; fi
           mkdir -p ${esc (relUnder p)}
-          cp -rsf --no-preserve=mode ${indivOf p}/. ${esc (relUnder p)}/
+          # A real dir already staged here (e.g. a producer output tree under
+          # `libsyscall`, or another -I copy) must win over an incoming symlink of
+          # the same name; cp reports that one conflict but still copies the rest,
+          # so tolerate its exit (diagnostics stay visible) rather than abort.
+          cp -rsf --no-preserve=mode ${indivOf p}/. ${esc (relUnder p)}/ || true
+          # `cp -rs` turns each *source symlink* in the tree into a link into the
+          # read-only content-addressed copy, whose own relative target then points
+          # outside that copy and dangles (an SDK `mach/*.defs` -> the tree's
+          # osfmk, a `libsyscall` -> the top-level one). Re-create those links with
+          # their *original* relative target so they resolve against the merged
+          # $out tree, where the target is itself staged by another -I copy — and
+          # so the later broken-link prune does not delete them. A path already
+          # present as a real dir wins (never replaced by a link).
+          (cd ${indivOf p} && find . -type l 2>/dev/null) | while IFS= read -r l; do
+            d=${esc (relUnder p)}/"$l"
+            if [ -d "$d" ] && [ ! -L "$d" ]; then continue; fi
+            t=$(readlink "${indivOf p}/$l" 2>/dev/null) || continue
+            ln -sfn "$t" "$d" 2>/dev/null || true
+          done
         '')
         rootIncs;
+      # Stage the followed real content of each symlinked *file* reference (e.g.
+      # a mig `.defs`) at its own through-symlink path, replacing the pruned
+      # dangling symlink with a real file. `indivOf` follows the symlink;
+      # readFileType on its (symlink-free) store path tells file from dir.
+      #
+      # Directories are deliberately NOT staged wholesale: a symlinked include
+      # dir often holds child symlinks that point outside it (so a store copy of
+      # the dir carries them as *broken* links), and cp -rs'ing that over the
+      # tree would clobber real files the header scan already staged. Compile
+      # edges get their exact headers from the scan (rootSrcs); other edges get
+      # each file they name here.
+      stageSymlinkTargets =
+        lib.concatMapStringsSep "\n"
+        (p: let
+          r = relUnder p;
+          cp = indivOf p;
+        in
+          lib.optionalString (builtins.readFileType cp == "regular") ''
+            if [ -L ${esc r} ]; then rm -f ${esc r}; fi
+            install -Dm644 ${cp} ${esc r}
+            if [ -x ${cp} ]; then chmod +x ${esc r}; ${shebangSed (esc r)} fi
+          '')
+        symlinkTargets;
       mkOutDirs =
         lib.concatMapStringsSep "\n"
         (o: ''realize_writable "$(dirname ${esc o})"'')
@@ -443,34 +575,35 @@ in {
       rspClean =
         lib.optionalString (e.rspfile != null && e.rspfile != "")
         ''rm -f ${esc e.rspfile}'';
-      # A generated script output (e.g. the mig `build-mig` wrapper) carries an
-      # absolute `#!/bin/bash` shebang that the pure edge sandbox lacks; rewrite
-      # it to the toolchain bash so a downstream edge can exec it. `/bin/sh` is
-      # left alone (Nix mounts it). We use a direct sed rather than
-      # `patchShebangs`, which silently leaves the line when it cannot resolve
-      # the interpreter in the edge's minimal PATH. No-op for non-script outputs.
+      # Rewrite a script's absolute shebang to the toolchain's: `#!/bin/bash` and
+      # `#!/usr/bin/env bash` -> the toolchain bash, `#!/usr/bin/env <x>` -> the
+      # toolchain `env` (which then finds <x> on the edge PATH). The pure edge
+      # sandbox provides neither /bin/bash nor /usr/bin/env; `/bin/sh` is left
+      # alone (Nix mounts it). A direct sed, not `patchShebangs`, which silently
+      # leaves the line when it cannot resolve the interpreter in the minimal
+      # PATH. `p` is a shell-quoted path expression; no-op for non-scripts.
+      shebangSed = p: ''
+        if [ -f ${p} ] && [ "$(head -c2 ${p} 2>/dev/null)" = "#!" ]; then
+          chmod u+w ${p} 2>/dev/null || true
+          sed -i \
+            -e "1s|^#! *\(/usr\)\?/bin/bash|#!${pkgs.bash}/bin/bash|" \
+            -e "1s|^#! */usr/bin/env  *bash|#!${pkgs.bash}/bin/bash|" \
+            -e "1s|^#! */usr/bin/env  *|#!${pkgs.coreutils}/bin/env |" \
+            ${p}
+        fi
+      '';
+      # A generated script output (e.g. the mig `build-mig` wrapper) carries such
+      # a shebang; rewrite each. Absolute `$out/<rel>` because the edge command
+      # may have cd'd into a WORKING_DIRECTORY subdir and not returned.
       patchOutShebangs =
         lib.concatMapStringsSep "\n"
         (o: let
-          # An output may be named absolutely (`<root>/rel`, the implicit-output
-          # form) or relatively; the command writes it at `$out/rel`, so target
-          # that (cwd is $out).
           rel =
             if underAnyRoot o
             then relUnder o
             else o;
-        in ''
-          # Absolute $out path: the edge command may have cd'd into a
-          # WORKING_DIRECTORY subdir and not returned, so a relative path would
-          # miss the file.
-          if [ -f "$out/${rel}" ] && [ "$(head -c2 "$out/${rel}" 2>/dev/null)" = "#!" ]; then
-            chmod u+w "$out/${rel}" || true
-            sed -i \
-              -e "1s|^#! *\(/usr\)\?/bin/bash|#!${pkgs.bash}/bin/bash|" \
-              -e "1s|^#! */usr/bin/env  *bash|#!${pkgs.bash}/bin/bash|" \
-              "$out/${rel}"
-          fi
-        '')
+        in
+          shebangSed ''"$out/${rel}"'')
         outs;
     in
       pkgs.runCommand (sanDrv (builtins.head outs)) {
@@ -512,6 +645,7 @@ in {
         # trees (a child symlink whose target was not itself staged); left in
         # place they break the edge command's own mkdir/cd on those paths.
         find . -xtype l -delete 2>/dev/null || true
+        ${stageSymlinkTargets}
         ${mkOutDirs}
         ${rspStage}
         ${command}
