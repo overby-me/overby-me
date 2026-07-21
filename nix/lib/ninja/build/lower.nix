@@ -492,12 +492,14 @@ in {
           # Declared under-root inputs, plus under-root *files named in the
           # command* that CMake did not declare (custom commands often reference
           # a helper script/template like `awk -f .../mig.awk` without listing it
-          # in DEPENDS). Directories and not-yet-produced outputs are excluded.
+          # in DEPENDS; a linker names an alias list inside a comma-joined
+          # `-Wl,-alias_list,<path>` token, so split on commas as well as spaces).
+          # Directories and not-yet-produced outputs are excluded.
           lib.unique (
             (filter (p: underAnyRoot p && safeNotSymlink p) ins)
             ++ (filter
               (p: underAnyRoot p && safeRegular p)
-              (lib.splitString " " e.command))
+              (concatMap (lib.splitString ",") (lib.splitString " " e.command)))
           );
       # `builtins.path` aborts on a symlink root, and some CMake `-I` dirs are
       # symlinks (e.g. libsystem_kernel/libsyscall -> the top-level libsyscall);
@@ -515,7 +517,9 @@ in {
       # symlink would abort eval, so pathExists filters those out).
       symlinkTargets = lib.unique (filter
         (p: underAnyRoot p && hasSymlinkComponent p && builtins.pathExists p)
-        (incAbsDirs e.command ++ ins ++ lib.splitString " " e.command));
+        (incAbsDirs e.command
+          ++ ins
+          ++ concatMap (lib.splitString ",") (lib.splitString " " e.command)));
 
       command = let
         stripped =
