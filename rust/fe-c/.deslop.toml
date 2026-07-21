@@ -1,0 +1,25 @@
+# deslop configuration for Fe-C (runtime memory-safety checking).
+#
+# The cementite runtime's core representation is deliberate bit-packing:
+# PackedCap is id:48 | flags:16 in one u64 (so a (ptr, cap) pair stays
+# 128-bit atomically updatable, docs/through-mode-coherence.md), and page
+# slots compress in-page offsets to u16. Width-narrowing casts are the
+# design, stated at the type level, not accidental truncation.
+
+disabled_rules = [
+  "rust_narrowing_numeric_cast",
+
+  # The runtime's documented failure model (docs/cementite-api.md) is
+  # report-and-abort: never a Result, never unwinding, because a check
+  # failing means memory is already untrustworthy. Internal integrity
+  # violations panic/expect deliberately (PLAN section 7: louder
+  # failures), so panic-shaped heuristics flag the design itself.
+  "expect_in_non_test_code",
+  "panic_macro_leftover",
+
+  # The crate root re-exports the capability vocabulary (Cap, AllocId,
+  # PackedCap, flags) on purpose: instrumented code links against these
+  # names, and the MIR pass resolves them by path. A facade root is the
+  # API, not a wall hiding structure.
+  "rust_root_reexport_wall",
+]

@@ -1,0 +1,1 @@
+{"name":"as-raw-xcb-connection","vers":"1.0.1","deps":[],"cksum":"175571dd1d178ced59193a6fc02dde1b972eb0bc56c892cde9beeceac5bf0f6b","features":{"alloc":[],"default":["alloc"]},"yanked":false,"pubtime":"2023-12-17T15:47:18Z"}

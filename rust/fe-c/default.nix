@@ -14,13 +14,21 @@
 
   homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/fe-c";
 
-  # Offline vendor directory for cargo-driven checks (clippy). Sources and
-  # checksums come straight from Cargo.lock, mirroring nix/lib/cargo's
-  # fetch scheme, so the checks stay pure once third-party deps appear.
+  # Offline vendor directory for cargo-driven checks (clippy, unit, miri).
+  # Sources and checksums come straight from the lockfiles, mirroring
+  # nix/lib/cargo's fetch scheme, so the checks stay pure. Two locks feed
+  # it: the workspace's own, and a committed copy of the pinned
+  # toolchain's library/Cargo.lock so `cargo miri setup` can build its
+  # sysroot offline (refresh nix/miri-std.Cargo.lock on toolchain bumps).
   vendorFor = pkgs: let
-    lock = builtins.fromTOML (builtins.readFile ./Cargo.lock);
-    thirdParty =
-      builtins.filter (p: p ? checksum) (lock.package or []);
+    locks = [./Cargo.lock ./nix/miri-std.Cargo.lock];
+    thirdParty = lib.unique (lib.concatMap (
+        lockFile: let
+          lock = builtins.fromTOML (builtins.readFile lockFile);
+        in
+          builtins.filter (p: p ? checksum) (lock.package or [])
+      )
+      locks);
     crateTar = p:
       pkgs.fetchurl {
         name = "${p.name}-${p.version}.crate";
@@ -47,6 +55,7 @@
       cp -r ${fecSrc}/. build
       chmod -R u+w build
       cd build
+      export HOME=$TMPDIR
       export CARGO_HOME=$TMPDIR/cargo-home
       export CARGO_TARGET_DIR=$TMPDIR/target
       mkdir -p $CARGO_HOME
@@ -126,6 +135,20 @@ in {
     fe-c-clippy = pkgs:
       cargoCheck pkgs "clippy" ''
         cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+      '';
+
+    fe-c-unit = pkgs:
+      cargoCheck pkgs "unit" ''
+        cargo test --workspace --offline --locked
+      '';
+
+    # cementite's own unsafe under Miri (the miri-runtime tier from
+    # docs/nix-integration.md section 3). Leak checking is off: table
+    # metadata is forever-allocated by design.
+    fe-c-miri = pkgs:
+      cargoCheck pkgs "miri" ''
+        export MIRIFLAGS=-Zmiri-ignore-leaks
+        cargo miri test -p cementite --offline --locked
       '';
   };
 }

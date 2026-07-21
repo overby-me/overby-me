@@ -1,0 +1,1 @@
+{"name":"nodrop","vers":"0.1.14","deps":[{"name":"nodrop-union","req":"^0.1.8","features":[],"optional":true,"default_features":true,"target":null,"kind":"normal"}],"cksum":"72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb","features":{"default":["std"],"std":[],"use_needs_drop":[],"use_union":["nodrop-union"]},"yanked":false,"pubtime":"2019-10-09T07:33:37Z"}

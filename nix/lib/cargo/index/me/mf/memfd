@@ -1,0 +1,1 @@
+{"name":"memfd","vers":"0.6.5","deps":[{"name":"rustix","req":"^1.0","features":["fs"],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227","features":{},"yanked":false,"pubtime":"2025-09-01T14:04:44Z"}

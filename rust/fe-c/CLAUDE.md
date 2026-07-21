@@ -95,7 +95,9 @@ stale artifacts).
 ✅ `nix build .#cementite` succeeds; `nix develop` provides nightly +
 `rustc-dev` + `rust-src` + `miri`; `nix flake check` runs fmt/clippy.
 
-**A2. `cementite` core data structures.**
+**A2. `cementite` core data structures.** *(done 2026-07-22; measured
+root-resolve: 4.6 ns spanning-alloc interior, 8.3 ns small-alloc page,
+19.6 ns dense-page overflow chain, 8.2 ns miss)*
 `AllocId` (48-bit), `CapFlags`, `Cap` (unpacked), `PackedCap`, page-radix
 allocation table, id-indexed liveness bitmap. No allocator yet.
 See `docs/cementite-api.md`.

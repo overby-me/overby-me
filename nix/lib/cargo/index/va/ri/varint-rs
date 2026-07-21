@@ -1,0 +1,1 @@
+{"name":"varint-rs","vers":"2.2.0","deps":[],"cksum":"8f54a172d0620933a27a4360d3db3e2ae0dd6cceae9730751a036bbf182c4b23","features":{"default":["std","signed"],"signed":[],"std":[]},"yanked":false,"pubtime":"2020-11-25T17:29:42Z"}

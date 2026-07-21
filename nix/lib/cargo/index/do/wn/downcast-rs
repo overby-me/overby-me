@@ -1,0 +1,1 @@
+{"name":"downcast-rs","vers":"1.2.1","deps":[],"cksum":"75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2","features":{"default":["std"],"std":[]},"yanked":false,"pubtime":"2024-04-07T00:40:26Z"}

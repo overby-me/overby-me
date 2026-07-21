@@ -2,7 +2,7 @@
 //! hardened binary.
 //!
 //! Design record: `docs/cementite-api.md` and `docs/through-mode-coherence.md`
-//! in the repository. The load-bearing invariants (PLAN.md §2):
+//! in the repository. The load-bearing invariants (PLAN.md, section 2):
 //!
 //! - I2: capability-shaped API; allocation ids are never recycled; liveness
 //!   is a bitmap indexed by id.
@@ -12,7 +12,15 @@
 //!   checks compare at the dereference and never re-resolve from the
 //!   faulting address.
 //!
-//! Populated by Task A2 (core data structures), A3 (allocator), and A4
-//! (libc interposition).
+//! Current contents: capability types and the allocation table plus
+//! liveness bitmap (Task A2). The allocator (A3), libc interposition (A4)
+//! and the check surface (phase B) build on these.
 
-pub const _TASK_A2_PENDING: () = ();
+#![warn(missing_docs)]
+
+mod cap;
+mod liveness;
+mod sys;
+pub mod table;
+
+pub use cap::{ALLOC_ID_BITS, ALLOC_ID_LIMIT, AllocId, Cap, CapFlags, PackedCap};

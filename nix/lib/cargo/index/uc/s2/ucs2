@@ -1,0 +1,1 @@
+{"name":"ucs2","vers":"0.3.3","deps":[{"name":"bit_field","req":"^0.10","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"df79298e11f316400c57ec268f3c2c29ac3c4d4777687955cd3d4f3a35ce7eba","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2024-04-06T19:59:48Z"}

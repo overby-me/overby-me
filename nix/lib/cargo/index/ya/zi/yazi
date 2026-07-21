@@ -1,0 +1,1 @@
+{"name":"yazi","vers":"0.2.1","deps":[{"name":"wasm-bindgen-test","req":"^0.3.37","features":[],"optional":false,"default_features":true,"target":"cfg(target_family = \"wasm\")","kind":"dev"}],"cksum":"e01738255b5a16e78bbb83e7fbba0a1e7dd506905cfc53f4622d89015a03fbb5","features":{"default":["std"],"std":[]},"yanked":false,"pubtime":"2025-01-03T16:26:07Z"}

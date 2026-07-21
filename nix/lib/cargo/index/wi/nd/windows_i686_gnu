@@ -1,2 +1,5 @@
+{"name":"windows_i686_gnu","vers":"0.42.2","deps":[],"cksum":"c61d927d8da41da96a81f029489353e68739737d3beca43145c8afec9a31a84f","features":{},"yanked":false,"pubtime":"2023-03-13T14:49:06Z"}
+{"name":"windows_i686_gnu","vers":"0.48.5","deps":[],"cksum":"a75915e7def60c94dcef72200b9a8e58e5091744960da64ec734a6c6e9b3743e","features":{},"yanked":false,"pubtime":"2023-08-18T17:46:48Z"}
 {"name":"windows_i686_gnu","vers":"0.52.6","deps":[],"cksum":"8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2024-07-03T19:43:46Z"}
+{"name":"windows_i686_gnu","vers":"0.53.0","deps":[],"cksum":"c1dc67659d35f387f5f6c479dc4e28f1d4bb90ddd1a5d3da2e5d97b42d6272c3","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-01-07T15:42:42Z"}
 {"name":"windows_i686_gnu","vers":"0.53.1","deps":[],"cksum":"960e6da069d81e09becb0ca57a65220ddff016ff2d6af6a223cf372a506593a3","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-10-06T17:33:40Z"}
