@@ -1165,11 +1165,11 @@ fn insert_unit_config(props: &mut PropertyMap, conf: &UnitConfig) {
         None => insert(props, "FragmentPath", ""),
     }
 
-    // SourcePath (same as FragmentPath for our purposes)
-    match &conf.fragment_path {
-        Some(p) => insert(props, "SourcePath", &p.display().to_string()),
-        None => insert(props, "SourcePath", ""),
-    }
+    // SourcePath is the file a unit was *synthesised* from (e.g. /etc/fstab for
+    // a generated mount unit, or a generator's input) - NOT the fragment path.
+    // A normal on-disk unit has none, so it stays empty until unit generation
+    // records a real source.
+    insert(props, "SourcePath", "");
 
     // Drop-in files
     if conf.loaded_dropin_files.is_empty() {

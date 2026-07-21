@@ -9,10 +9,12 @@
     set -eux
     set -o pipefail
 
-    : "SourcePath for unit with drop-in"
+    : "SourcePath is empty for a normal (non-generated) unit"
     SP="$(systemctl show -P SourcePath systemd-journald.service)"
-    # May or may not be set, but the property should exist
-    [[ -n "$SP" || -z "$SP" ]]
+    # A regular unit file has no SourcePath (that field is only set for units
+    # synthesised from another source, e.g. a generator or /etc/fstab). It must
+    # not leak the fragment path.
+    [[ -z "$SP" ]]
 
     : "Id property for well-known unit"
     ID="$(systemctl show -P Id systemd-journald.service)"
