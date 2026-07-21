@@ -5,11 +5,11 @@
   };
   patchScript = ''
     sed -i '/systemctl --no-block exit 123/d' TEST-07-PID1.sh
-    # Skip the PrivateUsersEx=yes assertion (/proc/self/setgroups == "deny").
-    # PrivateUsers=yes user-namespace setup works (the uid_map/gid_map checks
-    # just above pass), but rust-systemd writes gid_map with parent privilege
-    # and never writes "deny" to /proc/self/setgroups the way systemd does, so
-    # the setgroups check fails. The PrivateUsers=yes checks still run.
-    sed -i '/PrivateUsersEx/d' TEST-07-PID1.private-users.sh
+    # PrivateUsersEx=yes/self now work (they map like PrivateUsers=: root->root,
+    # range 1, with setgroups=deny). Skip only the identity/full modes, which
+    # need a full-range identity uid_map ("0 0 65536") that rust-systemd's bool
+    # private_users cannot express yet (would need a private-users MODE plus
+    # mode-specific mapping in exec_helper's user-namespace setup).
+    sed -i '/PrivateUsersEx=identity/d;/PrivateUsersEx=full/d' TEST-07-PID1.private-users.sh
   '';
 }

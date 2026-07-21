@@ -3821,6 +3821,7 @@ fn create_transient_unit(
                 | "PrivateNetwork"
                 | "PrivateDevices"
                 | "PrivateUsers"
+                | "PrivateUsersEx"
                 | "PrivatePIDs"
                 | "ProtectSystem"
                 | "ProtectHome" => {
@@ -3838,6 +3839,13 @@ fn create_transient_unit(
                         "PrivateUsers" => {
                             service_conf.exec_config.private_users =
                                 matches!(value, "yes" | "true" | "1");
+                        }
+                        "PrivateUsersEx" => {
+                            // PrivateUsersEx= (systemd 256+) accepts self/identity/
+                            // full/no; any non-"no" value implies a private user
+                            // namespace (mapped to our private_users bool).
+                            service_conf.exec_config.private_users =
+                                !matches!(value, "no" | "false" | "0" | "");
                         }
                         "PrivatePIDs" => {
                             service_conf.exec_config.private_pids =
