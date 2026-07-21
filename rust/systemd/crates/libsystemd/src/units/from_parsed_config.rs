@@ -894,6 +894,7 @@ fn make_common_from_parsed(
             fragment_path,
             refs_by_name,
             default_dependencies: unit.default_dependencies,
+            collect_mode: unit.collect_mode,
             ignore_on_isolate: unit.ignore_on_isolate,
             conditions: unit.conditions,
             assertions: unit.assertions,

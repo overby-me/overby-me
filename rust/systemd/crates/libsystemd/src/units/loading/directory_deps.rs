@@ -1960,6 +1960,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                 common: Common {
                     status: RwLock::new(UnitStatus::NeverStarted),
                     unit: UnitConfig {
+                        collect_mode: crate::units::CollectMode::default(),
                         description: format!("Swap unit for {} (from /etc/fstab)", device),
                         documentation: Vec::new(),
                         fragment_path: None,
@@ -2137,6 +2138,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
             common: Common {
                 status: RwLock::new(UnitStatus::NeverStarted),
                 unit: UnitConfig {
+                    collect_mode: crate::units::CollectMode::default(),
                     description: format!("Mount unit for {mountpoint} (from /etc/fstab)"),
                     documentation: Vec::new(),
                     fragment_path: None,

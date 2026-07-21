@@ -559,14 +559,19 @@ fn try_create_transient_unit(
         properties.insert("remain_after_exit".into(), Value::Bool(true));
     }
 
-    // Pass -p / --property overrides
-    if !cli.property.is_empty() {
-        let props: Vec<Value> = cli
+    // Pass -p / --property overrides, plus --collect (maps to CollectMode=).
+    {
+        let mut props: Vec<Value> = cli
             .property
             .iter()
             .map(|s| Value::String(s.clone()))
             .collect();
-        properties.insert("properties".into(), Value::Array(props));
+        if cli.collect {
+            props.push(Value::String("CollectMode=inactive-or-failed".to_string()));
+        }
+        if !props.is_empty() {
+            properties.insert("properties".into(), Value::Array(props));
+        }
     }
 
     // Pass environment variables (resolve pass-through vars client-side)

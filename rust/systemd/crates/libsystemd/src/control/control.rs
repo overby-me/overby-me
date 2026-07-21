@@ -3566,6 +3566,7 @@ fn create_transient_unit(
     let mut failure_action = crate::units::UnitAction::None;
     let mut success_action = crate::units::UnitAction::None;
     let mut prop_description: Option<String> = None;
+    let mut prop_collect_mode: Option<crate::units::CollectMode> = None;
     let mut success_action_units: Vec<String> = vec![];
     let mut failure_action_units: Vec<String> = vec![];
     let mut start_limit_burst: Option<u32> = None;
@@ -3580,6 +3581,12 @@ fn create_transient_unit(
             match key {
                 "Description" => {
                     prop_description = Some(value.to_string());
+                }
+                "CollectMode" => {
+                    prop_collect_mode = Some(match value {
+                        "inactive-or-failed" => crate::units::CollectMode::InactiveOrFailed,
+                        _ => crate::units::CollectMode::Inactive,
+                    });
                 }
                 "Type" => {
                     service_conf.srcv_type = match value {
@@ -4703,6 +4710,7 @@ fn create_transient_unit(
         id: unit_id.clone(),
         common: Common {
             unit: UnitConfig {
+                collect_mode: prop_collect_mode.unwrap_or_default(),
                 description: prop_description
                     .clone()
                     .or_else(|| params.description.clone())
@@ -4963,6 +4971,7 @@ fn create_transient_unit(
             id: timer_id.clone(),
             common: Common {
                 unit: UnitConfig {
+                    collect_mode: crate::units::CollectMode::default(),
                     description: params
                         .description
                         .clone()
@@ -5116,6 +5125,7 @@ fn create_transient_unit(
             id: path_id.clone(),
             common: Common {
                 unit: UnitConfig {
+                    collect_mode: crate::units::CollectMode::default(),
                     description: params
                         .description
                         .clone()
@@ -6075,12 +6085,31 @@ pub fn execute_command(
                     let _ = std::fs::remove_file(&stderr_path);
                 }
             }
-            // Keep the transient unit in the unit table so that
-            // `systemctl is-failed` / `systemctl --state=failed` can
-            // query it after `systemd-run --wait` returns.  The unit
-            // will be replaced the next time a transient with the same
-            // name is created (see create_transient_unit) or cleaned up
-            // via `systemctl reset-failed`.
+            // A --collect unit (CollectMode=inactive-or-failed) is unloaded now
+            // that it has finished, so `systemctl show` reports not-found and the
+            // unit name can be reused. A non-collect unit is instead kept so
+            // `systemctl is-failed` / `systemctl --state=failed` can query its
+            // result after `systemd-run --wait` returns (it is replaced on the
+            // next transient with the same name, or cleared via reset-failed).
+            let collect_frag = {
+                let ri = run_info.read_poisoned();
+                ri.unit_table.get(&id).and_then(|u| {
+                    matches!(
+                        u.common.unit.collect_mode,
+                        crate::units::CollectMode::InactiveOrFailed
+                    )
+                    .then(|| u.common.unit.fragment_path.clone())
+                })
+            };
+            if let Some(frag) = collect_frag {
+                run_info.write_poisoned().unit_table.remove(&id);
+                // Also delete the on-disk transient fragment; otherwise a
+                // subsequent `systemctl show`/`is-failed` reloads the unit from
+                // it and it reappears as loaded.
+                if let Some(f) = frag {
+                    let _ = std::fs::remove_file(&f);
+                }
+            }
             return Ok(resp);
         }
         Command::Enable(names) => {

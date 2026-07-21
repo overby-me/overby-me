@@ -2395,6 +2395,10 @@ pub struct UnitConfig {
     /// Defaults to true, matching systemd behavior.
     pub default_dependencies: bool,
 
+    /// CollectMode= — whether the unit is garbage-collected when it becomes
+    /// inactive (default) or inactive-or-failed (`systemd-run --collect`).
+    pub collect_mode: crate::units::CollectMode,
+
     /// Conditions that must all be true for the unit to activate.
     /// If any condition fails, the unit is skipped (not treated as an error).
     /// Matches systemd's ConditionPathExists=, ConditionPathIsDirectory=, etc.

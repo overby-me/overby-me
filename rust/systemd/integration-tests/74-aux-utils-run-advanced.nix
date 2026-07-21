@@ -47,8 +47,13 @@
     : "systemd-run --collect removes unit after stop"
     UNIT="run-collect-$RANDOM"
     systemd-run --unit="$UNIT" --collect --wait true
-    # Unit should be gone after completion with --collect
-    sleep 1
+    # --collect garbage-collects the transient unit once it exits (async).
+    for _ in $(seq 1 25); do
+      STATE="$(systemctl show -P LoadState "$UNIT.service" 2>/dev/null || true)"
+      [[ "$STATE" != "loaded" ]] && break
+      sleep 0.2
+    done
+    [[ "$STATE" == "not-found" || "$STATE" == "" ]]
     RAEOF
     chmod +x TEST-74-AUX-UTILS.run-advanced.sh
   '';
