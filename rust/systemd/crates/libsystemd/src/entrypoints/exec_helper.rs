@@ -465,6 +465,10 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub private_users: bool,
 
+    /// PrivateUsersEx= mode ("self"/"identity"/"full"; empty = yes-style).
+    #[serde(default)]
+    pub private_users_mode: String,
+
     /// PrivateMounts= — if true, a private mount namespace is created.
     /// See systemd.exec(5).
     #[serde(default)]
@@ -2148,12 +2152,26 @@ pub fn run_exec_helper() {
                 std::io::Error::last_os_error()
             );
         } else {
-            // Write uid_map and gid_map for minimal identity mapping
-            // (map root inside the namespace to the original uid outside).
-            let _ = std::fs::write("/proc/self/uid_map", format!("0 {uid} 1\n"));
-            // Must deny setgroups before writing gid_map (kernel requirement)
-            let _ = std::fs::write("/proc/self/setgroups", "deny\n");
-            let _ = std::fs::write("/proc/self/gid_map", format!("0 {gid} 1\n"));
+            // Write uid_map/gid_map per PrivateUsers(Ex)= mode:
+            //   yes/self -> "0 <uid> 1" (root maps to the caller's uid),
+            //   identity -> "0 0 65536", full -> "0 0 4294967295" (identity map).
+            // setgroups is denied for every mode except "full", which allows it.
+            let (uid_map, gid_map, deny_setgroups) = match config.private_users_mode.as_str() {
+                "identity" => ("0 0 65536\n".to_string(), "0 0 65536\n".to_string(), true),
+                "full" => (
+                    "0 0 4294967295\n".to_string(),
+                    "0 0 4294967295\n".to_string(),
+                    false,
+                ),
+                _ => (format!("0 {uid} 1\n"), format!("0 {gid} 1\n"), true),
+            };
+            let _ = std::fs::write("/proc/self/uid_map", &uid_map);
+            if deny_setgroups {
+                // Must deny setgroups before writing gid_map (kernel requirement
+                // when unprivileged; harmless when privileged).
+                let _ = std::fs::write("/proc/self/setgroups", "deny\n");
+            }
+            let _ = std::fs::write("/proc/self/gid_map", &gid_map);
         }
     }
 

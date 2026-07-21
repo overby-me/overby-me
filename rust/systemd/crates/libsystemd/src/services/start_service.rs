@@ -996,6 +996,7 @@ fn start_service_with_filedescriptors(
         private_devices: conf.exec_config.private_devices,
         private_network: conf.exec_config.private_network,
         private_users: conf.exec_config.private_users,
+        private_users_mode: conf.exec_config.private_users_mode.clone(),
         private_mounts: conf.exec_config.private_mounts,
         join_namespace_pid: srvc.join_namespace_pid,
         mount_flags: conf.exec_config.mount_flags.clone(),

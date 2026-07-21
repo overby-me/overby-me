@@ -3027,6 +3027,9 @@ pub struct ExecConfig {
     /// user/group. Defaults to false. Parsed and stored; no runtime
     /// user-namespace enforcement yet. See systemd.exec(5).
     pub private_users: bool,
+    /// PrivateUsersEx= mode: "self"/"identity"/"full" (empty = PrivateUsers=yes
+    /// style). Selects the uid/gid map written for the private user namespace.
+    pub private_users_mode: String,
     /// PrivateMounts= — if true, the processes of this unit will be run in
     /// their own private file system (mount) namespace with all mount
     /// propagation from the processes towards the host's main file system

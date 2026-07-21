@@ -3312,6 +3312,7 @@ fn create_transient_unit(
         private_devices: false,
         private_network: false,
         private_users: false,
+        private_users_mode: String::new(),
         private_mounts: false,
         mount_flags: None,
         io_scheduling_class: crate::units::IOSchedulingClass::None,
@@ -3843,9 +3844,15 @@ fn create_transient_unit(
                         "PrivateUsersEx" => {
                             // PrivateUsersEx= (systemd 256+) accepts self/identity/
                             // full/no; any non-"no" value implies a private user
-                            // namespace (mapped to our private_users bool).
+                            // namespace, and the value selects the uid/gid map.
                             service_conf.exec_config.private_users =
                                 !matches!(value, "no" | "false" | "0" | "");
+                            service_conf.exec_config.private_users_mode =
+                                if service_conf.exec_config.private_users {
+                                    value.to_string()
+                                } else {
+                                    String::new()
+                                };
                         }
                         "PrivatePIDs" => {
                             service_conf.exec_config.private_pids =
