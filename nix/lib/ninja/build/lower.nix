@@ -202,6 +202,46 @@ in {
     safeNotSymlink = p: builtins.pathExists p && !(hasSymlinkComponent p);
     safeRegular = p: safeNotSymlink p && builtins.readFileType p == "regular";
 
+    # The Mach/kernel RPC interface directories in an SDK `usr/include`: their
+    # `.defs` and `.h` are symlinks into the tree's osfmk, which a mig edge reads
+    # through `<mach/...>` / `<device/...>` includes but whose target dir it does
+    # not itself stage as an -I.
+    ifaceDirs = ["mach" "mach_debug" "device" "servers" "machine"];
+    # Relative paths of every symlink under one of `ifaceDirs` in real dir `base`
+    # (walking real dirs only, lstat readDir, never following a symlink). We stage
+    # the *followed* content of just these in place — scoping to the interface
+    # dirs (a couple hundred files) rather than the whole SDK (thousands of
+    # framework symlinks), and using content-addressed `builtins.path` rather than
+    # a cp -rL of the tree, keeps fine-grained caching intact. Other headers a
+    # compile edge reads are found by the depfile scan; mig edges (no scan)
+    # resolve their `<mach/*>` includes here.
+    ifaceSymlinksUnder = base: let
+      collectAll = sub: let
+        dir = toString base + "/${sub}";
+        entries = builtins.readDir dir;
+      in
+        concatMap (
+          n: let
+            rel = "${sub}/${n}";
+            t = entries.${n};
+          in
+            if t == "symlink"
+            then [rel]
+            else if t == "directory"
+            then collectAll rel
+            else []
+        )
+        (builtins.attrNames entries);
+      top = builtins.readDir (toString base);
+    in
+      concatMap (
+        n:
+          if (top.${n} or "") == "directory" && elem n ifaceDirs
+          then collectAll n
+          else []
+      )
+      (builtins.attrNames top);
+
     # Rewrite every root prefix in a command to the edge's own `$out` (the
     # merged working tree the edge runs in): `<root>/x` -> `$out/x`, and a bare
     # `<root>` (e.g. `-I<builddir>`) -> `$out`. The `/` form is listed first so
@@ -484,31 +524,49 @@ in {
           else stripRoots e.command;
         withSubs =
           builtins.replaceStrings (map (s: s.from) subs) (map (s: s.to) subs) stripped;
+        base =
+          builtins.replaceStrings
+          (map (s: s.from) toolPathSubs) (map (s: s.to) toolPathSubs)
+          withSubs;
       in
-        builtins.replaceStrings
-        (map (s: s.from) toolPathSubs) (map (s: s.to) toolPathSubs)
-        withSubs;
+        # A compile may `#include <generated/header.h>` (a generated
+        # `darlingserver/rpc.h`) that ninja never declared as a dependency, so it
+        # is not staged into $out and the command's own $out-relative -I cannot
+        # find it. Append the producer-output include dirs (the same set the scan
+        # uses) so the compiler reads it straight from the producer; the store
+        # path in the flag makes Nix mount that output.
+        base
+        + lib.optionalString (useScan && generatedHeaderIncs != [])
+        (" " + lib.concatStringsSep " " generatedHeaderIncs);
 
       stageDeps =
         lib.concatMapStringsSep "\n"
         (id: "cp -rsf --no-preserve=mode ${edgeDrvs.${toString id}}/. ./")
         depIds;
+      # Skip if the path is already staged: the same header can be both a scanned
+      # input here and a producer output copied in by stageDeps (a source header
+      # `install`ed into the SDK, e.g. darling/emulation/*.h), whose read-only
+      # symlinked parent then makes a second `install` fail "cannot remove". The
+      # first copy is authoritative, so leave it. Preserve the execute bit (a
+      # command may run a staged file directly, the rpc.h generator is
+      # `.../generate-rpc-wrappers.py <args>`); `builtins.path` keeps the source's
+      # exec bit, so test the content-addressed copy.
       stageRelSrcs =
         lib.concatMapStringsSep "\n"
         (s: ''
-          install -Dm644 ${srcStorePath s} ${esc s}
-          if [ -x ${srcStorePath s} ]; then chmod +x ${esc s}; ${shebangSed (esc s)} fi
+          if [ ! -e ${esc s} ]; then
+            install -Dm644 ${srcStorePath s} ${esc s}
+            if [ -x ${srcStorePath s} ]; then chmod +x ${esc s}; ${shebangSed (esc s)} fi
+          fi
         '')
         relSrcs;
       stageRootSrcs =
         lib.concatMapStringsSep "\n"
-        # Preserve the execute bit: a command may run a staged file directly (the
-        # darlingserver rpc.h generator is `.../generate-rpc-wrappers.py <args>`),
-        # which needs +x, while data inputs stay 0644. `builtins.path` keeps the
-        # source's exec bit, so test the content-addressed copy.
         (p: ''
-          install -Dm644 ${indivOf p} ${esc (relUnder p)}
-          if [ -x ${indivOf p} ]; then chmod +x ${esc (relUnder p)}; ${shebangSed (esc (relUnder p))} fi
+          if [ ! -e ${esc (relUnder p)} ]; then
+            install -Dm644 ${indivOf p} ${esc (relUnder p)}
+            if [ -x ${indivOf p} ]; then chmod +x ${esc (relUnder p)}; ${shebangSed (esc (relUnder p))} fi
+          fi
         '')
         rootSrcs;
       stageIncs =
@@ -540,6 +598,36 @@ in {
             ln -sfn "$t" "$d" 2>/dev/null || true
           done
         '')
+        rootIncs;
+      # Stage the followed real content of each Mach/kernel interface file reached
+      # through a symlink whose osfmk target dir this edge does not itself stage,
+      # so a mig `<mach/...>` / `<device/...>` include resolves. builtins.path
+      # follows the link and is content-addressed, keeping fine-grained caching (a
+      # cp -rL of the whole dir would pull in the entire source tree). Runs after
+      # the prune and the -I copies so its real files win over a peer -I's
+      # dangling symlink of the same name. Only the source tree (first rewrite
+      # root) is walked — the configured tree's interface dirs hold symlinks to
+      # not-yet-generated headers (a mig `clock.h`) that `builtins.path` aborts on.
+      stageIfaceDeref =
+        lib.concatMapStringsSep "\n"
+        (p:
+          lib.optionalString (rewriteRoots != [] && rootFor p == builtins.head rewriteRoots)
+          (lib.concatMapStringsSep "\n" (
+              rel: let
+                orig = toString (rootFor p) + "/" + relUnder p + "/" + rel;
+                content = builtins.path {
+                  path = orig;
+                  name = "iref-" + lib.strings.sanitizeDerivationName rel;
+                };
+              in
+                lib.optionalString
+                (builtins.pathExists orig && builtins.readFileType content == "regular")
+                ''
+                  rm -f ${esc (relUnder p + "/" + rel)}
+                  install -Dm644 ${content} ${esc (relUnder p + "/" + rel)}
+                ''
+            )
+            (ifaceSymlinksUnder (toString (rootFor p) + "/" + relUnder p))))
         rootIncs;
       # Stage the followed real content of each symlinked *file* reference (e.g.
       # a mig `.defs`) at its own through-symlink path, replacing the pruned
@@ -645,6 +733,7 @@ in {
         # trees (a child symlink whose target was not itself staged); left in
         # place they break the edge command's own mkdir/cd on those paths.
         find . -xtype l -delete 2>/dev/null || true
+        ${stageIfaceDeref}
         ${stageSymlinkTargets}
         ${mkOutDirs}
         ${rspStage}
