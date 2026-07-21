@@ -46,8 +46,18 @@ fn make_cgroup_path(srvc_name: &str, slice: Option<&str>) -> Result<PathBuf, Str
     let base = if let Some(slice_name) = slice {
         slice_cgroup_path(&cgroup_root, slice_name)
     } else {
-        // Default to system.slice like real systemd
-        slice_cgroup_path(&cgroup_root, "system.slice")
+        // Default slice: app.slice for a `systemd --user` manager (whose cgroup
+        // root is its delegated user@UID.service subtree), system.slice
+        // otherwise — matching real systemd.
+        let default_slice = if cgroup_root
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("user@"))
+        {
+            "app.slice"
+        } else {
+            "system.slice"
+        };
+        slice_cgroup_path(&cgroup_root, default_slice)
     };
     let service_cgroup = base.join(srvc_name);
     trace!(

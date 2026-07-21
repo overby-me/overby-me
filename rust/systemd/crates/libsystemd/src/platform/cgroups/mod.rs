@@ -132,8 +132,33 @@ pub fn move_out_of_own_cgroup(base_path: &std::path::Path) -> Result<(), CgroupE
 /// root (with slice hierarchy), matching real systemd's layout.
 pub fn get_cgroup_root(base_path: &std::path::Path) -> Result<std::path::PathBuf, CgroupError> {
     if let Some(v2_root) = detect_v2_root(base_path) {
-        trace!("Cgroup root: {v2_root:?}");
-        Ok(v2_root)
+        // Root units at THIS manager's own cgroup rather than the mount root.
+        // The manager process lives in <unit-root>/init.scope (PID 1) or
+        // <unit-root>/systemd_rs_self (legacy layout); stripping that trailing
+        // component yields the unit root. For PID 1 the result is empty (the
+        // mount root — unchanged behaviour); a `systemd --user` manager, which
+        // logind places in its delegated /user.slice/…/user@UID.service, resolves
+        // to that subtree so it creates its units there instead of failing to
+        // write the system hierarchy.
+        let rel = std::fs::read_to_string("/proc/self/cgroup")
+            .ok()
+            .and_then(|c| {
+                c.lines()
+                    .find_map(|l| l.strip_prefix("0::").map(str::to_string))
+            })
+            .map(|p| {
+                let mut p = p.trim_start_matches('/').to_string();
+                for suffix in [OWN_CGROUP_NAME, INIT_SCOPE_NAME] {
+                    if let Some(stripped) = p.strip_suffix(suffix) {
+                        p = stripped.trim_end_matches('/').to_string();
+                    }
+                }
+                p
+            })
+            .unwrap_or_default();
+        let root = v2_root.join(&rel);
+        trace!("Cgroup root: {root:?} (v2_root={v2_root:?}, rel={rel:?})");
+        Ok(root)
     } else {
         // Fallback to get_own_freezer for non-v2 systems
         get_own_freezer(base_path)

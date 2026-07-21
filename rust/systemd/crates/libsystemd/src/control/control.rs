@@ -3410,7 +3410,21 @@ fn create_transient_unit(
                 .find_map(|p| p.strip_prefix("Slice=").map(|s| s.to_owned()))
                 .filter(|s| !s.is_empty())
         })
-        .or_else(|| Some("system.slice".to_owned()));
+        .or_else(|| {
+            // A `systemd --user` manager (whose cgroup root is its delegated
+            // user@UID.service subtree) defaults transient units to app.slice;
+            // the system manager uses system.slice.
+            let is_user = crate::platform::cgroups::get_cgroup_root(&std::path::PathBuf::from(
+                "/sys/fs/cgroup",
+            ))
+            .ok()
+            .and_then(|r| {
+                r.file_name()
+                    .map(|n| n.to_string_lossy().starts_with("user@"))
+            })
+            .unwrap_or(false);
+            Some(if is_user { "app.slice" } else { "system.slice" }.to_owned())
+        });
 
     let platform_specific = PlatformSpecificServiceFields {
         #[cfg(target_os = "linux")]
