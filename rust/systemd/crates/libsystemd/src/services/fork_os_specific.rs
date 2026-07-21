@@ -547,9 +547,18 @@ pub fn setup_slice_cgroup(
     // Also enable controllers within the slice's subtree_control so
     // child cgroups (the service) can have limits applied.
     {
-        // Always enable memory and pids for children — the service's own
-        // pre_fork_os_specific may need them.
-        let child_controllers: Vec<&str> = vec!["memory", "pids", "cpu", "io"];
+        // Enable memory/pids/cpu for children — the service's own
+        // pre_fork_os_specific may need them.  `io` is deliberately NOT
+        // enabled unconditionally: the service-level path already enables io
+        // up the ancestor chain when a service actually needs it (io_accounting
+        // / IO* limits, see enable_controllers_on_parent above), and enabling
+        // io in EVERY slice's subtree_control keeps it pinned in each slice's
+        // cgroup.controllers forever — a controller can only be removed once no
+        // sibling still delegates it, so the unconditional +io blocked the
+        // controller-mask trim on unit exit (TEST-19-CGROUP.delegate
+        // testcase_controllers: `io` must vanish from system.slice once the
+        // last IOAccounting unit exits).
+        let child_controllers: Vec<&str> = vec!["memory", "pids", "cpu"];
         let subtree_control = slice_path.join("cgroup.subtree_control");
         let value = child_controllers
             .iter()

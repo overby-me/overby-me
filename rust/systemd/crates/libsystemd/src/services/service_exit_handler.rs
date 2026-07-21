@@ -1565,7 +1565,68 @@ pub(crate) fn service_exit_handler(
                                 }
                             }
                         }
+
                     }
+                }
+            }
+
+            // Controller-mask realization for `io`: this runs regardless of
+            // whether the service's own (leaf) cgroup still exists — by the time
+            // the exit handler reaches here the leaf is often already gone, but
+            // its ancestor slices still carry `io` in their cgroup.subtree_control.
+            // Once no active service under an ancestor slice still needs io,
+            // disable it there so `io` vanishes from that slice's
+            // cgroup.controllers (matching upstream; TEST-19-CGROUP.delegate
+            // testcase_controllers). Walk bottom-up because the kernel rejects
+            // `-io` (EBUSY) while a child still delegates io; ignore errors.
+            {
+                let io_paths: Vec<std::path::PathBuf> = run_info
+                    .unit_table
+                    .values()
+                    .filter_map(|u| {
+                        let Specific::Service(s) = &u.specific else {
+                            return None;
+                        };
+                        if !matches!(*u.common.status.read_poisoned(), UnitStatus::Started(_)) {
+                            return None;
+                        }
+                        let c = &s.conf;
+                        let needs_io = c.io_accounting == Some(true)
+                            || c.io_weight.is_some()
+                            || c.startup_io_weight.is_some()
+                            || !c.io_device_weight.is_empty()
+                            || !c.io_read_bandwidth_max.is_empty()
+                            || !c.io_write_bandwidth_max.is_empty()
+                            || !c.io_read_iops_max.is_empty()
+                            || !c.io_write_iops_max.is_empty()
+                            || matches!(c.delegate, crate::units::Delegate::Yes)
+                            || matches!(
+                                &c.delegate,
+                                crate::units::Delegate::Controllers(ctrls)
+                                    if ctrls.iter().any(|x| x == "io")
+                            );
+                        needs_io.then(|| c.platform_specific.cgroup_path.clone())
+                    })
+                    .collect();
+
+                let cgroup_root = std::path::Path::new("/sys/fs/cgroup");
+                let mut cur = cgroup_path.parent();
+                while let Some(p) = cur {
+                    let subtree = p.join("cgroup.subtree_control");
+                    let still_needed = io_paths
+                        .iter()
+                        .any(|ip| ip.as_path() != p && ip.starts_with(p));
+                    if !still_needed
+                        && std::fs::read_to_string(&subtree)
+                            .map(|s| s.split_whitespace().any(|c| c == "io"))
+                            .unwrap_or(false)
+                    {
+                        let _ = std::fs::write(&subtree, "-io");
+                    }
+                    if p == cgroup_root {
+                        break;
+                    }
+                    cur = p.parent();
                 }
             }
         }
