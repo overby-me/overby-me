@@ -3210,6 +3210,18 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
         "yes" | "private" | "strict" => {
             // Create new cgroup namespace for private/strict
             if config.protect_control_groups_ex != "yes" {
+                // ProtectControlGroupsEx=private + DelegateSubgroup=: post_fork
+                // already moved us into the subgroup, but the new cgroup namespace
+                // must root at the DELEGATED cgroup so the subgroup is visible
+                // under /sys/fs/cgroup. Move back to the delegated root before
+                // unsharing; we re-enter the subgroup after the fresh mount below.
+                if config.protect_control_groups_ex == "private"
+                    && config.platform_specific.delegate_subgroup.is_some()
+                {
+                    let _ = crate::platform::cgroups::move_self_to_cgroup(
+                        &config.platform_specific.cgroup_path,
+                    );
+                }
                 let ret = unsafe { libc::unshare(libc::CLONE_NEWCGROUP) };
                 if ret != 0 {
                     log::warn!(
@@ -3249,6 +3261,15 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
                     "mount_ns: mount cgroup2 failed: {}",
                     std::io::Error::last_os_error()
                 );
+            }
+            // Re-enter the DelegateSubgroup now that the cgroup namespace roots
+            // at the delegated cgroup and /sys/fs/cgroup is a fresh RW cgroup2
+            // mount: the subgroup is at /sys/fs/cgroup/<sub>.
+            if config.protect_control_groups_ex == "private"
+                && let Some(ref sub) = config.platform_specific.delegate_subgroup
+            {
+                let subpath = std::path::Path::new("/sys/fs/cgroup").join(sub);
+                let _ = crate::platform::cgroups::move_self_to_cgroup(&subpath);
             }
         }
         _ => {
