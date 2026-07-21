@@ -224,6 +224,13 @@
                   ln -s bin "$out/sbin"
                 fi
 
+                # run0 is a multi-call alias of systemd-run: crates/run detects
+                # argv[0] == "run0" and elevates privileges (runs COMMAND as the
+                # target user in a transient unit).  Provide it as a symlink.
+                if [ -e "$out/bin/systemd-run" ]; then
+                  ln -sf systemd-run "$out/bin/run0"
+                fi
+
                 # Replace the systemd init binary with a wrapper that execs rust-systemd,
                 # so NixOS actually boots with rust-systemd as PID 1 instead of systemd.
                 # NixOS uses $out/lib/systemd/systemd as the init binary (stage-2).

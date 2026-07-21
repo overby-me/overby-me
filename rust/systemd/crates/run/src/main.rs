@@ -698,13 +698,94 @@ fn try_create_transient_unit(
     Ok(Some(result))
 }
 
+/// Translate a `run0 [OPTIONS] COMMAND...` invocation into the equivalent
+/// `systemd-run` argument vector.  `run0` is upstream a multi-call alias of
+/// systemd-run that elevates: it runs COMMAND as the target user (root by
+/// default, or `--user`/`-u USER`) in a transient unit and forwards its stdio.
+/// We map that onto our existing systemd-run machinery: `--uid=USER` plus
+/// `--pipe --wait` so the command's output is streamed back to the caller.
+/// Options that run0 and systemd-run share (`--property`, `--slice`,
+/// `--setenv`, `--description`, `--working-directory`, `--nice`) pass through
+/// unchanged; the first non-option token begins COMMAND and everything after
+/// it is forwarded verbatim after a `--` separator.
+fn translate_run0(raw: &[String]) -> Vec<String> {
+    let mut out = vec![
+        "systemd-run".to_string(),
+        "--pipe".to_string(),
+        "--wait".to_string(),
+    ];
+    let mut cmd: Vec<String> = Vec::new();
+    let mut i = 1;
+    while i < raw.len() {
+        let a = &raw[i];
+        match a.as_str() {
+            "-u" | "--user" => {
+                if i + 1 < raw.len() {
+                    out.push(format!("--uid={}", raw[i + 1]));
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            s if s.starts_with("--user=") => {
+                out.push(format!("--uid={}", &s["--user=".len()..]));
+                i += 1;
+                continue;
+            }
+            // Value-bearing options shared with systemd-run: keep the flag and
+            // its argument together.
+            "-p" | "--property" | "--slice" | "--description" | "--setenv" | "-E"
+            | "--working-directory" | "-D" | "--nice" => {
+                out.push(a.clone());
+                if i + 1 < raw.len() {
+                    out.push(raw[i + 1].clone());
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            s if s.starts_with('-') => {
+                // Other leading flags overlap with systemd-run; pass through.
+                out.push(a.clone());
+                i += 1;
+                continue;
+            }
+            _ => {
+                // First bare token: COMMAND starts here, forward the rest.
+                cmd.extend_from_slice(&raw[i..]);
+                break;
+            }
+        }
+    }
+    if !cmd.is_empty() {
+        out.push("--".to_string());
+        out.extend(cmd);
+    }
+    out
+}
+
 fn main() {
     // Ignore SIGPIPE so piping output to grep/head/etc. doesn't panic.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
-    let mut cli = Cli::parse();
+    // `run0` is a multi-call alias of systemd-run that elevates privileges.
+    // Detect it by argv[0] and rewrite the argument vector before parsing.
+    let raw: Vec<String> = std::env::args().collect();
+    let invoked_as_run0 = raw
+        .first()
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::file_name)
+        .is_some_and(|n| n == "run0");
+
+    let mut cli = if invoked_as_run0 {
+        Cli::parse_from(translate_run0(&raw))
+    } else {
+        Cli::parse()
+    };
 
     // -v is shorthand for --pipe --wait --service-type=exec
     if cli.verbose {

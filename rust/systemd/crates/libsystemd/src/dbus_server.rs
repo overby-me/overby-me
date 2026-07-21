@@ -812,6 +812,26 @@ mod inner {
         zbus::zvariant::OwnedObjectPath,
     );
 
+    /// Resolve the real UID of a D-Bus method's caller via the bus daemon's
+    /// `GetConnectionUnixUser`.  A message with no sender comes from a direct
+    /// peer connection (no bus) and is treated as trusted (uid 0).  A message
+    /// that *does* have a sender but whose UID cannot be resolved fails closed
+    /// (returns a non-root sentinel) so a permission check never grants root by
+    /// accident.
+    async fn caller_uid(header: &zbus::message::Header<'_>, conn: &zbus::Connection) -> u32 {
+        let Some(sender) = header.sender() else {
+            return 0;
+        };
+        let Ok(proxy) = zbus::fdo::DBusProxy::new(conn).await else {
+            return u32::MAX;
+        };
+        let bus_name: zbus::names::BusName<'_> = sender.to_owned().into();
+        proxy
+            .get_connection_unix_user(bus_name)
+            .await
+            .unwrap_or(u32::MAX)
+    }
+
     #[interface(name = "org.freedesktop.systemd1.Manager")]
     impl Manager {
         /// Returns the version string of the service manager.
@@ -1069,6 +1089,70 @@ mod inner {
         fn thaw_unit(&self, name: String) -> zbus::fdo::Result<()> {
             invoke_command(&self.run_info, crate::control::Command::Thaw(name))
                 .map_err(zbus::fdo::Error::Failed)?;
+            Ok(())
+        }
+
+        /// Attach the given PIDs to a unit's cgroup subtree.  `path` selects a
+        /// sub-cgroup beneath the unit's own cgroup ("" = the unit itself).
+        ///
+        /// Permission model mirrors upstream `bus_unit_method_attach_processes`:
+        /// only a privileged (uid 0) caller may attach processes to a unit that
+        /// is not delegated to the caller.  We do not track per-unit delegation
+        /// owners (all system units are root-owned), so any unprivileged caller
+        /// is denied — the exact case exercised by TEST-07-PID1.attach_processes,
+        /// where a non-root user calls this on a `Delegate=yes` system unit that
+        /// has no ref_uid for them.
+        #[zbus(name = "AttachProcessesToUnit")]
+        async fn attach_processes_to_unit(
+            &self,
+            name: String,
+            path: String,
+            pids: Vec<u32>,
+            #[zbus(header)] header: zbus::message::Header<'_>,
+            #[zbus(connection)] conn: &zbus::Connection,
+        ) -> zbus::fdo::Result<()> {
+            let uid = caller_uid(&header, conn).await;
+
+            // Resolve the unit's own cgroup path (also validates it exists).
+            let cgroup = {
+                let ri = self.run_info.read_poisoned();
+                let Some(unit) = ri.unit_table.values().find(|u| u.id.name == name) else {
+                    return Err(zbus::fdo::Error::Failed(format!("Unit {name} not found")));
+                };
+                match &unit.specific {
+                    crate::units::Specific::Service(svc) => {
+                        Some(svc.conf.platform_specific.cgroup_path.clone())
+                    }
+                    _ => None,
+                }
+            };
+
+            // Unprivileged callers may only attach to a unit delegated to them;
+            // we have no such delegation, so deny every non-root caller.
+            if uid != 0 {
+                return Err(zbus::fdo::Error::AccessDenied(format!(
+                    "Access denied: unit {name} is not delegated to uid {uid}"
+                )));
+            }
+
+            // Privileged path: migrate the PIDs into the unit's cgroup subtree.
+            let Some(mut cg) = cgroup else {
+                return Err(zbus::fdo::Error::Failed(format!(
+                    "Unit {name} has no cgroup to attach processes to"
+                )));
+            };
+            if !path.is_empty() {
+                cg.push(path.trim_start_matches('/'));
+            }
+            let procs = cg.join("cgroup.procs");
+            for pid in pids {
+                if let Err(e) = std::fs::write(&procs, format!("{pid}\n")) {
+                    return Err(zbus::fdo::Error::Failed(format!(
+                        "Failed to attach pid {pid} to {}: {e}",
+                        procs.display()
+                    )));
+                }
+            }
             Ok(())
         }
 
