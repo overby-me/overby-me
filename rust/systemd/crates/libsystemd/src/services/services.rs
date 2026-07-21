@@ -1505,6 +1505,44 @@ impl Service {
             }
         }
 
+        // ProtectControlGroupsEx=private + DelegateSubgroup=: control commands
+        // (ExecStartPre=/Post=/StopPost=) must run in a `.control` subgroup of the
+        // service cgroup, with the cgroup namespace rooted there, so their
+        // /proc/self/cgroup reads "0::/". This mirrors systemd's no-inner-processes
+        // handling: the delegated cgroup carries controllers in cgroup.subtree_control
+        // and therefore cannot hold processes directly, so helpers land in `.control`
+        // (a sibling of the delegated subgroup) rather than in init.scope. Registered
+        // before the mount-namespace pre_exec below so it runs while the real cgroupfs
+        // is still writable.
+        #[cfg(target_os = "linux")]
+        {
+            let control_cgroup = run_info.unit_table.get(&id).and_then(|unit| {
+                if let crate::units::Specific::Service(srvc) = &unit.specific
+                    && srvc.conf.exec_config.protect_control_groups_ex
+                        == crate::units::ProtectControlGroupsEx::Private
+                    && srvc.conf.platform_specific.delegate_subgroup.is_some()
+                {
+                    Some(srvc.conf.platform_specific.cgroup_path.join(".control"))
+                } else {
+                    None
+                }
+            });
+            if let Some(control) = control_cgroup {
+                use std::os::unix::process::CommandExt;
+                unsafe {
+                    cmd.pre_exec(move || {
+                        let _ = std::fs::create_dir_all(&control);
+                        let _ = std::fs::write(
+                            control.join("cgroup.procs"),
+                            format!("{}\n", std::process::id()),
+                        );
+                        libc::unshare(libc::CLONE_NEWCGROUP);
+                        Ok(())
+                    });
+                }
+            }
+        }
+
         // JoinsNamespaceOf=: join the target service's mount namespace so
         // that preliminary ExecStart= commands in oneshot services see the
         // same filesystem view (e.g. PrivateTmp) as the target.
