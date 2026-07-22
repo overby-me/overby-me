@@ -1414,8 +1414,16 @@ fn insert_service_config(props: &mut PropertyMap, conf: &ServiceConfig) {
         !matches!(conf.delegate, crate::units::Delegate::No),
     );
 
-    // Watchdog
-    insert_timeout(props, "WatchdogUSec", &conf.watchdog_sec);
+    // Watchdog — an unset (or zero) watchdog reports 0, not infinity.
+    // Unlike RuntimeMaxUSec (where None means "no limit" = infinity), an
+    // absent WatchdogSec means the watchdog is disabled, which systemd
+    // reports as WatchdogUSec=0.
+    let watchdog_usec = match &conf.watchdog_sec {
+        Some(Timeout::Duration(d)) => format!("{}us", d.as_micros()),
+        Some(Timeout::Infinity) => "infinity".to_string(),
+        None => "0".to_string(),
+    };
+    insert(props, "WatchdogUSec", &watchdog_usec);
 
     // RuntimeMaxUSec
     insert_timeout(props, "RuntimeMaxUSec", &conf.runtime_max_sec);
