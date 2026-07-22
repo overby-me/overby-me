@@ -47,10 +47,11 @@
     '';
 
   # Shared harness for checks that drive real cargo against the pinned
-  # nightly with vendored sources.
+  # nightly with vendored sources. nushell is available for assertion
+  # scripts (repo convention).
   cargoCheck = pkgs: name: script:
     pkgs.runCommand "fe-c-${name}" {
-      nativeBuildInputs = [(fecToolchain pkgs)];
+      nativeBuildInputs = [(fecToolchain pkgs) pkgs.nushell];
     } ''
       cp -r ${fecSrc}/. build
       chmod -R u+w build
@@ -150,6 +151,22 @@ in {
     fe-c-interpose = pkgs:
       cargoCheck pkgs "interpose" ''
         cargo test -p cementite --features interpose --offline --locked
+      '';
+
+    # Driver visitation census (A5): build the rustc_public driver, run it
+    # on the hand-audited fixture, assert it drives a real compilation and
+    # the census meets the minimums with no skipped bodies (I1).
+    fe-c-census = pkgs:
+      cargoCheck pkgs "census" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        fixture=crates/fe-c-driver/tests/fixtures/census_fixture.rs
+        FEC_CENSUS_OUT="$TMPDIR/census.json" "$drv" "$fixture" \
+          -o "$TMPDIR/fixbin" --edition 2021
+        # The driver drove a real compilation, not just analysis.
+        test -x "$TMPDIR/fixbin"
+        nu crates/fe-c-driver/tests/assert_census.nu "$TMPDIR/census.json"
       '';
 
     # cementite's own unsafe under Miri (the miri-runtime tier from

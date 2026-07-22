@@ -116,7 +116,8 @@ a churn stress test.
 ✅ A small C harness's allocations appear in the table with correct bounds;
 `strdup`-style libc-internal allocations too.
 
-**A5. Driver skeleton + visitation census.**
+**A5. Driver skeleton + visitation census.** *(done 2026-07-22; runs on
+the full serde tree — 13 crates, skipped_bodies=0 everywhere)*
 `fe-c-driver` on `rustc_public`; enumerate MIR bodies; emit a report of every
 pointer-typed local, every deref, every raw→safe cast, every FFI edge.
 **No rewriting yet.**
