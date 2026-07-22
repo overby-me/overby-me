@@ -339,12 +339,12 @@ pub fn sync_mount_units(
             name: name.clone(),
         };
         if name.contains("deptest") {
-            log::warn!(
+            crate::entrypoints::kmsg(&format!(
                 "MOUNTPROBE sync {name} net={is_network} intable={} synth={:?} over={:?}",
                 ri.unit_table.contains_key(&id),
                 synthesized.get(name),
                 overridden.get(name)
-            );
+            ));
         }
         if ri.unit_table.contains_key(&id) {
             if let Some(prev) = synthesized.get(name).copied() {
@@ -363,7 +363,7 @@ pub fn sync_mount_units(
                 if let Some(u) = ri.unit_table.get_mut(&id) {
                     apply_mount_deps_in_place(&mut u.common.dependencies, source, *is_network);
                     if name.contains("deptest") {
-                        log::warn!(
+                        crate::entrypoints::kmsg(&format!(
                             "MOUNTPROBE did-override {name} net={is_network} after={:?}",
                             u.common
                                 .dependencies
@@ -371,7 +371,7 @@ pub fn sync_mount_units(
                                 .iter()
                                 .map(|x| x.name.clone())
                                 .collect::<Vec<_>>()
-                        );
+                        ));
                     }
                 }
                 overridden.insert(name.clone(), *is_network);
@@ -439,7 +439,9 @@ pub fn sync_mount_units(
             } else {
                 (String::new(), false)
             };
-            log::warn!("MOUNTPROBE revert {name} is_net={is_net} what={what}");
+            crate::entrypoints::kmsg(&format!(
+                "MOUNTPROBE revert {name} is_net={is_net} what={what}"
+            ));
             apply_mount_deps_in_place(&mut u.common.dependencies, &what, is_net);
             try_set_stopped(&u.common.status);
         }
