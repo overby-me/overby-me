@@ -474,22 +474,21 @@ in {
         ( cd corpus/cast-oob \
             && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
 
-        # Two scenarios per mode: a whole-object `&*bad` reborrow (no arg) and a
-        # field reborrow `&(*p).b` past the end (argv `field`).
-        set +e
-        "$TMPDIR/tt/debug/cast-oob"       >"$TMPDIR/thw.log" 2>&1; thw_exit=$?
-        "$TMPDIR/tc/debug/cast-oob"       >"$TMPDIR/caw.log" 2>&1; caw_exit=$?
-        "$TMPDIR/tt/debug/cast-oob" field >"$TMPDIR/thf.log" 2>&1; thf_exit=$?
-        "$TMPDIR/tc/debug/cast-oob" field >"$TMPDIR/caf.log" 2>&1; caf_exit=$?
-        set -e
-
-        echo "--- through/whole (exit $thw_exit) ---"; cat "$TMPDIR/thw.log"
-        echo "--- case/whole (exit $caw_exit) ---"; cat "$TMPDIR/caw.log"
-        echo "--- through/field (exit $thf_exit) ---"; cat "$TMPDIR/thf.log"
-        echo "--- case/field (exit $caf_exit) ---"; cat "$TMPDIR/caf.log"
-        nu corpus/assert_cast_oob.nu \
-          "$TMPDIR/thw.log" "$thw_exit" "$TMPDIR/caw.log" "$caw_exit" \
-          "$TMPDIR/thf.log" "$thf_exit" "$TMPDIR/caf.log" "$caf_exit"
+        # Three scenarios, each in both modes: a whole-object `&*bad` reborrow
+        # (no arg), a field reborrow `&(*p).b` past the end (`field`), and a
+        # *direct* field read `(*p).b` past the end (`direct`) — the last caught
+        # by the projected deref fault, not the cast ensure. All abort OutOfBounds.
+        for scenario in whole:"" field:field direct:direct; do
+          name="''${scenario%%:*}"; arg="''${scenario#*:}"
+          set +e
+          "$TMPDIR/tt/debug/cast-oob" $arg >"$TMPDIR/t-$name.log" 2>&1; t_exit=$?
+          "$TMPDIR/tc/debug/cast-oob" $arg >"$TMPDIR/c-$name.log" 2>&1; c_exit=$?
+          set -e
+          echo "--- through/$name (exit $t_exit) ---"; cat "$TMPDIR/t-$name.log"
+          echo "--- case/$name (exit $c_exit) ---"; cat "$TMPDIR/c-$name.log"
+          nu corpus/assert_cast_oob.nu "through/$name" "$TMPDIR/t-$name.log" "$t_exit"
+          nu corpus/assert_cast_oob.nu "case/$name" "$TMPDIR/c-$name.log" "$c_exit"
+        done
       '';
 
     # Heap UAF with mint-site naming (trace -0130 debuggability): a Box is freed

@@ -203,22 +203,21 @@ to the escape (only escaped regions stay findable-as-dead).
 
 ## Open items carried forward
 
-- **point 0 checks the base pointer, not the projected element's extent.** The
-  raw-deref check resolves and range-checks the *deref base* (`p` for `(*p).f`
-  or `(*p)[i]`), so a **direct** projected access through a mis-cast base
-  (`base.add(k) as *const Struct` then `(*p).f = v`, no reborrow, no
-  `ptr::write`) checks only that `p` is in bounds, not that `p + offset(f)` is.
-  This is a narrow **false negative** (only bites a mis-cast base; a legitimate
-  pointer-to-`Struct` has its fields in bounds by construction), and it is
-  **both-modes** — a precision limit of point 0, not a mode-soundness gap. The
-  two forms that *do* matter are already covered: a **reborrow** `&(*p).f` by
-  the field-granular cast ensure (point 1), and a **write intrinsic**
-  `ptr::write((*p).f …)` by the write-call check on the computed destination.
-  Fix direction: make point 0 extent-aware — materialize `&raw const place` as
-  the fault and pass the place's layout size, reusing `raw_const_place_as_u8` /
-  the `ensure` extent comparison. Deferred: it touches the hottest path (every
-  deref), so the false-positive suite's check volume and timing must be
-  re-vetted first.
+- **point 0 checks the projected element's *start*, not its full extent.**
+  point 0 now faults on the **accessed** address for a simple projected place
+  (`&raw const (*p).f` = `p + offset(f)`, via `is_simple_projected_place` +
+  `raw_const_place_as_u8`), so a **direct** projected access through a mis-cast
+  base (`base.add(k) as *const Struct` then `(*p).f`, no reborrow, no
+  `ptr::write`) is caught — the `cast-oob direct` scenario aborts `OutOfBounds`
+  in both modes, and the false-positive suite stays clean (5.1M hashbrown
+  checks). The **residual** is narrow: a field that *starts* in bounds but
+  *extends* past the end (a subobject wider than the remaining allocation).
+  Closing it needs the full extent (`fault + size`), which the single-address
+  `deref_rooted` does not compare; the fix is a `__fec_check_extent` (the
+  `ensure` extent logic without the mint recording) routed for projected
+  derefs. Deferred as low-value (only bites a mis-cast base whose first field is
+  in bounds) and to keep `deref_rooted`'s arity stable across the smallvec /
+  rusqlite / stack asserts.
 - **Interposed frees don't quarantine.** `interpose::free` clears liveness
   (I7) then frees immediately; routing C frees through the shared quarantine
   needs a per-origin release dispatch on the node (System vs libc `free`).

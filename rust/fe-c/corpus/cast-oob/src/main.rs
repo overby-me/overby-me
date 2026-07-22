@@ -63,10 +63,26 @@ fn field_reborrow() {
     black_box(x);
 }
 
+/// Direct field read `(*p).b` of a field off the end — no reborrow, no
+/// `ptr::write`. This is caught by the projected deref fault (point 0 faults on
+/// the accessed address `p + offset(b)`, not the base `p`), the direct-access
+/// half of the documented point-0 precision gap.
+fn direct_field() {
+    let v: Vec<u64> = black_box(vec![0x3333_3333_3333_3333; 1]); // 8-byte buffer
+    let base = v.as_ptr();
+    eprintln!("BASE={base:p}");
+    let p = base as *const Pair;
+    // Direct read of the out-of-bounds field: the projected deref check faults
+    // on `p + 8`, which is at the end of the 8-byte buffer, and aborts.
+    let x = unsafe { (*p).b };
+    println!("NO_ABORT x={x:#x}");
+    black_box(x);
+}
+
 fn main() {
-    if std::env::args().nth(1).as_deref() == Some("field") {
-        field_reborrow();
-    } else {
-        whole_object();
+    match std::env::args().nth(1).as_deref() {
+        Some("field") => field_reborrow(),
+        Some("direct") => direct_field(),
+        _ => whole_object(),
     }
 }

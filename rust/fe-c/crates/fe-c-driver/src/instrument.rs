@@ -243,12 +243,13 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
             finder.visit_statement(&basic_blocks[block].statements[stmt_index], location);
             let found = finder.found;
 
-            for (fault_local, is_raw) in found {
+            for (place, is_raw) in found {
+                let base_local = place.local;
                 // The pointer's derivation root, or itself when propagation
                 // found none (unpropagated fallback: resolves the access's
                 // own allocation — never a false positive, at worst a false
                 // negative when provenance is lost).
-                let root_local = roots.get(&fault_local).copied().unwrap_or(fault_local);
+                let root_local = roots.get(&base_local).copied().unwrap_or(base_local);
                 injected += 1;
 
                 // Raw derefs, and every deref in `through` mode, get the full
@@ -261,13 +262,20 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
                     fns.dealloc_reachable
                 };
 
+                let projected = is_simple_projected_place(&place);
                 let new_block = split_block(basic_blocks, location);
                 let bd = &mut basic_blocks[block];
 
                 let u8_ptr = Ty::new_imm_ptr(tcx, tcx.types.u8);
-                // Cast the faulting pointer and the root pointer to
-                // *const u8, threading each as a distinct SSA value.
-                let fault_arg = cast_to_u8_ptr(local_decls, bd, fault_local, u8_ptr, source_info);
+                // Fault on the *accessed* address: for a simple projected place
+                // `(*p).f` that is `&raw const place` = `p + offset(f)` (a
+                // tighter check than the base `p`); for a whole-object `*p` it
+                // is just `p`. The root pointer is threaded as a distinct value.
+                let fault_arg = if projected {
+                    raw_const_place_as_u8(tcx, local_decls, bd, &place, u8_ptr, source_info)
+                } else {
+                    cast_to_u8_ptr(local_decls, bd, base_local, u8_ptr, source_info)
+                };
                 let root_arg = cast_to_u8_ptr(local_decls, bd, root_local, u8_ptr, source_info);
 
                 let ret = local_decls.push(LocalDecl::new(tcx.types.unit, source_info.span));
@@ -1124,27 +1132,44 @@ fn dealloc_reachable_blocks(body: &Body<'_>) -> HashSet<BasicBlock> {
     reachable
 }
 
-/// Collects the base locals of dereferences in a statement (indirect places),
-/// each tagged `is_raw`. Always collects raw-pointer bases; safe-reference
-/// bases (`*r`, `r: &T`) only when `check_safe` (through mode, or a
-/// dealloc-reachable block in case mode).
+/// Collects the dereference places in a statement (indirect places), each
+/// tagged `is_raw`. Always collects raw-pointer bases; safe-reference bases
+/// (`*r`, `r: &T`) only when `check_safe` (through mode, or a dealloc-reachable
+/// block in case mode). The full place (not just its base local) is kept so the
+/// check can fault on the *accessed* address — `p + offset(f)` for `(*p).f` —
+/// not merely the base `p`.
 struct DerefFinder<'a, 'tcx> {
     local_decls: &'a IndexVec<Local, LocalDecl<'tcx>>,
     check_safe: bool,
-    found: Vec<(Local, bool)>,
+    found: Vec<(Place<'tcx>, bool)>,
 }
 
 impl<'tcx> Visitor<'tcx> for DerefFinder<'_, 'tcx> {
     fn visit_place(&mut self, place: &Place<'tcx>, context: PlaceContext, location: Location) {
         if place.is_indirect() {
             if is_raw_ptr_local(self.local_decls, place.local) {
-                self.found.push((place.local, true));
+                self.found.push((*place, true));
             } else if self.check_safe && is_ref_local(self.local_decls, place.local) {
-                self.found.push((place.local, false));
+                self.found.push((*place, false));
             }
         }
         self.super_place(place, context, location);
     }
+}
+
+/// True if `place` is a simple projected dereference — a single leading `Deref`
+/// followed by field/index/downcast projections and **no further `Deref`**
+/// (`(*p).f`, `(*p)[i]`, `(*p).f.g`). For these the *accessed* address is
+/// `&raw const place` (`p + offset`), which is a tighter fault than the base
+/// pointer `p`: it catches a direct projected access off the end of a mis-cast
+/// base, which the base check would miss (a point-0 precision gap). A nested
+/// `Deref` would change the derivation root, so those keep the base fault.
+fn is_simple_projected_place(place: &Place<'_>) -> bool {
+    place.projection.len() > 1
+        && matches!(place.projection[0], ProjectionElem::Deref)
+        && place.projection[1..]
+            .iter()
+            .all(|p| !matches!(p, ProjectionElem::Deref))
 }
 
 /// Splits `location.block` at `location.statement_index`, moving the tail

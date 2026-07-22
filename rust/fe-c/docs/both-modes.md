@@ -108,7 +108,9 @@ relationship, exactly as the tables predict:
 | `smallvec-0003` | heap OOB | abort | abort | write-intrinsic / raw deref, both |
 | `cast-oob` (whole-object) | raw→safe cast OOB | abort | abort | the cast ensure (point 1), both modes |
 | `cast-oob field` | field reborrow `&(*p).b` OOB | abort | abort | field-granular cast ensure — closes the `case` elision gap |
+| `cast-oob direct` | direct field read `(*p).b` OOB | abort | abort | projected deref fault (point 0 faults on `p + offset`, not the base) |
 | `lru-0130` | heap use-after-free | abort | abort | `case` via the dealloc-reachable re-check (point 4) |
+| `heap-mint` | heap UAF, mint named | abort | abort | both name `minted_at`; `case` also `read_at` (both-sites debuggability) |
 | `through-safe-ref` | safe-ref stack UAF | abort | **elide** | the bolded row: `case` elides safe-pointer derefs |
 | `rusqlite-0128` | safe-ref stack UAF (real CVE) | abort | **elide** | same elision |
 
