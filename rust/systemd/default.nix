@@ -417,6 +417,7 @@
               testEnv = t.testEnv or {};
               testTimeout = t.testTimeout or 1800;
               enableTpm = t.enableTpm or false;
+              allowReboot = t.allowReboot or false;
             };
         })
         tests)
@@ -431,6 +432,7 @@
               testEnv = t.testEnv or {};
               testTimeout = t.testTimeout or 1800;
               enableTpm = t.enableTpm or false;
+              allowReboot = t.allowReboot or false;
               useUpstreamSystemd = true;
             };
         })

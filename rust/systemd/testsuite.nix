@@ -16,6 +16,12 @@
   # Attach a software TPM (swtpm -> /dev/tpmrm0) to the VM. Needed by TEST-70-TPM2,
   # whose systemd-tpm2-setup/tpm2 tooling requires a TPM2 device.
   enableTpm ? false,
+  # Start the VM with allow_reboot=True so a guest `systemctl reboot` restarts
+  # the VM (QEMU resets + re-runs the same kernel) instead of the default
+  # -no-reboot behaviour (guest reboot terminates QEMU). Needed by reboot tests
+  # (TEST-09-REBOOT); harmless but undesirable for others (a kernel panic would
+  # loop instead of fast-failing), so it is opt-in per test.
+  allowReboot ? false,
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -705,6 +711,7 @@ in
     };
 
     testScript = ''
+      ${pkgs.lib.optionalString allowReboot "machine.start(allow_reboot=True)"}
       machine.wait_for_unit("multi-user.target", timeout=120)
 
       # Reload systemd to pick up any test unit files installed via activation
@@ -750,19 +757,31 @@ in
       # `-w` waits for the child so the /testok check below still works.
       test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}setsid -w bash -c './${testName}.sh; rc=$?; [ $rc -eq 77 ] && touch /skipped; exit $rc' 2>&1 | tee /dev/ttyS0"
 
-      try:
-          (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
-          print(output)
-          # tee masks the real exit code; rely on /testok check below
-      except BrokenPipeError:
-          # Some tests (e.g. TEST-18-FAILUREACTION) trigger a VM reboot.
-          # Wait for the machine to come back up, then re-run the test script
-          # which will detect the second phase (e.g. via /firstphase marker).
-          print("BrokenPipeError: VM likely rebooted, waiting for it to come back...")
-          machine.wait_for_unit("multi-user.target", timeout=120)
-          machine.succeed("systemctl daemon-reload")
-          (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
-          print(output)
+      # A test may reboot the VM one or more times (TEST-09-REBOOT's multi-boot
+      # journal cycle, TEST-18-FAILUREACTION, ...). A reboot mid-execute tears
+      # down the backdoor shell, surfacing as EITHER a BrokenPipeError (the
+      # connection dropped) OR a binascii.Error (the reboot truncated the final
+      # base64 output frame). On either, reconnect to the rebooted VM and re-run
+      # the test script, which resumes the next phase itself (it tracks progress
+      # across boots, e.g. via /var/tmp/.systemd_reboot_count). Loop until the
+      # script completes without rebooting. Non-rebooting tests take the first
+      # iteration and break immediately, so their behaviour is unchanged.
+      import binascii
+      reboot_seen = 0
+      while True:
+          try:
+              (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
+              print(output)
+              # tee masks the real exit code; rely on /testok check below
+              break
+          except (BrokenPipeError, binascii.Error):
+              reboot_seen += 1
+              if reboot_seen > 10:
+                  raise Exception("too many reboots; aborting to avoid an infinite loop")
+              print(f"VM rebooted (#{reboot_seen}), reconnecting and resuming the test...")
+              machine.connected = False
+              machine.wait_for_unit("multi-user.target", timeout=120)
+              machine.succeed("systemctl daemon-reload")
 
       # Check for /testok (standard systemd test success marker) or
       # /skipped (upstream convention for tests that detected a missing
