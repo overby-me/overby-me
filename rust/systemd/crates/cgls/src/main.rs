@@ -341,8 +341,14 @@ fn find_unit_cgroup_in(dir: &Path, unit_name: &str) -> Option<PathBuf> {
         if name_str == unit_name && path.join("cgroup.procs").exists() {
             return Some(path);
         }
-        // Recurse into slices
-        if (name_str.ends_with(".slice") || name_str == "init.scope")
+        // Recurse into slices, and into the per-user manager service
+        // (user@UID.service), whose delegated subtree holds the user's
+        // app.slice / session.slice / init.scope. Without the latter,
+        // `systemd-cgls --user-unit=app.slice` can't find app.slice, which
+        // lives at user.slice/user-UID.slice/user@UID.service/app.slice.
+        if (name_str.ends_with(".slice")
+            || name_str == "init.scope"
+            || (name_str.starts_with("user@") && name_str.ends_with(".service")))
             && let Some(found) = find_unit_cgroup_in(&path, unit_name)
         {
             return Some(found);
