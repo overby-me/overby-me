@@ -261,20 +261,22 @@ distinction holds (rusqlite/through-safe-ref still elide in `case`). Both abort
 than deregisters at free (`table::poison_and_info` / `unlink`).
 Reachability is conservative (any call, not a precise `nofree` callgraph — the
 heap-only abort makes over-approximation cost extra checks, never false
-positives). The `case` report now also names the **dangling-read site**
-(`read_at=34`, the exact `let v = *value` line): the re-check is injected right
-at the dereference, so it carries that source line, threaded as a third
-argument. Precisely naming the **free** line and the lru-internal **mint** line
-is deliberately deferred: under the conservative "any call frees" reachability
-the nearest preceding call is the innocent `eprintln!` between the `pop()` and
-the read, so a `freed_at` derived from the CFG would be a red herring — a
-precise free line needs the deferred `nofree` callgraph (or drop-terminator
-instrumentation, whose blast radius on the false-positive suite is unvetted).
-The precise **mint** line is now unblocked: point 1's `ensure` was extended to
-field reborrows (`&(*node).val`) and vetted clean (5.1M hashbrown checks), so
-recording the mint line on the root cap at ensure time (`cap.mint_site`) and
-printing it is a bounded next step. Scoped in STATUS; the report names the
-freed node, the dangling-read site, and the fact of free today.)*
+positives). The `case` report names the **dangling-read site** (`read_at`, the
+`let v = *value` line — the re-check is injected right at the dereference) and
+the **mint site** (`minted_at`, where the dangling reference was born): point
+1's `ensure` records the mint line on the allocation via `note_mint` (a
+dedicated lock-free `Record.mint` field that survives `poison`), and the heap
+use-after-free report surfaces it. Demonstrated end to end by `corpus/heap-mint`
+(`fe-c-heap-mint`): a `Box` freed while a field reference into it is held aborts
+`UseAfterFree` naming `minted_at=35 read_at=40` in `case` (through names
+`minted_at`), plus a `note_mint` unit test (record + survive-poison). It does
+**not** surface on `lru-0130` (lru's reborrow is inside the uninstrumented
+crate; instrumenting lru does not help — its optimized-MIR reborrow does not
+resolve the node record). The one remaining site is the **free** line,
+deliberately deferred: under the conservative "any call frees" reachability the
+nearest preceding call is the innocent `eprintln!` between the `pop()` and the
+read, so a CFG-derived `freed_at` would be a red herring — a precise free line
+needs the deferred `nofree` callgraph.)*
 
 **C3. [todo] The other mode**, with the `differential` check wired: any violation
 `through` catches that `case` misses must map to a documented elision gap in

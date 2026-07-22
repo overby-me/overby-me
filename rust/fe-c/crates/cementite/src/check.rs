@@ -114,9 +114,10 @@ pub extern "C" fn __fec_check_deref_rooted(fault: *const u8, root: *const u8) {
         }
         // Temporal (I8): the owning allocation must still be live. A dead
         // STACK region is a use-after-scope-exit (the rusqlite-0128 class);
-        // a dead heap region is a use-after-free.
+        // a dead heap region is a use-after-free. Pass the recorded mint line so
+        // a heap use-after-free names where the dangling reference was born.
         if !table::is_live(cap.id) {
-            report_uaf_and_abort(f, cap.base, cap.id.raw(), cap.flags, cap.site);
+            report_uaf_at(f, cap.base, cap.id.raw(), cap.flags, cap.site, 0, cap.mint);
         }
     }
 }
@@ -165,6 +166,7 @@ pub extern "C" fn __fec_check_dealloc_reachable(
             cap.flags,
             cap.site,
             read_line as u32,
+            cap.mint,
         );
     }
 }
@@ -181,7 +183,7 @@ pub extern "C" fn __fec_check_dealloc_reachable(
 ///
 /// Neither pointer is dereferenced; both are only inspected.
 #[unsafe(no_mangle)]
-pub extern "C" fn __fec_ensure(fault: *const u8, root: *const u8, size: usize) {
+pub extern "C" fn __fec_ensure(fault: *const u8, root: *const u8, size: usize, mint_line: usize) {
     if !REPORTER_REGISTERED.swap(true, Ordering::Relaxed) {
         #[cfg(not(miri))]
         // SAFETY: `report` is a valid `extern "C" fn()`.
@@ -204,6 +206,12 @@ pub extern "C" fn __fec_ensure(fault: *const u8, root: *const u8, size: usize) {
         // Temporal: the allocation must be live at the cast.
         if !table::is_live(cap.id) {
             report_uaf_and_abort(f, cap.base, cap.id.raw(), cap.flags, cap.site);
+        }
+        // Valid mint: record where this reference was born on the owning
+        // allocation, so a later use-after-free names it (`minted_at`). Heap
+        // only — a stack scope's `site` already carries its escape line.
+        if mint_line != 0 && !cap.flags.contains(CapFlags::STACK) {
+            table::note_mint(cap.rec, mint_line as u32);
         }
     }
 }
@@ -264,7 +272,7 @@ fn report_null_and_abort() -> ! {
 #[cold]
 #[inline(never)]
 fn report_uaf_and_abort(fault: usize, base: usize, id: u64, flags: CapFlags, site: u32) -> ! {
-    report_uaf_at(fault, base, id, flags, site, 0);
+    report_uaf_at(fault, base, id, flags, site, 0, 0);
 }
 
 #[cold]
@@ -276,13 +284,15 @@ fn report_uaf_at(
     flags: CapFlags,
     site: u32,
     read_line: u32,
+    mint: u32,
 ) -> ! {
-    let kind = if flags.contains(CapFlags::STACK) {
+    let stack = flags.contains(CapFlags::STACK);
+    let kind = if stack {
         "UseAfterScopeExit"
     } else {
         "UseAfterFree"
     };
-    let region = if flags.contains(CapFlags::STACK) {
+    let region = if stack {
         "stack scope"
     } else {
         "heap allocation"
@@ -295,6 +305,15 @@ fn report_uaf_at(
     } else {
         String::new()
     };
+    // The mint site (trace -0130 debuggability): the source line the dangling
+    // reference was born at (its raw->safe cast), recorded on the heap
+    // allocation by `note_mint` at `ensure` time. Stack scopes use `escaped_at`
+    // instead. 0 = unrecorded.
+    let minted = if !stack && mint != 0 {
+        format!(" minted_at={mint}")
+    } else {
+        String::new()
+    };
     // The dangling-read site (trace -0130 debuggability): the source line the
     // freed region was read at. The case-mode dealloc-reachable re-check knows
     // it because it is injected right at the dereference. 0 = unrecorded.
@@ -304,11 +323,16 @@ fn report_uaf_at(
         String::new()
     };
     let msg = format!(
-        "fe-c-violation kind={kind} fault={fault:#x} alloc_base={base:#x} alloc_id={id}{escaped}{read}\n\
+        "fe-c-violation kind={kind} fault={fault:#x} alloc_base={base:#x} alloc_id={id}{escaped}{minted}{read}\n\
 fe-c: dereference into a dead {region} (id={id}, base={base:#x}); the owning \
-region was torn down / freed before this access{}{}\n",
+region was torn down / freed before this access{}{}{}\n",
         if site != 0 {
             format!(" (escaped at source line {site})")
+        } else {
+            String::new()
+        },
+        if !stack && mint != 0 {
+            format!(" (reference minted at source line {mint})")
         } else {
             String::new()
         },

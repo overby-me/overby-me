@@ -114,6 +114,15 @@ pub struct Cap {
     /// this is where the local's address was laundered out of the frame
     /// (I9 / trace F7), so a use-after-scope report can name it.
     pub site: u32,
+    /// Source line where a reference into this allocation was last minted at a
+    /// raw->safe cast (point 1 `ensure`; 0 = unrecorded). For a **heap**
+    /// allocation a use-after-free report names it (`minted_at`, trace -0130);
+    /// stack scopes use `site` for the escape line instead.
+    pub mint: u32,
+    /// Backing table record index, so `ensure` can record the mint line on the
+    /// resolved allocation without a second table walk. `u32::MAX` when the cap
+    /// was not produced from a table record.
+    pub rec: u32,
 }
 
 impl Cap {
@@ -213,6 +222,8 @@ mod tests {
             id: AllocId::from_raw(7),
             flags: CapFlags::EMPTY,
             site: 0,
+            mint: 0,
+            rec: u32::MAX,
         };
         assert!(cap.covers(0x1000, 1));
         assert!(cap.covers(0x10ff, 1));

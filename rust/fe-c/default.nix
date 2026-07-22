@@ -51,6 +51,8 @@
       ./corpus/lru-0130/Cargo.lock
       # The point-1 raw->safe cast OOB reproducer (no third-party deps).
       ./corpus/cast-oob/Cargo.lock
+      # Heap UAF with mint-site naming (no third-party deps).
+      ./corpus/heap-mint/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -488,6 +490,37 @@ in {
         nu corpus/assert_cast_oob.nu \
           "$TMPDIR/thw.log" "$thw_exit" "$TMPDIR/caw.log" "$caw_exit" \
           "$TMPDIR/thf.log" "$thf_exit" "$TMPDIR/caf.log" "$caf_exit"
+      '';
+
+    # Heap UAF with mint-site naming (trace -0130 debuggability): a Box is freed
+    # while a field reference minted into it is held, then read. Both modes abort
+    # UseAfterFree; because the mint (`&(*p).b`) is in this instrumented binary,
+    # the report names `minted_at` (where the reference was born) — and case also
+    # names `read_at`. Demonstrates the both-sites naming end to end.
+    fe-c-heap-mint = pkgs:
+      cargoCheck pkgs "heap-mint" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=heap_mint
+
+        ( cd corpus/heap-mint \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/heap-mint" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        ( cd corpus/heap-mint \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/heap-mint" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_heap_mint.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Differential gate (C3, I4): `through` is the oracle. Build three

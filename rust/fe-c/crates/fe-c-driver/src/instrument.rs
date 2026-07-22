@@ -72,7 +72,7 @@ fn inject_fec_decls(psess: &rustc_session::parse::ParseSess, krate: &mut rustc_a
     const DECLS: &str = "unsafe extern \"C\" {\n\
         fn __fec_check_deref_rooted(fault: *const u8, root: *const u8);\n\
         fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u8, read_line: usize);\n\
-        fn __fec_ensure(fault: *const u8, root: *const u8, size: usize);\n\
+        fn __fec_ensure(fault: *const u8, root: *const u8, size: usize, mint_line: usize);\n\
         fn __fec_scope_enter(base: *const u8, len: usize, site: usize);\n\
         fn __fec_scope_exit(base: *const u8);\n\
     }\n";
@@ -485,6 +485,14 @@ fn instrument_cast_ensures<'tcx>(
             let fault_arg =
                 raw_const_place_as_u8(tcx, local_decls, bd, &place, u8_ptr, source_info);
             let root_arg = cast_to_u8_ptr(local_decls, bd, root, u8_ptr, source_info);
+            // The mint site: the source line of this raw->safe cast, recorded on
+            // the resolved allocation so a later heap use-after-free names where
+            // the dangling reference was born (`minted_at`, trace -0130).
+            let mint_line = tcx
+                .sess
+                .source_map()
+                .lookup_char_pos(source_info.span.lo())
+                .line as u64;
             let ret = local_decls.push(LocalDecl::new(tcx.types.unit, source_info.span));
             bd.terminator = Some(Terminator {
                 source_info,
@@ -504,6 +512,14 @@ fn instrument_cast_ensures<'tcx>(
                                 span: source_info.span,
                                 user_ty: None,
                                 const_: MirConst::from_usize(tcx, size),
+                            })),
+                            span: source_info.span,
+                        },
+                        Spanned {
+                            node: Operand::Constant(Box::new(ConstOperand {
+                                span: source_info.span,
+                                user_ty: None,
+                                const_: MirConst::from_usize(tcx, mint_line),
                             })),
                             span: source_info.span,
                         },

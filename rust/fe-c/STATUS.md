@@ -54,16 +54,20 @@ injected right at the dereference, so it carries that line as a third argument.
 exhaustive): T2 shadow-slot coherence (the at-rest cap layout that replaces the
 table lookup), `strict` unknown-provenance (needs full cap propagation first,
 or it false-positives on foreign statics), and interprocedural + at-rest
-capability propagation. For `case`: the C2 report already names the freed node
-and the dangling-read site; the last precision step is the **free** and **mint**
-source lines. The **free** line is deferred by correctness: a CFG-derived
-`freed_at` would name the innocent `eprintln!` sitting between the `pop()` and
-the read, so a precise free line needs the deferred `nofree` callgraph. The
-**mint** line is now *reachable*: the field-reborrow ensure (`&(*node).val`)
-exists and is vetted clean (5.1M hashbrown checks, no false positives), so the
-remaining work is only to record the mint line on the root cap at ensure time
-(`cap.mint_site`, the `escaped_at` mechanism applied to heap) and print it —
-a bounded next step, no longer blocked.
+capability propagation. For `case`: the C2 report now names the freed node, the
+**mint** site (`minted_at`, where the dangling reference was born), and the
+dangling-read site (`read_at`). The mint line is recorded on the allocation by
+`note_mint` at `ensure` time (a dedicated lock-free `Record.mint` field that
+survives `poison`) and surfaced end to end by `corpus/heap-mint`
+(`fe-c-heap-mint`): a `Box` freed while a field reference into it is held aborts
+`UseAfterFree` naming `minted_at=35 read_at=40` in `case` (through names
+`minted_at`). It does **not** surface on `lru-0130` because lru's reborrow is
+inside the uninstrumented crate; instrumenting lru does not help (its
+optimized-MIR reborrow does not resolve the node record), so `heap-mint` is the
+demonstrator. The one remaining site is the **free** line, deferred by
+correctness: a CFG-derived `freed_at` would name the innocent `eprintln!`
+sitting between the `pop()` and the read, so a precise free line needs the
+deferred `nofree` callgraph.
 
 **Instrumentation points landed.** point 0 (raw deref), point 1 (raw→safe cast
 `ensure` — `corpus/cast-oob` aborts OutOfBounds in both modes for **both** a
@@ -79,10 +83,11 @@ yet: point 2 (`through` covers loaded pointers via safe-deref checking;
 `case`'s "load from memory" variant is subsumed by point 1 for now), point 3a
 (FFI inbound prologue), and the `through` performance layer (T2 shadow slots).
 
-All 18 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+All 19 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
 `false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
-`through-safe-ref`, `rusqlite-0128`, `lru-0130`, `cast-oob`, `differential`.
+`through-safe-ref`, `rusqlite-0128`, `lru-0130`, `cast-oob`, `heap-mint`,
+`differential`.
 
 ## Protocol
 

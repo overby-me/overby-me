@@ -84,6 +84,11 @@ struct Record {
     /// Registration site (SiteId, 0 = unknown). Doubles as the freelist
     /// link while the record is free.
     site: AtomicU32,
+    /// Source line where a reference into this allocation was last minted at a
+    /// raw->safe cast (point 1 `ensure`; 0 = unrecorded). A **dedicated** field,
+    /// never aliased as a freelist link, so `note_mint` can store it lock-free:
+    /// worst case a report names a stale line, never memory corruption.
+    mint: AtomicU32,
     base: AtomicUsize,
     len: AtomicUsize,
     /// `PackedCap` encoding: id in the high 48 bits, flags in the low 16.
@@ -217,6 +222,9 @@ pub fn register(base: usize, len: usize, flags: CapFlags, site: u32) -> AllocId 
     rec.base.store(base, Ordering::Relaxed);
     rec.len.store(len, Ordering::Relaxed);
     rec.site.store(site, Ordering::Relaxed);
+    // Reset the mint line: this record may be reused from the freelist, and a
+    // stale mint would misname a future use-after-free report.
+    rec.mint.store(0, Ordering::Relaxed);
     rec.id_flags
         .store(PackedCap::pack(id, flags).id_and_flags, Ordering::Relaxed);
     rec.seq.store(rseq.wrapping_add(2), Ordering::Release);
@@ -310,6 +318,21 @@ pub fn poison(base: usize) -> bool {
     };
     TABLE.liveness.clear(packed.id());
     true
+}
+
+/// Records the source line where a reference into a resolved allocation was
+/// minted at a raw->safe cast (point 1 `ensure`), so a later use-after-free
+/// report can name it (`minted_at`, trace -0130). `rec` is the backing record
+/// index carried by the [`Cap`] the caller just resolved. Lock-free by design:
+/// `mint` is a dedicated field (never a freelist link) and its only reader does
+/// a single relaxed load, so a racing free can at worst make a report name a
+/// stale line — never memory corruption. No-op for the `u32::MAX` sentinel (a
+/// cap not produced from a table record).
+pub fn note_mint(rec: u32, line: u32) {
+    if rec == u32::MAX {
+        return;
+    }
+    TABLE.records.get(rec).mint.store(line, Ordering::Relaxed);
 }
 
 /// Unregisters the allocation starting at exactly `base`.
@@ -626,6 +649,7 @@ fn record_cap_covering(rec_idx: u32, addr: usize) -> Option<Cap> {
         let base = rec.base.load(Ordering::Relaxed);
         let len = rec.len.load(Ordering::Relaxed);
         let site = rec.site.load(Ordering::Relaxed);
+        let mint = rec.mint.load(Ordering::Relaxed);
         let packed = PackedCap {
             id_and_flags: rec.id_flags.load(Ordering::Relaxed),
         };
@@ -640,6 +664,8 @@ fn record_cap_covering(rec_idx: u32, addr: usize) -> Option<Cap> {
                 id: packed.id(),
                 flags: packed.flags(),
                 site,
+                mint,
+                rec: rec_idx,
             })
         } else {
             None
@@ -843,5 +869,41 @@ mod tests {
 
         writer.join().unwrap();
         let _ = reader.join().unwrap();
+    }
+
+    #[test]
+    fn note_mint_records_and_survives_poison() {
+        // A fresh heap allocation has no mint site.
+        let base = window(11) + 0x40;
+        let id = register(base, 32, CapFlags::EMPTY, 0);
+        assert_eq!(
+            lookup(base).expect("resolves").mint,
+            0,
+            "fresh alloc has no mint"
+        );
+
+        // `note_mint`, keyed by the resolved cap's record index, records the
+        // line where a reference into the allocation was minted.
+        let cap = lookup(base).expect("resolves");
+        note_mint(cap.rec, 4242);
+        assert_eq!(
+            lookup(base + 8).expect("interior resolves").mint,
+            4242,
+            "mint is recorded and readable from any interior address"
+        );
+
+        // Poison keeps the record findable-as-dead (F2) *and* preserves the
+        // mint, so a use-after-free report resolving the quarantined address can
+        // still name where the dangling reference was born.
+        let freed = poison_and_info(base).expect("poison finds the live alloc");
+        let dead = lookup(base).expect("still findable in quarantine");
+        assert!(!is_live(dead.id), "poisoned alloc reads as dead");
+        assert_eq!(dead.mint, 4242, "mint survives poison into the UAF window");
+        assert_eq!(dead.id, id, "same allocation identity");
+
+        // The u32::MAX sentinel (a cap not from a record) is a no-op, not a panic.
+        note_mint(u32::MAX, 99);
+
+        unlink(&freed);
     }
 }
