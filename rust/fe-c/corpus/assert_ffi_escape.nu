@@ -32,5 +32,12 @@ def main [log: path, exit_code: int] {
     error make {msg: $"report named ($base), expected the escaped stack local ($sl)"}
   }
 
-  print $"ffi-escape OK: aborted UseAfterScopeExit naming the dead stack scope ($sl) reached across FFI"
+  # F7: the report must name the escape/registration site (the fec_register
+  # call the pointer was handed out at), not only the callback it fired in.
+  let esc = ($viol | parse --regex 'escaped_at=(?<e>[0-9]+)' | get e.0?)
+  if ($esc | is-empty) or (($esc | into int) == 0) {
+    error make {msg: $"report did not name the escape site (escaped_at); got: ($viol)"}
+  }
+
+  print $"ffi-escape OK: aborted UseAfterScopeExit naming the dead stack scope ($sl), escaped_at line ($esc)"
 }

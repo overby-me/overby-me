@@ -70,7 +70,7 @@ impl rustc_driver::Callbacks for FecInstrument {
 fn inject_fec_decls(psess: &rustc_session::parse::ParseSess, krate: &mut rustc_ast::Crate) {
     const DECLS: &str = "unsafe extern \"C\" {\n\
         fn __fec_check_deref_rooted(fault: *const u8, root: *const u8);\n\
-        fn __fec_scope_enter(base: *const u8, len: usize);\n\
+        fn __fec_scope_enter(base: *const u8, len: usize, site: usize);\n\
         fn __fec_scope_exit(base: *const u8);\n\
     }\n";
     let name = rustc_span::FileName::Custom("fe-c-inject".to_string());
@@ -117,7 +117,7 @@ fn fec_optimized_mir(tcx: TyCtxt<'_>, def_id: LocalDefId) -> &Body<'_> {
 struct FecFns {
     /// `__fec_check_deref_rooted(fault, root)`.
     check: DefId,
-    /// `__fec_scope_enter(base, len)`.
+    /// `__fec_scope_enter(base, len, site)`.
     scope_enter: DefId,
     /// `__fec_scope_exit(base)`.
     scope_exit: DefId,
@@ -369,7 +369,7 @@ fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFn
     }
     let sites: Vec<(Local, BasicBlock, usize)> = address_taken_sites(body)
         .into_iter()
-        .filter(|&(l, _, _)| escapes.contains(&l))
+        .filter(|&(l, _, _)| escapes.contains_key(&l))
         .collect();
     if sites.is_empty() {
         return 0;
@@ -415,7 +415,7 @@ fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFn
                 local,
                 ty,
                 fns.scope_exit,
-                None,
+                &[],
                 source_info,
             );
             injected += 1;
@@ -459,9 +459,11 @@ fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFn
                 .or_else(|| bd.statements.get(at.saturating_sub(1)))
                 .map(|s| s.source_info)
                 .unwrap_or_else(|| bd.terminator().source_info);
-            let (func, len) = match hook {
-                Hook::Enter(size) => (fns.scope_enter, Some(size)),
-                Hook::Exit => (fns.scope_exit, None),
+            // scope_enter carries [region size, escape site line]; scope_exit
+            // takes only the base.
+            let (func, extra): (DefId, Vec<u64>) = match hook {
+                Hook::Enter(size) => (fns.scope_enter, vec![size, u64::from(escapes[&local])]),
+                Hook::Exit => (fns.scope_exit, Vec::new()),
             };
             inject_scope_call(
                 tcx,
@@ -472,7 +474,7 @@ fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFn
                 local,
                 ty,
                 func,
-                len,
+                &extra,
                 source_info,
             );
             injected += 1;
@@ -505,7 +507,7 @@ fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFn
                     local,
                     ty,
                     fns.scope_exit,
-                    None,
+                    &[],
                     source_info,
                 );
                 injected += 1;
@@ -576,7 +578,12 @@ fn drop_sites(
 /// trace F6). A `&mut x` merely handed to a Rust method that keeps it in-frame
 /// (the hashbrown common case) reaches neither, so default-on scope hooks stay
 /// cheap and false-positive-free.
-fn escaping_locals<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashSet<Local> {
+///
+/// Returns each escaping local mapped to the **source line of its escape
+/// sink** (the `SiteId` a use-after-scope report names as `escaped_at`, so the
+/// developer sees where the address was handed out, not just the callback the
+/// abort fires in — trace F7).
+fn escaping_locals<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashMap<Local, u32> {
     let mut taint: HashMap<Local, HashSet<Local>> = HashMap::new();
     for bb in body.basic_blocks.iter() {
         for stmt in &bb.statements {
@@ -592,7 +599,7 @@ fn escaping_locals<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashSet<Local>
         }
     }
     if taint.is_empty() {
-        return HashSet::new();
+        return HashMap::new();
     }
 
     // Propagate through pointer-preserving moves/casts/offsets to a fixpoint.
@@ -640,7 +647,8 @@ fn escaping_locals<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashSet<Local>
         }
     }
 
-    let mut escaping = HashSet::new();
+    let mut escaping: HashMap<Local, u32> = HashMap::new();
+    let sm = tcx.sess.source_map();
     for bb in body.basic_blocks.iter() {
         // Sink: a pointer-to-integer cast launders the address out of frame.
         for stmt in &bb.statements {
@@ -651,7 +659,10 @@ fn escaping_locals<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashSet<Local>
                     && let Some(p) = op.place()
                     && let Some(seed) = taint.get(&p.local)
                 {
-                    escaping.extend(seed.iter().copied());
+                    let line = sm.lookup_char_pos(stmt.source_info.span.lo()).line as u32;
+                    for &l in seed {
+                        escaping.entry(l).or_insert(line);
+                    }
                 }
             }
         }
@@ -660,11 +671,16 @@ fn escaping_locals<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashSet<Local>
         if let TerminatorKind::Call { func, args, .. } = &bb.terminator().kind
             && is_foreign_call(tcx, &body.local_decls, func)
         {
+            let line = sm
+                .lookup_char_pos(bb.terminator().source_info.span.lo())
+                .line as u32;
             for arg in args.iter() {
                 if let Some(p) = arg.node.place()
                     && let Some(seed) = taint.get(&p.local)
                 {
-                    escaping.extend(seed.iter().copied());
+                    for &l in seed {
+                        escaping.entry(l).or_insert(line);
+                    }
                 }
             }
         }
@@ -706,7 +722,7 @@ fn inject_scope_before_return<'tcx>(
     local: Local,
     ty: Ty<'tcx>,
     func: DefId,
-    len: Option<u64>,
+    extra: &[u64],
     source_info: SourceInfo,
 ) {
     let orig = basic_blocks[block].terminator.take();
@@ -721,7 +737,7 @@ fn inject_scope_before_return<'tcx>(
         local,
         ty,
         func,
-        len,
+        extra,
         source_info,
     );
 }
@@ -738,7 +754,7 @@ fn inject_scope_call<'tcx>(
     local: Local,
     ty: Ty<'tcx>,
     func: DefId,
-    len: Option<u64>,
+    extra: &[u64],
     source_info: SourceInfo,
 ) {
     let new_block = split_block(
@@ -757,14 +773,15 @@ fn inject_scope_call<'tcx>(
         local,
         ty,
         func,
-        len,
+        extra,
         source_info,
     );
 }
 
-/// Builds `func(&raw const local as *const u8, [len])` as `block`'s
+/// Builds `func(&raw const local as *const u8, extra…)` as `block`'s
 /// terminator, targeting `target`. `&raw const local` is cast to `*const u8`
-/// and threaded through.
+/// and threaded through; each `extra` value is appended as a `usize` constant
+/// argument (`[len, site]` for `scope_enter`, none for `scope_exit`).
 #[allow(clippy::too_many_arguments)]
 fn emit_scope_terminator<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -775,7 +792,7 @@ fn emit_scope_terminator<'tcx>(
     local: Local,
     ty: Ty<'tcx>,
     func: DefId,
-    len: Option<u64>,
+    extra: &[u64],
     source_info: SourceInfo,
 ) {
     let bd = &mut basic_blocks[block];
@@ -797,12 +814,12 @@ fn emit_scope_terminator<'tcx>(
         node: Operand::Move(Place::from(addr_u8)),
         span: source_info.span,
     }];
-    if let Some(len) = len {
+    for &val in extra {
         args.push(Spanned {
             node: Operand::Constant(Box::new(ConstOperand {
                 span: source_info.span,
                 user_ty: None,
-                const_: MirConst::from_usize(tcx, len),
+                const_: MirConst::from_usize(tcx, val),
             })),
             span: source_info.span,
         });

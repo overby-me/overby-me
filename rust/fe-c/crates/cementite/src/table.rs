@@ -572,6 +572,7 @@ fn record_cap_covering(rec_idx: u32, addr: usize) -> Option<Cap> {
         }
         let base = rec.base.load(Ordering::Relaxed);
         let len = rec.len.load(Ordering::Relaxed);
+        let site = rec.site.load(Ordering::Relaxed);
         let packed = PackedCap {
             id_and_flags: rec.id_flags.load(Ordering::Relaxed),
         };
@@ -585,6 +586,7 @@ fn record_cap_covering(rec_idx: u32, addr: usize) -> Option<Cap> {
                 len,
                 id: packed.id(),
                 flags: packed.flags(),
+                site,
             })
         } else {
             None

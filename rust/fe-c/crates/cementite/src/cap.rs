@@ -110,6 +110,10 @@ pub struct Cap {
     pub id: AllocId,
     /// Capability flags.
     pub flags: CapFlags,
+    /// Registration/escape site (a `SiteId`; 0 = unknown). For a stack scope
+    /// this is where the local's address was laundered out of the frame
+    /// (I9 / trace F7), so a use-after-scope report can name it.
+    pub site: u32,
 }
 
 impl Cap {
@@ -208,6 +212,7 @@ mod tests {
             len: 0x100,
             id: AllocId::from_raw(7),
             flags: CapFlags::EMPTY,
+            site: 0,
         };
         assert!(cap.covers(0x1000, 1));
         assert!(cap.covers(0x10ff, 1));

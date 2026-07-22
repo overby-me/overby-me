@@ -101,22 +101,30 @@ and the rusqlite local is a `String` (a `Drop` type), so its drop glue is a
 reliable lexical death signal — no pre-optimization MIR hook was needed.
 
 Scope hooks are now **default-on**: an escape analysis (`escaping_locals`, a
-forward taint from address-of, sunk at a pointer→integer cast) keeps them to
-the locals whose address is laundered out of the frame, so hashbrown gets few
-or no hooks and neither times out nor false-aborts (`FEC_SCOPE_HOOKS` gate
-removed). The exact rusqlite corpus entry needs two more pieces, each a real
-chunk:
+forward taint from address-of, sunk at a pointer→integer cast *or* a pointer
+argument to a foreign `extern "C"` call) keeps them to the locals whose
+address is laundered out of the frame, so hashbrown gets few or no hooks and
+neither times out nor false-aborts (`FEC_SCOPE_HOOKS` gate removed).
 
-1. **FFI inbound/outbound checks (point 3, I9).** `extern "C"` prologues
-   validate safe-pointer params; outbound pointer args are marked escaped
-   (`note_escape`). The `Violation` needs `escaped_at` so the report names
-   the registration site (`create_scalar_function`), per trace F7. The escape
-   analysis above already isolates the escaping locals; I9 adds the FFI-arg
-   sink (currently only the integer-cast sink is wired) and the report field.
-2. **The real C build.** Vendor `rusqlite@0.25.3` + `libsqlite3-sys`
+The **outbound FFI escape** (I9 / F6) and **`escaped_at`** (F7) are done. The
+FFI-arg sink registers the escaping local; `scope_enter` records the escape
+site (the source line, via the table's existing `site` field); a
+use-after-scope report prints `escaped_at=<line>`, naming where the address
+was handed out. `corpus/ffi-escape` (a new `fe-c-ffi-escape` check) is the
+cross-FFI reproducer: a stack borrow passed to a C harness, dereferenced when
+C re-enters through a trampoline, aborts naming the dead scope and the
+`fec_register` line. The exact rusqlite corpus entry needs one more real
+chunk (plus one nicety):
+
+1. **The real C build.** Vendor `rusqlite@0.25.3` + `libsqlite3-sys`
    (bundled), with provenance flowing through the trampoline. The A4
-   cc-harness already proved the mixed-language build works; this is the
-   first *corpus* entry to use it.
+   cc-harness and `corpus/ffi-escape` already prove the mixed-language build
+   and the cross-FFI detection; this is the first *corpus* entry to use a
+   real third-party C dependency.
+2. *(nicety)* the **inbound `extern "C"` prologue check** (`ensure_foreign_arg`,
+   trace step 4): validate safe-pointer params on the way in. Not needed for
+   the abort (which fires at the callback's dereference), but completes the
+   both-directions I9 story.
 
 Also address-reuse soundness: a poisoned stack region that is not
 re-registered by the next frame can produce a stale resolve. `scope_enter`

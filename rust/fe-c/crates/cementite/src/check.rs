@@ -116,7 +116,7 @@ pub extern "C" fn __fec_check_deref_rooted(fault: *const u8, root: *const u8) {
         // STACK region is a use-after-scope-exit (the rusqlite-0128 class);
         // a dead heap region is a use-after-free.
         if !table::is_live(cap.id) {
-            report_uaf_and_abort(f, cap.base, cap.id.raw(), cap.flags);
+            report_uaf_and_abort(f, cap.base, cap.id.raw(), cap.flags, cap.site);
         }
     }
 }
@@ -124,13 +124,15 @@ pub extern "C" fn __fec_check_deref_rooted(fault: *const u8, root: *const u8) {
 /// Stack scope entry (I8). The MIR pass emits this at scope entry for a
 /// local whose address escapes, registering `[base, base+len)` as a live
 /// stack region so a later access through an escaped pointer can be checked
-/// against it.
+/// against it. `site` is the escape site (a `SiteId`, 0 = unknown) — where
+/// the address is laundered out of the frame — recorded so a later
+/// use-after-scope report can name it (I9 / trace F7).
 ///
 /// # Safety
 ///
 /// `base` is only recorded, never dereferenced.
 #[unsafe(no_mangle)]
-pub extern "C" fn __fec_scope_enter(base: *const u8, len: usize) {
+pub extern "C" fn __fec_scope_enter(base: *const u8, len: usize, site: usize) {
     if base.is_null() || len == 0 {
         return;
     }
@@ -144,7 +146,7 @@ pub extern "C" fn __fec_scope_enter(base: *const u8, len: usize) {
     {
         table::release_record(freed);
     }
-    table::register(addr, len, CapFlags::STACK, 0);
+    table::register(addr, len, CapFlags::STACK, site as u32);
 }
 
 /// Stack scope exit (I8). The MIR pass emits this at frame teardown: it
@@ -174,7 +176,7 @@ fn report_null_and_abort() -> ! {
 
 #[cold]
 #[inline(never)]
-fn report_uaf_and_abort(fault: usize, base: usize, id: u64, flags: CapFlags) -> ! {
+fn report_uaf_and_abort(fault: usize, base: usize, id: u64, flags: CapFlags, site: u32) -> ! {
     let kind = if flags.contains(CapFlags::STACK) {
         "UseAfterScopeExit"
     } else {
@@ -185,10 +187,23 @@ fn report_uaf_and_abort(fault: usize, base: usize, id: u64, flags: CapFlags) -> 
     } else {
         "heap allocation"
     };
+    // The escape site (I9 / trace F7): where the address was laundered out of
+    // the frame — the registration site the developer needs, not just the
+    // callback the abort fires in. 0 = unrecorded.
+    let escaped = if site != 0 {
+        format!(" escaped_at={site}")
+    } else {
+        String::new()
+    };
     let msg = format!(
-        "fe-c-violation kind={kind} fault={fault:#x} alloc_base={base:#x} alloc_id={id}\n\
+        "fe-c-violation kind={kind} fault={fault:#x} alloc_base={base:#x} alloc_id={id}{escaped}\n\
 fe-c: dereference into a dead {region} (id={id}, base={base:#x}); the owning \
-region was torn down / freed before this access\n"
+region was torn down / freed before this access{}\n",
+        if site != 0 {
+            format!(" (escaped at source line {site})")
+        } else {
+            String::new()
+        }
     );
     let _ = std::io::Write::write_all(&mut std::io::stderr(), msg.as_bytes());
     std::process::abort();
