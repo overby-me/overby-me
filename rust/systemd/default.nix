@@ -418,6 +418,7 @@
               testTimeout = t.testTimeout or 1800;
               enableTpm = t.enableTpm or false;
               allowReboot = t.allowReboot or false;
+              useBootLoader = t.useBootLoader or false;
             };
         })
         tests)
@@ -433,6 +434,7 @@
               testTimeout = t.testTimeout or 1800;
               enableTpm = t.enableTpm or false;
               allowReboot = t.allowReboot or false;
+              useBootLoader = t.useBootLoader or false;
               useUpstreamSystemd = true;
             };
         })

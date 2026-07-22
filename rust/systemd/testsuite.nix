@@ -22,6 +22,13 @@
   # (TEST-09-REBOOT); harmless but undesirable for others (a kernel panic would
   # loop instead of fast-failing), so it is opt-in per test.
   allowReboot ? false,
+  # Boot the VM through a real bootloader from a disk image (instead of the
+  # default directBoot, which loads the kernel directly and cannot cleanly
+  # re-run the whole boot on reboot). A firmware reboot re-initialises every
+  # device and re-runs the full boot, so the test driver's backdoor console is
+  # re-established exactly like the first boot. Needed by multi-boot reboot
+  # tests; implies allowReboot. Opt-in per test (slower: builds a disk image).
+  useBootLoader ? false,
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -699,19 +706,34 @@ in
       };
 
       # Give the VM enough resources for tests
-      virtualisation = {
-        # The integration-test manager is built from the debug dev profile
-        # (rust-systemd-dev): its unoptimized PID 1 binary needs more RAM than
-        # the release build, so give the VM headroom to avoid an early-boot OOM.
-        memorySize = 4096;
-        cores = 2;
-        # Software TPM for TEST-70-TPM2 (opt-in per test via enableTpm).
-        tpm.enable = enableTpm;
+      virtualisation =
+        {
+          # The integration-test manager is built from the debug dev profile
+          # (rust-systemd-dev): its unoptimized PID 1 binary needs more RAM than
+          # the release build, so give the VM headroom to avoid an early-boot OOM.
+          memorySize = 4096;
+          cores = 2;
+          # Software TPM for TEST-70-TPM2 (opt-in per test via enableTpm).
+          tpm.enable = enableTpm;
+        }
+        // pkgs.lib.optionalAttrs useBootLoader {
+          # Boot via a bootloader on a disk image so a guest reboot re-runs the
+          # full firmware->bootloader->kernel boot (see the useBootLoader arg).
+          useBootLoader = true;
+          useEFIBoot = true;
+        };
+      # A bootloader is required when useBootLoader is set; systemd-boot is
+      # installed into the ESP at image-build time (using the build host's
+      # systemd, so it does not depend on rust-systemd's own bootctl).
+      boot.loader = pkgs.lib.mkIf useBootLoader {
+        systemd-boot.enable = true;
+        efi.canTouchEfiVariables = true;
+        timeout = 0;
       };
     };
 
     testScript = ''
-      ${pkgs.lib.optionalString allowReboot "machine.start(allow_reboot=True)"}
+      ${pkgs.lib.optionalString (allowReboot || useBootLoader) "machine.start(allow_reboot=True)"}
       machine.wait_for_unit("multi-user.target", timeout=120)
 
       # Reload systemd to pick up any test unit files installed via activation
