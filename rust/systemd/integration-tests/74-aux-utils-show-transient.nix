@@ -27,7 +27,7 @@
     : "Transient service has correct Type"
     # Default type for systemd-run is simple
     TYPE="$(systemctl show -P Type "$UNIT.service")"
-    [[ "$TYPE" == "simple" || "$TYPE" == "exec" ]]
+    [[ "$TYPE" == "simple" ]]
     systemctl stop "$UNIT.service" 2>/dev/null || true
 
     : "Oneshot transient shows Result=success after completion"
