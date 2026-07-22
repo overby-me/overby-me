@@ -43,6 +43,10 @@
       ./corpus/closure-escape/Cargo.lock
       # The C1 through-mode safe-reference reproducer (no third-party deps).
       ./corpus/through-safe-ref/Cargo.lock
+      # The real RUSTSEC-2021-0128 corpus: rusqlite 0.25.3 + bundled SQLite.
+      # rusqlite 0.25.3 is yanked (its lock entry is hand-added), but yanked
+      # crates still serve from the CDN, so fetchurl vendors it like any other.
+      ./corpus/rusqlite-0128/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -374,6 +378,42 @@ in {
         echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
         echo "--- case-like (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
         nu corpus/assert_through_safe_ref.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
+      '';
+
+    # The real CVE (B5): RUSTSEC-2021-0128 against unmodified rusqlite 0.25.3 +
+    # bundled SQLite. A closure captures a stack borrow, is registered with
+    # SQLite, outlives the frame, and is invoked by SQLite (C) — reading the
+    # dropped local through a safe reference. Built twice: FEC_MODE=through
+    # aborts UseAfterScopeExit naming the dead scope and the registration site;
+    # FEC_MODE unset (case-like) elides the safe deref and runs clean. The
+    # first corpus entry pulling real third-party C; only the Rust boundary is
+    # instrumented (rusqlite_0128), not SQLite.
+    fe-c-rusqlite-0128 = pkgs:
+      cargoCheck pkgs "rusqlite-0128" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=rusqlite_0128
+
+        # through mode: the closure's safe-reference read is checked -> abort.
+        ( cd corpus/rusqlite-0128 \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/rusqlite-0128" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        # case-like mode (FEC_MODE unset): the safe deref is elided -> clean.
+        ( cd corpus/rusqlite-0128 \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/rusqlite-0128" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case-like (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_rusqlite_0128.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the

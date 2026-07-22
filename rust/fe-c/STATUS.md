@@ -23,23 +23,31 @@ reproducers (`stack-uaf`, `ffi-escape`, `closure-escape`).
 defining behavior — **safe-pointer deref checking** (the one bolded both-modes
 row; `FEC_MODE=through`) — is implemented and shown by `corpus/through-safe-ref`
 (through aborts on a safe-reference read of a dead local; case-like mode elides
-it). **This closes the §3.2 gap** that was the exact `corpus-rusqlite-0128`
-blocker: its closure reads the local through a safe reference, which `through`
-now checks. The exact rusqlite corpus now needs only the real vendored
-`libsqlite3-sys` build (0.25.3 is yanked — use a non-yanked vulnerable version)
-run under `FEC_MODE=through`.
+it).
 
-**Remaining for full `through` mode** (all substantial, interdependent): T2
-shadow-slot coherence (the at-rest cap layout), `strict` unknown-provenance
-(needs full cap propagation first, or it false-positives on foreign statics),
-and interprocedural + at-rest capability propagation. Then C2 (dealloc
-re-checks, `case`-only) and C3 (`case` + the `differential` gate against
-`through`) are the `case`-milestone tasks.
+**B5's exact `corpus-rusqlite-0128` is now MET** (`fe-c-rusqlite-0128`). Fe-C
+catches the **real CVE in real, unmodified `rusqlite@=0.25.3` + bundled
+SQLite**: the closure captures a stack borrow via `create_scalar_function`,
+SQLite (C) invokes it after the frame returns, and its safe-reference read of
+the dropped local aborts `UseAfterScopeExit` under `FEC_MODE=through`, naming
+the dead scope and `escaped_at` the registration site; case-like mode elides
+the safe deref and runs clean. rusqlite 0.25.3 is yanked, so its lock entry is
+hand-completed (the CDN still serves it, so the offline fetchurl vendor works).
+That safe-reference read was the §3.2 gap, now closed by through's safe-deref
+checking. So B5 is fully done, on real third-party C.
 
-All 14 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+**Remaining for full `through` mode** (all substantial, interdependent, and all
+*performance/precision*, not correctness — through is already sound and
+exhaustive): T2 shadow-slot coherence (the at-rest cap layout that replaces the
+table lookup), `strict` unknown-provenance (needs full cap propagation first,
+or it false-positives on foreign statics), and interprocedural + at-rest
+capability propagation. Then C2 (dealloc re-checks, `case`-only) and C3 (`case`
+with the `differential` gate against `through`) are the `case`-milestone tasks.
+
+All 15 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
 `false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
-`through-safe-ref`.
+`through-safe-ref`, `rusqlite-0128`.
 
 ## Protocol
 
@@ -61,7 +69,7 @@ push to `main`, never weaken a test. Hard stop at C1 (human-only).
 | **B2** | MIR rewriting (`override_queries` on `optimized_mir`) | instrumented harness reports non-zero check counts, control clean |
 | **B3** | raw-deref checking, **catches RUSTSEC-2021-0003** | real smallvec 1.6.0 aborts naming the SmallVec buffer (not the String); 1.6.1 control clean |
 | **B4** | false-positive suite + **dependency-free runtime** | hashbrown (98 tests + 907k-check workload) and regex-automata (204 tests) instrumented, zero false traps |
-| **B5** | I8 stack scopes: lexical granularity + default-on escape analysis (partial) | `corpus/stack-uaf` (inner-block `String`, escaped, dereferenced later in the same frame) aborts `UseAfterScopeExit` naming the dead scope; hashbrown stays clean default-on |
+| **B5** | I8 stack scopes + I9 FFI escape; **catches the real RUSTSEC-2021-0128** | `fe-c-rusqlite-0128`: real unmodified `rusqlite@=0.25.3` + bundled SQLite aborts `UseAfterScopeExit` under `FEC_MODE=through`, naming the dead scope + `create_scalar_function` registration site; case-like elides. Plus `stack-uaf`/`ffi-escape`/`closure-escape`/`through-safe-ref` |
 
 ### The instrumentation, in brief
 
@@ -104,7 +112,7 @@ push to `main`, never weaken a test. Hard stop at C1 (human-only).
   separate cargo build graphs, and drags no build script into a dependent's
   graph for the whole-graph instrumenter to trip over.
 
-## B5 — what's left for `corpus-rusqlite-0128`
+## B5 — the `corpus-rusqlite-0128` arc (done)
 
 The **I8 mechanism is done and demonstrated** (`corpus/stack-uaf` →
 `UseAfterScopeExit`), now at **lexical granularity**: `scope_exit` fires at a
@@ -131,23 +139,22 @@ sink registers the escaping local; `scope_enter` records the escape site (the
 source line, via the table's existing `site` field); a use-after-scope report
 prints `escaped_at=<line>`, naming where the address was handed out. All three
 reproducers abort `UseAfterScopeExit` naming the dead scope *and* the escape
-site. The exact rusqlite corpus entry needs:
+site.
 
-1. **The real C build.** Vendor a *non-yanked* vulnerable `rusqlite` (0.25.3
-   is yanked — use 0.25.0–0.25.2 or 0.26.0–0.26.1) + `libsqlite3-sys`
-   (bundled), built under `FEC_MODE=through`. The A4 cc-harness and
-   `corpus/ffi-escape` already prove the mixed-language build; this is the
-   first *corpus* entry to use a real third-party C dependency.
-2. *(nicety)* the **inbound `extern "C"` prologue check** (`ensure_foreign_arg`,
+**The exact `corpus-rusqlite-0128` is done** (`fe-c-rusqlite-0128`): real,
+unmodified `rusqlite@=0.25.3` + bundled SQLite, built under `FEC_MODE=through`,
+aborts `UseAfterScopeExit` on the closure's safe-reference read of the dropped
+local, naming the dead scope and `escaped_at` the `create_scalar_function`
+registration site; case-like mode elides the safe deref and runs clean. The
+`§3.2` pointer-through-a-safe-reference gap that used to block it is closed by
+through's safe-deref checking (C1). rusqlite 0.25.3 is yanked, so its lock
+entry is hand-completed; the CDN still serves the `.crate`, so the pure offline
+fetchurl vendor works. The only optional follow-on is:
+
+1. *(nicety)* the **inbound `extern "C"` prologue check** (`ensure_foreign_arg`,
    trace step 4): validate safe-pointer params on the way in. Not needed for
    the abort (which fires at the callback's dereference), but completes the
    both-directions I9 story.
-
-The `§3.2` pointer-through-a-safe-reference gap that used to be the real
-blocker here is **now closed** by through mode's safe-deref checking (C1):
-`corpus/through-safe-ref` is the safe-reference form of the closure shape and
-aborts under `FEC_MODE=through`. So the exact rusqlite corpus is now a
-build-and-run exercise (item 1) rather than a missing-instrumentation one.
 
 Also address-reuse soundness: a poisoned stack region that is not
 re-registered by the next frame can produce a stale resolve. `scope_enter`
@@ -182,10 +189,11 @@ to the escape (only escaped regions stay findable-as-dead).
    `strict` unknown-provenance (do this **last** — it is only sound once caps
    exist everywhere, else it false-positives on foreign statics). The both-modes
    rule (I4) binds: keep `docs/both-modes.md` filled as each lands.
-3. The exact `corpus-rusqlite-0128` is now a build-and-run exercise: vendor a
-   non-yanked vulnerable `rusqlite` + bundled `libsqlite3-sys`, build under
-   `FEC_MODE=through`, assert it aborts naming the closure/registration site.
-   The §3.2 instrumentation it needed is already in.
+3. The exact `corpus-rusqlite-0128` is **done** (`fe-c-rusqlite-0128`) — Fe-C
+   catches the real CVE in real `rusqlite@=0.25.3` + bundled SQLite under
+   `FEC_MODE=through`. (Vendoring a yanked crate: hand-complete its `Cargo.lock`
+   entry — cargo builds a yanked version when it is already fully locked, and
+   the CDN still serves the `.crate` for fetchurl. See `corpus/rusqlite-0128`.)
 4. **C2** (dealloc-reachable re-checks, `case`-only) and **C3** (`case` + the
    `differential` gate against `through`) are the `case` milestone — they need
    `case` mode, which is the second milestone after `through` is complete.

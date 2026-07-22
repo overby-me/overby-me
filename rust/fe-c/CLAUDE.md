@@ -197,11 +197,17 @@ across build graphs) and `FEC_INSTRUMENT_ONLY` scopes instrumentation to a
 crate list so deep dep trees don't need cementite as a sysroot crate (D1).
 The `fe-c-false-positive` check runs the hashbrown workload offline.*
 
-**B5. [todo] Stack scope hooks (I8) + FFI boundary checks (point 3, both directions).**
-*(partial 2026-07-22 — the I8/I9 mechanism is done and demonstrated by three
-green reproducers; the exact `corpus-rusqlite-0128` acceptance needs a
-Phase-C-adjacent §3.2 check (safe-reference read) + the real `libsqlite3-sys`
-build, so this stays `[todo]`. See `STATUS.md`.)*
+**B5. [done] Stack scope hooks (I8) + FFI boundary checks (point 3, both directions).**
+*(2026-07-22 — met against **real, unmodified `rusqlite@=0.25.3` + bundled
+SQLite** (`fe-c-rusqlite-0128`): under `FEC_MODE=through` the registered
+closure's safe-reference read of the dropped stack local aborts
+`UseAfterScopeExit`, naming the dead scope and `escaped_at` the
+`create_scalar_function` registration site; case-like mode elides the safe
+deref and runs clean. The full arc: A4b symbol-level build of rusqlite + SQLite
+with no cementite edge, B5's escape analysis registering the captured borrow's
+scope, `escaped_at` (F7), and C1 through mode's safe-deref checking catching the
+§3.2 safe-reference read. rusqlite 0.25.3 is yanked, so its lock entry is
+hand-completed; the CDN still serves it for the pure offline vendor.)*
 ✅ **`corpus-rusqlite-0128` aborts**, report names the dead stack scope, the
 callback, *and* the registration site. This is also the first corpus entry
 pulling real C — it doubles as the mixed-language build smoke test.
