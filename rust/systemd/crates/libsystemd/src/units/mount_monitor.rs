@@ -338,6 +338,14 @@ pub fn sync_mount_units(
             kind: UnitIdKind::Mount,
             name: name.clone(),
         };
+        if name.contains("deptest") {
+            log::warn!(
+                "MOUNTPROBE sync {name} net={is_network} intable={} synth={:?} over={:?}",
+                ri.unit_table.contains_key(&id),
+                synthesized.get(name),
+                overridden.get(name)
+            );
+        }
         if ri.unit_table.contains_key(&id) {
             if let Some(prev) = synthesized.get(name).copied() {
                 // A unit this monitor synthesised: reclassify in place if its
@@ -354,6 +362,17 @@ pub fn sync_mount_units(
                 // declared local/remote classification while it is mounted.
                 if let Some(u) = ri.unit_table.get_mut(&id) {
                     apply_mount_deps_in_place(&mut u.common.dependencies, source, *is_network);
+                    if name.contains("deptest") {
+                        log::warn!(
+                            "MOUNTPROBE did-override {name} net={is_network} after={:?}",
+                            u.common
+                                .dependencies
+                                .after
+                                .iter()
+                                .map(|x| x.name.clone())
+                                .collect::<Vec<_>>()
+                        );
+                    }
                 }
                 overridden.insert(name.clone(), *is_network);
             }
@@ -420,6 +439,7 @@ pub fn sync_mount_units(
             } else {
                 (String::new(), false)
             };
+            log::warn!("MOUNTPROBE revert {name} is_net={is_net} what={what}");
             apply_mount_deps_in_place(&mut u.common.dependencies, &what, is_net);
             try_set_stopped(&u.common.status);
         }
