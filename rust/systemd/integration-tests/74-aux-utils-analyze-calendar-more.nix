@@ -9,17 +9,16 @@
     set -eux
     set -o pipefail
 
+    # pipefail makes a failing analyze abort; assert on the exact "Normalized
+    # form:" line rather than swallowing errors and matching loosely.
     : "systemd-analyze calendar handles weekly"
-    OUT="$(systemd-analyze calendar weekly 2>&1)" || true
-    echo "$OUT" | grep -qi "next\|original\|normalized"
+    systemd-analyze calendar weekly | grep -q "Normalized form:"
 
     : "systemd-analyze calendar handles monthly"
-    OUT="$(systemd-analyze calendar monthly 2>&1)" || true
-    echo "$OUT" | grep -qi "next\|original\|normalized"
+    systemd-analyze calendar monthly | grep -q "Normalized form:"
 
     : "systemd-analyze calendar handles Mon..Fri expression"
-    OUT="$(systemd-analyze calendar "Mon,Tue *-*-* 00:00:00" 2>&1)" || true
-    echo "$OUT" | grep -qi "next\|original\|normalized"
+    systemd-analyze calendar "Mon,Tue *-*-* 00:00:00" | grep -q "Normalized form:"
 
     : "systemd-analyze calendar rejects invalid expression"
     (! systemd-analyze calendar "not-a-valid-calendar" 2>/dev/null)
