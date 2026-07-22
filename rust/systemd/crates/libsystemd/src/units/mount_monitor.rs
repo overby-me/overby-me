@@ -11,7 +11,6 @@
 //! `systemctl is-active <path>.mount` reflects manual mounts. Required by
 //! TEST-10-MOUNT and TEST-60-MOUNT-RATELIMIT.
 
-use crate::lock_ext::RwLockExt;
 use crate::runtime_info::ArcMutRuntimeInfo;
 use crate::units::status::{StatusStarted, StatusStopped, UnitStatus};
 use crate::units::{UnitId, UnitIdKind};
@@ -278,6 +277,30 @@ fn apply_mount_deps_in_place(d: &mut crate::units::Dependencies, what: &str, is_
     d.dedup();
 }
 
+/// Mark a unit Started(Running) if not already, using a non-blocking status
+/// lock (skip if contended; the next sync retries). Blocking on a per-unit lock
+/// while holding the RuntimeInfo lock risks a deadlock.
+fn try_mark_started(status: &std::sync::RwLock<UnitStatus>) {
+    let mut st = match status.try_write() {
+        Ok(st) => st,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return,
+    };
+    if !matches!(&*st, UnitStatus::Started(_)) {
+        *st = UnitStatus::Started(StatusStarted::Running);
+    }
+}
+
+/// Mark a unit Stopped, using a non-blocking status lock (see `try_mark_started`).
+fn try_set_stopped(status: &std::sync::RwLock<UnitStatus>) {
+    let mut st = match status.try_write() {
+        Ok(st) => st,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return,
+    };
+    *st = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
+}
+
 /// Synchronise the unit table with `/proc/self/mountinfo` + `/run/mount/utab`.
 ///
 /// `synthesized` tracks units this monitor created (name -> last is_network);
@@ -298,7 +321,15 @@ pub fn sync_mount_units(
         current.insert(name, (mountpoint, source, fstype, is_network));
     }
 
-    let mut ri = run_info.write_poisoned();
+    // The mount monitor is a best-effort background syncer. Take the RuntimeInfo
+    // lock non-blocking: if the manager is busy (e.g. a large transaction), skip
+    // this pass and retry on the next poll/timeout, rather than writer-starving
+    // readers or blocking PID 1. (Blocking here deadlocked TEST-03-JOBS.)
+    let mut ri = match run_info.try_write() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return,
+    };
 
     for (name, (mountpoint, source, fstype, is_network)) in &current {
         let id = UnitId {
@@ -325,10 +356,7 @@ pub fn sync_mount_units(
                 overridden.insert(name.clone(), *is_network);
             }
             if let Some(u) = ri.unit_table.get(&id) {
-                let mut st = u.common.status.write_poisoned();
-                if !matches!(&*st, UnitStatus::Started(_)) {
-                    *st = UnitStatus::Started(StatusStarted::Running);
-                }
+                try_mark_started(&u.common.status);
             }
             continue;
         }
@@ -337,7 +365,7 @@ pub fn sync_mount_units(
             Ok(unit) => {
                 crate::units::insert_new_unit_lenient(unit, &mut ri);
                 if let Some(u) = ri.unit_table.get(&id) {
-                    *u.common.status.write_poisoned() = UnitStatus::Started(StatusStarted::Running);
+                    try_mark_started(&u.common.status);
                 }
                 synthesized.insert(name.clone(), *is_network);
             }
@@ -357,8 +385,7 @@ pub fn sync_mount_units(
             name: name.clone(),
         };
         if let Some(u) = ri.unit_table.get(&id) {
-            *u.common.status.write_poisoned() =
-                UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
+            try_set_stopped(&u.common.status);
         }
         // Dependency-aware removal so the unit is scrubbed from every other
         // unit's dep lists; a raw remove would leave dangling reverse-deps that
@@ -392,8 +419,7 @@ pub fn sync_mount_units(
                 (String::new(), false)
             };
             apply_mount_deps_in_place(&mut u.common.dependencies, &what, is_net);
-            *u.common.status.write_poisoned() =
-                UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
+            try_set_stopped(&u.common.status);
         }
         overridden.remove(&name);
     }
