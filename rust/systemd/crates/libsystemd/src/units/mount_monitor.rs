@@ -116,29 +116,16 @@ fn target_has_netdev(target: &str) -> bool {
     false
 }
 
-/// Build a synthesised `.mount` unit describing a kernel mount, with systemd's
-/// `mount_add_default_dependencies` ordering. `is_network` selects the
-/// remote-fs vs local-fs targets.
-fn build_synthesized_mount_unit(
-    name: &str,
+/// The mount ordering/pull-in dependency names for a mount, per systemd's
+/// `mount_add_default_dependencies`. Returns `(after, before, wants, requires)`.
+fn mount_default_deps(
     what: &str,
-    where_: &str,
-    fstype: &str,
     is_network: bool,
-) -> Result<crate::units::Unit, String> {
-    use crate::units::unit_parsing::{
-        ParsedCommonConfig, ParsedMountConfig, ParsedMountSection, ParsedUnitSection,
-    };
-
-    // A device-backed local mount is ordered after local-fs-pre.target and its
-    // backing device; a network filesystem after remote-fs-pre.target +
-    // network.target. Both conflict with umount.target so they are torn down on
-    // shutdown.
+) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
     let mut after: Vec<String> = Vec::new();
     let mut wants: Vec<String> = Vec::new();
     let mut before: Vec<String> = vec!["umount.target".to_owned()];
     let mut requires: Vec<String> = Vec::new();
-    let conflicts: Vec<String> = vec!["umount.target".to_owned()];
     if is_network {
         after.push("remote-fs-pre.target".to_owned());
         after.push("network.target".to_owned());
@@ -154,6 +141,58 @@ fn build_synthesized_mount_unit(
         requires.push(format!("{esc}.device"));
         after.push(format!("blockdev@{esc}.target"));
     }
+    (after, before, wants, requires)
+}
+
+/// Whether `name` is one of the mount default-dependency targets/devices, so it
+/// can be scrubbed when a mount's local/remote classification changes.
+fn is_mount_default_dep(name: &str) -> bool {
+    matches!(
+        name,
+        "local-fs-pre.target"
+            | "remote-fs-pre.target"
+            | "local-fs.target"
+            | "remote-fs.target"
+            | "network.target"
+            | "umount.target"
+    ) || name.ends_with(".device")
+        || name.starts_with("blockdev@")
+}
+
+/// Build a `UnitId` for a dependency name, deriving the kind from the suffix.
+/// Only the kinds used by mount default-dependencies are handled.
+fn dep_unit_id(name: &str) -> Option<UnitId> {
+    let kind = if name.ends_with(".target") {
+        UnitIdKind::Target
+    } else if name.ends_with(".device") {
+        UnitIdKind::Device
+    } else if name.ends_with(".mount") {
+        UnitIdKind::Mount
+    } else {
+        return None;
+    };
+    Some(UnitId {
+        kind,
+        name: name.to_owned(),
+    })
+}
+
+/// Build a synthesised `.mount` unit describing a kernel mount, with systemd's
+/// `mount_add_default_dependencies` ordering. `is_network` selects the
+/// remote-fs vs local-fs targets.
+fn build_synthesized_mount_unit(
+    name: &str,
+    what: &str,
+    where_: &str,
+    fstype: &str,
+    is_network: bool,
+) -> Result<crate::units::Unit, String> {
+    use crate::units::unit_parsing::{
+        ParsedCommonConfig, ParsedMountConfig, ParsedMountSection, ParsedUnitSection,
+    };
+
+    let (after, before, wants, requires) = mount_default_deps(what, is_network);
+    let conflicts: Vec<String> = vec!["umount.target".to_owned()];
 
     let unit_section = ParsedUnitSection {
         description: where_.to_owned(),
@@ -222,10 +261,47 @@ pub fn sync_mount_units(run_info: &ArcMutRuntimeInfo, synthesized: &mut HashMap<
                     }
                     continue;
                 }
-                // Ours, but the classification changed (e.g. _netdev appeared):
-                // drop the old unit and rebuild below with the new ordering.
+                // Ours, but the classification changed (e.g. _netdev appeared in
+                // /run/mount/utab after the kernel mount). Rewrite the mount
+                // default-dependencies in place: remove + re-insert would
+                // re-resolve the old reverse-deps (local-fs-pre.target, the old
+                // device) straight back onto the new unit.
                 Some(_) => {
-                    ri.unit_table.remove(&id);
+                    let (na, nb, nw, nr) = mount_default_deps(source, *is_network);
+                    if let Some(u) = ri.unit_table.get_mut(&id) {
+                        {
+                            let d = &mut u.common.dependencies;
+                            d.after.retain(|x| !is_mount_default_dep(&x.name));
+                            d.before.retain(|x| !is_mount_default_dep(&x.name));
+                            d.wants.retain(|x| !is_mount_default_dep(&x.name));
+                            d.requires.retain(|x| !is_mount_default_dep(&x.name));
+                            for n in na {
+                                if let Some(uid) = dep_unit_id(&n) {
+                                    d.after.push(uid);
+                                }
+                            }
+                            for n in nb {
+                                if let Some(uid) = dep_unit_id(&n) {
+                                    d.before.push(uid);
+                                }
+                            }
+                            for n in nw {
+                                if let Some(uid) = dep_unit_id(&n) {
+                                    d.wants.push(uid);
+                                }
+                            }
+                            for n in nr {
+                                if let Some(uid) = dep_unit_id(&n) {
+                                    d.requires.push(uid);
+                                }
+                            }
+                            d.dedup();
+                        }
+                        *u.common.status.write_poisoned() =
+                            UnitStatus::Started(StatusStarted::Running);
+                    }
+                    synthesized.insert(name.clone(), *is_network);
+                    continue;
                 }
                 // A static (fstab / unit-file) mount unit: leave its deps alone,
                 // only reflect that the mount is present.
