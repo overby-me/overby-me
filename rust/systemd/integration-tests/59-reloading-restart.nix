@@ -4,22 +4,24 @@
   # Skip reload rate limiting (ReloadLimitBurst not implemented) and
   # RestartMode=debug (not implemented).
   #
-  # Type=notify-reload is ALSO skipped, but for a DEEPER reason than "not
-  # implemented" (the reload SIGHUP dispatch + RELOADING/READY handling exist:
-  # control.rs:8522, notification_handler.rs:896). The blocker is the TRANSIENT
-  # lifecycle: `systemd-run --unit X -p Type=notify-reload -p KillMode=process
-  # <script>` starts the service and rust-systemd immediately logs "Started
-  # ... Deactivated successfully" while the script keeps running orphaned in the
-  # cgroup. So `systemctl reload` (SIGHUP) and `systemctl stop` (SIGTERM,
-  # KillMode=process) never reach the script's trap handlers; stop SIGKILLs the
-  # orphan, giving ExecMainStatus=9 (SIGKILL) instead of the expected 109
-  # (88 +11 reload +7 stop +3 final). Root cause = transient notify-reload
-  # service readiness / main-PID tracking: rust-systemd loses the forked main
-  # process for a systemd-run transient notify(-reload) unit and deactivates it
-  # at once. Unit-file Type=notify services (the testservice-*-59 above) track
-  # correctly, so the gap is specific to the systemd-run transient path. Deep;
-  # revisit by tracing start_service main-PID capture + READY=1 wait for
-  # transient notify units.
+  # Type=notify-reload is ALSO skipped, and a VM-probe diagnosis (2026-07-22)
+  # found the ROOT CAUSE = a BROAD stop-path bug, NOT anything notify-reload- or
+  # transient-specific: rust-systemd's service stop sends NO graceful SIGTERM to
+  # the main process before SIGKILL when ExecStop= is empty. `run_stop_cmd`
+  # (services.rs:1702-1703) early-returns `Ok(())` when `conf.stop.is_empty()`,
+  # then `kill()` (services.rs:1252) goes straight to
+  # `kill_all_remaining_processes()` which SIGKILLs (KillMode=process ->
+  # SIGKILL self.pid, services.rs:1199). So the upstream notify-reload script's
+  # `trap leave SIGTERM` handler never runs; the process dies by SIGKILL, giving
+  # ExecMainStatus=9 instead of 109. (Probe evidence: DEACTPROBE + EXITPROBE
+  # show the unit stays active through `systemctl reload` and is SIGKILLed only
+  # at stop -- the earlier "transient/main-PID" theory was WRONG, misled by
+  # non-causal journal ordering.) FIX (task #84): add a graceful SIGTERM phase
+  # in kill() before kill_all_remaining_processes -- send SIGTERM per KillMode,
+  # wait up to TimeoutStopSec for the main process to exit (poll PID table),
+  # then SIGKILL survivors. Broad blast radius (every ExecStop-less service
+  # stop); needs careful impl + full regression. Once fixed, restore the
+  # notify-reload block (upstream TEST-59-RELOADING-RESTART.sh lines 111-155).
   patchScript = ''
         cat > TEST-59-RELOADING-RESTART.sh << 'TESTEOF'
     #!/usr/bin/env bash
