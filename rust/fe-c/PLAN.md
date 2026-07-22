@@ -71,6 +71,18 @@ crate, with sound seams as the long-term research contribution.
   benefit: the hot path becomes a register compare, not a lookup, and the
   machinery is exactly what `through` mode needs (I2). See
   `docs/traces/rustsec-2021-0003.md` §F10.
+- **I11 — `cementite` is freestanding: zero dependencies, direct syscalls.**
+  Discovered empirically during A1–A4 (dependency-version conflicts when
+  force-injecting the runtime into arbitrary graphs), but it is a *requirement*,
+  not an optimization, for three independent reasons: (a) a runtime that links
+  into every binary cannot depend on crates it may itself be instrumenting —
+  that is circular; (b) `-Zbuild-std` instrumentation of `core`/`alloc` cannot
+  route through a Cargo dependency edge at all; (c) whole-process coverage of
+  `../libc` would otherwise mean cementite depending on rustix while
+  instrumenting rustix. Precedent: ASan/HWASan runtimes and `compiler-builtins`
+  are freestanding for exactly this reason. Prefer `#![no_std]`; the hand-rolled
+  syscall/asm surface is precisely the "syscall stubs and a few lines of asm"
+  trusted-base residue §7 already budgets for — keep it minimal and audited.
 
 ## 3. v0 — `case` mode (case hardening)
 

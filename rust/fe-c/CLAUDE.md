@@ -69,6 +69,15 @@ and stop; do not quietly design around it.
   Rust forwarding via `dlsym(RTLD_NEXT)`.
 - **Naming**: `fil` is a reserved alias for `through`, unusable until the
   guarantee is earned. Don't use it in code or docs yet.
+- **`cementite` is freestanding** — zero dependencies, `#![no_std]` where
+  possible, direct syscalls. Not a preference: a runtime linked into every
+  binary cannot depend on crates it may be instrumenting, and `-Zbuild-std`
+  can't route through a Cargo dependency edge. PLAN I11.
+- **Injection is by symbol, not by dependency edge.** Instrumented crates emit
+  calls to `extern "C"` symbols (`__fec_*`); `cementite` is linked once into
+  the final binary and resolves them. No Cargo dependency is added to any
+  instrumented crate. This is the ASan model, and it is the only shape that
+  works for `core`/`alloc` under `-Zbuild-std` (Task D1).
 
 **Open, and yours to decide when you reach it:** whether to build `through`
 before `case`. `docs/both-modes.md` §Finding argues for through-first
@@ -83,9 +92,12 @@ does not block you until Task C1.
 Work in order. Each task: acceptance is a check that passes, not a judgment
 call. Add each new check to `nix flake check` as you go.
 
+**Mark tasks `[done]` here as you complete them** — this file is the durable
+record of progress across sessions and context compactions.
+
 ### Phase A — foundation (mode-independent)
 
-**A1. Workspace + toolchain + nix skeleton.** *(done 2026-07-21)*
+**A1. [done] Workspace + toolchain + nix skeleton.** *(2026-07-21)*
 Three crates, `rust-toolchain.toml` pinned nightly (shared with `../libc`),
 flakelight module wiring through `nix/lib/cargo`.
 *Before writing any nix*, answer the six API questions in
@@ -95,7 +107,7 @@ stale artifacts).
 ✅ `nix build .#cementite` succeeds; `nix develop` provides nightly +
 `rustc-dev` + `rust-src` + `miri`; `nix flake check` runs fmt/clippy.
 
-**A2. `cementite` core data structures.** *(done 2026-07-22; measured
+**A2. [done] `cementite` core data structures.** *(2026-07-22; measured
 root-resolve: 4.6 ns spanning-alloc interior, 8.3 ns small-alloc page,
 19.6 ns dense-page overflow chain, 8.2 ns miss)*
 `AllocId` (48-bit), `CapFlags`, `Cap` (unpacked), `PackedCap`, page-radix
@@ -104,19 +116,28 @@ See `docs/cementite-api.md`.
 ✅ Unit tests; Miri-clean; a criterion bench reporting root-resolve cost
 (reference point: ~2 ns for a dense-table lookup, warm cache, single thread).
 
-**A3. Allocator.** *(done 2026-07-22)*
+**A3. [done] Allocator.** *(2026-07-22)*
 `FecAlloc` as `#[global_allocator]`; register/deregister; quarantine with a
 byte budget and FIFO eviction.
 ✅ Liveness bit provably cleared before memory release (I7 — write the test
 that fails if the order is swapped); quarantine stays inside its budget under
 a churn stress test.
 
-**A4. libc interposition, tier 1.** *(done 2026-07-22)*
+**A4. [done] libc interposition, tier 1.** *(2026-07-22)*
 `malloc`/`calloc`/`realloc`/`free`/`posix_memalign` via `dlsym(RTLD_NEXT)`.
 ✅ A small C harness's allocations appear in the table with correct bounds;
 `strdup`-style libc-internal allocations too.
 
-**A5. Driver skeleton + visitation census.** *(done 2026-07-22; runs on
+**A4b. [todo] `cargo-fe-c` orchestration.**
+`RUSTC_WRAPPER` that instruments the whole dependency graph and links
+`cementite` once into the final binary. **Symbol-level injection only** — no
+Cargo dependency edge into instrumented crates (see §3). Was missing from the
+original queue; A1–A4 cannot reach third-party crates without it.
+✅ A binary with third-party dependencies builds with every crate
+instrumented; `cargo tree` on those crates is unchanged; `nm` shows
+`__fec_*` resolved once in the final artifact.
+
+**A5. [done] Driver skeleton + visitation census.** *(2026-07-22; runs on
 the full serde tree — 13 crates, skipped_bodies=0 everywhere)*
 `fe-c-driver` on `rustc_public`; enumerate MIR bodies; emit a report of every
 pointer-typed local, every deref, every raw→safe cast, every FFI edge.
@@ -126,14 +147,14 @@ against a hand-audited small crate.
 
 ### Phase B — first checking
 
-**B1. Capability propagation dataflow (I10).** *(done 2026-07-22)*
+**B1. [done] Capability propagation dataflow (I10).** *(2026-07-22)*
 Resolve at derivation roots; propagate through offsets and projections; record
 where propagation is lost.
 ✅ On `smallvec::insert_many`, the pass identifies the derivation root
 (`as_mut_ptr()`) and propagates to the overflowing write. *Verified on real
 `smallvec@=1.6.0`: `insert_many rooted_writes=4 write_roots=["as_mut_ptr"]`.*
 
-**B2. MIR rewriting infrastructure.** *(done 2026-07-22)*
+**B2. [done] MIR rewriting infrastructure.** *(2026-07-22)*
 Insert calls to `cementite`; thread the returned pointer as a distinct SSA
 value.
 ✅ Instrumented hello-world runs and reports non-zero check counts.
@@ -142,7 +163,7 @@ value.
 injects `cementite::__fec_check_deref(ptr)` (resolved by path). The harness
 reports 3 checks fired, program output unchanged, control clean.*
 
-**B3. Raw-deref checking (instrumentation point 0).** *(done 2026-07-22)*
+**B3. [done] Raw-deref checking (instrumentation point 0).** *(2026-07-22)*
 ✅ **`corpus-smallvec-0003` aborts**, and the report names the SmallVec
 allocation — *not* the neighbouring `String`. That mis-attribution is the I10
 regression canary; assert on it explicitly.
@@ -153,7 +174,7 @@ neighbouring String. Patched `1.6.1` runs clean (259 checks, no false
 positive). The `fe-c-corpus-smallvec` check builds both offline; cementite
 is force-injected into every compile so smallvec itself is instrumented.*
 
-**B4. Cast checks (point 1) + `ensure`.** *(done 2026-07-22)*
+**B4. [done] Cast checks (point 1) + `ensure`.** *(2026-07-22)*
 ✅ `false-positive` check green: `serde`, `regex`, `hashbrown` own test suites
 pass instrumented.
 *Instrumented and run clean: `hashbrown@0.14.5` own suite (98 tests) and a
@@ -168,9 +189,10 @@ across build graphs) and `FEC_INSTRUMENT_ONLY` scopes instrumentation to a
 crate list so deep dep trees don't need cementite as a sysroot crate (D1).
 The `fe-c-false-positive` check runs the hashbrown workload offline.*
 
-**B5. Stack scope hooks (I8) + FFI boundary checks (point 3, both directions).**
-*(partial 2026-07-22 — I8 mechanism done + demonstrated; rusqlite-0128 not
-yet, see `STATUS.md`)*
+**B5. [todo] Stack scope hooks (I8) + FFI boundary checks (point 3, both directions).**
+*(partial 2026-07-22 — I8 mechanism done + demonstrated; the exact
+`corpus-rusqlite-0128` acceptance is not yet met, so this stays `[todo]`.
+See `STATUS.md`.)*
 ✅ **`corpus-rusqlite-0128` aborts**, report names the dead stack scope, the
 callback, *and* the registration site. This is also the first corpus entry
 pulling real C — it doubles as the mixed-language build smoke test.
@@ -189,22 +211,22 @@ build. Scoped in STATUS.*
 
 ### Phase C — modes
 
-**C1. Decide the mode order** (see §3 above). Record the decision and its
+**C1. [todo] Decide the mode order** (see §3 above). Record the decision and its
 rationale in `PLAN.md` §2 under I4. Then implement the first mode end to end.
 
-**C2. Dealloc-reachable re-checks (point 4, I6)** — `case` only.
+**C2. [todo] Dealloc-reachable re-checks (point 4, I6)** — `case` only.
 ✅ **`corpus-lru-0130` aborts** with both the free site and the `iter()`
 reborrow site named.
 
-**C3. The other mode**, with the `differential` check wired: any violation
+**C3. [todo] The other mode**, with the `differential` check wired: any violation
 `through` catches that `case` misses must map to a documented elision gap in
 `docs/both-modes.md`, or it's a bug.
 
 ### Phase D — substrate
 
-**D1.** `-Zbuild-std` sysroot derivations, keyed on (nightly × mode × target ×
+**D1. [todo]** `-Zbuild-std` sysroot derivations, keyed on (nightly × mode × target ×
 cementite hash).
-**D2.** `../libc` (Eyra lineage) built under instrumentation — whole-process
+**D2. [todo]** `../libc` (Eyra lineage) built under instrumentation — whole-process
 coverage. See `../libc/PLAN.md` P2.
 
 ---
@@ -258,3 +280,47 @@ negative is a CVE that shipped.
 Do not add scope. Explicit non-goals (PLAN §10): macOS/Windows, dynamic
 linking, aliasing-model checking (that's Miri — run it alongside, don't
 reimplement it), production containment claims, LLVM passes.
+
+---
+
+## 8. Autonomous session protocol
+
+When running unattended, follow this exactly.
+
+**Assume you will lose context.** Compaction will happen mid-run. The repo is
+the only durable state: task marks in §4, blockers in `STATUS.md`, reasoning in
+commit messages. Never rely on remembering anything from earlier in the run.
+
+**Branch.** Work on `fe-c/v0`, created off main. Never commit to main, never
+rewrite published history, never force-push. Push the feature branch only.
+
+**Loop.**
+
+1. Read §4. Find the first task not marked `[done]`.
+2. Implement it — that task only. Do not start the next one.
+3. Run `nix flake check`.
+4. Green → mark the task `[done]` in §4, commit (one commit per task, message
+   naming the task and what its acceptance check proves), continue from 1.
+5. Red → fix and retry. After **3 failed attempts**, stop per below.
+
+**Hard stops — write `STATUS.md` and halt. Do not guess, do not work around.**
+
+- The `nix/lib/cargo` questions in `docs/nix-integration.md` §6 can't be
+  answered by reading the code — especially #2. Guessing the derivation key is
+  a correctness bug that hides for weeks.
+- A §3 settled decision looks wrong.
+- Three consecutive failures on one task.
+- **Task C1** — the mode-order decision is the human's, unconditionally.
+- Anything needing network, credentials, publishing, or changes outside
+  `rust/fe-c/` and `rust/libc/`.
+
+`STATUS.md` states: which task, what was tried, what's blocking, what you'd
+recommend. It is deleted when the blocker is resolved.
+
+**Scope.** Tasks A1 → B5, then stop at C1. Do not add features, crates,
+targets, or dependencies beyond what the current task requires. Non-goals in
+§7 and PLAN §10 are binding.
+
+**If a task reveals a design defect**, write a new trace in `docs/traces/`
+(follow the existing three: reproducer, step table, findings, plan deltas),
+apply the deltas, and note it in the commit. Do not silently patch invariants.
