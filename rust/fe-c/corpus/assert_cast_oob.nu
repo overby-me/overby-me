@@ -9,7 +9,7 @@
 def check-mode [label: string, log: path, exit_code: int] {
   let lines = (open $log | lines)
   if $exit_code == 0 {
-    error make {msg: $"($label) mode did not abort the OOB cast (exit ($exit_code)); log: ($lines)"}
+    error make {msg: $"($label) mode did not abort the OOB cast \(exit ($exit_code)\); log: ($lines)"}
   }
   if ($lines | any {|l| $l | str contains "NO_ABORT"}) {
     error make {msg: $"($label) mode reached NO_ABORT: the OOB raw->safe cast was not caught"}

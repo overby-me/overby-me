@@ -9,7 +9,7 @@ def main [log: path, exit_code: int] {
   let lines = (open $log | lines)
 
   if $exit_code == 0 {
-    error make {msg: $"reproducer did not abort (exit ($exit_code)); log: ($lines)"}
+    error make {msg: $"reproducer did not abort \(exit ($exit_code)\); log: ($lines)"}
   }
   if ($lines | any {|l| $l | str contains "NO_ABORT"}) {
     error make {msg: "reached NO_ABORT: the cross-FFI stale access was not trapped"}

@@ -9,7 +9,7 @@
 def check-mode [label: string, log: path, exit_code: int, expect_read: bool] {
   let lines = (open $log | lines)
   if $exit_code == 0 {
-    error make {msg: $"($label) mode did not abort the UAF (exit ($exit_code)); log: ($lines)"}
+    error make {msg: $"($label) mode did not abort the UAF \(exit ($exit_code)\); log: ($lines)"}
   }
   if ($lines | any {|l| $l | str contains "NO_ABORT"}) {
     error make {msg: $"($label) mode reached NO_ABORT: the freed-Box read was not caught"}

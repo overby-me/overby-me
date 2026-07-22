@@ -16,7 +16,7 @@ def main [repro_log: path, repro_exit: int, control_log: path, control_exit: int
 
   # 1. The reproducer must have aborted (SIGABRT = 134), not run to the end.
   if $repro_exit == 0 {
-    error make {msg: $"reproducer did not abort (exit ($repro_exit)); log: ($r)"}
+    error make {msg: $"reproducer did not abort \(exit ($repro_exit)\); log: ($r)"}
   }
   if not ($r | any {|l| $l | str contains "NO_ABORT"} | into bool | ($in == false)) {
     error make {msg: "reproducer reached NO_ABORT: the overflow was not trapped"}
@@ -42,7 +42,7 @@ def main [repro_log: path, repro_exit: int, control_log: path, control_exit: int
   # 4. The patched control must run clean.
   let c = (open $control_log | lines)
   if $control_exit != 0 {
-    error make {msg: $"patched control aborted (exit ($control_exit)); log: ($c)"}
+    error make {msg: $"patched control aborted \(exit ($control_exit)\); log: ($c)"}
   }
   if not ($c | any {|l| $l | str contains "CONTROL_OK"}) {
     error make {msg: $"control did not complete cleanly; log: ($c)"}

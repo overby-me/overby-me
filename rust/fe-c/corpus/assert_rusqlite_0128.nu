@@ -12,7 +12,7 @@ def main [through_log: path, through_exit: int, case_log: path, case_exit: int] 
 
   # --- through mode: must abort UseAfterScopeExit naming the escape site ---
   if $through_exit == 0 {
-    error make {msg: $"through mode did not abort the CVE (exit ($through_exit)); log: ($tlines)"}
+    error make {msg: $"through mode did not abort the CVE \(exit ($through_exit)\); log: ($tlines)"}
   }
   if ($tlines | any {|l| $l | str contains "NO_ABORT"}) {
     error make {msg: "through mode reached NO_ABORT: the CVE was not caught"}
@@ -41,7 +41,7 @@ def main [through_log: path, through_exit: int, case_log: path, case_exit: int] 
   # --- case-like mode: the safe deref is elided; the program runs clean ---
   let clines = (open $case_log | lines)
   if $case_exit != 0 {
-    error make {msg: $"case-like mode aborted (exit ($case_exit)); it must elide the safe deref; log: ($clines)"}
+    error make {msg: $"case-like mode aborted \(exit ($case_exit)\); it must elide the safe deref; log: ($clines)"}
   }
   if not ($clines | any {|l| $l | str contains "NO_ABORT"}) {
     error make {msg: $"case-like mode did not reach NO_ABORT; log: ($clines)"}
