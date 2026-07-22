@@ -69,10 +69,13 @@ correctness: a CFG-derived `freed_at` would name the innocent `eprintln!`
 sitting between the `pop()` and the read, so a precise free line needs the
 deferred `nofree` callgraph.
 
-**Instrumentation points landed.** point 0 (raw deref — now faults on the
-*accessed* address for a simple projected place `(*p).f`/`(*p)[i]`, i.e.
-`p + offset`, not just the base `p`, so a direct mis-cast projected access is
-caught: `corpus/cast-oob`'s `direct` scenario), point 1 (raw→safe cast `ensure`
+**Instrumentation points landed.** point 0 (raw deref — now **extent-aware**:
+every sized raw/`through` deref goes through `__fec_check_extent(fault, root,
+size)`, faulting on the *accessed* address (`p` for `*p`, `p + offset` for
+`(*p).f`/`(*p)[i]`) and verifying the whole `[fault, fault+size)`, so a mis-cast
+access off the end *or* overrunning the end is caught — `corpus/cast-oob`'s
+`direct`, `extent`, and `whole-extent` scenarios; only unsized accesses keep the
+start-only check), point 1 (raw→safe cast `ensure`
 — `corpus/cast-oob` aborts OutOfBounds in both modes for **both** a whole-object
 `&*bad` reborrow and a **field reborrow** `&(*p).b` off the end, the spatial
 check that makes `case` elision sound; field reborrows were added to close a
