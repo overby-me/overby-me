@@ -321,14 +321,16 @@ pub fn sync_mount_units(
         current.insert(name, (mountpoint, source, fstype, is_network));
     }
 
-    // The mount monitor is a best-effort background syncer. Take the RuntimeInfo
-    // lock non-blocking: if the manager is busy (e.g. a large transaction), skip
-    // this pass and retry on the next poll/timeout, rather than writer-starving
-    // readers or blocking PID 1. (Blocking here deadlocked TEST-03-JOBS.)
-    let mut ri = match run_info.try_write() {
+    // Take the RuntimeInfo write lock (blocking) so the sync reliably lands even
+    // while a test is rapidly polling `systemctl is-active`. This is safe from
+    // the TEST-03-JOBS deadlock because (a) per-unit status is set non-blocking
+    // (try_mark_started / try_set_stopped) so we never block on a status lock
+    // while holding this one, and (b) the caller only syncs in response to an
+    // actual mount-table change, so the monitor is idle (not contending) during
+    // transaction stress with no mount activity.
+    let mut ri = match run_info.write() {
         Ok(g) => g,
-        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
-        Err(std::sync::TryLockError::WouldBlock) => return,
+        Err(p) => p.into_inner(),
     };
 
     for (name, (mountpoint, source, fstype, is_network)) in &current {
@@ -456,20 +458,41 @@ pub fn start_mount_monitor_thread(run_info: ArcMutRuntimeInfo) {
                 unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) },
                 PollFlags::POLLPRI | PollFlags::POLLERR,
             )];
-            match poll(&mut fds, PollTimeout::try_from(1000).unwrap_or(PollTimeout::ZERO)) {
-                Ok(_) => {}
+            // Block until the kernel signals a mount-table change (POLLPRI), with
+            // a long safety timeout. Do NOT sync on the timeout: the monitor
+            // stays idle (never contends for the RuntimeInfo lock) whenever there
+            // is no mount activity, which keeps it clear of PID 1 during
+            // transaction stress with no mounts (TEST-03-JOBS deadlocked when the
+            // old 1s periodic sync contended there).
+            let n = match poll(
+                &mut fds,
+                PollTimeout::try_from(30_000).unwrap_or(PollTimeout::ZERO),
+            ) {
+                Ok(n) => n,
                 Err(nix::errno::Errno::EINTR) => continue,
                 Err(e) => {
                     log::warn!("mount-monitor: poll failed: {e}");
                     return;
                 }
+            };
+            if n == 0 {
+                continue; // timeout, no mount change: stay idle
             }
             // Consume the readiness by re-reading the file from the start, so
             // the next poll blocks again instead of spinning on POLLPRI.
             let _ = file.seek(SeekFrom::Start(0));
             scratch.clear();
             let _ = file.read_to_end(&mut scratch);
+            // Sync now, then re-sync a few times: libmount writes /run/mount/utab
+            // (where `_netdev` lives) slightly AFTER the kernel mount, so a
+            // mount's network classification can appear only on a later pass. No
+            // lock is held across the sleeps, and these run only right after a
+            // real change, so they never contend during mount-idle stress.
             sync_mount_units(&run_info, &mut synthesized, &mut overridden);
+            for _ in 0..4 {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                sync_mount_units(&run_info, &mut synthesized, &mut overridden);
+            }
         }
     });
 }
