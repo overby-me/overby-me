@@ -126,11 +126,12 @@ against a hand-audited small crate.
 
 ### Phase B — first checking
 
-**B1. Capability propagation dataflow (I10).**
+**B1. Capability propagation dataflow (I10).** *(done 2026-07-22)*
 Resolve at derivation roots; propagate through offsets and projections; record
 where propagation is lost.
 ✅ On `smallvec::insert_many`, the pass identifies the derivation root
-(`as_mut_ptr()`) and propagates to the overflowing write.
+(`as_mut_ptr()`) and propagates to the overflowing write. *Verified on real
+`smallvec@=1.6.0`: `insert_many rooted_writes=4 write_roots=["as_mut_ptr"]`.*
 
 **B2. MIR rewriting infrastructure.**
 Insert calls to `cementite`; thread the returned pointer as a distinct SSA

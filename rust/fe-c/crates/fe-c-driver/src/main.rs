@@ -16,6 +16,7 @@ extern crate rustc_middle;
 extern crate rustc_public;
 
 mod census;
+mod provenance;
 
 use std::ops::ControlFlow;
 

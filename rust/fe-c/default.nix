@@ -169,6 +169,22 @@ in {
         nu crates/fe-c-driver/tests/assert_census.nu "$TMPDIR/census.json"
       '';
 
+    # Capability propagation dataflow (B1, I10): run the driver over the
+    # insert_many-shaped fixture and assert each write is traced to its
+    # as_mut_ptr derivation root (both the direct-deref and ptr::write
+    # forms real unsafe code uses).
+    fe-c-provenance = pkgs:
+      cargoCheck pkgs "provenance" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        fixture=crates/fe-c-driver/tests/fixtures/provenance_fixture.rs
+        FEC_PROV_FN=insert_many_like "$drv" "$fixture" \
+          -o "$TMPDIR/pf" --edition 2021 >"$TMPDIR/prov.log" 2>/dev/null
+        cat "$TMPDIR/prov.log"
+        nu crates/fe-c-driver/tests/assert_provenance.nu "$TMPDIR/prov.log"
+      '';
+
     # cementite's own unsafe under Miri (the miri-runtime tier from
     # docs/nix-integration.md section 3). Leak checking is off: table
     # metadata is forever-allocated by design.

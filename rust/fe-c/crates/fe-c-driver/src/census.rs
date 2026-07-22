@@ -2,6 +2,7 @@
 //! later checking pass will need to visit, proving I1 (total visitation)
 //! before any rewriting exists.
 
+use rustc_public::CrateDef;
 use rustc_public::mir::visit::{Location, PlaceContext};
 use rustc_public::mir::{
     Body, CastKind, MirVisitor, Place, ProjectionElem, Rvalue, Terminator, TerminatorKind,
@@ -31,12 +32,18 @@ pub struct Census {
     /// Bodies whose analysis panicked and were skipped. Must stay
     /// observable: a non-zero value means the census under-counts.
     pub skipped_bodies: u64,
+    /// Raw dereferences whose provenance the B1 dataflow traced to a
+    /// derivation root (I10).
+    pub rooted_derefs: u64,
+    /// Raw dereferences where provenance propagation was lost.
+    pub lost_derefs: u64,
 }
 
 /// Runs the census over every local MIR body and reports it.
 pub fn run() -> Result<(), String> {
     let mut census = Census::default();
     let krate = rustc_public::local_crate().name;
+    let prov_fn_filter = std::env::var("FEC_PROV_FN").ok().filter(|s| !s.is_empty());
 
     for item in rustc_public::all_local_items() {
         // The census must never break the compilation it rides on: any
@@ -52,6 +59,25 @@ pub fn run() -> Result<(), String> {
             };
             visitor.visit_body(&body);
             sub.bodies = 1;
+
+            // B1 capability propagation (I10): trace each raw deref to a
+            // derivation root or record the loss.
+            let (prov, _facts) = crate::provenance::analyze(&body);
+            sub.rooted_derefs = prov.rooted_derefs;
+            sub.lost_derefs = prov.lost_derefs;
+
+            // Per-function provenance dump for spot-checking a specific
+            // function (e.g. FEC_PROV_FN=insert_many): print the derivation
+            // roots that reach a write in any matching body.
+            if let Some(want) = prov_fn_filter.as_deref() {
+                let name = item.name();
+                if name.contains(want) && prov.rooted_writes > 0 {
+                    println!(
+                        "fe-c-prov fn={name} rooted_writes={} write_roots={:?}",
+                        prov.rooted_writes, prov.write_roots
+                    );
+                }
+            }
             Some(sub)
         }));
         match outcome {
@@ -75,6 +101,8 @@ impl Census {
         self.raw_to_safe_casts += o.raw_to_safe_casts;
         self.ptr_int_casts += o.ptr_int_casts;
         self.ffi_calls += o.ffi_calls;
+        self.rooted_derefs += o.rooted_derefs;
+        self.lost_derefs += o.lost_derefs;
     }
 }
 
@@ -182,7 +210,7 @@ fn report(krate: &str, census: &Census) {
     let json = format!(
         "{{\"crate\":\"{}\",\"bodies\":{},\"raw_ptr_locals\":{},\"ref_locals\":{},\
 \"derefs\":{},\"raw_derefs\":{},\"raw_to_safe_casts\":{},\"ptr_int_casts\":{},\
-\"ffi_calls\":{},\"skipped_bodies\":{}}}",
+\"ffi_calls\":{},\"skipped_bodies\":{},\"rooted_derefs\":{},\"lost_derefs\":{}}}",
         krate,
         census.bodies,
         census.raw_ptr_locals,
@@ -193,6 +221,8 @@ fn report(krate: &str, census: &Census) {
         census.ptr_int_casts,
         census.ffi_calls,
         census.skipped_bodies,
+        census.rooted_derefs,
+        census.lost_derefs,
     );
 
     // FEC_CENSUS_DIR: one file per crate (for multi-crate builds like a
