@@ -339,6 +339,23 @@ pub fn sync_mount_units(
             name: name.clone(),
         };
         if ri.unit_table.contains_key(&id) {
+            // Reconcile the tracking maps against the unit's actual nature. A
+            // stale `synthesized` entry (left by a prior synthesised mount at
+            // this path whose async removal lost the race with a daemon-reload
+            // that then loaded a *static* unit of the same name) would otherwise
+            // route the static unit through the synthesised branch and skip the
+            // override. Key off the fragment path: Some => loaded from disk
+            // (static), None => synthesised by this monitor.
+            let has_fragment = ri
+                .unit_table
+                .get(&id)
+                .map(|u| u.common.unit.fragment_path.is_some())
+                .unwrap_or(false);
+            if has_fragment {
+                synthesized.remove(name);
+            } else {
+                overridden.remove(name);
+            }
             if let Some(prev) = synthesized.get(name).copied() {
                 // A unit this monitor synthesised: reclassify in place if its
                 // local/remote classification changed (e.g. _netdev appeared in
