@@ -1,148 +1,140 @@
-# Fe-C — autonomous session status
+# Fe-C — session status (at the C1 boundary)
 
-Written 2026-07-22 at the end of an autonomous build session. Branch:
-`fe-c/v0` (7 commits off `main`, none pushed). This file records what is
-done, why the session halted where it did, and exactly how to resume.
+Written 2026-07-22. Branch: `fe-c/v0` off `main` (not pushed). This records
+what is done, the one partial task, and how to resume at Phase C.
 
 ## TL;DR
 
-Phase A (foundation, A1–A5) is **complete, tested, and committed**, plus
-the first Phase-B analysis (**B1**, capability propagation). The session
-**halted before B2** (MIR rewriting): rewriting requires internal
-`rustc_middle::mir` mutation plus linking `cementite` into instrumented
-crates, which cannot be completed *and verified* in one session without
-faking the acceptance — and the hard rules (and the "if blocked, write
-STATUS.md and halt" instruction) forbid that. B2's approach is now
-fact-checked and scoped below.
+Phase A (A1–A5) and Phase B's checking work (B1–B4) are **complete, tested,
+and committed**. **Fe-C catches a real CVE**: instrumenting the vulnerable
+`smallvec@=1.6.0` traps RUSTSEC-2021-0003 and names the right allocation
+(the I10 canary), while the patched control and the hashbrown/regex-automata
+suites run clean under instrumentation (no false positives). **B5 is
+partial**: the I8 stack-scope mechanism is built and demonstrated
+(use-after-scope-exit is caught), but the exact `corpus-rusqlite-0128`
+(inner-lexical-scope UAF across real-C FFI) is not yet done — see below.
 
-All 7 flake checks are green:
-`fe-c-fmt`, `fe-c-clippy` (--all-features), `fe-c-unit`, `fe-c-miri`,
-`fe-c-interpose`, `fe-c-census`, `fe-c-provenance`.
+The session stops at **C1** (decide the mode order + implement the first
+mode) as instructed. C1 is not started; the mode-order decision is still
+open (`docs/both-modes.md` §Finding argues through-first).
 
-## Protocol discrepancy (please resolve)
+All fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+`interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
+`false-positive`, `corpus-stackuaf`.
 
-The kickoff instruction said to follow **§8 (autonomous session protocol)**
-of `CLAUDE.md` "exactly". **`CLAUDE.md` has no §8** — it ends at §7 ("When
-unsure"). The task queue is §4. I proceeded on §4's queue and inferred a
-reasonable protocol: one commit per task, run the task's acceptance check
-plus fmt/clippy/unit/miri before committing, advance the `fe-c/v0` bookmark
-after each, never push, never weaken a test. If §8 was meant to exist,
-it was never written; nothing downstream depended on it, but flagging so a
-real §8 can be added or the reference dropped.
+## Protocol discrepancy (unresolved)
+
+The kickoff said to follow **§8 (autonomous session protocol)** of
+`CLAUDE.md`. **There is no §8** — the file ends at §7. I worked §4's queue
+and inferred a protocol: one commit per task, run the task's acceptance plus
+fmt/clippy/unit/miri before committing, advance the `fe-c/v0` bookmark, never
+push, never weaken a test. Flagging so a real §8 is written or the reference
+dropped.
 
 ## Done (committed on `fe-c/v0`)
 
-| Task | Commit | Acceptance evidence |
-| ---- | ------ | ------------------- |
-| docs import + layout | `doc(rust): Import Fe-C and Libc-rs design docs` | files moved to `docs/`, `docs/traces/`, `corpus/`; libc docs to `../libc` |
-| **A1** workspace + nix | `feat: workspace, pinned nightly, nix wiring` | `nix build .#cementite/.#fe-c-driver/.#cargo-fe-c`; `nix develop .#fe-c` gives nightly+rustc-dev+rust-src+miri; default shell rustc unchanged (stable 1.95). `docs/nix-integration.md` §6 answered against the real `nix/lib/cargo`. |
-| **A2** cementite core | `feat: cementite core data structures` | 48-bit `AllocId`, `Cap`/`PackedCap`, page-radix table, id-indexed liveness bitmap. 18 unit tests, Miri-clean, criterion root-resolve bench (4.6–19.6 ns). |
-| **A3** allocator + quarantine | `feat: quarantining global allocator` | `FecAlloc`; I7 (liveness cleared before release, verified by a test that fails on reorder); byte-budgeted FIFO quarantine holds under 10k churn; real `#[global_allocator]` integration test. |
-| **A4** libc interposition | `feat: libc allocator interposition` | `malloc/calloc/realloc/free/posix_memalign` via `dlsym(RTLD_NEXT)`; bootstrap buffer; `#[thread_local]` reentrancy guard also coordinates with `FecAlloc` (no double-registration). `strdup` + a cc-compiled C harness tracked. Behind off-by-default `interpose` feature. |
-| **A5** driver + census | `feat: rustc_public driver + visitation census` | `fe-c-driver` on `rustc_public`; census of pointer locals/derefs/casts/FFI. Runs on hello-world and the **whole serde tree** (13 crates, `skipped_bodies=0`). Hand-audited fixture check. |
-| **B1** propagation dataflow | `feat: capability propagation dataflow (I10)` | Resolves at derivation roots, propagates through offsets/`ptr::add`, handles writes via `ptr::write`/`ptr::copy` intrinsics. **On real `smallvec@=1.6.0`: `insert_many rooted_writes=4 write_roots=["as_mut_ptr"]`.** |
-| infra | `chore(nix/devshell): Exclude rust/fe-c from the stable clippy hook` | the pre-commit clippy hook runs stable cargo, which can't build `#![feature(rustc_private)]`; fe-c's clippy runs on nightly via the `fe-c-clippy` flake check. |
+| Task | What ships | Evidence |
+| ---- | ---------- | -------- |
+| **A1** | 3-crate workspace, pinned nightly, nix wiring | `nix build .#cementite/.#fe-c-driver/.#cargo-fe-c`; devShell nightly; §6 API questions answered |
+| **A2** | cementite core (48-bit `AllocId`, `Cap`/`PackedCap`, page-radix table, id-indexed liveness bitmap) | 24 unit tests, Miri-clean, criterion bench |
+| **A3** | `FecAlloc` quarantining allocator | I7 verified; byte-budget FIFO; global-allocator integration test |
+| **A4** | libc interposition (`dlsym(RTLD_NEXT)`) | strdup + cc-compiled C harness tracked; behind `interpose` feature |
+| **A5** | `rustc_public` driver + visitation census | runs on the whole serde tree (13 crates, `skipped_bodies=0`) |
+| **B1** | capability propagation dataflow (I10) | real `smallvec@=1.6.0` `insert_many rooted_writes=4 write_roots=["as_mut_ptr"]` |
+| **B2** | MIR rewriting (`override_queries` on `optimized_mir`) | instrumented harness reports non-zero check counts, control clean |
+| **B3** | raw-deref checking, **catches RUSTSEC-2021-0003** | real smallvec 1.6.0 aborts naming the SmallVec buffer (not the String); 1.6.1 control clean |
+| **B4** | false-positive suite + **dependency-free runtime** | hashbrown (98 tests + 907k-check workload) and regex-automata (204 tests) instrumented, zero false traps |
+| **B5** | I8 stack-scope mechanism (partial) | `corpus/stack-uaf` aborts `UseAfterScopeExit` naming the dead scope; gated behind `FEC_SCOPE_HOOKS` |
 
-### Where the code lives
+### The instrumentation, in brief
 
-- `crates/cementite/src/` — `cap.rs` (capabilities), `liveness.rs`
-  (bitmap), `table.rs` (allocation table), `arena.rs` (forever-mmap
-  arenas), `alloc.rs` (`FecAlloc` + quarantine), `interpose.rs` (A4,
-  feature-gated), `sys.rs` (private mmap backend).
-- `crates/fe-c-driver/src/` — `main.rs` (RUSTC/RUSTC_WRAPPER drop-in),
-  `census.rs` (A5), `provenance.rs` (B1).
-- Checks + fixtures under `crates/fe-c-driver/tests/` and `default.nix`.
+`fe-c-driver` has two modes (dispatched in `main.rs`):
 
-## Halt point: B2 (MIR rewriting) — scoped, not started
+- **Census/B1** (default): `rustc_public::run!` + a read-only census +
+  provenance dataflow (`census.rs`, `provenance.rs`).
+- **Instrument** (`FEC_INSTRUMENT`): a `rustc_driver::Callbacks` that wraps
+  the `optimized_mir` query and rewrites MIR (`instrument.rs`): a rooted
+  deref check (`__fec_check_deref_rooted(fault, root)`) before every raw
+  access and pointer-write intrinsic, resolving the owning allocation from
+  the *derivation root* (I10) and checking spatial bounds + temporal
+  liveness. Stack scope hooks (I8) are a gated Pass 0.
 
-**Why here.** `rustc_public` (stable MIR) is read-only — confirmed by
-reading the toolchain source: no `&mut Body`, transform, or rewrite API.
-Rewriting must therefore drop to `rustc_driver::Callbacks` +
-`config.override_queries` and mutate internal `rustc_middle::mir::Body`.
-That is a different driver entry point than the `rustc_public::run!` the
-census/B1 use, plus a link-integration problem. It is real work with real
-uncertainty; a half-done version that "compiles but doesn't instrument"
-would be a fake pass, so it was not started rather than faked.
+`cementite` is the runtime (`check.rs` check/scope entry points, `table.rs`,
+`alloc.rs`, `arena.rs`, `sys.rs`, `liveness.rs`, `interpose.rs`).
 
-**Fact-checked approach (verified against the pinned nightly's source):**
+### Orchestration (the `cargo-fe-c` seam, built out during B3/B4)
 
-1. New driver mode built on `rustc_driver::run_compiler(&args, &mut cb)`
-   with a `Callbacks::config` that sets
-   `config.override_queries = Some(|_sess, providers| { … })`
-   (the field is `Option<fn(&Session, &mut Providers)>`).
-2. Inside, wrap `providers.optimized_mir`: call
-   `(rustc_interface::DEFAULT_QUERY_PROVIDERS.optimized_mir)(tcx, def_id)`
-   for the original `&Body`, **clone**, insert instrumentation, and return
-   it via the arena (existing MIR passes use `tcx.alloc_steal_mir`; the
-   override returns `&'tcx Body`). The B1 analysis already identifies
-   exactly which statements/terminators to instrument, on the *stable* MIR
-   — reuse its classification, mapping stable↔internal via
-   `rustc_public::rustc_internal::{internal, run}`.
-3. **The remaining hard piece** is the injected call's target and linking:
-   to insert `check_deref(ptr, size, cap)` the pass needs the callee's
-   `DefId` and `cementite` linked into the instrumented crate. Two options:
-   - resolve `cementite::check_*` by path via `tcx` (requires the crate to
-     `--extern cementite=…`, injected by `cargo-fe-c`), or
-   - inject an FFI call to a `#[no_mangle] extern "C"` cementite export
-     (needs an extern-decl `DefId` synthesised in the crate).
-   Either way, `cargo-fe-c` must add `cementite` to the link (and, for
-   whole-program coverage, `-Zbuild-std` — Task D1). This is the piece to
-   build first; the MIR mutation itself is mechanical once the target
-   resolves.
+- The driver **force-injects cementite** into every compilation
+  (`--extern force:cementite=…`, `-Zunstable-options`), so third-party deps
+  (smallvec) are instrumented and the check fn resolves even where the
+  source never names cementite. `FEC_CEMENTITE_RLIB`/`_DEPS` point at a
+  prebuilt cementite; the `-L` for its deps is confined to binary/test
+  crates.
+- **`FEC_INSTRUMENT_ONLY=<crate,…>`** scopes instrumentation to a crate
+  list, leaving dependencies uninstrumented. Whole-tree instrumentation of
+  a deep dependency graph needs cementite as a *sysroot crate* (Task D1);
+  until then, scope to the crate(s) under test.
+- **cementite is dependency-free** (raw `mmap` syscall in `sys.rs`, no
+  rustix/libc/bitflags) precisely so it links into any crate without
+  version conflicts across separate cargo build graphs (B4).
 
-**Minimal B2 acceptance path.** Add `#[no_mangle] extern "C" fn
-__fec_check_deref(ptr, size)` to `cementite` that bumps a runtime counter
-and prints it on exit; have `cargo-fe-c` link `cementite` (staticlib);
-inject a call before each raw deref the B1 pass flags; confirm an
-instrumented hello-world runs and the counter is non-zero.
+## B5 — what's left for `corpus-rusqlite-0128`
 
-## B3–B5 depend on B2
+The **I8 mechanism is done and demonstrated** (`corpus/stack-uaf` →
+`UseAfterScopeExit`). The exact rusqlite corpus entry needs four more
+pieces, each a real chunk:
 
-- **B3** (raw-deref checking, `corpus-smallvec-0003` aborts, I10 canary):
-  needs B2 + `check_deref` comparing the *propagated* cap (B1 already
-  yields the right provenance so the report names the SmallVec allocation,
-  not the neighbouring `String`). Fixture: vendored `smallvec@1.6.0` (its
-  source is already resolved and the reproducer is in
-  `docs/traces/rustsec-2021-0003.md`), plus a `-control` (`1.6.1`) and a
-  `-unmapped` variant.
-- **B4** (cast checks + `ensure`, false-positive suite): serde/regex/
-  hashbrown test suites pass instrumented — needs B2 + the `nix/lib/cargo`
-  per-crate wrapper (see below).
-- **B5** (stack scope hooks I8 + FFI checks, `corpus-rusqlite-0128`
-  aborts): needs B2 + `libsqlite3-sys` (real C — the A4 cc-harness already
-  proved the mixed-language build works).
+1. **Escape analysis.** Scope hooks are gated (`FEC_SCOPE_HOOKS`) because
+   instrumenting *every* address-taken local is impractical (hashbrown
+   times out registering/poisoning a stack region per call). Only locals
+   whose address genuinely escapes the frame (cast to int, stored to a
+   static/heap, or passed to an FFI call) need hooks. Reuse the
+   `compute_roots` provenance to trace escape operands back to an
+   address-of; then default-on becomes affordable.
+2. **Lexical-scope granularity.** `rusqlite`'s `local` lives in an inner
+   block and the closure is invoked *later in the same function*, so
+   frame-granularity (poison at return) is too coarse. Lexical granularity
+   needs `StorageLive`/`StorageDead`, which **optimized MIR strips** —
+   hook `mir_drops_elaborated_and_const_checked` (pre-optimization) instead
+   of `optimized_mir`, or re-derive scopes from `body.var_debug_info`.
+3. **FFI inbound/outbound checks (point 3, I9).** `extern "C"` prologues
+   validate safe-pointer params; outbound pointer args are marked escaped
+   (`note_escape`). The `Violation` needs `escaped_at` so the report names
+   the registration site (`create_scalar_function`), per trace F7.
+4. **The real C build.** Vendor `rusqlite@0.25.3` + `libsqlite3-sys`
+   (bundled). The A4 cc-harness already proved the mixed-language build
+   works; this is the first *corpus* entry to use it.
 
-## Open items noted along the way
+Also address-reuse soundness: a poisoned stack region that is not
+re-registered by the next frame can produce a stale resolve. `scope_enter`
+already replaces a dead region at the same base; a fuller fix ties poisoning
+to the escape (only escaped regions stay findable-as-dead).
 
-- **Interposed frees don't quarantine yet.** `interpose::free` clears
-  liveness (I7) then frees immediately. Routing C frees through the shared
-  quarantine needs a per-origin release dispatch on the quarantine node
-  (System vs libc `free`); the node already carries the origin pointer, so
-  this is a small, well-scoped addition. (`crates/cementite/src/alloc.rs`,
-  `interpose.rs`.)
-- **`nix/lib/cargo` has no per-crate wrapper / hash-extension** (verified,
-  `docs/nix-integration.md` §6 Q1/Q2). The per-crate `harden` dial and
-  per-crate instrumentation (phase C / B4) need this patch: thread a
-  per-crate flags/driver attribute from `crateOverrides` through
-  `build/buildCrate.nix`, and add `harden` to the artifact hash string in
-  `build/buildCargoProject.nix` (~line 220) or mode flips reuse stale
-  artifacts.
-- **Toolchain pin.** `rust-toolchain.toml` = `nightly-2026-06-29` (newest
-  date in the locked `rust-overlay` input with rustc-dev/rust-src/miri).
-  `nix/miri-std.Cargo.lock` is a committed copy of the toolchain's
-  `library/Cargo.lock` so `cargo miri setup` builds offline; **refresh it
-  on every nightly bump**.
-- **Driver runtime linkage.** `nix build .#fe-c-driver` bakes the
-  `librustc_driver` rpath, so the built binary is self-contained. Run it
-  outside nix with `LD_LIBRARY_PATH=$(rustc --print sysroot)/lib`.
+## Open items carried forward
 
-## How to resume
+- **Interposed frees don't quarantine.** `interpose::free` clears liveness
+  (I7) then frees immediately; routing C frees through the shared quarantine
+  needs a per-origin release dispatch on the node (System vs libc `free`).
+- **`nix/lib/cargo` per-crate wrapper / hash-extension** (docs/nix-integration
+  §6 Q1/Q2) — needed for the per-crate `harden` dial and for whole-tree
+  instrumentation via a proper wrapper rather than `RUSTC=`.
+- **`-Zbuild-std` sysroot (D1)** would make cementite a sysroot crate,
+  removing the `FEC_INSTRUMENT_ONLY` scoping limitation and enabling
+  whole-process coverage (D2 + `../libc`).
+- **Toolchain pin** `nightly-2026-06-29`; `nix/miri-std.Cargo.lock` is a
+  committed copy of the toolchain's `library/Cargo.lock` — refresh on bumps.
+- **`FEC_DEBUG=1`** makes the driver print which bodies it instruments and
+  how many checks — useful when validating a new corpus entry.
 
-1. Read this file, then `CLAUDE.md` §4 (queue) and §2 (hard rules).
-2. Start B2 with the minimal acceptance path above. Build the
-   `cargo-fe-c` link-injection of `cementite` first; the MIR mutation is
-   mechanical once the check-fn `DefId` resolves.
-3. Keep the both-modes rule (I4) in view: `docs/both-modes.md` must stay
-   filled before any checking feature merges. The open mode-order decision
-   (Task C1, through-first vs case-first) is still open and does not block
-   B1–B5.
+## How to resume (Phase C / C1)
+
+1. Read this file, then `CLAUDE.md` §3 (the open mode-order decision) and
+   §4.
+2. **C1** is the recorded decision: through-first vs case-first
+   (`docs/both-modes.md` argues through-first — it needs less machinery and
+   is the oracle for differential-testing case). Record it under I4, then
+   implement the first mode end to end.
+3. The both-modes rule (I4) still binds: `docs/both-modes.md` must stay
+   filled before any checking feature merges.
+4. To finish B5 first, do the four pieces above in order; the escape
+   analysis is the highest-leverage (unlocks default-on scope hooks).
