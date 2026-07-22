@@ -532,6 +532,28 @@ impl ServiceState {
                 *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![e.reason.clone()]);
             }
         }
+
+        // The service is now fully stopped. Remove its cgroup directory, matching
+        // systemd's unit_prune_cgroup on the DEAD transition. The exit handler
+        // skips cleanup while status == Stopping (to avoid racing a restart), so a
+        // deliberate `systemctl stop` of a long-running service would otherwise
+        // leak the cgroup. Recursive because a Delegate=yes payload may have
+        // created child cgroups (possibly chown'd to another uid).
+        #[cfg(target_os = "linux")]
+        {
+            let cgroup_path = &conf.platform_specific.cgroup_path;
+            if cgroup_path.exists()
+                && let Err(e) = crate::platform::cgroups::remove_cgroup_recursive(cgroup_path)
+            {
+                log::warn!(
+                    "deactivate: could not remove cgroup {} for {}: {}",
+                    cgroup_path.display(),
+                    id.name,
+                    e
+                );
+            }
+        }
+
         // Reset socket activated flags so socket activation can restart
         // this service when a new connection arrives on its socket.
         if !conf.sockets.is_empty() {

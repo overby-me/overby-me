@@ -377,6 +377,18 @@ fn main() {
     } else if args.len() >= 2 && (args[0].contains(':') || args[0].starts_with('/')) {
         // First arg looks like an address (host:port or /path/to/socket)
         args.remove(0)
+    } else if args.iter().any(|a| a == "--user") {
+        // `--user` connects to the per-user manager's control socket under
+        // $XDG_RUNTIME_DIR (see run_user_manager in libsystemd). Without this,
+        // `systemctl --user ...` would talk to the system manager, which does
+        // not know the user's units: e.g. `systemctl stop --user <svc>` would
+        // silently no-op and the service (and its cgroup) would leak. Mirrors
+        // the socket resolution in systemd-run --user.
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() }));
+        format!("{runtime_dir}/systemd/control.socket")
     } else {
         // Default to the rust-systemd control socket
         "/run/systemd/rust-systemd-notify/control.socket".to_owned()
