@@ -59,6 +59,17 @@ pub struct ParsedMountSection {
     /// complete within this time, the mount unit enters a failed state.
     /// Defaults to None (use the manager default, typically 90 seconds).
     pub timeout_sec: Option<u64>,
+
+    /// ConfigurationDirectory= — directories under /etc created on start.
+    pub configuration_directory: Vec<String>,
+    /// RuntimeDirectory= — directories under /run created on start, removed on stop.
+    pub runtime_directory: Vec<String>,
+    /// StateDirectory= — directories under /var/lib created on start.
+    pub state_directory: Vec<String>,
+    /// CacheDirectory= — directories under /var/cache created on start.
+    pub cache_directory: Vec<String>,
+    /// LogsDirectory= — directories under /var/log created on start.
+    pub logs_directory: Vec<String>,
 }
 
 impl Default for ParsedMountSection {
@@ -74,6 +85,11 @@ impl Default for ParsedMountSection {
             force_unmount: false,
             directory_mode: 0o755,
             timeout_sec: None,
+            configuration_directory: Vec::new(),
+            runtime_directory: Vec::new(),
+            state_directory: Vec::new(),
+            cache_directory: Vec::new(),
+            logs_directory: Vec::new(),
         }
     }
 }
@@ -203,6 +219,24 @@ fn parse_mount_section(
     {
         mount.timeout_sec = parse_mount_timeout_sec(value);
     }
+    // Exec directories (ConfigurationDirectory=, RuntimeDirectory=, etc.):
+    // whitespace-separated names, accumulated across all occurrences.
+    fn collect_dir(section: &ParsedSection, key: &str) -> Vec<String> {
+        section
+            .get(key)
+            .map(|values| {
+                values
+                    .iter()
+                    .flat_map(|(_line, val)| val.split_whitespace().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    mount.configuration_directory = collect_dir(section, "CONFIGURATIONDIRECTORY");
+    mount.runtime_directory = collect_dir(section, "RUNTIMEDIRECTORY");
+    mount.state_directory = collect_dir(section, "STATEDIRECTORY");
+    mount.cache_directory = collect_dir(section, "CACHEDIRECTORY");
+    mount.logs_directory = collect_dir(section, "LOGSDIRECTORY");
     // Log any unrecognized keys at trace level
     let known_keys = [
         "WHAT",
@@ -215,6 +249,11 @@ fn parse_mount_section(
         "FORCEUNMOUNT",
         "DIRECTORYMODE",
         "TIMEOUTSEC",
+        "CONFIGURATIONDIRECTORY",
+        "RUNTIMEDIRECTORY",
+        "STATEDIRECTORY",
+        "CACHEDIRECTORY",
+        "LOGSDIRECTORY",
     ];
     for key in section.keys() {
         if !known_keys.contains(&key.as_str()) {

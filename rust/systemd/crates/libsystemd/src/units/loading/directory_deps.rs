@@ -2213,6 +2213,11 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     force_unmount: false,
                     directory_mode: 0o755,
                     timeout_sec: None,
+                    configuration_directory: Vec::new(),
+                    runtime_directory: Vec::new(),
+                    state_directory: Vec::new(),
+                    cache_directory: Vec::new(),
+                    logs_directory: Vec::new(),
                 },
                 state: RwLock::new(MountState {
                     common: CommonState::default(),

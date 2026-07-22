@@ -1223,6 +1223,16 @@ pub struct MountConfig {
     pub directory_mode: u32,
     /// TimeoutSec= — mount operation timeout.
     pub timeout_sec: Option<u64>,
+    /// ConfigurationDirectory= — directories under /etc created on start.
+    pub configuration_directory: Vec<String>,
+    /// RuntimeDirectory= — directories under /run created on start, removed on stop.
+    pub runtime_directory: Vec<String>,
+    /// StateDirectory= — directories under /var/lib created on start.
+    pub state_directory: Vec<String>,
+    /// CacheDirectory= — directories under /var/cache created on start.
+    pub cache_directory: Vec<String>,
+    /// LogsDirectory= — directories under /var/log created on start.
+    pub logs_directory: Vec<String>,
 }
 
 impl From<ParsedMountSection> for MountConfig {
@@ -1238,6 +1248,11 @@ impl From<ParsedMountSection> for MountConfig {
             force_unmount: parsed.force_unmount,
             directory_mode: parsed.directory_mode,
             timeout_sec: parsed.timeout_sec,
+            configuration_directory: parsed.configuration_directory,
+            runtime_directory: parsed.runtime_directory,
+            state_directory: parsed.state_directory,
+            cache_directory: parsed.cache_directory,
+            logs_directory: parsed.logs_directory,
         }
     }
 }
@@ -1906,6 +1921,58 @@ impl Unit {
     }
 }
 
+/// The base directory for each exec-directory kind, paired with a selector for
+/// the matching `MountConfig` field. Shared by create/remove so the base paths
+/// stay in sync.
+const EXEC_DIR_BASES: [&str; 5] = ["/etc", "/run", "/var/lib", "/var/cache", "/var/log"];
+
+fn mount_exec_dir_lists(conf: &MountConfig) -> [&[String]; 5] {
+    [
+        &conf.configuration_directory,
+        &conf.runtime_directory,
+        &conf.state_directory,
+        &conf.cache_directory,
+        &conf.logs_directory,
+    ]
+}
+
+/// Create the `ConfigurationDirectory=`/`RuntimeDirectory=`/`StateDirectory=`/
+/// `CacheDirectory=`/`LogsDirectory=` directories for a mount unit under their
+/// base paths (/etc, /run, /var/lib, /var/cache, /var/log). Mount units run
+/// mount(2) directly and bypass exec_helper, so they don't get the exec-directory
+/// creation that services do — this mirrors it for the mount start path.
+fn create_mount_exec_directories(conf: &MountConfig) {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    for (base, names) in EXEC_DIR_BASES.iter().zip(mount_exec_dir_lists(conf)) {
+        for name in names {
+            let path = std::path::Path::new(base).join(name);
+            if let Err(e) = std::fs::create_dir_all(&path) {
+                log::warn!("Failed to create exec directory {}: {}", path.display(), e);
+                continue;
+            }
+            trace!("Created mount exec directory {}", path.display());
+            #[cfg(unix)]
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+}
+
+/// Remove a mount unit's `RuntimeDirectory=` directories (under /run) on stop,
+/// mirroring how services drop their runtime directories when they deactivate.
+/// Configuration/state/cache/logs directories persist across stop (only
+/// `systemctl clean` removes those).
+fn remove_mount_runtime_directories(conf: &MountConfig) {
+    for name in &conf.runtime_directory {
+        let path = std::path::Path::new("/run").join(name);
+        if path.exists()
+            && let Err(e) = std::fs::remove_dir_all(&path)
+        {
+            trace!("Failed to remove runtime directory {}: {}", path.display(), e);
+        }
+    }
+}
+
 /// Perform the mount(2) syscall for a mount unit.
 ///
 /// This creates the mount point directory if needed, then calls mount(2)
@@ -1926,6 +1993,7 @@ fn activate_mount(
             "Mount point {} is already mounted, marking as active",
             conf.where_
         );
+        create_mount_exec_directories(conf);
         let mut status = status.write_poisoned();
         *status = UnitStatus::Started(StatusStarted::Running);
         return Ok(UnitStatus::Started(StatusStarted::Running));
@@ -2063,6 +2131,7 @@ fn activate_mount(
     match mount_result {
         Ok(()) => {
             info!("Successfully mounted {} on {}", conf.what, conf.where_);
+            create_mount_exec_directories(conf);
             let mut status = status.write_poisoned();
             *status = UnitStatus::Started(StatusStarted::Running);
             Ok(UnitStatus::Started(StatusStarted::Running))
@@ -2105,6 +2174,9 @@ fn deactivate_mount(
     conf: &MountConfig,
     status: &RwLock<UnitStatus>,
 ) -> Result<(), UnitOperationError> {
+    // RuntimeDirectory= is dropped on stop (like services); configuration/
+    // state/cache/logs directories persist until `systemctl clean`.
+    remove_mount_runtime_directories(conf);
     // If not currently mounted, just mark as stopped
     if !is_already_mounted(&conf.where_) {
         trace!(
