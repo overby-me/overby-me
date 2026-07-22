@@ -1,11 +1,11 @@
-# Fe-C — session status (at the C1 boundary)
+# Fe-C — session status (Phase C underway, through-first)
 
-Written 2026-07-22. Branch: `fe-c/v0` off `main` (not pushed). This records
-what is done, the one partial task, and how to resume at Phase C.
+Written 2026-07-22. Branch: `fe-c/v0` off `main` (pushed to origin). This
+records what is done and how to continue building out `through` mode.
 
 ## TL;DR
 
-Phase A (A1–A5, plus A4b), and Phase B (B1–B4 and B5's mechanism) are
+Phase A (A1–A5, plus A4b) and Phase B (B1–B4 and B5's mechanism) are
 **complete, tested, and committed**. **Fe-C catches a real CVE**:
 instrumenting the vulnerable `smallvec@=1.6.0` traps RUSTSEC-2021-0003 and
 names the right allocation (the I10 canary), while the patched control and the
@@ -16,19 +16,30 @@ edge, and cementite is freestanding (I11). **B5's I8/I9 mechanism is done**:
 lexical-scope granularity, a default-on escape analysis with three sinks
 (integer cast, foreign-call argument, closure capture), the outbound FFI
 escape, and `escaped_at` naming the escape site — demonstrated by three
-reproducers (`stack-uaf`, `ffi-escape`, `closure-escape`). The **exact**
-`corpus-rusqlite-0128` remains blocked on a §3.2 pointer-loaded-from-memory
-check (its closure reads the local through a *safe* reference) and the real
-vendored `libsqlite3-sys` build — see the B5 section.
+reproducers (`stack-uaf`, `ffi-escape`, `closure-escape`).
 
-The session stops at **C1** (decide the mode order + implement the first
-mode), the human's decision per §8. C1 is not started; the mode-order
-decision is still open (`docs/both-modes.md` §Finding argues through-first).
-The §3.2 check the exact rusqlite corpus needs is itself Phase-C-adjacent.
+**Phase C is underway.** C1's mode-order decision is **through-first**
+(recorded in `PLAN.md` I4 and `docs/both-modes.md` §Decision). Through mode's
+defining behavior — **safe-pointer deref checking** (the one bolded both-modes
+row; `FEC_MODE=through`) — is implemented and shown by `corpus/through-safe-ref`
+(through aborts on a safe-reference read of a dead local; case-like mode elides
+it). **This closes the §3.2 gap** that was the exact `corpus-rusqlite-0128`
+blocker: its closure reads the local through a safe reference, which `through`
+now checks. The exact rusqlite corpus now needs only the real vendored
+`libsqlite3-sys` build (0.25.3 is yanked — use a non-yanked vulnerable version)
+run under `FEC_MODE=through`.
 
-All fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`, `interpose`,
-`census`, `provenance`, `instrument`, `corpus-smallvec`, `false-positive`,
-`corpus-stackuaf`, `ffi-escape`, `closure-escape`.
+**Remaining for full `through` mode** (all substantial, interdependent): T2
+shadow-slot coherence (the at-rest cap layout), `strict` unknown-provenance
+(needs full cap propagation first, or it false-positives on foreign statics),
+and interprocedural + at-rest capability propagation. Then C2 (dealloc
+re-checks, `case`-only) and C3 (`case` + the `differential` gate against
+`through`) are the `case`-milestone tasks.
+
+All 14 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+`interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
+`false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
+`through-safe-ref`.
 
 ## Protocol
 
@@ -124,22 +135,19 @@ site. The exact rusqlite corpus entry needs:
 
 1. **The real C build.** Vendor a *non-yanked* vulnerable `rusqlite` (0.25.3
    is yanked — use 0.25.0–0.25.2 or 0.26.0–0.26.1) + `libsqlite3-sys`
-   (bundled). The A4 cc-harness and `corpus/ffi-escape` already prove the
-   mixed-language build; this is the first *corpus* entry to use a real
-   third-party C dependency.
-2. **A `§3.2` pointer-loaded-from-memory check.** *This is the real blocker.*
-   The rusqlite closure reads `local` through a **safe reference** (`r.len()`),
-   which v0's raw-deref instrumentation (point 0) does not touch — the raw
-   dereference in the real trampoline is of the *live* closure box (`pApp`),
-   which passes. Catching the dead-local read needs a check at the point a
-   pointer/reference is loaded from memory and used (trace §3.2). The
-   `closure-escape` reproducer sidesteps this by capturing a *raw* pointer, so
-   its read is a checked raw dereference; the real rusqlite closure captures a
-   safe `&T`.
-3. *(nicety)* the **inbound `extern "C"` prologue check** (`ensure_foreign_arg`,
+   (bundled), built under `FEC_MODE=through`. The A4 cc-harness and
+   `corpus/ffi-escape` already prove the mixed-language build; this is the
+   first *corpus* entry to use a real third-party C dependency.
+2. *(nicety)* the **inbound `extern "C"` prologue check** (`ensure_foreign_arg`,
    trace step 4): validate safe-pointer params on the way in. Not needed for
    the abort (which fires at the callback's dereference), but completes the
    both-directions I9 story.
+
+The `§3.2` pointer-through-a-safe-reference gap that used to be the real
+blocker here is **now closed** by through mode's safe-deref checking (C1):
+`corpus/through-safe-ref` is the safe-reference form of the closure shape and
+aborts under `FEC_MODE=through`. So the exact rusqlite corpus is now a
+build-and-run exercise (item 1) rather than a missing-instrumentation one.
 
 Also address-reuse soundness: a poisoned stack region that is not
 re-registered by the next frame can produce a stale resolve. `scope_enter`
@@ -162,21 +170,22 @@ to the escape (only escaped regions stay findable-as-dead).
 - **`FEC_DEBUG=1`** makes the driver print which bodies it instruments and
   how many checks — useful when validating a new corpus entry.
 
-## How to resume (Phase C / C1)
+## How to resume (finishing `through` mode, then `case`)
 
-1. Read this file, then `CLAUDE.md` §3 (the open mode-order decision) and
-   §4.
-2. **C1** is the recorded decision: through-first vs case-first
-   (`docs/both-modes.md` argues through-first — it needs less machinery and
-   is the oracle for differential-testing case). Record it under I4, then
-   implement the first mode end to end.
-3. The both-modes rule (I4) still binds: `docs/both-modes.md` must stay
-   filled before any checking feature merges.
-4. B5's I8/I9 **mechanism is done** (lexical scopes, escape analysis with
-   three sinks, outbound FFI escape, `escaped_at`; three green reproducers).
-   The **exact** `corpus-rusqlite-0128` remains blocked on a `§3.2`
-   pointer-loaded-from-memory check (its closure reads the local through a
-   *safe* reference, which point 0's raw-deref instrumentation does not touch)
-   and the real vendored `libsqlite3-sys` build (0.25.3 is yanked; use a
-   non-yanked vulnerable version). The `§3.2` check is Phase-C-adjacent, so
-   this naturally lands with the modes rather than before C1.
+1. Read this file, then `CLAUDE.md` §3–§4 and `docs/both-modes.md` (the `through`
+   column is the spec for what's left).
+2. **C1 is decided (through-first) and its defining behavior is in** (safe-deref
+   checking under `FEC_MODE=through`, `corpus/through-safe-ref`). To finish
+   `through` end to end, work the remaining `through` column rows: at-rest cap
+   propagation (T2 shadow slots — the 128-bit coherent pair, layout already
+   fixed in `docs/through-mode-coherence.md`), interprocedural propagation, then
+   `strict` unknown-provenance (do this **last** — it is only sound once caps
+   exist everywhere, else it false-positives on foreign statics). The both-modes
+   rule (I4) binds: keep `docs/both-modes.md` filled as each lands.
+3. The exact `corpus-rusqlite-0128` is now a build-and-run exercise: vendor a
+   non-yanked vulnerable `rusqlite` + bundled `libsqlite3-sys`, build under
+   `FEC_MODE=through`, assert it aborts naming the closure/registration site.
+   The §3.2 instrumentation it needed is already in.
+4. **C2** (dealloc-reachable re-checks, `case`-only) and **C3** (`case` + the
+   `differential` gate against `through`) are the `case` milestone — they need
+   `case` mode, which is the second milestone after `through` is complete.
