@@ -377,13 +377,13 @@ fn main() {
             }
         }
     } else if let Some(ref user_unit) = cli.user_unit {
-        // Search in user cgroup hierarchy
-        let user_root = PathBuf::from(CGROUP_ROOT).join("user.slice");
-        let found = if user_root.exists() {
-            find_unit_cgroup_in(&user_root, user_unit)
-        } else {
-            None
-        };
+        // Search the whole cgroup tree for the user unit. The user's app.slice /
+        // session.slice normally live deep under
+        // user.slice/user-UID.slice/user@UID.service, but when cgls itself runs
+        // inside the user manager (systemd-run --user ...) it may be in a cgroup
+        // namespace where /sys/fs/cgroup IS user@UID.service and app.slice is a
+        // direct child. Searching from the root handles both layouts.
+        let found = find_unit_cgroup_in(&PathBuf::from(CGROUP_ROOT), user_unit);
         match found {
             Some(path) => vec![path],
             None => {
