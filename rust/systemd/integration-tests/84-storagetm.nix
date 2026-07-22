@@ -1,13 +1,7 @@
 {
   name = "84-STORAGETM";
-  # Upstream 84-STORAGETM requires nvme-cli + kernel NVMe-over-TCP target
-  # support, not configured in the test VM.
-  patchScript = ''
-    {
-      echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: NVMe storage-target setup missing, skipping' >/skipped"
-      echo "exit 77"
-    } > TEST-84-STORAGETM.sh
-    chmod +x TEST-84-STORAGETM.sh
-  '';
+  # De-skipped to baseline. Upstream TEST-84-STORAGETM.sh self-skips (exit 77)
+  # when nvme-cli is broken / the kernel lacks NVMe-over-TCP TLS support, which
+  # is the case in the VM -- so rust-systemd's override is likely redundant (like
+  # 75-RESOLVED). If it self-skips (BUILD_RC=0), remove the override.
 }

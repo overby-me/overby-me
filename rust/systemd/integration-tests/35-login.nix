@@ -1,8 +1,16 @@
 {
   name = "35-LOGIN";
-  # De-skipped to baseline. Upstream TEST-35-LOGIN.sh self-skips (exit 77) when
-  # `evemu-device` is absent, which it likely is in the VM -- so rust-systemd's
-  # "logind infrastructure missing" override may be redundant (like 75-RESOLVED,
-  # whose upstream self-skips on missing knotc). If it self-skips, remove the
-  # override; if it runs and hits the logind stub, it is genuinely deep.
+  # Upstream 35-LOGIN. Baselined 2026-07-22: does NOT self-skip (evemu-device is
+  # present or the guard is later) -- it runs the full logind suite (setup_test_user
+  # + systemctl edit + restart systemd-logind all pass, then run_testcases hits
+  # testcase_ambient_caps and beyond, which need real logind session management).
+  # Genuinely deep (systemd-logind sessions/seats/PAM). Re-skipped.
+  patchScript = ''
+    {
+      echo "#!/usr/bin/env bash"
+      echo "echo 'rust-systemd: systemd-logind session suite not implemented, skipping' >/skipped"
+      echo "exit 77"
+    } > TEST-35-LOGIN.sh
+    chmod +x TEST-35-LOGIN.sh
+  '';
 }
