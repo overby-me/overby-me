@@ -291,14 +291,21 @@ fn try_mark_started(status: &std::sync::RwLock<UnitStatus>) {
     }
 }
 
-/// Mark a unit Stopped, using a non-blocking status lock (see `try_mark_started`).
+/// Mark an *active* unit Stopped, using a non-blocking status lock (see
+/// `try_mark_started`). Only a currently-Started unit is deactivated: never
+/// stomp a unit PID 1 is transitioning. A `systemctl start <mount>` sets the
+/// unit Starting and its mount is not yet in mountinfo, so a gone-path pass mid
+/// start would otherwise fail the job with "a required dependency failed"
+/// (TEST-60-MOUNT-RATELIMIT.testcase_issue_20329).
 fn try_set_stopped(status: &std::sync::RwLock<UnitStatus>) {
     let mut st = match status.try_write() {
         Ok(st) => st,
         Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
         Err(std::sync::TryLockError::WouldBlock) => return,
     };
-    *st = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
+    if matches!(&*st, UnitStatus::Started(_)) {
+        *st = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
+    }
 }
 
 /// Synchronise the unit table with `/proc/self/mountinfo` + `/run/mount/utab`.
