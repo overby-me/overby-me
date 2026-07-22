@@ -94,3 +94,24 @@ for the three reasons above: less machinery, an oracle for `case`, and an
 honest safety promise from commit one. The bolded mode-distinction row — safe
 pointer derefs are **checked** in `through`, **elided** in `case` — is what
 the first `through` milestone implements; the `case` elision arrives later.
+
+## Differential gate result (2026-07-22, Task C3)
+
+`through` (the oracle, checks every deref) and `case` (elides safe derefs,
+re-checks dealloc-reachable ones) are run against the corpus in both modes
+(`fe-c-differential`, plus each corpus entry's own two-mode check). The verified
+relationship, exactly as the tables predict:
+
+| Reproducer | bug | `through` | `case` | why |
+| ---------- | --- | --------- | ------ | --- |
+| `closure-escape` | raw-pointer stack UAF | abort | abort | raw deref, checked in both (point 0) |
+| `smallvec-0003` | heap OOB | abort | abort | write-intrinsic / raw deref, both |
+| `lru-0130` | heap use-after-free | abort | abort | `case` via the dealloc-reachable re-check (point 4) |
+| `through-safe-ref` | safe-ref stack UAF | abort | **elide** | the bolded row: `case` elides safe-pointer derefs |
+| `rusqlite-0128` | safe-ref stack UAF (real CVE) | abort | **elide** | same elision |
+
+The **only** violations `through` catches that `case` misses are the
+safe-pointer-deref stack use-after-scope reads — precisely the elision the
+bolded row documents. No undocumented gap: the gate passes. (Concurrent
+free-during-scope, F3, is the other stated `case` limitation; it is not
+exercised by this single-threaded corpus.)

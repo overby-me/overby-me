@@ -452,6 +452,49 @@ in {
         nu corpus/assert_lru_0130.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
+    # Differential gate (C3, I4): `through` is the oracle. Build three
+    # contrasting reproducers in both modes and assert `through` catches all,
+    # `case` agrees on the raw + heap UAFs, and `case` misses only the
+    # documented safe-pointer-deref elision (the stack-scope read). Any other
+    # through-catch that case missed would be an undocumented gap — a bug.
+    fe-c-differential = pkgs:
+      cargoCheck pkgs "differential" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1
+
+        build() {
+          ( cd "corpus/$1" \
+              && FEC_MODE="$3" FEC_INSTRUMENT_ONLY="$2" RUSTC="$drv" \
+                 CARGO_TARGET_DIR="$TMPDIR/$1-$3" cargo build --offline --locked )
+        }
+        run() {
+          set +e
+          "$TMPDIR/$1-$2/debug/$1" >"$TMPDIR/$1-$2.log" 2>&1
+          local e=$?
+          set -e
+          echo "$e"
+        }
+
+        build closure-escape closure_escape through
+        build closure-escape closure_escape case
+        build through-safe-ref through_safe_ref through
+        build through-safe-ref through_safe_ref case
+        build lru-0130 lru_0130 through
+        build lru-0130 lru_0130 case
+
+        ce_th=$(run closure-escape through);      ce_ca=$(run closure-escape case)
+        tsr_th=$(run through-safe-ref through);   tsr_ca=$(run through-safe-ref case)
+        lru_th=$(run lru-0130 through);           lru_ca=$(run lru-0130 case)
+
+        echo "closure-escape (raw UAF):    through=$ce_th  case=$ce_ca"
+        echo "through-safe-ref (safe UAF): through=$tsr_th case=$tsr_ca"
+        echo "lru-0130 (heap UAF):         through=$lru_th case=$lru_ca"
+        nu corpus/assert_differential.nu \
+          "$ce_th" "$ce_ca" "$tsr_th" "$tsr_ca" "$lru_th" "$lru_ca"
+      '';
+
     # Capability propagation dataflow (B1, I10): run the driver over the
     # insert_many-shaped fixture and assert each write is traced to its
     # as_mut_ptr derivation root (both the direct-deref and ptr::write

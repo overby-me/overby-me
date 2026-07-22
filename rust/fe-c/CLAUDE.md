@@ -268,6 +268,16 @@ analogous to `escaped_at`).)*
 **C3. [todo] The other mode**, with the `differential` check wired: any violation
 `through` catches that `case` misses must map to a documented elision gap in
 `docs/both-modes.md`, or it's a bug.
+*(2026-07-22 — the **`differential` gate is wired** (`fe-c-differential`) and
+passes: it runs three contrasting reproducers (`closure-escape` raw,
+`through-safe-ref` safe-ref stack, `lru-0130` heap) in both modes and asserts
+`through` (the oracle) catches all, `case` agrees on the raw + heap UAFs, and
+`case` misses **only** the documented safe-pointer-deref elision (the stack
+read). The verified relationship is recorded in `docs/both-modes.md`
+§Differential. `case` mode itself exists (safe-deref elision + the C2
+dealloc-reachable re-check). Remaining refinement: principled elision
+(vetting at the raw→safe cast) so `case` can skip *more* than it does today, and
+the concurrent free-during-scope caveat (F3).)*
 
 ### Phase D — substrate
 
