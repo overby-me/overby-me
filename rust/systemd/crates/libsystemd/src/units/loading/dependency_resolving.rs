@@ -542,14 +542,67 @@ fn add_default_dependency_relations(units: &mut UnitTable) {
                     add_after_to_sysinit.push(unit.id.clone());
                 }
             }
+            UnitIdKind::Mount => {
+                // systemd's mount_add_default_dependencies: order the mount after
+                // its fs-pre target (and backing device) and before the fs
+                // target. Applies to statically-loaded / fstab mount units;
+                // runtime-synthesised mounts get the same deps in mount_monitor.
+                let deps = if let crate::units::Specific::Mount(m) = &unit.specific {
+                    // The root mount and API pseudo-filesystems are ordered
+                    // specially in early boot (the fstab generator puts / BEFORE
+                    // local-fs-pre.target); adding the normal After= there would
+                    // create an ordering cycle, so skip them.
+                    let fstype = m.conf.fs_type.as_deref().unwrap_or("");
+                    let is_api = matches!(
+                        fstype,
+                        "proc" | "sysfs" | "devtmpfs" | "devpts" | "cgroup" | "cgroup2"
+                            | "mqueue" | "hugetlbfs" | "debugfs" | "tracefs" | "securityfs"
+                            | "pstore" | "bpf" | "configfs" | "fusectl" | "efivarfs"
+                            | "binfmt_misc" | "autofs" | "ramfs"
+                    );
+                    if m.conf.where_ == "/" || is_api {
+                        None
+                    } else {
+                        let is_network = crate::units::mount_is_network_static(
+                            Some(fstype),
+                            m.conf.options.as_deref(),
+                        );
+                        Some(crate::units::mount_default_deps(&m.conf.what, is_network))
+                    }
+                } else {
+                    None
+                };
+                if let Some((na, nb, nw, nr)) = deps {
+                    let d = &mut unit.common.dependencies;
+                    for n in na {
+                        if let Some(uid) = crate::units::dep_unit_id(&n) {
+                            d.after.push(uid);
+                        }
+                    }
+                    for n in nb {
+                        if let Some(uid) = crate::units::dep_unit_id(&n) {
+                            d.before.push(uid);
+                        }
+                    }
+                    for n in nw {
+                        if let Some(uid) = crate::units::dep_unit_id(&n) {
+                            d.wants.push(uid);
+                        }
+                    }
+                    for n in nr {
+                        if let Some(uid) = crate::units::dep_unit_id(&n) {
+                            d.requires.push(uid);
+                        }
+                    }
+                }
+            }
             UnitIdKind::Target
             | UnitIdKind::Slice
-            | UnitIdKind::Mount
             | UnitIdKind::Swap
             | UnitIdKind::Device
             | UnitIdKind::Timer
             | UnitIdKind::Path => {
-                // Targets, slices, mounts, swaps, devices, timers, and paths only get the
+                // Targets, slices, swaps, devices, timers, and paths only get the
                 // shutdown.target conflict/before (already added above).
             }
         }

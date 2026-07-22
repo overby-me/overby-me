@@ -68,7 +68,7 @@ fn parse_mountinfo() -> Vec<(String, String, String)> {
 
 /// True for filesystem types that are inherently network filesystems, which get
 /// remote-fs ordering even without an explicit `_netdev`.
-fn fstype_is_network(fstype: &str) -> bool {
+pub(crate) fn fstype_is_network(fstype: &str) -> bool {
     matches!(
         fstype,
         "nfs" | "nfs4"
@@ -85,6 +85,16 @@ fn fstype_is_network(fstype: &str) -> bool {
             | "lustre"
             | "9p"
     )
+}
+
+/// Whether a mount unit is a network filesystem, from its unit-file config: a
+/// network fstype or an explicit `_netdev` in its `Options=`. For static / fstab
+/// mount units; runtime-synthesised mounts use the utab-based check instead.
+pub(crate) fn mount_is_network_static(fs_type: Option<&str>, options: Option<&str>) -> bool {
+    fs_type.map(fstype_is_network).unwrap_or(false)
+        || options
+            .map(|o| o.split(',').any(|f| f == "_netdev"))
+            .unwrap_or(false)
 }
 
 /// Whether the mount of `source` at `target` carries the userspace `_netdev`
@@ -127,7 +137,7 @@ fn mount_has_netdev(target: &str, source: &str) -> bool {
 
 /// The mount ordering/pull-in dependency names for a mount, per systemd's
 /// `mount_add_default_dependencies`. Returns `(after, before, wants, requires)`.
-fn mount_default_deps(
+pub(crate) fn mount_default_deps(
     what: &str,
     is_network: bool,
 ) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
@@ -170,7 +180,7 @@ fn is_mount_default_dep(name: &str) -> bool {
 
 /// Build a `UnitId` for a dependency name, deriving the kind from the suffix.
 /// Only the kinds used by mount default-dependencies are handled.
-fn dep_unit_id(name: &str) -> Option<UnitId> {
+pub(crate) fn dep_unit_id(name: &str) -> Option<UnitId> {
     let kind = if name.ends_with(".target") {
         UnitIdKind::Target
     } else if name.ends_with(".device") {
