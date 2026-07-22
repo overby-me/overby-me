@@ -23,11 +23,7 @@
     # parsed service config (drop-in/override load or parse gap). Diagnose with
     # `systemctl show systemd-journald.service -p FileDescriptorStoreMax` in the
     # VM; if 0, fix the journald unit/drop-in loading of FileDescriptorStoreMax.
-    sed -i '/^systemctl start forever-print-hola/s/.*/echo SKIP # forever-print-hola/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^systemctl stop forever-print-hola/s/.*/echo SKIP # stop forever-print-hola/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^systemctl kill --signal=SIGKILL systemd-journald/s/.*/echo SKIP # SIGKILL journald/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^\[\[ ! -f "\/tmp\/i-lose-my-logs" \]\]/s/.*/echo SKIP # i-lose-my-logs check/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^rm -f \/tmp\/i-lose-my-logs/s/.*/echo SKIP # rm i-lose-my-logs/' TEST-04-JOURNAL.journal.sh
+    # (FDSTORE hunk de-weakened again with an FDPROBE kmsg in the notify handler.)
 
     # Skip journalctl --follow tests (require running journald with working
     # stream reconnection)
