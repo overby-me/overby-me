@@ -44,7 +44,7 @@ dropped.
 | **B2** | MIR rewriting (`override_queries` on `optimized_mir`) | instrumented harness reports non-zero check counts, control clean |
 | **B3** | raw-deref checking, **catches RUSTSEC-2021-0003** | real smallvec 1.6.0 aborts naming the SmallVec buffer (not the String); 1.6.1 control clean |
 | **B4** | false-positive suite + **dependency-free runtime** | hashbrown (98 tests + 907k-check workload) and regex-automata (204 tests) instrumented, zero false traps |
-| **B5** | I8 stack-scope mechanism (partial) | `corpus/stack-uaf` aborts `UseAfterScopeExit` naming the dead scope; gated behind `FEC_SCOPE_HOOKS` |
+| **B5** | I8 stack scopes: lexical granularity + default-on escape analysis (partial) | `corpus/stack-uaf` (inner-block `String`, escaped, dereferenced later in the same frame) aborts `UseAfterScopeExit` naming the dead scope; hashbrown stays clean default-on |
 
 ### The instrumentation, in brief
 
@@ -98,21 +98,22 @@ in the *same* frame) is caught, not only use-after-frame-return. The earlier
 worry that "optimized MIR strips `StorageLive`/`Dead`" turned out not to
 block this: optimized MIR keeps **drop terminators** (semantically required),
 and the rusqlite local is a `String` (a `Drop` type), so its drop glue is a
-reliable lexical death signal — no pre-optimization MIR hook was needed. The
-exact rusqlite corpus entry needs three more pieces, each a real chunk:
+reliable lexical death signal — no pre-optimization MIR hook was needed.
 
-1. **Escape analysis.** Scope hooks are still gated (`FEC_SCOPE_HOOKS`)
-   because instrumenting *every* address-taken local is impractical
-   (hashbrown times out registering/poisoning a stack region per call). Only
-   locals whose address genuinely escapes the frame (cast to int, stored to a
-   static/heap, or passed to an FFI call) need hooks. Reuse the
-   `compute_roots` provenance to trace escape operands back to an
-   address-of; then default-on becomes affordable.
-2. **FFI inbound/outbound checks (point 3, I9).** `extern "C"` prologues
+Scope hooks are now **default-on**: an escape analysis (`escaping_locals`, a
+forward taint from address-of, sunk at a pointer→integer cast) keeps them to
+the locals whose address is laundered out of the frame, so hashbrown gets few
+or no hooks and neither times out nor false-aborts (`FEC_SCOPE_HOOKS` gate
+removed). The exact rusqlite corpus entry needs two more pieces, each a real
+chunk:
+
+1. **FFI inbound/outbound checks (point 3, I9).** `extern "C"` prologues
    validate safe-pointer params; outbound pointer args are marked escaped
    (`note_escape`). The `Violation` needs `escaped_at` so the report names
-   the registration site (`create_scalar_function`), per trace F7.
-3. **The real C build.** Vendor `rusqlite@0.25.3` + `libsqlite3-sys`
+   the registration site (`create_scalar_function`), per trace F7. The escape
+   analysis above already isolates the escaping locals; I9 adds the FFI-arg
+   sink (currently only the integer-cast sink is wired) and the report field.
+2. **The real C build.** Vendor `rusqlite@0.25.3` + `libsqlite3-sys`
    (bundled), with provenance flowing through the trampoline. The A4
    cc-harness already proved the mixed-language build works; this is the
    first *corpus* entry to use it.

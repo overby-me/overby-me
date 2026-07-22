@@ -205,17 +205,18 @@ See `STATUS.md`.)*
 callback, *and* the registration site. This is also the first corpus entry
 pulling real C — it doubles as the mixed-language build smoke test.
 *Delivered: the I8 runtime mechanism (`__fec_scope_enter`/`_exit` +
-`table::poison` + a temporal liveness check in `__fec_check_deref_rooted`)
-and frame-granularity scope emission, demonstrated by `corpus/stack-uaf`:
-an escaped stack pointer dereferenced after its frame returns aborts
-`UseAfterScopeExit` naming the dead scope (new `fe-c-corpus-stackuaf`
-check). Gated behind `FEC_SCOPE_HOOKS` — instrumenting every address-taken
-local is impractical without an escape analysis (hashbrown times out).
-Remaining for the exact rusqlite-0128: an escape analysis (so it can be
-default-on), lexical-scope granularity (optimized MIR strips
-`StorageLive`/`Dead`, so the inner-block scope needs a pre-optimization MIR
-hook), the FFI inbound/outbound checks (I9), and the real `libsqlite3-sys`
-build. Scoped in STATUS.*
+`table::poison` + a temporal liveness check in `__fec_check_deref_rooted`),
+**lexical-scope granularity** (poison at a local's drop terminator / its
+`StorageDead`, else frame return — so the inner-block-then-same-frame shape
+is caught, not just use-after-frame-return), and a **default-on escape
+analysis** (`escaping_locals`: only locals whose address is laundered to an
+integer get hooks, so hashbrown neither times out nor false-aborts). Shown by
+`corpus/stack-uaf`: an inner-block `String` whose address escapes, then is
+dereferenced later in the same frame, aborts `UseAfterScopeExit` naming the
+dead scope (`fe-c-corpus-stackuaf`). Remaining for the exact rusqlite-0128:
+the FFI inbound/outbound checks (I9, incl. `escaped_at` naming the
+registration site) and the real vendored `libsqlite3-sys` build. Scoped in
+STATUS.*
 
 ### Phase C — modes
 

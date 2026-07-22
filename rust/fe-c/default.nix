@@ -268,16 +268,18 @@ in {
         nu corpus/assert_false_positive.nu "$TMPDIR/fp.log" "$fp_exit"
       '';
 
-    # Stack scope hooks (B5, I8): with FEC_SCOPE_HOOKS on, build the
-    # stack-UAF reproducer (a stack pointer laundered past its frame, as the
-    # rusqlite-0128 closure does across FFI) and assert the stale deref
-    # aborts UseAfterScopeExit naming the dead stack scope.
+    # Stack scope hooks (B5, I8): build the stack-UAF reproducer (an
+    # inner-block stack local laundered past its scope, as the rusqlite-0128
+    # closure does across FFI) and assert the stale deref, later in the same
+    # frame, aborts UseAfterScopeExit naming the dead stack scope. Scope hooks
+    # are default-on (an escape analysis keeps them to laundered locals), so no
+    # FEC_SCOPE_HOOKS is needed.
     fe-c-corpus-stackuaf = pkgs:
       cargoCheck pkgs "corpus-stackuaf" ''
         cargo build -p fe-c-driver --offline --locked
         export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
-        export FEC_INSTRUMENT=1 FEC_SCOPE_HOOKS=1
+        export FEC_INSTRUMENT=1
         ( cd corpus/stack-uaf \
             && FEC_INSTRUMENT_ONLY=stack_uaf RUSTC="$drv" \
                CARGO_TARGET_DIR="$TMPDIR/t" cargo build --offline --locked )

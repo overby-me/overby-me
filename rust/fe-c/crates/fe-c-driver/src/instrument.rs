@@ -26,8 +26,8 @@ use rustc_index::IndexVec;
 use rustc_middle::mir::visit::{PlaceContext, Visitor};
 use rustc_middle::mir::{
     BasicBlock, BasicBlockData, BinOp, Body, CallSource, CastKind, Const as MirConst, ConstOperand,
-    Local, LocalDecl, Location, Operand, Place, RawPtrKind, Rvalue, SourceInfo, Statement,
-    StatementKind, Terminator, TerminatorKind, UnwindAction,
+    Local, LocalDecl, Location, Operand, Place, ProjectionElem, RawPtrKind, Rvalue, SourceInfo,
+    Statement, StatementKind, Terminator, TerminatorKind, UnwindAction,
 };
 use rustc_middle::ty::{self, Mutability, Ty, TyCtxt};
 use rustc_span::Spanned;
@@ -158,16 +158,15 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
     let roots = compute_roots(tcx, body);
     let mut injected = 0usize;
 
-    // Pass 0: stack scope hooks (I8), behind FEC_SCOPE_HOOKS. Register each
-    // address-taken local as a stack region and poison it at its lexical
-    // death point (drop glue / StorageDead, else frame teardown), so a pointer
-    // that escapes the scope (as the rusqlite-0128 closure does across FFI)
-    // resolves as a dead stack region. Opt-in for now: instrumenting *every*
-    // address-taken local is impractical without an escape analysis (most
-    // never leave the frame) — see STATUS.
-    if std::env::var_os("FEC_SCOPE_HOOKS").is_some() {
-        injected += instrument_scopes(tcx, body, fns);
-    }
+    // Pass 0: stack scope hooks (I8). Register each *escaping* address-taken
+    // local as a stack region and poison it at its lexical death point (drop
+    // glue / StorageDead, else frame teardown), so a pointer that escapes the
+    // scope (as the rusqlite-0128 closure does across FFI) resolves as a dead
+    // stack region. Default-on: the escape analysis (`escaping_locals`) keeps
+    // this to the locals whose address is laundered out of the frame, so a
+    // raw-pointer-heavy crate like hashbrown gets few or no hooks and neither
+    // times out nor false-aborts.
+    injected += instrument_scopes(tcx, body, fns);
 
     let basic_blocks = body.basic_blocks.as_mut();
     let local_decls = &mut body.local_decls;
@@ -364,7 +363,14 @@ fn cast_to_u8_ptr<'tcx>(
 /// NRVO return slot live for the whole frame) falls back to `Return`. Returns
 /// how many hooks were injected.
 fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns) -> usize {
-    let sites = address_taken_sites(body);
+    let escapes = escaping_locals(body);
+    if escapes.is_empty() {
+        return 0;
+    }
+    let sites: Vec<(Local, BasicBlock, usize)> = address_taken_sites(body)
+        .into_iter()
+        .filter(|&(l, _, _)| escapes.contains(&l))
+        .collect();
     if sites.is_empty() {
         return 0;
     }
@@ -557,6 +563,99 @@ fn drop_sites(
         }
     }
     sites
+}
+
+/// The address-taken locals whose address genuinely *escapes* the frame, and
+/// so are worth a scope hook. A forward taint tracks, for each pointer local,
+/// the stack locals whose address it may hold: seeded at address-of and
+/// propagated through pointer-preserving copies, casts and `offset`. A local
+/// escapes when a tainted pointer is **cast to an integer** — the laundering
+/// that carries a stack address out of the frame (into a `static`, a heap
+/// closure, or across FFI as the rusqlite-0128 closure does). A `&mut x`
+/// merely handed to a Rust method that keeps it in-frame (the hashbrown
+/// common case) never reaches an integer cast, so default-on scope hooks stay
+/// cheap and false-positive-free.
+fn escaping_locals(body: &Body<'_>) -> HashSet<Local> {
+    let mut taint: HashMap<Local, HashSet<Local>> = HashMap::new();
+    for bb in body.basic_blocks.iter() {
+        for stmt in &bb.statements {
+            if let StatementKind::Assign(boxed) = &stmt.kind {
+                let (dst, rv) = &**boxed;
+                if dst.projection.is_empty()
+                    && let Rvalue::Ref(_, _, p) | Rvalue::RawPtr(_, p) = rv
+                    && p.projection.is_empty()
+                {
+                    taint.entry(dst.local).or_default().insert(p.local);
+                }
+            }
+        }
+    }
+    if taint.is_empty() {
+        return HashSet::new();
+    }
+
+    // Propagate through pointer-preserving moves/casts/offsets to a fixpoint.
+    for _ in 0..8 {
+        let mut changed = false;
+        for bb in body.basic_blocks.iter() {
+            for stmt in &bb.statements {
+                if let StatementKind::Assign(boxed) = &stmt.kind {
+                    let (dst, rv) = &**boxed;
+                    if !dst.projection.is_empty() {
+                        continue;
+                    }
+                    let src = match rv {
+                        Rvalue::Use(op, _) => op.place(),
+                        Rvalue::Cast(_, op, ty)
+                            if matches!(ty.kind(), ty::RawPtr(..) | ty::Ref(..)) =>
+                        {
+                            op.place()
+                        }
+                        Rvalue::BinaryOp(BinOp::Offset, boxed) => boxed.0.place(),
+                        // Reborrow `&*base` / `&raw *base`: a new reference to
+                        // the same target, the form `&local as *const T`
+                        // lowers to. Preserves the address, so propagate taint.
+                        Rvalue::Ref(_, _, p) | Rvalue::RawPtr(_, p)
+                            if p.projection.len() == 1
+                                && matches!(p.projection[0], ProjectionElem::Deref) =>
+                        {
+                            Some(Place::from(p.local))
+                        }
+                        _ => None,
+                    };
+                    if let Some(src) = src
+                        && let Some(seed) = taint.get(&src.local).cloned()
+                    {
+                        let entry = taint.entry(dst.local).or_default();
+                        for l in seed {
+                            changed |= entry.insert(l);
+                        }
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // Sink: a pointer-to-integer cast launders the address out of the frame.
+    let mut escaping = HashSet::new();
+    for bb in body.basic_blocks.iter() {
+        for stmt in &bb.statements {
+            if let StatementKind::Assign(boxed) = &stmt.kind {
+                let (_, rv) = &**boxed;
+                if let Rvalue::Cast(_, op, ty) = rv
+                    && ty.is_integral()
+                    && let Some(p) = op.place()
+                    && let Some(seed) = taint.get(&p.local)
+                {
+                    escaping.extend(seed.iter().copied());
+                }
+            }
+        }
+    }
+    escaping
 }
 
 /// The first address-taking site `(local, block, statement_index)` for each
