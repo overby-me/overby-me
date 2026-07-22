@@ -227,6 +227,26 @@ mod inner {
             out
         }
 
+        /// Freeze the unit via the cgroup v2 freezer (like `systemctl freeze`).
+        fn freeze(&self) -> zbus::fdo::Result<()> {
+            invoke_command(
+                &self.run_info,
+                crate::control::Command::Freeze(self.unit_name.clone()),
+            )
+            .map_err(zbus::fdo::Error::Failed)?;
+            Ok(())
+        }
+
+        /// Thaw a previously frozen unit (like `systemctl thaw`).
+        fn thaw(&self) -> zbus::fdo::Result<()> {
+            invoke_command(
+                &self.run_info,
+                crate::control::Command::Thaw(self.unit_name.clone()),
+            )
+            .map_err(zbus::fdo::Error::Failed)?;
+            Ok(())
+        }
+
         /// When the unit last transitioned out of inactive (activation
         /// began), in microseconds since the Unix epoch.  `0` means never.
         #[zbus(property)]
