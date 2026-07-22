@@ -7052,6 +7052,55 @@ pub fn execute_command(
                 return Ok(serde_json::json!({ "cleaned": unit_name }));
             }
 
+            // Mount units keep their exec directories directly on MountConfig
+            // (they have no ExecConfig). Remove them per --what.
+            if let Specific::Mount(m) = &unit.specific {
+                let mc = &m.conf;
+                let what = what.as_deref();
+                let specs: [(&str, &Vec<String>, bool); 5] = [
+                    (
+                        "/etc",
+                        &mc.configuration_directory,
+                        matches!(what, Some("configuration") | Some("all")),
+                    ),
+                    (
+                        "/run",
+                        &mc.runtime_directory,
+                        matches!(what, None | Some("runtime") | Some("all")),
+                    ),
+                    (
+                        "/var/lib",
+                        &mc.state_directory,
+                        matches!(what, Some("state") | Some("all")),
+                    ),
+                    (
+                        "/var/cache",
+                        &mc.cache_directory,
+                        matches!(what, None | Some("cache") | Some("all")),
+                    ),
+                    (
+                        "/var/log",
+                        &mc.logs_directory,
+                        matches!(what, Some("logs") | Some("all")),
+                    ),
+                ];
+                let mut removed = Vec::new();
+                for (base, names, do_remove) in specs {
+                    if !do_remove {
+                        continue;
+                    }
+                    for name in names {
+                        let path = format!("{base}/{name}");
+                        if std::path::Path::new(&path).exists() {
+                            let _ = std::fs::remove_dir_all(&path);
+                            removed.push(path);
+                        }
+                    }
+                }
+                info!("clean {}: removed {:?}", unit_name, removed);
+                return Ok(serde_json::json!({ "cleaned": unit_name }));
+            }
+
             // Extract exec_config from the unit's specific config
             let exec_config = match &unit.specific {
                 Specific::Service(svc) => Some(&svc.conf.exec_config),

@@ -221,6 +221,15 @@ impl SocketState {
             });
         match open_res {
             Ok(()) => {
+                // Socket units bypass exec_helper, so create their exec
+                // directories (ConfigurationDirectory= etc.) here.
+                create_exec_directories([
+                    &conf.exec_config.configuration_directory,
+                    &conf.exec_config.runtime_directory,
+                    &conf.exec_config.state_directory,
+                    &conf.exec_config.cache_directory,
+                    &conf.exec_config.logs_directory,
+                ]);
                 let mut status = status.write_poisoned();
                 *status = UnitStatus::Started(StatusStarted::Running);
                 run_info.notify_eventfds();
@@ -242,6 +251,8 @@ impl SocketState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
     ) -> Result<(), UnitOperationError> {
+        // RuntimeDirectory= is dropped on stop, like services/mounts.
+        remove_runtime_directories(&conf.exec_config.runtime_directory);
         let close_result = self
             .sock
             .close_all(
@@ -1926,44 +1937,44 @@ impl Unit {
 /// stay in sync.
 const EXEC_DIR_BASES: [&str; 5] = ["/etc", "/run", "/var/lib", "/var/cache", "/var/log"];
 
-fn mount_exec_dir_lists(conf: &MountConfig) -> [&[String]; 5] {
-    [
-        &conf.configuration_directory,
-        &conf.runtime_directory,
-        &conf.state_directory,
-        &conf.cache_directory,
-        &conf.logs_directory,
-    ]
-}
-
-/// Create the `ConfigurationDirectory=`/`RuntimeDirectory=`/`StateDirectory=`/
-/// `CacheDirectory=`/`LogsDirectory=` directories for a mount unit under their
-/// base paths (/etc, /run, /var/lib, /var/cache, /var/log). Mount units run
-/// mount(2) directly and bypass exec_helper, so they don't get the exec-directory
-/// creation that services do — this mirrors it for the mount start path.
-fn create_mount_exec_directories(conf: &MountConfig) {
+/// Create exec directories (configuration/runtime/state/cache/logs, in that
+/// order) under their base paths (/etc, /run, /var/lib, /var/cache, /var/log).
+/// Shared by mount and socket units, which run their operation directly and
+/// bypass exec_helper, so they don't get the exec-directory creation that
+/// services do — this mirrors it for those start paths.
+fn create_exec_directories(dir_lists: [&[String]; 5]) {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-    for (base, names) in EXEC_DIR_BASES.iter().zip(mount_exec_dir_lists(conf)) {
+    for (base, names) in EXEC_DIR_BASES.iter().zip(dir_lists) {
         for name in names {
             let path = std::path::Path::new(base).join(name);
             if let Err(e) = std::fs::create_dir_all(&path) {
                 log::warn!("Failed to create exec directory {}: {}", path.display(), e);
                 continue;
             }
-            trace!("Created mount exec directory {}", path.display());
+            trace!("Created exec directory {}", path.display());
             #[cfg(unix)]
             let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
         }
     }
 }
 
-/// Remove a mount unit's `RuntimeDirectory=` directories (under /run) on stop,
+fn create_mount_exec_directories(conf: &MountConfig) {
+    create_exec_directories([
+        &conf.configuration_directory,
+        &conf.runtime_directory,
+        &conf.state_directory,
+        &conf.cache_directory,
+        &conf.logs_directory,
+    ]);
+}
+
+/// Remove a unit's `RuntimeDirectory=` directories (under /run) on stop,
 /// mirroring how services drop their runtime directories when they deactivate.
 /// Configuration/state/cache/logs directories persist across stop (only
-/// `systemctl clean` removes those).
-fn remove_mount_runtime_directories(conf: &MountConfig) {
-    for name in &conf.runtime_directory {
+/// `systemctl clean` removes those). Used by mount and socket units.
+fn remove_runtime_directories(runtime: &[String]) {
+    for name in runtime {
         let path = std::path::Path::new("/run").join(name);
         if path.exists()
             && let Err(e) = std::fs::remove_dir_all(&path)
@@ -2176,7 +2187,7 @@ fn deactivate_mount(
 ) -> Result<(), UnitOperationError> {
     // RuntimeDirectory= is dropped on stop (like services); configuration/
     // state/cache/logs directories persist until `systemctl clean`.
-    remove_mount_runtime_directories(conf);
+    remove_runtime_directories(&conf.runtime_directory);
     // If not currently mounted, just mark as stopped
     if !is_already_mounted(&conf.where_) {
         trace!(
