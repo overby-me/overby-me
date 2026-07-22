@@ -5,10 +5,9 @@
   };
   testTimeout = 600;
   patchScript = ''
-    # Skip systemd-run --user (user session not fully supported)
-    sed -i '/^systemd-run --user/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    # Also skip the journalctl --user-unit check that follows it
-    sed -i '/^journalctl -b -n 1 -r --user-unit/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
+    # (De-weakened: the systemd-run --user + journalctl --user-unit skip was
+    # removed to baseline the current-user user-manager + journalctl --user-unit
+    # path, which the user manager should now support.)
 
     # Skip journalctl -b <script> test (executable_is_script test).
     # In the NixOS VM the test script runs via the backdoor (virtconsole),
