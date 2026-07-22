@@ -33,11 +33,7 @@
     # at runtime the way boot services are. Next: read forever-print-hola.service
     # StandardOutput + trace rust-systemd's runtime stdout-to-journald stream
     # connection for non-boot services. Deep; re-skipped.
-    sed -i '/^systemctl start forever-print-hola/s/.*/echo SKIP # forever-print-hola/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^systemctl stop forever-print-hola/s/.*/echo SKIP # stop forever-print-hola/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^systemctl kill --signal=SIGKILL systemd-journald/s/.*/echo SKIP # SIGKILL journald/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^\[\[ ! -f "\/tmp\/i-lose-my-logs" \]\]/s/.*/echo SKIP # i-lose-my-logs check/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^rm -f \/tmp\/i-lose-my-logs/s/.*/echo SKIP # rm i-lose-my-logs/' TEST-04-JOURNAL.journal.sh
+    # (FDSTORE hunk de-weakened again for the JDPROBE journald kmsg diagnostic.)
 
     # Skip journalctl --follow tests (require running journald with working
     # stream reconnection)
