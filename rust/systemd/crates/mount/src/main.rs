@@ -443,6 +443,40 @@ fn generate_automount_unit(
     unit
 }
 
+/// Create ExecDirectory= directories requested via `-p` (ConfigurationDirectory=,
+/// RuntimeDirectory=, StateDirectory=, CacheDirectory=, LogsDirectory=) under
+/// their base paths. `systemd-mount` mounts directly, bypassing PID 1's
+/// activate_mount, so it creates these itself; PID 1's mount unit handling
+/// (with RuntimeDirectoryPreserve=) takes over on later stop/restart.
+fn create_exec_dirs_from_properties(properties: &[String]) {
+    let bases = [
+        ("ConfigurationDirectory", "/etc"),
+        ("RuntimeDirectory", "/run"),
+        ("StateDirectory", "/var/lib"),
+        ("CacheDirectory", "/var/cache"),
+        ("LogsDirectory", "/var/log"),
+    ];
+    for prop in properties {
+        let Some((key, val)) = prop.split_once('=') else {
+            continue;
+        };
+        let Some((_, base)) = bases.iter().find(|(k, _)| *k == key.trim()) else {
+            continue;
+        };
+        for name in val.split_whitespace() {
+            let path = std::path::Path::new(base).join(name);
+            if std::fs::create_dir_all(&path).is_ok() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ =
+                        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+                }
+            }
+        }
+    }
+}
+
 // ── Mount / Unmount operations ────────────────────────────────────────────
 
 /// Mount a filesystem using the `mount` command as a fallback.
@@ -868,6 +902,11 @@ fn main() {
                 eprintln!("Failed to mount: {}", e);
                 process::exit(1);
             }
+            // Direct mount bypasses PID 1's activate_mount, so create the
+            // ExecDirectory= dirs (ConfigurationDirectory=/RuntimeDirectory=/…)
+            // requested via -p here. PID 1 handles RuntimeDirectoryPreserve= on
+            // subsequent stop/restart of the fragment.
+            create_exec_dirs_from_properties(&cli.property);
         }
 
         println!("Mounted {} on {}.", what, where_);
