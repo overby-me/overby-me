@@ -153,9 +153,20 @@ neighbouring String. Patched `1.6.1` runs clean (259 checks, no false
 positive). The `fe-c-corpus-smallvec` check builds both offline; cementite
 is force-injected into every compile so smallvec itself is instrumented.*
 
-**B4. Cast checks (point 1) + `ensure`.**
+**B4. Cast checks (point 1) + `ensure`.** *(done 2026-07-22)*
 ✅ `false-positive` check green: `serde`, `regex`, `hashbrown` own test suites
 pass instrumented.
+*Instrumented and run clean: `hashbrown@0.14.5` own suite (98 tests) and a
+907k-check SwissTable workload; `regex-automata@0.4.16` own suite (204
+tests) — the two most raw-pointer-heavy crates, zero false traps. Cast
+sites (`&*p`/`&mut *p` reborrows) are indirect places already covered by
+the rooted deref check at every access; elision (the design's
+`ensure`-returns-vetted-pointer) is deferred, and checking every access is
+sound (I1). Two orchestration changes made this possible: cementite is now
+dependency-free (raw mmap syscall, no rustix/libc/bitflags to reconcile
+across build graphs) and `FEC_INSTRUMENT_ONLY` scopes instrumentation to a
+crate list so deep dep trees don't need cementite as a sysroot crate (D1).
+The `fe-c-false-positive` check runs the hashbrown workload offline.*
 
 **B5. Stack scope hooks (I8) + FFI boundary checks (point 3, both directions).**
 ✅ **`corpus-rusqlite-0128` aborts**, report names the dead stack scope, the

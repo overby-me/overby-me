@@ -10,8 +10,10 @@ license.workspace = true
 harness = false
 name = "root_resolve"
 
-[dependencies]
-rustix = { version = "1", default-features = false, features = ["mm", "std"] }
+# No runtime dependencies: cementite links into every instrumented binary,
+# so it must not drag in crates (rustix/libc/bitflags) whose versions can't
+# be reconciled across separate cargo build graphs. The metadata backend
+# uses a raw mmap syscall (src/sys.rs).
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = [

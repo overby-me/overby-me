@@ -33,6 +33,8 @@
       # The B3 corpus reproducer + its patched control.
       ./corpus/smallvec-0003/Cargo.lock
       ./corpus/smallvec-0003-control/Cargo.lock
+      # The B4 false-positive workload (hashbrown tree).
+      ./corpus/false-positive/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -241,6 +243,30 @@ in {
         echo "--- control (exit $control_exit) ---"; cat "$TMPDIR/control.log"
         nu corpus/assert_smallvec_0003.nu \
           "$TMPDIR/repro.log" "$repro_exit" "$TMPDIR/control.log" "$control_exit"
+      '';
+
+    # False-positive suite (B4): instrument hashbrown's SwissTable unsafe
+    # and hammer it under FecAlloc — legitimate in-bounds unsafe must never
+    # trap. (serde/regex/hashbrown full test suites also pass instrumented;
+    # see STATUS. hashbrown was chosen for the offline check as the most
+    # raw-pointer-heavy with a tractable dependency tree.)
+    fe-c-false-positive = pkgs:
+      cargoCheck pkgs "false-positive" ''
+        cargo build -p fe-c-driver -p cementite --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1
+        export FEC_CEMENTITE_RLIB="$CARGO_TARGET_DIR/debug/libcementite.rlib"
+        export FEC_CEMENTITE_DEPS="$CARGO_TARGET_DIR/debug/deps"
+        ( cd corpus/false-positive \
+            && FEC_INSTRUMENT_ONLY=hashbrown,fec_fp RUSTC="$drv" \
+               CARGO_TARGET_DIR="$TMPDIR/t" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/t/debug/fec-fp" >"$TMPDIR/fp.log" 2>&1
+        fp_exit=$?
+        set -e
+        cat "$TMPDIR/fp.log"
+        nu corpus/assert_false_positive.nu "$TMPDIR/fp.log" "$fp_exit"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the

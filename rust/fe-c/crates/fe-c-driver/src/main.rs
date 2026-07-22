@@ -63,8 +63,28 @@ fn main() {
     // unaffected; it uses a rustc_driver::Callbacks driver rather than the
     // read-only rustc_public one.
     if std::env::var_os("FEC_INSTRUMENT").is_some() {
-        inject_cementite(&mut args);
-        std::process::exit(instrument::run(&args));
+        // FEC_INSTRUMENT_ONLY scopes instrumentation to a comma-separated
+        // crate-name list (the crate under test), leaving its dependencies
+        // uninstrumented. Whole-process instrumentation (the default) works
+        // for shallow trees like smallvec, but injecting a cementite
+        // dependency into every crate of a deep tree (serde/regex) needs
+        // cementite as a sysroot crate (Task D1) to resolve at every level.
+        let instrument_this = match std::env::var("FEC_INSTRUMENT_ONLY") {
+            Ok(list) => {
+                let name = crate_name(&args);
+                list.split(',').any(|n| Some(n) == name.as_deref())
+            }
+            Err(_) => true,
+        };
+        if instrument_this {
+            inject_cementite(&mut args);
+            std::process::exit(instrument::run(&args));
+        }
+        // Not in scope: compile normally, no instrumentation, no cementite.
+        let status = std::process::Command::new(&real_rustc)
+            .args(&args[1..])
+            .status();
+        std::process::exit(status.ok().and_then(|s| s.code()).unwrap_or(1));
     }
 
     let run = rustc_public::run!(&args, census_callback);
@@ -106,10 +126,40 @@ fn inject_cementite(args: &mut Vec<String>) {
     }
     args.push("--extern".to_string());
     args.push(format!("force:cementite={rlib}"));
-    if let Ok(deps) = std::env::var("FEC_CEMENTITE_DEPS") {
+
+    // cementite's own dependency rlibs (rustix, libc, bitflags, …) are only
+    // needed to LINK the final binary. Adding them to -L for every rlib
+    // compile shadows the target crate's own copies of shared crates
+    // (E0519 on bitflags/libc). So expose them only when producing a
+    // binary or test harness.
+    if produces_binary(args)
+        && let Ok(deps) = std::env::var("FEC_CEMENTITE_DEPS")
+    {
         args.push("-L".to_string());
         args.push(format!("dependency={deps}"));
     }
+}
+
+/// Whether this rustc invocation produces a linked binary (a `bin` crate or
+/// a `--test` harness), as opposed to an intermediate rlib.
+fn produces_binary(args: &[String]) -> bool {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--test" {
+            return true;
+        }
+        let ct = if a == "--crate-type" {
+            it.next().map(String::as_str)
+        } else {
+            a.strip_prefix("--crate-type=")
+        };
+        if let Some(ct) = ct
+            && ct.split(',').any(|t| t == "bin")
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Extracts the `--crate-name` value from a rustc command line.
