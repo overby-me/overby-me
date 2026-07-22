@@ -89,9 +89,14 @@
     systemd-analyze dot --from-pattern="*.service" --to-pattern="*.target" >/dev/null
 
     : "systemd-analyze verify"
-    # default.target isn't materialized under /run/systemd/system in this VM,
-    # so tolerate the open failure (verify itself works, see condition --unit).
-    systemd-analyze verify /run/systemd/system/default.target 2>&1 || :
+    cat >/run/systemd/system/analyze-verify-test.service <<EOF
+    [Unit]
+    Description=analyze verify test
+    [Service]
+    ExecStart=/bin/true
+    EOF
+    systemd-analyze verify /run/systemd/system/analyze-verify-test.service
+    rm -f /run/systemd/system/analyze-verify-test.service
 
     : "systemd-analyze condition"
     systemd-analyze condition 'ConditionPathExists=/etc/os-release'
@@ -122,7 +127,7 @@
     systemd-analyze cat-config --tldr systemd/system.conf >/dev/null
 
     : "systemd-analyze security"
-    systemd-analyze security || :
+    systemd-analyze security
 
     : "systemd-analyze exit-status"
     systemd-analyze exit-status
