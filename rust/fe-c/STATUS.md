@@ -90,29 +90,32 @@ dropped.
 ## B5 — what's left for `corpus-rusqlite-0128`
 
 The **I8 mechanism is done and demonstrated** (`corpus/stack-uaf` →
-`UseAfterScopeExit`). The exact rusqlite corpus entry needs four more
-pieces, each a real chunk:
+`UseAfterScopeExit`), now at **lexical granularity**: `scope_exit` fires at a
+local's lexical death point — its `Drop { local }` terminator, else its
+`StorageDead(local)` — not just at `Return`. So the inner-block-then-callback
+shape (the borrow's target dies at a block's end while the read happens later
+in the *same* frame) is caught, not only use-after-frame-return. The earlier
+worry that "optimized MIR strips `StorageLive`/`Dead`" turned out not to
+block this: optimized MIR keeps **drop terminators** (semantically required),
+and the rusqlite local is a `String` (a `Drop` type), so its drop glue is a
+reliable lexical death signal — no pre-optimization MIR hook was needed. The
+exact rusqlite corpus entry needs three more pieces, each a real chunk:
 
-1. **Escape analysis.** Scope hooks are gated (`FEC_SCOPE_HOOKS`) because
-   instrumenting *every* address-taken local is impractical (hashbrown
-   times out registering/poisoning a stack region per call). Only locals
-   whose address genuinely escapes the frame (cast to int, stored to a
+1. **Escape analysis.** Scope hooks are still gated (`FEC_SCOPE_HOOKS`)
+   because instrumenting *every* address-taken local is impractical
+   (hashbrown times out registering/poisoning a stack region per call). Only
+   locals whose address genuinely escapes the frame (cast to int, stored to a
    static/heap, or passed to an FFI call) need hooks. Reuse the
    `compute_roots` provenance to trace escape operands back to an
    address-of; then default-on becomes affordable.
-2. **Lexical-scope granularity.** `rusqlite`'s `local` lives in an inner
-   block and the closure is invoked *later in the same function*, so
-   frame-granularity (poison at return) is too coarse. Lexical granularity
-   needs `StorageLive`/`StorageDead`, which **optimized MIR strips** —
-   hook `mir_drops_elaborated_and_const_checked` (pre-optimization) instead
-   of `optimized_mir`, or re-derive scopes from `body.var_debug_info`.
-3. **FFI inbound/outbound checks (point 3, I9).** `extern "C"` prologues
+2. **FFI inbound/outbound checks (point 3, I9).** `extern "C"` prologues
    validate safe-pointer params; outbound pointer args are marked escaped
    (`note_escape`). The `Violation` needs `escaped_at` so the report names
    the registration site (`create_scalar_function`), per trace F7.
-4. **The real C build.** Vendor `rusqlite@0.25.3` + `libsqlite3-sys`
-   (bundled). The A4 cc-harness already proved the mixed-language build
-   works; this is the first *corpus* entry to use it.
+3. **The real C build.** Vendor `rusqlite@0.25.3` + `libsqlite3-sys`
+   (bundled), with provenance flowing through the trampoline. The A4
+   cc-harness already proved the mixed-language build works; this is the
+   first *corpus* entry to use it.
 
 Also address-reuse soundness: a poisoned stack region that is not
 re-registered by the next frame can produce a stale resolve. `scope_enter`

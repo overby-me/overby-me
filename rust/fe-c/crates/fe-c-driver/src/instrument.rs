@@ -159,11 +159,12 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
     let mut injected = 0usize;
 
     // Pass 0: stack scope hooks (I8), behind FEC_SCOPE_HOOKS. Register each
-    // address-taken local as a stack region and poison it at frame teardown,
-    // so a pointer that escapes the scope (as the rusqlite-0128 closure does
-    // across FFI) resolves as a dead stack region. Opt-in for now:
-    // instrumenting *every* address-taken local is impractical without an
-    // escape analysis (most never leave the frame) — see STATUS.
+    // address-taken local as a stack region and poison it at its lexical
+    // death point (drop glue / StorageDead, else frame teardown), so a pointer
+    // that escapes the scope (as the rusqlite-0128 closure does across FFI)
+    // resolves as a dead stack region. Opt-in for now: instrumenting *every*
+    // address-taken local is impractical without an escape analysis (most
+    // never leave the frame) — see STATUS.
     if std::env::var_os("FEC_SCOPE_HOOKS").is_some() {
         injected += instrument_scopes(tcx, body, fns);
     }
@@ -350,38 +351,61 @@ fn cast_to_u8_ptr<'tcx>(
 
 // ---- stack scope hooks (I8) -----------------------------------------------
 
-/// Emits stack scope hooks (I8) at **frame granularity**: `scope_enter` just
-/// after a local's address is first taken, and `scope_exit` before every
-/// `Return` (frame teardown). Optimized MIR strips `StorageLive`/`Dead`, so
-/// lexical-scope granularity is not available here; frame granularity
-/// catches use-after-function-return (a pointer that escapes a frame and is
-/// dereferenced after it returns). Returns how many hooks were injected.
+/// Emits stack scope hooks (I8) at **lexical granularity**: `scope_enter`
+/// just after a local's address is first taken, and `scope_exit` at that
+/// local's lexical death point. The death point is, in order of preference:
+/// the local's `Drop { local }` terminator (a `Drop`-type local like the
+/// rusqlite `String` has no `StorageDead`, but its drop glue survives
+/// optimization); otherwise its `StorageDead(local)` statement. This matters
+/// for the rusqlite-0128 shape, where the borrow's target dies at an inner
+/// block's end but the callback fires *later in the same frame* — frame
+/// granularity (poison only at `Return`) would miss it. A local with neither
+/// death marker (an argument, a `Copy` local whose address escaped, or an
+/// NRVO return slot live for the whole frame) falls back to `Return`. Returns
+/// how many hooks were injected.
 fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns) -> usize {
     let sites = address_taken_sites(body);
     if sites.is_empty() {
         return 0;
     }
+    let escaping: HashSet<Local> = sites.iter().map(|&(l, _, _)| l).collect();
+    let dead = storage_dead_sites(body, &escaping);
+    let drops = drop_sites(body, &escaping);
     let typing_env = body.typing_env(tcx);
+
+    // Region sizes need `tcx.layout_of`; resolve them before the mutable
+    // borrow. A local whose layout does not resolve gets no enter (and so no
+    // exit either — an unregistered region is simply not checked).
+    let mut size_of: HashMap<Local, u64> = HashMap::new();
+    for &(local, _, _) in &sites {
+        let ty = body.local_decls[local].ty;
+        if let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty)) {
+            size_of.insert(local, layout.size.bytes());
+        }
+    }
+
     let basic_blocks = body.basic_blocks.as_mut();
     let local_decls = &mut body.local_decls;
     let mut injected = 0usize;
 
-    // scope_exit before every Return, for each escaping local (processed
-    // before enters, since enters below add blocks). One exit call per
-    // (return-block, local); chained through fresh blocks.
-    let return_blocks: Vec<BasicBlock> = basic_blocks
-        .indices()
-        .filter(|&b| matches!(basic_blocks[b].terminator().kind, TerminatorKind::Return))
-        .collect();
-    for rb in return_blocks {
-        for &(local, _, _) in &sites {
+    // Terminator exits: a `scope_exit` before each non-cleanup `Drop { local }`.
+    // A Drop-type local (the rusqlite `String`) carries no `StorageDead` in
+    // optimized MIR, but its drop glue *is* its lexical death point and
+    // survives optimization. Done first: it only rewrites terminators and
+    // pushes blocks, leaving the statement indices the mid-block pass relies
+    // on untouched.
+    for (&local, blocks) in &drops {
+        if !size_of.contains_key(&local) {
+            continue;
+        }
+        for &block in blocks {
             let ty = local_decls[local].ty;
-            let source_info = basic_blocks[rb].terminator().source_info;
+            let source_info = basic_blocks[block].terminator().source_info;
             inject_scope_before_return(
                 tcx,
                 basic_blocks,
                 local_decls,
-                rb,
+                block,
                 local,
                 ty,
                 fns.scope_exit,
@@ -392,38 +416,147 @@ fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFn
         }
     }
 
-    // scope_enter just after each address-taking statement. Reverse so
-    // splits do not disturb earlier indices.
-    let mut by_block: std::collections::BTreeMap<BasicBlock, Vec<(Local, usize)>> =
+    // Mid-block hooks: a `scope_enter` after each address-take and a lexical
+    // `scope_exit` before each `StorageDead` (for locals with no drop glue).
+    // Grouped by block and applied in descending statement order, so splitting
+    // the block at a higher index never disturbs a lower one we have yet to
+    // visit.
+    enum Hook {
+        Enter(u64),
+        Exit,
+    }
+    let mut mid: std::collections::BTreeMap<BasicBlock, Vec<(usize, Local, Hook)>> =
         std::collections::BTreeMap::new();
     for &(local, block, idx) in &sites {
-        by_block.entry(block).or_default().push((local, idx));
+        if let Some(&size) = size_of.get(&local) {
+            mid.entry(block)
+                .or_default()
+                .push((idx + 1, local, Hook::Enter(size)));
+        }
     }
-    for (block, mut entries) in by_block {
-        entries.sort_by_key(|&(_, idx)| std::cmp::Reverse(idx));
-        for (local, idx) in entries {
+    for (&local, locs) in &dead {
+        if !size_of.contains_key(&local) || drops.contains_key(&local) {
+            continue;
+        }
+        for &(block, idx) in locs {
+            mid.entry(block).or_default().push((idx, local, Hook::Exit));
+        }
+    }
+    for (block, mut hooks) in mid {
+        hooks.sort_by_key(|&(at, _, _)| std::cmp::Reverse(at));
+        for (at, local, hook) in hooks {
             let ty = local_decls[local].ty;
-            let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty)) else {
-                continue;
+            let bd = &basic_blocks[block];
+            let source_info = bd
+                .statements
+                .get(at)
+                .or_else(|| bd.statements.get(at.saturating_sub(1)))
+                .map(|s| s.source_info)
+                .unwrap_or_else(|| bd.terminator().source_info);
+            let (func, len) = match hook {
+                Hook::Enter(size) => (fns.scope_enter, Some(size)),
+                Hook::Exit => (fns.scope_exit, None),
             };
-            let size = layout.size.bytes();
-            let source_info = basic_blocks[block].statements[idx].source_info;
             inject_scope_call(
                 tcx,
                 basic_blocks,
                 local_decls,
                 block,
-                idx + 1,
+                at,
                 local,
                 ty,
-                fns.scope_enter,
-                Some(size),
+                func,
+                len,
                 source_info,
             );
             injected += 1;
         }
     }
+
+    // Frame-granularity fallback for locals with no lexical death point (no
+    // drop glue and no `StorageDead` — an argument, a `Copy` local whose
+    // address escaped, or an NRVO return slot live for the whole frame):
+    // poison before every `Return`, where `&raw const local` is still valid.
+    let frame_locals: Vec<Local> = escaping
+        .iter()
+        .copied()
+        .filter(|l| size_of.contains_key(l) && !dead.contains_key(l) && !drops.contains_key(l))
+        .collect();
+    if !frame_locals.is_empty() {
+        let return_blocks: Vec<BasicBlock> = basic_blocks
+            .indices()
+            .filter(|&b| matches!(basic_blocks[b].terminator().kind, TerminatorKind::Return))
+            .collect();
+        for rb in return_blocks {
+            for &local in &frame_locals {
+                let ty = local_decls[local].ty;
+                let source_info = basic_blocks[rb].terminator().source_info;
+                inject_scope_before_return(
+                    tcx,
+                    basic_blocks,
+                    local_decls,
+                    rb,
+                    local,
+                    ty,
+                    fns.scope_exit,
+                    None,
+                    source_info,
+                );
+                injected += 1;
+            }
+        }
+    }
+
     injected
+}
+
+/// The `StorageDead(local)` statement locations for each given local — the
+/// lexical end of that local's stack storage, where its scope region is
+/// poisoned. Optimized MIR retains these for address-escaping locals (the
+/// ones that must stay in memory rather than being promoted to SSA), which is
+/// what makes lexical-scope granularity available here.
+fn storage_dead_sites(
+    body: &Body<'_>,
+    locals: &HashSet<Local>,
+) -> std::collections::BTreeMap<Local, Vec<(BasicBlock, usize)>> {
+    let mut sites: std::collections::BTreeMap<Local, Vec<(BasicBlock, usize)>> =
+        std::collections::BTreeMap::new();
+    for block in body.basic_blocks.indices() {
+        for (i, stmt) in body.basic_blocks[block].statements.iter().enumerate() {
+            if let StatementKind::StorageDead(local) = stmt.kind
+                && locals.contains(&local)
+            {
+                sites.entry(local).or_default().push((block, i));
+            }
+        }
+    }
+    sites
+}
+
+/// The non-cleanup blocks that end in `Drop { local }` for each given local —
+/// the drop glue of a `Drop`-type local (the rusqlite `String`), which is its
+/// lexical death point and survives MIR optimization even when `StorageDead`
+/// does not. Cleanup (unwind-path) drops are skipped: the whole frame is
+/// unwinding there, and the injected call would carry the wrong unwind action.
+fn drop_sites(
+    body: &Body<'_>,
+    locals: &HashSet<Local>,
+) -> std::collections::BTreeMap<Local, Vec<BasicBlock>> {
+    let mut sites: std::collections::BTreeMap<Local, Vec<BasicBlock>> =
+        std::collections::BTreeMap::new();
+    for block in body.basic_blocks.indices() {
+        let bd = &body.basic_blocks[block];
+        if bd.is_cleanup {
+            continue;
+        }
+        if let TerminatorKind::Drop { place, .. } = &bd.terminator().kind
+            && place.projection.is_empty()
+            && locals.contains(&place.local)
+        {
+            sites.entry(place.local).or_default().push(block);
+        }
+    }
+    sites
 }
 
 /// The first address-taking site `(local, block, statement_index)` for each
