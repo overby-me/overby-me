@@ -1,12 +1,13 @@
 //! Runtime mount monitor.
 //!
-//! Watches `/proc/self/mountinfo` and synthesises an already-active `.mount`
-//! unit for every mount that exists in the kernel but has no unit yet (for
-//! example a filesystem mounted directly with `mount(8)` rather than by
-//! systemd), and marks a `.mount` unit inactive once its mount disappears.
+//! Watches `/proc/self/mountinfo` (and `/run/mount/utab` for userspace mount
+//! options) and synthesises an already-active `.mount` unit for every mount
+//! that exists in the kernel but has no unit yet (for example a filesystem
+//! mounted directly with `mount(8)` rather than by systemd), and marks a
+//! `.mount` unit inactive once its mount disappears.
 //!
-//! This mirrors systemd's `mount_load_proc_self_mountinfo` / `mount_setup_unit`
-//! and the `epoll(EPOLLPRI)` it keeps on `/proc/self/mountinfo`, so that
+//! Mirrors systemd's `mount_load_proc_self_mountinfo` / `mount_setup_unit` and
+//! the `epoll(EPOLLPRI)` it keeps on `/proc/self/mountinfo`, so that
 //! `systemctl is-active <path>.mount` reflects manual mounts. Required by
 //! TEST-10-MOUNT and TEST-60-MOUNT-RATELIMIT.
 
@@ -14,9 +15,11 @@ use crate::lock_ext::RwLockExt;
 use crate::runtime_info::ArcMutRuntimeInfo;
 use crate::units::status::{StatusStarted, StatusStopped, UnitStatus};
 use crate::units::{UnitId, UnitIdKind};
+use std::collections::HashMap;
 
-/// Decode the octal escapes (`\NNN`) the kernel uses in `/proc/self/mountinfo`
-/// for space (`\040`), tab (`\011`), newline (`\012`) and backslash (`\134`).
+/// Decode the octal escapes (`\NNN`) the kernel and libmount use in
+/// `/proc/self/mountinfo` and `/run/mount/utab` for space (`\040`), tab
+/// (`\011`), newline (`\012`) and backslash (`\134`).
 fn octal_unescape(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -63,26 +66,10 @@ fn parse_mountinfo() -> Vec<(String, String, String)> {
     mounts
 }
 
-/// Build a synthesised `.mount` unit describing a kernel mount. It carries no
-/// default dependencies (a manual mount is not part of systemd's ordering).
-fn build_synthesized_mount_unit(
-    name: &str,
-    what: &str,
-    where_: &str,
-    fstype: &str,
-) -> Result<crate::units::Unit, String> {
-    use crate::units::unit_parsing::{
-        ParsedCommonConfig, ParsedMountConfig, ParsedMountSection, ParsedUnitSection,
-    };
-
-    // Mount default dependencies (systemd's mount_add_default_dependencies).
-    // A device-backed local mount is ordered after local-fs-pre.target and its
-    // backing device; a network filesystem after remote-fs-pre.target +
-    // network.target. Both conflict with umount.target so they are torn down on
-    // shutdown. NOTE: the `_netdev` userspace option (which also makes a mount
-    // "remote") lives in /run/mount/utab, not /proc/self/mountinfo, and is not
-    // read yet, so a `_netdev` mount is still classified local for now.
-    let is_network = matches!(
+/// True for filesystem types that are inherently network filesystems, which get
+/// remote-fs ordering even without an explicit `_netdev`.
+fn fstype_is_network(fstype: &str) -> bool {
+    matches!(
         fstype,
         "nfs" | "nfs4"
             | "cifs"
@@ -97,7 +84,56 @@ fn build_synthesized_mount_unit(
             | "orangefs"
             | "lustre"
             | "9p"
-    );
+    )
+}
+
+/// Whether the mount at `target` carries the userspace `_netdev` option, read
+/// from `/run/mount/utab`. libmount writes one line per mount as space-separated
+/// `KEY=value` tokens, e.g. `ID=1 SRC=/dev/x TARGET=/mnt ROOT=/ OPTS=_netdev`.
+/// The `_netdev` option only lives here, never in `/proc/self/mountinfo`, and is
+/// written slightly after mountinfo — the periodic re-sync picks it up.
+fn target_has_netdev(target: &str) -> bool {
+    let content = match std::fs::read_to_string("/run/mount/utab") {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    for line in content.lines() {
+        let mut this_target: Option<String> = None;
+        let mut opts: Option<&str> = None;
+        for tok in line.split_whitespace() {
+            if let Some(v) = tok.strip_prefix("TARGET=") {
+                this_target = Some(octal_unescape(v));
+            } else if let Some(v) = tok.strip_prefix("OPTS=") {
+                opts = Some(v);
+            }
+        }
+        if this_target.as_deref() == Some(target) {
+            return opts
+                .map(|o| o.split(',').any(|f| f == "_netdev"))
+                .unwrap_or(false);
+        }
+    }
+    false
+}
+
+/// Build a synthesised `.mount` unit describing a kernel mount, with systemd's
+/// `mount_add_default_dependencies` ordering. `is_network` selects the
+/// remote-fs vs local-fs targets.
+fn build_synthesized_mount_unit(
+    name: &str,
+    what: &str,
+    where_: &str,
+    fstype: &str,
+    is_network: bool,
+) -> Result<crate::units::Unit, String> {
+    use crate::units::unit_parsing::{
+        ParsedCommonConfig, ParsedMountConfig, ParsedMountSection, ParsedUnitSection,
+    };
+
+    // A device-backed local mount is ordered after local-fs-pre.target and its
+    // backing device; a network filesystem after remote-fs-pre.target +
+    // network.target. Both conflict with umount.target so they are torn down on
+    // shutdown.
     let mut after: Vec<String> = Vec::new();
     let mut wants: Vec<String> = Vec::new();
     let mut before: Vec<String> = vec!["umount.target".to_owned()];
@@ -151,79 +187,107 @@ fn build_synthesized_mount_unit(
     crate::units::from_parsed_config::unit_from_parsed_mount(conf)
 }
 
-/// Synchronise the unit table with `/proc/self/mountinfo`: create + activate a
-/// `.mount` unit for every mount without one, mark existing mount units active,
-/// and mark mount units inactive once their mount is gone.
-pub fn sync_mount_units(run_info: &ArcMutRuntimeInfo) {
-    let mounts = parse_mountinfo();
-
-    let mut current: std::collections::HashMap<String, (String, String, String)> =
-        std::collections::HashMap::new();
-    for (mountpoint, source, fstype) in mounts {
+/// Synchronise the unit table with `/proc/self/mountinfo` + `/run/mount/utab`.
+/// `synthesized` maps the names of units this monitor created to their last
+/// `is_network` classification, so a mount whose userspace options change (e.g.
+/// `_netdev` appears in utab after the kernel mount) is rebuilt with the right
+/// ordering.
+pub fn sync_mount_units(run_info: &ArcMutRuntimeInfo, synthesized: &mut HashMap<String, bool>) {
+    // name -> (mountpoint, source, fstype, is_network)
+    let mut current: HashMap<String, (String, String, String, bool)> = HashMap::new();
+    for (mountpoint, source, fstype) in parse_mountinfo() {
         let name = crate::units::unit_parsing::path_to_mount_unit_name(&mountpoint);
-        current.insert(name, (mountpoint, source, fstype));
+        let is_network = fstype_is_network(&fstype) || target_has_netdev(&mountpoint);
+        current.insert(name, (mountpoint, source, fstype, is_network));
     }
 
     let mut ri = run_info.write_poisoned();
 
-    // 1. Every current mount should have an active `.mount` unit.
-    for (name, (mountpoint, source, fstype)) in &current {
+    for (name, (mountpoint, source, fstype, is_network)) in &current {
         let id = UnitId {
             kind: UnitIdKind::Mount,
             name: name.clone(),
         };
-        if let Some(u) = ri.unit_table.get(&id) {
-            // Existing (fstab / unit-file / already-synthesised) unit: reflect
-            // that the mount is present.
-            let mut status = u.common.status.write_poisoned();
-            if !matches!(&*status, UnitStatus::Started(_)) {
-                *status = UnitStatus::Started(StatusStarted::Running);
+        let prev_class = synthesized.get(name).copied();
+
+        if ri.unit_table.contains_key(&id) {
+            match prev_class {
+                // Ours, and the classification is unchanged: just keep active.
+                Some(c) if c == *is_network => {
+                    if let Some(u) = ri.unit_table.get(&id) {
+                        let mut st = u.common.status.write_poisoned();
+                        if !matches!(&*st, UnitStatus::Started(_)) {
+                            *st = UnitStatus::Started(StatusStarted::Running);
+                        }
+                    }
+                    continue;
+                }
+                // Ours, but the classification changed (e.g. _netdev appeared):
+                // drop the old unit and rebuild below with the new ordering.
+                Some(_) => {
+                    ri.unit_table.remove(&id);
+                }
+                // A static (fstab / unit-file) mount unit: leave its deps alone,
+                // only reflect that the mount is present.
+                None => {
+                    if let Some(u) = ri.unit_table.get(&id) {
+                        let mut st = u.common.status.write_poisoned();
+                        if !matches!(&*st, UnitStatus::Started(_)) {
+                            *st = UnitStatus::Started(StatusStarted::Running);
+                        }
+                    }
+                    continue;
+                }
             }
-            continue;
         }
-        match build_synthesized_mount_unit(name, source, mountpoint, fstype) {
+
+        match build_synthesized_mount_unit(name, source, mountpoint, fstype, *is_network) {
             Ok(unit) => {
                 crate::units::insert_new_unit_lenient(unit, &mut ri);
                 if let Some(u) = ri.unit_table.get(&id) {
-                    *u.common.status.write_poisoned() =
-                        UnitStatus::Started(StatusStarted::Running);
+                    *u.common.status.write_poisoned() = UnitStatus::Started(StatusStarted::Running);
                 }
+                synthesized.insert(name.clone(), *is_network);
             }
             Err(e) => log::warn!("mount-monitor: failed to synthesise {name}: {e}"),
         }
     }
 
-    // 2. Mount units that are active but whose mount is gone -> inactive.
-    let stale: Vec<UnitId> = ri
-        .unit_table
-        .iter()
-        .filter(|(id, u)| {
-            id.kind == UnitIdKind::Mount
-                && !current.contains_key(&id.name)
-                && matches!(&*u.common.status.read_poisoned(), UnitStatus::Started(_))
-        })
-        .map(|(id, _)| id.clone())
+    // Remove synthesised units whose mount has gone away (unmounted).
+    let gone: Vec<String> = synthesized
+        .keys()
+        .filter(|n| !current.contains_key(*n))
+        .cloned()
         .collect();
-    for id in stale {
+    for name in gone {
+        let id = UnitId {
+            kind: UnitIdKind::Mount,
+            name: name.clone(),
+        };
         if let Some(u) = ri.unit_table.get(&id) {
             *u.common.status.write_poisoned() =
                 UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
         }
+        ri.unit_table.remove(&id);
+        synthesized.remove(&name);
     }
 }
 
 /// Start the `/proc/self/mountinfo` monitor thread. Does an initial sync, then
 /// blocks in `poll(POLLPRI|POLLERR)` on the mountinfo fd (which the kernel wakes
-/// on any mount-table change), re-syncing on each change. A short timeout also
-/// re-syncs periodically as a safety net.
+/// on any mount-table change), re-syncing on each change. A 1s timeout also
+/// re-syncs periodically, which additionally picks up delayed `/run/mount/utab`
+/// updates (e.g. userspace `_netdev`).
 pub fn start_mount_monitor_thread(run_info: ArcMutRuntimeInfo) {
     std::thread::spawn(move || {
         use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
         use std::io::{Read, Seek, SeekFrom};
         use std::os::fd::AsRawFd;
 
+        let mut synthesized: HashMap<String, bool> = HashMap::new();
+
         // Initial sync so mounts already present at start-up get their units.
-        sync_mount_units(&run_info);
+        sync_mount_units(&run_info, &mut synthesized);
 
         let mut file = match std::fs::File::open("/proc/self/mountinfo") {
             Ok(f) => f,
@@ -239,7 +303,6 @@ pub fn start_mount_monitor_thread(run_info: ArcMutRuntimeInfo) {
                 unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) },
                 PollFlags::POLLPRI | PollFlags::POLLERR,
             )];
-            // 1s safety timeout in case a change is ever missed.
             match poll(&mut fds, PollTimeout::try_from(1000).unwrap_or(PollTimeout::ZERO)) {
                 Ok(_) => {}
                 Err(nix::errno::Errno::EINTR) => continue,
@@ -253,7 +316,7 @@ pub fn start_mount_monitor_thread(run_info: ArcMutRuntimeInfo) {
             let _ = file.seek(SeekFrom::Start(0));
             scratch.clear();
             let _ = file.read_to_end(&mut scratch);
-            sync_mount_units(&run_info);
+            sync_mount_units(&run_info, &mut synthesized);
         }
     });
 }
