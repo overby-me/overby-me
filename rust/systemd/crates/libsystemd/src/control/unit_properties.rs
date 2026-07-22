@@ -234,6 +234,15 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
             insert(&mut props, "SubState", "plugged");
         }
 
+        // Mount units report `mounted` when active (not the default `running`).
+        // TEST-60-MOUNT-RATELIMIT.testcase_issue_20329 asserts `SubState=mounted`
+        // after `systemctl start <path>.mount`.
+        if matches!(&unit.specific, Specific::Mount(_))
+            && matches!(&*status, UnitStatus::Started(_))
+        {
+            insert(&mut props, "SubState", "mounted");
+        }
+
         // Socket units report `listening` when bound and idle, and `running`
         // while one or more accepted connections are being serviced.  The
         // generic mapping reports `running` for any Started unit; distinguish
