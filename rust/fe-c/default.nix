@@ -49,6 +49,8 @@
       ./corpus/rusqlite-0128/Cargo.lock
       # The real RUSTSEC-2021-0130 corpus: lru 0.6.6 (use-after-free).
       ./corpus/lru-0130/Cargo.lock
+      # The point-1 raw->safe cast OOB reproducer (no third-party deps).
+      ./corpus/cast-oob/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -450,6 +452,38 @@ in {
         echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
         echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
         nu corpus/assert_lru_0130.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
+      '';
+
+    # Raw->safe cast ensure (point 1, §3.1): a raw pointer past the end of a
+    # Vec buffer is cast to a safe `&u64`. The cast ensure resolves the
+    # derivation root and validates the referent's extent, aborting OutOfBounds
+    # in BOTH modes (case elides the later derefs; through's deref check
+    # resolves the off-the-end faulting address, so it too relies on the cast
+    # ensure). The spatial-at-mint check that makes case-mode elision sound.
+    fe-c-cast-oob = pkgs:
+      cargoCheck pkgs "cast-oob" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=cast_oob
+
+        ( cd corpus/cast-oob \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/cast-oob" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        ( cd corpus/cast-oob \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/cast-oob" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_cast_oob.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Differential gate (C3, I4): `through` is the oracle. Build three

@@ -53,13 +53,21 @@ exhaustive): T2 shadow-slot coherence (the at-rest cap layout that replaces the
 table lookup), `strict` unknown-provenance (needs full cap propagation first,
 or it false-positives on foreign statics), and interprocedural + at-rest
 capability propagation. For `case`: C2's exact report (name the `pop` free site
-and `iter()` reborrow site) and C3 (`case` + the `differential` gate against
-`through`).
+and `iter()` reborrow site).
 
-All 16 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+**Instrumentation points landed.** point 0 (raw deref), point 1 (raw→safe cast
+`ensure` — `corpus/cast-oob` aborts OutOfBounds in both modes, the spatial
+check that makes `case` elision sound), point 4 (dealloc-reachable re-check,
+`case`), point 5 (stack scope hooks, I8), and I9 outbound escape are all in.
+The `differential` gate (C3) is wired and passing (`fe-c-differential`). Not
+yet: point 2 (`through` covers loaded pointers via safe-deref checking;
+`case`'s "load from memory" variant is subsumed by point 1 for now), point 3a
+(FFI inbound prologue), and the `through` performance layer (T2 shadow slots).
+
+All 18 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
 `false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
-`through-safe-ref`, `rusqlite-0128`, `lru-0130`.
+`through-safe-ref`, `rusqlite-0128`, `lru-0130`, `cast-oob`, `differential`.
 
 ## Protocol
 

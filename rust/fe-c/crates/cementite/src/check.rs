@@ -156,6 +156,45 @@ pub extern "C" fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u
     }
 }
 
+/// Raw→safe cast check (instrumentation point 1, trace §3.1 `ensure`). The MIR
+/// pass injects this where a raw pointer becomes a safe reference (`&*p`,
+/// `p as &T`), validating that the resulting reference's `[fault, fault+size)`
+/// extent lies within a **live** allocation resolved from the derivation root
+/// (I10). This is what makes `case`-mode elision sound: `case` elides the
+/// reference's later dereferences, so the reference must be proven in-bounds
+/// and live *once*, at the cast. `size` is the referent's size in bytes.
+///
+/// # Safety
+///
+/// Neither pointer is dereferenced; both are only inspected.
+#[unsafe(no_mangle)]
+pub extern "C" fn __fec_ensure(fault: *const u8, root: *const u8, size: usize) {
+    if !REPORTER_REGISTERED.swap(true, Ordering::Relaxed) {
+        #[cfg(not(miri))]
+        // SAFETY: `report` is a valid `extern "C" fn()`.
+        unsafe {
+            atexit(report)
+        };
+    }
+    DEREF_CHECKS.fetch_add(1, Ordering::Relaxed);
+
+    if fault.is_null() {
+        report_null_and_abort();
+    }
+    if let Some(cap) = table::lookup(root as usize) {
+        let f = fault as usize;
+        let end = f.saturating_add(size);
+        // Spatial: the whole referent must lie inside the allocation.
+        if f < cap.base || end > cap.base + cap.len {
+            report_oob_and_abort(f, cap.base, cap.len, cap.id.raw());
+        }
+        // Temporal: the allocation must be live at the cast.
+        if !table::is_live(cap.id) {
+            report_uaf_and_abort(f, cap.base, cap.id.raw(), cap.flags, cap.site);
+        }
+    }
+}
+
 /// Stack scope entry (I8). The MIR pass emits this at scope entry for a
 /// local whose address escapes, registering `[base, base+len)` as a live
 /// stack region so a later access through an escaped pointer can be checked

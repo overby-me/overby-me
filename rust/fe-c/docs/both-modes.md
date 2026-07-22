@@ -106,6 +106,7 @@ relationship, exactly as the tables predict:
 | ---------- | --- | --------- | ------ | --- |
 | `closure-escape` | raw-pointer stack UAF | abort | abort | raw deref, checked in both (point 0) |
 | `smallvec-0003` | heap OOB | abort | abort | write-intrinsic / raw deref, both |
+| `cast-oob` | raw→safe cast OOB | abort | abort | the cast ensure (point 1), both modes |
 | `lru-0130` | heap use-after-free | abort | abort | `case` via the dealloc-reachable re-check (point 4) |
 | `through-safe-ref` | safe-ref stack UAF | abort | **elide** | the bolded row: `case` elides safe-pointer derefs |
 | `rusqlite-0128` | safe-ref stack UAF (real CVE) | abort | **elide** | same elision |

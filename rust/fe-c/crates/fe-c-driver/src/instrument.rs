@@ -72,6 +72,7 @@ fn inject_fec_decls(psess: &rustc_session::parse::ParseSess, krate: &mut rustc_a
     const DECLS: &str = "unsafe extern \"C\" {\n\
         fn __fec_check_deref_rooted(fault: *const u8, root: *const u8);\n\
         fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u8);\n\
+        fn __fec_ensure(fault: *const u8, root: *const u8, size: usize);\n\
         fn __fec_scope_enter(base: *const u8, len: usize, site: usize);\n\
         fn __fec_scope_exit(base: *const u8);\n\
     }\n";
@@ -121,6 +122,8 @@ struct FecFns {
     check: DefId,
     /// `__fec_check_dealloc_reachable(fault, root)` — case-mode re-check.
     dealloc_reachable: DefId,
+    /// `__fec_ensure(fault, root, size)` — raw→safe cast check (point 1).
+    ensure: DefId,
     /// `__fec_scope_enter(base, len, site)`.
     scope_enter: DefId,
     /// `__fec_scope_exit(base)`.
@@ -134,6 +137,7 @@ struct FecFns {
 fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
     let mut check = None;
     let mut dealloc_reachable = None;
+    let mut ensure = None;
     let mut scope_enter = None;
     let mut scope_exit = None;
     for id in tcx.hir_crate_items(()).foreign_items() {
@@ -141,6 +145,7 @@ fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
         match tcx.item_name(def_id).as_str() {
             "__fec_check_deref_rooted" => check = Some(def_id),
             "__fec_check_dealloc_reachable" => dealloc_reachable = Some(def_id),
+            "__fec_ensure" => ensure = Some(def_id),
             "__fec_scope_enter" => scope_enter = Some(def_id),
             "__fec_scope_exit" => scope_exit = Some(def_id),
             _ => {}
@@ -149,6 +154,7 @@ fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
     Some(FecFns {
         check: check?,
         dealloc_reachable: dealloc_reachable?,
+        ensure: ensure?,
         scope_enter: scope_enter?,
         scope_exit: scope_exit?,
     })
@@ -192,6 +198,15 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
     // raw-pointer-heavy crate like hashbrown gets few or no hooks and neither
     // times out nor false-aborts.
     injected += instrument_scopes(tcx, body, fns);
+
+    // Pass 0.5 (both modes): raw->safe cast ensures (point 1, §3.1). Validate a
+    // `&*p` reference's extent is in-bounds and live *at the cast*, resolving
+    // from the raw pointer's derivation root (I10). This is what lets `case`
+    // soundly elide the reference's later dereferences; `through` needs it too,
+    // because the reborrow's own local is a reference (not tracked by
+    // `compute_roots`), so the later deref check would resolve the faulting
+    // address — off the end for an OOB cast — and find nothing.
+    injected += instrument_cast_ensures(tcx, body, &roots, fns.ensure);
 
     let basic_blocks = body.basic_blocks.as_mut();
     let local_decls = &mut body.local_decls;
@@ -386,6 +401,92 @@ fn cast_to_u8_ptr<'tcx>(
         ))),
     ));
     tmp
+}
+
+/// Injects `__fec_ensure(ref_ptr, root, size)` before every `&*p` reborrow of a
+/// raw pointer — a raw->safe cast (point 1, §3.1). Only `_ref = &*raw` (a
+/// single `Deref` of a raw-pointer local, no further projection) is handled;
+/// field reborrows are left to the deref checks. `size` is the referent's
+/// layout size. Returns how many ensures were injected.
+fn instrument_cast_ensures<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    body: &mut Body<'tcx>,
+    roots: &HashMap<Local, Local>,
+    ensure_fn: DefId,
+) -> usize {
+    let typing_env = body.typing_env(tcx);
+    let basic_blocks = body.basic_blocks.as_mut();
+    let local_decls = &mut body.local_decls;
+    let mut injected = 0usize;
+
+    for block in basic_blocks.indices().rev() {
+        for idx in (0..basic_blocks[block].statements.len()).rev() {
+            // Read the cast site (immutable) before splitting/injecting.
+            let Some((raw, size, source_info)) = ({
+                let stmt = &basic_blocks[block].statements[idx];
+                if let StatementKind::Assign(boxed) = &stmt.kind
+                    && let Rvalue::Ref(_, _, place) = &boxed.1
+                    && place.projection.len() == 1
+                    && matches!(place.projection[0], ProjectionElem::Deref)
+                    && is_raw_ptr_local(local_decls, place.local)
+                    && let Ok(layout) =
+                        tcx.layout_of(typing_env.as_query_input(place.ty(local_decls, tcx).ty))
+                {
+                    Some((place.local, layout.size.bytes(), stmt.source_info))
+                } else {
+                    None
+                }
+            }) else {
+                continue;
+            };
+
+            let root = roots.get(&raw).copied().unwrap_or(raw);
+            let new_block = split_block(
+                basic_blocks,
+                Location {
+                    block,
+                    statement_index: idx,
+                },
+            );
+            let bd = &mut basic_blocks[block];
+            let u8_ptr = Ty::new_imm_ptr(tcx, tcx.types.u8);
+            let fault_arg = cast_to_u8_ptr(local_decls, bd, raw, u8_ptr, source_info);
+            let root_arg = cast_to_u8_ptr(local_decls, bd, root, u8_ptr, source_info);
+            let ret = local_decls.push(LocalDecl::new(tcx.types.unit, source_info.span));
+            bd.terminator = Some(Terminator {
+                source_info,
+                kind: TerminatorKind::Call {
+                    func: Operand::function_handle(tcx, ensure_fn, [], source_info.span),
+                    args: Box::new([
+                        Spanned {
+                            node: Operand::Move(Place::from(fault_arg)),
+                            span: source_info.span,
+                        },
+                        Spanned {
+                            node: Operand::Move(Place::from(root_arg)),
+                            span: source_info.span,
+                        },
+                        Spanned {
+                            node: Operand::Constant(Box::new(ConstOperand {
+                                span: source_info.span,
+                                user_ty: None,
+                                const_: MirConst::from_usize(tcx, size),
+                            })),
+                            span: source_info.span,
+                        },
+                    ]),
+                    destination: Place::from(ret),
+                    target: Some(new_block),
+                    unwind: UnwindAction::Unreachable,
+                    call_source: CallSource::Misc,
+                    fn_span: source_info.span,
+                },
+                attributes: ThinVec::new(),
+            });
+            injected += 1;
+        }
+    }
+    injected
 }
 
 // ---- stack scope hooks (I8) -----------------------------------------------

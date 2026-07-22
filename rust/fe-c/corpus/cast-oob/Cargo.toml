@@ -1,0 +1,21 @@
+# corpus-cast-oob (point 1 / trace §3.1): a raw pointer past the end of an
+# allocation is cast to a safe reference. The raw->safe cast ensure resolves
+# the derivation root and validates the referent's extent, aborting
+# OutOfBounds in both modes. Its own workspace. cementite is a path dependency
+# (this leaf binary installs FecAlloc, which tracks the Vec buffer); the
+# injected checks are symbol-level (A4b / I11). The fe-c-cast-oob check builds
+# it in both modes and asserts both abort OutOfBounds.
+[workspace]
+
+[package]
+name = "cast-oob"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }
+
+[[bin]]
+name = "cast-oob"
+path = "src/main.rs"
