@@ -464,10 +464,6 @@ fn handle_received_fds_impl(
 
     if fdstore {
         let max_fds = file_descriptor_store_max;
-        crate::entrypoints::kmsg(&format!(
-            "FDPROBE {name}: FDSTORE=1 max={max_fds} nfds={} label={fd_label}",
-            received_fds.len()
-        ));
 
         if max_fds == 0 {
             trace!(
