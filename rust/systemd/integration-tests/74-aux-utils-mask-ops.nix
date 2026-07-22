@@ -21,7 +21,7 @@
     systemctl daemon-reload
     systemctl mask "$UNIT.service"
     STATE="$(systemctl is-enabled "$UNIT.service" 2>&1 || true)"
-    [[ "$STATE" == "masked" || "$STATE" == *"masked"* ]]
+    [[ "$STATE" == "masked" ]]
     systemctl unmask "$UNIT.service"
     rm -f "/run/systemd/system/$UNIT.service"
     systemctl daemon-reload
