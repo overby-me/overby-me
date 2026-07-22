@@ -363,7 +363,7 @@ fn cast_to_u8_ptr<'tcx>(
 /// NRVO return slot live for the whole frame) falls back to `Return`. Returns
 /// how many hooks were injected.
 fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns) -> usize {
-    let escapes = escaping_locals(body);
+    let escapes = escaping_locals(tcx, body);
     if escapes.is_empty() {
         return 0;
     }
@@ -568,14 +568,15 @@ fn drop_sites(
 /// The address-taken locals whose address genuinely *escapes* the frame, and
 /// so are worth a scope hook. A forward taint tracks, for each pointer local,
 /// the stack locals whose address it may hold: seeded at address-of and
-/// propagated through pointer-preserving copies, casts and `offset`. A local
-/// escapes when a tainted pointer is **cast to an integer** — the laundering
-/// that carries a stack address out of the frame (into a `static`, a heap
-/// closure, or across FFI as the rusqlite-0128 closure does). A `&mut x`
-/// merely handed to a Rust method that keeps it in-frame (the hashbrown
-/// common case) never reaches an integer cast, so default-on scope hooks stay
+/// propagated through pointer-preserving copies, casts, reborrows and
+/// `offset`. A local escapes when a tainted pointer reaches an escape sink:
+/// a **cast to an integer** (laundering a stack address into a `static` or a
+/// heap closure), or a **pointer argument to a foreign `extern "C"` call**
+/// (handing it straight out to C, as the rusqlite-0128 closure box is — I9 /
+/// trace F6). A `&mut x` merely handed to a Rust method that keeps it in-frame
+/// (the hashbrown common case) reaches neither, so default-on scope hooks stay
 /// cheap and false-positive-free.
-fn escaping_locals(body: &Body<'_>) -> HashSet<Local> {
+fn escaping_locals<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashSet<Local> {
     let mut taint: HashMap<Local, HashSet<Local>> = HashMap::new();
     for bb in body.basic_blocks.iter() {
         for stmt in &bb.statements {
@@ -639,15 +640,28 @@ fn escaping_locals(body: &Body<'_>) -> HashSet<Local> {
         }
     }
 
-    // Sink: a pointer-to-integer cast launders the address out of the frame.
     let mut escaping = HashSet::new();
     for bb in body.basic_blocks.iter() {
+        // Sink: a pointer-to-integer cast launders the address out of frame.
         for stmt in &bb.statements {
             if let StatementKind::Assign(boxed) = &stmt.kind {
                 let (_, rv) = &**boxed;
                 if let Rvalue::Cast(_, op, ty) = rv
                     && ty.is_integral()
                     && let Some(p) = op.place()
+                    && let Some(seed) = taint.get(&p.local)
+                {
+                    escaping.extend(seed.iter().copied());
+                }
+            }
+        }
+        // Sink: a pointer argument to a foreign `extern "C"` call — the
+        // outbound FFI escape (I9 / trace F6) the rusqlite closure box takes.
+        if let TerminatorKind::Call { func, args, .. } = &bb.terminator().kind
+            && is_foreign_call(tcx, &body.local_decls, func)
+        {
+            for arg in args.iter() {
+                if let Some(p) = arg.node.place()
                     && let Some(seed) = taint.get(&p.local)
                 {
                     escaping.extend(seed.iter().copied());
@@ -937,6 +951,21 @@ fn callee_name<'tcx>(
     match func.ty(decls, tcx).kind() {
         ty::FnDef(def_id, _) => Some(tcx.item_name(*def_id).to_string()),
         _ => None,
+    }
+}
+
+/// Whether a direct call targets a foreign (`extern "C"`) function — an
+/// outbound FFI edge where a pointer argument leaves Rust's control (I9 /
+/// trace F6). Indirect calls through a function pointer (the shape C uses to
+/// re-enter a Rust trampoline) are not foreign items and are not matched here.
+fn is_foreign_call<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    decls: &IndexVec<Local, LocalDecl<'tcx>>,
+    func: &Operand<'tcx>,
+) -> bool {
+    match func.ty(decls, tcx).kind() {
+        ty::FnDef(def_id, _) => tcx.is_foreign_item(*def_id),
+        _ => false,
     }
 }
 

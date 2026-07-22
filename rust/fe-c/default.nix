@@ -37,6 +37,8 @@
       ./corpus/false-positive/Cargo.lock
       # The B5 stack-UAF reproducer (no third-party deps).
       ./corpus/stack-uaf/Cargo.lock
+      # The B5 / I9 cross-FFI escape reproducer (no third-party deps).
+      ./corpus/ffi-escape/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -289,6 +291,29 @@ in {
         set -e
         cat "$TMPDIR/su.log"
         nu corpus/assert_stack_uaf.nu "$TMPDIR/su.log" "$su_exit"
+      '';
+
+    # Cross-FFI escape (B5, I9 / trace F6): build the ffi-escape reproducer
+    # (a stack borrow handed out to a genuinely C-compiled harness, the frame
+    # returned, then C re-enters Rust through a trampoline and dereferences
+    # the dead local) and assert it aborts UseAfterScopeExit naming the dead
+    # stack scope. The escape analysis recognises the outbound extern-C
+    # pointer argument; the C harness itself is not instrumented (F8).
+    fe-c-ffi-escape = pkgs:
+      cargoCheck pkgs "ffi-escape" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1
+        ( cd corpus/ffi-escape \
+            && FEC_INSTRUMENT_ONLY=ffi_escape RUSTC="$drv" \
+               CARGO_TARGET_DIR="$TMPDIR/t" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/t/debug/ffi-escape" >"$TMPDIR/fe.log" 2>&1
+        fe_exit=$?
+        set -e
+        cat "$TMPDIR/fe.log"
+        nu corpus/assert_ffi_escape.nu "$TMPDIR/fe.log" "$fe_exit"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the
