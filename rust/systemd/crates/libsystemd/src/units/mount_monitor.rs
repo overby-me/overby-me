@@ -75,9 +75,58 @@ fn build_synthesized_mount_unit(
         ParsedCommonConfig, ParsedMountConfig, ParsedMountSection, ParsedUnitSection,
     };
 
+    // Mount default dependencies (systemd's mount_add_default_dependencies).
+    // A device-backed local mount is ordered after local-fs-pre.target and its
+    // backing device; a network filesystem after remote-fs-pre.target +
+    // network.target. Both conflict with umount.target so they are torn down on
+    // shutdown. NOTE: the `_netdev` userspace option (which also makes a mount
+    // "remote") lives in /run/mount/utab, not /proc/self/mountinfo, and is not
+    // read yet, so a `_netdev` mount is still classified local for now.
+    let is_network = matches!(
+        fstype,
+        "nfs" | "nfs4"
+            | "cifs"
+            | "smb3"
+            | "smbfs"
+            | "ncpfs"
+            | "glusterfs"
+            | "ceph"
+            | "afs"
+            | "coda"
+            | "ocfs2"
+            | "orangefs"
+            | "lustre"
+            | "9p"
+    );
+    let mut after: Vec<String> = Vec::new();
+    let mut wants: Vec<String> = Vec::new();
+    let mut before: Vec<String> = vec!["umount.target".to_owned()];
+    let mut requires: Vec<String> = Vec::new();
+    let conflicts: Vec<String> = vec!["umount.target".to_owned()];
+    if is_network {
+        after.push("remote-fs-pre.target".to_owned());
+        after.push("network.target".to_owned());
+        before.push("remote-fs.target".to_owned());
+    } else {
+        after.push("local-fs-pre.target".to_owned());
+        wants.push("local-fs-pre.target".to_owned());
+        before.push("local-fs.target".to_owned());
+    }
+    if what.starts_with("/dev/") {
+        let esc = crate::unit_name::unit_name_path_escape(what);
+        after.push(format!("{esc}.device"));
+        requires.push(format!("{esc}.device"));
+        after.push(format!("blockdev@{esc}.target"));
+    }
+
     let unit_section = ParsedUnitSection {
         description: where_.to_owned(),
         default_dependencies: false,
+        after,
+        before,
+        wants,
+        requires,
+        conflicts,
         ..Default::default()
     };
 
