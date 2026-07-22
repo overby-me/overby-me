@@ -79,10 +79,26 @@ fn direct_field() {
     black_box(x);
 }
 
+/// Field read whose *start* is in bounds but whose *extent* overruns the end —
+/// caught only by the extent check (point 0 over `[p+8, p+16)`), not the
+/// projected start address (`p+8`, which is inside the 12-byte buffer).
+fn extent_overrun() {
+    let v: Vec<u8> = black_box(vec![0u8; 12]); // 12-byte buffer
+    let base = v.as_ptr();
+    eprintln!("BASE={base:p}");
+    let p = base as *const Pair;
+    // Field `b` (offset 8, 8 bytes) starts at base+8 — inside the 12-byte
+    // buffer — but reads [base+8, base+16), overrunning it by 4 bytes.
+    let x = unsafe { (*p).b };
+    println!("NO_ABORT x={x:#x}");
+    black_box(x);
+}
+
 fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("field") => field_reborrow(),
         Some("direct") => direct_field(),
+        Some("extent") => extent_overrun(),
         _ => whole_object(),
     }
 }

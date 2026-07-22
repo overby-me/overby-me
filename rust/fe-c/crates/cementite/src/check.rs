@@ -12,7 +12,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use crate::cap::CapFlags;
+use crate::cap::{Cap, CapFlags};
 use crate::table;
 
 /// Number of raw-dereference checks executed this process.
@@ -193,20 +193,7 @@ pub extern "C" fn __fec_ensure(fault: *const u8, root: *const u8, size: usize, m
     }
     DEREF_CHECKS.fetch_add(1, Ordering::Relaxed);
 
-    if fault.is_null() {
-        report_null_and_abort();
-    }
-    if let Some(cap) = table::lookup(root as usize) {
-        let f = fault as usize;
-        let end = f.saturating_add(size);
-        // Spatial: the whole referent must lie inside the allocation.
-        if f < cap.base || end > cap.base + cap.len {
-            report_oob_and_abort(f, cap.base, cap.len, cap.id.raw());
-        }
-        // Temporal: the allocation must be live at the cast.
-        if !table::is_live(cap.id) {
-            report_uaf_and_abort(f, cap.base, cap.id.raw(), cap.flags, cap.site);
-        }
+    if let Some(cap) = extent_verify(fault, root, size) {
         // Valid mint: record where this reference was born on the owning
         // allocation, so a later use-after-free names it (`minted_at`). Heap
         // only — a stack scope's `site` already carries its escape line.
@@ -214,6 +201,56 @@ pub extern "C" fn __fec_ensure(fault: *const u8, root: *const u8, size: usize, m
             table::note_mint(cap.rec, mint_line as u32);
         }
     }
+}
+
+/// Projected-dereference extent check (instrumentation point 0, spatial+temporal
+/// on the *accessed* extent). The MIR pass injects this for a raw or `through`
+/// dereference of a simple projected place (`(*p).f`, `(*p)[i]`), where the
+/// access covers `[fault, fault + size)` with `fault = p + offset` and `size`
+/// the projected place's layout size. Unlike the single-address deref check it
+/// verifies the whole extent, so a subobject that starts in bounds but extends
+/// past the end of a mis-cast allocation is caught. Resolves from the derivation
+/// root (I10), never the faulting address.
+///
+/// # Safety
+///
+/// Neither pointer is dereferenced; both are only inspected.
+#[unsafe(no_mangle)]
+pub extern "C" fn __fec_check_extent(fault: *const u8, root: *const u8, size: usize) {
+    if !REPORTER_REGISTERED.swap(true, Ordering::Relaxed) {
+        #[cfg(not(miri))]
+        // SAFETY: `report` is a valid `extern "C" fn()`.
+        unsafe {
+            atexit(report)
+        };
+    }
+    DEREF_CHECKS.fetch_add(1, Ordering::Relaxed);
+    extent_verify(fault, root, size);
+}
+
+/// Shared extent check for [`__fec_ensure`] and [`__fec_check_extent`]: resolve
+/// the owning allocation from the derivation `root` (I10) and verify
+/// `[fault, fault + size)` lies inside a live allocation. Aborts on an
+/// out-of-bounds or dead resolve; returns the resolved cap, or `None` for
+/// unknown provenance (v0's tolerant policy for foreign statics / uninstrumented
+/// allocators).
+#[inline]
+fn extent_verify(fault: *const u8, root: *const u8, size: usize) -> Option<Cap> {
+    if fault.is_null() {
+        report_null_and_abort();
+    }
+    let cap = table::lookup(root as usize)?;
+    let f = fault as usize;
+    let end = f.saturating_add(size);
+    // Spatial: the whole referent must lie inside the allocation.
+    if f < cap.base || end > cap.base + cap.len {
+        report_oob_and_abort(f, cap.base, cap.len, cap.id.raw());
+    }
+    // Temporal: the allocation must be live.
+    if !table::is_live(cap.id) {
+        report_uaf_at(f, cap.base, cap.id.raw(), cap.flags, cap.site, 0, cap.mint);
+    }
+    Some(cap)
 }
 
 /// Stack scope entry (I8). The MIR pass emits this at scope entry for a
@@ -267,12 +304,6 @@ fn report_null_and_abort() -> ! {
         b"fe-c: null raw-pointer dereference\n",
     );
     std::process::abort();
-}
-
-#[cold]
-#[inline(never)]
-fn report_uaf_and_abort(fault: usize, base: usize, id: u64, flags: CapFlags, site: u32) -> ! {
-    report_uaf_at(fault, base, id, flags, site, 0, 0);
 }
 
 #[cold]

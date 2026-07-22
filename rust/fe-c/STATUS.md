@@ -205,21 +205,21 @@ to the escape (only escaped regions stay findable-as-dead).
 
 ## Open items carried forward
 
-- **point 0 checks the projected element's *start*, not its full extent.**
-  point 0 now faults on the **accessed** address for a simple projected place
-  (`&raw const (*p).f` = `p + offset(f)`, via `is_simple_projected_place` +
-  `raw_const_place_as_u8`), so a **direct** projected access through a mis-cast
-  base (`base.add(k) as *const Struct` then `(*p).f`, no reborrow, no
-  `ptr::write`) is caught — the `cast-oob direct` scenario aborts `OutOfBounds`
-  in both modes, and the false-positive suite stays clean (5.1M hashbrown
-  checks). The **residual** is narrow: a field that *starts* in bounds but
-  *extends* past the end (a subobject wider than the remaining allocation).
-  Closing it needs the full extent (`fault + size`), which the single-address
-  `deref_rooted` does not compare; the fix is a `__fec_check_extent` (the
-  `ensure` extent logic without the mint recording) routed for projected
-  derefs. Deferred as low-value (only bites a mis-cast base whose first field is
-  in bounds) and to keep `deref_rooted`'s arity stable across the smallvec /
-  rusqlite / stack asserts.
+- **point 0 is extent-aware for projected accesses; whole-object `*p` still
+  checks the start only.** A projected raw/`through` deref (`(*p).f`, `(*p)[i]`)
+  now goes through `__fec_check_extent(fault, root, size)` — it faults on the
+  accessed address `p + offset` *and* verifies `[fault, fault + size)` lies
+  inside the live allocation, so both a start-off-the-end access (`cast-oob
+  direct`) and one whose start is in bounds but whose extent overruns (`cast-oob
+  extent`) are caught, in both modes, with the false-positive suite clean (5.1M
+  hashbrown checks). `__fec_check_extent` shares `extent_verify` with the point-1
+  `ensure` (minus the mint recording). The **residual** is a whole-object `*p`
+  read that overruns a mis-cast base wider than the allocation (`p` cast to a
+  larger `T` than fits): `is_simple_projected_place` excludes the bare `[Deref]`,
+  so it keeps the single-address base check. The same `check_extent` routing
+  would close it (drop the projected restriction, size = pointee layout) — left
+  off only because it puts an extent call on *every* whole-object deref, the
+  broadest hot-path change, to be vetted deliberately.
 - **Interposed frees don't quarantine.** `interpose::free` clears liveness
   (I7) then frees immediately; routing C frees through the shared quarantine
   needs a per-origin release dispatch on the node (System vs libc `free`).

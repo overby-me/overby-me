@@ -34,8 +34,8 @@ mod sys;
 pub mod table;
 
 pub use check::{
-    __fec_check_dealloc_reachable, __fec_check_deref, __fec_check_deref_rooted, __fec_ensure,
-    __fec_scope_enter, __fec_scope_exit, deref_check_count,
+    __fec_check_dealloc_reachable, __fec_check_deref, __fec_check_deref_rooted, __fec_check_extent,
+    __fec_ensure, __fec_scope_enter, __fec_scope_exit, deref_check_count,
 };
 
 pub use alloc::{

@@ -109,6 +109,7 @@ relationship, exactly as the tables predict:
 | `cast-oob` (whole-object) | raw→safe cast OOB | abort | abort | the cast ensure (point 1), both modes |
 | `cast-oob field` | field reborrow `&(*p).b` OOB | abort | abort | field-granular cast ensure — closes the `case` elision gap |
 | `cast-oob direct` | direct field read `(*p).b` OOB | abort | abort | projected deref fault (point 0 faults on `p + offset`, not the base) |
+| `cast-oob extent` | field read overrunning the end | abort | abort | projected extent check (`__fec_check_extent` over `[p+offset, +size)`) |
 | `lru-0130` | heap use-after-free | abort | abort | `case` via the dealloc-reachable re-check (point 4) |
 | `heap-mint` | heap UAF, mint named | abort | abort | both name `minted_at`; `case` also `read_at` (both-sites debuggability) |
 | `through-safe-ref` | safe-ref stack UAF | abort | **elide** | the bolded row: `case` elides safe-pointer derefs |

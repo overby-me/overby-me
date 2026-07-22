@@ -73,6 +73,7 @@ fn inject_fec_decls(psess: &rustc_session::parse::ParseSess, krate: &mut rustc_a
         fn __fec_check_deref_rooted(fault: *const u8, root: *const u8);\n\
         fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u8, read_line: usize);\n\
         fn __fec_ensure(fault: *const u8, root: *const u8, size: usize, mint_line: usize);\n\
+        fn __fec_check_extent(fault: *const u8, root: *const u8, size: usize);\n\
         fn __fec_scope_enter(base: *const u8, len: usize, site: usize);\n\
         fn __fec_scope_exit(base: *const u8);\n\
     }\n";
@@ -124,6 +125,8 @@ struct FecFns {
     dealloc_reachable: DefId,
     /// `__fec_ensure(fault, root, size)` — raw→safe cast check (point 1).
     ensure: DefId,
+    /// `__fec_check_extent(fault, root, size)` — projected-deref extent check.
+    check_extent: DefId,
     /// `__fec_scope_enter(base, len, site)`.
     scope_enter: DefId,
     /// `__fec_scope_exit(base)`.
@@ -138,6 +141,7 @@ fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
     let mut check = None;
     let mut dealloc_reachable = None;
     let mut ensure = None;
+    let mut check_extent = None;
     let mut scope_enter = None;
     let mut scope_exit = None;
     for id in tcx.hir_crate_items(()).foreign_items() {
@@ -146,6 +150,7 @@ fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
             "__fec_check_deref_rooted" => check = Some(def_id),
             "__fec_check_dealloc_reachable" => dealloc_reachable = Some(def_id),
             "__fec_ensure" => ensure = Some(def_id),
+            "__fec_check_extent" => check_extent = Some(def_id),
             "__fec_scope_enter" => scope_enter = Some(def_id),
             "__fec_scope_exit" => scope_exit = Some(def_id),
             _ => {}
@@ -155,6 +160,7 @@ fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
         check: check?,
         dealloc_reachable: dealloc_reachable?,
         ensure: ensure?,
+        check_extent: check_extent?,
         scope_enter: scope_enter?,
         scope_exit: scope_exit?,
     })
@@ -207,6 +213,10 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
     // `compute_roots`), so the later deref check would resolve the faulting
     // address — off the end for an OOB cast — and find nothing.
     injected += instrument_cast_ensures(tcx, body, &roots, fns.ensure);
+
+    // For the projected-deref extent check (point 0): the accessed subobject's
+    // layout size. Computed before the body is split into mutable borrows.
+    let typing_env = body.typing_env(tcx);
 
     let basic_blocks = body.basic_blocks.as_mut();
     let local_decls = &mut body.local_decls;
@@ -263,6 +273,28 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
                 };
 
                 let projected = is_simple_projected_place(&place);
+                // A projected raw/`through` deref gets the extent check over the
+                // whole accessed subobject (spatial + temporal) when its layout
+                // size is known — so a subobject that *starts* in bounds but runs
+                // past the end of a mis-cast allocation is caught, not just one
+                // whose start is off the end. Case-mode safe derefs keep the
+                // temporal-only re-check (their spatial extent was vetted at the
+                // cast ensure); whole-object and unsized accesses keep the
+                // single-address base check.
+                let extent_size = if projected && check == check_fn {
+                    let ty = place.ty(local_decls, tcx).ty;
+                    tcx.layout_of(typing_env.as_query_input(ty))
+                        .ok()
+                        .map(|l| l.size.bytes())
+                } else {
+                    None
+                };
+                let actual_check = if extent_size.is_some() {
+                    fns.check_extent
+                } else {
+                    check
+                };
+
                 let new_block = split_block(basic_blocks, location);
                 let bd = &mut basic_blocks[block];
 
@@ -296,7 +328,7 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
                 // (§2). Precisely naming the *free* line needs the deferred
                 // `nofree` callgraph: under the conservative "any call frees"
                 // reachability, an innocent intervening call would be named.
-                if check == fns.dealloc_reachable {
+                if actual_check == fns.dealloc_reachable {
                     let read_line = tcx
                         .sess
                         .source_map()
@@ -310,11 +342,20 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
                         })),
                         span: source_info.span,
                     });
+                } else if let Some(size) = extent_size {
+                    args.push(Spanned {
+                        node: Operand::Constant(Box::new(ConstOperand {
+                            span: source_info.span,
+                            user_ty: None,
+                            const_: MirConst::from_usize(tcx, size),
+                        })),
+                        span: source_info.span,
+                    });
                 }
                 bd.terminator = Some(Terminator {
                     source_info,
                     kind: TerminatorKind::Call {
-                        func: Operand::function_handle(tcx, check, [], source_info.span),
+                        func: Operand::function_handle(tcx, actual_check, [], source_info.span),
                         args: args.into_boxed_slice(),
                         destination: Place::from(ret),
                         target: Some(new_block),

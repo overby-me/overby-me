@@ -474,11 +474,13 @@ in {
         ( cd corpus/cast-oob \
             && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
 
-        # Three scenarios, each in both modes: a whole-object `&*bad` reborrow
-        # (no arg), a field reborrow `&(*p).b` past the end (`field`), and a
-        # *direct* field read `(*p).b` past the end (`direct`) — the last caught
-        # by the projected deref fault, not the cast ensure. All abort OutOfBounds.
-        for scenario in whole:"" field:field direct:direct; do
+        # Four scenarios, each in both modes: a whole-object `&*bad` reborrow
+        # (no arg), a field reborrow `&(*p).b` past the end (`field`), a *direct*
+        # field read `(*p).b` whose start is past the end (`direct`, caught by
+        # the projected deref fault), and a direct read whose start is in bounds
+        # but whose extent overruns (`extent`, caught by the extent check). All
+        # abort OutOfBounds.
+        for scenario in whole:"" field:field direct:direct extent:extent; do
           name="''${scenario%%:*}"; arg="''${scenario#*:}"
           set +e
           "$TMPDIR/tt/debug/cast-oob" $arg >"$TMPDIR/t-$name.log" 2>&1; t_exit=$?
