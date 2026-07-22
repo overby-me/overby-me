@@ -1,8 +1,25 @@
 {
   name = "59-RELOADING-RESTART";
   # Custom rewrite: test RELOADING=1 failure handling (implemented).
-  # Skip reload rate limiting (ReloadLimitBurst not implemented),
-  # Type=notify-reload (not implemented), and RestartMode=debug (not implemented).
+  # Skip reload rate limiting (ReloadLimitBurst not implemented) and
+  # RestartMode=debug (not implemented).
+  #
+  # Type=notify-reload is ALSO skipped, but for a DEEPER reason than "not
+  # implemented" (the reload SIGHUP dispatch + RELOADING/READY handling exist:
+  # control.rs:8522, notification_handler.rs:896). The blocker is the TRANSIENT
+  # lifecycle: `systemd-run --unit X -p Type=notify-reload -p KillMode=process
+  # <script>` starts the service and rust-systemd immediately logs "Started
+  # ... Deactivated successfully" while the script keeps running orphaned in the
+  # cgroup. So `systemctl reload` (SIGHUP) and `systemctl stop` (SIGTERM,
+  # KillMode=process) never reach the script's trap handlers; stop SIGKILLs the
+  # orphan, giving ExecMainStatus=9 (SIGKILL) instead of the expected 109
+  # (88 +11 reload +7 stop +3 final). Root cause = transient notify-reload
+  # service readiness / main-PID tracking: rust-systemd loses the forked main
+  # process for a systemd-run transient notify(-reload) unit and deactivates it
+  # at once. Unit-file Type=notify services (the testservice-*-59 above) track
+  # correctly, so the gap is specific to the systemd-run transient path. Deep;
+  # revisit by tracing start_service main-PID capture + READY=1 wait for
+  # transient notify units.
   patchScript = ''
         cat > TEST-59-RELOADING-RESTART.sh << 'TESTEOF'
     #!/usr/bin/env bash
