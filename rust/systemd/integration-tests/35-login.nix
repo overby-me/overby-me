@@ -1,13 +1,8 @@
 {
   name = "35-LOGIN";
-  # Upstream 35-LOGIN requires a PAM-authenticated test user and extensive
-  # systemd-logind features that exceed rust-systemd's current scope.
-  patchScript = ''
-    {
-      echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: logind test user infrastructure missing, skipping' >/skipped"
-      echo "exit 77"
-    } > TEST-35-LOGIN.sh
-    chmod +x TEST-35-LOGIN.sh
-  '';
+  # De-skipped to baseline. Upstream TEST-35-LOGIN.sh self-skips (exit 77) when
+  # `evemu-device` is absent, which it likely is in the VM -- so rust-systemd's
+  # "logind infrastructure missing" override may be redundant (like 75-RESOLVED,
+  # whose upstream self-skips on missing knotc). If it self-skips, remove the
+  # override; if it runs and hits the logind stub, it is genuinely deep.
 }
