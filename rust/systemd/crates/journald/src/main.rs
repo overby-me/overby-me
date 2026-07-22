@@ -2453,11 +2453,6 @@ fn handle_stdout_connection(
         }
     }
 
-    if let Ok(mut k) = std::fs::OpenOptions::new().write(true).open("/dev/kmsg") {
-        use std::io::Write as _;
-        let _ = writeln!(k, "JDPROBE stream-setup unit={unit_name}");
-    }
-
     // Refresh the PID metadata cache after reading the header.  For
     // command-mode systemd-cat the process calls execvp() between sending
     // the header and writing log data, so /proc/PID/exe changes (e.g.
