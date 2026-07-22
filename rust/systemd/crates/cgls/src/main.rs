@@ -357,6 +357,28 @@ fn find_unit_cgroup_in(dir: &Path, unit_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Resolve a user unit (e.g. `app.slice`) that is an ANCESTOR of cgls's own
+/// cgroup by reading `/proc/self/cgroup` and taking the path prefix up to and
+/// including the matching component. The cgroup-v2 line is
+/// `0::/a/b/app.slice/...`, relative to the process's cgroup-namespace root,
+/// which is where `/sys/fs/cgroup` is mounted, so joining the prefix onto
+/// CGROUP_ROOT yields the correct path in both host and namespaced views.
+fn resolve_user_unit_from_self(unit_name: &str) -> Option<PathBuf> {
+    let content = fs::read_to_string("/proc/self/cgroup").ok()?;
+    let rel = content.lines().find_map(|l| l.strip_prefix("0::"))?.trim();
+    let mut acc = PathBuf::from(CGROUP_ROOT);
+    for comp in rel.trim_start_matches('/').split('/') {
+        if comp.is_empty() {
+            continue;
+        }
+        acc.push(comp);
+        if comp == unit_name && acc.join("cgroup.procs").exists() {
+            return Some(acc);
+        }
+    }
+    None
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -383,7 +405,12 @@ fn main() {
         // inside the user manager (systemd-run --user ...) it may be in a cgroup
         // namespace where /sys/fs/cgroup IS user@UID.service and app.slice is a
         // direct child. Searching from the root handles both layouts.
-        let found = find_unit_cgroup_in(&PathBuf::from(CGROUP_ROOT), user_unit);
+        let found = find_unit_cgroup_in(&PathBuf::from(CGROUP_ROOT), user_unit)
+            // Fallback: when cgls runs as a transient service inside the user
+            // manager, the requested unit (e.g. app.slice) is an ANCESTOR of
+            // cgls's own cgroup, not a descendant, so a downward search misses
+            // it. Resolve it from cgls's own /proc/self/cgroup instead.
+            .or_else(|| resolve_user_unit_from_self(user_unit));
         match found {
             Some(path) => vec![path],
             None => {
