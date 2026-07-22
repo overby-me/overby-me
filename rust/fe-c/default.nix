@@ -47,6 +47,8 @@
       # rusqlite 0.25.3 is yanked (its lock entry is hand-added), but yanked
       # crates still serve from the CDN, so fetchurl vendors it like any other.
       ./corpus/rusqlite-0128/Cargo.lock
+      # The real RUSTSEC-2021-0130 corpus: lru 0.6.6 (use-after-free).
+      ./corpus/lru-0130/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -414,6 +416,29 @@ in {
         echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
         echo "--- case-like (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
         nu corpus/assert_rusqlite_0128.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
+      '';
+
+    # Heap use-after-free (RUSTSEC-2021-0130): real lru 0.6.6. iter() yields a
+    # reference into a node; the loop pop()s (frees) the node and reads the
+    # value through the dangling reference. Under FEC_MODE=through the read
+    # resolves the freed heap allocation — kept findable in quarantine — and
+    # aborts UseAfterFree. Exercises heap temporal safety (the poison-on-free
+    # quarantine), the complement of the stack-scope UAF corpora.
+    fe-c-lru-0130 = pkgs:
+      cargoCheck pkgs "lru-0130" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1
+        ( cd corpus/lru-0130 \
+            && FEC_MODE=through FEC_INSTRUMENT_ONLY=lru_0130 RUSTC="$drv" \
+               CARGO_TARGET_DIR="$TMPDIR/t" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/t/debug/lru-0130" >"$TMPDIR/lru.log" 2>&1
+        lru_exit=$?
+        set -e
+        cat "$TMPDIR/lru.log"
+        nu corpus/assert_lru_0130.nu "$TMPDIR/lru.log" "$lru_exit"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the

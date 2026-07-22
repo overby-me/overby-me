@@ -4,15 +4,17 @@
 //! Every successful allocation is registered in the allocation table with
 //! its exact bounds. Every free runs the I7 sequence:
 //!
-//! 1. [`table::deregister`] clears the liveness bit — *before* any memory
+//! 1. [`table::poison_and_info`] clears the liveness bit — *before* any memory
 //!    is released — so a stale pointer carrying the freed id fails
-//!    structurally from this instant on.
+//!    structurally from this instant on. The record stays *findable*, so a
+//!    dereference into the freed address resolves the dead capability and is
+//!    caught as a use-after-free (trace `rustsec-2021-0130` F2) rather than
+//!    degrading to unknown provenance.
 //! 2. The address enters quarantine (bytes-budgeted FIFO), withholding it
 //!    from reuse so a fresh allocation cannot present a valid capability at
-//!    the same address while stale references exist (ABA defence, trace
-//!    `rustsec-2021-0130` section F2).
-//! 3. Only on eviction is the memory handed back to the system allocator
-//!    and the table record released.
+//!    the same address while stale references exist (ABA defence, same trace).
+//! 3. Only on eviction is the record [`table::unlink`]ed, the memory handed
+//!    back to the system allocator, and the table record released.
 //!
 //! The budget is an atomic with a compile-time default and a runtime
 //! setter. Reading `FEC_*` env vars from inside a global allocator would
@@ -137,8 +139,9 @@ impl Quarantine {
 
     /// Pushes a freed allocation into quarantine, then evicts oldest
     /// entries until the budget is satisfied. Called after
-    /// [`table::deregister`] has already cleared the liveness bit. `ptr`
-    /// carries the original allocation's provenance for the deferred free.
+    /// [`table::poison_and_info`] has cleared the liveness bit (leaving the
+    /// record findable). `ptr` carries the original allocation's provenance
+    /// for the deferred free.
     fn push_and_evict(&self, ptr: *mut u8, align: usize, freed: FreedAlloc) {
         let mut st = self.state.lock().unwrap();
 
@@ -202,7 +205,7 @@ impl Quarantine {
         st.bytes -= freed.len;
 
         // I7: by the time memory is released the liveness bit is already
-        // clear (deregister cleared it on entry). A reorder that released
+        // clear (poison_and_info cleared it on entry). A reorder that released
         // before clearing would trip this.
         debug_assert!(
             !table::is_live(freed.id),
@@ -212,6 +215,11 @@ impl Quarantine {
         if table::is_live(freed.id) {
             RELEASED_WHILE_LIVE.fetch_add(1, Ordering::Relaxed);
         }
+
+        // Unlink the poisoned record now that its memory is leaving
+        // quarantine, so the released address is no longer resolvable (its
+        // liveness bit was already clear since the free).
+        table::unlink(&freed);
 
         // Return the memory to the system allocator, then free the record
         // so the freed allocation is no longer reportable.
@@ -271,9 +279,11 @@ unsafe impl GlobalAlloc for FecAlloc {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        match table::deregister(ptr as usize) {
-            // Registered: liveness bit is now clear; quarantine the address
-            // and defer the real free to eviction.
+        match table::poison_and_info(ptr as usize) {
+            // Registered: liveness bit is now clear but the record stays
+            // findable, so a stale dereference into the quarantined address
+            // resolves it as dead (use-after-free) instead of unknown. The
+            // record is unlinked and the memory released at eviction.
             Some(freed) => QUARANTINE.push_and_evict(ptr, layout.align(), freed),
             // Not registered (allocated before install, or a zero-size
             // request the runtime skipped): free straight through.
@@ -346,14 +356,14 @@ mod tests {
         unsafe { FecAlloc.dealloc(p, layout) };
 
         // I7: liveness cleared synchronously at free, before the memory is
-        // released. The address is still quarantined (withheld), so a stale
-        // pointer carrying `id` fails on liveness, and no fresh allocation
-        // can reuse this exact address yet (ABA defence).
+        // released. The record stays *findable* (linked) while the address is
+        // quarantined, so a stale dereference resolves the dead capability and
+        // is caught as a use-after-free (trace F2), not degraded to unknown
+        // provenance. No fresh allocation can reuse this exact address yet.
         assert!(!table::is_live(id), "liveness cleared at free (I7)");
-        assert!(
-            table::lookup(p as usize).is_none(),
-            "record unlinked from the table at free"
-        );
+        let cap = table::lookup(p as usize).expect("record stays findable in quarantine");
+        assert_eq!(cap.id, id, "same allocation, still resolvable");
+        assert!(!table::is_live(cap.id), "resolved as dead (use-after-free)");
         assert_eq!(
             quarantine_bytes(),
             bytes_before + 64,

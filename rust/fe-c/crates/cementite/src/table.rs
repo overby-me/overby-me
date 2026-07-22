@@ -354,6 +354,59 @@ pub fn deregister(base: usize) -> Option<FreedAlloc> {
     })
 }
 
+/// Clears the liveness bit for the allocation at `base` and returns its info,
+/// but leaves the record **linked** so a dereference while the address sits in
+/// quarantine still resolves it as dead — the use-after-free window (trace F2,
+/// the RUSTSEC-2021-0130 class). Pair with [`unlink`] at eviction, once the
+/// memory is actually released. Returns `None` if no allocation starts at
+/// `base` (allocated before install, or a zero-size request).
+pub fn poison_and_info(base: usize) -> Option<FreedAlloc> {
+    let _guard = TABLE.write_lock.lock().unwrap();
+    let first_page = base >> PAGE_SHIFT;
+    let slot = slot_for(first_page, false)?;
+    let rec_idx = find_start(slot, base)?;
+    let rec = TABLE.records.get(rec_idx);
+    let len = rec.len.load(Ordering::Relaxed);
+    let packed = PackedCap {
+        id_and_flags: rec.id_flags.load(Ordering::Relaxed),
+    };
+    let id = packed.id();
+
+    // Dead, but still findable: the record stays linked until eviction, so a
+    // stale dereference into quarantined memory resolves the dead capability
+    // and aborts instead of degrading to unknown provenance.
+    TABLE.liveness.clear(id);
+
+    Some(FreedAlloc {
+        id,
+        base,
+        len,
+        record: rec_idx,
+    })
+}
+
+/// Unlinks a record that was left findable by [`poison_and_info`], at the
+/// point its memory leaves quarantine and is released. The liveness bit is
+/// already clear, so there is no window where a live capability names freed
+/// memory.
+pub fn unlink(freed: &FreedAlloc) {
+    let _guard = TABLE.write_lock.lock().unwrap();
+    let first_page = freed.base >> PAGE_SHIFT;
+    let Some(slot) = slot_for(first_page, false) else {
+        return;
+    };
+    slot_write(slot, |s| remove_start(s, freed.record));
+
+    let last_page = (freed.base + freed.len - 1) >> PAGE_SHIFT;
+    for page_num in first_page + 1..=last_page {
+        let spill_slot = slot_for(page_num, false).expect("spill slot must exist");
+        slot_write(spill_slot, |s| {
+            let prev = s.spill.swap(NONE, Ordering::Relaxed);
+            debug_assert_eq!(prev, freed.record, "cementite: spill chain corrupted");
+        });
+    }
+}
+
 /// Finds the record index of the allocation starting at `base`, if any.
 fn find_start(slot: &PageSlot, base: usize) -> Option<u32> {
     let count = slot.count.load(Ordering::Relaxed) as usize;

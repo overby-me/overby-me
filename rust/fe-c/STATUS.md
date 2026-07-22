@@ -44,10 +44,18 @@ or it false-positives on foreign statics), and interprocedural + at-rest
 capability propagation. Then C2 (dealloc re-checks, `case`-only) and C3 (`case`
 with the `differential` gate against `through`) are the `case`-milestone tasks.
 
-All 15 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+**Heap use-after-free** works too (`fe-c-lru-0130`): real, unmodified
+`lru@=0.6.6` — its `iter()` yields a reference into a node, the loop `pop()`s
+(frees) the node, and reads the value through the dangling reference. Under
+`FEC_MODE=through` it aborts `UseAfterFree`. This needed `FecAlloc::dealloc` to
+**poison** the freed allocation (keep it findable-as-dead in quarantine) rather
+than deregister at free, so the deref resolves the dead capability instead of
+degrading to unknown. A **third real CVE** (after RUSTSEC-2021-0003 and -0128).
+
+All 16 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
 `false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
-`through-safe-ref`, `rusqlite-0128`.
+`through-safe-ref`, `rusqlite-0128`, `lru-0130`.
 
 ## Protocol
 
