@@ -198,6 +198,35 @@ mod inner {
             out
         }
 
+        /// Activation details of the current activation, as `a(ss)`.  When a
+        /// service was activated by a `.path` or `.timer` unit, this reports
+        /// `[("trigger_unit", <unit>), ("trigger_path", <path>)]` (trigger_path
+        /// only for path triggers).  Empty once the unit is no longer active
+        /// from that trigger — real systemd drops ActivationDetails on
+        /// deactivation, so we gate on the unit being currently started.
+        #[zbus(property)]
+        fn activation_details(&self) -> Vec<(String, String)> {
+            let ri = self.run_info.read_poisoned();
+            let Some(unit) = ri.unit_table.values().find(|u| u.id.name == self.unit_name) else {
+                return Vec::new();
+            };
+            if !matches!(&*unit.common.status.read_poisoned(), UnitStatus::Started(_)) {
+                return Vec::new();
+            }
+            let crate::units::Specific::Service(srvc) = &unit.specific else {
+                return Vec::new();
+            };
+            let state = srvc.state.read_poisoned();
+            let mut out = Vec::new();
+            if let Some(tu) = &state.srvc.trigger_unit {
+                out.push(("trigger_unit".to_string(), tu.clone()));
+            }
+            if let Some(tp) = &state.srvc.trigger_path {
+                out.push(("trigger_path".to_string(), tp.clone()));
+            }
+            out
+        }
+
         /// When the unit last transitioned out of inactive (activation
         /// began), in microseconds since the Unix epoch.  `0` means never.
         #[zbus(property)]
