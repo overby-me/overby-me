@@ -10,13 +10,16 @@
 
 #![feature(rustc_private)]
 
+extern crate rustc_ast;
 extern crate rustc_data_structures;
 extern crate rustc_driver;
 extern crate rustc_hir;
 extern crate rustc_index;
 extern crate rustc_interface;
 extern crate rustc_middle;
+extern crate rustc_parse;
 extern crate rustc_public;
+extern crate rustc_session;
 extern crate rustc_span;
 extern crate thin_vec;
 
@@ -63,19 +66,24 @@ fn main() {
     // unaffected; it uses a rustc_driver::Callbacks driver rather than the
     // read-only rustc_public one.
     if std::env::var_os("FEC_INSTRUMENT").is_some() {
-        // FEC_INSTRUMENT_ONLY scopes instrumentation to a comma-separated
-        // crate-name list (the crate under test), leaving its dependencies
-        // uninstrumented. Whole-process instrumentation (the default) works
-        // for shallow trees like smallvec, but injecting a cementite
-        // dependency into every crate of a deep tree (serde/regex) needs
-        // cementite as a sysroot crate (Task D1) to resolve at every level.
-        let instrument_this = match std::env::var("FEC_INSTRUMENT_ONLY") {
-            Ok(list) => {
-                let name = crate_name(&args);
-                list.split(',').any(|n| Some(n) == name.as_deref())
-            }
-            Err(_) => true,
-        };
+        let name = crate_name(&args);
+        // Never instrument:
+        // - cementite itself: it *defines* the __fec_* symbols, so
+        //   instrumenting it would recurse and clash with the injected decls;
+        // - build scripts and proc-macro crates: they run at *build* time on
+        //   the host and are never linked against cementite, so injected
+        //   __fec_* calls would be undefined symbols. This matters under
+        //   whole-graph instrumentation, where cementite's own build script
+        //   is in the graph.
+        // FEC_INSTRUMENT_ONLY further scopes instrumentation to a crate-name
+        // list (the crate under test); whole-graph (the default) works
+        // because injection is symbol-level (A4b) with no dependency edge.
+        let instrument_this = name.as_deref() != Some("cementite")
+            && !is_host_tool(&args, name.as_deref())
+            && match std::env::var("FEC_INSTRUMENT_ONLY") {
+                Ok(list) => list.split(',').any(|n| Some(n) == name.as_deref()),
+                Err(_) => true,
+            };
         if instrument_this {
             inject_cementite(&mut args);
             std::process::exit(instrument::run(&args));
@@ -101,42 +109,29 @@ fn is_info_probe(args: &[String]) -> bool {
         .any(|a| matches!(a.as_str(), "-vV" | "-V" | "--version") || a.starts_with("--print"))
 }
 
-/// Makes `cementite` available as an extern crate to *every* compilation so
-/// the injected check calls resolve — including in third-party dependencies
-/// (e.g. `smallvec`) that do not declare it. `FEC_CEMENTITE_RLIB` points at
-/// a prebuilt `libcementite.rlib` and `FEC_CEMENTITE_DEPS` at its
-/// dependency search dir. This is the minimal `cargo-fe-c` orchestration:
-/// cementite behaves like an always-available sysroot crate.
+/// Links `cementite` once into the final binary so the injected `extern "C"`
+/// check symbols resolve (A4b, the ASan model). No `--extern`, no crate
+/// dependency edge: each instrumented crate only *declares* the symbols
+/// (see `inject_fec_decls`); only the final binary/test needs cementite's
+/// object. `FEC_CEMENTITE_RLIB` points at a prebuilt `libcementite.rlib`,
+/// which the linker treats as an archive and pulls the `__fec_*` members
+/// from. cementite is dependency-free (I11), so no extra `-L` is needed.
 fn inject_cementite(args: &mut Vec<String>) {
     let Ok(rlib) = std::env::var("FEC_CEMENTITE_RLIB") else {
         return;
     };
-    // Never inject into cementite's own build, and never duplicate an
-    // existing `--extern cementite`.
-    if crate_name(args).as_deref() == Some("cementite")
-        || args.iter().any(|a| a.contains("cementite="))
-    {
+    if crate_name(args).as_deref() == Some("cementite") {
         return;
     }
-    // `force:` loads cementite even when the crate's source never references
-    // it (dependencies like smallvec don't), so the check fn is resolvable
-    // and the injected calls link. The modifier needs -Zunstable-options.
-    if !args.iter().any(|a| a == "-Zunstable-options") {
-        args.push("-Zunstable-options".to_string());
+    // If cementite is already a Cargo dependency (`--extern cementite=…`, as
+    // in the harness that uses `FecAlloc`), cargo links it — a second copy
+    // via link-arg would duplicate every symbol.
+    if args.iter().any(|a| a.starts_with("cementite=")) {
+        return;
     }
-    args.push("--extern".to_string());
-    args.push(format!("force:cementite={rlib}"));
-
-    // cementite's own dependency rlibs (rustix, libc, bitflags, …) are only
-    // needed to LINK the final binary. Adding them to -L for every rlib
-    // compile shadows the target crate's own copies of shared crates
-    // (E0519 on bitflags/libc). So expose them only when producing a
-    // binary or test harness.
-    if produces_binary(args)
-        && let Ok(deps) = std::env::var("FEC_CEMENTITE_DEPS")
-    {
-        args.push("-L".to_string());
-        args.push(format!("dependency={deps}"));
+    if produces_binary(args) {
+        args.push("-C".to_string());
+        args.push(format!("link-arg={rlib}"));
     }
 }
 
@@ -155,6 +150,30 @@ fn produces_binary(args: &[String]) -> bool {
         };
         if let Some(ct) = ct
             && ct.split(',').any(|t| t == "bin")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether this invocation compiles host-time code that is never linked
+/// against cementite: a Cargo build script (`--crate-name build_script_*`) or
+/// a proc-macro crate (`--crate-type proc-macro`). Instrumenting either would
+/// emit `__fec_*` calls with nothing to resolve them.
+fn is_host_tool(args: &[String], name: Option<&str>) -> bool {
+    if name.is_some_and(|n| n.starts_with("build_script_")) {
+        return true;
+    }
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let ct = if a == "--crate-type" {
+            it.next().map(String::as_str)
+        } else {
+            a.strip_prefix("--crate-type=")
+        };
+        if let Some(ct) = ct
+            && ct.split(',').any(|t| t == "proc-macro")
         {
             return true;
         }

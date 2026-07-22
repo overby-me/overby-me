@@ -128,7 +128,7 @@ a churn stress test.
 ✅ A small C harness's allocations appear in the table with correct bounds;
 `strdup`-style libc-internal allocations too.
 
-**A4b. [todo] `cargo-fe-c` orchestration.**
+**A4b. [done] `cargo-fe-c` orchestration.** *(2026-07-22)*
 `RUSTC_WRAPPER` that instruments the whole dependency graph and links
 `cementite` once into the final binary. **Symbol-level injection only** — no
 Cargo dependency edge into instrumented crates (see §3). Was missing from the
@@ -136,6 +136,13 @@ original queue; A1–A4 cannot reach third-party crates without it.
 ✅ A binary with third-party dependencies builds with every crate
 instrumented; `cargo tree` on those crates is unchanged; `nm` shows
 `__fec_*` resolved once in the final artifact.
+*Verified on the `smallvec-0003` corpus binary: whole-graph instrumented,
+`cargo tree` shows no cementite edge under `smallvec`, and `nm` shows
+`__fec_check_deref_rooted` defined exactly once. The driver never instruments
+cementite, build scripts (`build_script_*`) or proc-macros; cementite is
+freestanding (I11), so its `build.rs` invokes `cc`/`ar` directly and no
+build-toolchain crate enters a dependent's graph. A leaf binary that installs
+`FecAlloc` takes cementite as an ordinary path dependency.*
 
 **A5. [done] Driver skeleton + visitation census.** *(2026-07-22; runs on
 the full serde tree — 13 crates, skipped_bodies=0 everywhere)*
@@ -171,8 +178,9 @@ regression canary; assert on it explicitly.
 the `as_mut_ptr()` root (a 1-byte spilled buffer), the overflowing
 `ptr::write`/`ptr::copy` traps, and the report names that buffer, not the
 neighbouring String. Patched `1.6.1` runs clean (259 checks, no false
-positive). The `fe-c-corpus-smallvec` check builds both offline; cementite
-is force-injected into every compile so smallvec itself is instrumented.*
+positive). The `fe-c-corpus-smallvec` check builds both offline; smallvec is
+instrumented via symbol-level `__fec_*` injection (no cementite dependency
+edge, A4b), and cementite is linked once into the final binary.*
 
 **B4. [done] Cast checks (point 1) + `ensure`.** *(2026-07-22)*
 ✅ `false-positive` check green: `serde`, `regex`, `hashbrown` own test suites

@@ -21,8 +21,7 @@
 
 use std::collections::HashMap;
 
-use rustc_hir::def::{DefKind, Res};
-use rustc_hir::def_id::{CRATE_DEF_INDEX, DefId, LocalDefId};
+use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_index::IndexVec;
 use rustc_middle::mir::visit::{PlaceContext, Visitor};
 use rustc_middle::mir::{
@@ -46,10 +45,48 @@ pub fn run(args: &[String]) -> i32 {
 struct FecInstrument;
 
 impl rustc_driver::Callbacks for FecInstrument {
+    fn after_crate_root_parsing(
+        &mut self,
+        compiler: &rustc_interface::interface::Compiler,
+        krate: &mut rustc_ast::Crate,
+    ) -> rustc_driver::Compilation {
+        // Symbol-level injection (I11, A4b): declare the cementite check
+        // entry points as `extern "C"` foreign fns in *this* crate, so the
+        // MIR pass calls them as bare symbols with no Cargo dependency edge
+        // on cementite. cementite is linked once into the final binary
+        // (main.rs `-C link-arg`), resolving the symbols — the ASan model.
+        inject_fec_decls(&compiler.sess.psess, krate);
+        rustc_driver::Compilation::Continue
+    }
+
     fn config(&mut self, config: &mut rustc_interface::interface::Config) {
         config.override_queries = Some(|_sess, providers| {
             providers.queries.optimized_mir = fec_optimized_mir;
         });
+    }
+}
+
+/// Parses and appends `unsafe extern "C" { fn __fec_*; }` to the crate AST.
+fn inject_fec_decls(psess: &rustc_session::parse::ParseSess, krate: &mut rustc_ast::Crate) {
+    const DECLS: &str = "unsafe extern \"C\" {\n\
+        fn __fec_check_deref_rooted(fault: *const u8, root: *const u8);\n\
+        fn __fec_scope_enter(base: *const u8, len: usize);\n\
+        fn __fec_scope_exit(base: *const u8);\n\
+    }\n";
+    let name = rustc_span::FileName::Custom("fe-c-inject".to_string());
+    let Ok(mut parser) = rustc_parse::new_parser_from_source_str(
+        psess,
+        name,
+        DECLS.to_string(),
+        rustc_parse::lexer::StripTokens::Nothing,
+    ) else {
+        return;
+    };
+    if let Ok(Some(item)) = parser.parse_item(
+        rustc_parse::parser::ForceCollect::No,
+        rustc_parse::parser::AllowConstBlockItems::No,
+    ) {
+        krate.items.push(item);
     }
 }
 
@@ -86,33 +123,27 @@ struct FecFns {
     scope_exit: DefId,
 }
 
-/// Resolves cementite's check/scope entry points by walking the crate graph
-/// and the cementite crate root's module children.
+/// Resolves the check/scope entry points to the *local* `extern "C"` foreign
+/// fns injected by `inject_fec_decls` (A4b): a symbol reference, not a Cargo
+/// dependency on cementite. Returns `None` before the decls exist (they are
+/// injected only in instrument mode).
 fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
-    let cnum = tcx
-        .crates(())
-        .iter()
-        .find(|&&c| tcx.crate_name(c).as_str() == "cementite")?;
-    let root = DefId {
-        krate: *cnum,
-        index: CRATE_DEF_INDEX,
-    };
-    let children = tcx.module_children(root);
-    let find = |name: &str| {
-        children.iter().find_map(|child| {
-            if child.ident.as_str() == name
-                && let Res::Def(DefKind::Fn, def_id) = child.res
-            {
-                Some(def_id)
-            } else {
-                None
-            }
-        })
-    };
+    let mut check = None;
+    let mut scope_enter = None;
+    let mut scope_exit = None;
+    for id in tcx.hir_crate_items(()).foreign_items() {
+        let def_id = id.owner_id.to_def_id();
+        match tcx.item_name(def_id).as_str() {
+            "__fec_check_deref_rooted" => check = Some(def_id),
+            "__fec_scope_enter" => scope_enter = Some(def_id),
+            "__fec_scope_exit" => scope_exit = Some(def_id),
+            _ => {}
+        }
+    }
     Some(FecFns {
-        check: find("__fec_check_deref_rooted")?,
-        scope_enter: find("__fec_scope_enter")?,
-        scope_exit: find("__fec_scope_exit")?,
+        check: check?,
+        scope_enter: scope_enter?,
+        scope_exit: scope_exit?,
     })
 }
 

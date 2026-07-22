@@ -9,9 +9,10 @@ publish = false
 # instrumentation with FecAlloc tracking every allocation. A checker that
 # aborted on legitimate unsafe code would trap here; it must run clean.
 #
-# Its own workspace; cementite is force-injected by the driver. The
-# fe-c-false-positive check builds it with FEC_INSTRUMENT_ONLY=hashbrown,fec_fp
-# so hashbrown itself is instrumented.
+# Its own workspace. cementite is a path dependency (this leaf binary installs
+# FecAlloc); the injected checks are symbol-level and add no edge (A4b / I11).
+# The fe-c-false-positive check builds it with
+# FEC_INSTRUMENT_ONLY=hashbrown,fec_fp so hashbrown itself is instrumented.
 [workspace]
 
 [[bin]]
@@ -19,4 +20,5 @@ name = "fec-fp"
 path = "src/main.rs"
 
 [dependencies]
+cementite = { path = "../../crates/cementite" }
 hashbrown = "0.14"

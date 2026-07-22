@@ -20,10 +20,10 @@ criterion = { version = "0.5", default-features = false, features = [
   "cargo_bench_support",
 ] }
 
-[build-dependencies]
-# Compiles tests/harness.c only when the `interpose` feature is set (see
-# build.rs); a normal build runs the script as a no-op.
-cc = "1"
+# No build dependencies either (invariant I11): build.rs invokes `cc`/`ar`
+# directly to compile tests/harness.c under the `interpose` feature, so a
+# crate that installs FecAlloc pulls in no C-toolchain crate (nor its build
+# script) that the whole-graph instrumenter would fail to link.
 
 [features]
 # libc allocator interposition (Task A4). Off by default: the #[no_mangle]

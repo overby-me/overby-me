@@ -28,7 +28,7 @@
       ./Cargo.lock
       ./nix/miri-std.Cargo.lock
       # The B2 instrumentation harness is its own workspace with its own
-      # lock (cementite path dep + rustix tree).
+      # lock (a cementite path dep; cementite is dependency-free, I11).
       ./crates/fe-c-driver/tests/fixtures/harness/Cargo.lock
       # The B3 corpus reproducer + its patched control.
       ./corpus/smallvec-0003/Cargo.lock
@@ -214,16 +214,15 @@ in {
     # Corpus RUSTSEC-2021-0003 (B3, I10 canary): build the smallvec 1.6.0
     # reproducer instrumented and assert it aborts naming the SmallVec
     # allocation (not the neighbouring String), while the patched 1.6.1
-    # control runs clean. cementite is force-injected into every compile so
-    # smallvec itself is instrumented.
+    # control runs clean. Whole-graph instrumentation (no FEC_INSTRUMENT_ONLY)
+    # covers smallvec too; the injected checks are symbol-level (A4b) and
+    # resolve against cementite, which the fixture links as a path dependency.
     fe-c-corpus-smallvec = pkgs:
       cargoCheck pkgs "corpus-smallvec" ''
-        cargo build -p fe-c-driver -p cementite --offline --locked
+        cargo build -p fe-c-driver --offline --locked
         export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
         export FEC_INSTRUMENT=1
-        export FEC_CEMENTITE_RLIB="$CARGO_TARGET_DIR/debug/libcementite.rlib"
-        export FEC_CEMENTITE_DEPS="$CARGO_TARGET_DIR/debug/deps"
 
         # Reproducer: vulnerable smallvec 1.6.0, must abort naming SmallVec.
         ( cd corpus/smallvec-0003 \
@@ -254,12 +253,10 @@ in {
     # raw-pointer-heavy with a tractable dependency tree.)
     fe-c-false-positive = pkgs:
       cargoCheck pkgs "false-positive" ''
-        cargo build -p fe-c-driver -p cementite --offline --locked
+        cargo build -p fe-c-driver --offline --locked
         export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
         export FEC_INSTRUMENT=1
-        export FEC_CEMENTITE_RLIB="$CARGO_TARGET_DIR/debug/libcementite.rlib"
-        export FEC_CEMENTITE_DEPS="$CARGO_TARGET_DIR/debug/deps"
         ( cd corpus/false-positive \
             && FEC_INSTRUMENT_ONLY=hashbrown,fec_fp RUSTC="$drv" \
                CARGO_TARGET_DIR="$TMPDIR/t" cargo build --offline --locked )
@@ -277,12 +274,10 @@ in {
     # aborts UseAfterScopeExit naming the dead stack scope.
     fe-c-corpus-stackuaf = pkgs:
       cargoCheck pkgs "corpus-stackuaf" ''
-        cargo build -p fe-c-driver -p cementite --offline --locked
+        cargo build -p fe-c-driver --offline --locked
         export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
         export FEC_INSTRUMENT=1 FEC_SCOPE_HOOKS=1
-        export FEC_CEMENTITE_RLIB="$CARGO_TARGET_DIR/debug/libcementite.rlib"
-        export FEC_CEMENTITE_DEPS="$CARGO_TARGET_DIR/debug/deps"
         ( cd corpus/stack-uaf \
             && FEC_INSTRUMENT_ONLY=stack_uaf RUSTC="$drv" \
                CARGO_TARGET_DIR="$TMPDIR/t" cargo build --offline --locked )

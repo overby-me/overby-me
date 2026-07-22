@@ -64,19 +64,28 @@ dropped.
 
 ### Orchestration (the `cargo-fe-c` seam, built out during B3/B4)
 
-- The driver **force-injects cementite** into every compilation
-  (`--extern force:cementite=…`, `-Zunstable-options`), so third-party deps
-  (smallvec) are instrumented and the check fn resolves even where the
-  source never names cementite. `FEC_CEMENTITE_RLIB`/`_DEPS` point at a
-  prebuilt cementite; the `-L` for its deps is confined to binary/test
-  crates.
-- **`FEC_INSTRUMENT_ONLY=<crate,…>`** scopes instrumentation to a crate
-  list, leaving dependencies uninstrumented. Whole-tree instrumentation of
-  a deep dependency graph needs cementite as a *sysroot crate* (Task D1);
-  until then, scope to the crate(s) under test.
-- **cementite is dependency-free** (raw `mmap` syscall in `sys.rs`, no
-  rustix/libc/bitflags) precisely so it links into any crate without
-  version conflicts across separate cargo build graphs (B4).
+- **Symbol-level injection (A4b, the ASan model).** Each instrumented crate
+  only *declares* the `__fec_*` check symbols — the driver injects an
+  `unsafe extern "C"` block into the AST (`inject_fec_decls`) and rewrites
+  MIR to call it. There is **no cementite dependency edge** into third-party
+  crates (`cargo tree` on smallvec/hashbrown is unchanged); cementite is
+  linked *once* into the final binary. A leaf binary that installs `FecAlloc`
+  (a Rust type, so it genuinely needs the crate) takes cementite as an
+  ordinary Cargo path dependency — cargo links it and its object resolves
+  every crate's `__fec_*`. Where there is no such edge (a future
+  `-Zbuild-std` target), `FEC_CEMENTITE_RLIB` names a prebuilt
+  `libcementite.rlib` the driver appends as a link-arg.
+- The driver **never instruments** cementite itself, build scripts
+  (`build_script_*`), or proc-macro crates: they are host-time or define the
+  symbols, so injected calls would be undefined or recursive.
+- **`FEC_INSTRUMENT_ONLY=<crate,…>`** scopes instrumentation to a crate list,
+  leaving dependencies uninstrumented (a speed lever for the corpus checks);
+  whole-graph is the default and now works because injection is symbol-level.
+- **cementite is freestanding** (invariant I11): zero dependencies — not even
+  build-time ones (raw `mmap` syscall in `sys.rs`; `build.rs` calls `cc`/`ar`
+  directly). It links into any crate without version conflicts across
+  separate cargo build graphs, and drags no build script into a dependent's
+  graph for the whole-graph instrumenter to trip over.
 
 ## B5 — what's left for `corpus-rusqlite-0128`
 
