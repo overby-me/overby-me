@@ -249,14 +249,21 @@ end-to-end.)*
 **C2. [todo] Dealloc-reachable re-checks (point 4, I6)** — `case` only.
 ✅ **`corpus-lru-0130` aborts** with both the free site and the `iter()`
 reborrow site named.
-*(2026-07-22 — the **`through` half is done**: `fe-c-lru-0130` catches the real
-RUSTSEC-2021-0130 use-after-free in unmodified `lru@=0.6.6` under
-`FEC_MODE=through`, aborting `UseAfterFree` on the freed-node read. This needed
-heap temporal safety — `FecAlloc::dealloc` now poisons (keeps findable-as-dead
-in quarantine) rather than deregisters at free (`table::poison_and_info` /
-`unlink`). Remaining for C2: the `case`-mode dealloc-reachable re-check
-(`nofree` callgraph analysis) so `case` catches it without checking every
-access, naming the `pop` free site and the `iter()` reborrow site.)*
+*(2026-07-22 — the dealloc-reachable re-check is **done and demonstrated in
+both modes** (`fe-c-lru-0130` builds twice). `through` catches the real
+RUSTSEC-2021-0130 use-after-free in unmodified `lru@=0.6.6` at every deref;
+`case` elides safe derefs but re-checks the one that is **dealloc-reachable**
+(it follows the `pop()` call) via `__fec_check_dealloc_reachable`, which aborts
+only on a dead **heap** allocation — a dead stack scope passes, so the mode
+distinction holds (rusqlite/through-safe-ref still elide in `case`). Both abort
+`UseAfterFree` naming the freed node. This needed heap temporal safety:
+`FecAlloc::dealloc` now poisons (keeps findable-as-dead in quarantine) rather
+than deregisters at free (`table::poison_and_info` / `unlink`).
+Reachability is conservative (any call, not a precise `nofree` callgraph — the
+heap-only abort makes over-approximation cost extra checks, never false
+positives). Remaining for the exact acceptance: name the `pop` free site and
+the `iter()` reborrow site in the report (a heap `freed_at`/`minted_at`,
+analogous to `escaped_at`).)*
 
 **C3. [todo] The other mode**, with the `differential` check wired: any violation
 `through` catches that `case` misses must map to a documented elision gap in

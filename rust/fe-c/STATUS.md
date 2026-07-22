@@ -36,21 +36,25 @@ hand-completed (the CDN still serves it, so the offline fetchurl vendor works).
 That safe-reference read was the §3.2 gap, now closed by through's safe-deref
 checking. So B5 is fully done, on real third-party C.
 
+**Heap use-after-free** works too, in **both modes** (`fe-c-lru-0130`): real,
+unmodified `lru@=0.6.6` — its `iter()` yields a reference into a node, the loop
+`pop()`s (frees) the node, and reads the value through the dangling reference.
+`through` checks every deref; **`case`** (C2) elides safe derefs but re-checks
+this one because it is **dealloc-reachable** (follows the `pop()` call) via
+`__fec_check_dealloc_reachable`, which aborts only on a dead **heap**
+allocation — a dead stack scope passes, so the mode distinction holds. Both
+abort `UseAfterFree`. This needed `FecAlloc::dealloc` to **poison** the freed
+allocation (keep it findable-as-dead in quarantine) rather than deregister at
+free. A **third real CVE** (after RUSTSEC-2021-0003 and -0128).
+
 **Remaining for full `through` mode** (all substantial, interdependent, and all
 *performance/precision*, not correctness — through is already sound and
 exhaustive): T2 shadow-slot coherence (the at-rest cap layout that replaces the
 table lookup), `strict` unknown-provenance (needs full cap propagation first,
 or it false-positives on foreign statics), and interprocedural + at-rest
-capability propagation. Then C2 (dealloc re-checks, `case`-only) and C3 (`case`
-with the `differential` gate against `through`) are the `case`-milestone tasks.
-
-**Heap use-after-free** works too (`fe-c-lru-0130`): real, unmodified
-`lru@=0.6.6` — its `iter()` yields a reference into a node, the loop `pop()`s
-(frees) the node, and reads the value through the dangling reference. Under
-`FEC_MODE=through` it aborts `UseAfterFree`. This needed `FecAlloc::dealloc` to
-**poison** the freed allocation (keep it findable-as-dead in quarantine) rather
-than deregister at free, so the deref resolves the dead capability instead of
-degrading to unknown. A **third real CVE** (after RUSTSEC-2021-0003 and -0128).
+capability propagation. For `case`: C2's exact report (name the `pop` free site
+and `iter()` reborrow site) and C3 (`case` + the `differential` gate against
+`through`).
 
 All 16 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,

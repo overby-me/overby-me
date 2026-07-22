@@ -420,25 +420,36 @@ in {
 
     # Heap use-after-free (RUSTSEC-2021-0130): real lru 0.6.6. iter() yields a
     # reference into a node; the loop pop()s (frees) the node and reads the
-    # value through the dangling reference. Under FEC_MODE=through the read
-    # resolves the freed heap allocation — kept findable in quarantine — and
-    # aborts UseAfterFree. Exercises heap temporal safety (the poison-on-free
-    # quarantine), the complement of the stack-scope UAF corpora.
+    # value through the dangling reference. Built in BOTH modes: through checks
+    # every dereference; case elides safe derefs but re-checks this one because
+    # it is dealloc-reachable (follows the pop() call) — the point-4 / I6
+    # re-check (C2). Both resolve the freed heap allocation, kept findable in
+    # quarantine, and abort UseAfterFree. Heap temporal safety, the complement
+    # of the stack-scope UAF corpora.
     fe-c-lru-0130 = pkgs:
       cargoCheck pkgs "lru-0130" ''
         cargo build -p fe-c-driver --offline --locked
         export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
-        export FEC_INSTRUMENT=1
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=lru_0130
+
         ( cd corpus/lru-0130 \
-            && FEC_MODE=through FEC_INSTRUMENT_ONLY=lru_0130 RUSTC="$drv" \
-               CARGO_TARGET_DIR="$TMPDIR/t" cargo build --offline --locked )
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
         set +e
-        "$TMPDIR/t/debug/lru-0130" >"$TMPDIR/lru.log" 2>&1
-        lru_exit=$?
+        "$TMPDIR/tt/debug/lru-0130" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
         set -e
-        cat "$TMPDIR/lru.log"
-        nu corpus/assert_lru_0130.nu "$TMPDIR/lru.log" "$lru_exit"
+
+        ( cd corpus/lru-0130 \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/lru-0130" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_lru_0130.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the

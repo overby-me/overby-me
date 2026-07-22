@@ -121,6 +121,41 @@ pub extern "C" fn __fec_check_deref_rooted(fault: *const u8, root: *const u8) {
     }
 }
 
+/// Case-mode dealloc-reachable re-check (instrumentation point 4, I6; trace
+/// `rustsec-2021-0130` §3.4). The MIR pass injects this in `case` mode before a
+/// safe-pointer dereference that follows a possibly-freeing call, so a
+/// reference minted while its allocation was live but invalidated by an
+/// intervening **heap free** is still caught. Unlike the full deref check it
+/// aborts *only* on a dead **heap** allocation: `case` elides stack-scope
+/// temporal safety (that is `through`'s job), so a resolved dead **stack**
+/// region passes here, preserving the mode distinction. Spatial safety was
+/// established once at the raw->safe cast, so this re-check is temporal only.
+///
+/// # Safety
+///
+/// Neither pointer is dereferenced; both are only inspected.
+#[unsafe(no_mangle)]
+pub extern "C" fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u8) {
+    if !REPORTER_REGISTERED.swap(true, Ordering::Relaxed) {
+        #[cfg(not(miri))]
+        // SAFETY: `report` is a valid `extern "C" fn()`.
+        unsafe {
+            atexit(report)
+        };
+    }
+    DEREF_CHECKS.fetch_add(1, Ordering::Relaxed);
+
+    // Temporal only, heap only: a dead heap allocation is a use-after-free
+    // `case` must catch; a dead stack scope is elided (through's job); live or
+    // unknown provenance passes.
+    if let Some(cap) = table::lookup(root as usize)
+        && !table::is_live(cap.id)
+        && !cap.flags.contains(CapFlags::STACK)
+    {
+        report_uaf_and_abort(fault as usize, cap.base, cap.id.raw(), cap.flags, cap.site);
+    }
+}
+
 /// Stack scope entry (I8). The MIR pass emits this at scope entry for a
 /// local whose address escapes, registering `[base, base+len)` as a live
 /// stack region so a later access through an escaped pointer can be checked

@@ -71,6 +71,7 @@ impl rustc_driver::Callbacks for FecInstrument {
 fn inject_fec_decls(psess: &rustc_session::parse::ParseSess, krate: &mut rustc_ast::Crate) {
     const DECLS: &str = "unsafe extern \"C\" {\n\
         fn __fec_check_deref_rooted(fault: *const u8, root: *const u8);\n\
+        fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u8);\n\
         fn __fec_scope_enter(base: *const u8, len: usize, site: usize);\n\
         fn __fec_scope_exit(base: *const u8);\n\
     }\n";
@@ -118,6 +119,8 @@ fn fec_optimized_mir(tcx: TyCtxt<'_>, def_id: LocalDefId) -> &Body<'_> {
 struct FecFns {
     /// `__fec_check_deref_rooted(fault, root)`.
     check: DefId,
+    /// `__fec_check_dealloc_reachable(fault, root)` — case-mode re-check.
+    dealloc_reachable: DefId,
     /// `__fec_scope_enter(base, len, site)`.
     scope_enter: DefId,
     /// `__fec_scope_exit(base)`.
@@ -130,12 +133,14 @@ struct FecFns {
 /// injected only in instrument mode).
 fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
     let mut check = None;
+    let mut dealloc_reachable = None;
     let mut scope_enter = None;
     let mut scope_exit = None;
     for id in tcx.hir_crate_items(()).foreign_items() {
         let def_id = id.owner_id.to_def_id();
         match tcx.item_name(def_id).as_str() {
             "__fec_check_deref_rooted" => check = Some(def_id),
+            "__fec_check_dealloc_reachable" => dealloc_reachable = Some(def_id),
             "__fec_scope_enter" => scope_enter = Some(def_id),
             "__fec_scope_exit" => scope_exit = Some(def_id),
             _ => {}
@@ -143,6 +148,7 @@ fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
     }
     Some(FecFns {
         check: check?,
+        dealloc_reachable: dealloc_reachable?,
         scope_enter: scope_enter?,
         scope_exit: scope_exit?,
     })
@@ -154,12 +160,23 @@ fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
 ///
 /// `FEC_MODE=through` selects **through** mode (Task C1): the exhaustive mode
 /// that also checks **safe-pointer** dereferences (`*r` where `r: &T`), which
-/// `case` elides as vetted at the cast. This is the one bolded row in the
-/// both-modes table and what catches a safe-reference read of a dead local
-/// (the rusqlite-0128 §3.2 shape). Otherwise only raw dereferences are checked.
+/// `case` elides as vetted at the cast (the one bolded row in the both-modes
+/// table). In `case` mode a safe deref is instead re-checked *only* when it is
+/// **dealloc-reachable** — it follows a possibly-freeing call — via the
+/// temporal-only heap re-check (point 4, I6; Task C2, trace `rustsec-2021-0130`
+/// §3.4). Raw dereferences are checked in both modes.
 fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns) -> usize {
     let check_fn = fns.check;
     let through = matches!(std::env::var("FEC_MODE").as_deref(), Ok("through"));
+    // In `case` mode, safe-pointer derefs are elided except those reachable
+    // from a (conservatively, any) call — where an intervening heap free could
+    // have invalidated the reference. `through` checks them all, so it needs no
+    // such set.
+    let dealloc_reachable = if through {
+        HashSet::new()
+    } else {
+        dealloc_reachable_blocks(body)
+    };
     // Provenance first, on the un-mutated body: which local holds each
     // pointer's derivation root (I10). Keyed on original locals, which the
     // block-splitting below never renumbers.
@@ -200,21 +217,34 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
             };
             let source_info = basic_blocks[block].statements[stmt_index].source_info;
 
+            // In `case` mode, only re-check safe derefs in dealloc-reachable
+            // blocks; `through` checks them everywhere.
+            let check_safe = through || dealloc_reachable.contains(&block);
             let mut finder = DerefFinder {
                 local_decls,
-                through,
+                check_safe,
                 found: Vec::new(),
             };
             finder.visit_statement(&basic_blocks[block].statements[stmt_index], location);
             let found = finder.found;
 
-            for fault_local in found {
+            for (fault_local, is_raw) in found {
                 // The pointer's derivation root, or itself when propagation
                 // found none (unpropagated fallback: resolves the access's
                 // own allocation — never a false positive, at worst a false
                 // negative when provenance is lost).
                 let root_local = roots.get(&fault_local).copied().unwrap_or(fault_local);
                 injected += 1;
+
+                // Raw derefs, and every deref in `through` mode, get the full
+                // check; a `case`-mode safe deref gets the temporal-only heap
+                // re-check (it aborts on a dead heap allocation but passes a
+                // dead stack scope, which `case` elides).
+                let check = if is_raw || through {
+                    check_fn
+                } else {
+                    fns.dealloc_reachable
+                };
 
                 let new_block = split_block(basic_blocks, location);
                 let bd = &mut basic_blocks[block];
@@ -229,7 +259,7 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
                 bd.terminator = Some(Terminator {
                     source_info,
                     kind: TerminatorKind::Call {
-                        func: Operand::function_handle(tcx, check_fn, [], source_info.span),
+                        func: Operand::function_handle(tcx, check, [], source_info.span),
                         args: Box::new([
                             Spanned {
                                 node: Operand::Move(Place::from(fault_arg)),
@@ -870,22 +900,53 @@ fn emit_scope_terminator<'tcx>(
     });
 }
 
-/// Collects the base locals of dereferences in a statement (indirect places).
-/// Always collects raw-pointer bases; in `through` mode also safe-reference
-/// bases (`*r`, `r: &T`), the safe dereferences `case` elides.
+/// The basic blocks reachable (following CFG edges) from the target of some
+/// `Call` terminator — the blocks that execute *after* a call. In `case` mode
+/// a safe dereference here is re-checked (point 4, I6, trace §3.4): a preceding
+/// call may have freed the referent. Conservative — every call is treated as
+/// possibly-freeing; a precise `nofree` callgraph would prune this (the abort
+/// is already gated to dead *heap* allocations at runtime, so the imprecision
+/// costs extra checks, never false positives).
+fn dealloc_reachable_blocks(body: &Body<'_>) -> HashSet<BasicBlock> {
+    let mut reachable: HashSet<BasicBlock> = HashSet::new();
+    let mut worklist: Vec<BasicBlock> = Vec::new();
+    for block in body.basic_blocks.indices() {
+        if let TerminatorKind::Call {
+            target: Some(t), ..
+        } = &body.basic_blocks[block].terminator().kind
+            && reachable.insert(*t)
+        {
+            worklist.push(*t);
+        }
+    }
+    while let Some(b) = worklist.pop() {
+        for succ in body.basic_blocks[b].terminator().successors() {
+            if reachable.insert(succ) {
+                worklist.push(succ);
+            }
+        }
+    }
+    reachable
+}
+
+/// Collects the base locals of dereferences in a statement (indirect places),
+/// each tagged `is_raw`. Always collects raw-pointer bases; safe-reference
+/// bases (`*r`, `r: &T`) only when `check_safe` (through mode, or a
+/// dealloc-reachable block in case mode).
 struct DerefFinder<'a, 'tcx> {
     local_decls: &'a IndexVec<Local, LocalDecl<'tcx>>,
-    through: bool,
-    found: Vec<Local>,
+    check_safe: bool,
+    found: Vec<(Local, bool)>,
 }
 
 impl<'tcx> Visitor<'tcx> for DerefFinder<'_, 'tcx> {
     fn visit_place(&mut self, place: &Place<'tcx>, context: PlaceContext, location: Location) {
-        if place.is_indirect()
-            && (is_raw_ptr_local(self.local_decls, place.local)
-                || (self.through && is_ref_local(self.local_decls, place.local)))
-        {
-            self.found.push(place.local);
+        if place.is_indirect() {
+            if is_raw_ptr_local(self.local_decls, place.local) {
+                self.found.push((place.local, true));
+            } else if self.check_safe && is_ref_local(self.local_decls, place.local) {
+                self.found.push((place.local, false));
+            }
         }
         self.super_place(place, context, location);
     }
