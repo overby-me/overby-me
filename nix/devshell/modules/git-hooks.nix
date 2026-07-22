@@ -200,6 +200,11 @@
       };
       clippy = {
         enable = true;
+        # rust/fe-c pins a nightly toolchain and its fe-c-driver crate uses
+        # `#![feature(rustc_private)]`, which the stable `pkgs.cargo` here
+        # cannot build. Its clippy runs on the pinned nightly via the
+        # `fe-c-clippy` flake check (--all-features) instead.
+        excludes = ["^rust/fe-c/"];
         entry = "${pkgs.writeShellScript "clippy-multi-project" ''
           # Determine which Cargo projects contain changed .rs files.
           # Arguments are the changed .rs file paths passed by pre-commit.
