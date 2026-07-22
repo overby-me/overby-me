@@ -210,16 +210,20 @@ pulling real C — it doubles as the mixed-language build smoke test.
 `StorageDead`, else frame return — so the inner-block-then-same-frame shape
 is caught, not just use-after-frame-return), and a **default-on escape
 analysis** (`escaping_locals`: only locals whose address is laundered to an
-integer or handed to a foreign call get hooks, so hashbrown neither times out
-nor false-aborts), the **outbound FFI escape** (I9 / F6: a pointer argument
-to an `extern "C"` call registers its stack scope) and **`escaped_at`** (F7:
-the report names the source line the address escaped at). Shown by
-`corpus/stack-uaf` (inner-block `String` dereferenced later in the same frame)
-and `corpus/ffi-escape` (a stack borrow handed to a C harness and dereferenced
-when C re-enters through a trampoline) — both abort `UseAfterScopeExit` naming
-the dead scope *and* the escape site. Remaining for the exact rusqlite-0128:
-the real vendored `libsqlite3-sys` build (and, for completeness, the inbound
-`extern "C"` prologue check). Scoped in STATUS.*
+integer, handed to a foreign call, or captured into a heap-boxed closure get
+hooks, so hashbrown neither times out nor false-aborts), the **outbound FFI
+escape** (I9 / F6: a pointer argument to an `extern "C"` call registers its
+stack scope) and **`escaped_at`** (F7: the report names the source line the
+address escaped at). Shown by three reproducers — `corpus/stack-uaf`
+(inner-block `String` dereferenced later in the same frame), `corpus/ffi-escape`
+(a stack borrow handed to a C harness and dereferenced when C re-enters through
+a trampoline), and `corpus/closure-escape` (a raw stack pointer captured into a
+boxed closure kept past the frame, the rusqlite-0128 closure shape) — all abort
+`UseAfterScopeExit` naming the dead scope *and* the escape site. Remaining for
+the exact rusqlite-0128: the real vendored `libsqlite3-sys` build, a `§3.2`
+pointer-loaded-from-memory check (its closure reads the local through a *safe*
+reference, which v0's raw-deref point 0 does not instrument), and the inbound
+`extern "C"` prologue check. Scoped in STATUS.*
 
 ### Phase C — modes
 

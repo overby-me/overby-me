@@ -5,31 +5,37 @@ what is done, the one partial task, and how to resume at Phase C.
 
 ## TL;DR
 
-Phase A (A1–A5) and Phase B's checking work (B1–B4) are **complete, tested,
-and committed**. **Fe-C catches a real CVE**: instrumenting the vulnerable
-`smallvec@=1.6.0` traps RUSTSEC-2021-0003 and names the right allocation
-(the I10 canary), while the patched control and the hashbrown/regex-automata
-suites run clean under instrumentation (no false positives). **B5 is
-partial**: the I8 stack-scope mechanism is built and demonstrated
-(use-after-scope-exit is caught), but the exact `corpus-rusqlite-0128`
-(inner-lexical-scope UAF across real-C FFI) is not yet done — see below.
+Phase A (A1–A5, plus A4b), and Phase B (B1–B4 and B5's mechanism) are
+**complete, tested, and committed**. **Fe-C catches a real CVE**:
+instrumenting the vulnerable `smallvec@=1.6.0` traps RUSTSEC-2021-0003 and
+names the right allocation (the I10 canary), while the patched control and the
+hashbrown/regex-automata suites run clean under instrumentation (no false
+positives). **A4b** reworked the orchestration to symbol-level injection (the
+ASan model): instrumented third-party crates gain no cementite dependency
+edge, and cementite is freestanding (I11). **B5's I8/I9 mechanism is done**:
+lexical-scope granularity, a default-on escape analysis with three sinks
+(integer cast, foreign-call argument, closure capture), the outbound FFI
+escape, and `escaped_at` naming the escape site — demonstrated by three
+reproducers (`stack-uaf`, `ffi-escape`, `closure-escape`). The **exact**
+`corpus-rusqlite-0128` remains blocked on a §3.2 pointer-loaded-from-memory
+check (its closure reads the local through a *safe* reference) and the real
+vendored `libsqlite3-sys` build — see the B5 section.
 
 The session stops at **C1** (decide the mode order + implement the first
-mode) as instructed. C1 is not started; the mode-order decision is still
-open (`docs/both-modes.md` §Finding argues through-first).
+mode), the human's decision per §8. C1 is not started; the mode-order
+decision is still open (`docs/both-modes.md` §Finding argues through-first).
+The §3.2 check the exact rusqlite corpus needs is itself Phase-C-adjacent.
 
-All fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
-`interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
-`false-positive`, `corpus-stackuaf`.
+All fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`, `interpose`,
+`census`, `provenance`, `instrument`, `corpus-smallvec`, `false-positive`,
+`corpus-stackuaf`, `ffi-escape`, `closure-escape`.
 
-## Protocol discrepancy (unresolved)
+## Protocol
 
-The kickoff said to follow **§8 (autonomous session protocol)** of
-`CLAUDE.md`. **There is no §8** — the file ends at §7. I worked §4's queue
-and inferred a protocol: one commit per task, run the task's acceptance plus
-fmt/clippy/unit/miri before committing, advance the `fe-c/v0` bookmark, never
-push, never weaken a test. Flagging so a real §8 is written or the reference
-dropped.
+Following **§8** of `CLAUDE.md` (added mid-project): one commit per task, run
+the fe-c flake checks (individually — never `nix flake check`, it OOMs; the
+repo rule), mark tasks `[done]` in §4, advance the `fe-c/v0` bookmark, never
+push to `main`, never weaken a test. Hard stop at C1 (human-only).
 
 ## Done (committed on `fe-c/v0`)
 
@@ -101,27 +107,36 @@ and the rusqlite local is a `String` (a `Drop` type), so its drop glue is a
 reliable lexical death signal — no pre-optimization MIR hook was needed.
 
 Scope hooks are now **default-on**: an escape analysis (`escaping_locals`, a
-forward taint from address-of, sunk at a pointer→integer cast *or* a pointer
-argument to a foreign `extern "C"` call) keeps them to the locals whose
-address is laundered out of the frame, so hashbrown gets few or no hooks and
-neither times out nor false-aborts (`FEC_SCOPE_HOOKS` gate removed).
+forward taint from address-of) keeps them to the locals whose address is
+laundered out of the frame, so hashbrown gets few or no hooks and neither
+times out nor false-aborts (`FEC_SCOPE_HOOKS` gate removed). Three escape
+sinks are wired: a **pointer→integer cast** (`corpus/stack-uaf`), a **pointer
+argument to a foreign `extern "C"` call** (`corpus/ffi-escape`), and a
+**pointer captured into a heap-boxed closure** (`corpus/closure-escape` — the
+rusqlite-0128 closure shape).
 
 The **outbound FFI escape** (I9 / F6) and **`escaped_at`** (F7) are done. The
-FFI-arg sink registers the escaping local; `scope_enter` records the escape
-site (the source line, via the table's existing `site` field); a
-use-after-scope report prints `escaped_at=<line>`, naming where the address
-was handed out. `corpus/ffi-escape` (a new `fe-c-ffi-escape` check) is the
-cross-FFI reproducer: a stack borrow passed to a C harness, dereferenced when
-C re-enters through a trampoline, aborts naming the dead scope and the
-`fec_register` line. The exact rusqlite corpus entry needs one more real
-chunk (plus one nicety):
+sink registers the escaping local; `scope_enter` records the escape site (the
+source line, via the table's existing `site` field); a use-after-scope report
+prints `escaped_at=<line>`, naming where the address was handed out. All three
+reproducers abort `UseAfterScopeExit` naming the dead scope *and* the escape
+site. The exact rusqlite corpus entry needs:
 
-1. **The real C build.** Vendor `rusqlite@0.25.3` + `libsqlite3-sys`
-   (bundled), with provenance flowing through the trampoline. The A4
-   cc-harness and `corpus/ffi-escape` already prove the mixed-language build
-   and the cross-FFI detection; this is the first *corpus* entry to use a
-   real third-party C dependency.
-2. *(nicety)* the **inbound `extern "C"` prologue check** (`ensure_foreign_arg`,
+1. **The real C build.** Vendor a *non-yanked* vulnerable `rusqlite` (0.25.3
+   is yanked — use 0.25.0–0.25.2 or 0.26.0–0.26.1) + `libsqlite3-sys`
+   (bundled). The A4 cc-harness and `corpus/ffi-escape` already prove the
+   mixed-language build; this is the first *corpus* entry to use a real
+   third-party C dependency.
+2. **A `§3.2` pointer-loaded-from-memory check.** *This is the real blocker.*
+   The rusqlite closure reads `local` through a **safe reference** (`r.len()`),
+   which v0's raw-deref instrumentation (point 0) does not touch — the raw
+   dereference in the real trampoline is of the *live* closure box (`pApp`),
+   which passes. Catching the dead-local read needs a check at the point a
+   pointer/reference is loaded from memory and used (trace §3.2). The
+   `closure-escape` reproducer sidesteps this by capturing a *raw* pointer, so
+   its read is a checked raw dereference; the real rusqlite closure captures a
+   safe `&T`.
+3. *(nicety)* the **inbound `extern "C"` prologue check** (`ensure_foreign_arg`,
    trace step 4): validate safe-pointer params on the way in. Not needed for
    the abort (which fires at the callback's dereference), but completes the
    both-directions I9 story.

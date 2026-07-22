@@ -25,9 +25,10 @@ use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_index::IndexVec;
 use rustc_middle::mir::visit::{PlaceContext, Visitor};
 use rustc_middle::mir::{
-    BasicBlock, BasicBlockData, BinOp, Body, CallSource, CastKind, Const as MirConst, ConstOperand,
-    Local, LocalDecl, Location, Operand, Place, ProjectionElem, RawPtrKind, Rvalue, SourceInfo,
-    Statement, StatementKind, Terminator, TerminatorKind, UnwindAction,
+    AggregateKind, BasicBlock, BasicBlockData, BinOp, Body, CallSource, CastKind,
+    Const as MirConst, ConstOperand, Local, LocalDecl, Location, Operand, Place, ProjectionElem,
+    RawPtrKind, Rvalue, SourceInfo, Statement, StatementKind, Terminator, TerminatorKind,
+    UnwindAction,
 };
 use rustc_middle::ty::{self, Mutability, Ty, TyCtxt};
 use rustc_span::Spanned;
@@ -650,18 +651,37 @@ fn escaping_locals<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashMap<Local,
     let mut escaping: HashMap<Local, u32> = HashMap::new();
     let sm = tcx.sess.source_map();
     for bb in body.basic_blocks.iter() {
-        // Sink: a pointer-to-integer cast launders the address out of frame.
         for stmt in &bb.statements {
             if let StatementKind::Assign(boxed) = &stmt.kind {
                 let (_, rv) = &**boxed;
+                let line = || sm.lookup_char_pos(stmt.source_info.span.lo()).line as u32;
+                // Sink: a pointer-to-integer cast launders the address out.
                 if let Rvalue::Cast(_, op, ty) = rv
                     && ty.is_integral()
                     && let Some(p) = op.place()
                     && let Some(seed) = taint.get(&p.local)
                 {
-                    let line = sm.lookup_char_pos(stmt.source_info.span.lo()).line as u32;
+                    let l0 = line();
                     for &l in seed {
-                        escaping.entry(l).or_insert(line);
+                        escaping.entry(l).or_insert(l0);
+                    }
+                }
+                // Sink: a pointer captured by-move into a closure. The closure
+                // is heap-boxed and outlives the frame (rusqlite hands such a
+                // box to SQLite via `create_scalar_function`), carrying the
+                // stack address out with it.
+                if let Rvalue::Aggregate(kind, operands) = rv
+                    && matches!(**kind, AggregateKind::Closure(..))
+                {
+                    for op in operands.iter() {
+                        if let Some(p) = op.place()
+                            && let Some(seed) = taint.get(&p.local)
+                        {
+                            let l0 = line();
+                            for &l in seed {
+                                escaping.entry(l).or_insert(l0);
+                            }
+                        }
                     }
                 }
             }

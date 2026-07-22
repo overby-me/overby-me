@@ -39,6 +39,8 @@
       ./corpus/stack-uaf/Cargo.lock
       # The B5 / I9 cross-FFI escape reproducer (no third-party deps).
       ./corpus/ffi-escape/Cargo.lock
+      # The B5 / I9 closure heap-escape reproducer (no third-party deps).
+      ./corpus/closure-escape/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -314,6 +316,29 @@ in {
         set -e
         cat "$TMPDIR/fe.log"
         nu corpus/assert_ffi_escape.nu "$TMPDIR/fe.log" "$fe_exit"
+      '';
+
+    # Closure heap-escape (B5, I9): build the closure-escape reproducer (a raw
+    # pointer to a stack local captured by-move into a boxed closure kept past
+    # the frame, then dereferenced when the closure runs) and assert it aborts
+    # UseAfterScopeExit naming the dead scope and the capture site. This is the
+    # rusqlite-0128 closure shape; the escape analysis recognises the pointer
+    # captured into a heap-boxed closure.
+    fe-c-closure-escape = pkgs:
+      cargoCheck pkgs "closure-escape" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1
+        ( cd corpus/closure-escape \
+            && FEC_INSTRUMENT_ONLY=closure_escape RUSTC="$drv" \
+               CARGO_TARGET_DIR="$TMPDIR/t" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/t/debug/closure-escape" >"$TMPDIR/ce.log" 2>&1
+        ce_exit=$?
+        set -e
+        cat "$TMPDIR/ce.log"
+        nu corpus/assert_closure_escape.nu "$TMPDIR/ce.log" "$ce_exit"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the
