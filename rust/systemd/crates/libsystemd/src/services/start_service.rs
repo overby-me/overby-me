@@ -790,6 +790,21 @@ fn start_service_with_filedescriptors(
                         "MEMORY_PRESSURE_WATCH".to_owned(),
                         pressure_path.to_string_lossy().into_owned(),
                     ));
+                    // MEMORY_PRESSURE_WRITE — the base64-encoded PSI trigger the
+                    // service writes to memory.pressure to register its stall
+                    // threshold: "some <threshold_us> <window_us>\0". threshold_us
+                    // is MemoryPressureThresholdSec= (systemd's default is 200ms);
+                    // window is systemd's fixed MEMORY_PRESSURE_DEFAULT_WINDOW_USEC
+                    // (2s). See systemd.exec(5) / sd_notify(3).
+                    let threshold_us = match conf.memory_pressure_threshold_sec {
+                        Some(crate::units::Timeout::Duration(d)) => d.as_micros() as u64,
+                        _ => 200_000,
+                    };
+                    let trigger = format!("some {threshold_us} 2000000\0");
+                    use base64::Engine;
+                    let encoded =
+                        base64::engine::general_purpose::STANDARD.encode(trigger.as_bytes());
+                    env.push(("MEMORY_PRESSURE_WRITE".to_owned(), encoded));
                 } else if matches!(conf.memory_pressure_watch, MemoryPressureWatch::Off) {
                     // Off: explicitly set to empty string (different from Skip which omits it)
                     env.push(("MEMORY_PRESSURE_WATCH".to_owned(), String::new()));
