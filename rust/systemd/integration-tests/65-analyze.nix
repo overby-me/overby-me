@@ -12,13 +12,13 @@
     . "$(dirname "$0")"/util.sh
 
     : "systemd-analyze time (boot timing)"
-    systemd-analyze time || :
+    systemd-analyze time
 
     : "systemd-analyze blame (unit timing)"
-    systemd-analyze blame || :
+    systemd-analyze blame
 
     : "systemd-analyze critical-chain"
-    systemd-analyze critical-chain || :
+    systemd-analyze critical-chain
 
     : "systemd-analyze log-level get/set"
     ORIG_LOG_LEVEL="$(systemd-analyze log-level)"
@@ -89,6 +89,8 @@
     systemd-analyze dot --from-pattern="*.service" --to-pattern="*.target" >/dev/null
 
     : "systemd-analyze verify"
+    # default.target isn't materialized under /run/systemd/system in this VM,
+    # so tolerate the open failure (verify itself works, see condition --unit).
     systemd-analyze verify /run/systemd/system/default.target 2>&1 || :
 
     : "systemd-analyze condition"
