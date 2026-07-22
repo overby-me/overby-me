@@ -245,12 +245,51 @@ fn build_synthesized_mount_unit(
     crate::units::from_parsed_config::unit_from_parsed_mount(conf)
 }
 
+/// Rewrite a mount unit's default-dependencies in place to match `is_network`
+/// (and the backing `what`): scrub the old mount default-deps and add the new
+/// ones. Used to reclassify a synthesised mount, to make an active mount
+/// override a static unit's declared ordering, and to revert a static unit.
+fn apply_mount_deps_in_place(d: &mut crate::units::Dependencies, what: &str, is_network: bool) {
+    d.after.retain(|x| !is_mount_default_dep(&x.name));
+    d.before.retain(|x| !is_mount_default_dep(&x.name));
+    d.wants.retain(|x| !is_mount_default_dep(&x.name));
+    d.requires.retain(|x| !is_mount_default_dep(&x.name));
+    let (na, nb, nw, nr) = mount_default_deps(what, is_network);
+    for n in na {
+        if let Some(uid) = dep_unit_id(&n) {
+            d.after.push(uid);
+        }
+    }
+    for n in nb {
+        if let Some(uid) = dep_unit_id(&n) {
+            d.before.push(uid);
+        }
+    }
+    for n in nw {
+        if let Some(uid) = dep_unit_id(&n) {
+            d.wants.push(uid);
+        }
+    }
+    for n in nr {
+        if let Some(uid) = dep_unit_id(&n) {
+            d.requires.push(uid);
+        }
+    }
+    d.dedup();
+}
+
 /// Synchronise the unit table with `/proc/self/mountinfo` + `/run/mount/utab`.
-/// `synthesized` maps the names of units this monitor created to their last
-/// `is_network` classification, so a mount whose userspace options change (e.g.
-/// `_netdev` appears in utab after the kernel mount) is rebuilt with the right
-/// ordering.
-pub fn sync_mount_units(run_info: &ArcMutRuntimeInfo, synthesized: &mut HashMap<String, bool>) {
+///
+/// `synthesized` tracks units this monitor created (name -> last is_network);
+/// they are removed when their mount disappears. `overridden` tracks static /
+/// unit-file mounts whose declared ordering the monitor has replaced with the
+/// active mount's (systemd coldplugs the running mount over the unit file); when
+/// their mount disappears the deps are reverted to the unit-file config.
+pub fn sync_mount_units(
+    run_info: &ArcMutRuntimeInfo,
+    synthesized: &mut HashMap<String, bool>,
+    overridden: &mut HashMap<String, bool>,
+) {
     // name -> (mountpoint, source, fstype, is_network)
     let mut current: HashMap<String, (String, String, String, bool)> = HashMap::new();
     for (mountpoint, source, fstype) in parse_mountinfo() {
@@ -266,74 +305,32 @@ pub fn sync_mount_units(run_info: &ArcMutRuntimeInfo, synthesized: &mut HashMap<
             kind: UnitIdKind::Mount,
             name: name.clone(),
         };
-        let prev_class = synthesized.get(name).copied();
-
         if ri.unit_table.contains_key(&id) {
-            match prev_class {
-                // Ours, and the classification is unchanged: just keep active.
-                Some(c) if c == *is_network => {
-                    if let Some(u) = ri.unit_table.get(&id) {
-                        let mut st = u.common.status.write_poisoned();
-                        if !matches!(&*st, UnitStatus::Started(_)) {
-                            *st = UnitStatus::Started(StatusStarted::Running);
-                        }
-                    }
-                    continue;
-                }
-                // Ours, but the classification changed (e.g. _netdev appeared in
-                // /run/mount/utab after the kernel mount). Rewrite the mount
-                // default-dependencies in place: remove + re-insert would
-                // re-resolve the old reverse-deps (local-fs-pre.target, the old
-                // device) straight back onto the new unit.
-                Some(_) => {
-                    let (na, nb, nw, nr) = mount_default_deps(source, *is_network);
+            if let Some(prev) = synthesized.get(name).copied() {
+                // A unit this monitor synthesised: reclassify in place if its
+                // local/remote classification changed (e.g. _netdev appeared in
+                // /run/mount/utab after the kernel mount).
+                if prev != *is_network {
                     if let Some(u) = ri.unit_table.get_mut(&id) {
-                        {
-                            let d = &mut u.common.dependencies;
-                            d.after.retain(|x| !is_mount_default_dep(&x.name));
-                            d.before.retain(|x| !is_mount_default_dep(&x.name));
-                            d.wants.retain(|x| !is_mount_default_dep(&x.name));
-                            d.requires.retain(|x| !is_mount_default_dep(&x.name));
-                            for n in na {
-                                if let Some(uid) = dep_unit_id(&n) {
-                                    d.after.push(uid);
-                                }
-                            }
-                            for n in nb {
-                                if let Some(uid) = dep_unit_id(&n) {
-                                    d.before.push(uid);
-                                }
-                            }
-                            for n in nw {
-                                if let Some(uid) = dep_unit_id(&n) {
-                                    d.wants.push(uid);
-                                }
-                            }
-                            for n in nr {
-                                if let Some(uid) = dep_unit_id(&n) {
-                                    d.requires.push(uid);
-                                }
-                            }
-                            d.dedup();
-                        }
-                        *u.common.status.write_poisoned() =
-                            UnitStatus::Started(StatusStarted::Running);
+                        apply_mount_deps_in_place(&mut u.common.dependencies, source, *is_network);
                     }
                     synthesized.insert(name.clone(), *is_network);
-                    continue;
                 }
-                // A static (fstab / unit-file) mount unit: leave its deps alone,
-                // only reflect that the mount is present.
-                None => {
-                    if let Some(u) = ri.unit_table.get(&id) {
-                        let mut st = u.common.status.write_poisoned();
-                        if !matches!(&*st, UnitStatus::Started(_)) {
-                            *st = UnitStatus::Started(StatusStarted::Running);
-                        }
-                    }
-                    continue;
+            } else if overridden.get(name).copied() != Some(*is_network) {
+                // A static / fstab mount unit: the active mount overrides its
+                // declared local/remote classification while it is mounted.
+                if let Some(u) = ri.unit_table.get_mut(&id) {
+                    apply_mount_deps_in_place(&mut u.common.dependencies, source, *is_network);
+                }
+                overridden.insert(name.clone(), *is_network);
+            }
+            if let Some(u) = ri.unit_table.get(&id) {
+                let mut st = u.common.status.write_poisoned();
+                if !matches!(&*st, UnitStatus::Started(_)) {
+                    *st = UnitStatus::Started(StatusStarted::Running);
                 }
             }
+            continue;
         }
 
         match build_synthesized_mount_unit(name, source, mountpoint, fstype, *is_network) {
@@ -348,7 +345,7 @@ pub fn sync_mount_units(run_info: &ArcMutRuntimeInfo, synthesized: &mut HashMap<
         }
     }
 
-    // Remove synthesised units whose mount has gone away (unmounted).
+    // Synthesised units whose mount has gone away -> remove.
     let gone: Vec<String> = synthesized
         .keys()
         .filter(|n| !current.contains_key(*n))
@@ -370,6 +367,35 @@ pub fn sync_mount_units(run_info: &ArcMutRuntimeInfo, synthesized: &mut HashMap<
             ri.unit_table.remove(&id);
         }
         synthesized.remove(&name);
+        overridden.remove(&name);
+    }
+
+    // Static / fstab units whose mount has gone away -> revert their deps to the
+    // unit-file config (do NOT remove them; the unit file still exists).
+    let reverted: Vec<String> = overridden
+        .keys()
+        .filter(|n| !current.contains_key(*n))
+        .cloned()
+        .collect();
+    for name in reverted {
+        let id = UnitId {
+            kind: UnitIdKind::Mount,
+            name: name.clone(),
+        };
+        if let Some(u) = ri.unit_table.get_mut(&id) {
+            let (what, is_net) = if let crate::units::Specific::Mount(m) = &u.specific {
+                (
+                    m.conf.what.clone(),
+                    mount_is_network_static(m.conf.fs_type.as_deref(), m.conf.options.as_deref()),
+                )
+            } else {
+                (String::new(), false)
+            };
+            apply_mount_deps_in_place(&mut u.common.dependencies, &what, is_net);
+            *u.common.status.write_poisoned() =
+                UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
+        }
+        overridden.remove(&name);
     }
 }
 
@@ -385,9 +411,10 @@ pub fn start_mount_monitor_thread(run_info: ArcMutRuntimeInfo) {
         use std::os::fd::AsRawFd;
 
         let mut synthesized: HashMap<String, bool> = HashMap::new();
+        let mut overridden: HashMap<String, bool> = HashMap::new();
 
         // Initial sync so mounts already present at start-up get their units.
-        sync_mount_units(&run_info, &mut synthesized);
+        sync_mount_units(&run_info, &mut synthesized, &mut overridden);
 
         let mut file = match std::fs::File::open("/proc/self/mountinfo") {
             Ok(f) => f,
@@ -416,7 +443,7 @@ pub fn start_mount_monitor_thread(run_info: ArcMutRuntimeInfo) {
             let _ = file.seek(SeekFrom::Start(0));
             scratch.clear();
             let _ = file.read_to_end(&mut scratch);
-            sync_mount_units(&run_info, &mut synthesized);
+            sync_mount_units(&run_info, &mut synthesized, &mut overridden);
         }
     });
 }
