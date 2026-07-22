@@ -205,21 +205,24 @@ to the escape (only escaped regions stay findable-as-dead).
 
 ## Open items carried forward
 
-- **point 0 is extent-aware for projected accesses; whole-object `*p` still
-  checks the start only.** A projected raw/`through` deref (`(*p).f`, `(*p)[i]`)
-  now goes through `__fec_check_extent(fault, root, size)` — it faults on the
-  accessed address `p + offset` *and* verifies `[fault, fault + size)` lies
-  inside the live allocation, so both a start-off-the-end access (`cast-oob
-  direct`) and one whose start is in bounds but whose extent overruns (`cast-oob
-  extent`) are caught, in both modes, with the false-positive suite clean (5.1M
-  hashbrown checks). `__fec_check_extent` shares `extent_verify` with the point-1
-  `ensure` (minus the mint recording). The **residual** is a whole-object `*p`
-  read that overruns a mis-cast base wider than the allocation (`p` cast to a
-  larger `T` than fits): `is_simple_projected_place` excludes the bare `[Deref]`,
-  so it keeps the single-address base check. The same `check_extent` routing
-  would close it (drop the projected restriction, size = pointee layout) — left
-  off only because it puts an extent call on *every* whole-object deref, the
-  broadest hot-path change, to be vetted deliberately.
+- **point 0 is extent-aware for all sized accesses; only unsized accesses keep
+  the start-only check.** Every raw deref (both modes) and every `through` safe
+  deref with a known layout size now goes through
+  `__fec_check_extent(fault, root, size)` — it faults on the accessed address
+  (`p` for `*p`, `p + offset` for `(*p).f`) *and* verifies `[fault, fault+size)`
+  lies inside the live allocation. So a start-off-the-end access (`cast-oob
+  direct`), a projected access whose extent overruns (`cast-oob extent`), and a
+  whole-object `*p` read of a type wider than a mis-cast allocation (`cast-oob
+  whole-extent`) are all caught, in both modes, with the false-positive suite
+  clean (5.1M hashbrown checks) and the stack-UAF / smallvec / rusqlite catches
+  unchanged. `__fec_check_extent` shares `extent_verify` with the point-1
+  `ensure` (minus the mint recording). The only **residual** is an **unsized**
+  access (`[T]`, `dyn Trait`) whose size is unknown at the site: `layout_of`
+  fails, so it keeps the single-address `deref_rooted`. That is inherent (there
+  is no static extent to check), not a mis-cast precision gap — a fat-pointer
+  length check would be a separate feature. Pointer-write intrinsics
+  (`ptr::write`) still use the single-address check on the destination
+  (`instrument_write_call`); extent-checking writes is a follow-on.
 - **Interposed frees don't quarantine.** `interpose::free` clears liveness
   (I7) then frees immediately; routing C frees through the shared quarantine
   needs a per-origin release dispatch on the node (System vs libc `free`).

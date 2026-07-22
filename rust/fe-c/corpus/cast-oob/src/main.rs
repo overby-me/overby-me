@@ -94,11 +94,28 @@ fn extent_overrun() {
     black_box(x);
 }
 
+/// Whole-object read `*p` of a type wider than the mis-cast allocation — the
+/// deref *starts* at the base (in bounds) but reads past the end. Caught by the
+/// extent check over `[p, p + size_of::<[u8; 16]>())`, which the single-address
+/// base check would miss.
+fn whole_object_extent() {
+    let v: Vec<u8> = black_box(vec![0u8; 12]); // 12-byte buffer
+    let base = v.as_ptr();
+    eprintln!("BASE={base:p}");
+    // Reinterpret the 12-byte buffer as a 16-byte array and read the whole
+    // thing: `*p` reads [base, base+16), overrunning by 4 bytes.
+    let p = base as *const [u8; 16];
+    let x = unsafe { *p };
+    println!("NO_ABORT x={:#x}", x[0]);
+    black_box(x);
+}
+
 fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("field") => field_reborrow(),
         Some("direct") => direct_field(),
         Some("extent") => extent_overrun(),
+        Some("whole-extent") => whole_object_extent(),
         _ => whole_object(),
     }
 }

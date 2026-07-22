@@ -203,14 +203,16 @@ pub extern "C" fn __fec_ensure(fault: *const u8, root: *const u8, size: usize, m
     }
 }
 
-/// Projected-dereference extent check (instrumentation point 0, spatial+temporal
-/// on the *accessed* extent). The MIR pass injects this for a raw or `through`
-/// dereference of a simple projected place (`(*p).f`, `(*p)[i]`), where the
-/// access covers `[fault, fault + size)` with `fault = p + offset` and `size`
-/// the projected place's layout size. Unlike the single-address deref check it
-/// verifies the whole extent, so a subobject that starts in bounds but extends
-/// past the end of a mis-cast allocation is caught. Resolves from the derivation
-/// root (I10), never the faulting address.
+/// Dereference extent check (instrumentation point 0, spatial+temporal on the
+/// *accessed* extent). The MIR pass injects this for a raw dereference (either
+/// mode) or a `through` safe dereference whose accessed place has a known layout
+/// size: the access covers `[fault, fault + size)` with `fault = p` for a
+/// whole-object `*p` and `p + offset` for a projected `(*p).f`/`(*p)[i]`. Unlike
+/// the single-address deref check it verifies the whole extent, so an access
+/// that starts in bounds but extends past the end of a mis-cast allocation is
+/// caught. Resolves from the derivation root (I10), never the faulting address.
+/// (Unsized accesses, whose size is unknown at the site, keep the single-address
+/// `__fec_check_deref_rooted`.)
 ///
 /// # Safety
 ///

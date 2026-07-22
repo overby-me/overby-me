@@ -273,15 +273,17 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
                 };
 
                 let projected = is_simple_projected_place(&place);
-                // A projected raw/`through` deref gets the extent check over the
-                // whole accessed subobject (spatial + temporal) when its layout
-                // size is known — so a subobject that *starts* in bounds but runs
-                // past the end of a mis-cast allocation is caught, not just one
-                // whose start is off the end. Case-mode safe derefs keep the
-                // temporal-only re-check (their spatial extent was vetted at the
-                // cast ensure); whole-object and unsized accesses keep the
-                // single-address base check.
-                let extent_size = if projected && check == check_fn {
+                // A raw deref (either mode) or a `through` safe deref gets the
+                // extent check over the whole accessed place (spatial + temporal)
+                // when its layout size is known — the fault is `p` for a
+                // whole-object `*p` and `p + offset` for a projected `(*p).f`,
+                // and the check verifies `[fault, fault + size)`, so an access
+                // that *starts* in bounds but runs past the end of a mis-cast
+                // allocation is caught, not just one whose start is off the end.
+                // Case-mode safe derefs keep the temporal-only re-check (their
+                // spatial extent was vetted at the cast ensure); an unsized
+                // access (`layout_of` fails) keeps the single-address base check.
+                let extent_size = if check == check_fn {
                     let ty = place.ty(local_decls, tcx).ty;
                     tcx.layout_of(typing_env.as_query_input(ty))
                         .ok()
