@@ -87,27 +87,36 @@ fn fstype_is_network(fstype: &str) -> bool {
     )
 }
 
-/// Whether the mount at `target` carries the userspace `_netdev` option, read
-/// from `/run/mount/utab`. libmount writes one line per mount as space-separated
-/// `KEY=value` tokens, e.g. `ID=1 SRC=/dev/x TARGET=/mnt ROOT=/ OPTS=_netdev`.
-/// The `_netdev` option only lives here, never in `/proc/self/mountinfo`, and is
-/// written slightly after mountinfo — the periodic re-sync picks it up.
-fn target_has_netdev(target: &str) -> bool {
+/// Whether the mount of `source` at `target` carries the userspace `_netdev`
+/// option, read from `/run/mount/utab`. libmount writes one line per mount as
+/// space-separated `KEY=value` tokens, e.g.
+/// `ID=1 SRC=/dev/x TARGET=/mnt ROOT=/ OPTS=_netdev`. The `_netdev` option only
+/// lives here, never in `/proc/self/mountinfo`, and is written slightly after
+/// mountinfo — the periodic re-sync picks it up.
+///
+/// The entry is matched on BOTH target and source: rust-systemd's
+/// `deactivate_mount` uses the `umount2` syscall, which (unlike the libmount
+/// `umount` command) does not remove the utab entry, so a stale entry for a
+/// previous mount at the same path must not be mistaken for the current one.
+fn mount_has_netdev(target: &str, source: &str) -> bool {
     let content = match std::fs::read_to_string("/run/mount/utab") {
         Ok(c) => c,
         Err(_) => return false,
     };
     for line in content.lines() {
         let mut this_target: Option<String> = None;
+        let mut this_src: Option<String> = None;
         let mut opts: Option<&str> = None;
         for tok in line.split_whitespace() {
             if let Some(v) = tok.strip_prefix("TARGET=") {
                 this_target = Some(octal_unescape(v));
+            } else if let Some(v) = tok.strip_prefix("SRC=") {
+                this_src = Some(octal_unescape(v));
             } else if let Some(v) = tok.strip_prefix("OPTS=") {
                 opts = Some(v);
             }
         }
-        if this_target.as_deref() == Some(target) {
+        if this_target.as_deref() == Some(target) && this_src.as_deref() == Some(source) {
             return opts
                 .map(|o| o.split(',').any(|f| f == "_netdev"))
                 .unwrap_or(false);
@@ -236,7 +245,7 @@ pub fn sync_mount_units(run_info: &ArcMutRuntimeInfo, synthesized: &mut HashMap<
     let mut current: HashMap<String, (String, String, String, bool)> = HashMap::new();
     for (mountpoint, source, fstype) in parse_mountinfo() {
         let name = crate::units::unit_parsing::path_to_mount_unit_name(&mountpoint);
-        let is_network = fstype_is_network(&fstype) || target_has_netdev(&mountpoint);
+        let is_network = fstype_is_network(&fstype) || mount_has_netdev(&mountpoint, &source);
         current.insert(name, (mountpoint, source, fstype, is_network));
     }
 
@@ -344,7 +353,12 @@ pub fn sync_mount_units(run_info: &ArcMutRuntimeInfo, synthesized: &mut HashMap<
             *u.common.status.write_poisoned() =
                 UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
         }
-        ri.unit_table.remove(&id);
+        // Dependency-aware removal so the unit is scrubbed from every other
+        // unit's dep lists; a raw remove would leave dangling reverse-deps that
+        // get re-resolved onto the next unit synthesised for the same path.
+        if crate::units::remove_unit_with_dependencies(id.clone(), &mut ri).is_err() {
+            ri.unit_table.remove(&id);
+        }
         synthesized.remove(&name);
     }
 }
