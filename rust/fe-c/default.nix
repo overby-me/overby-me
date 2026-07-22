@@ -9,6 +9,9 @@
       ./Cargo.toml
       ./Cargo.lock
       ./crates
+      # Corpus reproducer crates (separate workspaces) for the corpus
+      # checks. Ignored by the workspace build; used by fe-c-corpus-*.
+      ./corpus
     ];
   };
 
@@ -27,6 +30,9 @@
       # The B2 instrumentation harness is its own workspace with its own
       # lock (cementite path dep + rustix tree).
       ./crates/fe-c-driver/tests/fixtures/harness/Cargo.lock
+      # The B3 corpus reproducer + its patched control.
+      ./corpus/smallvec-0003/Cargo.lock
+      ./corpus/smallvec-0003-control/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -199,6 +205,42 @@ in {
         echo "--- instrumented ---"; cat "$TMPDIR/ins.log"
         echo "--- control ---"; cat "$TMPDIR/ctl.log"
         nu crates/fe-c-driver/tests/assert_instrument.nu "$TMPDIR/ins.log" "$TMPDIR/ctl.log"
+      '';
+
+    # Corpus RUSTSEC-2021-0003 (B3, I10 canary): build the smallvec 1.6.0
+    # reproducer instrumented and assert it aborts naming the SmallVec
+    # allocation (not the neighbouring String), while the patched 1.6.1
+    # control runs clean. cementite is force-injected into every compile so
+    # smallvec itself is instrumented.
+    fe-c-corpus-smallvec = pkgs:
+      cargoCheck pkgs "corpus-smallvec" ''
+        cargo build -p fe-c-driver -p cementite --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1
+        export FEC_CEMENTITE_RLIB="$CARGO_TARGET_DIR/debug/libcementite.rlib"
+        export FEC_CEMENTITE_DEPS="$CARGO_TARGET_DIR/debug/deps"
+
+        # Reproducer: vulnerable smallvec 1.6.0, must abort naming SmallVec.
+        ( cd corpus/smallvec-0003 \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tr" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tr/debug/smallvec-0003" >"$TMPDIR/repro.log" 2>&1
+        repro_exit=$?
+        set -e
+
+        # Control: patched smallvec 1.6.1, must run clean.
+        ( cd corpus/smallvec-0003-control \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/smallvec-0003-control" >"$TMPDIR/control.log" 2>&1
+        control_exit=$?
+        set -e
+
+        echo "--- reproducer (exit $repro_exit) ---"; cat "$TMPDIR/repro.log"
+        echo "--- control (exit $control_exit) ---"; cat "$TMPDIR/control.log"
+        nu corpus/assert_smallvec_0003.nu \
+          "$TMPDIR/repro.log" "$repro_exit" "$TMPDIR/control.log" "$control_exit"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the

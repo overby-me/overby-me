@@ -1,0 +1,20 @@
+# corpus-smallvec-0003: the RUSTSEC-2021-0003 reproducer (spatial / heap
+# overflow, the I10 provenance canary). Its own workspace; cementite is not
+# a cargo dependency — the instrument driver force-injects it so it is
+# available to this crate and to smallvec itself. Built + run by the
+# fe-c-corpus-smallvec check, which asserts it aborts naming the SmallVec
+# allocation, not the neighbouring String.
+[workspace]
+
+[package]
+name = "smallvec-0003"
+version = "0.0.0"
+edition = "2018"
+publish = false
+
+[dependencies]
+smallvec = "=1.6.0"
+
+[[bin]]
+name = "smallvec-0003"
+path = "src/main.rs"

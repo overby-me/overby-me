@@ -63,6 +63,7 @@ fn main() {
     // unaffected; it uses a rustc_driver::Callbacks driver rather than the
     // read-only rustc_public one.
     if std::env::var_os("FEC_INSTRUMENT").is_some() {
+        inject_cementite(&mut args);
         std::process::exit(instrument::run(&args));
     }
 
@@ -78,6 +79,51 @@ fn main() {
 fn is_info_probe(args: &[String]) -> bool {
     args.iter()
         .any(|a| matches!(a.as_str(), "-vV" | "-V" | "--version") || a.starts_with("--print"))
+}
+
+/// Makes `cementite` available as an extern crate to *every* compilation so
+/// the injected check calls resolve — including in third-party dependencies
+/// (e.g. `smallvec`) that do not declare it. `FEC_CEMENTITE_RLIB` points at
+/// a prebuilt `libcementite.rlib` and `FEC_CEMENTITE_DEPS` at its
+/// dependency search dir. This is the minimal `cargo-fe-c` orchestration:
+/// cementite behaves like an always-available sysroot crate.
+fn inject_cementite(args: &mut Vec<String>) {
+    let Ok(rlib) = std::env::var("FEC_CEMENTITE_RLIB") else {
+        return;
+    };
+    // Never inject into cementite's own build, and never duplicate an
+    // existing `--extern cementite`.
+    if crate_name(args).as_deref() == Some("cementite")
+        || args.iter().any(|a| a.contains("cementite="))
+    {
+        return;
+    }
+    // `force:` loads cementite even when the crate's source never references
+    // it (dependencies like smallvec don't), so the check fn is resolvable
+    // and the injected calls link. The modifier needs -Zunstable-options.
+    if !args.iter().any(|a| a == "-Zunstable-options") {
+        args.push("-Zunstable-options".to_string());
+    }
+    args.push("--extern".to_string());
+    args.push(format!("force:cementite={rlib}"));
+    if let Ok(deps) = std::env::var("FEC_CEMENTITE_DEPS") {
+        args.push("-L".to_string());
+        args.push(format!("dependency={deps}"));
+    }
+}
+
+/// Extracts the `--crate-name` value from a rustc command line.
+fn crate_name(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--crate-name" {
+            return it.next().cloned();
+        }
+        if let Some(v) = a.strip_prefix("--crate-name=") {
+            return Some(v.to_string());
+        }
+    }
+    None
 }
 
 /// Runs the census after the compiler has produced MIR. Returns

@@ -142,10 +142,16 @@ value.
 injects `cementite::__fec_check_deref(ptr)` (resolved by path). The harness
 reports 3 checks fired, program output unchanged, control clean.*
 
-**B3. Raw-deref checking (instrumentation point 0).**
+**B3. Raw-deref checking (instrumentation point 0).** *(done 2026-07-22)*
 ✅ **`corpus-smallvec-0003` aborts**, and the report names the SmallVec
 allocation — *not* the neighbouring `String`. That mis-attribution is the I10
 regression canary; assert on it explicitly.
+*Verified on real `smallvec@=1.6.0`: the check resolves the capability from
+the `as_mut_ptr()` root (a 1-byte spilled buffer), the overflowing
+`ptr::write`/`ptr::copy` traps, and the report names that buffer, not the
+neighbouring String. Patched `1.6.1` runs clean (259 checks, no false
+positive). The `fe-c-corpus-smallvec` check builds both offline; cementite
+is force-injected into every compile so smallvec itself is instrumented.*
 
 **B4. Cast checks (point 1) + `ensure`.**
 ✅ `false-positive` check green: `serde`, `regex`, `hashbrown` own test suites

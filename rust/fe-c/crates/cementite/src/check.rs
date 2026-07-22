@@ -12,6 +12,8 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use crate::table;
+
 /// Number of raw-dereference checks executed this process.
 static DEREF_CHECKS: AtomicU64 = AtomicU64::new(0);
 /// Whether the at-exit reporter has been registered yet.
@@ -71,6 +73,46 @@ pub extern "C" fn __fec_check_deref(ptr: *const u8) {
     }
 }
 
+/// Raw-pointer dereference check with **provenance** (Task B3, invariant
+/// I10). The MIR pass passes both the faulting pointer and the pointer at
+/// its *derivation root*; the capability is resolved from the **root**, and
+/// the faulting address is compared against it.
+///
+/// Resolving from the root, never the faulting address, is what makes an
+/// overflow into an adjacent *live* allocation fail: looking up the fault
+/// would find the neighbour's (valid) capability and wrongly pass — the
+/// exact F10 defect in `docs/traces/rustsec-2021-0003.md`.
+///
+/// # Safety
+///
+/// Neither pointer is dereferenced here; both are only inspected.
+#[unsafe(no_mangle)]
+pub extern "C" fn __fec_check_deref_rooted(fault: *const u8, root: *const u8) {
+    if !REPORTER_REGISTERED.swap(true, Ordering::Relaxed) {
+        #[cfg(not(miri))]
+        // SAFETY: `report` is a valid `extern "C" fn()`.
+        unsafe {
+            atexit(report)
+        };
+    }
+    DEREF_CHECKS.fetch_add(1, Ordering::Relaxed);
+
+    if fault.is_null() {
+        report_null_and_abort();
+    }
+
+    // I10: resolve the owning allocation from the DERIVATION ROOT. If the
+    // root has no known provenance (stack, foreign static, or an
+    // uninstrumented allocator), fall through — v0's tolerant policy for
+    // unknown heap/static provenance.
+    if let Some(cap) = table::lookup(root as usize) {
+        let f = fault as usize;
+        if f < cap.base || f >= cap.base + cap.len {
+            report_oob_and_abort(f, cap.base, cap.len, cap.id.raw());
+        }
+    }
+}
+
 #[cold]
 #[inline(never)]
 fn report_null_and_abort() -> ! {
@@ -78,6 +120,25 @@ fn report_null_and_abort() -> ! {
         &mut std::io::stderr(),
         b"fe-c: null raw-pointer dereference\n",
     );
+    std::process::abort();
+}
+
+#[cold]
+#[inline(never)]
+fn report_oob_and_abort(fault: usize, base: usize, len: usize, id: u64) -> ! {
+    let end = base + len;
+    let past = fault.saturating_sub(end);
+    // Machine-parseable first line (tests assert on it), then a human note.
+    // The named allocation is the one the pointer was DERIVED from, not
+    // whatever the faulting address happens to land in.
+    let msg = format!(
+        "fe-c-violation kind=OutOfBounds fault={fault:#x} alloc_base={base:#x} \
+alloc_len={len} alloc_id={id}\n\
+fe-c: out-of-bounds raw dereference {past} byte(s) past the end of the owning \
+allocation [{base:#x}, {end:#x}); resolved at the derivation root per I10, not \
+the faulting address\n"
+    );
+    let _ = std::io::Write::write_all(&mut std::io::stderr(), msg.as_bytes());
     std::process::abort();
 }
 
