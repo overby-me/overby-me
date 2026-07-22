@@ -188,6 +188,20 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
             &*unit.common.status.read_poisoned(),
             UnitStatus::Started(_)
         );
+    if unit.id.name.contains("deptest") {
+        crate::entrypoints::kmsg(&format!(
+            "SHOWPROBE {} status={:?} mount_inactive={} stored_after={:?}",
+            unit.id.name,
+            &*unit.common.status.read_poisoned(),
+            mount_inactive,
+            unit.common
+                .dependencies
+                .after
+                .iter()
+                .map(|x| x.name.clone())
+                .collect::<Vec<_>>()
+        ));
+    }
     match &unit.specific {
         crate::units::Specific::Mount(m) if mount_inactive => {
             let is_net = crate::units::mount_is_network_static(
