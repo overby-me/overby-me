@@ -101,6 +101,39 @@ pub fn pre_fork_os_specific(
             }
         }
 
+        // When MemoryPressureWatch is enabled the service (possibly a
+        // DynamicUser) must be able to WRITE the PSI trigger to its cgroup's
+        // memory.pressure file. The Delegate= chown below only runs for
+        // delegated services and never covers memory.pressure, so chown that one
+        // file to the service user here for any watched service. Mirrors systemd
+        // making memory.pressure writable for MemoryPressureWatch= (79-MEMPRESS).
+        if !matches!(
+            srvc.memory_pressure_watch,
+            crate::units::MemoryPressureWatch::Off | crate::units::MemoryPressureWatch::Skip
+        ) {
+            use std::os::unix::fs::PermissionsExt;
+            let pressure = srvc.platform_specific.cgroup_path.join("memory.pressure");
+            if pressure.exists() {
+                let uid = match dynamic_uid {
+                    Some(u) => u,
+                    None => super::start_service::resolve_uid(&srvc.exec_config.user).unwrap_or(0),
+                };
+                let gid = match dynamic_uid {
+                    Some(g) if srvc.exec_config.group.is_none() => g,
+                    _ => super::start_service::resolve_gid(&srvc.exec_config.group).unwrap_or(uid),
+                };
+                let _ = std::fs::set_permissions(
+                    &pressure,
+                    std::fs::Permissions::from_mode(0o644),
+                );
+                let _ = nix::unistd::chown(
+                    &pressure,
+                    Some(nix::unistd::Uid::from_raw(uid)),
+                    Some(nix::unistd::Gid::from_raw(gid)),
+                );
+            }
+        }
+
         // When Delegate is enabled, hand the service's cgroup to the service
         // user so it can manage its own sub-hierarchy. This runs AFTER
         // controllers are enabled on the parent, so controller-specific
