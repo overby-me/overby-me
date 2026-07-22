@@ -227,7 +227,15 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
     // deref places — so check the destination pointer before the call.
     let original_blocks: Vec<BasicBlock> = basic_blocks.indices().collect();
     for block in original_blocks {
-        injected += instrument_write_call(tcx, basic_blocks, local_decls, &roots, block, check_fn);
+        injected += instrument_write_call(
+            tcx,
+            basic_blocks,
+            local_decls,
+            &roots,
+            block,
+            fns,
+            typing_env,
+        );
     }
 
     // Pass 2: direct dereference places (`*p`). In `through` mode this covers
@@ -374,17 +382,26 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
 }
 
 /// If `block` ends in a pointer-write intrinsic call
-/// (`ptr::write`/`copy`/`copy_nonoverlapping`/`write_bytes`), injects a
-/// `__fec_check_deref_rooted(dst, root)` on the destination pointer *before*
-/// the call: the original call moves into a fresh block, and this block's
-/// terminator becomes the check, targeting it.
+/// (`ptr::write`/`copy`/`copy_nonoverlapping`/`write_bytes`), injects a check on
+/// the destination pointer *before* the call: the original call moves into a
+/// fresh block, and this block's terminator becomes the check, targeting it.
+///
+/// The check is `__fec_check_extent(dst, root, size)` when the written extent's
+/// byte size is known — `count * size_of::<T>()`, with `count` = 1 for the
+/// single-element writes and the intrinsic's `count` argument for
+/// `copy`/`copy_nonoverlapping`/`write_bytes` — so a `ptr::copy` whose
+/// destination starts in bounds but whose extent overruns the end of a mis-cast
+/// allocation is caught, not only one whose start is off the end. It falls back
+/// to the single-address `__fec_check_deref_rooted(dst, root)` when the element
+/// type is unsized (no static `size_of`).
 fn instrument_write_call<'tcx>(
     tcx: TyCtxt<'tcx>,
     basic_blocks: &mut IndexVec<BasicBlock, BasicBlockData<'tcx>>,
     local_decls: &mut IndexVec<Local, LocalDecl<'tcx>>,
     roots: &HashMap<Local, Local>,
     block: BasicBlock,
-    check_fn: DefId,
+    fns: &FecFns,
+    typing_env: ty::TypingEnv<'tcx>,
 ) -> usize {
     let term = basic_blocks[block].terminator();
     let source_info = term.source_info;
@@ -406,6 +423,17 @@ fn instrument_write_call<'tcx>(
     let fault_local = dst_place.local;
     let root_local = roots.get(&fault_local).copied().unwrap_or(fault_local);
 
+    // The written extent's element size (`size_of::<T>()` for a `*mut T`
+    // destination), if statically known — None for an unsized element.
+    let elem_size = local_decls[fault_local]
+        .ty
+        .builtin_deref(true)
+        .and_then(|pointee| tcx.layout_of(typing_env.as_query_input(pointee)).ok())
+        .map(|layout| layout.size.bytes());
+    // The `count` operand for the count-taking intrinsics, captured before the
+    // terminator is moved (it is one of the call's own arguments, live here).
+    let count_op = ptr_write_count_arg(&name).and_then(|ci| args.get(ci).map(|a| a.node.clone()));
+
     // Move the original write call into a fresh block.
     let orig = basic_blocks[block].terminator.take();
     let is_cleanup = basic_blocks[block].is_cleanup;
@@ -415,22 +443,63 @@ fn instrument_write_call<'tcx>(
     let bd = &mut basic_blocks[block];
     let fault_arg = cast_to_u8_ptr(local_decls, bd, fault_local, u8_ptr, source_info);
     let root_arg = cast_to_u8_ptr(local_decls, bd, root_local, u8_ptr, source_info);
+
+    let mut args_out = vec![
+        Spanned {
+            node: Operand::Move(Place::from(fault_arg)),
+            span: source_info.span,
+        },
+        Spanned {
+            node: Operand::Move(Place::from(root_arg)),
+            span: source_info.span,
+        },
+    ];
+    // Extent check when the element size is known; otherwise the base check.
+    let check = match elem_size {
+        Some(sz) => {
+            let size_operand = match count_op {
+                // `size = count * size_of::<T>()` (materialized when non-trivial).
+                Some(count) if sz != 1 => {
+                    let size_local =
+                        local_decls.push(LocalDecl::new(tcx.types.usize, source_info.span));
+                    let elem_const = Operand::Constant(Box::new(ConstOperand {
+                        span: source_info.span,
+                        user_ty: None,
+                        const_: MirConst::from_usize(tcx, sz),
+                    }));
+                    bd.statements.push(Statement::new(
+                        source_info,
+                        StatementKind::Assign(Box::new((
+                            Place::from(size_local),
+                            Rvalue::BinaryOp(BinOp::Mul, Box::new((count, elem_const))),
+                        ))),
+                    ));
+                    Operand::Move(Place::from(size_local))
+                }
+                // `size = count` (element size 1).
+                Some(count) => count,
+                // Single-element write: `size = size_of::<T>()`.
+                None => Operand::Constant(Box::new(ConstOperand {
+                    span: source_info.span,
+                    user_ty: None,
+                    const_: MirConst::from_usize(tcx, sz),
+                })),
+            };
+            args_out.push(Spanned {
+                node: size_operand,
+                span: source_info.span,
+            });
+            fns.check_extent
+        }
+        None => fns.check,
+    };
     let ret = local_decls.push(LocalDecl::new(tcx.types.unit, source_info.span));
 
     bd.terminator = Some(Terminator {
         source_info,
         kind: TerminatorKind::Call {
-            func: Operand::function_handle(tcx, check_fn, [], source_info.span),
-            args: Box::new([
-                Spanned {
-                    node: Operand::Move(Place::from(fault_arg)),
-                    span: source_info.span,
-                },
-                Spanned {
-                    node: Operand::Move(Place::from(root_arg)),
-                    span: source_info.span,
-                },
-            ]),
+            func: Operand::function_handle(tcx, check, [], source_info.span),
+            args: args_out.into_boxed_slice(),
             destination: Place::from(ret),
             target: Some(new_block),
             unwind: UnwindAction::Unreachable,
@@ -449,6 +518,16 @@ fn ptr_write_dest_arg(name: &str) -> Option<usize> {
     match name {
         "write" | "write_unaligned" | "write_volatile" | "write_bytes" => Some(0),
         "copy" | "copy_nonoverlapping" => Some(1),
+        _ => None,
+    }
+}
+
+/// The index of the element-`count` argument for the count-taking write
+/// intrinsics (`copy(src, dst, count)`, `write_bytes(dst, val, count)`), which
+/// write `count * size_of::<T>()` bytes. `None` for the single-element writes.
+fn ptr_write_count_arg(name: &str) -> Option<usize> {
+    match name {
+        "write_bytes" | "copy" | "copy_nonoverlapping" => Some(2),
         _ => None,
     }
 }

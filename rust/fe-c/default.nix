@@ -53,6 +53,8 @@
       ./corpus/cast-oob/Cargo.lock
       # Heap UAF with mint-site naming (no third-party deps).
       ./corpus/heap-mint/Cargo.lock
+      # Write-intrinsic extent overrun (no third-party deps).
+      ./corpus/copy-overrun/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -492,6 +494,37 @@ in {
           nu corpus/assert_cast_oob.nu "through/$name" "$TMPDIR/t-$name.log" "$t_exit"
           nu corpus/assert_cast_oob.nu "case/$name" "$TMPDIR/c-$name.log" "$c_exit"
         done
+      '';
+
+    # Write-intrinsic extent overrun (point 0, write path): a
+    # ptr::copy_nonoverlapping whose destination base is in bounds but whose
+    # write extent (count * size_of) overruns the buffer. Both modes abort
+    # OutOfBounds via the write-extent check (a single-address destination check
+    # would pass). Write checks are not mode-gated.
+    fe-c-copy-overrun = pkgs:
+      cargoCheck pkgs "copy-overrun" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=copy_overrun
+
+        ( cd corpus/copy-overrun \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/copy-overrun" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        ( cd corpus/copy-overrun \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/copy-overrun" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_copy_overrun.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Heap UAF with mint-site naming (trace -0130 debuggability): a Box is freed
