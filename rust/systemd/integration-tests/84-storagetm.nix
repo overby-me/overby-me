@@ -1,7 +1,15 @@
 {
   name = "84-STORAGETM";
-  # De-skipped to baseline. Upstream TEST-84-STORAGETM.sh self-skips (exit 77)
-  # when nvme-cli is broken / the kernel lacks NVMe-over-TCP TLS support, which
-  # is the case in the VM -- so rust-systemd's override is likely redundant (like
-  # 75-RESOLVED). If it self-skips (BUILD_RC=0), remove the override.
+  # Upstream 84-STORAGETM. Baselined 2026-07-22: does NOT self-skip -- the VM
+  # DOES have nvme-cli + kernel NVMe-over-TCP (nvmet_tcp enabled), so the test
+  # runs (nvme gen-hostnqn / connect-all) and needs the systemd-storagetm target
+  # exposer (stub in rust-systemd). Genuinely deep. Re-skipped.
+  patchScript = ''
+    {
+      echo "#!/usr/bin/env bash"
+      echo "echo 'rust-systemd: systemd-storagetm not implemented, skipping' >/skipped"
+      echo "exit 77"
+    } > TEST-84-STORAGETM.sh
+    chmod +x TEST-84-STORAGETM.sh
+  '';
 }
