@@ -9,9 +9,8 @@
     set -eux
     set -o pipefail
 
-    : "systemctl is-system-running returns running or degraded"
-    STATE=$(systemctl is-system-running || true)
-    [[ "$STATE" == "running" || "$STATE" == "degraded" ]]
+    : "systemctl is-system-running reaches running (no spurious degraded/failed units)"
+    timeout 60 bash -c 'until [[ "$(systemctl is-system-running)" == "running" ]]; do sleep 1; done'
 
     : "systemctl daemon-reload succeeds"
     systemctl daemon-reload
