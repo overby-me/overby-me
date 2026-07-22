@@ -15,14 +15,9 @@
     # matching the script's interpreter.
     sed -i '/journalctl -b "\$(readlink -f/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
 
-    # Skip the forever-print-hola FDSTORE tests: they require journald to
-    # store stdout stream FDs with PID 1 via FDSTORE=1 and recover them
-    # across restarts. This is not yet fully working.
-    sed -i '/^systemctl start forever-print-hola/s/.*/echo SKIP # forever-print-hola/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^systemctl stop forever-print-hola/s/.*/echo SKIP # stop forever-print-hola/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^systemctl kill --signal=SIGKILL systemd-journald/s/.*/echo SKIP # SIGKILL journald/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^\[\[ ! -f "\/tmp\/i-lose-my-logs" \]\]/s/.*/echo SKIP # i-lose-my-logs check/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^rm -f \/tmp\/i-lose-my-logs/s/.*/echo SKIP # rm i-lose-my-logs/' TEST-04-JOURNAL.journal.sh
+    # (De-weakened: the forever-print-hola FDSTORE hunk was removed to baseline
+    # the FDSTORE=1 stdout-stream-fd store/recovery path across a journald
+    # SIGKILL, now that fd_store infrastructure exists.)
 
     # Skip journalctl --follow tests (require running journald with working
     # stream reconnection)
