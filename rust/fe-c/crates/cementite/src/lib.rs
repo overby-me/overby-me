@@ -26,11 +26,14 @@
 mod alloc;
 mod arena;
 mod cap;
+mod check;
 #[cfg(feature = "interpose")]
 mod interpose;
 mod liveness;
 mod sys;
 pub mod table;
+
+pub use check::{__fec_check_deref, deref_check_count};
 
 pub use alloc::{
     DEFAULT_QUARANTINE_BYTES, FecAlloc, quarantine_budget, quarantine_bytes, set_quarantine_budget,

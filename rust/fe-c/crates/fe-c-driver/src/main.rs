@@ -10,12 +10,18 @@
 
 #![feature(rustc_private)]
 
+extern crate rustc_data_structures;
 extern crate rustc_driver;
+extern crate rustc_hir;
+extern crate rustc_index;
 extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
+extern crate rustc_span;
+extern crate thin_vec;
 
 mod census;
+mod instrument;
 mod provenance;
 
 use std::ops::ControlFlow;
@@ -50,6 +56,14 @@ fn main() {
             .args(&args[1..])
             .status();
         std::process::exit(status.ok().and_then(|s| s.code()).unwrap_or(1));
+    }
+
+    // Instrumentation mode (B2): rewrite MIR to inject cementite checks.
+    // Selected by FEC_INSTRUMENT so ordinary census/probe invocations are
+    // unaffected; it uses a rustc_driver::Callbacks driver rather than the
+    // read-only rustc_public one.
+    if std::env::var_os("FEC_INSTRUMENT").is_some() {
+        std::process::exit(instrument::run(&args));
     }
 
     let run = rustc_public::run!(&args, census_callback);

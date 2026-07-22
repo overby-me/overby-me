@@ -21,7 +21,13 @@
   # toolchain's library/Cargo.lock so `cargo miri setup` can build its
   # sysroot offline (refresh nix/miri-std.Cargo.lock on toolchain bumps).
   vendorFor = pkgs: let
-    locks = [./Cargo.lock ./nix/miri-std.Cargo.lock];
+    locks = [
+      ./Cargo.lock
+      ./nix/miri-std.Cargo.lock
+      # The B2 instrumentation harness is its own workspace with its own
+      # lock (cementite path dep + rustix tree).
+      ./crates/fe-c-driver/tests/fixtures/harness/Cargo.lock
+    ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
           lock = builtins.fromTOML (builtins.readFile lockFile);
@@ -167,6 +173,32 @@ in {
         # The driver drove a real compilation, not just analysis.
         test -x "$TMPDIR/fixbin"
         nu crates/fe-c-driver/tests/assert_census.nu "$TMPDIR/census.json"
+      '';
+
+    # MIR instrumentation (B2): build the harness with FEC_INSTRUMENT, run
+    # it, and assert the injected cementite checks fire at runtime with the
+    # program's behaviour unchanged; a control build fires zero checks.
+    fe-c-instrument = pkgs:
+      cargoCheck pkgs "instrument" ''
+        cargo build -p fe-c-driver -p cementite --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        h=crates/fe-c-driver/tests/fixtures/harness
+
+        # Instrumented build (separate target dir: env changes are not
+        # cargo-fingerprinted, so instrumented and control must not share).
+        ( cd "$h" && FEC_INSTRUMENT=1 RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/ti" \
+            cargo build --offline --locked )
+        "$TMPDIR/ti/debug/fec-harness" >"$TMPDIR/ins.log" 2>&1
+
+        # Uninstrumented control.
+        ( cd "$h" && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" \
+            cargo build --offline --locked )
+        "$TMPDIR/tc/debug/fec-harness" >"$TMPDIR/ctl.log" 2>&1
+
+        echo "--- instrumented ---"; cat "$TMPDIR/ins.log"
+        echo "--- control ---"; cat "$TMPDIR/ctl.log"
+        nu crates/fe-c-driver/tests/assert_instrument.nu "$TMPDIR/ins.log" "$TMPDIR/ctl.log"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the

@@ -53,4 +53,10 @@ disabled_rules = [
   # and extern-C calls (`strdup`, the C harness) read as unresolved/
   # hallucinated even though they compile and link fine.
   "hallucinated_local_call",
+
+  # `std::ptr::write(dst, val)` is a memory write, not buffered I/O; the
+  # name-based heuristic misreads it as an unbuffered file write in the B1
+  # provenance fixture. (Also fires on the runtime's own stderr report,
+  # which writes once, not in a loop.)
+  "rust_unbuffered_file_writes",
 ]
