@@ -41,6 +41,8 @@
       ./corpus/ffi-escape/Cargo.lock
       # The B5 / I9 closure heap-escape reproducer (no third-party deps).
       ./corpus/closure-escape/Cargo.lock
+      # The C1 through-mode safe-reference reproducer (no third-party deps).
+      ./corpus/through-safe-ref/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -339,6 +341,39 @@ in {
         set -e
         cat "$TMPDIR/ce.log"
         nu corpus/assert_closure_escape.nu "$TMPDIR/ce.log" "$ce_exit"
+      '';
+
+    # Through-mode safe-deref checking (C1): the one bolded row of the
+    # both-modes table. A closure captures a safe &u64 to a stack local and
+    # reads it back after the frame dies. Built twice: with FEC_MODE=through
+    # the safe dereference is checked and it aborts UseAfterScopeExit; with
+    # FEC_MODE unset (case-like) the safe deref is elided and it runs clean.
+    fe-c-through-safe-ref = pkgs:
+      cargoCheck pkgs "through-safe-ref" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=through_safe_ref
+
+        # through mode: the safe deref is checked -> abort.
+        ( cd corpus/through-safe-ref \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/through-safe-ref" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        # case-like mode (FEC_MODE unset): the safe deref is elided -> clean.
+        ( cd corpus/through-safe-ref \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/through-safe-ref" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case-like (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_through_safe_ref.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the

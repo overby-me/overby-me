@@ -41,10 +41,14 @@ crate, with sound seams as the long-term research contribution.
 - **I4 — Both-modes rule.** No feature lands unless its behavior is defined in
   both modes. The filled-in table is `docs/both-modes.md`; an empty cell is a
   blocker, not a TODO. (Anti-gravity: prevents `case` users' needs from quietly
-  becoming the whole roadmap.) **Open staging question raised there**:
-  `through` needs strictly less machinery than `case` and is the natural oracle
-  for differential-testing it, which argues for building it first — §3–§5 below
-  currently assume the opposite order. Decide deliberately and record it.
+  becoming the whole roadmap.) **Mode order (decided 2026-07-22, Task C1):
+  build `through` first, then `case` as the second milestone with a
+  differential-test gate against `through`.** Rationale: `through` needs
+  strictly less machinery (no `nofree` callgraph analysis, no elision-soundness
+  argument, no `strict-stack` compromise) and is the oracle that lets `case` be
+  differential-tested (`docs/both-modes.md` §Finding). §3–§5 below were written
+  assuming the reverse order; read them as the `case` milestone that now
+  follows `through`.
 - **I5 — Benchmark against Fil-C and ASan, never against our own fast mode.**
 - **I6 — Re-checks are required, not optional.** Dealloc-reachable re-checking
   (§3.4) ships in v0. A cast-site-only build misses the entire class of

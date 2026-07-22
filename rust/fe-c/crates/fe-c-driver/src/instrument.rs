@@ -151,8 +151,15 @@ fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
 /// Injects cementite check/scope calls into `body`: a rooted deref check at
 /// every raw access (I10) and stack scope enter/exit hooks for
 /// address-taken locals (I8). Returns how many calls were injected.
+///
+/// `FEC_MODE=through` selects **through** mode (Task C1): the exhaustive mode
+/// that also checks **safe-pointer** dereferences (`*r` where `r: &T`), which
+/// `case` elides as vetted at the cast. This is the one bolded row in the
+/// both-modes table and what catches a safe-reference read of a dead local
+/// (the rusqlite-0128 §3.2 shape). Otherwise only raw dereferences are checked.
 fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns) -> usize {
     let check_fn = fns.check;
+    let through = matches!(std::env::var("FEC_MODE").as_deref(), Ok("through"));
     // Provenance first, on the un-mutated body: which local holds each
     // pointer's derivation root (I10). Keyed on original locals, which the
     // block-splitting below never renumbers.
@@ -181,9 +188,10 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
         injected += instrument_write_call(tcx, basic_blocks, local_decls, &roots, block, check_fn);
     }
 
-    // Pass 2: direct raw-pointer deref places (`*p`). Reverse order so
-    // splitting a block does not disturb the indices of statements we have
-    // not visited yet (same discipline as check_pointers).
+    // Pass 2: direct dereference places (`*p`). In `through` mode this covers
+    // safe references too (`*r`, `r: &T`); otherwise only raw pointers.
+    // Reverse order so splitting a block does not disturb the indices of
+    // statements we have not visited yet (same discipline as check_pointers).
     for block in basic_blocks.indices().rev() {
         for stmt_index in (0..basic_blocks[block].statements.len()).rev() {
             let location = Location {
@@ -194,6 +202,7 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
 
             let mut finder = DerefFinder {
                 local_decls,
+                through,
                 found: Vec::new(),
             };
             finder.visit_statement(&basic_blocks[block].statements[stmt_index], location);
@@ -861,16 +870,21 @@ fn emit_scope_terminator<'tcx>(
     });
 }
 
-/// Collects the base locals of raw-pointer dereferences in a statement
-/// (indirect places whose base local is a raw pointer).
+/// Collects the base locals of dereferences in a statement (indirect places).
+/// Always collects raw-pointer bases; in `through` mode also safe-reference
+/// bases (`*r`, `r: &T`), the safe dereferences `case` elides.
 struct DerefFinder<'a, 'tcx> {
     local_decls: &'a IndexVec<Local, LocalDecl<'tcx>>,
+    through: bool,
     found: Vec<Local>,
 }
 
 impl<'tcx> Visitor<'tcx> for DerefFinder<'_, 'tcx> {
     fn visit_place(&mut self, place: &Place<'tcx>, context: PlaceContext, location: Location) {
-        if place.is_indirect() && is_raw_ptr_local(self.local_decls, place.local) {
+        if place.is_indirect()
+            && (is_raw_ptr_local(self.local_decls, place.local)
+                || (self.through && is_ref_local(self.local_decls, place.local)))
+        {
             self.found.push(place.local);
         }
         self.super_place(place, context, location);
@@ -1022,4 +1036,10 @@ fn is_root_source(name: &str) -> bool {
 
 fn is_raw_ptr_local(decls: &IndexVec<Local, LocalDecl<'_>>, local: Local) -> bool {
     matches!(decls[local].ty.kind(), ty::RawPtr(..))
+}
+
+/// Whether a local is a safe reference (`&T` / `&mut T`) — a deref through it
+/// is a safe-pointer dereference, checked only in `through` mode.
+fn is_ref_local(decls: &IndexVec<Local, LocalDecl<'_>>, local: Local) -> bool {
+    matches!(decls[local].ty.kind(), ty::Ref(..))
 }

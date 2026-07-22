@@ -84,3 +84,13 @@ deciding deliberately, and record the decision here either way.
 Counter-argument for the current order, for the record: `case` reaches useful
 CI overhead sooner, validates all the rustc_public/build-std/Eyra plumbing on
 a cheaper path, and produces publishable numbers earlier.
+
+## Decision (2026-07-22, Task C1)
+
+**`through` first.** Recorded in PLAN §2 under I4. The runtime and pass are
+built for `through` as the first milestone; `case` follows as the opt-in
+optimization with a `differential` gate against `through` (Task C3). Chosen
+for the three reasons above: less machinery, an oracle for `case`, and an
+honest safety promise from commit one. The bolded mode-distinction row — safe
+pointer derefs are **checked** in `through`, **elided** in `case` — is what
+the first `through` milestone implements; the `case` elision arrives later.

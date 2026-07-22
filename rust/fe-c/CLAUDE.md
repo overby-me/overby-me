@@ -230,6 +230,15 @@ reference, which v0's raw-deref point 0 does not instrument), and the inbound
 
 **C1. [todo] Decide the mode order** (see §3 above). Record the decision and its
 rationale in `PLAN.md` §2 under I4. Then implement the first mode end to end.
+*(2026-07-22 — decided **through-first**, recorded in `PLAN.md` I4 and
+`docs/both-modes.md` §Decision. Through mode's defining behavior — **safe-pointer
+deref checking** (the one bolded both-modes row) — is implemented behind
+`FEC_MODE=through` and shown by `corpus/through-safe-ref`: a safe `&u64` read of
+a dead stack local aborts `UseAfterScopeExit` in through, runs clean (elided) in
+case. This also closes the §3.2 gap the exact rusqlite-0128 needed. Remaining
+for full through: T2 shadow-slot coherence, `strict` unknown-provenance,
+interprocedural + at-rest cap propagation. Stays `[todo]` until through is
+end-to-end.)*
 
 **C2. [todo] Dealloc-reachable re-checks (point 4, I6)** — `case` only.
 ✅ **`corpus-lru-0130` aborts** with both the free site and the `iter()`
