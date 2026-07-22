@@ -135,7 +135,11 @@ pub extern "C" fn __fec_check_deref_rooted(fault: *const u8, root: *const u8) {
 ///
 /// Neither pointer is dereferenced; both are only inspected.
 #[unsafe(no_mangle)]
-pub extern "C" fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u8) {
+pub extern "C" fn __fec_check_dealloc_reachable(
+    fault: *const u8,
+    root: *const u8,
+    read_line: usize,
+) {
     if !REPORTER_REGISTERED.swap(true, Ordering::Relaxed) {
         #[cfg(not(miri))]
         // SAFETY: `report` is a valid `extern "C" fn()`.
@@ -147,12 +151,21 @@ pub extern "C" fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u
 
     // Temporal only, heap only: a dead heap allocation is a use-after-free
     // `case` must catch; a dead stack scope is elided (through's job); live or
-    // unknown provenance passes.
+    // unknown provenance passes. `read_line` is the source line of the dangling
+    // dereference (the re-check is injected right at it), so the report can name
+    // where the freed node was read (`read_at`).
     if let Some(cap) = table::lookup(root as usize)
         && !table::is_live(cap.id)
         && !cap.flags.contains(CapFlags::STACK)
     {
-        report_uaf_and_abort(fault as usize, cap.base, cap.id.raw(), cap.flags, cap.site);
+        report_uaf_at(
+            fault as usize,
+            cap.base,
+            cap.id.raw(),
+            cap.flags,
+            cap.site,
+            read_line as u32,
+        );
     }
 }
 
@@ -251,6 +264,19 @@ fn report_null_and_abort() -> ! {
 #[cold]
 #[inline(never)]
 fn report_uaf_and_abort(fault: usize, base: usize, id: u64, flags: CapFlags, site: u32) -> ! {
+    report_uaf_at(fault, base, id, flags, site, 0);
+}
+
+#[cold]
+#[inline(never)]
+fn report_uaf_at(
+    fault: usize,
+    base: usize,
+    id: u64,
+    flags: CapFlags,
+    site: u32,
+    read_line: u32,
+) -> ! {
     let kind = if flags.contains(CapFlags::STACK) {
         "UseAfterScopeExit"
     } else {
@@ -269,12 +295,25 @@ fn report_uaf_and_abort(fault: usize, base: usize, id: u64, flags: CapFlags, sit
     } else {
         String::new()
     };
+    // The dangling-read site (trace -0130 debuggability): the source line the
+    // freed region was read at. The case-mode dealloc-reachable re-check knows
+    // it because it is injected right at the dereference. 0 = unrecorded.
+    let read = if read_line != 0 {
+        format!(" read_at={read_line}")
+    } else {
+        String::new()
+    };
     let msg = format!(
-        "fe-c-violation kind={kind} fault={fault:#x} alloc_base={base:#x} alloc_id={id}{escaped}\n\
+        "fe-c-violation kind={kind} fault={fault:#x} alloc_base={base:#x} alloc_id={id}{escaped}{read}\n\
 fe-c: dereference into a dead {region} (id={id}, base={base:#x}); the owning \
-region was torn down / freed before this access{}\n",
+region was torn down / freed before this access{}{}\n",
         if site != 0 {
             format!(" (escaped at source line {site})")
+        } else {
+            String::new()
+        },
+        if read_line != 0 {
+            format!(" (read at source line {read_line})")
         } else {
             String::new()
         }

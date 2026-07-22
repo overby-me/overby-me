@@ -261,9 +261,19 @@ distinction holds (rusqlite/through-safe-ref still elide in `case`). Both abort
 than deregisters at free (`table::poison_and_info` / `unlink`).
 Reachability is conservative (any call, not a precise `nofree` callgraph — the
 heap-only abort makes over-approximation cost extra checks, never false
-positives). Remaining for the exact acceptance: name the `pop` free site and
-the `iter()` reborrow site in the report (a heap `freed_at`/`minted_at`,
-analogous to `escaped_at`).)*
+positives). The `case` report now also names the **dangling-read site**
+(`read_at=34`, the exact `let v = *value` line): the re-check is injected right
+at the dereference, so it carries that source line, threaded as a third
+argument. Precisely naming the **free** line and the lru-internal **mint** line
+is deliberately deferred: under the conservative "any call frees" reachability
+the nearest preceding call is the innocent `eprintln!` between the `pop()` and
+the read, so a `freed_at` derived from the CFG would be a red herring — a
+precise free line needs the deferred `nofree` callgraph (or drop-terminator
+instrumentation, whose blast radius on the false-positive suite is unvetted),
+and a precise mint line needs extending point 1's `ensure` to field reborrows
+(`&(*node).val`). Both are scoped in STATUS as the next deliberate step; the
+report names the freed node, the dangling-read site, and the fact of free
+today.)*
 
 **C3. [todo] The other mode**, with the `differential` check wired: any violation
 `through` catches that `case` misses must map to a documented elision gap in

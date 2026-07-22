@@ -45,15 +45,23 @@ this one because it is **dealloc-reachable** (follows the `pop()` call) via
 allocation — a dead stack scope passes, so the mode distinction holds. Both
 abort `UseAfterFree`. This needed `FecAlloc::dealloc` to **poison** the freed
 allocation (keep it findable-as-dead in quarantine) rather than deregister at
-free. A **third real CVE** (after RUSTSEC-2021-0003 and -0128).
+free. A **third real CVE** (after RUSTSEC-2021-0003 and -0128). The `case`
+report also names the **dangling-read site** (`read_at=34`): the re-check is
+injected right at the dereference, so it carries that line as a third argument.
 
 **Remaining for full `through` mode** (all substantial, interdependent, and all
 *performance/precision*, not correctness — through is already sound and
 exhaustive): T2 shadow-slot coherence (the at-rest cap layout that replaces the
 table lookup), `strict` unknown-provenance (needs full cap propagation first,
 or it false-positives on foreign statics), and interprocedural + at-rest
-capability propagation. For `case`: C2's exact report (name the `pop` free site
-and `iter()` reborrow site).
+capability propagation. For `case`: the C2 report already names the freed node
+and the dangling-read site; the last precision step is the **free** and **mint**
+source lines. Both are deferred deliberately (not blocked-by-effort but
+blocked-by-correctness): a CFG-derived `freed_at` would name the innocent
+`eprintln!` sitting between the `pop()` and the read, so a precise free line
+needs the deferred `nofree` callgraph, and a precise mint line needs point 1's
+`ensure` extended to field reborrows (`&(*node).val`) — whose blast radius on
+the false-positive suite must be vetted first.
 
 **Instrumentation points landed.** point 0 (raw deref), point 1 (raw→safe cast
 `ensure` — `corpus/cast-oob` aborts OutOfBounds in both modes, the spatial

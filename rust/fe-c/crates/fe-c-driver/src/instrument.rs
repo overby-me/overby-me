@@ -71,7 +71,7 @@ impl rustc_driver::Callbacks for FecInstrument {
 fn inject_fec_decls(psess: &rustc_session::parse::ParseSess, krate: &mut rustc_ast::Crate) {
     const DECLS: &str = "unsafe extern \"C\" {\n\
         fn __fec_check_deref_rooted(fault: *const u8, root: *const u8);\n\
-        fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u8);\n\
+        fn __fec_check_dealloc_reachable(fault: *const u8, root: *const u8, read_line: usize);\n\
         fn __fec_ensure(fault: *const u8, root: *const u8, size: usize);\n\
         fn __fec_scope_enter(base: *const u8, len: usize, site: usize);\n\
         fn __fec_scope_exit(base: *const u8);\n\
@@ -271,20 +271,43 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
                 let root_arg = cast_to_u8_ptr(local_decls, bd, root_local, u8_ptr, source_info);
 
                 let ret = local_decls.push(LocalDecl::new(tcx.types.unit, source_info.span));
+                let mut args = vec![
+                    Spanned {
+                        node: Operand::Move(Place::from(fault_arg)),
+                        span: source_info.span,
+                    },
+                    Spanned {
+                        node: Operand::Move(Place::from(root_arg)),
+                        span: source_info.span,
+                    },
+                ];
+                // The case-mode dealloc-reachable re-check also carries the
+                // source line of this dereference, so a heap use-after-free
+                // report can name where the dangling reference was read
+                // (`read_at`) — half of the both-sites debuggability rule
+                // (§2). Precisely naming the *free* line needs the deferred
+                // `nofree` callgraph: under the conservative "any call frees"
+                // reachability, an innocent intervening call would be named.
+                if check == fns.dealloc_reachable {
+                    let read_line = tcx
+                        .sess
+                        .source_map()
+                        .lookup_char_pos(source_info.span.lo())
+                        .line as u64;
+                    args.push(Spanned {
+                        node: Operand::Constant(Box::new(ConstOperand {
+                            span: source_info.span,
+                            user_ty: None,
+                            const_: MirConst::from_usize(tcx, read_line),
+                        })),
+                        span: source_info.span,
+                    });
+                }
                 bd.terminator = Some(Terminator {
                     source_info,
                     kind: TerminatorKind::Call {
                         func: Operand::function_handle(tcx, check, [], source_info.span),
-                        args: Box::new([
-                            Spanned {
-                                node: Operand::Move(Place::from(fault_arg)),
-                                span: source_info.span,
-                            },
-                            Spanned {
-                                node: Operand::Move(Place::from(root_arg)),
-                                span: source_info.span,
-                            },
-                        ]),
+                        args: args.into_boxed_slice(),
                         destination: Place::from(ret),
                         target: Some(new_block),
                         unwind: UnwindAction::Unreachable,
