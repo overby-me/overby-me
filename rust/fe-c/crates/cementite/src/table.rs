@@ -290,6 +290,28 @@ fn insert_start(slot: &PageSlot, off: u16, rec_idx: u32) {
     slot.overflow.store(fresh_idx, Ordering::Relaxed);
 }
 
+/// Marks the allocation starting at exactly `base` **dead** — clears its
+/// liveness bit — but leaves it linked, so a later access still resolves it
+/// (and finds it dead). Used for stack scope exit (I8, strict-stack): a
+/// pointer into a torn-down stack region must resolve as a fatal
+/// use-after-scope, not as unknown provenance. Returns whether a region was
+/// found at `base`.
+pub fn poison(base: usize) -> bool {
+    let _guard = TABLE.write_lock.lock().unwrap();
+    let Some(slot) = slot_for(base >> PAGE_SHIFT, false) else {
+        return false;
+    };
+    let Some(rec_idx) = find_start(slot, base) else {
+        return false;
+    };
+    let rec = TABLE.records.get(rec_idx);
+    let packed = PackedCap {
+        id_and_flags: rec.id_flags.load(Ordering::Relaxed),
+    };
+    TABLE.liveness.clear(packed.id());
+    true
+}
+
 /// Unregisters the allocation starting at exactly `base`.
 ///
 /// Clears the liveness bit first (I7: the caller releases the memory only

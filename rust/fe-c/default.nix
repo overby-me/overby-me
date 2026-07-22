@@ -35,6 +35,8 @@
       ./corpus/smallvec-0003-control/Cargo.lock
       # The B4 false-positive workload (hashbrown tree).
       ./corpus/false-positive/Cargo.lock
+      # The B5 stack-UAF reproducer (no third-party deps).
+      ./corpus/stack-uaf/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -267,6 +269,29 @@ in {
         set -e
         cat "$TMPDIR/fp.log"
         nu corpus/assert_false_positive.nu "$TMPDIR/fp.log" "$fp_exit"
+      '';
+
+    # Stack scope hooks (B5, I8): with FEC_SCOPE_HOOKS on, build the
+    # stack-UAF reproducer (a stack pointer laundered past its frame, as the
+    # rusqlite-0128 closure does across FFI) and assert the stale deref
+    # aborts UseAfterScopeExit naming the dead stack scope.
+    fe-c-corpus-stackuaf = pkgs:
+      cargoCheck pkgs "corpus-stackuaf" ''
+        cargo build -p fe-c-driver -p cementite --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_SCOPE_HOOKS=1
+        export FEC_CEMENTITE_RLIB="$CARGO_TARGET_DIR/debug/libcementite.rlib"
+        export FEC_CEMENTITE_DEPS="$CARGO_TARGET_DIR/debug/deps"
+        ( cd corpus/stack-uaf \
+            && FEC_INSTRUMENT_ONLY=stack_uaf RUSTC="$drv" \
+               CARGO_TARGET_DIR="$TMPDIR/t" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/t/debug/stack-uaf" >"$TMPDIR/su.log" 2>&1
+        su_exit=$?
+        set -e
+        cat "$TMPDIR/su.log"
+        nu corpus/assert_stack_uaf.nu "$TMPDIR/su.log" "$su_exit"
       '';
 
     # Capability propagation dataflow (B1, I10): run the driver over the

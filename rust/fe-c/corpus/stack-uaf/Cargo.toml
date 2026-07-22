@@ -1,0 +1,18 @@
+# Stack use-after-scope-exit reproducer (Task B5, invariant I8). A pointer
+# to a stack local escapes its frame (stashed in a static, the same laundering
+# the rusqlite-0128 closure does across FFI); after the frame returns, the
+# stale pointer is dereferenced. The scope hooks poison the region at frame
+# teardown, so the access traps as UseAfterScopeExit naming the dead scope.
+#
+# Its own workspace; cementite is force-injected by the driver.
+[package]
+name = "stack-uaf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "stack-uaf"
+path = "src/main.rs"

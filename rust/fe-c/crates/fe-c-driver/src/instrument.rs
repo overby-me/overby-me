@@ -26,11 +26,13 @@ use rustc_hir::def_id::{CRATE_DEF_INDEX, DefId, LocalDefId};
 use rustc_index::IndexVec;
 use rustc_middle::mir::visit::{PlaceContext, Visitor};
 use rustc_middle::mir::{
-    BasicBlock, BasicBlockData, BinOp, Body, CallSource, CastKind, Local, LocalDecl, Location,
-    Operand, Place, Rvalue, Statement, StatementKind, Terminator, TerminatorKind, UnwindAction,
+    BasicBlock, BasicBlockData, BinOp, Body, CallSource, CastKind, Const as MirConst, ConstOperand,
+    Local, LocalDecl, Location, Operand, Place, RawPtrKind, Rvalue, SourceInfo, Statement,
+    StatementKind, Terminator, TerminatorKind, UnwindAction,
 };
-use rustc_middle::ty::{self, Ty, TyCtxt};
+use rustc_middle::ty::{self, Mutability, Ty, TyCtxt};
 use rustc_span::Spanned;
+use std::collections::HashSet;
 use thin_vec::ThinVec;
 
 /// Runs the compiler on `args` with the instrumentation pass installed.
@@ -57,13 +59,13 @@ fn fec_optimized_mir(tcx: TyCtxt<'_>, def_id: LocalDefId) -> &Body<'_> {
     let default = (rustc_interface::DEFAULT_QUERY_PROVIDERS
         .queries
         .optimized_mir)(tcx, def_id);
-    let Some(check_fn) = find_check_fn(tcx) else {
-        // cementite not linked / symbol not found: leave the body untouched
+    let Some(fns) = find_fec_fns(tcx) else {
+        // cementite not linked / symbols not found: leave the body untouched
         // rather than fail the build.
         return default;
     };
     let mut body = default.clone();
-    let injected = instrument_body(tcx, &mut body, check_fn);
+    let injected = instrument_body(tcx, &mut body, &fns);
     if injected > 0 && std::env::var_os("FEC_DEBUG").is_some() {
         eprintln!(
             "fe-c-debug instrumented {} ({} checks)",
@@ -74,9 +76,19 @@ fn fec_optimized_mir(tcx: TyCtxt<'_>, def_id: LocalDefId) -> &Body<'_> {
     tcx.arena.alloc(body)
 }
 
-/// Resolves `cementite::__fec_check_deref_rooted` to its `DefId` by walking
-/// the crate graph and the cementite crate root's module children.
-fn find_check_fn(tcx: TyCtxt<'_>) -> Option<DefId> {
+/// The cementite check entry points the pass injects calls to.
+struct FecFns {
+    /// `__fec_check_deref_rooted(fault, root)`.
+    check: DefId,
+    /// `__fec_scope_enter(base, len)`.
+    scope_enter: DefId,
+    /// `__fec_scope_exit(base)`.
+    scope_exit: DefId,
+}
+
+/// Resolves cementite's check/scope entry points by walking the crate graph
+/// and the cementite crate root's module children.
+fn find_fec_fns(tcx: TyCtxt<'_>) -> Option<FecFns> {
     let cnum = tcx
         .crates(())
         .iter()
@@ -85,25 +97,45 @@ fn find_check_fn(tcx: TyCtxt<'_>) -> Option<DefId> {
         krate: *cnum,
         index: CRATE_DEF_INDEX,
     };
-    tcx.module_children(root).iter().find_map(|child| {
-        if child.ident.as_str() == "__fec_check_deref_rooted"
-            && let Res::Def(DefKind::Fn, def_id) = child.res
-        {
-            Some(def_id)
-        } else {
-            None
-        }
+    let children = tcx.module_children(root);
+    let find = |name: &str| {
+        children.iter().find_map(|child| {
+            if child.ident.as_str() == name
+                && let Res::Def(DefKind::Fn, def_id) = child.res
+            {
+                Some(def_id)
+            } else {
+                None
+            }
+        })
+    };
+    Some(FecFns {
+        check: find("__fec_check_deref_rooted")?,
+        scope_enter: find("__fec_scope_enter")?,
+        scope_exit: find("__fec_scope_exit")?,
     })
 }
 
-/// Injects a `__fec_check_deref_rooted(fault, root)` call before every
-/// raw-pointer dereference in `body`. Returns how many checks were injected.
-fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, check_fn: DefId) -> usize {
+/// Injects cementite check/scope calls into `body`: a rooted deref check at
+/// every raw access (I10) and stack scope enter/exit hooks for
+/// address-taken locals (I8). Returns how many calls were injected.
+fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns) -> usize {
+    let check_fn = fns.check;
     // Provenance first, on the un-mutated body: which local holds each
     // pointer's derivation root (I10). Keyed on original locals, which the
     // block-splitting below never renumbers.
     let roots = compute_roots(tcx, body);
     let mut injected = 0usize;
+
+    // Pass 0: stack scope hooks (I8), behind FEC_SCOPE_HOOKS. Register each
+    // address-taken local as a stack region and poison it at frame teardown,
+    // so a pointer that escapes the scope (as the rusqlite-0128 closure does
+    // across FFI) resolves as a dead stack region. Opt-in for now:
+    // instrumenting *every* address-taken local is impractical without an
+    // escape analysis (most never leave the frame) — see STATUS.
+    if std::env::var_os("FEC_SCOPE_HOOKS").is_some() {
+        injected += instrument_scopes(tcx, body, fns);
+    }
 
     let basic_blocks = body.basic_blocks.as_mut();
     let local_decls = &mut body.local_decls;
@@ -283,6 +315,236 @@ fn cast_to_u8_ptr<'tcx>(
         ))),
     ));
     tmp
+}
+
+// ---- stack scope hooks (I8) -----------------------------------------------
+
+/// Emits stack scope hooks (I8) at **frame granularity**: `scope_enter` just
+/// after a local's address is first taken, and `scope_exit` before every
+/// `Return` (frame teardown). Optimized MIR strips `StorageLive`/`Dead`, so
+/// lexical-scope granularity is not available here; frame granularity
+/// catches use-after-function-return (a pointer that escapes a frame and is
+/// dereferenced after it returns). Returns how many hooks were injected.
+fn instrument_scopes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns) -> usize {
+    let sites = address_taken_sites(body);
+    if sites.is_empty() {
+        return 0;
+    }
+    let typing_env = body.typing_env(tcx);
+    let basic_blocks = body.basic_blocks.as_mut();
+    let local_decls = &mut body.local_decls;
+    let mut injected = 0usize;
+
+    // scope_exit before every Return, for each escaping local (processed
+    // before enters, since enters below add blocks). One exit call per
+    // (return-block, local); chained through fresh blocks.
+    let return_blocks: Vec<BasicBlock> = basic_blocks
+        .indices()
+        .filter(|&b| matches!(basic_blocks[b].terminator().kind, TerminatorKind::Return))
+        .collect();
+    for rb in return_blocks {
+        for &(local, _, _) in &sites {
+            let ty = local_decls[local].ty;
+            let source_info = basic_blocks[rb].terminator().source_info;
+            inject_scope_before_return(
+                tcx,
+                basic_blocks,
+                local_decls,
+                rb,
+                local,
+                ty,
+                fns.scope_exit,
+                None,
+                source_info,
+            );
+            injected += 1;
+        }
+    }
+
+    // scope_enter just after each address-taking statement. Reverse so
+    // splits do not disturb earlier indices.
+    let mut by_block: std::collections::BTreeMap<BasicBlock, Vec<(Local, usize)>> =
+        std::collections::BTreeMap::new();
+    for &(local, block, idx) in &sites {
+        by_block.entry(block).or_default().push((local, idx));
+    }
+    for (block, mut entries) in by_block {
+        entries.sort_by_key(|&(_, idx)| std::cmp::Reverse(idx));
+        for (local, idx) in entries {
+            let ty = local_decls[local].ty;
+            let Ok(layout) = tcx.layout_of(typing_env.as_query_input(ty)) else {
+                continue;
+            };
+            let size = layout.size.bytes();
+            let source_info = basic_blocks[block].statements[idx].source_info;
+            inject_scope_call(
+                tcx,
+                basic_blocks,
+                local_decls,
+                block,
+                idx + 1,
+                local,
+                ty,
+                fns.scope_enter,
+                Some(size),
+                source_info,
+            );
+            injected += 1;
+        }
+    }
+    injected
+}
+
+/// The first address-taking site `(local, block, statement_index)` for each
+/// local whose address is taken (via `&raw`/`&`) — candidates for escaping
+/// their stack scope.
+fn address_taken_sites(body: &Body<'_>) -> Vec<(Local, BasicBlock, usize)> {
+    let mut seen: HashSet<Local> = HashSet::new();
+    let mut sites = Vec::new();
+    for block in body.basic_blocks.indices() {
+        for (i, stmt) in body.basic_blocks[block].statements.iter().enumerate() {
+            if let StatementKind::Assign(boxed) = &stmt.kind {
+                let place = match &boxed.1 {
+                    Rvalue::RawPtr(_, p) | Rvalue::Ref(_, _, p) => p,
+                    _ => continue,
+                };
+                if place.projection.is_empty() && seen.insert(place.local) {
+                    sites.push((place.local, block, i));
+                }
+            }
+        }
+    }
+    sites
+}
+
+/// Injects `scope_exit(&raw local)` immediately before `block`'s `Return`
+/// terminator: the original terminator moves to a fresh block that the
+/// injected call targets.
+#[allow(clippy::too_many_arguments)]
+fn inject_scope_before_return<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    basic_blocks: &mut IndexVec<BasicBlock, BasicBlockData<'tcx>>,
+    local_decls: &mut IndexVec<Local, LocalDecl<'tcx>>,
+    block: BasicBlock,
+    local: Local,
+    ty: Ty<'tcx>,
+    func: DefId,
+    len: Option<u64>,
+    source_info: SourceInfo,
+) {
+    let orig = basic_blocks[block].terminator.take();
+    let is_cleanup = basic_blocks[block].is_cleanup;
+    let ret_block = basic_blocks.push(BasicBlockData::new_stmts(Vec::new(), orig, is_cleanup));
+    emit_scope_terminator(
+        tcx,
+        basic_blocks,
+        local_decls,
+        block,
+        ret_block,
+        local,
+        ty,
+        func,
+        len,
+        source_info,
+    );
+}
+
+/// Injects a scope hook call at `block`/`at`: splits the block so the
+/// original tail becomes the call's target, then builds the hook terminator.
+#[allow(clippy::too_many_arguments)]
+fn inject_scope_call<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    basic_blocks: &mut IndexVec<BasicBlock, BasicBlockData<'tcx>>,
+    local_decls: &mut IndexVec<Local, LocalDecl<'tcx>>,
+    block: BasicBlock,
+    at: usize,
+    local: Local,
+    ty: Ty<'tcx>,
+    func: DefId,
+    len: Option<u64>,
+    source_info: SourceInfo,
+) {
+    let new_block = split_block(
+        basic_blocks,
+        Location {
+            block,
+            statement_index: at,
+        },
+    );
+    emit_scope_terminator(
+        tcx,
+        basic_blocks,
+        local_decls,
+        block,
+        new_block,
+        local,
+        ty,
+        func,
+        len,
+        source_info,
+    );
+}
+
+/// Builds `func(&raw const local as *const u8, [len])` as `block`'s
+/// terminator, targeting `target`. `&raw const local` is cast to `*const u8`
+/// and threaded through.
+#[allow(clippy::too_many_arguments)]
+fn emit_scope_terminator<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    basic_blocks: &mut IndexVec<BasicBlock, BasicBlockData<'tcx>>,
+    local_decls: &mut IndexVec<Local, LocalDecl<'tcx>>,
+    block: BasicBlock,
+    target: BasicBlock,
+    local: Local,
+    ty: Ty<'tcx>,
+    func: DefId,
+    len: Option<u64>,
+    source_info: SourceInfo,
+) {
+    let bd = &mut basic_blocks[block];
+
+    // _addr = &raw const local : *const ty
+    let raw_ty = Ty::new_ptr(tcx, ty, Mutability::Not);
+    let addr = local_decls.push(LocalDecl::new(raw_ty, source_info.span));
+    bd.statements.push(Statement::new(
+        source_info,
+        StatementKind::Assign(Box::new((
+            Place::from(addr),
+            Rvalue::RawPtr(RawPtrKind::Const, Place::from(local)),
+        ))),
+    ));
+    let u8_ptr = Ty::new_imm_ptr(tcx, tcx.types.u8);
+    let addr_u8 = cast_to_u8_ptr(local_decls, bd, addr, u8_ptr, source_info);
+
+    let mut args = vec![Spanned {
+        node: Operand::Move(Place::from(addr_u8)),
+        span: source_info.span,
+    }];
+    if let Some(len) = len {
+        args.push(Spanned {
+            node: Operand::Constant(Box::new(ConstOperand {
+                span: source_info.span,
+                user_ty: None,
+                const_: MirConst::from_usize(tcx, len),
+            })),
+            span: source_info.span,
+        });
+    }
+
+    let ret = local_decls.push(LocalDecl::new(tcx.types.unit, source_info.span));
+    bd.terminator = Some(Terminator {
+        source_info,
+        kind: TerminatorKind::Call {
+            func: Operand::function_handle(tcx, func, [], source_info.span),
+            args: args.into_boxed_slice(),
+            destination: Place::from(ret),
+            target: Some(target),
+            unwind: UnwindAction::Unreachable,
+            call_source: CallSource::Misc,
+            fn_span: source_info.span,
+        },
+        attributes: ThinVec::new(),
+    });
 }
 
 /// Collects the base locals of raw-pointer dereferences in a statement

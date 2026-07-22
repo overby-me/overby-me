@@ -12,6 +12,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use crate::cap::CapFlags;
 use crate::table;
 
 /// Number of raw-dereference checks executed this process.
@@ -102,14 +103,62 @@ pub extern "C" fn __fec_check_deref_rooted(fault: *const u8, root: *const u8) {
     }
 
     // I10: resolve the owning allocation from the DERIVATION ROOT. If the
-    // root has no known provenance (stack, foreign static, or an
-    // uninstrumented allocator), fall through — v0's tolerant policy for
-    // unknown heap/static provenance.
+    // root has no known provenance (foreign static, or an uninstrumented
+    // allocator), fall through — v0's tolerant policy for unknown
+    // heap/static provenance.
     if let Some(cap) = table::lookup(root as usize) {
         let f = fault as usize;
+        // Spatial (I10): the access must be inside the owning allocation.
         if f < cap.base || f >= cap.base + cap.len {
             report_oob_and_abort(f, cap.base, cap.len, cap.id.raw());
         }
+        // Temporal (I8): the owning allocation must still be live. A dead
+        // STACK region is a use-after-scope-exit (the rusqlite-0128 class);
+        // a dead heap region is a use-after-free.
+        if !table::is_live(cap.id) {
+            report_uaf_and_abort(f, cap.base, cap.id.raw(), cap.flags);
+        }
+    }
+}
+
+/// Stack scope entry (I8). The MIR pass emits this at scope entry for a
+/// local whose address escapes, registering `[base, base+len)` as a live
+/// stack region so a later access through an escaped pointer can be checked
+/// against it.
+///
+/// # Safety
+///
+/// `base` is only recorded, never dereferenced.
+#[unsafe(no_mangle)]
+pub extern "C" fn __fec_scope_enter(base: *const u8, len: usize) {
+    if base.is_null() || len == 0 {
+        return;
+    }
+    let addr = base as usize;
+    // A prior frame may have left a dead stack region at this address;
+    // replace it so the fresh scope registers without overlap.
+    if let Some(cap) = table::lookup(addr)
+        && cap.base == addr
+        && !table::is_live(cap.id)
+        && let Some(freed) = table::deregister(addr)
+    {
+        table::release_record(freed);
+    }
+    table::register(addr, len, CapFlags::STACK, 0);
+}
+
+/// Stack scope exit (I8). The MIR pass emits this at frame teardown: it
+/// poisons the region (clears liveness, keeps it findable) so a later
+/// access through a pointer that escaped the scope resolves as a fatal
+/// use-after-scope-exit.
+///
+/// # Safety
+///
+/// `base` is only recorded, never dereferenced.
+#[unsafe(no_mangle)]
+pub extern "C" fn __fec_scope_exit(base: *const u8) {
+    if !base.is_null() {
+        table::poison(base as usize);
     }
 }
 
@@ -120,6 +169,28 @@ fn report_null_and_abort() -> ! {
         &mut std::io::stderr(),
         b"fe-c: null raw-pointer dereference\n",
     );
+    std::process::abort();
+}
+
+#[cold]
+#[inline(never)]
+fn report_uaf_and_abort(fault: usize, base: usize, id: u64, flags: CapFlags) -> ! {
+    let kind = if flags.contains(CapFlags::STACK) {
+        "UseAfterScopeExit"
+    } else {
+        "UseAfterFree"
+    };
+    let region = if flags.contains(CapFlags::STACK) {
+        "stack scope"
+    } else {
+        "heap allocation"
+    };
+    let msg = format!(
+        "fe-c-violation kind={kind} fault={fault:#x} alloc_base={base:#x} alloc_id={id}\n\
+fe-c: dereference into a dead {region} (id={id}, base={base:#x}); the owning \
+region was torn down / freed before this access\n"
+    );
+    let _ = std::io::Write::write_all(&mut std::io::stderr(), msg.as_bytes());
     std::process::abort();
 }
 
