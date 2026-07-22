@@ -214,6 +214,9 @@ pub fn run_service_manager() {
     crate::path_watcher::start_path_watcher_thread(run_info.clone());
     crate::watchdog::start_watchdog_thread(run_info.clone());
     crate::dbus_server::start_dbus_server_thread(run_info.clone());
+    // Track manual mount(8) operations via /proc/self/mountinfo and synthesise
+    // active `.mount` units for them (systemctl is-active <path>.mount).
+    crate::units::start_mount_monitor_thread(run_info.clone());
 
     // Rebuild synthetic `.device` units from the udev db.  Device
     // units are created on-the-fly from `udev-event` RPC notifications
