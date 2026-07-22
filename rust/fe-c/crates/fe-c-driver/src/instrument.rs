@@ -426,11 +426,20 @@ fn cast_to_u8_ptr<'tcx>(
     tmp
 }
 
-/// Injects `__fec_ensure(ref_ptr, root, size)` before every `&*p` reborrow of a
-/// raw pointer — a raw->safe cast (point 1, §3.1). Only `_ref = &*raw` (a
-/// single `Deref` of a raw-pointer local, no further projection) is handled;
-/// field reborrows are left to the deref checks. `size` is the referent's
-/// layout size. Returns how many ensures were injected.
+/// Injects `__fec_ensure(ref_ptr, root, size)` before every reborrow of a raw
+/// pointer into a safe reference — a raw->safe cast (point 1, §3.1). Both the
+/// whole-object `_ref = &*raw` and a **field reborrow** `_ref = &(*raw).f` are
+/// handled: a `Deref` of a raw-pointer local followed by only `Field`/`Downcast`
+/// projections. `ref_ptr` is the address of the reborrowed place (`p` for `&*p`,
+/// `p + offset(f)` for `&(*p).f`), materialized as `&raw const place`, and
+/// `size` is that place's layout size — so a field reborrow is bounds-checked
+/// against the *field's* extent. Covering field reborrows closes a `case`-mode
+/// soundness gap: `case` elides the reference's later dereferences, so an
+/// unvetted field reborrow off the end of a mis-cast base (`base.add(k) as
+/// *const Struct` then `&(*p).f`) would never be spatially checked (I1 — a
+/// missing visit, not a policy elision). A projection with a *further* `Deref`
+/// or an `Index` changes the derivation root, so those are left to the deref
+/// checks. Returns how many ensures were injected.
 fn instrument_cast_ensures<'tcx>(
     tcx: TyCtxt<'tcx>,
     body: &mut Body<'tcx>,
@@ -445,17 +454,15 @@ fn instrument_cast_ensures<'tcx>(
     for block in basic_blocks.indices().rev() {
         for idx in (0..basic_blocks[block].statements.len()).rev() {
             // Read the cast site (immutable) before splitting/injecting.
-            let Some((raw, size, source_info)) = ({
+            let Some((place, raw, size, source_info)) = ({
                 let stmt = &basic_blocks[block].statements[idx];
                 if let StatementKind::Assign(boxed) = &stmt.kind
                     && let Rvalue::Ref(_, _, place) = &boxed.1
-                    && place.projection.len() == 1
-                    && matches!(place.projection[0], ProjectionElem::Deref)
-                    && is_raw_ptr_local(local_decls, place.local)
+                    && is_reborrow_of_raw(local_decls, place)
                     && let Ok(layout) =
                         tcx.layout_of(typing_env.as_query_input(place.ty(local_decls, tcx).ty))
                 {
-                    Some((place.local, layout.size.bytes(), stmt.source_info))
+                    Some((*place, place.local, layout.size.bytes(), stmt.source_info))
                 } else {
                     None
                 }
@@ -473,7 +480,10 @@ fn instrument_cast_ensures<'tcx>(
             );
             let bd = &mut basic_blocks[block];
             let u8_ptr = Ty::new_imm_ptr(tcx, tcx.types.u8);
-            let fault_arg = cast_to_u8_ptr(local_decls, bd, raw, u8_ptr, source_info);
+            // The reborrowed place's address: `p` for `&*p`, `p + offset(f)`
+            // for `&(*p).f`. `&raw const place` computes it uniformly.
+            let fault_arg =
+                raw_const_place_as_u8(tcx, local_decls, bd, &place, u8_ptr, source_info);
             let root_arg = cast_to_u8_ptr(local_decls, bd, root, u8_ptr, source_info);
             let ret = local_decls.push(LocalDecl::new(tcx.types.unit, source_info.span));
             bd.terminator = Some(Terminator {
@@ -510,6 +520,51 @@ fn instrument_cast_ensures<'tcx>(
         }
     }
     injected
+}
+
+/// True if `place` is a reborrow eligible for a raw->safe cast ensure: a
+/// `Deref` of a raw-pointer local, followed by only `Field`/`Downcast`
+/// projections (a whole-object `&*p` or a field reborrow `&(*p).f`). A further
+/// `Deref` or an `Index` after the first would change the derivation root, so
+/// those are left to the deref checks.
+fn is_reborrow_of_raw<'tcx>(
+    local_decls: &IndexVec<Local, LocalDecl<'tcx>>,
+    place: &Place<'tcx>,
+) -> bool {
+    if place.projection.is_empty()
+        || !matches!(place.projection[0], ProjectionElem::Deref)
+        || !is_raw_ptr_local(local_decls, place.local)
+    {
+        return false;
+    }
+    place.projection[1..]
+        .iter()
+        .all(|p| matches!(p, ProjectionElem::Field(..) | ProjectionElem::Downcast(..)))
+}
+
+/// Emits `_p = &raw const place; _u8 = _p as *const u8` and returns the u8
+/// pointer local — the address of `place` itself (`p` for `*p`, `p + offset(f)`
+/// for `(*p).f`), so a field reborrow is bounds-checked against the field's
+/// extent, not the whole object's.
+fn raw_const_place_as_u8<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    local_decls: &mut IndexVec<Local, LocalDecl<'tcx>>,
+    bd: &mut BasicBlockData<'tcx>,
+    place: &Place<'tcx>,
+    u8_ptr: Ty<'tcx>,
+    source_info: SourceInfo,
+) -> Local {
+    let elem_ty = place.ty(local_decls, tcx).ty;
+    let raw_ty = Ty::new_ptr(tcx, elem_ty, Mutability::Not);
+    let addr = local_decls.push(LocalDecl::new(raw_ty, source_info.span));
+    bd.statements.push(Statement::new(
+        source_info,
+        StatementKind::Assign(Box::new((
+            Place::from(addr),
+            Rvalue::RawPtr(RawPtrKind::Const, *place),
+        ))),
+    ));
+    cast_to_u8_ptr(local_decls, bd, addr, u8_ptr, source_info)
 }
 
 // ---- stack scope hooks (I8) -----------------------------------------------

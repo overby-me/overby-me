@@ -469,21 +469,25 @@ in {
 
         ( cd corpus/cast-oob \
             && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
-        set +e
-        "$TMPDIR/tt/debug/cast-oob" >"$TMPDIR/th.log" 2>&1
-        th_exit=$?
-        set -e
-
         ( cd corpus/cast-oob \
             && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+
+        # Two scenarios per mode: a whole-object `&*bad` reborrow (no arg) and a
+        # field reborrow `&(*p).b` past the end (argv `field`).
         set +e
-        "$TMPDIR/tc/debug/cast-oob" >"$TMPDIR/ca.log" 2>&1
-        ca_exit=$?
+        "$TMPDIR/tt/debug/cast-oob"       >"$TMPDIR/thw.log" 2>&1; thw_exit=$?
+        "$TMPDIR/tc/debug/cast-oob"       >"$TMPDIR/caw.log" 2>&1; caw_exit=$?
+        "$TMPDIR/tt/debug/cast-oob" field >"$TMPDIR/thf.log" 2>&1; thf_exit=$?
+        "$TMPDIR/tc/debug/cast-oob" field >"$TMPDIR/caf.log" 2>&1; caf_exit=$?
         set -e
 
-        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
-        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
-        nu corpus/assert_cast_oob.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
+        echo "--- through/whole (exit $thw_exit) ---"; cat "$TMPDIR/thw.log"
+        echo "--- case/whole (exit $caw_exit) ---"; cat "$TMPDIR/caw.log"
+        echo "--- through/field (exit $thf_exit) ---"; cat "$TMPDIR/thf.log"
+        echo "--- case/field (exit $caf_exit) ---"; cat "$TMPDIR/caf.log"
+        nu corpus/assert_cast_oob.nu \
+          "$TMPDIR/thw.log" "$thw_exit" "$TMPDIR/caw.log" "$caw_exit" \
+          "$TMPDIR/thf.log" "$thf_exit" "$TMPDIR/caf.log" "$caf_exit"
       '';
 
     # Differential gate (C3, I4): `through` is the oracle. Build three

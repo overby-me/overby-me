@@ -29,8 +29,15 @@ def check-mode [label: string, log: path, exit_code: int] {
   $base
 }
 
-def main [through_log: path, through_exit: int, case_log: path, case_exit: int] {
-  let tb = (check-mode "through" $through_log $through_exit)
-  let cb = (check-mode "case" $case_log $case_exit)
-  print $"cast-oob OK: both modes abort OutOfBounds on the raw->safe cast \(through base ($tb), case base ($cb)\) via the cast ensure"
+def main [
+  tw_log: path, tw_exit: int, # through, whole-object &*bad
+  cw_log: path, cw_exit: int, # case,    whole-object &*bad
+  tf_log: path, tf_exit: int, # through, field reborrow &(*p).b
+  cf_log: path, cf_exit: int, # case,    field reborrow &(*p).b
+] {
+  let tw = (check-mode "through/whole-object" $tw_log $tw_exit)
+  let cw = (check-mode "case/whole-object" $cw_log $cw_exit)
+  let tf = (check-mode "through/field" $tf_log $tf_exit)
+  let cf = (check-mode "case/field" $cf_log $cf_exit)
+  print $"cast-oob OK: both modes abort OutOfBounds on the raw->safe cast — whole-object \(through ($tw), case ($cw)\) and field reborrow \(through ($tf), case ($cf)\) — resolved at the owning buffer via the cast ensure"
 }

@@ -64,9 +64,14 @@ needs the deferred `nofree` callgraph, and a precise mint line needs point 1's
 the false-positive suite must be vetted first.
 
 **Instrumentation points landed.** point 0 (raw deref), point 1 (raw→safe cast
-`ensure` — `corpus/cast-oob` aborts OutOfBounds in both modes, the spatial
-check that makes `case` elision sound), point 4 (dealloc-reachable re-check,
-`case`), point 5 (stack scope hooks, I8), and I9 outbound escape are all in.
+`ensure` — `corpus/cast-oob` aborts OutOfBounds in both modes for **both** a
+whole-object `&*bad` reborrow and a **field reborrow** `&(*p).b` off the end,
+the spatial check that makes `case` elision sound; field reborrows were added
+to close a `case` gap — an unvetted `&(*p).f` off a mis-cast base would have had
+its later derefs elided, a missing visit under I1, and the instrumented
+hashbrown suite stays clean at 5.1M checks), point 4 (dealloc-reachable
+re-check, `case`), point 5 (stack scope hooks, I8), and I9 outbound escape are
+all in.
 The `differential` gate (C3) is wired and passing (`fe-c-differential`). Not
 yet: point 2 (`through` covers loaded pointers via safe-deref checking;
 `case`'s "load from memory" variant is subsumed by point 1 for now), point 3a
