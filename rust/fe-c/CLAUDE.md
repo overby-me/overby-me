@@ -269,11 +269,12 @@ is deliberately deferred: under the conservative "any call frees" reachability
 the nearest preceding call is the innocent `eprintln!` between the `pop()` and
 the read, so a `freed_at` derived from the CFG would be a red herring — a
 precise free line needs the deferred `nofree` callgraph (or drop-terminator
-instrumentation, whose blast radius on the false-positive suite is unvetted),
-and a precise mint line needs extending point 1's `ensure` to field reborrows
-(`&(*node).val`). Both are scoped in STATUS as the next deliberate step; the
-report names the freed node, the dangling-read site, and the fact of free
-today.)*
+instrumentation, whose blast radius on the false-positive suite is unvetted).
+The precise **mint** line is now unblocked: point 1's `ensure` was extended to
+field reborrows (`&(*node).val`) and vetted clean (5.1M hashbrown checks), so
+recording the mint line on the root cap at ensure time (`cap.mint_site`) and
+printing it is a bounded next step. Scoped in STATUS; the report names the
+freed node, the dangling-read site, and the fact of free today.)*
 
 **C3. [todo] The other mode**, with the `differential` check wired: any violation
 `through` catches that `case` misses must map to a documented elision gap in

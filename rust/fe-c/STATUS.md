@@ -56,12 +56,14 @@ table lookup), `strict` unknown-provenance (needs full cap propagation first,
 or it false-positives on foreign statics), and interprocedural + at-rest
 capability propagation. For `case`: the C2 report already names the freed node
 and the dangling-read site; the last precision step is the **free** and **mint**
-source lines. Both are deferred deliberately (not blocked-by-effort but
-blocked-by-correctness): a CFG-derived `freed_at` would name the innocent
-`eprintln!` sitting between the `pop()` and the read, so a precise free line
-needs the deferred `nofree` callgraph, and a precise mint line needs point 1's
-`ensure` extended to field reborrows (`&(*node).val`) — whose blast radius on
-the false-positive suite must be vetted first.
+source lines. The **free** line is deferred by correctness: a CFG-derived
+`freed_at` would name the innocent `eprintln!` sitting between the `pop()` and
+the read, so a precise free line needs the deferred `nofree` callgraph. The
+**mint** line is now *reachable*: the field-reborrow ensure (`&(*node).val`)
+exists and is vetted clean (5.1M hashbrown checks, no false positives), so the
+remaining work is only to record the mint line on the root cap at ensure time
+(`cap.mint_site`, the `escaped_at` mechanism applied to heap) and print it —
+a bounded next step, no longer blocked.
 
 **Instrumentation points landed.** point 0 (raw deref), point 1 (raw→safe cast
 `ensure` — `corpus/cast-oob` aborts OutOfBounds in both modes for **both** a
@@ -196,6 +198,22 @@ to the escape (only escaped regions stay findable-as-dead).
 
 ## Open items carried forward
 
+- **point 0 checks the base pointer, not the projected element's extent.** The
+  raw-deref check resolves and range-checks the *deref base* (`p` for `(*p).f`
+  or `(*p)[i]`), so a **direct** projected access through a mis-cast base
+  (`base.add(k) as *const Struct` then `(*p).f = v`, no reborrow, no
+  `ptr::write`) checks only that `p` is in bounds, not that `p + offset(f)` is.
+  This is a narrow **false negative** (only bites a mis-cast base; a legitimate
+  pointer-to-`Struct` has its fields in bounds by construction), and it is
+  **both-modes** — a precision limit of point 0, not a mode-soundness gap. The
+  two forms that *do* matter are already covered: a **reborrow** `&(*p).f` by
+  the field-granular cast ensure (point 1), and a **write intrinsic**
+  `ptr::write((*p).f …)` by the write-call check on the computed destination.
+  Fix direction: make point 0 extent-aware — materialize `&raw const place` as
+  the fault and pass the place's layout size, reusing `raw_const_place_as_u8` /
+  the `ensure` extent comparison. Deferred: it touches the hottest path (every
+  deref), so the false-positive suite's check volume and timing must be
+  re-vetted first.
 - **Interposed frees don't quarantine.** `interpose::free` clears liveness
   (I7) then frees immediately; routing C frees through the shared quarantine
   needs a per-origin release dispatch on the node (System vs libc `free`).
