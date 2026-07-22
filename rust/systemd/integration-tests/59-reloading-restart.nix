@@ -1,27 +1,20 @@
 {
   name = "59-RELOADING-RESTART";
-  # Custom rewrite: test RELOADING=1 failure handling (implemented).
-  # Skip reload rate limiting (ReloadLimitBurst not implemented) and
+  # Custom rewrite: test RELOADING=1 failure handling (implemented) and the
+  # full Type=notify-reload lifecycle (reload via SIGHUP, then a clean SIGTERM
+  # stop that runs the unit's `trap leave` handler and exits 109 -- upstream
+  # TEST-59-RELOADING-RESTART.sh notify-reload subtest).
+  #
+  # Still skipped: reload rate limiting (ReloadLimitBurst not implemented) and
   # RestartMode=debug (not implemented).
   #
-  # Type=notify-reload is ALSO skipped, and a VM-probe diagnosis (2026-07-22)
-  # found the ROOT CAUSE = a BROAD stop-path bug, NOT anything notify-reload- or
-  # transient-specific: rust-systemd's service stop sends NO graceful SIGTERM to
-  # the main process before SIGKILL when ExecStop= is empty. `run_stop_cmd`
-  # (services.rs:1702-1703) early-returns `Ok(())` when `conf.stop.is_empty()`,
-  # then `kill()` (services.rs:1252) goes straight to
-  # `kill_all_remaining_processes()` which SIGKILLs (KillMode=process ->
-  # SIGKILL self.pid, services.rs:1199). So the upstream notify-reload script's
-  # `trap leave SIGTERM` handler never runs; the process dies by SIGKILL, giving
-  # ExecMainStatus=9 instead of 109. (Probe evidence: DEACTPROBE + EXITPROBE
-  # show the unit stays active through `systemctl reload` and is SIGKILLed only
-  # at stop -- the earlier "transient/main-PID" theory was WRONG, misled by
-  # non-causal journal ordering.) FIX (task #84): add a graceful SIGTERM phase
-  # in kill() before kill_all_remaining_processes -- send SIGTERM per KillMode,
-  # wait up to TimeoutStopSec for the main process to exit (poll PID table),
-  # then SIGKILL survivors. Broad blast radius (every ExecStop-less service
-  # stop); needs careful impl + full regression. Once fixed, restore the
-  # notify-reload block (upstream TEST-59-RELOADING-RESTART.sh lines 111-155).
+  # The notify-reload subtest exercises the graceful-SIGTERM stop fix: kill()
+  # now sends SIGTERM to the main process and waits up to TimeoutStopSec before
+  # run_poststop's SIGKILL fallback, matching systemd's
+  # ExecStop -> SIGTERM -> TimeoutStopSec -> SIGKILL -> ExecStopPost sequence.
+  # Previously run_poststop's kill_all_remaining_processes SIGKILLed the main
+  # process immediately, so the `trap leave SIGTERM` handler never ran and the
+  # unit exited by signal (ExecMainStatus=9) instead of 109.
   patchScript = ''
         cat > TEST-59-RELOADING-RESTART.sh << 'TESTEOF'
     #!/usr/bin/env bash
@@ -132,6 +125,51 @@
     sleep 5
     systemctl is-active testservice-reload-ok-59.service
     systemctl stop testservice-reload-ok-59.service
+
+    : "Type=notify-reload full lifecycle: reload (SIGHUP=+11) then clean stop"
+    : "(SIGTERM->leave=+7, +3 final = 109) exercises the graceful-SIGTERM fix"
+    cat >/run/notify-reload-test.sh <<EOF
+    #!/usr/bin/env bash
+    set -eux
+    set -o pipefail
+
+    EXIT_STATUS=88
+    LEAVE=0
+
+    function reload() {
+        systemd-notify --reloading --status="Adding 11 to exit status"
+        EXIT_STATUS=\$((EXIT_STATUS + 11))
+        systemd-notify --ready --status="Back running"
+    }
+
+    function leave() {
+        systemd-notify --stopping --status="Adding 7 to exit status"
+        EXIT_STATUS=\$((EXIT_STATUS + 7))
+        LEAVE=1
+        return 0
+    }
+
+    trap reload SIGHUP
+    trap leave SIGTERM
+
+    systemd-notify --ready
+    systemd-notify --status="Running now"
+
+    while [ \$LEAVE = 0 ] ; do
+        sleep 1
+    done
+
+    systemd-notify --status="Adding 3 to exit status"
+    EXIT_STATUS=\$((EXIT_STATUS + 3))
+    exit \$EXIT_STATUS
+    EOF
+    chmod +x /run/notify-reload-test.sh
+
+    systemd-run --unit notify-reload-test -p Type=notify-reload -p KillMode=process /run/notify-reload-test.sh
+    systemctl reload notify-reload-test
+    systemctl stop notify-reload-test
+    test "$(systemctl show -p ExecMainStatus --value notify-reload-test)" = 109
+    systemctl reset-failed notify-reload-test
 
     rm -f /run/systemd/system/testservice-*-59.service
     systemctl daemon-reload

@@ -1249,6 +1249,78 @@ impl Service {
     ) -> Result<(), RunCmdError> {
         self.run_stop_cmd(conf, id, name, run_info)
     }
+
+    /// Send a graceful SIGTERM to the service's main process (per `KillMode=`)
+    /// and wait up to `TimeoutStopSec` for it to exit, mirroring systemd's
+    /// `SIGTERM -> TimeoutStopSec -> SIGKILL` stop sequence. Runs in `kill()`
+    /// after `ExecStop=` and before the SIGKILL fallback: without it a service
+    /// with no `ExecStop=` was SIGKILLed immediately, so SIGTERM cleanup (shell
+    /// `trap`, `systemd-notify --stopping`) never ran (e.g. a `Type=notify-reload`
+    /// unit exited by signal, ExecMainStatus=9, instead of via its handler).
+    fn terminate_gracefully(&mut self, conf: &ServiceConfig, name: &str, run_info: &RuntimeInfo) {
+        if matches!(conf.kill_mode, KillMode::None) {
+            return;
+        }
+        // The sd_notify MAINPID (`main_pid`) overrides the forked `pid` for
+        // signal delivery; prefer it. `pid`/`main_pid` on the Service struct are
+        // cleared on some paths before the stop (e.g. a transient notify unit),
+        // so fall back to the live PID table entry, which still holds the
+        // running process under its `PidEntry::Service(unit_id, _)` until reap.
+        let pid = self.main_pid.or(self.pid).or_else(|| {
+            let pid_table = run_info.pid_table.lock_poisoned();
+            pid_table.iter().find_map(|(p, entry)| match entry {
+                PidEntry::Service(uid, _) if uid.name == name => Some(*p),
+                _ => None,
+            })
+        });
+        let Some(pid) = pid else {
+            trace!("Graceful stop: {name} has no live PID, skipping SIGTERM");
+            return;
+        };
+        {
+            let pid_table = run_info.pid_table.lock_poisoned();
+            match pid_table.get(&pid) {
+                Some(PidEntry::ServiceExited(_)) | None => {
+                    trace!("Graceful stop: {name} pid {pid} already exited, skipping SIGTERM");
+                    return;
+                }
+                _ => {}
+            }
+        }
+        let target = match conf.kill_mode {
+            KillMode::ControlGroup => self.process_group.unwrap_or(pid),
+            _ => pid,
+        };
+        match nix::sys::signal::kill(target, nix::sys::signal::Signal::SIGTERM) {
+            Ok(()) => trace!("Graceful stop: sent SIGTERM to {name} (target {target})"),
+            Err(nix::errno::Errno::ESRCH) => return,
+            Err(e) => {
+                warn!("Graceful stop: failed to send SIGTERM to {name} (target {target}): {e}");
+                return;
+            }
+        }
+        let timeout = self
+            .get_stop_timeout(conf)
+            .unwrap_or_else(|| std::time::Duration::from_secs(90));
+        let start = std::time::Instant::now();
+        loop {
+            {
+                let pid_table = run_info.pid_table.lock_poisoned();
+                match pid_table.get(&pid) {
+                    Some(PidEntry::ServiceExited(_)) | None => break,
+                    _ => {}
+                }
+            }
+            if start.elapsed() >= timeout {
+                log::info!(
+                    "Graceful stop: {name} did not exit within TimeoutStopSec, escalating to SIGKILL"
+                );
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
     pub fn kill(
         &mut self,
         conf: &ServiceConfig,
@@ -1273,30 +1345,48 @@ impl Service {
             return Ok(());
         }
 
-        let result = self
-            .stop(conf, id.clone(), name, run_info)
-            .map_err(|stop_err| {
-                trace!(
-                    "Stop process failed with: {stop_err:?} for service: {name}. Running poststop commands"
-                );
-                match self.run_poststop(conf, id.clone(), name, run_info) {
-                    Ok(()) => ServiceErrorReason::StopFailed(stop_err),
-                    Err(poststop_err) => {
-                        ServiceErrorReason::StopAndPoststopFailed(stop_err, poststop_err)
-                    }
-                }
-            })
-            .and_then(|()| {
+        // Run ExecStop= commands first (real systemd runs ExecStop before it
+        // sends the kill signal).
+        let stop_res = self.stop(conf, id.clone(), name, run_info);
+
+        // Mark that this service was explicitly stopped so the exit handler
+        // suppresses automatic restart (Restart=always etc.).
+        self.manual_stop = true;
+
+        // Graceful SIGTERM to the main process (per KillMode) with a
+        // TimeoutStopSec wait, BEFORE run_poststop's SIGKILL fallback. Without
+        // this, run_poststop's kill_all_remaining_processes SIGKILLs the main
+        // process immediately, so its SIGTERM cleanup (shell `trap` handlers,
+        // `systemd-notify --stopping`, graceful shutdown) never runs -- e.g. a
+        // Type=notify-reload unit would exit by SIGKILL with ExecMainStatus=9
+        // instead of running its handler and exiting cleanly. Matches systemd's
+        // ExecStop -> SIGTERM -> TimeoutStopSec -> SIGKILL -> ExecStopPost stop
+        // sequence.
+        self.terminate_gracefully(conf, name, run_info);
+
+        // Run ExecStopPost= commands and SIGKILL any survivors (run_poststop
+        // also clears self.pid/process_group). Preserve the combined
+        // stop/poststop error semantics.
+        let result = match stop_res {
+            Ok(()) => {
                 trace!(
                     "Stop processes for service: {name} ran successfully. Running poststop commands"
                 );
                 self.run_poststop(conf, id.clone(), name, run_info)
                     .map_err(ServiceErrorReason::PoststopFailed)
-            });
-
-        // Mark that this service was explicitly stopped so the exit handler
-        // suppresses automatic restart (Restart=always etc.).
-        self.manual_stop = true;
+            }
+            Err(stop_err) => {
+                trace!(
+                    "Stop process failed with: {stop_err:?} for service: {name}. Running poststop commands"
+                );
+                match self.run_poststop(conf, id.clone(), name, run_info) {
+                    Ok(()) => Err(ServiceErrorReason::StopFailed(stop_err)),
+                    Err(poststop_err) => {
+                        Err(ServiceErrorReason::StopAndPoststopFailed(stop_err, poststop_err))
+                    }
+                }
+            }
+        };
 
         // Kill any remaining processes in the cgroup after ExecStop +
         // ExecStopPost have run, matching real systemd's behavior.
