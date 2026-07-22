@@ -175,7 +175,29 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         &unit.common.dependencies.conflicted_by,
     );
     insert_dep_list(&mut props, "Before", &unit.common.dependencies.before);
-    insert_dep_list(&mut props, "After", &unit.common.dependencies.after);
+    // For a mount unit that is not currently mounted, derive `After` from the
+    // fragment config (its declared local/remote classification) instead of the
+    // stored deps: the async mount monitor overrides a static unit's deps for an
+    // active mount and reverts them only on the unmount POLLPRI, which races a
+    // `systemctl show` issued right after `systemctl stop`. Deriving on demand
+    // when unmounted keeps `After` correct and synchronous.
+    match &unit.specific {
+        crate::units::Specific::Mount(m)
+            if !crate::units::is_already_mounted(&m.conf.where_) =>
+        {
+            let is_net = crate::units::mount_is_network_static(
+                m.conf.fs_type.as_deref(),
+                m.conf.options.as_deref(),
+            );
+            let (after, _, _, _) = crate::units::mount_default_deps(&m.conf.what, is_net);
+            let derived: Vec<crate::units::UnitId> = after
+                .iter()
+                .filter_map(|n| crate::units::dep_unit_id(n))
+                .collect();
+            insert_dep_list(&mut props, "After", &derived);
+        }
+        _ => insert_dep_list(&mut props, "After", &unit.common.dependencies.after),
+    }
     insert_dep_list(&mut props, "PartOf", &unit.common.dependencies.part_of);
     insert_dep_list(&mut props, "PartOfBy", &unit.common.dependencies.part_of_by);
     insert_dep_list(&mut props, "BindsTo", &unit.common.dependencies.binds_to);

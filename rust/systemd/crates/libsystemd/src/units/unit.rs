@@ -2165,7 +2165,7 @@ fn deactivate_mount(
 
 /// Check whether a path is already mounted by reading /proc/mounts.
 #[cfg(target_os = "linux")]
-fn is_already_mounted(path: &str) -> bool {
+pub(crate) fn is_already_mounted(path: &str) -> bool {
     let normalized = path.trim_end_matches('/');
     let check_path = if normalized.is_empty() {
         "/"
