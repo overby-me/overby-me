@@ -13,7 +13,7 @@
     UNIT="serrno-$RANDOM"
     systemd-run --wait --unit="$UNIT" true
     SE="$(systemctl show -P StatusErrno "$UNIT.service")"
-    [[ "$SE" == "0" || "$SE" == "" ]]
+    [[ "$SE" == "0" ]]
     SE2EOF
     chmod +x TEST-74-AUX-UTILS.status-errno2.sh
   '';
