@@ -4692,6 +4692,21 @@ fn create_transient_unit(
                     service_conf.exec_config.mount_api_vfs =
                         Some(matches!(value, "yes" | "true" | "1"));
                 }
+                "MemoryPressureWatch" => {
+                    service_conf.memory_pressure_watch = match value {
+                        "on" | "yes" | "true" | "1" => crate::units::MemoryPressureWatch::On,
+                        "off" | "no" | "false" | "0" => crate::units::MemoryPressureWatch::Off,
+                        "skip" => crate::units::MemoryPressureWatch::Skip,
+                        _ => crate::units::MemoryPressureWatch::Auto,
+                    };
+                }
+                "MemoryPressureThresholdSec" => {
+                    if let Some(d) = crate::units::from_parsed_config::parse_timespan(value.trim())
+                    {
+                        service_conf.memory_pressure_threshold_sec =
+                            Some(crate::units::Timeout::Duration(d));
+                    }
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }
