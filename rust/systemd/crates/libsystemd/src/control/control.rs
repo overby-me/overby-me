@@ -763,7 +763,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                     let slice = obj
                         .get("slice")
                         .and_then(|v| v.as_str())
-                        .map(|s| s.to_owned());
+                        .map(crate::units::from_parsed_config::mangle_slice_name);
 
                     let on_calendar = obj
                         .get("on_calendar")
@@ -3426,7 +3426,10 @@ fn create_transient_unit(
                 .properties
                 .iter()
                 .rev()
-                .find_map(|p| p.strip_prefix("Slice=").map(|s| s.to_owned()))
+                .find_map(|p| {
+                    p.strip_prefix("Slice=")
+                        .map(crate::units::from_parsed_config::mangle_slice_name)
+                })
                 .filter(|s| !s.is_empty())
         })
         .or_else(|| {
@@ -3961,7 +3964,8 @@ fn create_transient_unit(
                     service_conf.tasks_max = Some(parse_tasks_max(value));
                 }
                 "Slice" => {
-                    service_conf.slice = Some(value.to_string());
+                    service_conf.slice =
+                        Some(crate::units::from_parsed_config::mangle_slice_name(value));
                 }
                 "SendSIGHUP" => {
                     service_conf.send_sighup = matches!(value, "yes" | "true" | "1");

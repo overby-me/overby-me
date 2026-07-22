@@ -39,6 +39,20 @@ pub fn slice_cgroup_path(root: &std::path::Path, slice_name: &str) -> PathBuf {
     path
 }
 
+/// Normalize a slice reference to a canonical `.slice` unit name.
+///
+/// systemd accepts a short slice name such as `system` and mangles it to the
+/// full unit name `system.slice`. A value that already carries the `.slice`
+/// suffix (including the root slice `-.slice`) is returned unchanged, as is an
+/// empty string (which callers treat as "unset").
+pub fn mangle_slice_name(slice: &str) -> String {
+    if slice.is_empty() || slice.ends_with(".slice") {
+        slice.to_string()
+    } else {
+        format!("{slice}.slice")
+    }
+}
+
 #[cfg(feature = "cgroups")]
 fn make_cgroup_path(srvc_name: &str, slice: Option<&str>) -> Result<PathBuf, String> {
     let cgroup_root = crate::platform::cgroups::get_cgroup_root(&PathBuf::from("/sys/fs/cgroup"))

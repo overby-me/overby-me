@@ -968,7 +968,7 @@ fn parse_service_section(
         sockets: map_tuples_to_second(super::split_list_values(sockets.unwrap_or_default())),
         slice: slice.and_then(|vec| {
             if vec.len() == 1 {
-                Some(vec[0].1.clone())
+                Some(crate::units::from_parsed_config::mangle_slice_name(&vec[0].1))
             } else {
                 None
             }
