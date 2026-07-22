@@ -133,7 +133,11 @@ where propagation is lost.
 (`as_mut_ptr()`) and propagates to the overflowing write. *Verified on real
 `smallvec@=1.6.0`: `insert_many rooted_writes=4 write_roots=["as_mut_ptr"]`.*
 
-**B2. MIR rewriting infrastructure.**
+**B2. MIR rewriting infrastructure.** *(NOT STARTED — session halt point;
+see `STATUS.md`. rustc_public is read-only, so this needs
+`rustc_driver::Callbacks` + `override_queries` mutation of internal MIR
+plus linking `cementite` into instrumented crates. Approach fact-checked
+against the pinned nightly and scoped in STATUS.)*
 Insert calls to `cementite`; thread the returned pointer as a distinct SSA
 value.
 ✅ Instrumented hello-world runs and reports non-zero check counts.
