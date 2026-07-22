@@ -198,9 +198,10 @@ crate list so deep dep trees don't need cementite as a sysroot crate (D1).
 The `fe-c-false-positive` check runs the hashbrown workload offline.*
 
 **B5. [todo] Stack scope hooks (I8) + FFI boundary checks (point 3, both directions).**
-*(partial 2026-07-22 — I8 mechanism done + demonstrated; the exact
-`corpus-rusqlite-0128` acceptance is not yet met, so this stays `[todo]`.
-See `STATUS.md`.)*
+*(partial 2026-07-22 — the I8/I9 mechanism is done and demonstrated by three
+green reproducers; the exact `corpus-rusqlite-0128` acceptance needs a
+Phase-C-adjacent §3.2 check (safe-reference read) + the real `libsqlite3-sys`
+build, so this stays `[todo]`. See `STATUS.md`.)*
 ✅ **`corpus-rusqlite-0128` aborts**, report names the dead stack scope, the
 callback, *and* the registration site. This is also the first corpus entry
 pulling real C — it doubles as the mixed-language build smoke test.

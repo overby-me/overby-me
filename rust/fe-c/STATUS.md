@@ -172,5 +172,11 @@ to the escape (only escaped regions stay findable-as-dead).
    implement the first mode end to end.
 3. The both-modes rule (I4) still binds: `docs/both-modes.md` must stay
    filled before any checking feature merges.
-4. To finish B5 first, do the four pieces above in order; the escape
-   analysis is the highest-leverage (unlocks default-on scope hooks).
+4. B5's I8/I9 **mechanism is done** (lexical scopes, escape analysis with
+   three sinks, outbound FFI escape, `escaped_at`; three green reproducers).
+   The **exact** `corpus-rusqlite-0128` remains blocked on a `§3.2`
+   pointer-loaded-from-memory check (its closure reads the local through a
+   *safe* reference, which point 0's raw-deref instrumentation does not touch)
+   and the real vendored `libsqlite3-sys` build (0.25.3 is yanked; use a
+   non-yanked vulnerable version). The `§3.2` check is Phase-C-adjacent, so
+   this naturally lands with the modes rather than before C1.
