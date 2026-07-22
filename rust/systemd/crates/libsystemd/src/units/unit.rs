@@ -545,12 +545,25 @@ impl ServiceState {
             if cgroup_path.exists()
                 && let Err(e) = crate::platform::cgroups::remove_cgroup_recursive(cgroup_path)
             {
-                log::warn!(
-                    "deactivate: could not remove cgroup {} for {}: {}",
-                    cgroup_path.display(),
-                    id.name,
-                    e
-                );
+                // A user manager runs unprivileged: it cannot remove a subcgroup
+                // the payload chown'd to another uid (nor, therefore, the tree
+                // above it). Escalate to PID 1, which removes it as root. Mirrors
+                // systemd's unit_prune_cgroup_via_bus.
+                if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
+                    if let Err(e2) = crate::control::escalate_remove_cgroup(cgroup_path) {
+                        log::warn!(
+                            "deactivate: escalated cgroup removal for {} failed: {e2} (local: {e})",
+                            id.name,
+                        );
+                    }
+                } else {
+                    log::warn!(
+                        "deactivate: could not remove cgroup {} for {}: {}",
+                        cgroup_path.display(),
+                        id.name,
+                        e
+                    );
+                }
             }
         }
 

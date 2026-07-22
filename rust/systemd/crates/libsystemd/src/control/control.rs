@@ -134,6 +134,13 @@ pub enum Command {
     /// Send a signal to a unit's processes.
     /// Fields: unit_name, signal, kill_whom ("main"/"control"/"all"), kill_value
     Kill(String, i32, String, Option<i32>, bool),
+    /// `remove-subgroup <abs-cgroup-path>` — privileged helper for an
+    /// unprivileged (user) manager that could not remove a delegated cgroup
+    /// subtree itself, e.g. because the payload created a subcgroup owned by
+    /// another uid. PID 1 validates that the path belongs to the caller's own
+    /// `user@<uid>.service` before removing it as root. Mirrors systemd's
+    /// RemoveSubgroupFromUnit / unit_prune_cgroup_via_bus.
+    RemoveSubgroup(String),
     Shutdown(crate::shutdown::ShutdownAction),
     /// `suspend` — put the system to sleep (suspend to RAM).
     Suspend,
@@ -331,6 +338,17 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 }
             };
             Command::Restart(name)
+        }
+        "remove-subgroup" => {
+            let path = match &call.params {
+                Some(Value::String(s)) => s.clone(),
+                Some(_) | None => {
+                    return Err(ParseError::ParamsInvalid(
+                        "Params must be a single string (absolute cgroup path)".to_string(),
+                    ));
+                }
+            };
+            Command::RemoveSubgroup(path)
         }
         "try-restart" | "condrestart" => {
             let name = match &call.params {
@@ -7664,6 +7682,13 @@ pub fn execute_command(
 
             return Ok(serde_json::json!(null));
         }
+        Command::RemoveSubgroup(_path) => {
+            // remove-subgroup needs the caller's peer credentials for its
+            // ownership check, which are only available at the control-socket
+            // connection layer (see listen_on_commands). It must never be
+            // dispatched through execute_command.
+            return Err("remove-subgroup must be handled at the connection layer".to_string());
+        }
         Command::ListUnitFiles(type_filter) => {
             let ri = run_info.read_poisoned();
             let unit_dirs = &ri.config.unit_dirs;
@@ -10802,6 +10827,7 @@ use std::io::Write as IoWrite;
 pub fn listen_on_commands<T: 'static + Read + IoWrite + Send>(
     mut source: Box<T>,
     run_info: ArcMutRuntimeInfo,
+    peer_uid: Option<u32>,
 ) {
     std::thread::spawn(move || {
         loop {
@@ -10859,7 +10885,18 @@ pub fn listen_on_commands<T: 'static + Read + IoWrite + Send>(
                                     }
                                 }
                                 Ok(cmd) => {
-                                    let msg = match execute_command(cmd, run_info.clone()) {
+                                    // `remove-subgroup` needs the connection's peer
+                                    // credentials for its ownership check, so handle it here
+                                    // rather than in execute_command (which has no access to
+                                    // them).
+                                    let exec_result = if let Command::RemoveSubgroup(ref path) = cmd
+                                    {
+                                        handle_remove_subgroup(path, peer_uid)
+                                            .map(|()| serde_json::json!(null))
+                                    } else {
+                                        execute_command(cmd, run_info.clone())
+                                    };
+                                    let msg = match exec_result {
                                         Err(e) => {
                                             let err = super::jsonrpc2::make_error(
                                                 super::jsonrpc2::SERVER_ERROR,
@@ -10892,6 +10929,124 @@ pub fn listen_on_commands<T: 'static + Read + IoWrite + Send>(
     });
 }
 
+/// Read the connecting peer's uid from a Unix control-socket stream via
+/// SO_PEERCRED. Returns None for non-Unix peers or if the lookup fails; such
+/// callers cannot use methods that require caller credentials.
+fn peer_uid_of(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    use std::os::unix::io::AsRawFd;
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            std::ptr::addr_of_mut!(cred).cast::<libc::c_void>(),
+            &mut len,
+        )
+    };
+    if rc == 0 { Some(cred.uid) } else { None }
+}
+
+/// Handle a `remove-subgroup` control request: remove a delegated cgroup
+/// subtree on behalf of an unprivileged (user) manager that could not remove it
+/// itself, e.g. because the payload created a subcgroup owned by another uid.
+///
+/// Security: mirrors systemd's RemoveSubgroupFromUnit — the caller must be
+/// root, PID 1 itself, or the owner of the target `user@<uid>.service`. That
+/// reduces to: root may remove any leftover subtree inside the hierarchy; an
+/// unprivileged caller may only remove cgroups strictly beneath its own
+/// `user@<uid>.service`. The path must be absolute and normalized so it cannot
+/// traverse out of that subtree.
+#[cfg(target_os = "linux")]
+fn handle_remove_subgroup(path: &str, peer_uid: Option<u32>) -> Result<(), String> {
+    let uid = peer_uid.ok_or_else(|| "remove-subgroup: no peer credentials".to_string())?;
+
+    let p = std::path::Path::new(path);
+    if !p.is_absolute() {
+        return Err(format!("remove-subgroup: path is not absolute: {path}"));
+    }
+    if p.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        )
+    }) {
+        return Err(format!("remove-subgroup: path is not normalized: {path}"));
+    }
+    if uid == 0 {
+        // PID 1 is root; only ever operate inside the cgroup hierarchy.
+        if !path.starts_with("/sys/fs/cgroup/") {
+            return Err(format!("remove-subgroup: refusing non-cgroup path: {path}"));
+        }
+    } else {
+        // The trailing slash forces the target strictly *below* the caller's
+        // manager cgroup — it can never remove user@<uid>.service itself.
+        let allowed = format!("/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/");
+        if !path.starts_with(&allowed) {
+            return Err(format!(
+                "remove-subgroup: uid {uid} may not remove cgroup outside its own manager: {path}"
+            ));
+        }
+    }
+
+    if !p.exists() {
+        return Ok(());
+    }
+    crate::platform::cgroups::remove_cgroup_recursive(p)
+        .map_err(|e| format!("remove-subgroup: failed to remove {path}: {e}"))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn handle_remove_subgroup(_path: &str, _peer_uid: Option<u32>) -> Result<(), String> {
+    Err("remove-subgroup: not supported on this platform".to_string())
+}
+
+/// Ask PID 1 (the system manager) to remove a delegated cgroup subtree that we
+/// (an unprivileged user manager) could not remove ourselves — e.g. it contains
+/// a subcgroup owned by another uid. Connects to PID 1's control socket and
+/// issues a `remove-subgroup` request, blocking until PID 1 replies so the
+/// cgroup is gone on return. Mirrors systemd's unit_prune_cgroup_via_bus.
+#[cfg(target_os = "linux")]
+pub fn escalate_remove_cgroup(cgroup_path: &std::path::Path) -> Result<(), String> {
+    use std::io::{Read as _, Write as _};
+    use std::os::unix::net::UnixStream;
+
+    let sock = "/run/systemd/rust-systemd-notify/control.socket";
+    let mut stream = UnixStream::connect(sock).map_err(|e| format!("connect {sock}: {e}"))?;
+    // Bound the round-trip so a wedged PID 1 cannot stall the stop path (this
+    // runs while the service state lock is held).
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
+
+    let call = super::jsonrpc2::Call {
+        method: "remove-subgroup".to_string(),
+        params: Some(serde_json::Value::String(
+            cgroup_path.to_string_lossy().into_owned(),
+        )),
+        id: Some(serde_json::Value::from(1)),
+    };
+    let payload = serde_json::to_string(&call.to_json()).map_err(|e| format!("encode: {e}"))?;
+    stream
+        .write_all(payload.as_bytes())
+        .map_err(|e| format!("write: {e}"))?;
+    // Signal EOF on the write half so PID 1's reader dispatches the call.
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .map_err(|e| format!("shutdown: {e}"))?;
+
+    let mut resp_bytes = Vec::new();
+    stream
+        .read_to_end(&mut resp_bytes)
+        .map_err(|e| format!("read response: {e}"))?;
+    let resp: serde_json::Value =
+        serde_json::from_slice(&resp_bytes).map_err(|e| format!("decode response: {e}"))?;
+    if let Some(err) = resp.get("error") {
+        return Err(format!("PID 1 refused remove-subgroup: {err}"));
+    }
+    Ok(())
+}
+
 pub fn accept_control_connections_unix_socket(
     run_info: ArcMutRuntimeInfo,
     source: std::os::unix::net::UnixListener,
@@ -10900,7 +11055,8 @@ pub fn accept_control_connections_unix_socket(
         loop {
             match source.accept() {
                 Ok((stream, _addr)) => {
-                    listen_on_commands(Box::new(stream), run_info.clone());
+                    let peer_uid = peer_uid_of(&stream);
+                    listen_on_commands(Box::new(stream), run_info.clone(), peer_uid);
                 }
                 Err(e) => {
                     warn!("Error on control socket accept: {e}");
@@ -10914,7 +11070,9 @@ pub fn accept_control_connections_tcp(run_info: ArcMutRuntimeInfo, source: std::
     std::thread::spawn(move || {
         loop {
             let stream = Box::new(source.accept().unwrap().0);
-            listen_on_commands(stream, run_info.clone());
+            // TCP peers carry no SO_PEERCRED; privileged methods that require
+            // caller credentials (remove-subgroup) are refused over TCP.
+            listen_on_commands(stream, run_info.clone(), None);
         }
     });
 }
