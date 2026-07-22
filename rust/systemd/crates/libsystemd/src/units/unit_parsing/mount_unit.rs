@@ -70,6 +70,8 @@ pub struct ParsedMountSection {
     pub cache_directory: Vec<String>,
     /// LogsDirectory= — directories under /var/log created on start.
     pub logs_directory: Vec<String>,
+    /// RuntimeDirectoryPreserve= — whether RuntimeDirectory= survives stop.
+    pub runtime_directory_preserve: crate::units::RuntimeDirectoryPreserve,
 }
 
 impl Default for ParsedMountSection {
@@ -90,6 +92,7 @@ impl Default for ParsedMountSection {
             state_directory: Vec::new(),
             cache_directory: Vec::new(),
             logs_directory: Vec::new(),
+            runtime_directory_preserve: crate::units::RuntimeDirectoryPreserve::No,
         }
     }
 }
@@ -237,6 +240,15 @@ fn parse_mount_section(
     mount.state_directory = collect_dir(section, "STATEDIRECTORY");
     mount.cache_directory = collect_dir(section, "CACHEDIRECTORY");
     mount.logs_directory = collect_dir(section, "LOGSDIRECTORY");
+    if let Some(values) = section.get("RUNTIMEDIRECTORYPRESERVE")
+        && let Some((_line, value)) = values.last()
+    {
+        mount.runtime_directory_preserve = match value.trim().to_ascii_lowercase().as_str() {
+            "yes" | "true" | "1" => crate::units::RuntimeDirectoryPreserve::Yes,
+            "restart" => crate::units::RuntimeDirectoryPreserve::Restart,
+            _ => crate::units::RuntimeDirectoryPreserve::No,
+        };
+    }
     // Log any unrecognized keys at trace level
     let known_keys = [
         "WHAT",
@@ -254,6 +266,7 @@ fn parse_mount_section(
         "STATEDIRECTORY",
         "CACHEDIRECTORY",
         "LOGSDIRECTORY",
+        "RUNTIMEDIRECTORYPRESERVE",
     ];
     for key in section.keys() {
         if !known_keys.contains(&key.as_str()) {

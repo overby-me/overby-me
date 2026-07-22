@@ -2218,6 +2218,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     state_directory: Vec::new(),
                     cache_directory: Vec::new(),
                     logs_directory: Vec::new(),
+                    runtime_directory_preserve: crate::units::RuntimeDirectoryPreserve::No,
                 },
                 state: RwLock::new(MountState {
                     common: CommonState::default(),

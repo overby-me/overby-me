@@ -1244,6 +1244,8 @@ pub struct MountConfig {
     pub cache_directory: Vec<String>,
     /// LogsDirectory= — directories under /var/log created on start.
     pub logs_directory: Vec<String>,
+    /// RuntimeDirectoryPreserve= — whether RuntimeDirectory= survives stop.
+    pub runtime_directory_preserve: RuntimeDirectoryPreserve,
 }
 
 impl From<ParsedMountSection> for MountConfig {
@@ -1264,6 +1266,7 @@ impl From<ParsedMountSection> for MountConfig {
             state_directory: parsed.state_directory,
             cache_directory: parsed.cache_directory,
             logs_directory: parsed.logs_directory,
+            runtime_directory_preserve: parsed.runtime_directory_preserve,
         }
     }
 }
@@ -2185,9 +2188,12 @@ fn deactivate_mount(
     conf: &MountConfig,
     status: &RwLock<UnitStatus>,
 ) -> Result<(), UnitOperationError> {
-    // RuntimeDirectory= is dropped on stop (like services); configuration/
-    // state/cache/logs directories persist until `systemctl clean`.
-    remove_runtime_directories(&conf.runtime_directory);
+    // RuntimeDirectory= is dropped on stop unless RuntimeDirectoryPreserve=yes
+    // (which keeps it across restarts); configuration/state/cache/logs
+    // directories persist until `systemctl clean`.
+    if conf.runtime_directory_preserve != RuntimeDirectoryPreserve::Yes {
+        remove_runtime_directories(&conf.runtime_directory);
+    }
     // If not currently mounted, just mark as stopped
     if !is_already_mounted(&conf.where_) {
         trace!(
