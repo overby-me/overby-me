@@ -343,9 +343,6 @@
         ExecStart=$out/lib/systemd/systemd-journal-upload --save-state
         SupplementaryGroups=systemd-journal
         StateDirectory=systemd/journal-upload
-
-        [Install]
-        WantedBy=multi-user.target
         UPLOAD_SERVICE
 
                 # Install test binaries at paths expected by upstream integration tests.
