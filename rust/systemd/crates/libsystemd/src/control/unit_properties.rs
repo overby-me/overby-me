@@ -175,16 +175,21 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         &unit.common.dependencies.conflicted_by,
     );
     insert_dep_list(&mut props, "Before", &unit.common.dependencies.before);
-    // For a mount unit that is not currently mounted, derive `After` from the
-    // fragment config (its declared local/remote classification) instead of the
-    // stored deps: the async mount monitor overrides a static unit's deps for an
-    // active mount and reverts them only on the unmount POLLPRI, which races a
-    // `systemctl show` issued right after `systemctl stop`. Deriving on demand
-    // when unmounted keeps `After` correct and synchronous.
+    // For a mount unit that is not active, derive `After` from the fragment
+    // config (its declared local/remote classification) instead of the stored
+    // deps: the async mount monitor overrides a static unit's deps for an active
+    // mount and reverts them only on the unmount POLLPRI, which races a
+    // `systemctl show` issued right after `systemctl stop`. The unit status is
+    // set synchronously (Started by the monitor once the mount is active, which
+    // is-active waits for; Stopped by deactivate_mount during the stop itself),
+    // so keying off it keeps `After` correct and synchronous in both directions.
+    let mount_inactive = matches!(&unit.specific, crate::units::Specific::Mount(_))
+        && !matches!(
+            &*unit.common.status.read_poisoned(),
+            UnitStatus::Started(_)
+        );
     match &unit.specific {
-        crate::units::Specific::Mount(m)
-            if !crate::units::is_already_mounted(&m.conf.where_) =>
-        {
+        crate::units::Specific::Mount(m) if mount_inactive => {
             let is_net = crate::units::mount_is_network_static(
                 m.conf.fs_type.as_deref(),
                 m.conf.options.as_deref(),
