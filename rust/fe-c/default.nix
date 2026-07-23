@@ -486,7 +486,7 @@ in {
         # but whose extent overruns (`extent`), and a whole-object `*p` read of a
         # type wider than the allocation (`whole-extent`) — the last two caught by
         # the extent check. All abort OutOfBounds.
-        for scenario in whole:"" field:field direct:direct extent:extent whole-extent:whole-extent; do
+        for scenario in whole:"" field:field direct:direct extent:extent whole-extent:whole-extent int-cast:int-cast; do
           name="''${scenario%%:*}"; arg="''${scenario#*:}"
           set +e
           "$TMPDIR/tt/debug/cast-oob" $arg >"$TMPDIR/t-$name.log" 2>&1; t_exit=$?

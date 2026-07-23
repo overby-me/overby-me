@@ -1334,8 +1334,12 @@ fn compute_roots<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashMap<Local, L
                         // Address-of mints a pointer from that place's
                         // allocation: dst is itself a root.
                         Rvalue::RawPtr(..) | Rvalue::Ref(..) => Some(dst),
-                        Rvalue::Use(op, _) | Rvalue::Cast(_, op, _) => operand_root(&root_of, op),
-                        Rvalue::BinaryOp(BinOp::Offset, boxed) => operand_root(&root_of, &boxed.0),
+                        Rvalue::Use(op, _) | Rvalue::Cast(_, op, _) => {
+                            operand_root(&root_of, decls, op)
+                        }
+                        Rvalue::BinaryOp(BinOp::Offset, boxed) => {
+                            operand_root(&root_of, decls, &boxed.0)
+                        }
                         _ => None,
                     };
                     changed |= update(&mut root_of, dst, incoming);
@@ -1353,9 +1357,9 @@ fn compute_roots<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> HashMap<Local, L
                 let dst = destination.local;
                 let name = callee_name(tcx, decls, func);
                 let incoming = match name.as_deref() {
-                    Some(n) if is_ptr_arith(n) => {
-                        args.first().and_then(|a| operand_root(&root_of, &a.node))
-                    }
+                    Some(n) if is_ptr_arith(n) => args
+                        .first()
+                        .and_then(|a| operand_root(&root_of, decls, &a.node)),
                     Some(n) if is_root_source(n) => Some(dst),
                     _ => None,
                 };
@@ -1386,11 +1390,24 @@ fn update(root_of: &mut HashMap<Local, Local>, dst: Local, incoming: Option<Loca
     }
 }
 
-/// Root of an operand's pointer value, if it is a bare pointer local.
-fn operand_root(root_of: &HashMap<Local, Local>, op: &Operand<'_>) -> Option<Local> {
+/// Root of an operand's pointer value, if it is a bare pointer local: its
+/// propagated root, or **itself** as a leaf root when it has no earlier origin.
+/// Defaulting to itself is what roots an *opaque* pointer — a foreign-call
+/// return (`libc::malloc`), an int-to-pointer cast — so that an offset of it
+/// (`p.add(n)`) resolves from the opaque base `p`, not the faulting address
+/// `p + n` (I10; else an out-of-bounds offset resolves nothing, or an adjacent
+/// live allocation, and passes — the F10 miss). Restricted to pointer locals so
+/// the injected root cast stays a valid pointer-to-pointer cast.
+fn operand_root<'tcx>(
+    root_of: &HashMap<Local, Local>,
+    decls: &IndexVec<Local, LocalDecl<'tcx>>,
+    op: &Operand<'tcx>,
+) -> Option<Local> {
     match op {
-        Operand::Copy(p) | Operand::Move(p) if p.projection.is_empty() => {
-            root_of.get(&p.local).copied()
+        Operand::Copy(p) | Operand::Move(p)
+            if p.projection.is_empty() && is_raw_ptr_local(decls, p.local) =>
+        {
+            Some(root_of.get(&p.local).copied().unwrap_or(p.local))
         }
         _ => None,
     }

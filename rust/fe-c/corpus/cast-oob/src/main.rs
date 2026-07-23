@@ -110,12 +110,30 @@ fn whole_object_extent() {
     black_box(x);
 }
 
+/// OOB read through an **opaque-origin** pointer: the base is laundered through
+/// an integer (pointer -> usize -> pointer), so it has no recognized derivation
+/// root (`as_ptr` is lost across the int round-trip). The provenance dataflow
+/// must treat such an opaque pointer as its *own* leaf root, so an offset of it
+/// resolves from the base, not the faulting address `p + offset` (off the end,
+/// which would resolve nothing or an adjacent allocation and miss — I10 / F10).
+fn opaque_int_cast() {
+    let v: Vec<u64> = black_box(vec![0x4444_4444_4444_4444; 4]); // 32-byte buffer
+    let base = black_box(v.as_ptr() as usize); // pointer -> integer (opaque)
+    let p = base as *const u64; // integer -> pointer (opaque origin, no root)
+    eprintln!("BASE={base:#x}");
+    let bad = unsafe { p.add(6) }; // p + 48, past the 32-byte buffer
+    let x = unsafe { *bad };
+    println!("NO_ABORT x={x:#x}");
+    black_box(x);
+}
+
 fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("field") => field_reborrow(),
         Some("direct") => direct_field(),
         Some("extent") => extent_overrun(),
         Some("whole-extent") => whole_object_extent(),
+        Some("int-cast") => opaque_int_cast(),
         _ => whole_object(),
     }
 }
