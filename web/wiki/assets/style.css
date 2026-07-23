@@ -3111,6 +3111,14 @@ select:focus {
 	flex: 0 0 auto;
 }
 
+/* The Bluesky butterfly mark (inline SVG), sized like an icon wherever it sits
+   (popover button, profile card avatar). */
+.bsky-logo {
+	width: 1.125rem;
+	height: 1.125rem;
+	flex: 0 0 auto;
+}
+
 .chip-label {
 	overflow: hidden;
 	text-overflow: ellipsis;

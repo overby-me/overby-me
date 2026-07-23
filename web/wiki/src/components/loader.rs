@@ -504,6 +504,54 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
     current
 }
 
+/// The Bluesky butterfly (the official mark), inline so it needs no asset fetch
+/// and scales crisply. Sized like an inline icon via the `bsky-logo` class.
+pub fn bsky_logo() -> Element {
+    rsx! {
+        svg {
+            class: "bsky-logo",
+            view_box: "0 0 568 501",
+            "aria-hidden": "true",
+            path {
+                fill: "#0085FF",
+                d: "M123.121 33.664C188.241 82.553 258.281 181.68 284 234.873c25.719-53.192 95.759-152.32 160.879-201.21C491.866-1.611 568-28.906 568 57.947c0 17.346-9.945 145.713-15.778 166.555-20.275 72.453-94.155 90.933-159.875 79.748 114.875 19.551 144.097 84.311 80.986 149.071-119.86 122.992-172.272-30.859-185.702-70.281-2.462-7.227-3.614-10.608-3.631-7.733-.017-2.875-1.169.506-3.631 7.733-13.43 39.422-65.842 193.273-185.702 70.281-63.111-64.76-33.889-129.52 80.986-149.071-65.72 11.185-139.6-7.295-159.875-79.748C9.945 203.659 0 75.291 0 57.946 0-28.906 76.135-1.612 123.121 33.664Z",
+            }
+        }
+    }
+}
+
+/// Inline position for the identity popover, anchored to the click point (which
+/// sits on the trigger chip/avatar): horizontally centred on it, clamped into
+/// the viewport, opening below the trigger when it is in the top half of the
+/// screen and above it otherwise. Empty (the CSS centring fallback) when the
+/// window is unavailable.
+fn popover_anchor_style(x: f64, y: f64) -> String {
+    let Some(win) = web_sys::window() else {
+        return String::new();
+    };
+    let vw = win
+        .inner_width()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let vh = win
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    // Half the card's max width (320px) + a margin keeps the translateX(-50%)
+    // card fully on-screen after clamping.
+    let half = 168.0_f64;
+    let x = x.clamp(half.min(vw / 2.0), (vw - half).max(vw / 2.0));
+    if y < vh / 2.0 {
+        let top = y + 12.0;
+        format!("left: {x:.0}px; top: {top:.0}px; transform: translateX(-50%);")
+    } else {
+        let bottom = vh - y + 12.0;
+        format!("left: {x:.0}px; top: auto; bottom: {bottom:.0}px; transform: translateX(-50%);")
+    }
+}
+
 /// A click-triggered identity popover for any user representation. Wrap the
 /// trigger markup (an avatar, a name, a chip) as `children`; clicking it opens a
 /// small card showing a larger avatar, the display name, an optional role line,
@@ -519,6 +567,8 @@ pub fn UserPopover(
     children: Element,
 ) -> Element {
     let mut open = use_signal(|| false);
+    // Anchors the card to the trigger (set from the opening click's position).
+    let mut anchor_style = use_signal(String::new);
     let nav = use_navigator();
     let session = use_session();
     let my_id = session.read().user.as_ref().map(|u| u.id.clone());
@@ -541,6 +591,10 @@ pub fn UserPopover(
             onclick: move |e| {
                 e.stop_propagation();
                 let v = open();
+                if !v {
+                    let p = e.client_coordinates();
+                    anchor_style.set(popover_anchor_style(p.x, p.y));
+                }
                 open.set(!v);
             },
             onkeydown: move |e| {
@@ -564,6 +618,7 @@ pub fn UserPopover(
             }
             div {
                 class: "user-pop-card",
+                style: "{anchor_style}",
                 role: "dialog",
                 aria_modal: "true",
                 // Name the popover by the user it describes, so a screen reader
@@ -604,7 +659,7 @@ pub fn UserPopover(
                         target: "_blank",
                         rel: "noopener",
                         onclick: move |e| e.stop_propagation(),
-                        span { class: "material-icons", "open_in_new" }
+                        {bsky_logo()}
                         " {t(\"profile.blueskyAccount\")}"
                     }
                 }

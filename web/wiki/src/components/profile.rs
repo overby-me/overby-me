@@ -133,7 +133,7 @@ pub fn ProfileApp() -> Element {
         // ?linked=bluesky|error, surfaced in a snackbar by App on load).
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar small", span { class: "material-icons", "link" } }
+                div { class: "avatar small", {crate::components::loader::bsky_logo()} }
                 h3 { class: "title-medium",
                     if show_linked { "{t(\"profile.blueskyAccount\")}" } else { "{t(\"profile.linkBluesky\")}" }
                 }
