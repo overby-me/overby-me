@@ -4647,6 +4647,10 @@ fn create_transient_unit(
                         .ambient_capabilities
                         .extend(value.split_whitespace().map(|s| s.to_string()));
                 }
+                "PAMName" => {
+                    service_conf.exec_config.pam_name =
+                        (!value.is_empty()).then(|| value.to_string());
+                }
                 "EnvironmentFile" => {
                     if let Some(stripped) = value.strip_prefix('-') {
                         service_conf
