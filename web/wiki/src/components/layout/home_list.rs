@@ -327,6 +327,9 @@ fn NewContextButton(mime: String, root_id: String, root_context_id: String) -> E
         let root_id = root_id.clone();
         let root_context_id = root_context_id.clone();
         let token = session.read().access_token.clone();
+        // The creator becomes the new context's first owner member, so the
+        // owner-only surfaces (members, console) show for them right away.
+        let creator = session.read().user.clone();
         busy.set(true);
         error.set(String::new());
         spawn(async move {
@@ -337,6 +340,7 @@ fn NewContextButton(mime: String, root_id: String, root_context_id: String) -> E
                 &mime,
                 &title,
                 &key,
+                creator.as_ref(),
             )
             .await
             {

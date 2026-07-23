@@ -2119,8 +2119,12 @@ const REACTION_PARENTS: &[&str] = &[
 /// inserts the node in the *parent's* context, so the server-side `insert`
 /// permission (which gates on `node.context_id = permission.context_id`) passes;
 /// then it flips the node to be its own context and locks it (`mutable = false`);
-/// finally it seeds the per-context permission template so content can be added
-/// under it. Returns the new node's id + key.
+/// then it seeds the per-context permission template so content can be added
+/// under it; finally it seeds `creator` as the context's first OWNER member —
+/// the backend's `isContextOwner` reads owner member rows, so without this the
+/// creator would not be a context owner of their own group (and the owner-only
+/// surfaces — members, console — would hide from them). Returns the new node's
+/// id + key.
 pub async fn create_context(
     access_token: Option<&str>,
     parent_id: &str,
@@ -2128,6 +2132,7 @@ pub async fn create_context(
     mime_id: &str,
     name: &str,
     key: &str,
+    creator: Option<&crate::session::User>,
 ) -> Result<model::InsertedNode, String> {
     let inserted = insert_node(
         access_token,
@@ -2163,6 +2168,23 @@ pub async fn create_context(
         serde_json::json!({ "objs": context_permission_objects(&id) }),
     )
     .await?;
+    // Seed the creator as the context's first owner member (see the doc above).
+    if let Some(user) = creator {
+        execute_raw_vars(
+            access_token,
+            "mutation($objs: [members_insert_input!]!) { insertMembers(objects: $objs) { affected_rows } }",
+            serde_json::json!({ "objs": [{
+                "parentId": id,
+                "nodeId": user.id,
+                "email": user.email,
+                "name": user.display_name,
+                "owner": true,
+                "accepted": true,
+                "active": true,
+            }] }),
+        )
+        .await?;
+    }
     Ok(inserted)
 }
 
