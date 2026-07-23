@@ -20,6 +20,12 @@ use crate::snackbar::show_snackbar;
 /// Matches the backend's message cap, so a long paste is trimmed before send.
 const FEEDBACK_MAXLEN: usize = 4000;
 
+/// The feedback entry is hidden for now: the backend `/feedback` endpoint has
+/// no Better Stack token configured, so submitted reports are accepted and
+/// dropped. Flip to re-show the user-menu item once the sink is set up (see
+/// `backend/src/feedback.rs` + `BETTERSTACK_SOURCE_TOKEN`).
+pub const FEEDBACK_ENABLED: bool = false;
+
 /// Open state for [`FeedbackDialog`]. Global so the trigger (a user-menu item
 /// inside the transformed drawer pane) and the dialog (at the app-shell root,
 /// where its fixed scrim can cover the viewport) can live in different subtrees.

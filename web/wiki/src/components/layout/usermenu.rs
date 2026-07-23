@@ -188,14 +188,16 @@ pub(super) fn UserMenu() -> Element {
                     // The dialog itself renders at the app-shell root (see
                     // `feedback::FEEDBACK_OPEN`) — inside this drawer pane its
                     // fixed scrim would be trapped by the pane's transform.
-                    button {
-                        class: "list-item",
-                        onclick: move |_| {
-                            menu_open.set(false);
-                            *crate::components::feedback::FEEDBACK_OPEN.write() = true;
-                        },
-                        span { class: "material-icons", "feedback" }
-                        " {t(\"feedback.menu\")}"
+                    if crate::components::feedback::FEEDBACK_ENABLED {
+                        button {
+                            class: "list-item",
+                            onclick: move |_| {
+                                menu_open.set(false);
+                                *crate::components::feedback::FEEDBACK_OPEN.write() = true;
+                            },
+                            span { class: "material-icons", "feedback" }
+                            " {t(\"feedback.menu\")}"
+                        }
                     }
                     if is_auth {
                         // Your profile (memberships + the link-Bluesky card). Only
