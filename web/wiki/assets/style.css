@@ -1684,13 +1684,27 @@ html {
 	gap: var(--md-sys-spacing-2);
 	margin-top: var(--md-sys-spacing-6);
 }
-/* Feedback dialog type selector (bug/feature/other): three equal-width
-   buttons. The default .btn side padding (spacing-6 per side) makes the row
-   wider than the dialog, so let the buttons share the row and shrink. */
+/* Feedback dialog type selector (bug/feature/other): the buttons share the
+   row on wide dialogs but never shrink below their label (the default .btn
+   side padding made the row overflow the dialog); when the dialog is too
+   narrow for all three, the row wraps instead of clipping the labels. */
+.feedback-types {
+	flex-wrap: wrap;
+}
+
 .feedback-types .btn {
-	flex: 1;
-	min-width: 0;
+	flex: 1 1 auto;
+	min-width: fit-content;
 	padding-inline: var(--md-sys-spacing-2);
+	gap: var(--md-sys-spacing-1);
+}
+
+.feedback-types .btn .material-icons {
+	font-size: 1.125rem;
+}
+
+.feedback-types .feedback-type-label {
+	white-space: nowrap;
 }
 @keyframes m3-dialog-fade {
 	from {
@@ -1979,7 +1993,8 @@ a.folder-item:focus-visible {
 	position: relative;
 }
 
-.text-field input {
+.text-field input,
+.text-field textarea {
 	width: 100%;
 	padding: var(--md-sys-spacing-4);
 	/* M3 Expressive outlined text field: strong outline, medium corner, body-large. */
@@ -2002,13 +2017,22 @@ a.folder-item:focus-visible {
 /* DESIGN (expressive text field): focus morphs the corner larger, thickens
    the outline to 2px (padding-compensated so nothing shifts), and adds a faint
    primary wash. */
-.text-field input:focus {
+.text-field input:focus,
+.text-field textarea:focus {
 	border-color: var(--md-primary);
 	border-width: 2px;
 	padding: var(--md-sys-spacing-3-5);
 	border-radius: var(--md-sys-shape-corner-large);
 	background: color-mix(in srgb, var(--md-primary) 5%, transparent);
 	box-shadow: none;
+}
+
+/* Textareas don't inherit the body font, and only vertical resize keeps the
+   field inside its container (e.g. the feedback dialog). */
+.text-field textarea {
+	display: block;
+	font-family: inherit;
+	resize: vertical;
 }
 
 /* Styled file upload: a dashed drop-zone control wrapping a hidden native
@@ -2111,7 +2135,8 @@ select:focus {
 	border-color: var(--md-primary);
 }
 
-.text-field.error input {
+.text-field.error input,
+.text-field.error textarea {
 	border-color: var(--md-error);
 }
 
@@ -2123,6 +2148,12 @@ select:focus {
 	padding: 0 var(--md-sys-spacing-1);
 	font-size: var(--md-sys-typescale-body-small-size);
 	color: var(--md-on-surface-variant);
+}
+
+/* The floating label patches over the field's outline; inside a dialog the
+   surface behind it is surface-container-high, not the page background. */
+.m3-dialog .text-field label {
+	background: var(--md-surface-container-high);
 }
 
 .text-field .helper-text {
@@ -2236,14 +2267,14 @@ select:focus {
 	background: color-mix(in srgb, var(--md-tertiary) 22%, transparent);
 	color: var(--md-on-surface);
 	border-radius: 3px;
-	padding: 0 2px;
+	padding: 0 var(--md-sys-spacing-0-5);
 }
 .diff-del {
 	background: color-mix(in srgb, var(--md-error) 18%, transparent);
 	color: var(--md-on-surface-variant);
 	text-decoration: line-through;
 	border-radius: 3px;
-	padding: 0 2px;
+	padding: 0 var(--md-sys-spacing-0-5);
 }
 
 .list-item {

@@ -4,9 +4,11 @@
 //! sink app errors go to). The current path, app version and user agent are
 //! attached automatically, and the backend captures the sender when signed in.
 //!
-//! The dialog is a CONTROLLED component driven by an `open` signal owned by the
-//! caller (the user menu), and rendered OUTSIDE the menu's conditional markup,
-//! so closing the menu does not unmount the open dialog.
+//! The dialog's open state is a GLOBAL signal: the trigger is a user-menu item
+//! inside the drawer pane, but that pane is transformed (slide animation) and
+//! overflow-clipped, which would trap and clip the dialog's fixed scrim. The
+//! dialog itself is therefore rendered at the app-shell root (see
+//! `layout::Layout`), the same escape hatch the TOC popover uses.
 
 use dioxus::prelude::*;
 
@@ -18,11 +20,15 @@ use crate::snackbar::show_snackbar;
 /// Matches the backend's message cap, so a long paste is trimmed before send.
 const FEEDBACK_MAXLEN: usize = 4000;
 
-/// The feedback dialog. `open` is owned by the caller so the trigger (a user-menu
-/// item) can live inside the menu while the dialog renders outside it.
+/// Open state for [`FeedbackDialog`]. Global so the trigger (a user-menu item
+/// inside the transformed drawer pane) and the dialog (at the app-shell root,
+/// where its fixed scrim can cover the viewport) can live in different subtrees.
+pub static FEEDBACK_OPEN: GlobalSignal<bool> = Signal::global(|| false);
+
+/// The feedback dialog. Opened by setting [`FEEDBACK_OPEN`]; rendered once at
+/// the app-shell root.
 #[component]
-pub fn FeedbackDialog(open: Signal<bool>) -> Element {
-    let mut open = open;
+pub fn FeedbackDialog() -> Element {
     let session = use_session();
     let mut kind = use_signal(|| "bug".to_string());
     let mut message = use_signal(String::new);
@@ -55,7 +61,7 @@ pub fn FeedbackDialog(open: Signal<bool>) -> Element {
             busy.set(false);
             match res {
                 Ok(()) => {
-                    open.set(false);
+                    *FEEDBACK_OPEN.write() = false;
                     message.set(String::new());
                     show_snackbar(&t("feedback.sent"));
                 }
@@ -76,14 +82,14 @@ pub fn FeedbackDialog(open: Signal<bool>) -> Element {
 
     rsx! {
         Dialog {
-            open: open(),
-            on_dismiss: move |_| open.set(false),
+            open: FEEDBACK_OPEN(),
+            on_dismiss: move |_| *FEEDBACK_OPEN.write() = false,
             headline: t("feedback.title"),
             icon: "feedback".to_string(),
             actions: rsx! {
                 button {
                     class: "btn btn-outlined",
-                    onclick: move |_| open.set(false),
+                    onclick: move |_| *FEEDBACK_OPEN.write() = false,
                     "{t(\"common.cancel\")}"
                 }
                 button {
@@ -102,7 +108,7 @@ pub fn FeedbackDialog(open: Signal<bool>) -> Element {
                         class: if kind.read().as_str() == val { "btn btn-primary" } else { "btn btn-outlined" },
                         onclick: move |_| kind.set(val.to_string()),
                         span { class: "material-icons", "{icon}" }
-                        " {label}"
+                        span { class: "feedback-type-label", "{label}" }
                     }
                 }
             }

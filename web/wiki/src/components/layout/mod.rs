@@ -324,6 +324,11 @@ pub fn Layout() -> Element {
             // overflow clip and transform containing-block.
             breadcrumbs::TocPopover {}
 
+            // Feedback dialog (opened from the user menu). Also rendered at the
+            // app-shell root: inside the drawer pane its fixed scrim would be
+            // trapped by the pane's slide transform and overflow clip.
+            super::feedback::FeedbackDialog {}
+
             // Pull-to-refresh spinner (fixed overlay; listens on the window).
             super::pull_refresh::PullToRefresh {}
 

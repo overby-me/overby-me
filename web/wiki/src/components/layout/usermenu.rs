@@ -17,10 +17,6 @@ pub(super) fn UserMenu() -> Element {
     let is_auth = session.read().is_authenticated();
     let theme = use_theme();
     let mut menu_open = use_signal(|| false);
-    // The feedback dialog is opened from a menu item but rendered OUTSIDE the
-    // menu's conditional markup (below), so closing the menu on click does not
-    // unmount the open dialog.
-    let mut feedback_open = use_signal(|| false);
 
     let initial = session
         .read()
@@ -189,11 +185,14 @@ pub(super) fn UserMenu() -> Element {
                         {match *LANG.read() { Lang::En => " Dansk", Lang::Da => " English" }}
                     }
                     // Send feedback / report a bug (available signed in or out).
+                    // The dialog itself renders at the app-shell root (see
+                    // `feedback::FEEDBACK_OPEN`) — inside this drawer pane its
+                    // fixed scrim would be trapped by the pane's transform.
                     button {
                         class: "list-item",
                         onclick: move |_| {
                             menu_open.set(false);
-                            feedback_open.set(true);
+                            *crate::components::feedback::FEEDBACK_OPEN.write() = true;
                         },
                         span { class: "material-icons", "feedback" }
                         " {t(\"feedback.menu\")}"
@@ -258,9 +257,6 @@ pub(super) fn UserMenu() -> Element {
                     }
                 }
             }
-            // Rendered outside the `if menu_open()` block so closing the menu
-            // does not unmount the dialog while it is open.
-            crate::components::feedback::FeedbackDialog { open: feedback_open }
         }
     }
 }
