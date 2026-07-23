@@ -351,6 +351,15 @@ fn main() {
 
     if args[0] == "--version" {
         println!("systemctl (rust-systemd) 258");
+        // Build feature-flags line, mirroring `systemd --version`. Features
+        // rust-systemd does not implement are reported with a leading '-' so
+        // upstream tests that gate on them behave as on a build compiled without
+        // that feature (e.g. TEST-62-RESTRICT-IFACES and TEST-07-PID1 check
+        // `-BPF_FRAMEWORK` to skip their cgroup-BPF sections).
+        println!(
+            "+ACL +BLKID +KMOD +PAM +SECCOMP +TPM2 +OPENSSL +LZ4 +XZ +ZSTD +ZLIB \
+             -BPF_FRAMEWORK -BPF_LSM -APPARMOR -SMACK -SELINUX -IMA -IPE"
+        );
         return;
     }
 
