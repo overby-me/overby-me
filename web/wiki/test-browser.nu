@@ -1806,6 +1806,219 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
     { passed: $p, failed: $fl }
 }
 
+# Full editor feature pass, driven end to end through the real UI on a hermetic
+# throwaway GROUP (a context, so saving needs no authors): type text, apply every
+# toolbar control (inline marks, code, link, heading, lists, alignment,
+# undo/redo), paste sanitised HTML and plain text, rename the title, SAVE, verify
+# the stored Slate content in the backend, re-open the editor to prove the saved
+# content seeds back into the surface (slate -> html round trip), save again
+# without losing formatting, and let the debounced autosave persist a draft
+# without ever clicking Save. Firefox-only; warn-skips on Servo (execCommand +
+# synthetic ClipboardEvent). Teardown deletes the group, leaving the live backend
+# exactly as found.
+def test-editor-flow [session_id: string, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
+    mut p = $passed; mut fl = $failed
+    log-info ""
+    log-info "── Editor: format / paste / save / re-edit / autosave ───"
+    if (servo-skip "editor write-flow (execCommand + paste + save)") {
+        return { passed: $p, failed: $fl }
+    }
+    let GQL = (gql-url)
+    # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
+    let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+    # Editor-DOM prelude for every editor-side execute: the surface plus helpers to
+    # put the caret at the end, select a word by its text, and click a toolbar
+    # icon button the way a user would.
+    let ed = ('var E=document.getElementById("rich-editor");function endCaret(){E.focus();var r=document.createRange();r.selectNodeContents(E);r.collapse(false);var s=getSelection();s.removeAllRanges();s.addRange(r);}function selWord(w){var tw=document.createTreeWalker(E,NodeFilter.SHOW_TEXT);var n;while((n=tw.nextNode())){var i=n.data.indexOf(w);if(i>=0){var r=document.createRange();r.setStart(n,i);r.setEnd(n,i+w.length);var s=getSelection();s.removeAllRanges();s.addRange(r);return true}}return false}function tbtn(ic){var b=[...document.querySelectorAll(".editor-tools .btn-icon")].find(function(x){var m=x.querySelector(".material-icons");return m&&m.textContent.trim()==ic});if(b){b.click();return true}return false}')
+    let t = (date now | format date '%Y%m%d%H%M%S')
+    let gname = $"E2E editor ($t)"
+
+    # ── Setup: a throwaway group via the home "New group" control ──
+    wd-navigate $session_id $"(base-url)/"
+    sleep 1sec
+    if not (wd-wait-y $session_id 'return [...document.querySelectorAll("button.add-action")].some(function(b){return b.getAttribute("aria-label")=="New group"})?"y":"n"' 8000) {
+        log-fail "no add-group control on home (owner)"; $fl = $fl + 1
+        return { passed: $p, failed: $fl }
+    }
+    wd-execute $session_id 'var b=[...document.querySelectorAll("button.add-action")].find(function(b){return b.getAttribute("aria-label")=="New group"});if(b)b.click();return 1' | ignore
+    sleep 500ms
+    wd-execute $session_id ('var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="' + $gname + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
+    sleep 400ms
+    wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
+    for _ in 1..20 { let path = (wd-execute $session_id 'return location.pathname'); if ($path != "/") and ($path != null) { break }; sleep 300ms }
+    let grp = (try { wd-execute $session_id ($gql + 'var r=gql("query($n:String!){nodes(where:{name:{_eq:$n},mimeId:{_eq:\"wiki/group\"}}){id key}}",{n:"' + $gname + '"});var o={id:null,key:null};try{o.id=r.data.nodes[0].id;o.key=r.data.nodes[0].key}catch(e){}return JSON.stringify(o);') | from json } catch { {id: null, key: null} })
+    if ($grp.id | is-empty) {
+        log-fail "editor-flow group not created via the home UI"; $fl = $fl + 1
+        return { passed: $p, failed: $fl }
+    }
+    log-ok "editor-flow group created via the home UI"; $p = $p + 1
+    let ed_path = $"/($grp.key)?app=editor"
+
+    # ── Open the editor and type a multi-line document ──
+    wd-navigate $session_id $"(base-url)($ed_path)"
+    if not (wd-wait-for-element $session_id "#rich-editor" 15) {
+        log-fail "editor did not mount for the editor-flow group"; $fl = $fl + 1
+        wd-teardown-context $session_id $gql $grp.id | ignore
+        return { passed: $p, failed: $fl }
+    }
+    sleep 500ms
+    let typed = (wd-execute $session_id ($ed + 'endCaret();function line(x){document.execCommand("insertText",false,x)}line("Alpha BoldWord ItalicWord UnderWord StrikeWord CodeWord LinkWord");document.execCommand("insertParagraph");line("HeadLine");document.execCommand("insertParagraph");line("BulletItem");document.execCommand("insertParagraph");line("NumItem");document.execCommand("insertParagraph");line("CenterLine");return E.innerText.indexOf("CenterLine")>=0?"y":"n"'))
+    if $typed == "y" {
+        log-ok "editor accepts typed multi-line input (insertText)"; $p = $p + 1
+    } else {
+        log-fail "typing into the editor produced no content"; $fl = $fl + 1
+        wd-teardown-context $session_id $gql $grp.id | ignore
+        return { passed: $p, failed: $fl }
+    }
+
+    # ── Bold via the toolbar button, then undo / redo via their buttons ──
+    let bur = (try { wd-execute $session_id ($ed + 'selWord("BoldWord");tbtn("format_bold");var b1=/<(b|strong)[^>]*>BoldWord/.test(E.innerHTML);tbtn("undo");var b2=!/<(b|strong)[^>]*>BoldWord/.test(E.innerHTML);tbtn("redo");var b3=/<(b|strong)[^>]*>BoldWord/.test(E.innerHTML);return JSON.stringify({apply:b1,undo:b2,redo:b3})') | from json } catch { {apply: false, undo: false, redo: false} })
+    if $bur.apply { log-ok "toolbar bold applies to the selection"; $p = $p + 1 } else { log-fail "toolbar bold had no effect"; $fl = $fl + 1 }
+    if ($bur.undo and $bur.redo) { log-ok "toolbar undo / redo revert and restore the bold"; $p = $p + 1 } else { log-fail $"toolbar undo/redo broken \(undo=($bur.undo) redo=($bur.redo))"; $fl = $fl + 1 }
+
+    # ── The remaining inline marks: italic, underline, strikethrough, code ──
+    let marks = (try { wd-execute $session_id ($ed + 'selWord("ItalicWord");tbtn("format_italic");selWord("UnderWord");tbtn("format_underlined");selWord("StrikeWord");tbtn("strikethrough_s");selWord("CodeWord");tbtn("code");var h=E.innerHTML;return JSON.stringify({i:/<(i|em)[^>]*>ItalicWord/.test(h),u:/<u[^>]*>UnderWord/.test(h),s:/<(s|strike|del)[^>]*>StrikeWord/.test(h),c:/<code[^>]*>CodeWord/.test(h)})') | from json } catch { {i: false, u: false, s: false, c: false} })
+    if $marks.i { log-ok "toolbar italic applies"; $p = $p + 1 } else { log-fail "toolbar italic had no effect"; $fl = $fl + 1 }
+    if $marks.u { log-ok "toolbar underline applies"; $p = $p + 1 } else { log-fail "toolbar underline had no effect"; $fl = $fl + 1 }
+    if $marks.s { log-ok "toolbar strikethrough applies"; $p = $p + 1 } else { log-fail "toolbar strikethrough had no effect"; $fl = $fl + 1 }
+    if $marks.c { log-ok "toolbar code wraps the selection"; $p = $p + 1 } else { log-fail "toolbar code had no effect"; $fl = $fl + 1 }
+
+    # ── Link: toolbar button opens the popover; enter a URL and add ──
+    wd-execute $session_id ($ed + 'selWord("LinkWord");tbtn("link");return 1') | ignore
+    sleep 400ms
+    let link_set = (wd-execute $session_id 'var inp=document.querySelector(".link-popover .link-input");if(!inp)return "noinput";inp.value="https://example.com/e2e";inp.dispatchEvent(new Event("input",{bubbles:true}));return "y"')
+    sleep 200ms
+    wd-execute $session_id 'var b=document.querySelector(".link-popover .btn-primary");if(b)b.click();return 1' | ignore
+    sleep 300ms
+    let linked = (wd-execute $session_id ($ed + 'var a=[...E.querySelectorAll("a")].find(function(x){return x.textContent.indexOf("LinkWord")>=0});return a&&a.getAttribute("href")=="https://example.com/e2e"?"y":"n"'))
+    if ($link_set == "y") and ($linked == "y") {
+        log-ok "toolbar link popover links the selection"; $p = $p + 1
+    } else {
+        log-fail $"link popover did not link \(popover=($link_set) linked=($linked))"; $fl = $fl + 1
+    }
+
+    # ── Block styles: heading via the style select, lists, centre alignment ──
+    wd-execute $session_id ($ed + 'selWord("HeadLine");var sel=document.querySelector(".editor-select");sel.dispatchEvent(new MouseEvent("mousedown",{bubbles:true}));sel.value="heading-two";sel.dispatchEvent(new Event("change",{bubbles:true}));return 1') | ignore
+    sleep 300ms
+    wd-execute $session_id ($ed + 'selWord("BulletItem");tbtn("format_list_bulleted");selWord("NumItem");tbtn("format_list_numbered");selWord("CenterLine");tbtn("format_align_center");return 1') | ignore
+    sleep 300ms
+    let blocks = (try { wd-execute $session_id ($ed + 'var h=E.innerHTML;return JSON.stringify({h2:[...E.querySelectorAll("h2")].some(function(x){return x.textContent.indexOf("HeadLine")>=0}),ul:[...E.querySelectorAll("ul li")].some(function(x){return x.textContent.indexOf("BulletItem")>=0}),ol:[...E.querySelectorAll("ol li")].some(function(x){return x.textContent.indexOf("NumItem")>=0}),ce:/text-align:\s*center|align="center"/.test(h)})') | from json } catch { {h2: false, ul: false, ol: false, ce: false} })
+    if $blocks.h2 { log-ok "style select turns the line into a heading"; $p = $p + 1 } else { log-fail "style select (heading-two) had no effect"; $fl = $fl + 1 }
+    if $blocks.ul { log-ok "toolbar bulleted list applies"; $p = $p + 1 } else { log-fail "toolbar bulleted list had no effect"; $fl = $fl + 1 }
+    if $blocks.ol { log-ok "toolbar numbered list applies"; $p = $p + 1 } else { log-fail "toolbar numbered list had no effect"; $fl = $fl + 1 }
+    if $blocks.ce { log-ok "toolbar centre alignment applies"; $p = $p + 1 } else { log-fail "toolbar centre alignment had no effect"; $fl = $fl + 1 }
+
+    # ── Paste: HTML is sanitised to the semantic subset (scripts/styles dropped
+    #    whole, wrappers unwrapped, only href survives on links) ──
+    mut html_pasted = false
+    # Firefox ignores the `clipboardData` ClipboardEventInit member, so shadow the
+    # getter on the instance instead (the event stays a real ClipboardEvent, which
+    # the wasm handler's downcast requires).
+    let paste = (wd-execute $session_id ($ed + 'endCaret();var dt;try{dt=new DataTransfer()}catch(e){return "nodt"}dt.setData("text/html","<div><style>badcss{}</style><script>evil()</scr"+"ipt><span style=\"font-weight:700\">PastedSpan</span> <b onclick=\"h()\">PastedBold</b> <a href=\"https://example.com/paste\" onclick=\"h()\">PastedLink</a></div><h3>PastedHead</h3>");dt.setData("text/plain","PLAINFALLBACK");if(dt.getData("text/html")=="")return "nodt";var ev=new ClipboardEvent("paste",{bubbles:true,cancelable:true});Object.defineProperty(ev,"clipboardData",{value:dt});E.dispatchEvent(ev);var h=E.innerHTML;return JSON.stringify({span:h.indexOf("PastedSpan")>=0&&!/<span[^>]*>PastedSpan/.test(h),b:/<b[^>]*>PastedBold/.test(h)&&h.indexOf("onclick")<0,a:/<a [^>]*href="https:\/\/example.com\/paste"/.test(h),h3:/<h3[^>]*>PastedHead/.test(h),clean:h.indexOf("evil(")<0&&h.indexOf("badcss")<0&&h.indexOf("PLAINFALLBACK")<0})'))
+    if $paste == "nodt" {
+        log-warn "synthetic ClipboardEvent carries no data in this engine — skipping the HTML-paste checks"
+    } else {
+        let pj = (try { $paste | from json } catch { null })
+        if $pj == null {
+            log-fail $"HTML paste probe returned non-JSON: ($paste)"; $fl = $fl + 1
+        } else {
+            $html_pasted = true
+            if ($pj.span and $pj.b and $pj.a and $pj.h3) { log-ok "pasted HTML keeps the semantic subset (b / a href / h3, span unwrapped)"; $p = $p + 1 } else { log-fail $"pasted HTML mangled: ($paste)"; $fl = $fl + 1 }
+            if $pj.clean { log-ok "pasted HTML is sanitised (script / style / attributes dropped)"; $p = $p + 1 } else { log-fail $"pasted HTML kept dangerous content: ($paste)"; $fl = $fl + 1 }
+        }
+        # Plain-text-only paste falls back to escaped text with <br> line breaks.
+        let ptext = (wd-execute $session_id ($ed + 'endCaret();var dt=new DataTransfer();dt.setData("text/plain","PlainLine1\nPlainLine2");var ev=new ClipboardEvent("paste",{bubbles:true,cancelable:true});Object.defineProperty(ev,"clipboardData",{value:dt});E.dispatchEvent(ev);var h=E.innerHTML;return (h.indexOf("PlainLine1")>=0&&h.indexOf("PlainLine2")>=0)?"y":"n"'))
+        if $ptext == "y" { log-ok "plain-text paste inserts with line breaks"; $p = $p + 1 } else { log-fail "plain-text paste did not insert"; $fl = $fl + 1 }
+    }
+
+    # ── Toolbar state reflects the caret (aria-pressed on the bold button) ──
+    wd-execute $session_id ($ed + 'selWord("BoldWord");E.dispatchEvent(new KeyboardEvent("keyup",{bubbles:true}));return 1') | ignore
+    sleep 400ms
+    let tstate = (wd-execute $session_id 'var b=[...document.querySelectorAll(".editor-tools .btn-icon")].find(function(x){var m=x.querySelector(".material-icons");return m&&m.textContent.trim()=="format_bold"});return b&&b.getAttribute("aria-pressed")=="true"?"y":"n"')
+    if $tstate == "y" { log-ok "toolbar state tracks the caret (bold shows active)"; $p = $p + 1 } else { log-fail "toolbar state did not reflect a bold selection"; $fl = $fl + 1 }
+
+    # ── Rename the title, then SAVE via the save button ──
+    let gname2 = $"E2E editor renamed ($t)"
+    wd-execute $session_id ('var ti=document.querySelector("#main .card-content .text-field input");if(ti){ti.value="' + $gname2 + '";ti.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
+    sleep 300ms
+    let clicked_save = (wd-execute $session_id 'var b=[...document.querySelectorAll(".editor-toolbar .btn")].find(function(x){var m=x.querySelector(".material-icons");return m&&m.textContent.trim()=="save"});if(b){b.click();return "y"}return "n"')
+    if (wd-wait-y $session_id 'return location.search.indexOf("app=editor")<0?"y":"n"' 10000) {
+        log-ok "save navigates back to the node view"; $p = $p + 1
+    } else {
+        log-fail $"save did not navigate away \(clicked=($clicked_save))"; $fl = $fl + 1
+    }
+
+    # ── Verify the stored Slate content in the backend ──
+    let saved = (try { wd-execute $session_id ($gql + 'var GID="' + $grp.id + '";var r=gql("query($i:uuid!){node(id:$i){name data}}",{i:GID});var d=null;try{d=r.data.node}catch(e){}if(!d)return "nonode";var c=JSON.stringify(d.data&&d.data.content?d.data.content:{});return JSON.stringify({name:d.name,h2:c.indexOf("heading-two")>=0,ul:c.indexOf("bulleted-list")>=0,ol:c.indexOf("numbered-list")>=0,al:c.indexOf("\"align\":\"center\"")>=0,b:c.indexOf("\"bold\":true")>=0,i:c.indexOf("\"italic\":true")>=0,u:c.indexOf("\"underline\":true")>=0,st:c.indexOf("\"strikethrough\":true")>=0,co:c.indexOf("\"code\":true")>=0,li:c.indexOf("example.com/e2e")>=0,ps:c.indexOf("PastedSpan")>=0,ph:c.indexOf("PastedHead")>=0,pl:c.indexOf("example.com/paste")>=0,evil:c.indexOf("evil(")>=0})') | from json } catch { null })
+    if $saved == null {
+        log-fail "could not read the saved node back from the backend"; $fl = $fl + 1
+    } else {
+        if ($saved.name == $gname2) { log-ok "save persists the renamed title"; $p = $p + 1 } else { log-fail $"saved title wrong: ($saved.name)"; $fl = $fl + 1 }
+        if ($saved.b and $saved.i and $saved.u and $saved.st and $saved.co and $saved.li) { log-ok "saved Slate content carries all inline marks + the link"; $p = $p + 1 } else { log-fail $"saved marks incomplete: ($saved)"; $fl = $fl + 1 }
+        if ($saved.h2 and $saved.ul and $saved.ol and $saved.al) { log-ok "saved Slate content carries heading / lists / alignment"; $p = $p + 1 } else { log-fail $"saved blocks incomplete: ($saved)"; $fl = $fl + 1 }
+        if $html_pasted {
+            if ($saved.ps and $saved.ph and $saved.pl and (not $saved.evil)) { log-ok "saved content keeps the sanitised paste (and nothing dangerous)"; $p = $p + 1 } else { log-fail $"saved pasted content wrong: ($saved)"; $fl = $fl + 1 }
+        }
+    }
+
+    # ── Edit again: the saved Slate content seeds back into the surface ──
+    wd-navigate $session_id $"(base-url)($ed_path)"
+    if (wd-wait-for-element $session_id "#rich-editor" 15) {
+        sleep 500ms
+        let reseed = (try { wd-execute $session_id ($ed + 'var h=E.innerHTML;return JSON.stringify({h2:/<h2/.test(h)&&h.indexOf("HeadLine")>=0,b:/<(b|strong)[^>]*>BoldWord/.test(h),ul:/<ul/.test(h)&&h.indexOf("BulletItem")>=0,a:h.indexOf("example.com/e2e")>=0})') | from json } catch { null })
+        if ($reseed != null) and ($reseed.h2 and $reseed.b and $reseed.ul and $reseed.a) {
+            log-ok "editor re-seeds the saved content (slate -> html round trip)"; $p = $p + 1
+        } else {
+            log-fail $"re-opened editor lost content: ($reseed)"; $fl = $fl + 1
+        }
+        # Append a line and save again: the second save must keep the earlier
+        # formatting (the round trip is lossless under repeated edit cycles).
+        wd-execute $session_id ($ed + 'endCaret();document.execCommand("insertParagraph");document.execCommand("insertText",false,"RoundTripTwo");return 1') | ignore
+        sleep 300ms
+        wd-execute $session_id 'var b=[...document.querySelectorAll(".editor-toolbar .btn")].find(function(x){var m=x.querySelector(".material-icons");return m&&m.textContent.trim()=="save"});if(b)b.click();return 1' | ignore
+        if (wd-wait-y $session_id 'return location.search.indexOf("app=editor")<0?"y":"n"' 10000) {
+            let second = (try { wd-execute $session_id ($gql + 'var GID="' + $grp.id + '";var r=gql("query($i:uuid!){node(id:$i){data}}",{i:GID});var c="";try{c=JSON.stringify(r.data.node.data.content)}catch(e){}return JSON.stringify({rt:c.indexOf("RoundTripTwo")>=0,h2:c.indexOf("heading-two")>=0,b:c.indexOf("\"bold\":true")>=0,li:c.indexOf("example.com/e2e")>=0})') | from json } catch { null })
+            if ($second != null) and ($second.rt and $second.h2 and $second.b and $second.li) {
+                log-ok "second save appends without losing earlier formatting"; $p = $p + 1
+            } else {
+                log-fail $"second save lost content: ($second)"; $fl = $fl + 1
+            }
+        } else {
+            log-fail "second save did not navigate away"; $fl = $fl + 1
+        }
+    } else {
+        log-fail "editor did not re-mount for the round-trip check"; $fl = $fl + 1
+    }
+
+    # ── Autosave: a typed draft persists after the debounce, with no Save click ──
+    wd-navigate $session_id $"(base-url)($ed_path)"
+    if (wd-wait-for-element $session_id "#rich-editor" 15) {
+        sleep 500ms
+        wd-execute $session_id ($ed + 'endCaret();document.execCommand("insertText",false," AutosaveProbe");return 1') | ignore
+        # AUTOSAVE_DEBOUNCE_MS is 2.5s; leave headroom for the mutation round trip.
+        sleep 4500ms
+        let still_editing = (wd-execute $session_id 'return location.search.indexOf("app=editor")>=0?"y":"n"')
+        let auto = (wd-execute $session_id ($gql + 'var GID="' + $grp.id + '";var r=gql("query($i:uuid!){node(id:$i){data}}",{i:GID});var c="";try{c=JSON.stringify(r.data.node.data.content)}catch(e){}return c.indexOf("AutosaveProbe")>=0?"y":"n"'))
+        if ($still_editing == "y") and ($auto == "y") {
+            log-ok "debounced autosave persists the draft without Save"; $p = $p + 1
+        } else {
+            log-fail $"autosave did not persist \(editing=($still_editing) saved=($auto))"; $fl = $fl + 1
+        }
+    } else {
+        log-fail "editor did not re-mount for the autosave check"; $fl = $fl + 1
+    }
+
+    # ── Teardown: delete the throwaway group + its permissions ──
+    let td = (wd-teardown-context $session_id $gql $grp.id)
+    if ($td.gone == true) {
+        log-ok "cleaned up the editor-flow group + permissions"; $p = $p + 1
+    } else {
+        log-fail $"cleanup incomplete, MANUAL CHECK: group ($grp.id) gone=($td.gone)"; $fl = $fl + 1
+    }
+
+    { passed: $p, failed: $fl }
+}
+
 # Create-group-from-home write-flow: the owner-only "new group/event" control on
 # the home hero (bound to the root node). Drives the dialog through the UI, then
 # verifies against the backend that the node was created as its OWN context with
@@ -2056,6 +2269,9 @@ def main [
         let r = (test-vote-flow $session_id $passed $failed); $passed = $r.passed; $failed = $r.failed
         # Create group/event from home (owner-only) — also Firefox-only + self-cleaning.
         let r = (test-create-context $session_id $passed $failed); $passed = $r.passed; $failed = $r.failed
+        # Full editor feature pass (type / format / paste / save / re-edit /
+        # autosave) on a hermetic group — Firefox-only + self-cleaning.
+        let r = (test-editor-flow $session_id $passed $failed); $passed = $r.passed; $failed = $r.failed
     } else {
         log-info ""
         log-info "Skipping authenticated tests (set WIKI_EMAIL / WIKI_PASSWORD to enable)."
