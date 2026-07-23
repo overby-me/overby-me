@@ -88,11 +88,12 @@ yet: point 2 (`through` covers loaded pointers via safe-deref checking;
 `case`'s "load from memory" variant is subsumed by point 1 for now), point 3a
 (FFI inbound prologue), and the `through` performance layer (T2 shadow slots).
 
-All 22 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+All 23 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
 `false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
 `through-safe-ref`, `rusqlite-0128`, `lru-0130`, `cast-oob`, `heap-mint`,
-`copy-overrun`, `smallvec-0009`, `simple-slab-0039`, `differential`.
+`copy-overrun`, `smallvec-0009`, `simple-slab-0039`, `toodee-0028`,
+`differential`.
 
 **Point 0 is fully extent-aware for reads *and* writes.** The write-intrinsic
 path (`ptr::copy`/`copy_nonoverlapping`/`write_bytes`/`write`) now goes through
@@ -110,14 +111,22 @@ registers the foreign allocation (`codegen-units=1` on cementite links the
 "needs `--whole-archive`" belief was **wrong**, CGU=1 suffices), the
 **opaque-origin root fix** roots the malloc'd pointer so the index offset
 resolves from the base, and instrumentation scoped to the binary + slab crate
-checks `index()`. Also added **RUSTSEC-2019-0009** (`smallvec 0.6.9` `grow()`
-UAF). Joins -2021-0003 (smallvec spatial), -0128 (rusqlite stack-borrow-FFI),
--0130 (lru heap UAF).
+checks `index()`. Also added **RUSTSEC-2021-0028** (`toodee 0.2.0` `insert_row`
+OOB *write* — a lying `ExactSizeIterator` under-reserves, then `ptr::write`s
+past the buffer, caught by the write-call extent check) and **RUSTSEC-2019-0009**
+(`smallvec 0.6.9` `grow()` UAF). **Six real CVEs total** (with -2021-0003
+smallvec spatial, -0128 rusqlite stack-borrow-FFI, -0130 lru heap UAF).
 
 **Corpus catchability (see MEMORY: fe-c-corpus-catchability).** Rust
 global-allocator heap OOB/UAF **and** libc-malloc'd buffers (via interpose)
-catch cleanly. The interposition-reachable corpus subset (CORPUS.md note 5, a
-majority) is now unlocked. Still deferred: `bumpalo` (RUSTSEC-2022-0078, custom
+catch cleanly, **when the unsafe deref is in the instrumented crate's own MIR**
+— a raw `*p`/`&*p` (simple-slab) or a `ptr::write`/`copy` call (toodee,
+smallvec). The **next breadth unlock is `-Zbuild-std` (D1)**: crates whose OOB is
+routed through a *core* method — `ptr::as_ref()` (`caja` RUSTSEC-2026-0130),
+`get_unchecked`, slice `Index` on a bad `from_raw_parts` slice (`binary_vec_io`)
+— aren't caught because the deref lives in uninstrumented `core`. Building `core`
+under instrumentation would open that subset, analogous to how interposition
+opened the allocation subset. Also deferred: `bumpalo` (RUSTSEC-2022-0078, custom
 arena) did not abort — the freed-chunk read got un-reused data, needs
 investigation; concurrency/data-race CVEs (e.g. `atom`) are out of scope for
 single-thread v0.
