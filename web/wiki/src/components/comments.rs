@@ -548,25 +548,30 @@ fn reaction_emoji(node: &ChildNodeFields) -> String {
         .to_string()
 }
 
-/// Toggle the caller's `emoji` reaction on `parent_id`: remove it when `my_id` is
-/// their existing reaction node, otherwise add it.
-async fn toggle_reaction(
+/// Set the caller's reaction on `parent_id` to `emoji`. The backend permits only
+/// ONE reaction per user per parent (a Hasura insert-permission check), so this
+/// is swap-not-add: `mine` is the caller's current reaction on this parent (its
+/// node id + emoji), if any.
+/// - clicking the emoji they already have removes it (toggle off);
+/// - clicking a different emoji swaps: delete the old, then insert the new;
+/// - with no existing reaction, it just inserts.
+async fn set_reaction(
     token: Option<String>,
     parent_id: String,
     context_id: Option<String>,
     emoji: String,
-    my_id: Option<String>,
+    mine: Option<(String, String)>,
 ) -> Result<(), String> {
-    match my_id {
-        Some(id) => graphql::delete_node(token.as_deref(), &id)
-            .await
-            .map(|_| ()),
-        None => {
-            graphql::insert_reaction(token.as_deref(), &parent_id, context_id.as_deref(), &emoji)
-                .await
-                .map(|_| ())
+    if let Some((id, current_emoji)) = mine {
+        graphql::delete_node(token.as_deref(), &id).await?;
+        // Same emoji → that was a toggle-off; nothing more to add.
+        if current_emoji == emoji {
+            return Ok(());
         }
     }
+    graphql::insert_reaction(token.as_deref(), &parent_id, context_id.as_deref(), &emoji)
+        .await
+        .map(|_| ())
 }
 
 /// A reaction bar under a comment: grouped emoji chips with counts (the caller's
@@ -615,6 +620,11 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
             groups.push((emoji, 1, mine.then(|| r.id.0.clone())));
         }
     }
+    // The caller's current reaction on this parent (node id + emoji), if any.
+    // The backend allows only one, so a new pick swaps this out (see set_reaction).
+    let my_current: Option<(String, String)> = groups
+        .iter()
+        .find_map(|(emoji, _, mine)| mine.clone().map(|id| (id, emoji.clone())));
 
     let mut picker_open = use_signal(|| false);
     let mut picker_cat = use_signal(|| 0usize);
@@ -632,7 +642,7 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
                     disabled: !can_react,
                     onclick: {
                         let emoji = emoji.clone();
-                        let my_id = my_id.clone();
+                        let my_current = my_current.clone();
                         let parent_id = comment_id.clone();
                         let context_id = context_id.clone();
                         move |_| {
@@ -640,10 +650,10 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
                                 return;
                             }
                             let token = session.read().access_token.clone();
-                            let (emoji, my_id, parent_id, context_id) =
-                                (emoji.clone(), my_id.clone(), parent_id.clone(), context_id.clone());
+                            let (emoji, my_current, parent_id, context_id) =
+                                (emoji.clone(), my_current.clone(), parent_id.clone(), context_id.clone());
                             spawn(async move {
-                                match toggle_reaction(token, parent_id, context_id, emoji, my_id).await {
+                                match set_reaction(token, parent_id, context_id, emoji, my_current).await {
                                     Ok(()) => {
                                         let mut refresh = refresh;
                                         refresh += 1;
@@ -691,23 +701,20 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
                                         class: "reaction-picker-item",
                                         onclick: {
                                             let emoji = e.to_string();
-                                            let existing = groups
-                                                .iter()
-                                                .find(|(em, _, _)| em == &emoji)
-                                                .and_then(|(_, _, mid)| mid.clone());
+                                            let my_current = my_current.clone();
                                             let parent_id = comment_id.clone();
                                             let context_id = context_id.clone();
                                             move |_| {
                                                 picker_open.set(false);
                                                 let token = session.read().access_token.clone();
-                                                let (emoji, existing, parent_id, context_id) = (
+                                                let (emoji, my_current, parent_id, context_id) = (
                                                     emoji.clone(),
-                                                    existing.clone(),
+                                                    my_current.clone(),
                                                     parent_id.clone(),
                                                     context_id.clone(),
                                                 );
                                                 spawn(async move {
-                                                    match toggle_reaction(token, parent_id, context_id, emoji, existing).await {
+                                                    match set_reaction(token, parent_id, context_id, emoji, my_current).await {
                                                         Ok(()) => {
                                                             let mut refresh = refresh;
                                                             refresh += 1;
