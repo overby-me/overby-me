@@ -627,6 +627,13 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub read_write_paths: Vec<String>,
 
+    /// The service's cgroup `memory.pressure` path (from `MemoryPressureWatch=`),
+    /// bind-mounted read-write after `ProtectControlGroups=` makes
+    /// `/sys/fs/cgroup` read-only, so the service can still register PSI
+    /// triggers. Matches systemd adding the pressure path to `ReadWritePaths=`.
+    #[serde(default)]
+    pub memory_pressure_path: Option<String>,
+
     /// RestrictNamespaces= — namespace restriction.
     /// "yes" = all denied, "no" = all allowed, or space-separated list.
     /// See systemd.exec(5).
@@ -3328,6 +3335,18 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
             if config.protect_control_groups {
                 remount_read_only("/sys/fs/cgroup", config);
             }
+        }
+    }
+
+    // Re-make the service's memory.pressure file writable if ProtectControlGroups=
+    // just made /sys/fs/cgroup read-only. Must run AFTER the read-only remount
+    // above so the read-write bind overrides it, letting the service register PSI
+    // triggers (systemd achieves this by appending the path to ReadWritePaths=).
+    if let Some(ref mpp) = config.memory_pressure_path {
+        let cgroup_read_only = config.protect_control_groups
+            || matches!(config.protect_control_groups_ex.as_str(), "yes" | "strict");
+        if cgroup_read_only && Path::new(mpp).exists() {
+            bind_mount_readwrite(mpp, config);
         }
     }
 

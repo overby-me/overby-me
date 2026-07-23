@@ -1056,6 +1056,35 @@ fn start_service_with_filedescriptors(
         restrict_realtime: conf.exec_config.restrict_realtime,
         restrict_suid_sgid: conf.exec_config.restrict_suid_sgid,
         read_write_paths: conf.exec_config.read_write_paths.clone(),
+        memory_pressure_path: {
+            use crate::units::MemoryPressureWatch;
+            let should = match conf.memory_pressure_watch {
+                MemoryPressureWatch::On => true,
+                MemoryPressureWatch::Auto => {
+                    conf.platform_specific
+                        .cgroup_path
+                        .join("memory.pressure")
+                        .exists()
+                        || std::path::Path::new("/proc/pressure/memory").exists()
+                }
+                MemoryPressureWatch::Off | MemoryPressureWatch::Skip => false,
+            };
+            should.then(|| {
+                if matches!(
+                    conf.exec_config.protect_control_groups_ex,
+                    crate::units::ProtectControlGroupsEx::Private
+                        | crate::units::ProtectControlGroupsEx::Strict
+                ) {
+                    "/sys/fs/cgroup/memory.pressure".to_owned()
+                } else {
+                    conf.platform_specific
+                        .cgroup_path
+                        .join("memory.pressure")
+                        .to_string_lossy()
+                        .into_owned()
+                }
+            })
+        },
         restrict_namespaces: match conf.exec_config.restrict_namespaces {
             crate::units::RestrictNamespaces::No => "no".to_owned(),
             crate::units::RestrictNamespaces::Yes => "yes".to_owned(),
