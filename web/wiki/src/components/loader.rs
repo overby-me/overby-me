@@ -57,10 +57,12 @@ pub fn Home(app: Option<String>) -> Element {
 }
 
 /// Whether the signed-in user owns the currently resolved page's context.
-/// Written by [`PathResolver`] as pages resolve; read by the navigation
-/// surfaces (`layout::breadcrumbs::context_apps`) so the owner-only apps
-/// (members, console) only show for context owners.
-pub(crate) static CTX_IS_OWNER: GlobalSignal<bool> = Signal::global(|| false);
+/// `None` while the page is still resolving. Written by [`PathResolver`]; read
+/// by the navigation surfaces (`layout::breadcrumbs::context_apps`) so the
+/// owner-only apps (members, console) only show for context owners — and never
+/// flash before ownership is known (they appear once it resolves, animated by
+/// the rail/bar item entry animation).
+pub(crate) static CTX_IS_OWNER: GlobalSignal<Option<bool>> = Signal::global(|| None);
 
 /// Resolves a path to a node and renders the matching app. The query re-runs
 /// whenever the path (or token) changes.
@@ -91,14 +93,15 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     });
 
     // Publish whether the user owns this page's context, for the nav surfaces
-    // (owner-only rail apps). An effect rather than a render-time write, and
-    // only on a resolved result — while a navigation is still loading the last
-    // value stands, so the rail doesn't flicker between contexts.
+    // (owner-only rail apps). An effect rather than a render-time write. While
+    // a navigation is still resolving the state is UNKNOWN (`None`): the owner
+    // apps stay hidden rather than flashing the previous context's set and
+    // then disappearing.
     use_effect(move || {
         let owner = match &*node_future.read() {
-            Some(Ok(Some(node))) => node.is_context_owner.unwrap_or(false),
-            Some(_) => false,
-            None => return,
+            Some(Ok(Some(node))) => Some(node.is_context_owner.unwrap_or(false)),
+            Some(_) => Some(false),
+            None => None,
         };
         if *CTX_IS_OWNER.peek() != owner {
             *CTX_IS_OWNER.write() = owner;

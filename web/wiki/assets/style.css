@@ -607,6 +607,22 @@ html {
 	border-radius: var(--md-sys-shape-corner-large);
 	padding: var(--md-sys-spacing-0-5) 0;
 	width: 100%;
+	/* Destinations spring in when they appear — notably the owner-only
+	   member/console entries, which mount only once the resolved page confirms
+	   context ownership (see loader::CTX_IS_OWNER) instead of popping. */
+	animation: nav-item-in var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default) backwards;
+}
+
+@keyframes nav-item-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px) scale(0.8);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
 }
 .nav-rail-indicator {
 	position: relative;
@@ -732,6 +748,9 @@ html {
 	border: none;
 	cursor: pointer;
 	font: inherit;
+	/* Same entry spring as the rail (see .nav-rail-item). */
+	animation: nav-item-in var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default) backwards;
 }
 .nav-bar-indicator {
 	position: relative;

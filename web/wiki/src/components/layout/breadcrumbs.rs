@@ -481,9 +481,11 @@ pub(super) fn context_apps(
     if is_auth {
         // Members and the chair console are owner surfaces: only context owners
         // get their rail/bar entries (written by the path resolver as pages
-        // load). Their deep links still resolve for everyone; the apps gate
-        // their admin controls themselves.
-        let is_ctx_owner = crate::components::loader::CTX_IS_OWNER();
+        // load; unknown-while-resolving counts as not-owner, so the entries
+        // never show and then vanish — they animate in once ownership is
+        // confirmed). Their deep links still resolve for everyone; the apps
+        // gate their admin controls themselves.
+        let is_ctx_owner = crate::components::loader::CTX_IS_OWNER().unwrap_or(false);
         for (app, label) in [("speak", t("mime.speak")), ("vote", t("mime.vote"))] {
             apps.push((
                 if app == "speak" {
