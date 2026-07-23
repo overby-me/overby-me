@@ -332,6 +332,7 @@ Task A4 can start catching real CVEs before the driver exists.
 | `docs/cementite-api.md` | Runtime API draft | **Dies** when rustdoc exists |
 | `docs/nix-integration.md` | Flake shape + API questions | **Dies** when the flake exists |
 | `docs/through-mode-coherence.md` | Coherence decision + rationale | Frozen |
+| `docs/local-iteration.md` | Build the driver outside nix + dump MIR (fast edit/instrument loop) | Living |
 | `docs/traces/*.md` | CVE traces: design evidence + test specs | Frozen, dated |
 | `corpus/CORPUS.md` | The 46-entry acceptance corpus (SafeFFI Table 1), with per-row v0 gate marks | Living — resolve IDs to pinned versions as you go |
 
