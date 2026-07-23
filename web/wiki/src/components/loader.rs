@@ -523,6 +523,14 @@ pub fn UserPopover(
     let session = use_session();
     let my_id = session.read().user.as_ref().map(|u| u.id.clone());
     let is_me = user_id.is_some() && user_id == my_id;
+    // A linked Bluesky account is recognisable from its avatar URL: the bsky CDN
+    // path embeds the account's DID, and bsky.app resolves profile URLs by DID —
+    // so the popover can link to their Bluesky profile with no extra lookup.
+    let bsky_did = avatar_url
+        .contains("cdn.bsky.app/")
+        .then(|| avatar_url.split('/').find(|seg| seg.starts_with("did:")))
+        .flatten()
+        .map(str::to_string);
 
     rsx! {
         button {
@@ -587,6 +595,17 @@ pub fn UserPopover(
                         },
                         span { class: "material-icons", "person" }
                         " {t(\"profile.viewProfile\")}"
+                    }
+                }
+                if let Some(did) = bsky_did.clone() {
+                    a {
+                        class: "btn btn-outlined btn-full mt-1",
+                        href: "https://bsky.app/profile/{did}",
+                        target: "_blank",
+                        rel: "noopener",
+                        onclick: move |e| e.stop_propagation(),
+                        span { class: "material-icons", "open_in_new" }
+                        " {t(\"profile.blueskyAccount\")}"
                     }
                 }
             }
