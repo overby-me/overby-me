@@ -529,6 +529,7 @@ pub fn FolderApp(
                     FolderAdd {
                         parent_id: node.id.0.clone(),
                         context_id: node.context_id.clone().map(|c| c.0),
+                        parent_path: parent_path.clone(),
                         pending,
                     }
                 }
@@ -606,11 +607,15 @@ pub fn FolderApp(
 fn FolderAdd(
     parent_id: String,
     context_id: Option<String>,
+    /// This folder's own path, so a created child can be opened at
+    /// `parent_path + key` once the insert lands.
+    parent_path: Vec<String>,
     /// Optimistic children owned by FolderApp: this dialog pushes the new node here
     /// (shown at once), reconciled/rolled back there and here.
     mut pending: Signal<Vec<PendingChild>>,
 ) -> Element {
     let session = use_session();
+    let nav = use_navigator();
     let mut open = use_signal(|| false);
     let mut title = use_signal(String::new);
     let mut kind = use_signal(|| "wiki/document".to_string());
@@ -710,6 +715,7 @@ fn FolderAdd(
     let submit = {
         let parent_id = parent_id.clone();
         let context_id = context_id.clone();
+        let parent_path = parent_path.clone();
         move |_| {
             let mime = kind.read().clone();
             let typed = title.read().trim().to_string();
@@ -740,6 +746,7 @@ fn FolderAdd(
             let token = session.read().access_token.clone();
             let parent_id = parent_id.clone();
             let context_id = context_id.clone();
+            let parent_path = parent_path.clone();
             let key = crate::components::loader::slugify(&name);
             // Optimistic: show the child tile now and close the dialog; reconciled by
             // key against the fetched children, removed on error.
@@ -764,7 +771,18 @@ fn FolderAdd(
                     index: None,
                 };
                 match crate::graphql::insert_node(token.as_deref(), input).await {
-                    Ok(_) => crate::session::bump_data_version(),
+                    Ok(_) => {
+                        crate::session::bump_data_version();
+                        // Open the node just created (at parent_path + its key), so
+                        // adding content lands you on it rather than back on the
+                        // folder listing.
+                        let mut dest = parent_path.clone();
+                        dest.push(key.clone());
+                        nav.push(Route::PathPage {
+                            segments: dest,
+                            app: None,
+                        });
+                    }
                     Err(e) => {
                         pending.write().retain(|p| p.key != key);
                         log::error!("add child failed: {e}");
