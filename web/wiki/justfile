@@ -1,10 +1,19 @@
 dx := `which -a dx | grep dioxus | head -1`
 
+# Client-side error/panic shipping to Better Stack (the `remote-logging` feature)
+# is auto-enabled when BETTERSTACK_SOURCE_TOKEN is present in the build env. The
+# token + host are baked in at compile time via `option_env!` (see logging.rs),
+# so export them alongside the build, e.g.:
+#   BETTERSTACK_SOURCE_TOKEN=xxx BETTERSTACK_INGEST_HOST=sN.betterstackdata.com \
+#     nix develop .#wiki --command bash -c "just build"
+# Unset (e.g. the hermetic Nix package build), the flag is empty — console only.
+remote_logging := if env_var_or_default("BETTERSTACK_SOURCE_TOKEN", "") != "" { "--features remote-logging" } else { "" }
+
 dev:
     {{dx}} serve
 
 build:
-    {{dx}} build --release
+    {{dx}} build --release {{remote_logging}}
     # dx drops files from assets/ it doesn't recognize, so copy them into the
     # served root ourselves. This is the single source of truth for the deploy
     # bundle — the Nix package (default.nix) runs `just build`, so both match.
