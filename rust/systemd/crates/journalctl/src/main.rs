@@ -2592,7 +2592,18 @@ fn main() {
     // Exit 1 when --grep or --unit was used and no entries matched (matches
     // real journalctl behavior). This is important for scripts that use
     // `journalctl --grep=X` or `journalctl --unit=X` to check for entries.
-    if filtered.is_empty() && !cli.follow && (cli.grep.is_some() || cli.unit.is_some()) {
+    //
+    // Exception: when a cursor filter (--cursor / --after-cursor / --cursor-file)
+    // is active, an empty result is the normal "no new entries since the cursor"
+    // case and must exit 0, matching real journalctl. TEST-36-NUMAPOLICY relies
+    // on this: `journalctl -u init.scope --cursor-file=X` under `set -e`
+    // legitimately finds no entries for a policy phase that logged nothing.
+    if filtered.is_empty()
+        && !cli.follow
+        && effective_after_cursor.is_none()
+        && effective_cursor.is_none()
+        && (cli.grep.is_some() || cli.unit.is_some())
+    {
         process::exit(1);
     }
 }
