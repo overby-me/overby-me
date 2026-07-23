@@ -244,9 +244,17 @@ fn extent_verify(fault: *const u8, root: *const u8, size: usize) -> Option<Cap> 
     let cap = table::lookup(root as usize)?;
     let f = fault as usize;
     let end = f.saturating_add(size);
-    // Spatial: the whole referent must lie inside the allocation.
-    if f < cap.base || end > cap.base + cap.len {
-        report_oob_and_abort(f, cap.base, cap.len, cap.id.raw());
+    let alloc_end = cap.base + cap.len;
+    // Spatial: the whole referent `[f, f + size)` must lie inside the
+    // allocation.
+    if f < cap.base || end > alloc_end {
+        // Report the out-of-bounds distance from the relevant edge: if the
+        // access starts strictly past the end, that start; otherwise (start
+        // in-bounds or exactly at the boundary, extent overrunning — a wide
+        // read or a slice off a too-small buffer) the access end, so "N bytes
+        // past" reflects the whole overrun, not a misleading 0 for a length lie.
+        let report_at = if f > alloc_end { f } else { end };
+        report_oob_and_abort(report_at, cap.base, cap.len, cap.id.raw());
     }
     // Temporal: the allocation must be live.
     if !table::is_live(cap.id) {

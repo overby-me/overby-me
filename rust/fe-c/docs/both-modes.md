@@ -111,6 +111,7 @@ relationship, exactly as the tables predict:
 | `cast-oob direct` | direct field read `(*p).b` OOB | abort | abort | projected deref fault (point 0 faults on `p + offset`, not the base) |
 | `cast-oob extent` | field read overrunning the end | abort | abort | projected extent check (`__fec_check_extent` over `[p+offset, +size)`) |
 | `cast-oob whole-extent` | `*p` read wider than the alloc | abort | abort | whole-object extent check (`[p, p+size_of::<T>())`) |
+| `slice-oob` | `from_raw_parts` slice lies about its length | abort | abort | slice-extent check at the mint (point 1) — `case` elides the slice's derefs, so the `from_raw_parts` is the only checkpoint |
 | `lru-0130` | heap use-after-free | abort | abort | `case` via the dealloc-reachable re-check (point 4) |
 | `heap-mint` | heap UAF, mint named | abort | abort | both name `minted_at`; `case` also `read_at` (both-sites debuggability) |
 | `through-safe-ref` | safe-ref stack UAF | abort | **elide** | the bolded row: `case` elides safe-pointer derefs |

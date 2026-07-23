@@ -81,19 +81,22 @@ start-only check), point 1 (raw→safe cast `ensure`
 check that makes `case` elision sound; field reborrows were added to close a
 `case` gap — an unvetted `&(*p).f` off a mis-cast base would have had its later
 derefs elided, a missing visit under I1, and the instrumented hashbrown suite
-stays clean at 5.1M checks), point 4 (dealloc-reachable re-check, `case`), point
+stays clean at 5.1M checks; the same point-1 pass also vets a **slice's** extent
+at its `slice::from_raw_parts(data, len)` mint — `corpus/slice-oob` aborts
+OutOfBounds in both modes on a `&[T]` that lies about its length, the slice
+analog of the reborrow ensure), point 4 (dealloc-reachable re-check, `case`), point
 5 (stack scope hooks, I8), and I9 outbound escape are all in.
 The `differential` gate (C3) is wired and passing (`fe-c-differential`). Not
 yet: point 2 (`through` covers loaded pointers via safe-deref checking;
 `case`'s "load from memory" variant is subsumed by point 1 for now), point 3a
 (FFI inbound prologue), and the `through` performance layer (T2 shadow slots).
 
-All 23 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+All 24 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
 `false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
-`through-safe-ref`, `rusqlite-0128`, `lru-0130`, `cast-oob`, `heap-mint`,
-`copy-overrun`, `smallvec-0009`, `simple-slab-0039`, `toodee-0028`,
-`differential`.
+`through-safe-ref`, `rusqlite-0128`, `lru-0130`, `cast-oob`, `slice-oob`,
+`heap-mint`, `copy-overrun`, `smallvec-0009`, `simple-slab-0039`,
+`toodee-0028`, `differential`.
 
 **Point 0 is fully extent-aware for reads *and* writes.** The write-intrinsic
 path (`ptr::copy`/`copy_nonoverlapping`/`write_bytes`/`write`) now goes through
@@ -129,12 +132,30 @@ makes `compiler_builtins` fail ("cannot call functions through upstream
 monomorphizations", from `__fec_*` calls injected into arithmetic impls), and
 it's unnecessary since the common core-routed OOB (slice indexing) already
 inlines. D1's real value is whole-process `../libc` coverage (D2), not corpus
-breadth. Real remaining gaps: (a) `case` mode misses inlined slice reborrows —
-`through` catches the slice OOB but `case` NO_ABORTs, the reborrow the elision
-relies on doesn't get a point-1 `ensure` after inlining (a spatial `case` gap,
-like the field-reborrow one); (b) non-inlined core *calls* + interprocedural
-provenance (`caja` `ptr::as_ref`, RUSTSEC-2026-0130). Also deferred: `bumpalo`
-(custom arena) and concurrency CVEs (`atom`).
+breadth.
+
+**The `case`-mode slice gap is now CLOSED** (`fe-c-slice-oob`). The earlier
+"inlined slice reborrow" framing was **wrong**: at the corpus's debug opt-level
+the slice `Index` does **not** inline — `s[500]` stays `_r = &(*_slice)[i]` (a
+`Deref` of the *safe slice reference* plus `Index`, whose base is a `&[T]`, not a
+raw pointer), and a direct `let x = s[500]` is `copy (*_slice)[i]` with no raw
+deref at all. `through` caught it because its safe-deref extent check casts the
+fat slice reference to its thin data pointer as the root; `case` elides those
+safe derefs, so nothing checked it. The fix vets the slice's extent **at its
+mint** — a new pass injects `__fec_check_extent(data, root, len * size_of::<T>())`
+before every `slice::from_raw_parts{,_mut}(data, len)` call, the raw→safe cast
+for a slice (the analog of the `&*p` reborrow ensure). A `from_raw_parts` whose
+length exceeds the real allocation is now caught at construction in **both**
+modes, which is what makes `case`'s later-deref elision sound (I1). Matched by
+callee name + a two-arg signature + a slice-reference result, so the owning
+three-arg `Vec`/`String::from_raw_parts` is untouched; the false-positive suite
+stays clean (5.1M hashbrown checks). Also fixed the extent-overrun **report**:
+an access that starts in-bounds but overruns now reports the distance from the
+access *end* ("7968 byte(s) past" for the 1000-elem slice over a 4-elem buffer),
+not the misleading `0` the in-bounds start produced. Real remaining gap:
+non-inlined core *calls* + interprocedural provenance (`caja` `ptr::as_ref`,
+RUSTSEC-2026-0130). Also deferred: `bumpalo` (custom arena) and concurrency CVEs
+(`atom`).
 
 **Assert integrity fixed.** The corpus asserts' failure messages contained
 `(exit ($exit_code))`, which nushell runs as a subexpression (`exit 0`),

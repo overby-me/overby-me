@@ -236,6 +236,19 @@ fn instrument_body<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, fns: &FecFns)
             fns,
             typing_env,
         );
+        // A `slice::from_raw_parts(data, len)` mint is the raw->safe cast for a
+        // slice: vet the claimed extent against the allocation here, so `case`
+        // can soundly elide the slice's later derefs. Disjoint from the write
+        // intrinsics above (different callee), so at most one fires per block.
+        injected += instrument_slice_ctor(
+            tcx,
+            basic_blocks,
+            local_decls,
+            &roots,
+            block,
+            fns,
+            typing_env,
+        );
     }
 
     // Pass 2: direct dereference places (`*p`). In `through` mode this covers
@@ -500,6 +513,137 @@ fn instrument_write_call<'tcx>(
         kind: TerminatorKind::Call {
             func: Operand::function_handle(tcx, check, [], source_info.span),
             args: args_out.into_boxed_slice(),
+            destination: Place::from(ret),
+            target: Some(new_block),
+            unwind: UnwindAction::Unreachable,
+            call_source: CallSource::Misc,
+            fn_span: source_info.span,
+        },
+        attributes: ThinVec::new(),
+    });
+    1
+}
+
+/// If `block` ends in a `core::slice::from_raw_parts{,_mut}(data, len)` call —
+/// the raw->safe mint of a slice reference — injects an extent check on the
+/// claimed slice `[data, data + len * size_of::<T>())` *before* the call,
+/// resolved from `data`'s derivation root (I10). A `from_raw_parts` whose length
+/// exceeds the real allocation (a slice that lies about its length, the classic
+/// unsound-slice bug) is caught at construction in **both** modes: `through`
+/// would also catch a later deref of the slice, but `case` elides the slice's
+/// derefs, so the mint is the only checkpoint. This is the slice analog of the
+/// `&*p` reborrow ensure — vetting the whole extent once at the raw->safe cast is
+/// what makes `case`-mode elision sound (I1). Matched by callee name plus a
+/// two-argument signature and a slice-reference result, so the owning three-arg
+/// `Vec`/`String::from_raw_parts` is excluded. Returns 1 if a check was injected.
+fn instrument_slice_ctor<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    basic_blocks: &mut IndexVec<BasicBlock, BasicBlockData<'tcx>>,
+    local_decls: &mut IndexVec<Local, LocalDecl<'tcx>>,
+    roots: &HashMap<Local, Local>,
+    block: BasicBlock,
+    fns: &FecFns,
+    typing_env: ty::TypingEnv<'tcx>,
+) -> usize {
+    let term = basic_blocks[block].terminator();
+    let source_info = term.source_info;
+    let TerminatorKind::Call {
+        func,
+        args,
+        destination,
+        ..
+    } = &term.kind
+    else {
+        return 0;
+    };
+    let Some(name) = callee_name(tcx, local_decls, func) else {
+        return 0;
+    };
+    // `slice::from_raw_parts{,_mut}` is `(data, len) -> &[T]`; the owning
+    // `Vec`/`String::from_raw_parts(ptr, len, cap)` is excluded by the two-arg
+    // signature and the slice-reference result.
+    if !matches!(name.as_str(), "from_raw_parts" | "from_raw_parts_mut") || args.len() != 2 {
+        return 0;
+    }
+    if !is_slice_ref_local(local_decls, destination.local) {
+        return 0;
+    }
+    // arg0 = data pointer (a bare `*const T`/`*mut T` local); arg1 = len.
+    let Some(data_place) = args[0].node.place() else {
+        return 0;
+    };
+    if !data_place.projection.is_empty() || !is_raw_ptr_local(local_decls, data_place.local) {
+        return 0;
+    }
+    let data_local = data_place.local;
+    let len_op = args[1].node.clone();
+
+    // Element size `size_of::<T>()` for the `*const T` data pointer. A slice
+    // element is always `Sized`, but be defensive: without a static size there
+    // is nothing to bound, so skip.
+    let Some(elem_size) = local_decls[data_local]
+        .ty
+        .builtin_deref(true)
+        .and_then(|pointee| tcx.layout_of(typing_env.as_query_input(pointee)).ok())
+        .map(|layout| layout.size.bytes())
+    else {
+        return 0;
+    };
+
+    let root_local = roots.get(&data_local).copied().unwrap_or(data_local);
+
+    // Move the original from_raw_parts call into a fresh block; this block's
+    // terminator becomes the extent check, targeting it.
+    let orig = basic_blocks[block].terminator.take();
+    let is_cleanup = basic_blocks[block].is_cleanup;
+    let new_block = basic_blocks.push(BasicBlockData::new_stmts(Vec::new(), orig, is_cleanup));
+
+    let u8_ptr = Ty::new_imm_ptr(tcx, tcx.types.u8);
+    let bd = &mut basic_blocks[block];
+    let fault_arg = cast_to_u8_ptr(local_decls, bd, data_local, u8_ptr, source_info);
+    let root_arg = cast_to_u8_ptr(local_decls, bd, root_local, u8_ptr, source_info);
+
+    // size = len * size_of::<T>() (just `len` when the element is one byte).
+    // A bare `BinaryOp(Mul)` wraps rather than panicking (matching the write
+    // intrinsic's count*size), so the injected check never itself aborts.
+    let size_operand = if elem_size == 1 {
+        len_op
+    } else {
+        let size_local = local_decls.push(LocalDecl::new(tcx.types.usize, source_info.span));
+        let elem_const = Operand::Constant(Box::new(ConstOperand {
+            span: source_info.span,
+            user_ty: None,
+            const_: MirConst::from_usize(tcx, elem_size),
+        }));
+        bd.statements.push(Statement::new(
+            source_info,
+            StatementKind::Assign(Box::new((
+                Place::from(size_local),
+                Rvalue::BinaryOp(BinOp::Mul, Box::new((len_op, elem_const))),
+            ))),
+        ));
+        Operand::Move(Place::from(size_local))
+    };
+
+    let ret = local_decls.push(LocalDecl::new(tcx.types.unit, source_info.span));
+    bd.terminator = Some(Terminator {
+        source_info,
+        kind: TerminatorKind::Call {
+            func: Operand::function_handle(tcx, fns.check_extent, [], source_info.span),
+            args: Box::new([
+                Spanned {
+                    node: Operand::Move(Place::from(fault_arg)),
+                    span: source_info.span,
+                },
+                Spanned {
+                    node: Operand::Move(Place::from(root_arg)),
+                    span: source_info.span,
+                },
+                Spanned {
+                    node: size_operand,
+                    span: source_info.span,
+                },
+            ]),
             destination: Place::from(ret),
             target: Some(new_block),
             unwind: UnwindAction::Unreachable,
@@ -1462,4 +1606,14 @@ fn is_raw_ptr_local(decls: &IndexVec<Local, LocalDecl<'_>>, local: Local) -> boo
 /// is a safe-pointer dereference, checked only in `through` mode.
 fn is_ref_local(decls: &IndexVec<Local, LocalDecl<'_>>, local: Local) -> bool {
     matches!(decls[local].ty.kind(), ty::Ref(..))
+}
+
+/// Whether a local is a slice reference (`&[T]` / `&mut [T]`) — the result type
+/// of `slice::from_raw_parts{,_mut}`, distinguishing it from the owning
+/// `Vec`/`String::from_raw_parts` (which return `Vec`/`String`).
+fn is_slice_ref_local(decls: &IndexVec<Local, LocalDecl<'_>>, local: Local) -> bool {
+    match decls[local].ty.kind() {
+        ty::Ref(_, pointee, _) => matches!(pointee.kind(), ty::Slice(_)),
+        _ => false,
+    }
 }

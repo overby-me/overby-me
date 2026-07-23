@@ -51,6 +51,8 @@
       ./corpus/lru-0130/Cargo.lock
       # The point-1 raw->safe cast OOB reproducer (no third-party deps).
       ./corpus/cast-oob/Cargo.lock
+      # The point-1 slice-constructor extent reproducer (no third-party deps).
+      ./corpus/slice-oob/Cargo.lock
       # Heap UAF with mint-site naming (no third-party deps).
       ./corpus/heap-mint/Cargo.lock
       # Write-intrinsic extent overrun (no third-party deps).
@@ -502,6 +504,44 @@ in {
           nu corpus/assert_cast_oob.nu "through/$name" "$TMPDIR/t-$name.log" "$t_exit"
           nu corpus/assert_cast_oob.nu "case/$name" "$TMPDIR/c-$name.log" "$c_exit"
         done
+      '';
+
+    # Slice-constructor extent check (point 1, the case-mode slice-reborrow
+    # gap): a `&[u64]` built with slice::from_raw_parts(buf.as_ptr(), 1000) over
+    # a four-element buffer, then indexed at 500 — in bounds of the slice's
+    # *claimed* length but far past the real allocation. Vetting the slice's
+    # extent at the from_raw_parts mint (the raw->safe cast for a slice) catches
+    # the length lie at construction, so BOTH modes abort OutOfBounds naming the
+    # owning buffer — case elides the slice's later derefs (a direct s[i] read
+    # never even forms a raw deref in its MIR), so the mint is the only
+    # checkpoint. The slice analog of the cast-oob reborrow ensure.
+    fe-c-slice-oob = pkgs:
+      cargoCheck pkgs "slice-oob" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=slice_oob
+
+        # through mode: the slice's later safe deref is checked -> abort.
+        ( cd corpus/slice-oob \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/slice-oob" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        # case mode (FEC_MODE unset): the slice's derefs are elided, but the
+        # from_raw_parts mint check still catches the length lie -> abort.
+        ( cd corpus/slice-oob \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/slice-oob" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_slice_oob.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Write-intrinsic extent overrun (point 0, write path): a
