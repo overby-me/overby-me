@@ -56,6 +56,12 @@ pub fn Home(app: Option<String>) -> Element {
     }
 }
 
+/// Whether the signed-in user owns the currently resolved page's context.
+/// Written by [`PathResolver`] as pages resolve; read by the navigation
+/// surfaces (`layout::breadcrumbs::context_apps`) so the owner-only apps
+/// (members, console) only show for context owners.
+pub(crate) static CTX_IS_OWNER: GlobalSignal<bool> = Signal::global(|| false);
+
 /// Resolves a path to a node and renders the matching app. The query re-runs
 /// whenever the path (or token) changes.
 #[component]
@@ -81,6 +87,21 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
             graphql::query_root_node(access_token.as_deref()).await
         } else {
             graphql::resolve_path(access_token.as_deref(), &segs).await
+        }
+    });
+
+    // Publish whether the user owns this page's context, for the nav surfaces
+    // (owner-only rail apps). An effect rather than a render-time write, and
+    // only on a resolved result — while a navigation is still loading the last
+    // value stands, so the rail doesn't flicker between contexts.
+    use_effect(move || {
+        let owner = match &*node_future.read() {
+            Some(Ok(Some(node))) => node.is_context_owner.unwrap_or(false),
+            Some(_) => false,
+            None => return,
+        };
+        if *CTX_IS_OWNER.peek() != owner {
+            *CTX_IS_OWNER.write() = owner;
         }
     });
 

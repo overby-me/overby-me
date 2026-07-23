@@ -431,13 +431,10 @@ mod dom {
                             extra = true;
                         }
                     }
-                    Node::TEXT_NODE => {
-                        if child
-                            .text_content()
-                            .is_some_and(|t| !t.trim().is_empty())
-                        {
-                            extra = true;
-                        }
+                    Node::TEXT_NODE
+                        if child.text_content().is_some_and(|t| !t.trim().is_empty()) =>
+                    {
+                        extra = true;
                     }
                     _ => {}
                 }

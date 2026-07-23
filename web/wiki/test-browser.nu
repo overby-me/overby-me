@@ -1087,12 +1087,13 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
                 wd-post $"/session/($session_id)/actions" ({ actions: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerMove", duration: 30, origin: "viewport", x: 3, y: 400 }] }] } | to json) | ignore
                 sleep 200ms
             }
-            # Only the ready apps (folder/speak/vote/member) are in the rail; the
-            # rest (graph/social/...) are hidden until ready.
-            let rail = (wd-execute $session_id 'return JSON.stringify({vote:document.querySelector(".nav-rail a[href*=\"app=vote\"]")?1:0, speak:document.querySelector(".nav-rail a[href*=\"app=speak\"]")?1:0, member:document.querySelector(".nav-rail a[href*=\"app=member\"]")?1:0, graph:document.querySelector(".nav-rail a[href*=\"app=graph\"]")?1:0, social:document.querySelector(".nav-rail a[href*=\"app=social\"]")?1:0})')
-            let ok = (try { let j = ($rail | from json); ($j.vote == 1) and ($j.speak == 1) and ($j.member == 1) and ($j.graph == 0) and ($j.social == 0) } catch { false })
+            # Only the ready apps (folder/speak/vote, plus member + console for
+            # this context's owner) are in the rail; the rest (graph/social/...)
+            # are hidden until ready.
+            let rail = (wd-execute $session_id 'return JSON.stringify({vote:document.querySelector(".nav-rail a[href*=\"app=vote\"]")?1:0, speak:document.querySelector(".nav-rail a[href*=\"app=speak\"]")?1:0, member:document.querySelector(".nav-rail a[href*=\"app=member\"]")?1:0, admin:document.querySelector(".nav-rail a[href*=\"app=admin\"]")?1:0, graph:document.querySelector(".nav-rail a[href*=\"app=graph\"]")?1:0, social:document.querySelector(".nav-rail a[href*=\"app=social\"]")?1:0})')
+            let ok = (try { let j = ($rail | from json); ($j.vote == 1) and ($j.speak == 1) and ($j.member == 1) and ($j.admin == 1) and ($j.graph == 0) and ($j.social == 0) } catch { false })
             if $ok {
-                log-ok "app rail shows only the ready apps"; $p = $p + 1
+                log-ok "app rail shows the ready apps + owner surfaces (owned context)"; $p = $p + 1
             } else {
                 log-fail $"app rail set unexpected: ($rail)"; $fl = $fl + 1
             }
@@ -1101,6 +1102,26 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         }
     } else {
         log-warn "app rail not found — skipping app-switch check"
+    }
+
+    # ── Owner-gated rail apps: on a context the account does NOT own, the
+    #    Members and Console entries are absent (both showed on the owned
+    #    hermetic context just above). Uses any plain (non-owner) membership of
+    #    the account; skips when it owns everything it can see. ──
+    let nonown_key = (try { wd-execute $session_id ($gql + 'var r=gql("query{members(where:{owner:{_eq:false},accepted:{_eq:true}}){parent{key mimeId}}}",{});var k="none";try{var ms=r.data.members.filter(function(m){return m.parent&&(m.parent.mimeId=="wiki/group"||m.parent.mimeId=="wiki/event")&&/^[a-zA-Z0-9_-]+$/.test(m.parent.key)});if(ms.length)k=ms[0].parent.key}catch(e){}return k;') } catch { "none" })
+    if ($nonown_key == "none") or ($nonown_key == null) or ($nonown_key | is-empty) {
+        log-warn "no non-owned context visible — skipping owner-gated rail check"
+    } else {
+        wd-navigate $session_id $"(base-url)/($nonown_key)"
+        wd-wait-y $session_id 'return document.querySelector(".nav-rail a[href*=\"app=vote\"]")?"y":"n"' 8000 | ignore
+        sleep 800ms
+        let gated = (wd-execute $session_id 'return JSON.stringify({vote:document.querySelector(".nav-rail a[href*=\"app=vote\"]")?1:0, member:document.querySelector(".nav-rail a[href*=\"app=member\"]")?1:0, admin:document.querySelector(".nav-rail a[href*=\"app=admin\"]")?1:0})')
+        let gok = (try { let j = ($gated | from json); ($j.vote == 1) and ($j.member == 0) and ($j.admin == 0) } catch { false })
+        if $gok {
+            log-ok $"members + console hidden on a non-owned context \(/($nonown_key))"; $p = $p + 1
+        } else {
+            log-fail $"owner-gated rail apps wrong for a non-owner: ($gated) at /($nonown_key)"; $fl = $fl + 1
+        }
     }
 
     # ── Breadcrumbs start at the context (nearest group/event), not the root ──

@@ -479,18 +479,17 @@ pub(super) fn context_apps(
         ),
     ];
     if is_auth {
-        for (app, label) in [
-            ("speak", t("mime.speak")),
-            ("vote", t("mime.vote")),
-            // Members: React only surfaces this to owners, but MemberApp gates
-            // its admin controls itself, so the entry is safe for any authed user.
-            ("member", t("common.members")),
-        ] {
+        // Members and the chair console are owner surfaces: only context owners
+        // get their rail/bar entries (written by the path resolver as pages
+        // load). Their deep links still resolve for everyone; the apps gate
+        // their admin controls themselves.
+        let is_ctx_owner = crate::components::loader::CTX_IS_OWNER();
+        for (app, label) in [("speak", t("mime.speak")), ("vote", t("mime.vote"))] {
             apps.push((
-                match app {
-                    "speak" => "app/speak",
-                    "vote" => "app/vote",
-                    _ => "app/member",
+                if app == "speak" {
+                    "app/speak"
+                } else {
+                    "app/vote"
                 },
                 label,
                 Route::PathPage {
@@ -498,6 +497,17 @@ pub(super) fn context_apps(
                     app: Some(app.to_string()),
                 },
                 current_app.as_deref() == Some(app),
+            ));
+        }
+        if is_ctx_owner {
+            apps.push((
+                "app/member",
+                t("common.members"),
+                Route::PathPage {
+                    segments: ctx_path.clone(),
+                    app: Some("member".to_string()),
+                },
+                current_app.as_deref() == Some("member"),
             ));
         }
         // Follow the room: a member's device tracks the context's active node
@@ -512,17 +522,18 @@ pub(super) fn context_apps(
             },
             current_app.as_deref() == Some("follow"),
         ));
-        // The chair's run-the-meeting console (agenda + project + results). Owner
-        // actions gate themselves inside; members see the agenda/results read-only.
-        apps.push((
-            "app/admin",
-            t("console.title"),
-            Route::PathPage {
-                segments: ctx_path.clone(),
-                app: Some("admin".to_string()),
-            },
-            current_app.as_deref() == Some("admin"),
-        ));
+        // The chair's run-the-meeting console (agenda + project + results).
+        if is_ctx_owner {
+            apps.push((
+                "app/admin",
+                t("console.title"),
+                Route::PathPage {
+                    segments: ctx_path.clone(),
+                    app: Some("admin".to_string()),
+                },
+                current_app.as_deref() == Some("admin"),
+            ));
+        }
         // The other apps (screen, program, graph, social, map, profile, perm,
         // parent) are still reachable via their `?app=` URL but hidden from these
         // nav surfaces until they are ready to show. (admin IS shown, just above.)
