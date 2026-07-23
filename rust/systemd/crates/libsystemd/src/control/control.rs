@@ -4848,6 +4848,14 @@ fn create_transient_unit(
                             .push(value.to_string());
                     }
                 }
+                "NUMAPolicy" => {
+                    service_conf.exec_config.numa_policy =
+                        (!value.is_empty()).then(|| value.to_string());
+                }
+                "NUMAMask" => {
+                    service_conf.exec_config.numa_mask =
+                        (!value.is_empty()).then(|| value.to_string());
+                }
                 "MountAPIVFS" => {
                     service_conf.exec_config.mount_api_vfs =
                         Some(matches!(value, "yes" | "true" | "1"));
