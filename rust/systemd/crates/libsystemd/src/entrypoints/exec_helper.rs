@@ -171,6 +171,190 @@ fn resolve_ambient_caps(names: &[String]) -> Vec<u64> {
     caps
 }
 
+// ── PAMName= session support ─────────────────────────────────────────────
+//
+// When a unit sets PAMName=, systemd runs the named PAM stack while spawning
+// the service: the account and session phases run as root, before the UID
+// drop. This is how pam_systemd's `default-capability-ambient-set=` reaches a
+// service — pam_sm_open_session() raises the requested capabilities in this
+// process's ambient set, and we read them back afterwards and fold them into
+// the ambient set that is re-applied after the UID change (mirroring upstream
+// exec-invoke.c setup_pam() + `capability_ambient_set |= ambient_after_pam`).
+//
+// libpam is loaded at runtime via dlopen so the manager keeps its otherwise
+// native-dependency-free build. The absolute library path is baked in at
+// compile time from the Nix build (PAM_LIB env), falling back to the standard
+// soname when built outside Nix.
+const PAM_LIB_PATH: &str = match option_env!("PAM_LIB") {
+    Some(p) => p,
+    None => "libpam.so.0",
+};
+
+// From <security/_pam_types.h>.
+const PAM_SUCCESS: libc::c_int = 0;
+const PAM_SILENT: libc::c_int = 0x8000;
+const PAM_ESTABLISH_CRED: libc::c_int = 0x0002;
+
+// prctl(PR_CAP_AMBIENT, ...) sub-command. Defined locally so the build does
+// not depend on the libc crate exposing this particular constant.
+const PR_CAP_AMBIENT_IS_SET: libc::c_int = 1;
+
+#[repr(C)]
+struct PamMessage {
+    msg_style: libc::c_int,
+    msg: *const libc::c_char,
+}
+
+#[repr(C)]
+struct PamResponse {
+    resp: *mut libc::c_char,
+    resp_retcode: libc::c_int,
+}
+
+#[repr(C)]
+struct PamConv {
+    conv: Option<
+        unsafe extern "C" fn(
+            libc::c_int,
+            *mut *const PamMessage,
+            *mut *mut PamResponse,
+            *mut libc::c_void,
+        ) -> libc::c_int,
+    >,
+    appdata_ptr: *mut libc::c_void,
+}
+
+/// Minimal PAM conversation callback. Services never authenticate
+/// interactively, so we allocate an empty (zeroed) response array for any
+/// prompts and ignore informational/error messages. PAM frees the array and
+/// each response string with free(3), so it must come from the C allocator.
+unsafe extern "C" fn pam_noop_conv(
+    num_msg: libc::c_int,
+    _msg: *mut *const PamMessage,
+    resp: *mut *mut PamResponse,
+    _appdata: *mut libc::c_void,
+) -> libc::c_int {
+    if num_msg <= 0 || resp.is_null() {
+        return PAM_SUCCESS;
+    }
+    let arr =
+        unsafe { libc::calloc(num_msg as libc::size_t, std::mem::size_of::<PamResponse>()) }
+            as *mut PamResponse;
+    if arr.is_null() {
+        return 5; // PAM_BUF_ERR
+    }
+    unsafe { *resp = arr };
+    PAM_SUCCESS
+}
+
+type PamStartFn = unsafe extern "C" fn(
+    *const libc::c_char,
+    *const libc::c_char,
+    *const PamConv,
+    *mut *mut libc::c_void,
+) -> libc::c_int;
+type PamFlagsFn = unsafe extern "C" fn(*mut libc::c_void, libc::c_int) -> libc::c_int;
+type PamEndFn = unsafe extern "C" fn(*mut libc::c_void, libc::c_int) -> libc::c_int;
+
+/// Run the account + session phases of the named PAM stack for `user`, as the
+/// current (root) process. On success the process's ambient capability set
+/// reflects any `default-capability-ambient-set=` from pam_systemd; the caller
+/// reads it back with [`read_ambient_caps`].
+///
+/// Every failure is returned as `Err` so the caller can warn and continue
+/// without the session — running a service without its PAM stack matches the
+/// pre-existing behaviour (PAMName= used to be ignored), so this can never
+/// regress a service that previously started.
+fn run_pam_session(service: &str, user: &str) -> Result<(), String> {
+    use std::ffi::CString;
+
+    let c_service =
+        CString::new(service).map_err(|_| "PAMName contains a NUL byte".to_string())?;
+    let c_user = CString::new(user).map_err(|_| "user name contains a NUL byte".to_string())?;
+    let c_lib =
+        CString::new(PAM_LIB_PATH).map_err(|_| "PAM_LIB path contains a NUL byte".to_string())?;
+
+    // RTLD_GLOBAL so the PAM modules libpam dlopens can resolve its symbols.
+    let handle = unsafe { libc::dlopen(c_lib.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
+    if handle.is_null() {
+        return Err(format!("dlopen({PAM_LIB_PATH}) failed"));
+    }
+
+    macro_rules! sym {
+        ($name:literal, $ty:ty) => {{
+            let s = unsafe { libc::dlsym(handle, concat!($name, "\0").as_ptr() as *const libc::c_char) };
+            if s.is_null() {
+                return Err(format!("dlsym({}) failed", $name));
+            }
+            unsafe { std::mem::transmute::<*mut libc::c_void, $ty>(s) }
+        }};
+    }
+
+    let pam_start = sym!("pam_start", PamStartFn);
+    let pam_acct_mgmt = sym!("pam_acct_mgmt", PamFlagsFn);
+    let pam_setcred = sym!("pam_setcred", PamFlagsFn);
+    let pam_open_session = sym!("pam_open_session", PamFlagsFn);
+    let pam_end = sym!("pam_end", PamEndFn);
+
+    let conv = PamConv {
+        conv: Some(pam_noop_conv),
+        appdata_ptr: std::ptr::null_mut(),
+    };
+    let mut pamh: *mut libc::c_void = std::ptr::null_mut();
+
+    let r = unsafe { pam_start(c_service.as_ptr(), c_user.as_ptr(), &conv, &mut pamh) };
+    if r != PAM_SUCCESS || pamh.is_null() {
+        return Err(format!("pam_start failed ({r})"));
+    }
+
+    // Account and credential phases are best-effort: warn but keep going so a
+    // module quirk can't block the session (and the ambient caps) we need.
+    let r = unsafe { pam_acct_mgmt(pamh, PAM_SILENT) };
+    if r != PAM_SUCCESS {
+        log::warn!("pam_acct_mgmt for service '{service}' returned {r}, continuing");
+    }
+    let r = unsafe { pam_setcred(pamh, PAM_ESTABLISH_CRED | PAM_SILENT) };
+    if r != PAM_SUCCESS {
+        log::warn!("pam_setcred for service '{service}' returned {r}, continuing");
+    }
+
+    let r = unsafe { pam_open_session(pamh, PAM_SILENT) };
+    if r != PAM_SUCCESS {
+        // Tear the handle down (without closing a session that never opened).
+        unsafe { pam_end(pamh, r) };
+        return Err(format!("pam_open_session failed ({r})"));
+    }
+
+    // The session is intentionally left open: pam_close_session must run in the
+    // same process, but this process is about to execve() the service. A
+    // faithful implementation would fork a holder that closes the session when
+    // the service exits; for now the session is reaped by logind's GC. We keep
+    // the PAM handle alive (no pam_end) so its session data survives the exec.
+    Ok(())
+}
+
+/// Read the set of capabilities currently raised in this process's ambient
+/// set, via prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_IS_SET, ...). Used to fold
+/// PAM-provided ambient caps into the set re-applied after the UID drop.
+fn read_ambient_caps() -> Vec<u64> {
+    let mut caps = Vec::new();
+    for cap in 0u64..=63 {
+        let r = unsafe {
+            libc::prctl(
+                libc::PR_CAP_AMBIENT,
+                PR_CAP_AMBIENT_IS_SET,
+                cap as libc::c_ulong,
+                0,
+                0,
+            )
+        };
+        if r == 1 {
+            caps.push(cap);
+        }
+    }
+    caps
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct ExecHelperConfig {
     pub name: String,
@@ -502,6 +686,14 @@ pub struct ExecHelperConfig {
     /// creating a fresh one with PrivateUsers=.
     #[serde(default)]
     pub user_namespace_path: Option<String>,
+
+    /// PAMName= — name of a PAM service stack to run when spawning the
+    /// service. The account and session phases are run as root before the
+    /// UID drop; pam_systemd's `default-capability-ambient-set=` reaches the
+    /// service this way (its ambient caps are folded into the set re-applied
+    /// after the UID change). See systemd.exec(5).
+    #[serde(default)]
+    pub pam_name: Option<String>,
 
     /// IPCNamespacePath= — path to an existing IPC namespace to join.
     /// Mutually exclusive with PrivateIPC=.
@@ -2527,9 +2719,44 @@ pub fn run_exec_helper() {
         config.privileged_prefix,
     );
 
+    // PAMName=: run the PAM account + session stack as root, before the UID
+    // drop, so pam_systemd's `default-capability-ambient-set=` raises ambient
+    // caps we can fold into the set re-applied below. Failures are non-fatal
+    // (the service still starts without the session, as it did when PAMName=
+    // was ignored) so this can never regress an existing PAMName= unit.
+    let mut pam_ambient_caps: Vec<u64> = Vec::new();
+    if let Some(pam_name) = config.pam_name.as_deref().filter(|s| !s.is_empty()) {
+        let username = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(config.user))
+            .ok()
+            .flatten()
+            .map(|u| u.name)
+            .unwrap_or_else(|| config.user.to_string());
+        match run_pam_session(pam_name, &username) {
+            Ok(()) => {
+                pam_ambient_caps = read_ambient_caps();
+                log::trace!(
+                    "PAM session '{}' opened for user '{}'; ambient caps from PAM: {:?}",
+                    pam_name,
+                    username,
+                    pam_ambient_caps
+                );
+            }
+            Err(e) => {
+                log::warn!("Failed to set up PAM session '{pam_name}', continuing without it: {e}");
+            }
+        }
+    }
+
     // Resolve ambient capabilities BEFORE dropping privileges so we can
-    // set PR_SET_KEEPCAPS and retain them across the UID change.
-    let ambient_caps = resolve_ambient_caps(&config.ambient_capabilities);
+    // set PR_SET_KEEPCAPS and retain them across the UID change. Ambient caps
+    // contributed by the PAM session (above) are merged in so the post-drop
+    // re-raise keeps them too.
+    let mut ambient_caps = resolve_ambient_caps(&config.ambient_capabilities);
+    for cap in pam_ambient_caps {
+        if !ambient_caps.contains(&cap) {
+            ambient_caps.push(cap);
+        }
+    }
 
     log::trace!("about to drop privileges...");
 

@@ -1018,6 +1018,7 @@ fn start_service_with_filedescriptors(
         private_ipc: conf.exec_config.private_ipc.unwrap_or(false),
         network_namespace_path: conf.exec_config.network_namespace_path.clone(),
         user_namespace_path: conf.exec_config.user_namespace_path.clone(),
+        pam_name: conf.exec_config.pam_name.clone(),
         ipc_namespace_path: conf.exec_config.ipc_namespace_path.clone(),
         timer_slack_nsec: conf
             .exec_config

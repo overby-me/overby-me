@@ -13,7 +13,7 @@
   };
 
   packages = {
-    rust-systemd = {lib, ...}:
+    rust-systemd = {lib, pam, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd";
         version = "unstable";
@@ -30,6 +30,14 @@
         index = ../../nix/lib/cargo/index;
 
         features = ["dbus_support"];
+
+        # libsystemd dlopens libpam at runtime for PAMName= session setup; bake
+        # the absolute library path in via PAM_LIB (see exec_helper.rs).
+        crateOverrides = {
+          libsystemd = {
+            PAM_LIB = "${pam}/lib/libpam.so.0";
+          };
+        };
 
         meta = {
           description = "A service manager that is able to run \"traditional\" systemd services, written in rust";
@@ -48,7 +56,7 @@
     # latent manager bugs surface as visible PID 1 panics instead of the silent
     # wraparound a release build would produce.  Behavior otherwise matches the
     # release build; only optimization and these runtime checks differ.
-    rust-systemd-dev = {lib, ...}:
+    rust-systemd-dev = {lib, pam, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd-dev";
         version = "unstable";
@@ -66,6 +74,14 @@
 
         features = ["dbus_support"];
         release = false;
+
+        # libsystemd dlopens libpam at runtime for PAMName= session setup; bake
+        # the absolute library path in via PAM_LIB (see exec_helper.rs).
+        crateOverrides = {
+          libsystemd = {
+            PAM_LIB = "${pam}/lib/libpam.so.0";
+          };
+        };
 
         meta = {
           description = "rust-systemd built for fast development iteration (debug + wild)";
