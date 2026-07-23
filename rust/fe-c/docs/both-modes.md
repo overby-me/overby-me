@@ -118,9 +118,11 @@ relationship, exactly as the tables predict:
 | `heap-mint` | heap UAF, mint named | abort | abort | both name `minted_at`; `case` also `read_at` (both-sites debuggability) |
 | `through-safe-ref` | safe-ref stack UAF | abort | **elide** | the bolded row: `case` elides safe-pointer derefs |
 | `rusqlite-0128` | safe-ref stack UAF (real CVE) | abort | **elide** | same elision |
+| `partial-sort-0016` | real CVE: heap over-read past a `Vec` (debug-assert-only bound) | abort | **elide** | same elision, on a heap-spatial read: `case` elides the safe-reference reads, so the read-only over-read is uncaught until the library's own bounds-checked write panics |
 
-The **only** violations `through` catches that `case` misses are the
-safe-pointer-deref stack use-after-scope reads — precisely the elision the
-bolded row documents. No undocumented gap: the gate passes. (Concurrent
-free-during-scope, F3, is the other stated `case` limitation; it is not
-exercised by this single-threaded corpus.)
+The **only** violations `through` catches that `case` misses are
+safe-pointer-deref reads — precisely the elision the bolded row documents,
+whether the read is a stack use-after-scope (`through-safe-ref`, `rusqlite-0128`)
+or a heap spatial over-read (`partial-sort-0016`). No undocumented gap: the gate
+passes. (Concurrent free-during-scope, F3, is the other stated `case`
+limitation; it is not exercised by this single-threaded corpus.)

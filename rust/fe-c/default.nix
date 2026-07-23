@@ -71,6 +71,9 @@
       # The real RUSTSEC-2025-0109 corpus: binary_vec_io 0.1.12 (single &T ->
       # from_raw_parts slice of n*size_of::<T>() bytes, out-of-bounds for n>1).
       ./corpus/binary-vec-io-0109/Cargo.lock
+      # The real RUSTSEC-2023-0016 corpus: partial_sort 0.1.1 (debug-assert-only
+      # bound -> out-of-bounds read in optimized builds; through-catches).
+      ./corpus/partial-sort-0016/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -619,6 +622,43 @@ in {
         echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
         echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
         nu corpus/assert_binary_vec_io_0109.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
+      '';
+
+    # The real RUSTSEC-2023-0016 (through-catches / case-elides on a real
+    # spatial OOB): partial_sort 0.1.1 validates its `last` argument with a
+    # `debug_assert!`, elided in optimized/no-debug-assert builds (the fixture's
+    # dev profile sets debug-assertions=false, opt-level=3 — the only shape the
+    # CVE manifests in, and it inlines core's get_unchecked into partial_sort's
+    # MIR). `partial_sort(v, 40, ..)` on a 10-element Vec then reads past the
+    # buffer. through checks the safe-reference reads and aborts OutOfBounds at
+    # the first out-of-bounds element (naming the Vec buffer); case elides those
+    # safe derefs (the documented both-modes elision), so fe-c does not catch the
+    # read-only over-read and the library's own bounds-checked write panics (the
+    # advisory's limiting behavior). The spatial-OOB analog of through-safe-ref.
+    fe-c-partial-sort-0016 = pkgs:
+      cargoCheck pkgs "partial-sort-0016" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=partial_sort_0016,partial_sort
+
+        ( cd corpus/partial-sort-0016 \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/partial-sort-0016" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        ( cd corpus/partial-sort-0016 \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/partial-sort-0016" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_partial_sort_0016.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Write-intrinsic extent overrun (point 0, write path): a
