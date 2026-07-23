@@ -1619,6 +1619,27 @@ fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
         insert(props, "NUMAMask", mask);
     }
 
+    // CPUAffinity= — the literal `numa` resolves to the CPU list of the
+    // NUMAMask nodes (read from /sys/devices/system/node/nodeN/cpulist),
+    // matching systemd; a numeric list is shown as configured.
+    if !conf.cpu_affinity.is_empty() {
+        let rendered = if conf.cpu_affinity.iter().any(|t| t == "numa") {
+            let nodes = conf
+                .numa_mask
+                .as_deref()
+                .and_then(crate::numa::parse_numa_mask)
+                .unwrap_or_default();
+            crate::numa::numa_cpu_list(&nodes)
+        } else {
+            Some(conf.cpu_affinity.join(" "))
+        };
+        if let Some(a) = rendered
+            && !a.is_empty()
+        {
+            insert(props, "CPUAffinity", &a);
+        }
+    }
+
     // LogExtraFields=
     if !conf.log_extra_fields.is_empty() {
         insert(props, "LogExtraFields", &conf.log_extra_fields.join(" "));

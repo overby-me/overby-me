@@ -167,6 +167,98 @@ pub fn apply_numa_policy(policy: &NumaPolicy) -> NumaResult {
     Ok(())
 }
 
+/// Resolve `CPUAffinity=numa` to the CPU list of the given NUMA nodes, read
+/// from `/sys/devices/system/node/nodeN/cpulist`. For a single node the sysfs
+/// content is returned verbatim (an exact match for the kernel's formatting);
+/// multiple nodes are unioned and re-formatted as a compressed range list. An
+/// empty `nodes` slice means "all online nodes".
+pub fn numa_cpu_list(nodes: &[usize]) -> Option<String> {
+    let node_list: Vec<usize> = if nodes.is_empty() {
+        online_numa_nodes()
+    } else {
+        nodes.to_vec()
+    };
+    if node_list.is_empty() {
+        return None;
+    }
+    if node_list.len() == 1 {
+        let path = format!("/sys/devices/system/node/node{}/cpulist", node_list[0]);
+        return std::fs::read_to_string(path)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+    }
+    let mut cpus = std::collections::BTreeSet::new();
+    for n in node_list {
+        let path = format!("/sys/devices/system/node/node{n}/cpulist");
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            for cpu in parse_cpu_range_list(content.trim()) {
+                cpus.insert(cpu);
+            }
+        }
+    }
+    if cpus.is_empty() {
+        None
+    } else {
+        Some(format_cpu_range_list(&cpus))
+    }
+}
+
+/// List online NUMA node indices from `/sys/devices/system/node`.
+fn online_numa_nodes() -> Vec<usize> {
+    let mut nodes = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/sys/devices/system/node") {
+        for e in entries.flatten() {
+            if let Some(idx) = e
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_prefix("node"))
+                .and_then(|i| i.parse::<usize>().ok())
+            {
+                nodes.push(idx);
+            }
+        }
+    }
+    nodes.sort_unstable();
+    nodes
+}
+
+/// Parse a kernel cpulist string (`"0-3"`, `"0,2-4"`) into CPU indices.
+fn parse_cpu_range_list(s: &str) -> Vec<usize> {
+    let mut cpus = Vec::new();
+    for tok in s.split(',').filter(|t| !t.is_empty()) {
+        if let Some((a, b)) = tok.split_once('-') {
+            if let (Ok(a), Ok(b)) = (a.trim().parse::<usize>(), b.trim().parse::<usize>()) {
+                cpus.extend(a..=b);
+            }
+        } else if let Ok(c) = tok.trim().parse::<usize>() {
+            cpus.push(c);
+        }
+    }
+    cpus
+}
+
+/// Format sorted CPU indices as a compressed kernel-style range list (`"0-3"`).
+fn format_cpu_range_list(cpus: &std::collections::BTreeSet<usize>) -> String {
+    let mut out = String::new();
+    let mut iter = cpus.iter().copied().peekable();
+    while let Some(start) = iter.next() {
+        let mut end = start;
+        while iter.peek() == Some(&(end + 1)) {
+            end = iter.next().unwrap();
+        }
+        if !out.is_empty() {
+            out.push(',');
+        }
+        if start == end {
+            out.push_str(&start.to_string());
+        } else {
+            out.push_str(&format!("{start}-{end}"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
