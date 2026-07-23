@@ -119,17 +119,22 @@ smallvec spatial, -0128 rusqlite stack-borrow-FFI, -0130 lru heap UAF).
 
 **Corpus catchability (see MEMORY: fe-c-corpus-catchability).** Rust
 global-allocator heap OOB/UAF **and** libc-malloc'd buffers (via interpose)
-catch cleanly, **when the unsafe deref is in the instrumented crate's own MIR**
-— a raw `*p`/`&*p` (simple-slab) or a `ptr::write`/`copy` call (toodee,
-smallvec). The **next breadth unlock is `-Zbuild-std` (D1)**: crates whose OOB is
-routed through a *core* method — `ptr::as_ref()` (`caja` RUSTSEC-2026-0130),
-`get_unchecked`, slice `Index` on a bad `from_raw_parts` slice (`binary_vec_io`)
-— aren't caught because the deref lives in uninstrumented `core`. Building `core`
-under instrumentation would open that subset, analogous to how interposition
-opened the allocation subset. Also deferred: `bumpalo` (RUSTSEC-2022-0078, custom
-arena) did not abort — the freed-chunk read got un-reused data, needs
-investigation; concurrency/data-race CVEs (e.g. `atom`) are out of scope for
-single-thread v0.
+catch cleanly when the unsafe deref lands in instrumented MIR — a raw `*p`/`&*p`
+(simple-slab), a `ptr::write`/`copy` call (toodee, smallvec), **or a core deref
+that inlines into the crate** (slice `Index`/`get_unchecked` on a bad
+`from_raw_parts` slice inlines, so `through` catches it — tested, aborts
+OutOfBounds, **no `-Zbuild-std` needed**). **`-Zbuild-std` (D1) was tested and is
+NOT the corpus force-multiplier** it was assumed to be: instrumenting `core`
+makes `compiler_builtins` fail ("cannot call functions through upstream
+monomorphizations", from `__fec_*` calls injected into arithmetic impls), and
+it's unnecessary since the common core-routed OOB (slice indexing) already
+inlines. D1's real value is whole-process `../libc` coverage (D2), not corpus
+breadth. Real remaining gaps: (a) `case` mode misses inlined slice reborrows —
+`through` catches the slice OOB but `case` NO_ABORTs, the reborrow the elision
+relies on doesn't get a point-1 `ensure` after inlining (a spatial `case` gap,
+like the field-reborrow one); (b) non-inlined core *calls* + interprocedural
+provenance (`caja` `ptr::as_ref`, RUSTSEC-2026-0130). Also deferred: `bumpalo`
+(custom arena) and concurrency CVEs (`atom`).
 
 **Assert integrity fixed.** The corpus asserts' failure messages contained
 `(exit ($exit_code))`, which nushell runs as a subexpression (`exit 0`),
