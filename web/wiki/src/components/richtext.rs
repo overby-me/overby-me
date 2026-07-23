@@ -232,10 +232,15 @@ mod dom {
         }
     }
 
-    /// The Slate `align` for an element's `text-align`, if any.
+    /// The Slate `align` for an element's `text-align`, if any. Firefox's
+    /// `justifyCenter` & co (with `styleWithCSS = false`) set the legacy
+    /// `align` ATTRIBUTE rather than an inline style, so read both.
     fn read_align(el: &Element) -> Option<String> {
-        let html = el.dyn_ref::<web_sys::HtmlElement>()?;
-        let ta = html.style().get_property_value("text-align").ok()?;
+        let ta = el
+            .dyn_ref::<web_sys::HtmlElement>()
+            .and_then(|h| h.style().get_property_value("text-align").ok())
+            .filter(|s| !s.is_empty())
+            .or_else(|| el.get_attribute("align"))?;
         match ta.as_str() {
             "center" => Some("center".to_string()),
             "right" => Some("right".to_string()),
@@ -405,6 +410,44 @@ mod dom {
             "LI" => "list-item",
             _ => "paragraph",
         };
+        // Firefox's list commands wrap the list in the line's own <div>
+        // (`<div><ul>…</ul></div>`); serializing that wrapper as a paragraph
+        // would flatten the list to plain text. When a paragraph-ish element
+        // holds exactly one block child and nothing else, unwrap into it.
+        if ty == "paragraph" {
+            let kids = el.child_nodes();
+            let mut only_block: Option<Element> = None;
+            let mut extra = false;
+            for i in 0..kids.length() {
+                let Some(child) = kids.get(i) else { continue };
+                match child.node_type() {
+                    Node::ELEMENT_NODE => {
+                        let Some(cel) = child.dyn_ref::<Element>() else {
+                            continue;
+                        };
+                        if is_block_tag(&cel.tag_name().to_uppercase()) && only_block.is_none() {
+                            only_block = Some(cel.clone());
+                        } else {
+                            extra = true;
+                        }
+                    }
+                    Node::TEXT_NODE => {
+                        if child
+                            .text_content()
+                            .is_some_and(|t| !t.trim().is_empty())
+                        {
+                            extra = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(inner) = only_block {
+                if !extra {
+                    return block_from_element(&inner);
+                }
+            }
+        }
         let mut pairs = vec![("type", Value::from(ty))];
         if let Some(align) = read_align(el) {
             pairs.push(("align", Value::from(align)));

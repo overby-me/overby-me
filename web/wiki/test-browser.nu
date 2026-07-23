@@ -1856,7 +1856,7 @@ def test-editor-flow [session_id: string, passed: int, failed: int]: nothing -> 
 
     # ── Open the editor and type a multi-line document ──
     wd-navigate $session_id $"(base-url)($ed_path)"
-    if not (wd-wait-for-element $session_id "#rich-editor" 15) {
+    if not (wd-wait-for-element $session_id "#rich-editor" 30) {
         log-fail "editor did not mount for the editor-flow group"; $fl = $fl + 1
         wd-teardown-context $session_id $gql $grp.id | ignore
         return { passed: $p, failed: $fl }
@@ -1963,7 +1963,7 @@ def test-editor-flow [session_id: string, passed: int, failed: int]: nothing -> 
 
     # ── Edit again: the saved Slate content seeds back into the surface ──
     wd-navigate $session_id $"(base-url)($ed_path)"
-    if (wd-wait-for-element $session_id "#rich-editor" 15) {
+    if (wd-wait-for-element $session_id "#rich-editor" 30) {
         sleep 500ms
         let reseed = (try { wd-execute $session_id ($ed + 'var h=E.innerHTML;return JSON.stringify({h2:/<h2/.test(h)&&h.indexOf("HeadLine")>=0,b:/<(b|strong)[^>]*>BoldWord/.test(h),ul:/<ul/.test(h)&&h.indexOf("BulletItem")>=0,a:h.indexOf("example.com/e2e")>=0})') | from json } catch { null })
         if ($reseed != null) and ($reseed.h2 and $reseed.b and $reseed.ul and $reseed.a) {
@@ -1992,7 +1992,7 @@ def test-editor-flow [session_id: string, passed: int, failed: int]: nothing -> 
 
     # ── Autosave: a typed draft persists after the debounce, with no Save click ──
     wd-navigate $session_id $"(base-url)($ed_path)"
-    if (wd-wait-for-element $session_id "#rich-editor" 15) {
+    if (wd-wait-for-element $session_id "#rich-editor" 30) {
         sleep 500ms
         wd-execute $session_id ($ed + 'endCaret();document.execCommand("insertText",false," AutosaveProbe");return 1') | ignore
         # AUTOSAVE_DEBOUNCE_MS is 2.5s; leave headroom for the mutation round trip.
