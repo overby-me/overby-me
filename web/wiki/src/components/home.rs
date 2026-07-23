@@ -91,6 +91,9 @@ pub fn HomeApp() -> Element {
                                     icon: super::loader::mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
                                     label: member.label(),
                                     title: t("member.author"),
+                                    // The author's profile picture (e.g. their
+                                    // linked Bluesky avatar) shows on the chip.
+                                    avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()),
                                 }
                             }
                         }
