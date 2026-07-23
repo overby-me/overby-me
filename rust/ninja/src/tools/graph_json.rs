@@ -187,9 +187,15 @@ fn json_escape(s: &str) -> String {
 fn expand_in_edge(state: &State, edge: &Edge, value: &str) -> String {
     let rule = state.rules.get(&edge.rule);
     let in_str = edge.inputs.join(" ");
+    // `$in_newline` is the newline-separated form of `$in`; CMake's linker rules
+    // list object files only in the response file via `rspfile_content =
+    // $in_newline ...`. Without this, rspfile_content is emitted empty and the
+    // lowered link fails with "ld: no object files specified".
+    let in_newline_str = edge.inputs.join("\n");
     let out_str = edge.outputs.join(" ");
     expand(value, &|name| match name {
         "in" => Some(in_str.clone()),
+        "in_newline" => Some(in_newline_str.clone()),
         "out" => Some(out_str.clone()),
         _ => {
             if let Some(v) = edge.bindings.get(name) {
