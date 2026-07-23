@@ -112,11 +112,16 @@ fn preflight() -> Response<Body> {
 /// The atproto OAuth *client metadata* document, served at a stable public URL
 /// that doubles as the `client_id`. A public client (`token_endpoint_auth_method
 /// = none`) with PKCE + DPoP, so no client secret / JWKS is required.
+///
+/// `client_uri` must share the `client_id`'s origin — Bluesky's authorization
+/// server enforces this at PAR (`invalid_client_metadata: client_uri must have
+/// the same origin as the client_id`), so pointing it at the app origin broke
+/// every link attempt. The function origin is the only origin we serve from.
 fn client_metadata(cfg: &oauth::Config) -> Response<Body> {
     let doc = serde_json::json!({
         "client_id": cfg.client_id(),
         "client_name": "RadikalWiki",
-        "client_uri": cfg.app_origin,
+        "client_uri": cfg.function_origin,
         "redirect_uris": [cfg.redirect_uri()],
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
