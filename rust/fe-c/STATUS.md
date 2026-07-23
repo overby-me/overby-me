@@ -88,11 +88,11 @@ yet: point 2 (`through` covers loaded pointers via safe-deref checking;
 `case`'s "load from memory" variant is subsumed by point 1 for now), point 3a
 (FFI inbound prologue), and the `through` performance layer (T2 shadow slots).
 
-All 21 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+All 22 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
 `false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
 `through-safe-ref`, `rusqlite-0128`, `lru-0130`, `cast-oob`, `heap-mint`,
-`copy-overrun`, `smallvec-0009`, `differential`.
+`copy-overrun`, `smallvec-0009`, `simple-slab-0039`, `differential`.
 
 **Point 0 is fully extent-aware for reads *and* writes.** The write-intrinsic
 path (`ptr::copy`/`copy_nonoverlapping`/`write_bytes`/`write`) now goes through
@@ -101,21 +101,26 @@ path (`ptr::copy`/`copy_nonoverlapping`/`write_bytes`/`write`) now goes through
 destination starts in bounds but overruns is caught — `corpus/copy-overrun`.
 Only unsized elements keep the single-address check.
 
-**Four real CVEs now caught.** Added **RUSTSEC-2019-0009** (`smallvec 0.6.9`
-`grow()` use-after-free) in both modes — `grow(cap)` with `cap == capacity`
-skips the realloc but still deallocates, leaving a dangling pointer; the read
-aborts `UseAfterFree`. Joins RUSTSEC-2021-0003 (smallvec spatial), -0128
-(rusqlite stack-borrow-across-FFI), -0130 (lru heap UAF).
+**Five real CVEs now caught**, and the **libc interposition tier (A4) now
+catches a real CVE end to end**: **RUSTSEC-2020-0039** (`simple-slab 0.3.2`
+unchecked-`index()` OOB read of a **`libc::malloc`'d** buffer). Three pieces
+together (`fe-c-simple-slab-0039`, both modes abort `OutOfBounds`): interposition
+registers the foreign allocation (`codegen-units=1` on cementite links the
+`#[no_mangle] malloc` override into the dependent binary — the earlier
+"needs `--whole-archive`" belief was **wrong**, CGU=1 suffices), the
+**opaque-origin root fix** roots the malloc'd pointer so the index offset
+resolves from the base, and instrumentation scoped to the binary + slab crate
+checks `index()`. Also added **RUSTSEC-2019-0009** (`smallvec 0.6.9` `grow()`
+UAF). Joins -2021-0003 (smallvec spatial), -0128 (rusqlite stack-borrow-FFI),
+-0130 (lru heap UAF).
 
-**Corpus catchability (see MEMORY: fe-c-corpus-catchability).** Clean wins are
-single-threaded heap OOB/UAF in **Rust global-allocator** crates. Deferred:
-`simple-slab` (RUSTSEC-2020-0039, libc-malloc'd buffer) needs the interpose
-tier, but cementite's `#[no_mangle] malloc` override does not link into a
-dependent binary as an rlib (archive linking drops it; glibc's malloc wins) —
-needs `--whole-archive`/link-forcing, a real integration task. `bumpalo`
-(RUSTSEC-2022-0078, custom arena) did not abort — the freed-chunk read got
-un-reused data; needs investigation. Concurrency/data-race CVEs (e.g. `atom`)
-are out of scope for single-thread v0.
+**Corpus catchability (see MEMORY: fe-c-corpus-catchability).** Rust
+global-allocator heap OOB/UAF **and** libc-malloc'd buffers (via interpose)
+catch cleanly. The interposition-reachable corpus subset (CORPUS.md note 5, a
+majority) is now unlocked. Still deferred: `bumpalo` (RUSTSEC-2022-0078, custom
+arena) did not abort — the freed-chunk read got un-reused data, needs
+investigation; concurrency/data-race CVEs (e.g. `atom`) are out of scope for
+single-thread v0.
 
 **Assert integrity fixed.** The corpus asserts' failure messages contained
 `(exit ($exit_code))`, which nushell runs as a subexpression (`exit 0`),
