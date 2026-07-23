@@ -2933,6 +2933,128 @@ fn read_default_limit_nofile() -> Option<crate::units::ResourceLimit> {
     None
 }
 
+/// Read the `[Manager] NUMAPolicy=` / `NUMAMask=` settings from system.conf and
+/// its drop-ins into a [`crate::numa::NumaPolicy`]. `type_` is `-1` when no
+/// `NUMAPolicy=` is configured. Later sources override earlier ones, matching
+/// systemd's config precedence (base file, then /usr/lib, /etc, /run drop-ins).
+fn read_manager_numa_policy() -> crate::numa::NumaPolicy {
+    let mut policy_str: Option<String> = None;
+    let mut mask_str: Option<String> = None;
+
+    let mut sources: Vec<std::path::PathBuf> = vec![
+        std::path::PathBuf::from("/usr/lib/systemd/system.conf"),
+        std::path::PathBuf::from("/etc/systemd/system.conf"),
+    ];
+    for dir in [
+        "/usr/lib/systemd/system.conf.d",
+        "/etc/systemd/system.conf.d",
+        "/run/systemd/system.conf.d",
+    ] {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut files: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+            files.sort();
+            sources.extend(files);
+        }
+    }
+
+    for path in sources {
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let mut in_manager = false;
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                in_manager = line.eq_ignore_ascii_case("[Manager]");
+                continue;
+            }
+            if !in_manager {
+                continue;
+            }
+            if let Some(v) = line.strip_prefix("NUMAPolicy=") {
+                policy_str = Some(v.trim().to_string());
+            } else if let Some(v) = line.strip_prefix("NUMAMask=") {
+                mask_str = Some(v.trim().to_string());
+            }
+        }
+    }
+
+    let type_ = policy_str
+        .as_deref()
+        .and_then(crate::numa::mpol_from_string)
+        .unwrap_or(-1);
+    let nodes = mask_str
+        .as_deref()
+        .and_then(crate::numa::parse_numa_mask)
+        .unwrap_or_default();
+    crate::numa::NumaPolicy { type_, nodes }
+}
+
+fn errno_str(e: i32) -> String {
+    // Safe: strerror returns a pointer to a static/thread-local C string.
+    unsafe {
+        std::ffi::CStr::from_ptr(libc::strerror(e))
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+/// Read and apply PID 1's own NUMA memory policy from `[Manager] NUMAPolicy=`.
+///
+/// MUST be called on TID 1: `set_mempolicy(2)` affects the calling task, and
+/// the Manager policy is PID 1's. Logs to the journal (as `init.scope`, since
+/// journald attributes by the sender's cgroup) the same messages systemd does,
+/// which TEST-36-NUMAPOLICY greps for. Does nothing when no `NUMAPolicy=` is
+/// set (mirrors systemd's `update_numa_policy`, which skips an unset type).
+pub fn apply_manager_numa_policy() {
+    let policy = read_manager_numa_policy();
+    if policy.get_type() < 0 {
+        return;
+    }
+    match crate::numa::apply_numa_policy(&policy) {
+        Ok(()) => log::debug!("Set NUMA memory policy"),
+        Err(e) if e == libc::EOPNOTSUPP => {
+            crate::control::varlink::journal_log_with_fields(
+                "NUMA support not available, ignoring",
+                7,
+                &[],
+            );
+        }
+        Err(e) => {
+            let msg = format!("Failed to set NUMA memory policy, ignoring: {}", errno_str(e));
+            crate::control::varlink::journal_log_with_fields(&msg, 4, &[]);
+        }
+    }
+}
+
+static MANAGER_NUMA_REAPPLY: std::sync::OnceLock<(std::sync::Mutex<bool>, std::sync::Condvar)> =
+    std::sync::OnceLock::new();
+
+fn numa_reapply_slot() -> &'static (std::sync::Mutex<bool>, std::sync::Condvar) {
+    MANAGER_NUMA_REAPPLY.get_or_init(|| (std::sync::Mutex::new(false), std::sync::Condvar::new()))
+}
+
+/// Request that the main thread (TID 1) re-apply the Manager NUMA policy.
+/// Called from the `daemon-reload` handler, which runs on a worker thread;
+/// `set_mempolicy` must run on TID 1, so the work is handed to the main thread.
+pub fn request_manager_numa_reapply() {
+    let (lock, cvar) = numa_reapply_slot();
+    if let Ok(mut pending) = lock.lock() {
+        *pending = true;
+        cvar.notify_one();
+    }
+}
+
+/// Block until a NUMA re-apply is requested. Run by the main thread (TID 1).
+pub fn wait_for_manager_numa_reapply() {
+    let (lock, cvar) = numa_reapply_slot();
+    let mut pending = lock.lock().unwrap();
+    while !*pending {
+        pending = cvar.wait(pending).unwrap();
+    }
+    *pending = false;
+}
+
 ///
 /// Transient units are not backed by a unit file on disk — they exist only in
 /// memory for the lifetime of the service manager (or until explicitly removed).
@@ -10344,6 +10466,12 @@ pub fn execute_command(
             // This allows `systemctl daemon-reload` to pick up changes to
             // /run/systemd/system.conf or /etc/systemd/system.conf.
             parse_manager_environment(&run_info);
+
+            // Re-apply PID 1's own NUMA memory policy from [Manager] NUMAPolicy=.
+            // set_mempolicy(2) affects the calling task, so it must run on TID 1;
+            // this handler runs on a worker thread, so hand the work to the main
+            // thread (which services it in its post-boot loop).
+            request_manager_numa_reapply();
 
             // Hoist the disk rescan OUT of the write critical section: unit
             // file parsing takes hundreds of milliseconds and needs only the

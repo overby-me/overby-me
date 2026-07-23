@@ -94,6 +94,11 @@ pub fn run_service_manager() {
 
     logging::setup_logging(&log_conf).unwrap();
 
+    // Apply PID 1's own NUMA memory policy from [Manager] NUMAPolicy= now, on
+    // TID 1 while still single-threaded (set_mempolicy(2) affects the calling
+    // task). daemon-reload later re-applies it via the main-thread loop below.
+    crate::control::apply_manager_numa_policy();
+
     // Log the selected boot target — especially useful when emergency/rescue
     // mode was requested via kernel command line.
     let target = &conf.target_unit;
@@ -191,7 +196,7 @@ pub fn run_service_manager() {
         }
     };
     // listen to signals
-    let handle = start_signal_handler_thread(signals, run_info.clone());
+    let _signal_handle = start_signal_handler_thread(signals, run_info.clone());
 
     // If this is a daemon-reexec, restore PID tracking for running services.
     // This must happen after the signal handler is running (so SIGCHLD is
@@ -305,8 +310,17 @@ pub fn run_service_manager() {
         units::activate_needed_units(target_id, run_info);
     }
 
-    kmsg("initial activation returned; entering signal loop");
-    handle.join().unwrap();
+    kmsg("initial activation returned; entering main-thread task loop");
+    // The main thread (TID 1) now services tasks that must run on PID 1 itself.
+    // Currently that is re-applying the Manager NUMA memory policy on
+    // `daemon-reload`: set_mempolicy(2) affects the calling task, and the reload
+    // runs on a worker thread, which hands the re-apply here. This blocks the
+    // main thread the way the previous `handle.join()` did; process shutdown is
+    // driven by the signal-handler thread, so the loop runs until process exit.
+    loop {
+        control::wait_for_manager_numa_reapply();
+        control::apply_manager_numa_policy();
+    }
 }
 
 /// Entry point for the per-user service manager (`systemd --user`).
