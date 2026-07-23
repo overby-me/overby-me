@@ -21,10 +21,11 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 use serde_json::{json, Value};
 use wasm_bindgen::prelude::*;
 
-/// Write-only ingestion token; `None` (unset at build) leaves shipping off.
+/// Set at build (any value) when this build should ship logs; `None` leaves
+/// shipping off (console only). Presence, not the value, is the switch — the
+/// actual ingest token lives on the backend, which does the Better Stack call
+/// (see `backend/src/logs.rs`), so no secret is baked into the wasm bundle.
 const SOURCE_TOKEN: Option<&str> = option_env!("BETTERSTACK_SOURCE_TOKEN");
-/// The source's ingesting host (Better Stack gives one per source).
-const INGEST_HOST: Option<&str> = option_env!("BETTERSTACK_INGEST_HOST");
 const MAX_BREADCRUMBS: usize = 50;
 const FLUSH_INTERVAL_MS: u32 = 5000;
 
@@ -37,11 +38,11 @@ thread_local! {
     static SESSION_ID: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
+/// The backend log-ingest proxy (it forwards to Better Stack server-side). Going
+/// through our own origin keeps the ship off Better Stack's CORS (whose
+/// `Allow-Headers: *` excludes `Authorization`) and the token out of the client.
 fn ingest_url() -> String {
-    format!(
-        "https://{}",
-        INGEST_HOST.unwrap_or("in.logs.betterstack.com")
-    )
+    format!("{}/log", crate::backend_api::BACKEND_URL)
 }
 
 /// The wall-clock now as an RFC 3339 string (Logtail's `dt`).
@@ -244,9 +245,13 @@ fn setup_breadcrumbs() {
     });
 }
 
-/// Ship any queued entries via a batched HTTP POST (browser fetch via reqwest).
+/// Ship any queued entries via a batched HTTP POST to the backend proxy (browser
+/// fetch via reqwest). No auth header: the request is same-origin-friendly and
+/// the backend holds the ingest token.
 async fn flush() {
-    let Some(token) = SOURCE_TOKEN else { return };
+    if SOURCE_TOKEN.is_none() {
+        return;
+    }
     let batch: Vec<Value> = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
     if batch.is_empty() {
         return;
@@ -254,7 +259,6 @@ async fn flush() {
     // Best-effort: on failure the batch is dropped rather than growing unbounded.
     let _ = reqwest::Client::new()
         .post(ingest_url())
-        .bearer_auth(token)
         .json(&batch)
         .send()
         .await;
@@ -273,7 +277,9 @@ fn start_flush_loop() {
 /// about to abort and an async flush could not complete). A blocking XHR is
 /// deliberate here: it guarantees the panic reaches the server.
 fn ship_sync(entry: Value) {
-    let Some(token) = SOURCE_TOKEN else { return };
+    if SOURCE_TOKEN.is_none() {
+        return;
+    }
     let body = Value::Array(vec![entry]).to_string();
     let Ok(xhr) = web_sys::XmlHttpRequest::new() else {
         return;
@@ -281,7 +287,6 @@ fn ship_sync(entry: Value) {
     if xhr.open_with_async("POST", &ingest_url(), false).is_err() {
         return;
     }
-    let _ = xhr.set_request_header("Authorization", &format!("Bearer {token}"));
     let _ = xhr.set_request_header("Content-Type", "application/json");
     let _ = xhr.send_with_opt_str(Some(&body));
 }

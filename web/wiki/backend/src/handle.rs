@@ -20,6 +20,7 @@ mod auth;
 mod dpop;
 mod error;
 mod feedback;
+mod logs;
 mod members;
 mod nhost;
 mod notify;
@@ -62,6 +63,11 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
     // Roster parse reads the uploaded .xlsx from the request body (consumes req).
     if path == "/roster/parse" {
         return roster::handle_parse(cfg, req, bearer_owned.as_deref()).await;
+    }
+    // Frontend log shipping: forward the batched JSON body to Better Stack (also
+    // consumes req). Kept off the query dispatch below for the same reason.
+    if path == "/log" {
+        return logs::ingest(cfg, client, req).await;
     }
 
     // Extract the rest as `&str` (Send) — never hold a `&Request` across an await,
