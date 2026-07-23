@@ -523,6 +523,15 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub cpu_affinity: Vec<String>,
 
+    /// NUMAPolicy= — NUMA memory policy name (default/preferred/bind/interleave/
+    /// local), applied via set_mempolicy() before exec.
+    #[serde(default)]
+    pub numa_policy: Option<String>,
+
+    /// NUMAMask= — NUMA node mask for NUMAPolicy=, applied with the policy.
+    #[serde(default)]
+    pub numa_mask: Option<String>,
+
     /// PrivatePIDs= — if true, a new PID namespace is created and /proc is
     /// remounted so the service process becomes PID 1 in the new namespace.
     /// See systemd.exec(5).
@@ -2382,6 +2391,30 @@ pub fn run_exec_helper() {
                     std::io::Error::last_os_error()
                 );
             }
+        }
+    }
+
+    // Apply NUMAPolicy=/NUMAMask= via set_mempolicy() before exec. On failure
+    // (e.g. an invalid policy such as bind/interleave without a mask) exit 242,
+    // matching systemd's EXIT_NUMA_POLICY exec error.
+    {
+        let numa_policy = crate::numa::NumaPolicy {
+            type_: config
+                .numa_policy
+                .as_deref()
+                .and_then(crate::numa::mpol_from_string)
+                .unwrap_or(-1),
+            nodes: config
+                .numa_mask
+                .as_deref()
+                .and_then(crate::numa::parse_numa_mask)
+                .unwrap_or_default(),
+        };
+        if numa_policy.get_type() >= 0
+            && let Err(e) = crate::numa::apply_numa_policy(&numa_policy)
+        {
+            log::error!("Failed to set NUMA policy (errno {e}), exiting");
+            std::process::exit(242);
         }
     }
 

@@ -1611,6 +1611,14 @@ fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
         insert(props, "OOMScoreAdjust", &adj.to_string());
     }
 
+    // NUMAPolicy= / NUMAMask=
+    if let Some(ref pol) = conf.numa_policy {
+        insert(props, "NUMAPolicy", pol);
+    }
+    if let Some(ref mask) = conf.numa_mask {
+        insert(props, "NUMAMask", mask);
+    }
+
     // LogExtraFields=
     if !conf.log_extra_fields.is_empty() {
         insert(props, "LogExtraFields", &conf.log_extra_fields.join(" "));
