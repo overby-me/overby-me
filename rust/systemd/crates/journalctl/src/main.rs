@@ -2405,22 +2405,40 @@ fn main() {
     // --reverse controls direction.  With --reverse, the cursor becomes an
     // upper bound (iterate backwards from cursor).  Without --reverse it is
     // a lower bound (iterate forward from cursor).
+    // Cursor comparisons use (realtime, seqnum) to match the chronological
+    // order entries are sorted by (read_all_from_files sorts by realtime then
+    // seqnum). Comparing seqnum alone is inconsistent when the latest-realtime
+    // entry is not the highest-seqnum entry, which breaks --cursor-file /
+    // --after-cursor phase isolation (an older entry leaks past the saved tail
+    // cursor). Fall back to seqnum-only for a cursor that carries no t= field.
     if let Some(ref cursor_str) = effective_cursor
         && effective_after_cursor.is_none()
-        && let Some((seqnum, _realtime)) = parse_cursor(cursor_str)
+        && let Some((seqnum, realtime)) = parse_cursor(cursor_str)
     {
         if cli.reverse {
-            filtered.retain(|e| e.seqnum <= seqnum);
+            if realtime != 0 {
+                filtered.retain(|e| (e.realtime_usec, e.seqnum) <= (realtime, seqnum));
+            } else {
+                filtered.retain(|e| e.seqnum <= seqnum);
+            }
+        } else if realtime != 0 {
+            filtered.retain(|e| (e.realtime_usec, e.seqnum) >= (realtime, seqnum));
         } else {
             filtered.retain(|e| e.seqnum >= seqnum);
         }
     }
 
     if let Some(ref cursor_str) = effective_after_cursor
-        && let Some((seqnum, _realtime)) = parse_cursor(cursor_str)
+        && let Some((seqnum, realtime)) = parse_cursor(cursor_str)
     {
         if cli.reverse {
-            filtered.retain(|e| e.seqnum < seqnum);
+            if realtime != 0 {
+                filtered.retain(|e| (e.realtime_usec, e.seqnum) < (realtime, seqnum));
+            } else {
+                filtered.retain(|e| e.seqnum < seqnum);
+            }
+        } else if realtime != 0 {
+            filtered.retain(|e| (e.realtime_usec, e.seqnum) > (realtime, seqnum));
         } else {
             filtered.retain(|e| e.seqnum > seqnum);
         }
