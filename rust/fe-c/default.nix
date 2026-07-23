@@ -65,6 +65,9 @@
       ./corpus/simple-slab-0039/Cargo.lock
       # The real RUSTSEC-2021-0028 corpus: toodee 0.2.0 (insert_row OOB write).
       ./corpus/toodee-0028/Cargo.lock
+      # The real RUSTSEC-2022-0079 corpus: elf_rs 0.2.0 (unvalidated section
+      # count -> from_raw_parts slice past the input buffer).
+      ./corpus/elf-rs-0079/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -542,6 +545,43 @@ in {
         echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
         echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
         nu corpus/assert_slice_oob.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
+      '';
+
+    # The real RUSTSEC-2022-0079 (slice-constructor length lie in a REAL crate):
+    # elf_rs 0.2.0's section_header_raw builds
+    # `from_raw_parts(content.as_ptr().add(sh_off), sh_num)` with sh_off/sh_num
+    # taken straight from the (attacker-controlled) ELF header, unvalidated. A
+    # crafted header with a huge section count yields a slice far past the input
+    # buffer. The slice-constructor extent check catches the lie at the
+    # from_raw_parts mint in BOTH modes, naming the owning buffer. This exercises
+    # the check on a GENERIC element (`from_raw_parts::<ET::SectionHeader>`),
+    # whose size is synthesized by an injected size_of::<T>() that monomorphizes
+    # — through cannot catch it (the element is indexed via core's `.get()`, out
+    # of elf_rs's instrumented MIR), so the mint check is the only checkpoint.
+    fe-c-elf-rs-0079 = pkgs:
+      cargoCheck pkgs "elf-rs-0079" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=elf_rs_0079,elf_rs
+
+        ( cd corpus/elf-rs-0079 \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/elf-rs-0079" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        ( cd corpus/elf-rs-0079 \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/elf-rs-0079" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_elf_rs_0079.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Write-intrinsic extent overrun (point 0, write path): a

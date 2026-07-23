@@ -578,55 +578,129 @@ fn instrument_slice_ctor<'tcx>(
     let data_local = data_place.local;
     let len_op = args[1].node.clone();
 
-    // Element size `size_of::<T>()` for the `*const T` data pointer. A slice
-    // element is always `Sized`, but be defensive: without a static size there
-    // is nothing to bound, so skip.
-    let Some(elem_size) = local_decls[data_local]
-        .ty
-        .builtin_deref(true)
-        .and_then(|pointee| tcx.layout_of(typing_env.as_query_input(pointee)).ok())
-        .map(|layout| layout.size.bytes())
-    else {
+    // The slice element type `T` and its size. `size_of::<T>()` is resolved as a
+    // constant when the element is concrete; a generic element (elf_rs's
+    // `from_raw_parts::<ET::SectionHeader>`) needs the size_of call path below.
+    let Some(pointee_ty) = local_decls[data_local].ty.builtin_deref(true) else {
         return 0;
+    };
+    // Concrete elements resolve to a constant size; a *generic* element
+    // (elf_rs's `from_raw_parts::<ET::SectionHeader>`) has no static layout here,
+    // so its size is synthesized by a `core::mem::size_of::<T>()` call that
+    // monomorphizes with the instance. Resolve `size_of` up front so a failure
+    // to resolve it bails before any block is mutated.
+    let elem_size = tcx
+        .layout_of(typing_env.as_query_input(pointee_ty))
+        .ok()
+        .map(|layout| layout.size.bytes());
+    let size_of_fn = if elem_size.is_none() {
+        match resolve_size_of(tcx) {
+            Some(did) => Some(did),
+            None => return 0,
+        }
+    } else {
+        None
     };
 
     let root_local = roots.get(&data_local).copied().unwrap_or(data_local);
 
-    // Move the original from_raw_parts call into a fresh block; this block's
-    // terminator becomes the extent check, targeting it.
+    // Move the original from_raw_parts call into a fresh block; the injected
+    // check ends in its target.
     let orig = basic_blocks[block].terminator.take();
     let is_cleanup = basic_blocks[block].is_cleanup;
     let new_block = basic_blocks.push(BasicBlockData::new_stmts(Vec::new(), orig, is_cleanup));
 
     let u8_ptr = Ty::new_imm_ptr(tcx, tcx.types.u8);
-    let bd = &mut basic_blocks[block];
-    let fault_arg = cast_to_u8_ptr(local_decls, bd, data_local, u8_ptr, source_info);
-    let root_arg = cast_to_u8_ptr(local_decls, bd, root_local, u8_ptr, source_info);
+    let fault_arg = cast_to_u8_ptr(
+        local_decls,
+        &mut basic_blocks[block],
+        data_local,
+        u8_ptr,
+        source_info,
+    );
+    let root_arg = cast_to_u8_ptr(
+        local_decls,
+        &mut basic_blocks[block],
+        root_local,
+        u8_ptr,
+        source_info,
+    );
+    // `len` as a Copy operand: `usize` is Copy, and the from_raw_parts call moved
+    // into `new_block` still reads it.
+    let len_copy = match len_op {
+        Operand::Move(p) => Operand::Copy(p),
+        other => other,
+    };
 
-    // size = len * size_of::<T>() (just `len` when the element is one byte).
-    // A bare `BinaryOp(Mul)` wraps rather than panicking (matching the write
-    // intrinsic's count*size), so the injected check never itself aborts.
-    let size_operand = if elem_size == 1 {
-        len_op
-    } else {
-        let size_local = local_decls.push(LocalDecl::new(tcx.types.usize, source_info.span));
-        let elem_const = Operand::Constant(Box::new(ConstOperand {
-            span: source_info.span,
-            user_ty: None,
-            const_: MirConst::from_usize(tcx, elem_size),
-        }));
-        bd.statements.push(Statement::new(
-            source_info,
-            StatementKind::Assign(Box::new((
-                Place::from(size_local),
-                Rvalue::BinaryOp(BinOp::Mul, Box::new((len_op, elem_const))),
-            ))),
-        ));
-        Operand::Move(Place::from(size_local))
+    // Build the byte-size operand and the block whose terminator becomes the
+    // `check_extent` call: size = len * size_of::<T>(). A bare `BinaryOp(Mul)`
+    // wraps rather than panicking (matching the write intrinsic's count*size),
+    // so the injected check never itself aborts.
+    let (size_operand, check_block) = match elem_size {
+        // Concrete, one-byte element: size = len, inline in `block`.
+        Some(1) => (len_copy, block),
+        // Concrete, wider element: size = len * const, inline in `block`.
+        Some(sz) => {
+            let size_local = local_decls.push(LocalDecl::new(tcx.types.usize, source_info.span));
+            let elem_const = Operand::Constant(Box::new(ConstOperand {
+                span: source_info.span,
+                user_ty: None,
+                const_: MirConst::from_usize(tcx, sz),
+            }));
+            basic_blocks[block].statements.push(Statement::new(
+                source_info,
+                StatementKind::Assign(Box::new((
+                    Place::from(size_local),
+                    Rvalue::BinaryOp(BinOp::Mul, Box::new((len_copy, elem_const))),
+                ))),
+            ));
+            (Operand::Move(Place::from(size_local)), block)
+        }
+        // Generic element: `block` calls `size_of::<T>()` into `sizeof_local` and
+        // jumps to a fresh `mul_block`, which computes `len * sizeof` and then
+        // runs the check. `size_of_fn` was resolved above.
+        None => {
+            let size_of_fn = size_of_fn.expect("size_of resolved for a generic element");
+            let sizeof_local = local_decls.push(LocalDecl::new(tcx.types.usize, source_info.span));
+            let size_local = local_decls.push(LocalDecl::new(tcx.types.usize, source_info.span));
+            let mul_block = basic_blocks.push(BasicBlockData::new_stmts(
+                vec![Statement::new(
+                    source_info,
+                    StatementKind::Assign(Box::new((
+                        Place::from(size_local),
+                        Rvalue::BinaryOp(
+                            BinOp::Mul,
+                            Box::new((len_copy, Operand::Move(Place::from(sizeof_local)))),
+                        ),
+                    ))),
+                )],
+                None,
+                is_cleanup,
+            ));
+            basic_blocks[block].terminator = Some(Terminator {
+                source_info,
+                kind: TerminatorKind::Call {
+                    func: Operand::function_handle(
+                        tcx,
+                        size_of_fn,
+                        [pointee_ty.into()],
+                        source_info.span,
+                    ),
+                    args: Box::new([]),
+                    destination: Place::from(sizeof_local),
+                    target: Some(mul_block),
+                    unwind: UnwindAction::Unreachable,
+                    call_source: CallSource::Misc,
+                    fn_span: source_info.span,
+                },
+                attributes: ThinVec::new(),
+            });
+            (Operand::Move(Place::from(size_local)), mul_block)
+        }
     };
 
     let ret = local_decls.push(LocalDecl::new(tcx.types.unit, source_info.span));
-    bd.terminator = Some(Terminator {
+    basic_blocks[check_block].terminator = Some(Terminator {
         source_info,
         kind: TerminatorKind::Call {
             func: Operand::function_handle(tcx, fns.check_extent, [], source_info.span),
@@ -1616,4 +1690,27 @@ fn is_slice_ref_local(decls: &IndexVec<Local, LocalDecl<'_>>, local: Local) -> b
         ty::Ref(_, pointee, _) => matches!(pointee.kind(), ty::Slice(_)),
         _ => false,
     }
+}
+
+/// Resolves `core::mem::size_of` by walking the `core` crate's public module
+/// tree. It has no lang or diagnostic item in this toolchain, so it can't be
+/// looked up by symbol; the slice-constructor pass needs it to synthesize
+/// `size_of::<T>()` for a **generic** element, whose size is unknown until
+/// monomorphization. Returns `None` if `core` (or the path) can't be found, in
+/// which case the generic slice check is simply skipped.
+fn resolve_size_of(tcx: TyCtxt<'_>) -> Option<DefId> {
+    let core = tcx
+        .crates(())
+        .iter()
+        .copied()
+        .find(|&c| tcx.crate_name(c) == rustc_span::sym::core)?;
+    let mut cur = core.as_def_id();
+    for seg in ["mem", "size_of"] {
+        cur = tcx
+            .module_children(cur)
+            .iter()
+            .find(|ch| ch.ident.name.as_str() == seg)
+            .and_then(|ch| ch.res.opt_def_id())?;
+    }
+    Some(cur)
 }

@@ -91,12 +91,12 @@ yet: point 2 (`through` covers loaded pointers via safe-deref checking;
 `case`'s "load from memory" variant is subsumed by point 1 for now), point 3a
 (FFI inbound prologue), and the `through` performance layer (T2 shadow slots).
 
-All 24 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+All 25 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
 `false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
 `through-safe-ref`, `rusqlite-0128`, `lru-0130`, `cast-oob`, `slice-oob`,
-`heap-mint`, `copy-overrun`, `smallvec-0009`, `simple-slab-0039`,
-`toodee-0028`, `differential`.
+`elf-rs-0079`, `heap-mint`, `copy-overrun`, `smallvec-0009`,
+`simple-slab-0039`, `toodee-0028`, `differential`.
 
 **Point 0 is fully extent-aware for reads *and* writes.** The write-intrinsic
 path (`ptr::copy`/`copy_nonoverlapping`/`write_bytes`/`write`) now goes through
@@ -117,8 +117,12 @@ resolves from the base, and instrumentation scoped to the binary + slab crate
 checks `index()`. Also added **RUSTSEC-2021-0028** (`toodee 0.2.0` `insert_row`
 OOB *write* — a lying `ExactSizeIterator` under-reserves, then `ptr::write`s
 past the buffer, caught by the write-call extent check) and **RUSTSEC-2019-0009**
-(`smallvec 0.6.9` `grow()` UAF). **Six real CVEs total** (with -2021-0003
-smallvec spatial, -0128 rusqlite stack-borrow-FFI, -0130 lru heap UAF).
+(`smallvec 0.6.9` `grow()` UAF). Then **RUSTSEC-2022-0079** (`elf_rs 0.2.0`
+`section_header_raw` builds `from_raw_parts(ptr, sh_num)` with the ELF header's
+attacker-controlled section count, unvalidated — a slice far past the input
+buffer; caught at the mint by the slice-constructor extent check, in both modes).
+**Seven real CVEs total** (with -2021-0003 smallvec spatial, -0128 rusqlite
+stack-borrow-FFI, -0130 lru heap UAF).
 
 **Corpus catchability (see MEMORY: fe-c-corpus-catchability).** Rust
 global-allocator heap OOB/UAF **and** libc-malloc'd buffers (via interpose)
@@ -152,7 +156,20 @@ three-arg `Vec`/`String::from_raw_parts` is untouched; the false-positive suite
 stays clean (5.1M hashbrown checks). Also fixed the extent-overrun **report**:
 an access that starts in-bounds but overruns now reports the distance from the
 access *end* ("7968 byte(s) past" for the 1000-elem slice over a 4-elem buffer),
-not the misleading `0` the in-bounds start produced. Real remaining gap:
+not the misleading `0` the in-bounds start produced.
+
+**The slice check works on GENERIC elements too** (`fe-c-elf-rs-0079`,
+RUSTSEC-2022-0079), which most real `from_raw_parts` CVEs are. elf_rs's
+`from_raw_parts::<ET::SectionHeader>` is instrumented at the *generic*
+`optimized_mir`, where `layout_of` on the associated type fails — so the element
+size can't be a resolved constant. Instead the pass injects a
+`core::mem::size_of::<T>()` **call** (an extra block: `size_of` → `len * size` →
+`check_extent`), which monomorphizes with the instance at codegen. `size_of` has
+no lang/diagnostic item in this toolchain, so it's resolved by walking the
+`core` crate's module tree (`resolve_size_of`). Note `through` **cannot** catch
+elf_rs — its bad element is indexed via core's `.get()`, a call outside elf_rs's
+instrumented MIR — so the `from_raw_parts` mint check is the *only* checkpoint,
+in either mode. Real remaining gap:
 non-inlined core *calls* + interprocedural provenance (`caja` `ptr::as_ref`,
 RUSTSEC-2026-0130). Also deferred: `bumpalo` (custom arena) and concurrency CVEs
 (`atom`).
