@@ -91,12 +91,12 @@ yet: point 2 (`through` covers loaded pointers via safe-deref checking;
 `case`'s "load from memory" variant is subsumed by point 1 for now), point 3a
 (FFI inbound prologue), and the `through` performance layer (T2 shadow slots).
 
-All 25 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
+All 26 fe-c flake checks are green: `fmt`, `clippy`, `unit`, `miri`,
 `interpose`, `census`, `provenance`, `instrument`, `corpus-smallvec`,
 `false-positive`, `corpus-stackuaf`, `ffi-escape`, `closure-escape`,
 `through-safe-ref`, `rusqlite-0128`, `lru-0130`, `cast-oob`, `slice-oob`,
-`elf-rs-0079`, `heap-mint`, `copy-overrun`, `smallvec-0009`,
-`simple-slab-0039`, `toodee-0028`, `differential`.
+`elf-rs-0079`, `binary-vec-io-0109`, `heap-mint`, `copy-overrun`,
+`smallvec-0009`, `simple-slab-0039`, `toodee-0028`, `differential`.
 
 **Point 0 is fully extent-aware for reads *and* writes.** The write-intrinsic
 path (`ptr::copy`/`copy_nonoverlapping`/`write_bytes`/`write`) now goes through
@@ -120,9 +120,12 @@ past the buffer, caught by the write-call extent check) and **RUSTSEC-2019-0009*
 (`smallvec 0.6.9` `grow()` UAF). Then **RUSTSEC-2022-0079** (`elf_rs 0.2.0`
 `section_header_raw` builds `from_raw_parts(ptr, sh_num)` with the ELF header's
 attacker-controlled section count, unvalidated — a slice far past the input
-buffer; caught at the mint by the slice-constructor extent check, in both modes).
-**Seven real CVEs total** (with -2021-0003 smallvec spatial, -0128 rusqlite
-stack-borrow-FFI, -0130 lru heap UAF).
+buffer; caught at the mint by the slice-constructor extent check, in both modes)
+and **RUSTSEC-2025-0109** (`binary_vec_io 0.1.12` `binary_write_from_ref<T>`
+builds `from_raw_parts(p as *const u8, n * size_of::<T>())` from a single `&T`,
+out of bounds for `n > 1`; caught at the mint before the write). **Eight real
+CVEs total** (with -2021-0003 smallvec spatial, -0128 rusqlite stack-borrow-FFI,
+-0130 lru heap UAF).
 
 **Corpus catchability (see MEMORY: fe-c-corpus-catchability).** Rust
 global-allocator heap OOB/UAF **and** libc-malloc'd buffers (via interpose)

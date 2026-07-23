@@ -1,0 +1,25 @@
+# corpus-binary-vec-io-0109 (RUSTSEC-2025-0109): binary_vec_io 0.1.12's
+# `binary_write_from_ref<T>(f, p: &T, n)` builds
+# `slice::from_raw_parts(p as *const u8, n * size_of::<T>())` — an n-element-
+# worth byte slice over a single `T` — then writes it. With n > 1 the slice
+# reaches past the one-element allocation (an out-of-bounds read). The slice-
+# constructor extent check catches the lie at the from_raw_parts mint, before
+# the write, in both modes. Its own workspace; cementite is a path dependency
+# (the leaf binary installs FecAlloc, tracking the heap-boxed T). The
+# fe-c-binary-vec-io-0109 check builds it in both modes and asserts both abort
+# OutOfBounds.
+[workspace]
+
+[package]
+name = "binary-vec-io-0109"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cementite = { path = "../../crates/cementite" }
+binary_vec_io = "=0.1.12"
+
+[[bin]]
+name = "binary-vec-io-0109"
+path = "src/main.rs"

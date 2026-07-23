@@ -68,6 +68,9 @@
       # The real RUSTSEC-2022-0079 corpus: elf_rs 0.2.0 (unvalidated section
       # count -> from_raw_parts slice past the input buffer).
       ./corpus/elf-rs-0079/Cargo.lock
+      # The real RUSTSEC-2025-0109 corpus: binary_vec_io 0.1.12 (single &T ->
+      # from_raw_parts slice of n*size_of::<T>() bytes, out-of-bounds for n>1).
+      ./corpus/binary-vec-io-0109/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -582,6 +585,40 @@ in {
         echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
         echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
         nu corpus/assert_elf_rs_0079.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
+      '';
+
+    # The real RUSTSEC-2025-0109 (slice-constructor length lie): binary_vec_io
+    # 0.1.12's safe binary_write_from_ref<T>(f, p: &T, n) builds
+    # `from_raw_parts(p as *const u8, n * size_of::<T>())` — a byte slice n times
+    # the size of the single referent — then writes it. With n > 1 the slice
+    # reaches past the one-element allocation. The slice-constructor extent check
+    # catches the lie at the from_raw_parts mint (which runs before write_all),
+    # in BOTH modes, naming the owning heap allocation. A concrete-element (`u8`)
+    # slice whose runtime length is the crate's own `n * size_of::<T>()`.
+    fe-c-binary-vec-io-0109 = pkgs:
+      cargoCheck pkgs "binary-vec-io-0109" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=binary_vec_io_0109,binary_vec_io
+
+        ( cd corpus/binary-vec-io-0109 \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/binary-vec-io-0109" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        ( cd corpus/binary-vec-io-0109 \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/binary-vec-io-0109" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_binary_vec_io_0109.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Write-intrinsic extent overrun (point 0, write path): a

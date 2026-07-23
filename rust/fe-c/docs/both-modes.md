@@ -113,6 +113,7 @@ relationship, exactly as the tables predict:
 | `cast-oob whole-extent` | `*p` read wider than the alloc | abort | abort | whole-object extent check (`[p, p+size_of::<T>())`) |
 | `slice-oob` | `from_raw_parts` slice lies about its length | abort | abort | slice-extent check at the mint (point 1) — `case` elides the slice's derefs, so the `from_raw_parts` is the only checkpoint |
 | `elf-rs-0079` | real CVE: `elf_rs` `from_raw_parts` with an attacker section count | abort | abort | slice-extent check at the mint over a *generic* element (injected `size_of::<T>()`); the element is indexed via core's `.get()`, so the mint is the only checkpoint in **either** mode |
+| `binary-vec-io-0109` | real CVE: `binary_vec_io` `from_raw_parts(p, n*size_of::<T>())` from a single `&T` | abort | abort | slice-extent check at the mint (before `write_all` reads the slice); resolves the one-element heap allocation |
 | `lru-0130` | heap use-after-free | abort | abort | `case` via the dealloc-reachable re-check (point 4) |
 | `heap-mint` | heap UAF, mint named | abort | abort | both name `minted_at`; `case` also `read_at` (both-sites debuggability) |
 | `through-safe-ref` | safe-ref stack UAF | abort | **elide** | the bolded row: `case` elides safe-pointer derefs |
