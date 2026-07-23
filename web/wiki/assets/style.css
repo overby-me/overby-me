@@ -3101,6 +3101,16 @@ select:focus {
 	color: var(--md-primary);
 }
 
+/* A profile picture leading a chip (e.g. an author's linked Bluesky avatar):
+   a small round image in the icon slot. */
+.chip .chip-avatar {
+	width: 20px;
+	height: 20px;
+	border-radius: var(--md-sys-shape-corner-full);
+	object-fit: cover;
+	flex: 0 0 auto;
+}
+
 .chip-label {
 	overflow: hidden;
 	text-overflow: ellipsis;

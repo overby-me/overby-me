@@ -14,12 +14,22 @@ pub fn Spinner() -> Element {
 }
 
 /// A small outlined chip matching the old wiki's MUI outlined-secondary Chip: an
-/// optional leading Material icon (the mime icon) plus a label.
+/// optional leading Material icon (the mime icon) plus a label. A real profile
+/// picture in `avatar_url` (e.g. a linked Bluesky avatar) replaces the icon;
+/// NHost's gravatar placeholders don't count (same rule as `loader::user_avatar`).
 #[component]
-pub fn Chip(icon: Option<String>, label: String, title: Option<String>) -> Element {
+pub fn Chip(
+    icon: Option<String>,
+    label: String,
+    title: Option<String>,
+    avatar_url: Option<String>,
+) -> Element {
+    let avatar = avatar_url.filter(|u| !u.is_empty() && !u.contains("gravatar"));
     rsx! {
         span { class: "chip", title: title.unwrap_or_default(),
-            if let Some(icon) = icon {
+            if let Some(url) = avatar {
+                img { class: "chip-avatar", src: "{url}", alt: "", loading: "lazy" }
+            } else if let Some(icon) = icon {
                 span { class: "material-icons", "{icon}" }
             }
             span { class: "chip-label", "{label}" }
