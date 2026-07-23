@@ -576,6 +576,10 @@ pub struct LoginManager {
     /// When the caller drops their write-end, the read-end becomes readable
     /// and we can auto-release the inhibitor.
     inhibitor_pipes: HashMap<u64, OwnedFd>,
+    /// Session fifo read-ends, keyed by session id. CreateSession hands the
+    /// write-end to the caller (pam_systemd); we keep the read-end so the pipe
+    /// stays open for the session's lifetime (mirrors systemd's session fifo).
+    session_fifos: HashMap<String, OwnedFd>,
     /// VT_PROCESS monitors keyed by VT number.  Each monitor holds the tty
     /// fd open with VT_PROCESS mode so the kernel sends SIGUSR1/SIGUSR2
     /// instead of switching automatically.
@@ -647,6 +651,7 @@ impl LoginManager {
             power_button_devices: Vec::new(),
             config,
             inhibitor_pipes: HashMap::new(),
+            session_fifos: HashMap::new(),
             vt_monitors: HashMap::new(),
         };
 
@@ -2741,10 +2746,11 @@ impl Login1Manager {
     fn create_session(
         &self,
         uid: u32,
-        _pid: u32,
+        pid: u32,
         _service: String,
         stype: String,
         class: String,
+        _desktop: String,
         seat_id: String,
         vtnr: u32,
         tty: String,
@@ -2752,7 +2758,17 @@ impl Login1Manager {
         _remote: bool,
         _remote_user: String,
         _remote_host: String,
-    ) -> zbus::fdo::Result<(String, String, String, bool, u32, String, u32, bool)> {
+        _properties: Vec<(String, zbus::zvariant::OwnedValue)>,
+    ) -> zbus::fdo::Result<(
+        String,
+        zbus::zvariant::OwnedObjectPath,
+        String,
+        ZOwnedFd,
+        u32,
+        String,
+        u32,
+        bool,
+    )> {
         let mut mgr = self.mgr.lock().unwrap_or_else(|e| e.into_inner());
         let user = resolve_uid_to_name(uid);
         let seat = if seat_id.is_empty() {
@@ -2760,7 +2776,7 @@ impl Login1Manager {
         } else {
             Some(seat_id.as_str())
         };
-        let id = mgr.create_session(uid, &user, seat, vtnr, &stype, &class, &tty, _pid);
+        let id = mgr.create_session(uid, &user, seat, vtnr, &stype, &class, &tty, pid);
         mgr.sync_runtime_state();
         log::info!(
             "New session {} of user {} on {}",
@@ -2768,9 +2784,35 @@ impl Login1Manager {
             user,
             seat.unwrap_or("(no seat)")
         );
-        let obj_path = session_object_path(&id);
+
+        // Session fifo: hand the write-end to the caller (pam_systemd holds it
+        // for the session's lifetime), keep the read-end so the pipe stays
+        // open. Mirrors systemd's CreateSession "h" return; see inhibit().
+        let mut fds = [0 as RawFd; 2];
+        let rc = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
+        if rc != 0 {
+            return Err(zbus::fdo::Error::Failed(format!(
+                "pipe2 failed: {}",
+                io::Error::last_os_error()
+            )));
+        }
+        let read_end = unsafe { OwnedFd::from_raw_fd(fds[0]) };
+        let write_end = unsafe { OwnedFd::from_raw_fd(fds[1]) };
+        mgr.session_fifos.insert(id.clone(), read_end);
+
+        let obj_path = zbus::zvariant::OwnedObjectPath::try_from(session_object_path(&id))
+            .map_err(|e| zbus::fdo::Error::Failed(format!("invalid session object path: {e}")))?;
         let runtime_path = format!("/run/user/{}", uid);
-        Ok((id, obj_path, runtime_path, false, uid, seat_id, vtnr, false))
+        Ok((
+            id,
+            obj_path,
+            runtime_path,
+            ZOwnedFd::from(write_end),
+            uid,
+            seat_id,
+            vtnr,
+            false,
+        ))
     }
 
     fn release_session(&self, session_id: String) -> zbus::fdo::Result<()> {
