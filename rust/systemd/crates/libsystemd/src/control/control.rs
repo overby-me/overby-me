@@ -3027,32 +3027,66 @@ pub fn apply_manager_numa_policy() {
     }
 }
 
-static MANAGER_NUMA_REAPPLY: std::sync::OnceLock<(std::sync::Mutex<bool>, std::sync::Condvar)> =
-    std::sync::OnceLock::new();
-
-fn numa_reapply_slot() -> &'static (std::sync::Mutex<bool>, std::sync::Condvar) {
-    MANAGER_NUMA_REAPPLY.get_or_init(|| (std::sync::Mutex::new(false), std::sync::Condvar::new()))
+/// Generation counters coordinating the Manager NUMA re-apply between a
+/// worker thread (which requests) and the main thread / TID 1 (which applies).
+#[derive(Default)]
+struct NumaReapplyState {
+    requested: u64,
+    applied: u64,
 }
 
-/// Request that the main thread (TID 1) re-apply the Manager NUMA policy.
-/// Called from the `daemon-reload` handler, which runs on a worker thread;
-/// `set_mempolicy` must run on TID 1, so the work is handed to the main thread.
+static MANAGER_NUMA_REAPPLY: std::sync::OnceLock<(
+    std::sync::Mutex<NumaReapplyState>,
+    std::sync::Condvar,
+)> = std::sync::OnceLock::new();
+
+fn numa_reapply_slot() -> &'static (std::sync::Mutex<NumaReapplyState>, std::sync::Condvar) {
+    MANAGER_NUMA_REAPPLY
+        .get_or_init(|| (std::sync::Mutex::new(NumaReapplyState::default()), std::sync::Condvar::new()))
+}
+
+/// Request a Manager NUMA re-apply and BLOCK until the main thread (TID 1) has
+/// completed it. `daemon-reload` runs on a worker thread, but `set_mempolicy`
+/// must run on TID 1; TEST-36-NUMAPOLICY reads the journal immediately after
+/// `daemon-reload`, so the re-apply (and its journal log) must finish before
+/// reload returns. Bounded wait so an early-boot reload (before the main thread
+/// enters its service loop) can't hang the worker indefinitely.
 pub fn request_manager_numa_reapply() {
     let (lock, cvar) = numa_reapply_slot();
-    if let Ok(mut pending) = lock.lock() {
-        *pending = true;
-        cvar.notify_one();
+    let mut st = lock.lock().unwrap();
+    st.requested += 1;
+    let target = st.requested;
+    cvar.notify_all();
+    let start = std::time::Instant::now();
+    let deadline = std::time::Duration::from_secs(30);
+    while st.applied < target {
+        let remaining = deadline.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+        let (guard, _res) = cvar.wait_timeout(st, remaining).unwrap();
+        st = guard;
     }
 }
 
-/// Block until a NUMA re-apply is requested. Run by the main thread (TID 1).
-pub fn wait_for_manager_numa_reapply() {
+/// Main-thread (TID 1) loop: apply the Manager NUMA policy whenever a re-apply
+/// is requested, signalling completion so the requester can return. Never
+/// returns; the process is torn down by the signal-handler thread on shutdown.
+pub fn run_manager_numa_reapply_loop() -> ! {
     let (lock, cvar) = numa_reapply_slot();
-    let mut pending = lock.lock().unwrap();
-    while !*pending {
-        pending = cvar.wait(pending).unwrap();
+    loop {
+        let target = {
+            let mut st = lock.lock().unwrap();
+            while st.requested <= st.applied {
+                st = cvar.wait(st).unwrap();
+            }
+            st.requested
+        };
+        apply_manager_numa_policy();
+        let mut st = lock.lock().unwrap();
+        st.applied = target;
+        cvar.notify_all();
     }
-    *pending = false;
 }
 
 ///

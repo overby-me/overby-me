@@ -311,16 +311,13 @@ pub fn run_service_manager() {
     }
 
     kmsg("initial activation returned; entering main-thread task loop");
-    // The main thread (TID 1) now services tasks that must run on PID 1 itself.
-    // Currently that is re-applying the Manager NUMA memory policy on
-    // `daemon-reload`: set_mempolicy(2) affects the calling task, and the reload
-    // runs on a worker thread, which hands the re-apply here. This blocks the
-    // main thread the way the previous `handle.join()` did; process shutdown is
-    // driven by the signal-handler thread, so the loop runs until process exit.
-    loop {
-        control::wait_for_manager_numa_reapply();
-        control::apply_manager_numa_policy();
-    }
+    // The main thread (TID 1) now services tasks that must run on PID 1 itself:
+    // re-applying the Manager NUMA memory policy on `daemon-reload`.
+    // set_mempolicy(2) affects the calling task, and the reload runs on a worker
+    // thread which hands the re-apply here (blocking until it completes). This
+    // blocks the main thread the way the previous `handle.join()` did; process
+    // shutdown is driven by the signal-handler thread, so it runs until exit.
+    control::run_manager_numa_reapply_loop();
 }
 
 /// Entry point for the per-user service manager (`systemd --user`).
