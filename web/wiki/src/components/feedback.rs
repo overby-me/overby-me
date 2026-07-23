@@ -20,11 +20,12 @@ use crate::snackbar::show_snackbar;
 /// Matches the backend's message cap, so a long paste is trimmed before send.
 const FEEDBACK_MAXLEN: usize = 4000;
 
-/// The feedback entry is hidden for now: the backend `/feedback` endpoint has
-/// no Better Stack token configured, so submitted reports are accepted and
-/// dropped. Flip to re-show the user-menu item once the sink is set up (see
-/// `backend/src/feedback.rs` + `BETTERSTACK_SOURCE_TOKEN`).
-pub const FEEDBACK_ENABLED: bool = false;
+/// Gates the send-feedback user-menu item. Enabled: the backend `/feedback`
+/// endpoint ships to a configured Better Stack sink (the container carries
+/// `BETTERSTACK_SOURCE_TOKEN` + `BETTERSTACK_INGEST_HOST`). Set to `false` if the
+/// sink is ever removed, so reports aren't silently dropped (see
+/// `backend/src/feedback.rs`).
+pub const FEEDBACK_ENABLED: bool = true;
 
 /// Open state for [`FeedbackDialog`]. Global so the trigger (a user-menu item
 /// inside the transformed drawer pane) and the dialog (at the app-shell root,
