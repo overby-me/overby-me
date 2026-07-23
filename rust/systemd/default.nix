@@ -1,4 +1,20 @@
-{lib, ...}: {
+{lib, ...}: let
+  # Add systemd's pam_systemd.so to linux-pam's securedir so the manager's
+  # dlopened libpam (see exec_helper.rs PAMName= support) can resolve the bare
+  # `pam_systemd.so` the 35-LOGIN PAM stack references. NixOS pam.d files
+  # normally use absolute module paths, so the stock securedir omits it.
+  mkPamWithSystemd = {
+    pam,
+    systemd,
+  }:
+    pam.overrideAttrs (old: {
+      postInstall =
+        (old.postInstall or "")
+        + ''
+          ln -sf ${systemd}/lib/security/pam_systemd.so $out/lib/security/pam_systemd.so
+        '';
+    });
+in {
   devShells.rust-systemd = pkgs: {
     packages = with pkgs; [
       just
@@ -13,7 +29,7 @@
   };
 
   packages = {
-    rust-systemd = {lib, pam, ...}:
+    rust-systemd = {lib, pam, systemd, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd";
         version = "unstable";
@@ -35,7 +51,7 @@
         # the absolute library path in via PAM_LIB (see exec_helper.rs).
         crateOverrides = {
           libsystemd = {
-            PAM_LIB = "${pam}/lib/libpam.so.0";
+            PAM_LIB = "${mkPamWithSystemd {inherit pam systemd;}}/lib/libpam.so.0";
           };
         };
 
@@ -56,7 +72,7 @@
     # latent manager bugs surface as visible PID 1 panics instead of the silent
     # wraparound a release build would produce.  Behavior otherwise matches the
     # release build; only optimization and these runtime checks differ.
-    rust-systemd-dev = {lib, pam, ...}:
+    rust-systemd-dev = {lib, pam, systemd, ...}:
       lib.buildCargoProject {
         pname = "rust-systemd-dev";
         version = "unstable";
@@ -79,7 +95,7 @@
         # the absolute library path in via PAM_LIB (see exec_helper.rs).
         crateOverrides = {
           libsystemd = {
-            PAM_LIB = "${pam}/lib/libpam.so.0";
+            PAM_LIB = "${mkPamWithSystemd {inherit pam systemd;}}/lib/libpam.so.0";
           };
         };
 
