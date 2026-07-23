@@ -58,6 +58,9 @@
       # The real RUSTSEC-2019-0009 corpus: smallvec 0.6.9 (grow use-after-free).
       # 0.6.9 is yanked (lock entry hand-added), but the CDN still serves it.
       ./corpus/smallvec-0009/Cargo.lock
+      # The real RUSTSEC-2020-0039 corpus: simple-slab 0.3.2 (unchecked-index OOB
+      # read of a libc::malloc'd buffer, caught via interposition + root fix).
+      ./corpus/simple-slab-0039/Cargo.lock
     ];
     thirdParty = lib.unique (lib.concatMap (
         lockFile: let
@@ -560,6 +563,38 @@ in {
         echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
         echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
         nu corpus/assert_smallvec_0009.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
+      '';
+
+    # Real RUSTSEC-2020-0039 / CVE-2020-35892: simple-slab 0.3.2 unchecked-index
+    # OOB read of a libc::malloc'd buffer. Caught by the interpose tier (A4,
+    # cementite's malloc override registers the buffer; codegen-units=1 links it
+    # into the binary), the opaque-origin root fix (the malloc'd pointer roots
+    # itself, so the index offset resolves from the base), and instrumentation of
+    # simple-slab's index(). Scoped to the binary + slab crate; both modes abort.
+    fe-c-simple-slab-0039 = pkgs:
+      cargoCheck pkgs "simple-slab-0039" ''
+        cargo build -p fe-c-driver --offline --locked
+        export LD_LIBRARY_PATH="$(rustc --print sysroot)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        drv="$CARGO_TARGET_DIR/debug/fe-c-driver"
+        export FEC_INSTRUMENT=1 FEC_INSTRUMENT_ONLY=simple_slab_0039,simple_slab
+
+        ( cd corpus/simple-slab-0039 \
+            && FEC_MODE=through RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tt" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tt/debug/simple-slab-0039" >"$TMPDIR/th.log" 2>&1
+        th_exit=$?
+        set -e
+
+        ( cd corpus/simple-slab-0039 \
+            && RUSTC="$drv" CARGO_TARGET_DIR="$TMPDIR/tc" cargo build --offline --locked )
+        set +e
+        "$TMPDIR/tc/debug/simple-slab-0039" >"$TMPDIR/ca.log" 2>&1
+        ca_exit=$?
+        set -e
+
+        echo "--- through (exit $th_exit) ---"; cat "$TMPDIR/th.log"
+        echo "--- case (exit $ca_exit) ---"; cat "$TMPDIR/ca.log"
+        nu corpus/assert_simple_slab_0039.nu "$TMPDIR/th.log" "$th_exit" "$TMPDIR/ca.log" "$ca_exit"
       '';
 
     # Heap UAF with mint-site naming (trace -0130 debuggability): a Box is freed

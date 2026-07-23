@@ -1,0 +1,26 @@
+# corpus-simple-slab-0039 (RUSTSEC-2020-0039 / CVE-2020-35892): an out-of-bounds
+# read. simple-slab's `Slab::index()` is `&*(mem.offset(i))` with no bounds
+# check. The backing buffer is a `libc::malloc` allocation, so this is caught by
+# three pieces together: the libc interposition tier (A4, cementite's malloc
+# override registers the buffer), the opaque-origin root fix (the malloc'd
+# pointer is its own root, so the index offset resolves from the base), and MIR
+# instrumentation of index(). cementite uses the `interpose` feature and no
+# FecAlloc; codegen-units=1 forces the malloc override to link into the binary.
+[workspace]
+
+[package]
+name = "simple-slab-0039"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cementite = { path = "../../crates/cementite", features = ["interpose"] }
+simple-slab = "=0.3.2"
+
+[[bin]]
+name = "simple-slab-0039"
+path = "src/main.rs"
+
+[profile.dev.package.cementite]
+codegen-units = 1
