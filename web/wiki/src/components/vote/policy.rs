@@ -14,6 +14,10 @@ use super::*;
 /// amendment tree is browsable (#112).
 #[component]
 pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
+    /// The amendment "Show changes" word-diff is hidden for now: against the
+    /// current motion bodies it produces noisy, unhelpful diffs. Flip to
+    /// re-enable the toggle — the diff view and plumbing stay wired.
+    const AMENDMENT_DIFF_ENABLED: bool = false;
     let children = visible_sorted(&node.children);
     let children = &children;
 
@@ -103,7 +107,8 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                 .as_ref()
                                 .map(crate::components::content::slate_plain_text)
                                 .unwrap_or_default();
-                            let can_diff = diffable(&motion_text, &amendment_text);
+                            let can_diff =
+                                AMENDMENT_DIFF_ENABLED && diffable(&motion_text, &amendment_text);
                             let this_id = item.id.0.clone();
                             let is_open = can_diff && diff_open() == Some(this_id.clone());
                             rsx! {
