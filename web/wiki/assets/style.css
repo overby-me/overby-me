@@ -1684,6 +1684,14 @@ html {
 	gap: var(--md-sys-spacing-2);
 	margin-top: var(--md-sys-spacing-6);
 }
+/* Feedback dialog type selector (bug/feature/other): three equal-width
+   buttons. The default .btn side padding (spacing-6 per side) makes the row
+   wider than the dialog, so let the buttons share the row and shrink. */
+.feedback-types .btn {
+	flex: 1;
+	min-width: 0;
+	padding-inline: var(--md-sys-spacing-2);
+}
 @keyframes m3-dialog-fade {
 	from {
 		opacity: 0;

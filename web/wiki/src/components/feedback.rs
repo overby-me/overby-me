@@ -94,7 +94,7 @@ pub fn FeedbackDialog(open: Signal<bool>) -> Element {
                 }
             },
             // Type selector (bug / feature / other): a labelled toggle row.
-            div { class: "stack stack-h", style: "margin-bottom: var(--md-sys-spacing-3);",
+            div { class: "stack stack-h feedback-types", style: "margin-bottom: var(--md-sys-spacing-3);",
                 for (val , icon , label) in types {
                     button {
                         key: "{val}",
