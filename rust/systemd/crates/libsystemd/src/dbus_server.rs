@@ -994,6 +994,21 @@ mod inner {
             }
         }
 
+        /// Loads the unit with the given name (from disk on demand, resolving
+        /// symlink aliases) and returns its object path.  Unlike GetUnit this
+        /// does not require the unit to be pre-loaded.  dbus-broker calls
+        /// LoadUnit to map an activatable bus name to its unit object path
+        /// before starting it, so on-demand activation of daemons such as
+        /// systemd-timedated depends on this method existing.
+        fn load_unit(&self, name: String) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
+            match crate::control::find_or_load_unit(&name, &self.run_info) {
+                Ok(id) => Ok(unit_object_path(&id.name)),
+                Err(e) => Err(zbus::fdo::Error::Failed(format!(
+                    "Failed to load unit {name}: {e}"
+                ))),
+            }
+        }
+
         /// Start the given unit.  The `mode` argument is accepted but ignored
         /// (C systemd uses it for job scheduling modes like "replace" /
         /// "isolate").  Returns the object path of a fictional job entry.
