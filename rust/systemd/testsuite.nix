@@ -230,7 +230,20 @@ in
 
         services = {
           systemd-resolved.serviceConfig.PrivateDevices = lib.mkForce false;
-          systemd-timesyncd.serviceConfig.PrivateDevices = lib.mkForce false;
+          # The rust-systemd package bundles the upstream C systemd-timesyncd
+          # binary but doesn't reimplement it, so NixOS generates an
+          # Environment-only unit with no ExecStart/Type — which rust correctly
+          # parses as a completed oneshot (ActiveState=inactive).  Supply
+          # ExecStart/Type so `timedatectl set-ntp true` brings timesyncd active
+          # (TEST-45-TIMEDATE testcase_ntp asserts assert_timesyncd_state active).
+          systemd-timesyncd.serviceConfig = {
+            PrivateDevices = lib.mkForce false;
+            Type = lib.mkForce "notify";
+            ExecStart =
+              lib.mkForce "${config.systemd.package}/lib/systemd/systemd-timesyncd";
+            StateDirectory = lib.mkForce "systemd/timesync";
+            RuntimeDirectory = lib.mkForce "systemd/timesync";
+          };
           # Use Type=simple so the service is immediately active.
           # ExecReload uses a token-based handshake: it writes a unique
           # token to reload-request, sends SIGHUP to both the PID file
@@ -700,9 +713,17 @@ in
             isSystemUser = true;
             group = "systemd-journal";
           };
+          # systemd-timesync user for TEST-45-TIMEDATE: `timedatectl set-ntp true`
+          # starts systemd-timesyncd, which runs as User=systemd-timesync (real
+          # systemd ships example/sysusers.d/systemd-timesync.conf to create it).
+          systemd-timesync = {
+            isSystemUser = true;
+            group = "systemd-timesync";
+          };
         };
         groups.daemon = {};
         groups.testuser = {};
+        groups.systemd-timesync = {};
       };
 
       # Give the VM enough resources for tests
