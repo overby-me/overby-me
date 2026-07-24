@@ -874,15 +874,26 @@ impl Timedate1Manager {
     }
 
     #[zbus(name = "SetNTP")]
-    fn set_ntp(&self, use_ntp: bool, _interactive: bool) -> zbus::fdo::Result<()> {
+    async fn set_ntp(
+        &self,
+        use_ntp: bool,
+        _interactive: bool,
+        #[zbus(signal_emitter)] emitter: zbus::object_server::SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
         if let Err(e) = set_ntp(use_ntp) {
             return Err(zbus::fdo::Error::Failed(format!(
                 "Failed to set NTP: {}",
                 e
             )));
         }
-        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        s.ntp_enabled = use_ntp;
+        {
+            let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            s.ntp_enabled = use_ntp;
+        }
+        // Emit org.freedesktop.DBus.Properties.PropertiesChanged for NTP so
+        // subscribers (e.g. `busctl monitor`) observe the change. zbus derives
+        // the method name from the snake_case of the D-Bus property name "NTP".
+        let _ = self.n_t_p_changed(&emitter).await;
         Ok(())
     }
 

@@ -742,20 +742,28 @@ fn cmd_set_timezone(tz: &str) {
 }
 
 fn cmd_set_ntp(enable: bool) {
-    let enable_str = if enable { "enable" } else { "disable" };
+    let val = if enable { "true" } else { "false" };
 
-    // Try to enable/disable the timesyncd service via systemctl
-    let status = process::Command::new("systemctl")
-        .args([enable_str, "systemd-timesyncd.service"])
+    // Route the change through timedated's D-Bus interface
+    // (org.freedesktop.timedate1.SetNTP) rather than touching systemd-timesyncd
+    // directly. This D-Bus-activates systemd-timedated.service, which performs
+    // the enable/disable AND emits a PropertiesChanged signal that subscribers
+    // (e.g. `busctl monitor`, matching upstream timedatectl) observe.
+    let status = process::Command::new("busctl")
+        .args([
+            "call",
+            "org.freedesktop.timedate1",
+            "/org/freedesktop/timedate1",
+            "org.freedesktop.timedate1",
+            "SetNTP",
+            "bb",
+            val,
+            "false",
+        ])
         .status();
 
     match status {
         Ok(s) if s.success() => {
-            // Also start/stop the service
-            let action = if enable { "start" } else { "stop" };
-            let _ = process::Command::new("systemctl")
-                .args([action, "systemd-timesyncd.service"])
-                .status();
             println!(
                 "NTP synchronization {}d.",
                 if enable { "enable" } else { "disable" }
@@ -763,17 +771,13 @@ fn cmd_set_ntp(enable: bool) {
         }
         Ok(s) => {
             eprintln!(
-                "Failed to {} NTP: systemctl exited with {}",
-                enable_str,
+                "Failed to set NTP: busctl call exited with {}",
                 s.code().unwrap_or(-1)
             );
             process::exit(1);
         }
         Err(e) => {
-            eprintln!(
-                "Failed to {} NTP (could not run systemctl): {}",
-                enable_str, e
-            );
+            eprintln!("Failed to set NTP (could not run busctl): {}", e);
             process::exit(1);
         }
     }
