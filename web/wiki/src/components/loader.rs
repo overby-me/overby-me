@@ -466,12 +466,22 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
     let session = use_session();
     let token = session.read().access_token.clone();
     let mut blob_url = use_signal(|| None::<String>);
-    use_hook(|| {
+    // Reactive on `file_id` (and the token), NOT a one-shot `use_hook`: this
+    // component is reused across sibling navigations (e.g. switching between two
+    // candidates), where only the `file_id` prop changes and the component never
+    // remounts — a `use_hook` would keep serving the first node's image. On each
+    // change, revoke the previous blob before fetching the new one.
+    use_effect(use_reactive!(|(file_id, token)| {
+        let previous = blob_url.peek().clone();
+        if let Some(old) = previous {
+            let _ = web_sys::Url::revoke_object_url(&old);
+            blob_url.set(None);
+        }
         if file_id.is_empty() {
             return;
         }
+        let Some(token) = token.clone() else { return };
         spawn(async move {
-            let Some(token) = token else { return };
             // The file-blob URL is built through the one seam (backend_api), so
             // the cutover blob-path swap is a one-line change there. The JWT
             // rides in `?token=` (accepted by the same endpoint the img sites use).
@@ -494,7 +504,7 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
                 }
             }
         });
-    });
+    }));
     use_drop(move || {
         if let Some(u) = blob_url.peek().clone() {
             let _ = web_sys::Url::revoke_object_url(&u);
