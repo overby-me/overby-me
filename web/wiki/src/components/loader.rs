@@ -114,6 +114,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     match app.as_deref() {
         Some("profile") => return rsx! { super::profile::ProfileApp {} },
         Some("parent") => return rsx! { super::parent::ParentApp {} },
+        Some("feedback") => return rsx! { super::feedback_app::FeedbackApp {} },
         _ => {}
     }
 
@@ -429,6 +430,7 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "app/redirect" => "open_in_new",
         "app/cow" => "pets",
         "app/parent" => "link_off",
+        "wiki/feedback" | "app/feedback" => "feedback",
         _ => mime_icon_by_prefix(mime_id),
     }
 }

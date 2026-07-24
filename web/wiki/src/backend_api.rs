@@ -362,38 +362,6 @@ pub async fn claim_membership(token: &str, claim_token: &str) -> Result<String, 
     }
 }
 
-/// Submit a feedback / bug report / feature request. Ships to the backend
-/// `/feedback` endpoint, which forwards it to the team's observability sink.
-/// `token` is the session JWT when signed in (so the backend can capture the
-/// sender), None when anonymous. `kind` is bug/feature/other; `path`,
-/// `app_version` and `user_agent` are auto-captured context.
-pub async fn submit_feedback(
-    token: Option<&str>,
-    kind: &str,
-    message: &str,
-    path: &str,
-    app_version: &str,
-    user_agent: &str,
-) -> Result<(), String> {
-    let url = format!("{BACKEND_URL}/feedback");
-    let mut req = reqwest::Client::new().post(&url).query(&[
-        ("kind", kind),
-        ("message", message),
-        ("path", path),
-        ("app", app_version),
-        ("ua", user_agent),
-    ]);
-    if let Some(t) = token {
-        req = req.bearer_auth(t);
-    }
-    let resp = req.send().await.map_err(|e| e.to_string())?;
-    if resp.status().is_success() {
-        Ok(())
-    } else {
-        Err(format!("feedback failed: {}", resp.status()))
-    }
-}
-
 /// Owner-only: fetch a member's secret claim token so the owner can share a
 /// `?claim=<token>` link with the rostered person (whose email may not match).
 pub async fn member_claim_link(token: &str, member_id: &str) -> Result<String, String> {

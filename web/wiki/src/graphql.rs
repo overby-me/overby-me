@@ -3396,6 +3396,138 @@ pub async fn insert_reaction(
         .map(|inserted| inserted.is_some())
 }
 
+/// A feedback submission — a `wiki/feedback` node under the root. Which of these
+/// a caller receives is gated SERVER-SIDE (the `nodes` select rule): a home-
+/// context owner sees all; a plain member sees only their own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FeedbackItem {
+    pub id: String,
+    pub kind: String,
+    pub message: String,
+    /// The screenshot file id (`data.image`), if one was attached.
+    pub image: Option<String>,
+    pub path: String,
+    pub created_at: String,
+    pub owner_id: Option<String>,
+    pub owner_name: String,
+    pub owner_avatar: String,
+}
+
+/// Submit feedback: create a `wiki/feedback` node under the root node (its own
+/// context), carrying the kind, message, optional screenshot file id, and the
+/// originating path / app version / user agent. The submitter is stamped as the
+/// node owner server-side; members may insert here via a root-context permission.
+pub async fn insert_feedback(
+    access_token: Option<&str>,
+    kind: &str,
+    message: &str,
+    image_file_id: Option<&str>,
+    path: &str,
+    app_version: &str,
+    user_agent: &str,
+) -> Result<(), String> {
+    let root_id = query_root_id(access_token)
+        .await?
+        .ok_or("root node not found")?;
+    let mut data = serde_json::json!({
+        "kind": kind,
+        "message": message,
+        "path": path,
+        "appVersion": app_version,
+        "userAgent": user_agent,
+    });
+    if let Some(img) = image_file_id.filter(|i| !i.is_empty()) {
+        data["image"] = serde_json::Value::from(img);
+    }
+    let name: String = message.trim().chars().take(80).collect();
+    let name = if name.is_empty() {
+        kind.to_string()
+    } else {
+        name
+    };
+    let key = format!(
+        "feedback-{}-{}",
+        js_sys::Date::now() as u64,
+        (js_sys::Math::random() * 1e9) as u64
+    );
+    let input = model::NodesInsertInput {
+        name: Some(name),
+        key: Some(key),
+        mime_id: Some("wiki/feedback".to_string()),
+        parent_id: Some(model::Uuid(root_id.clone())),
+        context_id: Some(model::Uuid(root_id)),
+        data: Some(model::Jsonb(data)),
+        mutable: Some(false),
+        index: None,
+    };
+    insert_node(access_token, input).await.map(|_| ())
+}
+
+/// The feedback the caller may see (owner: all, member: own), newest first.
+pub async fn query_feedback(access_token: Option<&str>) -> Result<Vec<FeedbackItem>, String> {
+    let root_id = query_root_id(access_token)
+        .await?
+        .ok_or("root node not found")?;
+    let root_id = gql_escape(&root_id);
+    let query = format!(
+        "query {{ nodes(where: {{ parentId: {{ _eq: \"{root_id}\" }}, \
+         mimeId: {{ _eq: \"wiki/feedback\" }} }}) \
+         {{ id data createdAt ownerId owner {{ displayName avatarUrl }} }} }}"
+    );
+    let data = execute_raw(access_token, &query).await?;
+    let mut items: Vec<FeedbackItem> = data
+        .get("nodes")
+        .and_then(|n| n.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|n| {
+                    let d = n.get("data");
+                    let field = |k: &str| {
+                        d.and_then(|d| d.get(k))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    let image = field("image");
+                    let kind = field("kind");
+                    FeedbackItem {
+                        id: n
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        kind: if kind.is_empty() { "other".to_string() } else { kind },
+                        message: field("message"),
+                        image: if image.is_empty() { None } else { Some(image) },
+                        path: field("path"),
+                        created_at: n
+                            .get("createdAt")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        owner_id: n.get("ownerId").and_then(|v| v.as_str()).map(str::to_string),
+                        owner_name: n
+                            .get("owner")
+                            .and_then(|o| o.get("displayName"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        owner_avatar: n
+                            .get("owner")
+                            .and_then(|o| o.get("avatarUrl"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    // Newest first (client-side; feedback volume is low).
+    items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(items)
+}
+
 /// Build the `where` filter for the user's context nodes (groups or events) of
 /// a given mime type: nodes the user owns or has an accepted membership in.
 /// Nodes the user "belongs to": ones they own or have an accepted membership in.

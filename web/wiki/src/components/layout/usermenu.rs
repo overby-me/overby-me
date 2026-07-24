@@ -198,6 +198,19 @@ pub(super) fn UserMenu() -> Element {
                             span { class: "material-icons", "feedback" }
                             " {t(\"feedback.menu\")}"
                         }
+                        // Browse feedback: everyone sees their own submissions; home
+                        // context owners see all (enforced server-side).
+                        if is_auth {
+                            button {
+                                class: "list-item",
+                                onclick: move |_| {
+                                    menu_open.set(false);
+                                    nav.push(Route::Home { app: Some("feedback".to_string()) });
+                                },
+                                span { class: "material-icons", "forum" }
+                                " {t(\"feedback.view\")}"
+                            }
+                        }
                     }
                     if is_auth {
                         // Your profile (memberships + the link-Bluesky card). Only

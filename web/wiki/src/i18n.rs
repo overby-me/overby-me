@@ -105,7 +105,19 @@ const EN_JSON: &str = r#"{
         "feature": "Feature",
         "other": "Other",
         "send": "Send",
-        "sent": "Thanks! Your feedback was sent."
+        "sent": "Thanks! Your feedback was sent.",
+        "screenshot": "Screenshot (optional)",
+        "addScreenshot": "Attach a screenshot",
+        "removeScreenshot": "Remove screenshot",
+        "view": "Feedback",
+        "appTitle": "Feedback",
+        "empty": "No feedback yet.",
+        "emptyMine": "You haven't sent any feedback yet.",
+        "yours": "Your feedback",
+        "all": "All feedback",
+        "submittedBy": "From",
+        "anonymous": "Anonymous",
+        "deleteConfirm": "Delete this feedback? This cannot be undone."
     },
     "editor": {
         "style": "Style",
@@ -544,6 +556,7 @@ const EN_JSON: &str = r#"{
         "parent": "Missing parents",
         "redirect": "Redirect",
         "cow": "Cow",
+        "feedback": "Feedback",
         "unknown": "Unknown"
     }
 }"#;
@@ -558,7 +571,19 @@ const DA_JSON: &str = r#"{
         "feature": "Ønske",
         "other": "Andet",
         "send": "Send",
-        "sent": "Tak! Din feedback blev sendt."
+        "sent": "Tak! Din feedback blev sendt.",
+        "screenshot": "Skærmbillede (valgfrit)",
+        "addScreenshot": "Vedhæft et skærmbillede",
+        "removeScreenshot": "Fjern skærmbillede",
+        "view": "Feedback",
+        "appTitle": "Feedback",
+        "empty": "Ingen feedback endnu.",
+        "emptyMine": "Du har ikke sendt nogen feedback endnu.",
+        "yours": "Din feedback",
+        "all": "Al feedback",
+        "submittedBy": "Fra",
+        "anonymous": "Anonym",
+        "deleteConfirm": "Slet denne feedback? Dette kan ikke fortrydes."
     },
     "editor": {
         "style": "Stil",
@@ -997,6 +1022,7 @@ const DA_JSON: &str = r#"{
         "parent": "Manglende forældre",
         "redirect": "Omdirigering",
         "cow": "Ko",
+        "feedback": "Feedback",
         "unknown": "Ukendt"
     }
 }"#;

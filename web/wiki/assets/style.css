@@ -3119,6 +3119,15 @@ select:focus {
 	flex: 0 0 auto;
 }
 
+/* Feedback app: one submission per row, separated by a hairline. */
+.feedback-item {
+	padding: var(--md-sys-spacing-3) 0;
+	border-bottom: 1px solid var(--md-outline-variant);
+}
+.feedback-item:last-child {
+	border-bottom: none;
+}
+
 .chip-label {
 	overflow: hidden;
 	text-overflow: ellipsis;
