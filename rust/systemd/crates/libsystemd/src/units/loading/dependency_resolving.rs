@@ -83,6 +83,29 @@ pub fn prune_units(
     }
     ids_to_keep.extend(socket_activation_services);
 
+    // Also keep D-Bus-activatable services (those declaring BusName=). Like
+    // socket-activation targets, they are not part of the boot start subgraph,
+    // but a bus client can trigger their activation at any time: dbus-daemon
+    // asks PID 1 to start dbus-<busname>.service (an alias of the real unit),
+    // so the unit must remain in the table to be found and started on demand.
+    let mut dbus_activation_services = Vec::new();
+    for (id, unit) in unit_table.iter() {
+        if ids_to_keep.contains(id) {
+            continue;
+        }
+        if let Specific::Service(svc) = &unit.specific
+            && svc.conf.dbus_name.is_some()
+        {
+            trace!(
+                "Keeping D-Bus-activatable service {} (BusName={})",
+                id.name,
+                svc.conf.dbus_name.as_deref().unwrap_or("")
+            );
+            dbus_activation_services.push(id.clone());
+        }
+    }
+    ids_to_keep.extend(dbus_activation_services);
+
     // Remove all units that have been deemed unnecessary
     let mut ids_to_remove = Vec::new();
     for id in unit_table.keys() {

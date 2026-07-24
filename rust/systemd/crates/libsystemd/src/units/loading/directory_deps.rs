@@ -675,6 +675,25 @@ pub fn resolve_symlink_aliases(
             }
         }
     }
+
+    // Register the D-Bus activation alias `dbus-<busname>.service` for every
+    // service that declares BusName=. When a client calls a bus name with no
+    // owner, dbus-daemon asks PID 1 to start `dbus-<busname>.service` (upstream
+    // ships that name as a symlink to the real unit). Deriving it from BusName=
+    // here lets StartUnit(dbus-org.freedesktop.timedate1.service) resolve to
+    // systemd-timedated.service even when the alias symlink isn't installed.
+    for unit in unit_table.values_mut() {
+        let dbus_name = match &unit.specific {
+            Specific::Service(svc) => svc.conf.dbus_name.clone(),
+            _ => None,
+        };
+        if let Some(bus) = dbus_name {
+            let alias = format!("dbus-{bus}.service");
+            if unit.id.name != alias && !unit.common.unit.aliases.contains(&alias) {
+                unit.common.unit.aliases.push(alias);
+            }
+        }
+    }
 }
 
 /// Merge `source` UnitIds into `target` vec, skipping duplicates and self-references.
