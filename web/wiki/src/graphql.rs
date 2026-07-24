@@ -1734,7 +1734,7 @@ where
     Q: serde::de::DeserializeOwned + 'static,
     V: serde::Serialize,
 {
-    match execute_once(access_token, &operation).await {
+    let result = match execute_once(access_token, &operation).await {
         Err(msg) if is_jwt_error(&msg) => {
             // The token likely lapsed (e.g. the tab was backgrounded past expiry).
             // Refresh once and retry with the new token before surfacing the error
@@ -1747,7 +1747,23 @@ where
             }
         }
         other => other,
+    };
+    // Log the final failure centrally (shipped in remote-logging builds) so every
+    // GraphQL error is captured with its operation, regardless of how the caller
+    // surfaces it — many only show a generic toast and discard the detail.
+    if let Err(e) = &result {
+        log::warn!("graphql error [{}]: {e}", short_type_name::<Q>());
     }
+    result
+}
+
+/// The bare query-struct name (last `::` segment) for a GraphQL log line, e.g.
+/// `NodeInsertsQuery` rather than the full `wiki_dioxus::graphql::…` path.
+fn short_type_name<T>() -> &'static str {
+    std::any::type_name::<T>()
+        .rsplit("::")
+        .next()
+        .unwrap_or("query")
 }
 
 async fn execute_raw_once(
@@ -1779,7 +1795,7 @@ pub async fn execute_raw(
     access_token: Option<&str>,
     query: &str,
 ) -> Result<serde_json::Value, String> {
-    match execute_raw_once(access_token, query).await {
+    let result = match execute_raw_once(access_token, query).await {
         Err(msg) if is_jwt_error(&msg) => match crate::session::ensure_fresh_token().await {
             Some(fresh) if Some(fresh.as_str()) != access_token => {
                 execute_raw_once(Some(&fresh), query).await
@@ -1787,7 +1803,11 @@ pub async fn execute_raw(
             _ => Err(msg),
         },
         other => other,
+    };
+    if let Err(e) = &result {
+        log::warn!("graphql error (raw): {e}");
     }
+    result
 }
 
 async fn execute_raw_vars_once(
@@ -1817,7 +1837,7 @@ pub async fn execute_raw_vars(
     query: &str,
     variables: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    match execute_raw_vars_once(access_token, query, &variables).await {
+    let result = match execute_raw_vars_once(access_token, query, &variables).await {
         Err(msg) if is_jwt_error(&msg) => match crate::session::ensure_fresh_token().await {
             Some(fresh) if Some(fresh.as_str()) != access_token => {
                 execute_raw_vars_once(Some(&fresh), query, &variables).await
@@ -1825,7 +1845,11 @@ pub async fn execute_raw_vars(
             _ => Err(msg),
         },
         other => other,
+    };
+    if let Err(e) = &result {
+        log::warn!("graphql error (raw vars): {e}");
     }
+    result
 }
 
 // --- High-level query functions ---

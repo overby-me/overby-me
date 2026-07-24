@@ -95,8 +95,23 @@ fn breadcrumbs() -> Vec<String> {
     BREADCRUMBS.with(|b| b.borrow().iter().cloned().collect())
 }
 
-/// One structured log entry with the standard enrichment (user, session, path,
-/// breadcrumbs), so Logtail can filter/group by any of them.
+/// The JS call stack at the point of logging (from a throwaway `Error`), so an
+/// error entry pinpoints where it originated. `None` if unavailable.
+fn current_stack() -> Option<String> {
+    let err = js_sys::Error::new("");
+    js_sys::Reflect::get(&err, &JsValue::from_str("stack"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// One structured log entry with the standard enrichment, so Logtail can filter
+/// and group by any field:
+/// - who: `user_id` / `user_name`, plus a per-tab `session_id`
+/// - where: the current URL `path`, the app `app_version`, and a JS `stack`
+/// - what they did: `breadcrumbs` (the recent navigation + click/change/submit
+///   trail, newest last)
 fn make_entry(level: &str, message: String) -> Value {
     let (user_id, user_name) = current_user();
     let session_id = SESSION_ID.with(|s| s.borrow().clone());
@@ -108,6 +123,10 @@ fn make_entry(level: &str, message: String) -> Value {
         "user_name": user_name,
         "session_id": session_id,
         "path": current_path(),
+        "app_version": env!("CARGO_PKG_VERSION"),
+        "stack": current_stack(),
+        "user_agent": web_sys::window()
+            .and_then(|w| w.navigator().user_agent().ok()),
         "breadcrumbs": breadcrumbs(),
     })
 }
@@ -204,7 +223,19 @@ fn describe(el: &web_sys::Element) -> String {
         })
         .map(|l| format!(" \"{}\"", l.replace('"', "'")))
         .unwrap_or_default();
-    format!("{tag}{id_part}{class_part}{label}")
+    // For a link, also record where it points (the destination is the relevant
+    // context for a click that navigates). A same-origin href is trimmed to its
+    // path so the trail reads as in-app routes.
+    let href = if tag == "a" {
+        target
+            .get_attribute("href")
+            .filter(|h| !h.is_empty())
+            .map(|h| format!(" -> {h}"))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    format!("{tag}{id_part}{class_part}{label}{href}")
 }
 
 fn target_element(ev: &web_sys::Event) -> Option<web_sys::Element> {
@@ -300,6 +331,69 @@ fn setup_panic_hook() {
     }));
 }
 
+/// Catch errors that never flow through `log::` or a Rust panic: uncaught JS
+/// exceptions (e.g. thrown from web-sys glue) and unhandled promise rejections
+/// (a `spawn`ed future that errored with no handler). Both ship with the same
+/// enrichment (stack, breadcrumbs, user) as any other entry.
+fn setup_global_error_handlers() {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let et: &web_sys::EventTarget = win.as_ref();
+    add_listener(et, "error", |ev| {
+        // Only genuine script errors: an `ErrorEvent` with a message. Resource
+        // load failures (img/script 404) also fire "error" but carry none.
+        if let Some(ee) = ev.dyn_ref::<web_sys::ErrorEvent>() {
+            let msg = ee.message();
+            if msg.trim().is_empty() {
+                return;
+            }
+            let at = format!("{}:{}:{}", ee.filename(), ee.lineno(), ee.colno());
+            queue(make_entry("error", format!("UNCAUGHT: {msg} @ {at}")));
+        }
+    });
+    add_listener(et, "unhandledrejection", |ev| {
+        if let Some(pre) = ev.dyn_ref::<web_sys::PromiseRejectionEvent>() {
+            let reason = pre.reason();
+            let text = reason
+                .as_string()
+                .or_else(|| js_sys::JSON::stringify(&reason).ok().and_then(|s| s.as_string()))
+                .unwrap_or_else(|| "unhandled rejection".to_string());
+            queue(make_entry("error", format!("UNHANDLED REJECTION: {text}")));
+        }
+    });
+}
+
+/// Queue an entry for the next flush (used by the global handlers, which — unlike
+/// a panic — do not tear the app down, so an async ship is fine).
+fn queue(entry: Value) {
+    PENDING.with(|p| p.borrow_mut().push(entry));
+}
+
+thread_local! {
+    /// The last path recorded as a navigation breadcrumb, to dedupe the router's
+    /// initial + repeated route effects.
+    static LAST_NAV: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Record a client-side navigation as a breadcrumb. Called by the router on each
+/// route change (see `layout::Layout`), so an error's trail shows the pages the
+/// user moved through, not just the URL they were on when it broke.
+pub fn record_navigation(path: &str) {
+    let changed = LAST_NAV.with(|l| {
+        let mut l = l.borrow_mut();
+        if *l == path {
+            false
+        } else {
+            *l = path.to_string();
+            true
+        }
+    });
+    if changed {
+        push_breadcrumb(format!("navigate {path}"));
+    }
+}
+
 /// Install the remote logger, breadcrumb listeners, panic hook and flush loop.
 pub fn init() {
     let sid = format!("{:x}", (js_sys::Math::random() * 1e18) as u64);
@@ -310,6 +404,7 @@ pub fn init() {
 
     setup_breadcrumbs();
     setup_panic_hook();
+    setup_global_error_handlers();
     start_flush_loop();
 
     if SOURCE_TOKEN.is_none() {

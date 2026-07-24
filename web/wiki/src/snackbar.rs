@@ -18,6 +18,13 @@ const MAX_SNACK: usize = 3;
 /// [`MAX_SNACK`] at once, and skips a message identical to the newest one still
 /// showing (Notistack's `preventDuplicate`).
 pub fn show_snackbar(text: &str) {
+    // A generic-failure toast shown to the user is also recorded for the logger
+    // (shipped in remote-logging builds), so "something went wrong" leaves a trace
+    // even at the many call sites that discard the underlying error. The specific
+    // detail, when there is one, is logged separately (e.g. the GraphQL layer).
+    if text == crate::i18n::t("error.somethingWentWrong") {
+        log::warn!("error toast shown to user: {text}");
+    }
     // preventDuplicate: don't queue the same text twice in a row.
     if SNACKBAR.read().last().is_some_and(|m| m.text == text) {
         return;

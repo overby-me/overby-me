@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::components::{
     auth::{Login, Register, ResetPassword, SetPassword, Unverified},
-    crash::Crash,
+    error::ErrorPage,
     layout::Layout,
     loader::{Home, PathPage},
     profile::UserProfile,
@@ -40,11 +40,11 @@ pub enum Route {
     #[route("/profile/:id")]
     UserProfile { id: String },
 
-    // Hidden debug/QA route: a button that panics, to verify crash reporting
-    // end to end (ported from the old wiki's /crash). Not linked from any nav;
-    // listed before the catch-all so `/crash` resolves here, not as a node path.
-    #[route("/crash")]
-    Crash {},
+    // Hidden debug/QA route: buttons that trigger each kind of error, to verify
+    // error reporting end to end (formerly `/crash`). Not linked from any nav;
+    // listed before the catch-all so `/error` resolves here, not as a node path.
+    #[route("/error")]
+    ErrorPage {},
 
     // `app` carries the `?app=` query (vote/speak/member/editor/sort). Modelling
     // it in the route keeps Dioxus from stripping the query on navigation, so

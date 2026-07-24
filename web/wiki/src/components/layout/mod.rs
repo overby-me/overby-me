@@ -124,6 +124,16 @@ pub fn Layout() -> Element {
             win.scroll_to_with_x_and_y(0.0, 0.0);
         }
     }));
+    // Record each navigation as a diagnostics breadcrumb (remote-logging builds),
+    // so an error's trail shows the route path the user moved through. Keyed on
+    // the full URL string so an in-place app-view switch (?app=) is captured too.
+    #[cfg(feature = "remote-logging")]
+    {
+        let url = route.to_string();
+        use_effect(use_reactive!(|(url,)| {
+            crate::logging::record_navigation(&url);
+        }));
+    }
     // Reactive M3 window size class (adaptive nav + panes). Called before the
     // early returns below so the hook order stays stable across auth/screen pages.
     let size_class = crate::window_size::use_window_size();
