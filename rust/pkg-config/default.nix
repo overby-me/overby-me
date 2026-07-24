@@ -21,10 +21,15 @@
 
       index = ../../nix/lib/cargo/index;
 
-      rootAttrs.setupHook = ./setup-hook.sh;
-
-      rootAttrs.postInstall = ''
+      # This workspace has two root crates (libpkgconf + pkgconf), so
+      # buildCargoProject wraps them in a symlinkJoin, which runs no stdenv
+      # phases: setupHook and postInstall are silently ignored there.
+      # postBuild is the only hook symlinkJoin executes, so install both
+      # the pkg-config compatibility symlink and the setup hook from it.
+      rootAttrs.postBuild = ''
         ln -s $out/bin/pkgconf $out/bin/pkg-config
+        mkdir -p $out/nix-support
+        cp ${./setup-hook.sh} $out/nix-support/setup-hook
       '';
 
       meta = {
