@@ -158,7 +158,8 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let mut selected = use_signal(|| vec![false; options.len()]);
+    let options_len = options.len();
+    let mut selected = use_signal(|| vec![false; options_len]);
     let mut error = use_signal(String::new);
     let mut refresh = use_signal(|| 0u32);
     // Optimistic cast: the chosen option indices, shown as voted + counted at once
@@ -170,8 +171,22 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     // Optimistic close: flip the ballot to "results" at once when the owner stops
     // the poll; reverted on error. The refetch confirms mutable=false.
     let mut closed_opt = use_signal(|| false);
-    // Randomise the ballot order once per mount (#27); Blank stays last.
-    let order = use_hook(|| ballot_order(options.len(), js_sys::Math::random));
+    // Randomise the ballot order (#27; Blank stays last). Reactive on the poll id
+    // and option count — NOT a one-shot `use_hook` — because this component is
+    // reused across sibling navigations without remounting: a stale order carries
+    // the previous poll's indices, and against a SHORTER ballot `opts[ri]` below
+    // would be out of bounds (a panic). A fresh poll re-shuffles for its own set.
+    let order_memo =
+        use_memo(use_reactive!(|(options_len)| ballot_order(options_len, js_sys::Math::random)));
+    let order: Vec<usize> = order_memo.read().clone();
+    // The selection vector must likewise track the current ballot: reset to a
+    // correctly sized, cleared set when the poll (or its option count) changes,
+    // so a navigation to a different poll never carries stale checks or length.
+    let poll_id_dep = poll_id.clone();
+    use_effect(use_reactive!(|(poll_id_dep, options_len)| {
+        let _ = &poll_id_dep;
+        selected.set(vec![false; options_len]);
+    }));
 
     // Live results: any vote cast on this poll re-runs the tally / voted checks.
     let sub_poll = crate::graphql::gql_escape(&poll_id);

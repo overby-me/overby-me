@@ -18,20 +18,26 @@ pub fn RedirectApp(node: NodeWithChildren) -> Element {
     let target = redirect_url(node.data.as_ref().map(|d| &d.0));
     let node_id = node.id.0.clone();
 
-    // Forward automatically once a valid target is known.
-    {
-        let target = target.clone();
-        use_effect(move || {
-            if let Some(url) = target.clone() {
-                spawn(async move {
-                    gloo_timers::future::TimeoutFuture::new(1500).await;
+    // Forward automatically once a valid target is known. Reactive on `target`
+    // (this component is reused across sibling redirects without remounting), with
+    // a generation guard: navigating to a different redirect bumps `gen`, so the
+    // previous node's still-pending 1.5s timer sees a stale generation and does
+    // NOT fire — otherwise it would forward the whole page to the wrong URL.
+    let mut generation = use_signal(|| 0u32);
+    use_effect(use_reactive!(|(target)| {
+        let g = *generation.peek() + 1;
+        generation.set(g);
+        if let Some(url) = target {
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(1500).await;
+                if *generation.peek() == g {
                     if let Some(w) = web_sys::window() {
                         let _ = w.location().set_href(&url);
                     }
-                });
-            }
-        });
-    }
+                }
+            });
+        }
+    }));
 
     rsx! {
         div { class: "card",

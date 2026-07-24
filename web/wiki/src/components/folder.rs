@@ -123,7 +123,10 @@ pub fn FolderApp(
         let token = access_token.clone();
         let ctx = node_context.clone();
         let can = can_manage;
-        use_hook(move || {
+        // Reactive on the context — NOT a one-shot `use_hook` — since this
+        // component is reused across sibling navigations without remounting;
+        // keyed on `ctx` so moving to a different context refetches its setting.
+        use_effect(use_reactive!(|(ctx, token, can)| {
             if can {
                 spawn(async move {
                     let on = crate::graphql::screen_comments_on(token.as_deref(), &ctx)
@@ -132,7 +135,7 @@ pub fn FolderApp(
                     screen_comments.set(Some(on));
                 });
             }
-        });
+        }));
     }
     // The path to return to after deleting this node (its parent).
     let delete_parent: Vec<String> = if parent_path.is_empty() {

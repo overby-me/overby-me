@@ -83,7 +83,11 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
         let token = session.read().access_token.clone();
         let ctx = node_context.clone();
         let can = can_manage;
-        use_hook(move || {
+        // Reactive on the context — NOT a one-shot `use_hook` — since this
+        // component is reused across sibling navigations without remounting;
+        // keyed on `ctx`, so moving to a node in a different context refetches
+        // that context's setting instead of showing the previous one's.
+        use_effect(use_reactive!(|(ctx, token, can)| {
             if can {
                 spawn(async move {
                     let on = crate::graphql::screen_comments_on(token.as_deref(), &ctx)
@@ -92,7 +96,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     screen_comments.set(Some(on));
                 });
             }
-        });
+        }));
     }
 
     // Optional inline image (a `data.image` file id), mirroring React's Content.

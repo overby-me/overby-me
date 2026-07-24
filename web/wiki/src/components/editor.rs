@@ -279,7 +279,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     // Authors (members): content nodes carry a list of authors that the editor
     // maintains; contexts and a few vote types do not.
     let takes_authors = node_takes_authors(node.mime_id.as_deref());
-    let authors = use_signal(|| {
+    let mut authors = use_signal(|| {
         node.members
             .iter()
             .filter(|m| !m.hidden)
@@ -353,6 +353,69 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     // editor unmounts (saved or routed away) so no stale guard stays armed.
     use_hook(install_unsaved_guard);
     use_drop(|| set_editor_dirty(false));
+
+    // Reset every seeded field + re-seed the editor surface when the node changes
+    // WITHOUT a remount (a sibling editor→editor navigation reuses this component
+    // instance; the web renderer doesn't reliably remount on a key change). The
+    // `seeded_for` guard means this fires ONLY on an actual node-id change, never
+    // mid-edit — so it cannot clobber in-progress work — and every reset value is
+    // recomputed fresh from the current `node` prop rather than a frozen capture.
+    // Without this, editing node B would show/keep node A's title/authors/body and
+    // a save would write A's stale content onto B.
+    let mut seeded_for = use_signal(|| node_id.clone());
+    {
+        let node_id_dep = node_id.clone();
+        let reset_name = node.name.clone();
+        let reset_authors: Vec<model::Author> = node
+            .members
+            .iter()
+            .filter(|m| !m.hidden)
+            .map(|m| model::Author {
+                name: m.label(),
+                node_id: m.node_id.as_ref().map(|u| u.0.clone()),
+                avatar_url: m
+                    .user
+                    .as_ref()
+                    .map(|u| u.avatar_url.clone())
+                    .unwrap_or_default(),
+                user_id: m.user.as_ref().map(|u| u.id.0.clone()),
+            })
+            .filter(|a| !a.name.is_empty())
+            .collect();
+        let reset_image = initial_image.clone();
+        let reset_date = node
+            .created_at
+            .as_ref()
+            .map(|t| t.0.chars().take(10).collect::<String>())
+            .unwrap_or_default();
+        let reset_html = node
+            .data
+            .as_ref()
+            .and_then(|d| d.0.get("content"))
+            .map(richtext::slate_to_html)
+            .unwrap_or_else(|| "<p><br></p>".to_string());
+        use_effect(use_reactive!(|(
+            node_id_dep,
+            reset_name,
+            reset_authors,
+            reset_image,
+            reset_date,
+            reset_html
+        )| {
+            if *seeded_for.peek() == node_id_dep {
+                return; // initial mount — onmounted already seeded this node
+            }
+            seeded_for.set(node_id_dep);
+            title.set(reset_name);
+            authors.set(reset_authors);
+            image_id.set(reset_image);
+            image_name.set(String::new());
+            created_date.set(reset_date);
+            richtext::seed_editor(EDITOR_ID, &reset_html);
+            dirty.set(false);
+            set_editor_dirty(false);
+        }));
+    }
 
     let handle_save = {
         let token = session.read().access_token.clone();
