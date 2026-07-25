@@ -37,7 +37,9 @@ crate, with sound seams as the long-term research contribution.
 - **I3 — Mode is ABI.** Each crate's mode is recorded in metadata; cross-mode
   call adapters are specified now, while only one mode exists. The per-crate
   dial is ultimately a linking problem; leaving it implicit in v0 is how v2
-  becomes impossible.
+  becomes impossible. **Not implemented (§13):** mode is one build-wide env var,
+  nothing is recorded in metadata, and no adapter exists. The invariant was
+  written to stop exactly this, and it did not.
 - **I4 — Both-modes rule.** No feature lands unless its behavior is defined in
   both modes. The filled-in table is `docs/both-modes.md`; an empty cell is a
   blocker, not a TODO. (Anti-gravity: prevents `case` users' needs from quietly
@@ -74,7 +76,12 @@ crate, with sound seams as the long-term research contribution.
   adjacent live allocation resolves to a valid capability and passes. Side
   benefit: the hot path becomes a register compare, not a lookup, and the
   machinery is exactly what `through` mode needs (I2). See
-  `docs/traces/rustsec-2021-0003.md` §F10.
+  `docs/traces/rustsec-2021-0003.md` §F10. **Partly implemented (§13):**
+  provenance travels in the MIR pass, but the runtime still resolves the root
+  address through the table on every check, so the register-compare hot path
+  does not exist. For *safe-reference* bases no root is computed at all, which
+  means `through`'s defining check resolves from the faulting address: the F10
+  shape this invariant forbids.
 - **I11 — `cementite` is freestanding: zero dependencies, direct syscalls.**
   Discovered empirically during A1–A4 (dependency-version conflicts when
   force-injecting the runtime into arbitrary graphs), but it is a *requirement*,
@@ -170,7 +177,7 @@ optimizer entanglement.
 
 | Stage | Gate |
 | ----- | ---- |
-| v0 | Builds and runs a tokio-class app and the `../libc` substrate under `case`; reproducible RustSec CVEs from the SafeFFI corpus trap at the boundary; false-positive suite (serde/regex/hashbrown test suites) green; overhead *measured and published* (hypothesis: ≤10% on mostly-safe crates — a hypothesis until the numbers exist) |
+| v0 | Builds and runs a tokio-class app and the `../libc` substrate under `case`; reproducible RustSec CVEs from the SafeFFI corpus trap at the boundary; false-positive suite (serde/regex/hashbrown test suites) green; overhead *measured and published* (hypothesis: ≤10% on mostly-safe crates, a hypothesis until the numbers exist). **Status: false-positive suite green; nine CVEs trap, but only one is confirmably a declared corpus row (§13); no tokio-class app, no substrate, and no overhead number. The overhead clause is still a hypothesis.** |
 | v0.5 | Fallback engaged automatically; corpus coverage strictly grows |
 | v1 | Leaf crates run `through`; adapters proven by mixed-mode tests; overhead vs Fil-C published on shared C-via-FFI benchmarks |
 | v2 | UAF corpus deterministic under raw-escape; composition write-up |
@@ -226,8 +233,14 @@ production containment claims · LLVM passes of any kind.
    `docs/through-mode-coherence.md`. Remaining sub-questions (bitmap sharding,
    whether T1's consistency check earns its cost, non-128-bit-atomic fallback
    churn) are deferred there.
-2. Async-signal-safety requirements for table/bitmap lookup → dictates the
-   locking model (carried from the cementite draft).
+2. ~~Async-signal-safety requirements for table/bitmap lookup~~ **is no longer a
+   question, it is a defect.** `register`/`deregister`/`poison` and the scope
+   hooks all take a global `std::sync::Mutex` (`table.rs`), and the libc
+   interposers call them, so a `malloc` from a signal handler can deadlock
+   against an interrupted registration. The same lock is a hard scalability
+   wall: every allocation and every stack scope in every thread serialises on
+   it. Lookups themselves are lock-free (seqlock over the page slot), which is
+   the half that was designed for.
 3. `case`-mode interaction with `noalias`-driven hoisting: is
    `-Zmutable-noalias=off` a supported knob, and what does it cost?
 4. Fact transport if an LLVM-level backend is ever wanted (sidecar file vs
@@ -242,3 +255,36 @@ production containment claims · LLVM passes of any kind.
 boundary checker into a whole-process checker: `-Zbuild-std` + the substrate
 under `case` mode means "libc" is just more instrumentable Rust. Its plan
 gates on Fe-C at phase P2; Fe-C's v0 gate builds it in return.
+
+## 13. Divergences: this plan vs what is built (2026-07-25)
+
+This file is the design record, so it keeps saying what was intended. What
+follows is where the build differs, so nobody reads an intention as a
+guarantee. Full evidence and file references:
+`docs/evaluation-2026-07.md`; false-negative surface:
+`docs/coverage-ledger.md`.
+
+| Planned here | Built |
+| ------------ | ----- |
+| I3, §5: mode per crate, in metadata, with cross-mode adapters | One build-wide `FEC_MODE` env var; unset or misspelled silently means `case` |
+| I10, §3 point 0: cap resolved at roots, propagated, compared in registers | Root local resolved in the pass, but the runtime does a table lookup per check; no cap is ever carried |
+| I10 for safe references | No root computed for reference bases, so `through`'s safe-deref check resolves from the faulting address (predicted gap, see evaluation §3.2) |
+| §3 point 1: `ensure` returns a vetted pointer the pass threads as a distinct value | Returns unit; `case` elides on "the base local is a reference" instead, so the vetting is assumed rather than tracked |
+| §3 point 2 (safe-pointer loads), point 3a (FFI inbound prologue) | Not implemented |
+| §3 runtime: interceptor tiers b/c/d, guard-page and canary sampling | Only tier (a), the malloc family |
+| §3 runtime: unknown-provenance policy knob with counters | Hard-coded tolerate-unknown; the dead-stack-is-fatal half of `strict-stack` is implemented, the counters are not |
+| §7 v0 gate: overhead measured and published | No benchmark exists; the only number is A2's microbench of the table alone, and it is 2 to 10 times the design's own assumed floor, on a path the design assumed would be cold |
+| §9: `harden` as a per-crate derivation attribute | Corpus checks drive `RUSTC=` with env vars; `nix/lib/cargo`'s artifact key is untouched (nix-integration §6 Q2 is still the open correctness hazard it was flagged as) |
+| §9: `-Zbuild-std` sysroots | Attempted, blocked on `compiler_builtins` upstream monomorphization errors |
+| I11: `#![no_std]` where possible | Zero external dependencies (the load-bearing half), but std-linked |
+
+Two of these are worth restating as claims rather than gaps, because they
+change what may honestly be said in public:
+
+1. **`through` mode delivers "checked before every visited access", not
+   Fil-C's "the optimizer never dereferences directly".** Checks are injected
+   after rustc's MIR pipeline and the access stays an ordinary load or store
+   with its LLVM assumptions intact.
+2. **I1's "visits every access" is enforced over post-optimization MIR.** An
+   access that MIR optimization merged or removed is never visited, and nothing
+   distinguishes that from a deliberate elision.

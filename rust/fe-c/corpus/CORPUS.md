@@ -79,9 +79,50 @@ Notes:
    interposition even before MIR instrumentation exists — useful for
    bootstrapping the check before the driver is done.
 
+## Scoreboard (2026-07-25): read this before quoting a catch count
+
+**Against the 46 rows above: 1 confirmed, 1 probable, 44 unresolved.** The
+table's IDs were never resolved to `crate@version`, so most rows have not been
+attempted, missed, or scored. They are simply unknown.
+
+What actually got built is a second, **opportunistic corpus**, chosen by what
+the checker could reach. It is good work and it found real bugs, but it is not
+the corpus this file declares, and the two must not be conflated:
+
+| Caught | Crate | In the 46 rows? |
+| ------ | ----- | --------------- |
+| RUSTSEC-2021-0003 | `smallvec 1.6.0`, heap OOB | **yes** (confirmed) |
+| RUSTSEC-2019-0009 | `smallvec 0.6.9`, `grow` UAF | **probably**: likely the alias of CVE-2019-15551, verify against the advisory DB |
+| RUSTSEC-2021-0128 | `rusqlite 0.25.3` + bundled SQLite, stack borrow across FFI | no |
+| RUSTSEC-2021-0130 | `lru 0.6.6`, heap UAF | no |
+| RUSTSEC-2020-0039 | `simple-slab 0.3.2`, OOB read of a `libc::malloc` buffer | no (alias unverified) |
+| RUSTSEC-2021-0028 | `toodee 0.2.0`, OOB write | no (alias unverified) |
+| RUSTSEC-2022-0079 | `elf_rs 0.2.0`, `from_raw_parts` length lie | no |
+| RUSTSEC-2023-0016 | `partial_sort 0.1.1`, debug-assert-only bound | no |
+| RUSTSEC-2025-0109 | `binary_vec_io 0.1.12`, `from_raw_parts` length lie | no (postdates the paper) |
+
+**Attempted or surveyed and not caught**, which is the more informative half:
+
+| Not caught | Why | Would need |
+| ---------- | --- | ---------- |
+| `caja` / `ptr::as_ref` class (RUSTSEC-2026-0130) | The bad access happens in a non-inlined `core` call, outside instrumented MIR | Interprocedural provenance, or `-Zbuild-std` (D1, currently blocked) |
+| `bumpalo` class | Custom arena allocator; its memory is never registered | Arena registration, an open design question |
+| `atom` class | Concurrency bug; no thread-interleaving story exists | Out of scope for v0 |
+| RUSTSEC-2021-0047 | Evaded every tool in the paper | Standing falsifier, not a gate (note 3) |
+
+The honest summary of the harvest: the reachable vein is mined out. New CVE
+classes now need an alignment check or interprocedural provenance, not more
+reproducers of shapes already covered. See `docs/evaluation-2026-07.md` §3.5.
+
 ## To do at the computer
 
-For each row: resolve ID → `crate@vulnerable-version` + minimal reproducer
-(RustSec advisory DB has the mapping), pin it, vendor sources through
-`nix/lib/cargo` so `checks.corpus-rustsec` is pure/offline, and assert the
-Fe-C report (site + FailKind), not just nonzero exit.
+1. **Rescore this file** (Phase E6). For each of the 46 rows: resolve ID →
+   `crate@vulnerable-version` using the advisory DB's CVE aliases, then mark it
+   caught / missed / not attempted. Publish the denominator. A row that is
+   *missed* is worth as much as a row that is caught, and more than a row that
+   is silently dropped.
+2. For rows worth pursuing: pin the version, add a minimal reproducer, vendor
+   sources through `nix/lib/cargo` so the check stays pure and offline, and
+   assert the Fe-C report (site + FailKind), not just a nonzero exit.
+3. Give each entry a real patched-version control. Today only `smallvec-0003`
+   has one (`CLAUDE.md` §5).

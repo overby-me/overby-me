@@ -4,6 +4,17 @@ I4 says: *no feature lands unless its behaviour is defined in both modes.*
 This is that rule with teeth. Every row must be filled before the
 corresponding code merges. An empty cell is a blocker, not a TODO.
 
+**The tables below are the specification, not a build report.** As of
+2026-07-25 these rows are specified but not built: point 2 (safe-pointer loads
+from memory), point 3a (FFI inbound), cap propagation beyond intraprocedural
+in-flight (so no shadow slots, no T1/T2, no interprocedural), the
+unknown-provenance knob (behaviour is hard-coded tolerate-unknown in both
+modes, with the dead-stack-is-fatal half of `strict-stack` implemented), and
+guard-page/canary sampling. `through`'s "opaque call the optimizer cannot fold
+or hoist" is also weaker than written: the check is opaque, the access after it
+is an ordinary load with its LLVM assumptions intact. See
+`docs/evaluation-2026-07.md` §2 and `PLAN.md` §13.
+
 ## Instrumentation
 
 | Feature | `case` | `through` |

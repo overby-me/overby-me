@@ -5,8 +5,31 @@ Everything here is shaped by I2 (capability-shaped API), I6/I7 (re-checks,
 epoch-on-free) and the trace findings in
 `docs/traces/rustsec-2021-0130.md`.
 
-Draft status: **pre-implementation.** Signatures are the contract to argue
-about now, cheaply.
+Draft status: **pre-implementation, and now superseded.** The runtime exists;
+`cargo doc -p cementite` is the API of record. Keep this file as what was
+*intended*, and read it with the deltas below in mind. Full divergence table:
+`docs/evaluation-2026-07.md` §2.
+
+- `check_deref(ptr, size, cap)`, the register-compare hot path this file calls
+  "**Hot path (I10)**", **was never built**. The shipped entry points are
+  `__fec_check_deref_rooted(fault, root)` and `__fec_check_extent(fault, root,
+  size)`, and both do a table lookup on `root` per check. The claim below that
+  the table is "consulted at derivation roots and fallbacks only" describes the
+  design, not the build.
+- `check_deref_unpropagated` was **merged into the main path** (the root
+  defaults to the pointer itself), so the propagation-lost case is invisible:
+  no separate entry point, no counter, no policy. Splitting it again is Phase
+  E1.
+- `ensure` returns unit, not the vetted pointer, so no distinct SSA value is
+  threaded and `case`'s elision is a type-based heuristic rather than a tracked
+  property.
+- `ensure_aligned`, `ensure_foreign_arg`, `ensure_returned`, `check_access` and
+  `note_escape` do not exist. Escape recording folded into `scope_enter`'s
+  `site` argument; alignment is unchecked entirely.
+- The unknown-provenance knob and its counters do not exist. The behaviour is
+  hard-coded: an unresolvable root passes.
+- Guard-page and canary sampling, and interceptor tiers (b), (c) and (d), do
+  not exist. Only the malloc family is interposed.
 
 ## Core types
 

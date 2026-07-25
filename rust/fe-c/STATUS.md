@@ -1,7 +1,18 @@
 # Fe-C — session status (Phase C underway, through-first)
 
-Written 2026-07-22. Branch: `fe-c/v0` off `main` (pushed to origin). This
-records what is done and how to continue building out `through` mode.
+Written 2026-07-22, work since merged to `main`. This records **what is built
+and how it was shown**: the evidence log behind the task marks in `CLAUDE.md`
+§4, which is the authority when the two disagree.
+
+Two files carry the rest of the picture, and this one deliberately does not
+duplicate them:
+
+- **`docs/evaluation-2026-07.md`**: how the approach is doing, where the
+  implementation diverged from the design record, and what to do next (Phase E,
+  measurement before more detection). Read it before continuing.
+- **`docs/coverage-ledger.md`**: everything Fe-C does *not* check. The counts
+  below ("nine real CVEs", "5.1M checks, zero false traps") are numerators; the
+  ledger is where the denominator lives.
 
 ## TL;DR
 

@@ -26,7 +26,11 @@ submodules**: `cargo-fe-c` (subcommand + `RUSTC_WRAPPER`), `fe-c-driver`
 (rustc-as-a-library, MIR analysis + rewriting), `cementite` (the runtime that
 ships in the binary).
 
-**Status: design complete, zero code written.** Your job starts at Task A1.
+**Status (2026-07-25): a working checker.** Phases A and B are done, Phase C is
+mostly done, nine real CVEs are caught in real unmodified crates (one across
+real C), and 27 flake checks are green. What is missing is measurement, not
+detection: read `docs/evaluation-2026-07.md` before picking up work, and start
+at Phase E in §4 rather than at the next unfinished letter.
 
 ---
 
@@ -41,6 +45,9 @@ an invariant in `PLAN.md` §2.
 | **`free` clears the liveness bit before releasing memory**, and freed addresses go through quarantine. | I7. Otherwise a reused address presents a valid capability (ABA). |
 | **The pass visits every access from the first commit**; elision is a policy decision on top, never a missing visit. | I1. The additive framing already caused one false negative — §F9 of the same trace. |
 | **No feature merges until both columns of `docs/both-modes.md` are filled.** | I4. |
+| **No detection feature merges without either closing a row in `docs/coverage-ledger.md` or adding one.** | A checker's honest number is what it cannot see. Nine catches with an untracked false-negative surface is a number without a denominator. |
+| **No cost claim ships without a measurement.** "Cheap", "near-zero", "≤10%" are hypotheses until `fe-c-bench` prints them. Say "unmeasured" in the meantime. | I5, and `docs/evaluation-2026-07.md` §3.1. |
+| **Degradation is loud.** A mode that could not be parsed, a crate that could not be instrumented, a check that resolved nothing: each is counted and reported, never silently skipped. | §7's own rule. Every fail-open path in the build is currently invisible. |
 | **Never fork rustc, vendor llvm-project, or add an LLVM pass.** MIR-level instrumentation needs none of it. | The whole project thesis. Forks rot in a year. |
 | **Everything builds and tests through nix.** No second execution path. | Repo convention. |
 | **Benchmark against ASan and Fil-C, never against our own fast mode.** | I5. |
@@ -90,10 +97,17 @@ does not block you until Task C1.
 ## 4. Task queue
 
 Work in order. Each task: acceptance is a check that passes, not a judgment
-call. Add each new check to `nix flake check` as you go.
+call. Add each new check to the flake as you go (and run it directly; see §5).
 
-**Mark tasks `[done]` here as you complete them** — this file is the durable
-record of progress across sessions and context compactions.
+**Mark tasks here as you complete them.** This file is the durable record of
+progress across sessions and context compactions. Marks are `[todo]`,
+`[partial]` (substantial work landed, acceptance check not fully met: say what
+remains in one sentence) and `[done]` (the acceptance check passes). A task
+whose body describes finished work while its mark says `[todo]` is a bug in
+this file.
+
+**Next up is Phase E, not the next unfinished letter.** E1 to E3 gate any new
+detection feature; see `docs/evaluation-2026-07.md` §5 for why.
 
 ### Phase A — foundation (mode-independent)
 
@@ -234,8 +248,11 @@ reference, which v0's raw-deref point 0 does not instrument), and the inbound
 
 ### Phase C — modes
 
-**C1. [todo] Decide the mode order** (see §3 above). Record the decision and its
+**C1. [partial] Decide the mode order** (see §3 above). Record the decision and its
 rationale in `PLAN.md` §2 under I4. Then implement the first mode end to end.
+*Remains: T2 shadow-slot coherence, interprocedural and at-rest cap propagation,
+`strict` unknown-provenance. Also unresolved: `through`'s safe-deref check
+currently resolves from the faulting address (evaluation §3.2).*
 *(2026-07-22 — decided **through-first**, recorded in `PLAN.md` I4 and
 `docs/both-modes.md` §Decision. Through mode's defining behavior — **safe-pointer
 deref checking** (the one bolded both-modes row) — is implemented behind
@@ -246,9 +263,13 @@ for full through: T2 shadow-slot coherence, `strict` unknown-provenance,
 interprocedural + at-rest cap propagation. Stays `[todo]` until through is
 end-to-end.)*
 
-**C2. [todo] Dealloc-reachable re-checks (point 4, I6)** — `case` only.
+**C2. [partial] Dealloc-reachable re-checks (point 4, I6)**, `case` only.
 ✅ **`corpus-lru-0130` aborts** with both the free site and the `iter()`
 reborrow site named.
+*Remains: the **free** site is not named (the acceptance's other half). Under
+the conservative "any call frees" reachability the nearest preceding call is an
+innocent `eprintln!`, so a precise `freed_at` needs the deferred `nofree`
+callgraph. Everything else below is done.*
 *(2026-07-22 — the dealloc-reachable re-check is **done and demonstrated in
 both modes** (`fe-c-lru-0130` builds twice). `through` catches the real
 RUSTSEC-2021-0130 use-after-free in unmodified `lru@=0.6.6` at every deref;
@@ -278,9 +299,12 @@ nearest preceding call is the innocent `eprintln!` between the `pop()` and the
 read, so a CFG-derived `freed_at` would be a red herring — a precise free line
 needs the deferred `nofree` callgraph.)*
 
-**C3. [todo] The other mode**, with the `differential` check wired: any violation
+**C3. [partial] The other mode**, with the `differential` check wired: any violation
 `through` catches that `case` misses must map to a documented elision gap in
 `docs/both-modes.md`, or it's a bug.
+*Remains: principled elision (vetting at the raw→safe cast rather than "the base
+is a reference"), and evidence that the elision is sound at all: the vetting
+census, Phase E5.*
 *(2026-07-22 — the **`differential` gate is wired** (`fe-c-differential`) and
 passes: it runs three contrasting reproducers (`closure-escape` raw,
 `through-safe-ref` safe-ref stack, `lru-0130` heap) in both modes and asserts
@@ -292,10 +316,67 @@ dealloc-reachable re-check). Remaining refinement: principled elision
 (vetting at the raw→safe cast) so `case` can skip *more* than it does today, and
 the concurrent free-during-scope caveat (F3).)*
 
+### Phase E: measurement (next; before Phase D and before any new detection feature)
+
+Rationale and evidence: `docs/evaluation-2026-07.md`. The short version: nine
+detection features shipped and zero numbers exist, so every elision decision,
+and the reason `case` mode exists at all, is currently unfounded.
+
+**E1. [todo] Instrumentation and degradation counters.**
+Count and report: checks executed, checks where `root == fault` (propagation
+lost), lookups returning `None` (unknown provenance), unsized start-only checks,
+bodies visited vs skipped, crates instrumented. Emit a per-crate manifest under
+`FEC_DEBUG`.
+✅ `fe-c-false-positive` asserts the propagation-lost and unknown-provenance
+ratios stay below a recorded threshold, so a regression that silently stops
+checking fails the build instead of passing quietly.
+
+**E2. [todo] Fail closed.**
+`FEC_MODE` becomes an explicit `case`|`through` enum, anything else a hard
+error. `FEC_INSTRUMENT_ONLY` errors on a name that matched no crate.
+`find_fec_fns` returning `None` under `FEC_INSTRUMENT=1` is a hard error, not a
+silent passthrough.
+✅ A check that builds with an unrecognized mode (say `FEC_MODE=hard`) and
+asserts the build fails rather than quietly selecting `case`.
+
+**E3. [todo] `fe-c-bench` (I5).**
+One workload, four builds: uninstrumented, `case`, `through`, ASan. Non-gating,
+emits a report artifact. Remove the two per-check global atomics first (make the
+tally opt-in) so the baseline measures the checker, not the counter.
+✅ The check emits absolute numbers and ratios; `PLAN.md` §7's v0 overhead gate
+stops being a hypothesis.
+
+**E4. [todo] The safe-reference provenance canary.**
+A `through`-mode reproducer whose over-read goes through a safe reference into a
+live neighbouring allocation (the smallvec canary shape, but `&[u8]` instead of
+`*mut u8`). Evaluation §3.2 predicts it passes when it should abort; settle it.
+✅ The report names the source allocation, not the neighbour. If it does not,
+extend `compute_roots` to reference locals and write a fourth trace.
+
+**E5. [todo] Vetting census.**
+Compile-time ratio, per crate, of elided safe derefs that have a dominating
+`ensure` to those that do not. First evidence for or against the `case` elision
+argument (and so for the composition theorem, PLAN §6).
+✅ The number is printed for hashbrown and recorded in `docs/both-modes.md`.
+
+**E6. [todo] Rescore the corpus.**
+Resolve `corpus/CORPUS.md`'s 46 IDs to `crate@version` using the advisory DB's
+CVE aliases; publish caught / missed / not-attempted; keep misses as rows.
+✅ `corpus/CORPUS.md` carries a scoreboard with a denominator.
+
+**E7. [todo, human decision] The per-crate dial.**
+Either build it (per-crate rustc flags in `nix/lib/cargo`, `harden` in the
+artifact key per `docs/nix-integration.md` §6 Q2, and a real `cargo-fe-c`), or
+demote it from the README headline until it exists. Do not leave the project's
+central promise implemented as an env var. Like C1, this one is the human's.
+
 ### Phase D — substrate
 
 **D1. [todo]** `-Zbuild-std` sysroot derivations, keyed on (nightly × mode × target ×
-cementite hash).
+cementite hash). *Attempted during the corpus work and currently blocked:
+instrumenting `core` makes `compiler_builtins` fail with "cannot call functions
+through upstream monomorphizations". Its value is whole-process `../libc`
+coverage (D2), not corpus breadth.*
 **D2. [todo]** `../libc` (Eyra lineage) built under instrumentation — whole-process
 coverage. See `../libc/PLAN.md` P2.
 
@@ -303,14 +384,22 @@ coverage. See `../libc/PLAN.md` P2.
 
 ## 5. Verification
 
-`nix flake check` is the contract. Tiers, per `docs/nix-integration.md` §3:
-cheap (fmt, clippy, unit, ui, miri-runtime) on every change; corpus
-(`lru-0130`, `rusqlite-0128`, `smallvec-0003`, each with a patched-version
-control) as the real gates; expensive (false-positive, selfhost, differential,
-bench) nightly.
+The 27 `fe-c-*` flake checks are the contract. **Run them individually**
+(`nix build .#checks.x86_64-linux.fe-c-<name>`); `nix flake check` is forbidden
+repo-wide, it OOMs on this tree. Tiers, per `docs/nix-integration.md` §3: cheap
+(fmt, clippy, unit, miri, census, provenance, instrument, interpose) on every
+change; corpus entries as the real gates; expensive (false-positive,
+differential, and one day selfhost and bench) less often.
 
 Every corpus entry needs its `-control` twin — the patched crate version must
 run **clean**. A checker that aborts on everything passes no useful test.
+*Reality check: only `smallvec-0003` has a patched-version control. The others
+substitute a two-mode build (one mode aborts, the other runs clean) or a
+`NO_ABORT` sentinel in the reproducer. Those are weaker: they prove the check
+fires, not that the fixed version stops it firing. Add real controls as you
+touch each entry.* The `unmapped` regression guard specified in
+`docs/traces/rustsec-2021-0003.md` (so a test cannot pass via segfault) was
+never built either.
 
 The three traced entries above are the *worked* ones; `corpus/CORPUS.md` holds
 the full 46-entry acceptance table with per-row gate marks (required /
@@ -328,8 +417,10 @@ Task A4 can start catching real CVEs before the driver exists.
 | `CLAUDE.md` (this) | Rules + task queue | Update as tasks complete |
 | `PLAN.md` | Invariants, phases, gates, open questions | Living |
 | `README.md` | Human-facing; threat model | Living |
+| `docs/evaluation-2026-07.md` | Where the approach stands, what diverged from the design, ranked next steps | Point-in-time; **supersede** with a new dated file, do not edit |
+| `docs/coverage-ledger.md` | Every known false-negative surface | Living; a row per gap, removed only when a check closes it |
 | `docs/both-modes.md` | The I4 table + mode-order argument | Living |
-| `docs/cementite-api.md` | Runtime API draft | **Dies** when rustdoc exists |
+| `docs/cementite-api.md` | Runtime API **design draft**; the implementation has diverged from it | Superseded by rustdoc + the evaluation's divergence table; keep only as the record of what was intended |
 | `docs/nix-integration.md` | Flake shape + API questions | **Dies** when the flake exists |
 | `docs/through-mode-coherence.md` | Coherence decision + rationale | Frozen |
 | `docs/local-iteration.md` | Build the driver outside nix + dump MIR (fast edit/instrument loop) | Living |
@@ -369,8 +460,8 @@ rewrite published history, never force-push. Push the feature branch only.
 
 1. Read §4. Find the first task not marked `[done]`.
 2. Implement it — that task only. Do not start the next one.
-3. Run `nix flake check`.
-4. Green → mark the task `[done]` in §4, commit (one commit per task, message
+3. Run the affected `fe-c-*` checks individually. Never `nix flake check`.
+4. Green → mark the task in §4, commit (one commit per task, message
    naming the task and what its acceptance check proves), continue from 1.
 5. Red → fix and retry. After **3 failed attempts**, stop per below.
 
@@ -385,12 +476,17 @@ rewrite published history, never force-push. Push the feature branch only.
 - Anything needing network, credentials, publishing, or changes outside
   `rust/fe-c/` and `rust/libc/`.
 
-`STATUS.md` states: which task, what was tried, what's blocking, what you'd
-recommend. It is deleted when the blocker is resolved.
+`STATUS.md` states: what is built and how it was shown, then which task is
+blocked, what was tried, what you'd recommend. It has become the running
+state-of-the-project file rather than a blocker note, which is fine, but it must
+not restate §4's task marks or the evaluation's analysis. When it disagrees with
+§4, §4 wins.
 
-**Scope.** Tasks A1 → B5, then stop at C1. Do not add features, crates,
-targets, or dependencies beyond what the current task requires. Non-goals in
-§7 and PLAN §10 are binding.
+**Scope.** Phase E next (§4), then D. Do not add features, crates, targets, or
+dependencies beyond what the current task requires. E1 to E3 gate new detection
+features: adding a tenth CVE catch before the overhead and degradation numbers
+exist is the failure mode this queue is now ordered to prevent. Non-goals in §7
+and PLAN §10 are binding.
 
 **If a task reveals a design defect**, write a new trace in `docs/traces/`
 (follow the existing three: reproducer, step table, findings, plan deltas),

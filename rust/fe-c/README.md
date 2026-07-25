@@ -12,17 +12,34 @@ guarantees.
 ## What it does
 
 Safe Rust is proven at compile time, so Fe-C spends its runtime budget only
-where the type system abdicates:
+where the type system abdicates: raw-pointer accesses, raw-to-safe casts, and
+FFI boundaries are checked against a global allocation table, resolved from
+where the pointer was *derived* rather than from the address that faulted, so a
+report names the root cause instead of a distant dereference.
 
-- **Deterministic boundary checks** where raw pointers become safe pointers
-  (`&*p`, `&mut *p`, `Box::from_raw`): bounds, liveness, and provenance are
-  validated against a global allocation table at the cast site — failing at the
-  root cause, not at a distant dereference.
-- **FFI enforcement**: libc symbol interposition (allocator family, `mem*`,
-  ptr+len syscall wrappers), `extern "C"` prologue checks, and sampled
-  guard-page/canary allocations (GWP-ASan style) so even opaque C's own heap
-  misuse traps in hardware.
-- **A per-crate hardening dial**, set like an optimization level.
+**Working today** (each backed by a `nix build .#checks.<system>.fe-c-*` entry):
+
+- Raw-pointer dereference and write-intrinsic checks, extent-aware, in both
+  modes.
+- Raw-to-safe cast checks (`&*p`, `&(*p).f`) and slice-mint checks
+  (`slice::from_raw_parts`), including generic element types.
+- Stack scope registration and poisoning, with escape analysis, so a pointer
+  that outlives its frame traps and the report names the escape site.
+- Heap use-after-free, with quarantine, plus a `case`-mode re-check after
+  possibly-freeing calls.
+- Allocator-family libc interposition (`malloc`/`calloc`/`realloc`/`free`/
+  `posix_memalign`), so buffers allocated by C are tracked too.
+- Nine real CVEs caught in real, unmodified crates, one of them across real C
+  (`rusqlite` plus bundled SQLite). See `STATUS.md`.
+
+**Designed, not built yet** (do not plan around these):
+
+- The per-crate hardening dial. Mode is currently one build-wide setting, not a
+  per-crate attribute, and `cargo-fe-c` is a stub.
+- `extern "C"` inbound prologue checks; `mem*` and syscall-wrapper interposition
+  tiers; sampled guard-page/canary allocations (GWP-ASan style).
+- Alignment checking, at-rest capabilities, and interprocedural provenance.
+- Any performance number at all. See `docs/evaluation-2026-07.md`.
 
 ## Hardening modes
 
@@ -33,8 +50,12 @@ where the type system abdicates:
 
 `fil` is a **reserved alias** for `through`, to be enabled only once the
 guarantee is actually earned (precedent: Zig's proposed `fil` ABI mode).
-Modes are per-crate, recorded in crate metadata, mediated by cross-mode call
-adapters. Both modes are first-class from v0; see [PLAN.md](./PLAN.md).
+
+Modes are *designed* to be per-crate, recorded in crate metadata and mediated by
+cross-mode call adapters (PLAN I3). **As built, mode is one setting for the
+whole build** (`FEC_MODE`), and nothing yet records it in metadata or adapts at
+a seam. Both modes are first-class in behaviour and in the differential gate;
+the dial is not. See [PLAN.md](./PLAN.md).
 
 ## Fe-C is not Fil-C
 
@@ -47,7 +68,14 @@ adapters. Both modes are first-class from v0; see [PLAN.md](./PLAN.md).
   boundary. It is a testing/hardening tool, **not a containment boundary for
   hostile code**.
 - **Fe-C `through`** aims at the Fil-C-grade guarantee inside Rust's world,
-  staged deliberately (see PLAN.md §5–7).
+  staged deliberately (see PLAN.md §5–7). **What it delivers today is "checked
+  before every visited access", not Fil-C's "the optimizer never dereferences
+  directly":** checks are injected after rustc's MIR pipeline and the access
+  itself is still an ordinary load or store, so LLVM keeps its `noalias`,
+  `dereferenceable` and `align` assumptions. Lowering accesses through the
+  runtime is a v1 question, not a shipped property.
+- **No overhead number exists for either mode.** The cost claims in this file
+  and in PLAN are hypotheses until `fe-c-bench` exists.
 - Fe-C does not check Rust's aliasing model in any mode — that is
   [Miri](https://github.com/rust-lang/miri)'s job; run both.
 - For lifetime-bound bugs (too-relaxed signatures letting borrows outlive their
@@ -68,7 +96,7 @@ One Rust workspace. No compiler fork, no LLVM linkage, no submodules.
 
 | Crate | Role |
 | ----- | ---- |
-| `cargo-fe-c` | Cargo subcommand + `RUSTC_WRAPPER`; instruments the whole graph incl. `std` via `-Zbuild-std` |
+| `cargo-fe-c` | Cargo subcommand + `RUSTC_WRAPPER`. **Stub today**: builds are driven by pointing `RUSTC` at `fe-c-driver` with `FEC_*` env vars, from the flake checks. `-Zbuild-std` was tried and does not currently work (see STATUS) |
 | `fe-c-driver` | rustc-as-a-library (`rustc_public` where possible); MIR analysis + rewriting of accesses into plain runtime calls; per-crate mode metadata |
 | `cementite` | The hard phase (Fe₃C): allocation table (never-recycled IDs + liveness epochs), check functions, quarantining `#[global_allocator]`, libc interceptors |
 
@@ -86,20 +114,25 @@ lines of asm.
 
 Everything routes through the flake:
 
-- `nix build .#cargo-fe-c` / `.#cementite`
-- `nix build .#fe-c-sysroot-case-x86_64` — instrumented `core`/`alloc`/`std`
-  as cached derivations, rebuilt only on nightly bumps
+- `nix build .#cargo-fe-c` / `.#cementite` / `.#fe-c-driver`
 - `nix develop` — pinned nightly + `rustc-dev` + `rust-src` + miri
-- `nix flake check` — the CI entrypoint (fmt, lints, unit, RustSec corpus,
-  false-positive suite, selfhost, miri-on-runtime); run by the tangled spindle
-  pipeline
+- `nix build .#checks.x86_64-linux.fe-c-<name>` runs one of 27 checks: fmt,
+  clippy, unit, miri, interpose, census, provenance, instrument, the corpus
+  entries with their controls, false-positive, and the differential gate. Run
+  them **individually**; `nix flake check` is forbidden repo-wide (it OOMs on
+  this tree).
+- Not built yet: `fe-c-sysroot-<mode>-<target>` (instrumented `core`/`alloc`/
+  `std`), and `fe-c-bench`.
 
 ## Status
 
-Design phase. Nothing here is a security claim yet.
+Working checker, no security claim yet, no performance data.
 
 - **Starting work (human or agent): [CLAUDE.md](./CLAUDE.md)** — hard rules,
   settled decisions, ordered task queue.
+- Where the project stands and what to do next:
+  [docs/evaluation-2026-07.md](./docs/evaluation-2026-07.md).
+- What it does **not** check: [docs/coverage-ledger.md](./docs/coverage-ledger.md).
 - Design record: [PLAN.md](./PLAN.md). Evidence: [docs/traces/](./docs/traces).
 
 Monorepo table row:
