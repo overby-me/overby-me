@@ -74,6 +74,14 @@ controllen = "controllen"
 caf = "caf"
 CAF = "CAF"
 
+# LLVM spells the runtime-preemption keyword `dso_preemptable`, and LangRef
+# is the spelling a compatibility project has to use. `olt` is one of its
+# floating-point comparison predicates (ordered less than), not `old`.
+preemptable = "preemptable"
+Preemptable = "Preemptable"
+olt = "olt"
+Olt = "Olt"
+
 [default.extend-identifiers]
 # GNU tar upstream test names (tests/extrac*.at in tar-1.35) — not typos.
 extrac01 = "extrac01"
@@ -118,5 +126,8 @@ extend-exclude = [
   # contains target names like target_os = "nto" that look like typos
   "nix/lib/cargo/index/",
   "nix/lib/cargo/tests/fixtures/index/",
+  # The LLVM IR conformance corpus. Its comparison predicates are LangRef
+  # keywords rather than English: olt, oge, une, uno and friends.
+  "rust/llvm/corpus/",
 ]
 ignore-hidden = false
