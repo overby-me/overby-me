@@ -119,6 +119,7 @@ Landed since the ledger was written (each regression-tested before push):
 | `3348e6bd` | Nested `ExecDirectory=` paths (four defects) |
 | `57c9a771` | `systemd.unit-dropin.*` / `systemd.extra-unit.*` credentials |
 | `5c34f5a2` | Generators re-run on `daemon-reload`, as upstream does |
+| (this) | 05-RLIMITS override removed; the test passes with the real `systemd-run -t` |
 
 Both fake passes are gone. Several of these are user-facing bugs well beyond the
 tests that exposed them: `systemctl start --wait` hung on every oneshot, and
@@ -155,8 +156,6 @@ Remove the override, run, record. Ordered by expected payoff.
 | 55-OOMD | full skip | needs `extraUnits` + oomd binary |
 | 67-INTEGRITY | full skip | needs `extraUnits` (`integritysetup.target`) + binary |
 | 26-SYSTEMCTL | `edit --global` hunk deleted | flag implemented |
-| 05-RLIMITS rlimit | `-t` rewritten to `--pipe` | `-t` implemented |
-| 74-AUX-UTILS cgls | `--user-unit` lines deleted | `app.slice` default implemented |
 | 65-ANALYZE | substitute, 1167 upstream lines -> 154 | `verify`/`security` were de-weakened since; the substitute's skip list is stale |
 | 80-NOTIFYACCESS | substitute, 175 -> 86 | comment blames `systemd-run --wait`, `busctl`, `Type=notify-reload`, all of which now work |
 | 07-PID1 private-pids | substitute, 176 -> 24 | biggest single coverage loss in the 07 family |

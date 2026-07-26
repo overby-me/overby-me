@@ -3,7 +3,7 @@
   testEnv = {
     TEST_MATCH_SUBTEST = "\\.rlimit\\.sh$";
   };
-  patchScript = ''
-    sed -i 's/systemd-run --wait -t/systemd-run --wait --pipe/' TEST-05-RLIMITS.rlimit.sh
-  '';
+  # De-masked 2026-07-27. The override rewrote `systemd-run --wait -t` to
+  # `--pipe`, so the pty path was never exercised. crates/run/src/main.rs
+  # implements -t/--pty, so run the test as written.
 }
