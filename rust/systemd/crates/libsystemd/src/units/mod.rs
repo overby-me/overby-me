@@ -127,3 +127,112 @@ mod exec_dir_entry_tests {
         );
     }
 }
+
+/// One `ExecDirectory=` entry, parsed and ordered for creation.
+pub struct ExecDirEntry {
+    /// Source directory name, relative to the type's base (e.g. `aaa/bbb`).
+    pub src: String,
+    /// Optional symlink alias.
+    pub dest: Option<String>,
+    /// `:ro` access mode.
+    pub read_only: bool,
+    /// A parent of this entry is also configured, so its own symlink must NOT
+    /// be created: the parent's symlink already covers this path, and the two
+    /// resolve to the same inode (upstream `EXEC_DIRECTORY_ONLY_CREATE`, added
+    /// for systemd issue #24783).
+    pub only_create: bool,
+}
+
+/// Parse and order `ExecDirectory=` entries the way upstream's
+/// `exec_directory_sort` does.
+///
+/// Parents must be created before their children, even when the unit lists them
+/// the other way round (`StateDirectory=foo/bar foo`): otherwise the
+/// intermediate `foo` is created as a plain directory on the way to `foo/bar`,
+/// and the later `foo` entry can no longer become the symlink it needs to be.
+///
+/// Sorting by the source path is enough to get parents first, because `/` sorts
+/// after the end of a string: `aaa` < `aaa/bbb` < `aaa/ccc`.
+pub fn sorted_exec_dir_entries(entries: &[String]) -> Vec<ExecDirEntry> {
+    let mut parsed: Vec<ExecDirEntry> = entries
+        .iter()
+        .map(|e| {
+            let (src, dest, read_only) = parse_exec_dir_entry(e);
+            ExecDirEntry {
+                src,
+                dest,
+                read_only,
+                only_create: false,
+            }
+        })
+        .collect();
+    parsed.sort_by(|a, b| a.src.cmp(&b.src));
+
+    for i in 0..parsed.len() {
+        let is_child = parsed[..i]
+            .iter()
+            .any(|p| parsed[i].src.starts_with(&format!("{}/", p.src)));
+        parsed[i].only_create = is_child;
+    }
+    parsed
+}
+
+#[cfg(test)]
+mod exec_dir_sort_tests {
+    use super::sorted_exec_dir_entries;
+
+    fn names(v: &[super::ExecDirEntry]) -> Vec<&str> {
+        v.iter().map(|e| e.src.as_str()).collect()
+    }
+
+    #[test]
+    fn parents_are_ordered_before_their_children() {
+        let e = sorted_exec_dir_entries(&["foo/bar".into(), "foo".into()]);
+        assert_eq!(names(&e), vec!["foo", "foo/bar"]);
+    }
+
+    #[test]
+    fn a_child_is_flagged_only_create_and_its_parent_is_not() {
+        let e = sorted_exec_dir_entries(&["aaa/bbb".into(), "aaa".into()]);
+        assert!(!e[0].only_create, "aaa owns its symlink");
+        assert!(e[1].only_create, "aaa/bbb is covered by aaa's symlink");
+    }
+
+    #[test]
+    fn an_unrelated_prefix_is_not_treated_as_a_parent() {
+        // `aa` is a string prefix of `aaa` but not a path parent.
+        let e = sorted_exec_dir_entries(&["aa".into(), "aaa".into()]);
+        assert!(e.iter().all(|x| !x.only_create));
+    }
+
+    #[test]
+    fn the_full_upstream_case_orders_and_flags_correctly() {
+        let e = sorted_exec_dir_entries(&[
+            "waldo".into(),
+            "quux/pief".into(),
+            "aaa/bbb".into(),
+            "aaa".into(),
+            "aaa/ccc".into(),
+        ]);
+        assert_eq!(
+            names(&e),
+            vec!["aaa", "aaa/bbb", "aaa/ccc", "quux/pief", "waldo"]
+        );
+        // Only the two children of the configured `aaa` are ONLY_CREATE.
+        // `quux/pief` is nested but `quux` is not itself configured.
+        let flagged: Vec<&str> = e
+            .iter()
+            .filter(|x| x.only_create)
+            .map(|x| x.src.as_str())
+            .collect();
+        assert_eq!(flagged, vec!["aaa/bbb", "aaa/ccc"]);
+    }
+
+    #[test]
+    fn aliases_and_access_mode_survive_the_sort() {
+        let e = sorted_exec_dir_entries(&["xxx/yyy:aaa/111".into(), "www::ro".into()]);
+        assert_eq!(names(&e), vec!["www", "xxx/yyy"]);
+        assert!(e[0].read_only);
+        assert_eq!(e[1].dest.as_deref(), Some("aaa/111"));
+    }
+}

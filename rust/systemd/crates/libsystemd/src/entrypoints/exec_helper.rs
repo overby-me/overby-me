@@ -1936,7 +1936,12 @@ pub fn run_exec_helper() {
     // symlink <base>/<name> → private/<name> (matching real systemd).
     // Returns the path the service should use (the symlink for dynamic,
     // the direct path otherwise).
-    let create_managed_dir = |base: &Path, dir_name: &str, mode: u32, dynamic: bool| -> String {
+    let create_managed_dir_ex = |base: &Path,
+                                 dir_name: &str,
+                                 mode: u32,
+                                 dynamic: bool,
+                                 only_create: bool|
+     -> String {
         let uid = nix::unistd::Uid::from_raw(config.user);
         let gid = nix::unistd::Gid::from_raw(config.group);
         if dynamic {
@@ -1966,6 +1971,18 @@ pub fn run_exec_helper() {
             }
             let full_path = private_dir.join(dir_name);
             let link_path = base.join(dir_name);
+            // Intermediates between the private root and the leaf, at 0755.
+            if let Some(parent) = full_path.parent()
+                && parent != private_dir
+                && !parent.exists()
+            {
+                let _ = std::fs::create_dir_all(parent);
+                let mut p = private_dir.clone();
+                for comp in Path::new(dir_name).components().collect::<Vec<_>>().iter().rev().skip(1).rev() {
+                    p = p.join(comp);
+                    set_dir_mode(&p, 0o755);
+                }
+            }
 
             // DynamicUser=0 -> 1 migration.  A previous non-dynamic run left a
             // real directory at <base>/<name>; upstream moves it under
@@ -2005,16 +2022,47 @@ pub fn run_exec_helper() {
                 log::error!("Failed to chown directory {:?}: {}", full_path, e);
                 std::process::exit(1);
             }
-            // Create symlink: <base>/<name> → private/<name>
-            let _ = std::fs::remove_file(&link_path); // remove stale symlink
-            let target = Path::new("private").join(dir_name);
-            if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
-                log::warn!(
-                    "Failed to create symlink {:?} → {:?}: {}",
-                    link_path,
-                    target,
-                    e
-                );
+            // Link it up from the public place. A nested name (`aaa/bbb`) makes
+            // this more than a one-liner:
+            //
+            //  - the target must be relative to the LINK's directory, not to
+            //    `base`. For `/var/lib/aaa/bbb` that is `../private/aaa/bbb`;
+            //    a flat `private/aaa/bbb` would resolve to
+            //    `/var/lib/aaa/private/aaa/bbb`.
+            //  - when a parent was itself configured (`StateDirectory=aaa
+            //    aaa/bbb`), `/var/lib/aaa` is already a symlink into private/,
+            //    so the link path and the private path are the SAME inode. We
+            //    must not create a symlink then, and must not delete what is
+            //    there (upstream issue #24783).
+            let already_linked = match (
+                std::fs::canonicalize(&link_path),
+                std::fs::canonicalize(&full_path),
+            ) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => false,
+            };
+            // ONLY_CREATE: a configured parent already provides the symlink that
+            // covers this path, and link and target are the same inode.
+            if !only_create && !already_linked {
+                if let Some(parent) = link_path.parent()
+                    && !parent.exists()
+                {
+                    let _ = std::fs::create_dir_all(parent);
+                    set_dir_mode(parent, 0o755);
+                }
+                let target = match link_path.parent() {
+                    Some(parent) => path_make_relative(parent, &full_path),
+                    None => full_path.clone(),
+                };
+                let _ = std::fs::remove_file(&link_path); // stale symlink
+                if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
+                    log::warn!(
+                        "Failed to create symlink {:?} → {:?}: {}",
+                        link_path,
+                        target,
+                        e
+                    );
+                }
             }
             log::info!(
                 "DynamicUser=yes exec dir: {:?} -> {:?} (uid={} gid={} mode={:o})",
@@ -2053,6 +2101,17 @@ pub fn run_exec_helper() {
                 }
             }
 
+            if let Some(parent) = full_path.parent()
+                && parent != base
+                && !parent.exists()
+            {
+                let _ = std::fs::create_dir_all(parent);
+                let mut p = base.to_path_buf();
+                for comp in Path::new(dir_name).components().collect::<Vec<_>>().iter().rev().skip(1).rev() {
+                    p = p.join(comp);
+                    set_dir_mode(&p, 0o755);
+                }
+            }
             if let Err(e) = std::fs::create_dir_all(&full_path) {
                 log::error!("Failed to create directory {:?}: {}", full_path, e);
                 std::process::exit(1);
@@ -2118,6 +2177,16 @@ pub fn run_exec_helper() {
         rel
     }
 
+    /// Set a directory's mode, ignoring failures.
+    ///
+    /// Intermediate directories of a nested exec directory (`StateDirectory=aaa/bbb`
+    /// creates `aaa` on the way to `bbb`) are 0755 in upstream regardless of the
+    /// unit's DirectoryMode=, which applies to the leaf only.
+    fn set_dir_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+    }
+
     // ExecDirectory= entries flagged `:ro` — collected here and enforced as
     // read-only bind mounts once the mount namespace is set up.
     let mut read_only_exec_dirs: Vec<std::path::PathBuf> = Vec::new();
@@ -2147,8 +2216,8 @@ pub fn run_exec_helper() {
         let user = std::env::var_os("SYSTEMD_USER_MANAGER").is_some();
         let mode = config.state_directory_mode.unwrap_or(0o755);
         let mut full_paths: Vec<String> = Vec::new();
-        for entry in &config.state_directory {
-            let (src, dest, ro) = parse_exec_dir_entry(entry);
+        for e in crate::units::sorted_exec_dir_entries(&config.state_directory) {
+            let (src, dest, ro, only_create) = (e.src, e.dest, e.read_only, e.only_create);
             let src_path = base.join(&src);
             // Migrate-to-symlink: if the state directory is missing but a matching
             // configuration directory exists, create a relative symlink into it so
@@ -2162,7 +2231,7 @@ pub fn run_exec_helper() {
                 }
                 src_path.to_string_lossy().into_owned()
             } else {
-                create_managed_dir(&base, &src, mode, dynamic)
+                create_managed_dir_ex(&base, &src, mode, dynamic, only_create)
             };
             exec_dir_binds.push((full.clone(), src_path.clone()));
             if dynamic {
@@ -2171,14 +2240,20 @@ pub fn run_exec_helper() {
             // Optional destination: a symlink alias pointing at the source dir.
             if let Some(dest) = dest {
                 let dest_path = base.join(&dest);
-                if tmpfs_covered(&dest_path) {
-                    // The bind below provides it inside the namespace; leave
-                    // nothing behind on the host.
-                    let _ = std::fs::remove_file(&dest_path);
-                } else {
-                    let _ = std::fs::remove_file(&dest_path);
-                    if let Err(e) = std::os::unix::fs::symlink(&src, &dest_path) {
-                        log::warn!("Failed to symlink {dest_path:?} -> {src:?}: {e}");
+                let _ = std::fs::remove_file(&dest_path);
+                if !tmpfs_covered(&dest_path) {
+                    // The bind provides it inside the namespace when a tmpfs
+                    // covers it; otherwise link it here, relative to the
+                    // alias's own directory (see the note in create_exec_dirs).
+                    if let Some(parent) = dest_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let target = match dest_path.parent() {
+                        Some(parent) => path_make_relative(parent, &base.join(&src)),
+                        None => base.join(&src),
+                    };
+                    if let Err(e) = std::os::unix::fs::symlink(&target, &dest_path) {
+                        log::warn!("Failed to symlink {dest_path:?} -> {target:?}: {e}");
                     }
                 }
                 exec_dir_binds.push((full.clone(), dest_path));
@@ -2206,9 +2281,9 @@ pub fn run_exec_helper() {
                             private_out: &mut Vec<PathBuf>|
      -> Vec<String> {
         let mut full_paths = Vec::with_capacity(entries.len());
-        for entry in entries {
-            let (src, dest, ro) = parse_exec_dir_entry(entry);
-            let full = create_managed_dir(base, &src, mode, dynamic);
+        for e in crate::units::sorted_exec_dir_entries(entries) {
+            let (src, dest, ro) = (e.src, e.dest, e.read_only);
+            let full = create_managed_dir_ex(base, &src, mode, dynamic, e.only_create);
             bind_out.push((full.clone(), base.join(&src)));
             if dynamic {
                 private_out.push(base.join("private"));
@@ -2221,8 +2296,17 @@ pub fn run_exec_helper() {
                     if let Some(parent) = dest_path.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
-                    if let Err(e) = std::os::unix::fs::symlink(&src, &dest_path) {
-                        log::warn!("Failed to symlink {dest_path:?} -> {src:?}: {e}");
+                    // Relative to the ALIAS's own directory, not to `base`: a
+                    // nested alias `aaa/111` sits in `<base>/aaa`, so a bare
+                    // `xxx/yyy` would resolve to `<base>/aaa/xxx/yyy` and
+                    // dangle. Flat aliases are unaffected: the relative path
+                    // from `<base>` to `<base>/zzz` is still just `zzz`.
+                    let target = match dest_path.parent() {
+                        Some(parent) => path_make_relative(parent, &base.join(&src)),
+                        None => base.join(&src),
+                    };
+                    if let Err(e) = std::os::unix::fs::symlink(&target, &dest_path) {
+                        log::warn!("Failed to symlink {dest_path:?} -> {target:?}: {e}");
                     }
                 }
                 // The alias is a symlink on the host, which a tmpfs over `base`
@@ -2295,7 +2379,7 @@ pub fn run_exec_helper() {
                 if ro {
                     read_only_exec_dirs.push(base.join(&src));
                 }
-                let full = create_managed_dir(&base, &src, mode, false);
+                let full = create_managed_dir_ex(&base, &src, mode, false, false);
                 exec_dir_binds.push((full.clone(), base.join(&src)));
                 full
             })
@@ -2352,11 +2436,19 @@ pub fn run_exec_helper() {
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
+    // starts_with, not "parent is the private base": a nested exec directory
+    // lives at `<base>/private/quux/pief`, whose parent is `private/quux`, so a
+    // direct-child test skipped it entirely and its contents never appeared in
+    // the tmpfs, leaving the public symlinks dangling.
+    //
+    // These are registered before the public/alias binds below so the tmpfs has
+    // the real directories in place by the time a symlinked alias path is
+    // resolved through it.
     for (source, _) in &exec_dir_binds {
         let src = Path::new(source);
         if exec_dir_private_bases
             .iter()
-            .any(|b| src.parent() == Some(b.as_path()))
+            .any(|b| src.starts_with(b) && src != b.as_path())
         {
             config
                 .exec_dir_binds
