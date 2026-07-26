@@ -50,10 +50,22 @@
   # So the plain attach works and only the SEPARATE DATA DEVICE variant does
   # not. That is a much narrower target than "the attach is broken".
   #
-  # NEXT STEP: compare how the generated unit for the separate-data case differs
-  # (integritytab gets a data-device= option, which the generator turns into an
-  # extra argument) against what crates/integritysetup does with it. Check
-  # whether the option is parsed at all before assuming the dm ioctl is wrong.
+  # ALSO RULED OUT, by reading crates/integritysetup: the data-device= option
+  # IS parsed from integritytab (main.rs parse_options, "data-device" |
+  # "data_device"), IS stored, and IS built into the dm table by
+  # build_integrity_params, which emits `data_device:<path>`. Unit tests cover
+  # both the parse and the param building. So the option is not being dropped.
+  #
+  # REMAINING CANDIDATES, none yet tested:
+  #   - the generated unit for the separate-data case may not pass the option
+  #     through: check what systemd-integritysetup-generator writes into
+  #     /run/systemd/generator/systemd-integritysetup@integrity_test.service for
+  #     this case, and compare with what crates/integritysetup expects on its
+  #     command line.
+  #   - the dm ioctl may succeed while producing a device that never gets a
+  #     /dev/mapper/ node, which is what the failing udevadm wait observes.
+  # Capture the generated unit file and the service's own output in the VM
+  # before choosing between these; do not guess.
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
