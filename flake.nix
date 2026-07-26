@@ -226,6 +226,7 @@
         ./rust/gzip
         ./rust/h26xtoav1
         ./rust/help2man
+        ./rust/llvm
         ./rust/make
         ./rust/meson
         ./rust/nixos
