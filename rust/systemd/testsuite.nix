@@ -22,6 +22,17 @@
   # (TEST-09-REBOOT); harmless but undesirable for others (a kernel panic would
   # loop instead of fast-failing), so it is opt-in per test.
   allowReboot ? false,
+  # Accept `/skipped` (upstream's exit-77 convention) as a passing outcome.
+  # OFF by default: a skip means zero assertions ran, so it fails the check and
+  # a newly-self-skipping test surfaces as red.  Every test that sets this is
+  # listed in docs/TEST-OVERRIDES.md with what it would take to unset it.
+  expectedSkip ? false,
+  # Extra unit files to link into /usr/lib/systemd/system from the C systemd
+  # package, by basename (e.g. "systemd-oomd.service").  rust-systemd overlays
+  # its binaries onto that package, so the units ship with it but only a small
+  # default set is linked; linking all of them at boot is wasteful.  Tests that
+  # exercise a specific daemon name the units they need here.
+  extraUnits ? [],
   # Boot the VM through a real bootloader from a disk image (instead of the
   # default directBoot, which loads the kernel directly and cannot cleanly
   # re-run the whole boot on reboot). A firmware reboot re-initialises every
@@ -119,7 +130,9 @@ in
       # initrd mounts the API filesystems and switch_roots into rust-systemd as
       # the stage-2 manager — the role it is designed for, and the setup these
       # integration tests exercise. Re-enabling systemd-in-initrd is tracked as
-      # future work once rust-systemd grows an initrd mode (see PLAN.md).
+      # future work once rust-systemd grows an initrd mode.  This is also why
+      # TEST-08-INITRD is expectedSkip: it bails out when
+      # InitRDTimestampMonotonic is 0.
       boot.initrd.systemd.enable = lib.mkIf (!useUpstreamSystemd) (lib.mkForce false);
 
       # Use rust-systemd as the systemd package (or upstream C systemd for baseline)
@@ -424,6 +437,30 @@ in
           name=$(basename "$f")
           [ -e "/usr/lib/systemd/system/$name" ] || ln -sfn "$f" "/usr/lib/systemd/system/$name"
         done
+
+        # Per-test extra units (the `extraUnits` argument).  The C systemd
+        # package keeps most of its optional units under example/systemd/system
+        # rather than lib/systemd/system, so look in both.  Fail loudly on a
+        # typo: a silently missing unit turns into a confusing "unit not found"
+        # deep inside the test.
+        ${pkgs.lib.optionalString (extraUnits != []) ''
+          for name in ${pkgs.lib.escapeShellArgs extraUnits}; do
+            [ -e "/usr/lib/systemd/system/$name" ] && continue
+            found=""
+            for dir in ${config.systemd.package}/example/systemd/system \
+                       ${config.systemd.package}/lib/systemd/system; do
+              if [ -e "$dir/$name" ]; then
+                ln -sfn "$dir/$name" "/usr/lib/systemd/system/$name"
+                found=1
+                break
+              fi
+            done
+            if [ -z "$found" ]; then
+              echo "extraUnits: no such unit '$name' in the systemd package" >&2
+              exit 1
+            fi
+          done
+        ''}
 
         # The rust-systemd package doesn't ship systemd-network-generator.service
         # in its unit dir, so provide it inline for TEST-74-AUX-UTILS.network-generator.
@@ -826,23 +863,44 @@ in
               machine.wait_for_unit("multi-user.target", timeout=120)
               machine.succeed("systemctl daemon-reload")
 
-      # Check for /testok (standard systemd test success marker) or
-      # /skipped (upstream convention for tests that detected a missing
-      # prerequisite — e.g. TEST-08-INITRD when not running under a
-      # systemd initrd).  Either is a valid "this test ran to completion"
-      # marker; its absence means the script crashed / a set-e-trapped
-      # `test` assertion failed.
+      # Check for /testok, the standard systemd test success marker.  Its
+      # absence means the script crashed or a set-e-trapped `test` assertion
+      # failed.
+      #
+      # /skipped is the upstream convention for a test that detected a missing
+      # prerequisite and bailed out (exit 77).  A skip is NOT a pass: it means
+      # zero assertions ran.  By default it fails the check, so a test that
+      # starts self-skipping (a regressed prerequisite, a masked feature) shows
+      # up as red instead of silently green.  Tests that are legitimately
+      # expected to skip set `expectedSkip = true` in their integration-tests
+      # entry; that list is the audit surface, and every entry on it is
+      # accounted for in docs/TEST-OVERRIDES.md.
       (rc_ok, ok_out) = machine.execute("test -f /testok")
       (rc_skip, skip_out) = machine.execute("test -f /skipped")
       if rc_ok != 0 and rc_skip != 0:
-          print("=== /testok and /skipped both missing — dumping journal for diagnostics ===")
+          print("=== /testok and /skipped both missing, dumping journal for diagnostics ===")
           (rc_j, j) = machine.execute("journalctl --no-pager -b 2>&1 | tail -400")
           print(j)
           print("=== systemctl list-units --failed ===")
           (rc_f, f) = machine.execute("systemctl list-units --failed 2>&1")
           print(f)
-      # Assert one of /testok or /skipped exists — previous `machine.fail`
-      # was inverted and silently let missing-marker cases pass.
-      machine.succeed("test -f /testok -o -f /skipped")
+
+      if ${if expectedSkip then "True" else "False"}:
+          # Opted in to skipping: either marker is accepted, because such a
+          # test may also run to completion once its prerequisite appears.
+          machine.succeed("test -f /testok -o -f /skipped")
+          if rc_ok == 0:
+              print("NOTE: expectedSkip is set but the test reached /testok. "
+                    "Drop expectedSkip from this test's integration-tests entry.")
+      else:
+          if rc_ok != 0 and rc_skip == 0:
+              print("=== test wrote /skipped, so nothing was verified ===")
+              (rc_s, s) = machine.execute("cat /skipped 2>&1")
+              print(s)
+              raise Exception(
+                  "test skipped itself (/skipped) but is not marked expectedSkip; "
+                  "a skip is not a pass, see docs/TEST-OVERRIDES.md"
+              )
+          machine.succeed("test -f /testok")
     '';
   }

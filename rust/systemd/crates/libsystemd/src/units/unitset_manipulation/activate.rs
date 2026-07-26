@@ -1841,7 +1841,7 @@ fn deferred_notify_wait_and_dispatch(
             // run ExecStopPost and fail the start.  NOTE: this holds the
             // RuntimeInfo read guard + state write lock across the bounded
             // poststart helper wait; taking helper waits fully off the locks
-            // is UPSTREAM-MAP fix 2.
+            // is docs/ARCHITECTURE.md invariant I1.
             if let Specific::Service(svc) = &unit.specific
                 && !svc.conf.startpost.is_empty()
             {

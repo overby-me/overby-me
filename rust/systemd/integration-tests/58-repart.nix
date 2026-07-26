@@ -1,5 +1,8 @@
 {
   name = "58-REPART";
+  # Skips rather than passes: systemd-repart.service is not wired into the VM
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # Upstream 58-REPART exercises partition creation via systemd-repart, which
   # is a stub in rust-systemd.
   patchScript = ''

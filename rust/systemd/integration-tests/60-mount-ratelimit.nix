@@ -1,5 +1,8 @@
 {
   name = "60-MOUNT-RATELIMIT";
+  # Skips rather than passes: no mountinfo event-source rate limiting
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # The /proc/self/mountinfo-driven mount monitor is now implemented (shared
   # with 10-MOUNT), and this session added SubState=mounted for active mount
   # units plus a guard so the monitor never deactivates a mount unit PID 1 is

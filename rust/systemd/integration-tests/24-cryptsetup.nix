@@ -1,5 +1,8 @@
 {
   name = "24-CRYPTSETUP";
+  # Skips rather than passes: no encrypted /var partition in the VM
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # Upstream 24-CRYPTSETUP expects an encrypted /var partition set up by
   # the test infrastructure before boot.  Our NixOS test VM doesn't do that.
   patchScript = ''

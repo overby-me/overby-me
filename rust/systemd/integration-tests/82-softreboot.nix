@@ -1,5 +1,8 @@
 {
   name = "82-SOFTREBOOT";
+  # Skips rather than passes: soft-reboot is not implemented
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # Upstream 82-SOFTREBOOT tests the soft-reboot PID1 feature, not implemented
   # by rust-systemd. Baselined 2026-07-22: first failure is the missing
   # `SoftRebootsCount` Manager D-Bus property, and the test is a MULTI-soft-reboot

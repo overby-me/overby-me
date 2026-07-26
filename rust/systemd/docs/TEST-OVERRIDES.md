@@ -36,18 +36,24 @@ exec path, so `killall` misses it).
 
 ## Two structural problems
 
-### 1. The harness scores a skip as a pass
+### 1. The harness scored a skip as a pass (fixed)
 
-`testsuite.nix:846` asserts `test -f /testok -o -f /skipped`, and a script exiting 77
-gets `/skipped` created for it (`testsuite.nix:801`). Every override in this file is
-therefore invisible: `nix build .#checks.x86_64-linux.rust-systemd-test-46-homed`
-succeeds today while running zero lines of TEST-46-HOMED.sh.
+`testsuite.nix` used to assert `test -f /testok -o -f /skipped`, and a script exiting 77
+gets `/skipped` created for it. Every override in this file was therefore invisible:
+`nix build .#checks.x86_64-linux.rust-systemd-test-46-homed` succeeded while running
+zero lines of TEST-46-HOMED.sh.
 
-Nothing forces this ledger to stay honest. Before any of the work below, make
-`/skipped` a failure unless the test opts in, for example an `expectedSkip ? false`
-argument to `testsuite.nix` that flips the final assertion to `test -f /testok`.
-Tests that legitimately self-skip on a missing prerequisite (62-RESTRICT-IFACES takes
-upstream's own no-BPF path, 72-SYSUPDATE has no binary to test) set it explicitly.
+Fixed by the `expectedSkip` argument. A `/skipped` marker now fails the check unless the
+test opts in, and the opt-in list is the audit surface. 23 tests currently set it: the 16
+carrying a forced `exit 77` override, plus 7 where the upstream script takes its own skip
+path in this VM (06-SELINUX is not on a supported distro ID, 08-INITRD sees
+`InitRDTimestampMonotonic == 0` because `boot.initrd.systemd.enable` is off, 21-DFUZZER
+has no `dfuzzer`, 62-RESTRICT-IFACES reports `-BPF_FRAMEWORK`, 72-SYSUPDATE has no
+binary, 75-RESOLVED has no `knotc`, 88-UPGRADE has no `/usr/host-pkgs`).
+
+`expectedSkip` accepts either marker and prints a NOTE when the test reaches `/testok`,
+so a baseline run of a newly un-skipped test is safe: it tells you to drop the flag
+rather than failing.
 
 ### 2. Unit files are not wired into the VM
 
@@ -64,8 +70,10 @@ The C package ships these in `${systemd}/example/systemd/system/`, unlinked:
     systemd-sysupdate.service    systemd-sysupdated.service
 
 So several tests skipped as "not implemented" are really "the unit was never
-installed". Add an `extraUnits ? []` argument to `testsuite.nix` that symlinks named
-units per test, keeping the boot-time unit count bounded.
+installed". Addressed by the `extraUnits` argument: a test names the units it needs and
+`testsuite.nix` symlinks them from either `example/systemd/system` or
+`lib/systemd/system`, failing loudly on a typo, so the boot-time unit count stays
+bounded.
 
 The "overwhelm PID 1" note is itself worth a look: upstream loads its full unit set
 routinely. If loading a few hundred extra units destabilises boot, that is a scaling
@@ -93,10 +101,10 @@ highest-information action available and costs one VM run each.
 
 ## Work tiers
 
-### Tier 0: make the ledger enforceable
+### Tier 0: make the ledger enforceable (done)
 
-1. `expectedSkip` argument so `/skipped` fails by default (see above).
-2. `extraUnits` argument so a test can pull in specific C-package units.
+1. `expectedSkip` argument so `/skipped` fails by default. Done.
+2. `extraUnits` argument so a test can pull in specific C-package units. Done.
 
 Neither touches rust code. Both are prerequisites for trusting anything below.
 
@@ -109,7 +117,7 @@ Remove the override, run, record. Ordered by expected payoff.
 | 44-LOG-NAMESPACE | fake pass | 26-line test. Both ends exist; see below for the one missing link |
 | 34-DYNAMICUSERMIGRATE | fake pass | 240 lines of `RuntimeDirectory`/`StateDirectory`/`CacheDirectory`/`LogsDirectory` across `DynamicUser=0` -> `1`; the private/ layout is built |
 | 58-REPART | full skip | needs `extraUnits` + real binary, both present |
-| 46-HOMED | full skip | needs `extraUnits` + `homectl` already ships |
+| 46-HOMED | full skip | needs `extraUnits`. Note: the suite is 1,060 lines and leans on `userdbctl`, which has no rust crate, so expect the baseline to stop early |
 | 55-OOMD | full skip | needs `extraUnits` + oomd binary |
 | 67-INTEGRITY | full skip | needs `extraUnits` (`integritysetup.target`) + binary |
 | 26-SYSTEMCTL | `edit --global` hunk deleted | flag implemented |

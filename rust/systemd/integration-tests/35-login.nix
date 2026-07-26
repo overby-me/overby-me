@@ -1,5 +1,8 @@
 {
   name = "35-LOGIN";
+  # Skips rather than passes: the logind session/seat suite is not implemented
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # Upstream 35-LOGIN. Baselined 2026-07-22: does NOT self-skip (evemu-device is
   # present or the guard is later) -- it runs the full logind suite (setup_test_user
   # + systemctl edit + restart systemd-logind all pass, then run_testcases hits

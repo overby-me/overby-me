@@ -1,5 +1,8 @@
 {
   name = "54-CREDS";
+  # Skips rather than passes: ImportCredential=/varlink/run0 credential paths are missing
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # Enable systemd-creds standalone + SetCredential/--pipe credential tests.
   # Skip unshare mount namespace tests (system credentials dir detection differs).
   # Skip sections needing ImportCredential, varlink, run0.

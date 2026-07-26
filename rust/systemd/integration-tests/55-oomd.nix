@@ -1,5 +1,8 @@
 {
   name = "55-OOMD";
+  # Skips rather than passes: systemd-oomd.service is not wired into the VM
+  # See ../docs/TEST-OVERRIDES.md.
+  expectedSkip = true;
   # Upstream 55-OOMD requires a functional systemd-oomd.service; rust-systemd
   # ships systemd-oomd as a stub.
   patchScript = ''

@@ -433,39 +433,32 @@ in {
           }
       )
       testFiles;
+    # Every key an integration-tests entry may set, with its default.  Kept in
+    # one place so the rust-systemd and c-systemd variants cannot drift apart.
+    testArgs = t: pkgs: {
+      inherit pkgs;
+      inherit (t) name;
+      patchScript = t.patchScript or "";
+      extraPackages = (t.extraPackages or (_: [])) pkgs;
+      extraUnits = t.extraUnits or [];
+      testEnv = t.testEnv or {};
+      testTimeout = t.testTimeout or 1800;
+      enableTpm = t.enableTpm or false;
+      allowReboot = t.allowReboot or false;
+      useBootLoader = t.useBootLoader or false;
+      expectedSkip = t.expectedSkip or false;
+    };
   in
     lib.listToAttrs (
       (map (t: {
           name = "rust-systemd-test-${t._checkName}";
-          value = pkgs:
-            import ./testsuite.nix {
-              inherit pkgs;
-              inherit (t) name;
-              patchScript = t.patchScript or "";
-              extraPackages = (t.extraPackages or (_: [])) pkgs;
-              testEnv = t.testEnv or {};
-              testTimeout = t.testTimeout or 1800;
-              enableTpm = t.enableTpm or false;
-              allowReboot = t.allowReboot or false;
-              useBootLoader = t.useBootLoader or false;
-            };
+          value = pkgs: import ./testsuite.nix (testArgs t pkgs);
         })
         tests)
       ++ (map (t: {
           name = "c-systemd-test-${t._checkName}";
           value = pkgs:
-            import ./testsuite.nix {
-              inherit pkgs;
-              inherit (t) name;
-              patchScript = t.patchScript or "";
-              extraPackages = (t.extraPackages or (_: [])) pkgs;
-              testEnv = t.testEnv or {};
-              testTimeout = t.testTimeout or 1800;
-              enableTpm = t.enableTpm or false;
-              allowReboot = t.allowReboot or false;
-              useBootLoader = t.useBootLoader or false;
-              useUpstreamSystemd = true;
-            };
+            import ./testsuite.nix (testArgs t pkgs // {useUpstreamSystemd = true;});
         })
         tests)
     );
