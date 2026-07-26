@@ -14,9 +14,7 @@ impl Printer<'_> {
         for attachment in attachments {
             let _ = write!(self.out, "{separator}!{} ", metadata_name(&attachment.kind));
             match &attachment.node {
-                MdRef::Id(id) => {
-                    let _ = write!(self.out, "!{}", id.0);
-                }
+                MdRef::Id(id) => self.metadata_reference(*id),
                 MdRef::Inline(node) => self.metadata_definition(node),
             }
         }
@@ -76,9 +74,7 @@ impl Printer<'_> {
     pub(crate) fn metadata_operand(&mut self, operand: &MdOperand) {
         match operand {
             MdOperand::Null => self.push("null"),
-            MdOperand::Ref(id) => {
-                let _ = write!(self.out, "!{}", id.0);
-            }
+            MdOperand::Ref(id) => self.metadata_reference(*id),
             MdOperand::String(text) => {
                 let _ = write!(self.out, "!\"{}\"", escape_string(text));
             }
@@ -111,9 +107,7 @@ impl Printer<'_> {
                 };
                 self.push(&text);
             }
-            Value::Metadata(id) => {
-                let _ = write!(self.out, "!{}", id.0);
-            }
+            Value::Metadata(id) => self.metadata_reference(id),
             Value::Block(_) => self.push("<block>"),
         }
     }
@@ -132,9 +126,7 @@ impl Printer<'_> {
             MdField::Str(text) => {
                 let _ = write!(self.out, "\"{}\"", escape_string(text));
             }
-            MdField::Ref(id) => {
-                let _ = write!(self.out, "!{}", id.0);
-            }
+            MdField::Ref(id) => self.metadata_reference(*id),
             MdField::Null => self.push("null"),
             MdField::Words(words) => self.push(&words.join(" | ")),
             MdField::Value { ty, value } => {
@@ -143,6 +135,30 @@ impl Printer<'_> {
                 self.metadata_value(*value);
             }
             MdField::Inline(node) => self.metadata_definition(node),
+        }
+    }
+
+    /// A reference to a node: its number, or the node itself when it is one
+    /// of the kinds that print in place.
+    pub(crate) fn metadata_reference(&mut self, id: llvm_ir::MdId) {
+        let canonical = self.metadata.resolve(id);
+        if let Some(node) = self.module.metadata_node(canonical)
+            && crate::md_slots::prints_in_place(node)
+        {
+            let node = node.clone();
+            self.metadata_definition(&node);
+            return;
+        }
+        match self.metadata.number(id) {
+            Some(number) => {
+                let _ = write!(self.out, "!{number}");
+            }
+            // A reference the traversal never reached, which the verifier
+            // reports separately; printing the original number keeps the
+            // output readable rather than silently dropping it.
+            None => {
+                let _ = write!(self.out, "!{}", canonical.0);
+            }
         }
     }
 }

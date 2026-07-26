@@ -38,6 +38,7 @@ and each row names the check that backs it.
 | Type aliases: `%name = type [8 x i8]` expands where used | done | `llvm-upstream-assembler` |
 | Default alignments filled in from the data layout | done | `llvm-opt-differential` |
 | Function attributes hoisted into numbered groups on output | done | `llvm-opt-differential`, `llvm-roundtrip` |
+| Metadata uniquing and renumbering on output | done | `llvm-opt-differential`, `llvm-roundtrip` |
 | Verifier: placement rules for `!range`, `!align`, `!nonnull`, `!prof`, scope lists | done | `llvm-upstream-verifier` |
 | `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
 
@@ -71,7 +72,7 @@ skipped and counted separately rather than scored.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against `llvm-as | llvm-dis`, and **100 of 160** are identical. Two
+against `llvm-as | llvm-dis`, and **105 of 160** are identical. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against
@@ -98,7 +99,12 @@ a compiler project's README:
   `llvm-dis` do not exist because their contract is bitcode.
 - **No rustc backend.** `rustc_codegen_llvm` is not vendored, and no Rust
   program compiles through this project.
-- **No debug info, no unwinding, no LTO, no PGO, no coverage.**
+- **No debug info modelling.** Debug-info nodes round-trip as written, but
+  nothing knows what a `DICompileUnit` field means, so a field left at its
+  default is printed back rather than omitted the way upstream omits it.
+  That is the largest remaining cause of print differences and it wants the
+  `llvm-debuginfo` crate at T1, not a table of defaults.
+- **No unwinding, no LTO, no PGO, no coverage.**
 - **No C ABI.** `llvm-c-abi` is T5.
 
 ## Divergences from PLAN.md

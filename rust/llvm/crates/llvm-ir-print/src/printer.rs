@@ -10,6 +10,7 @@ use llvm_ir::value::{Name, escape_name, needs_quotes};
 use llvm_ir::{BlockId, Module, StructId, TypeId, TypeKind};
 use llvm_support::Align;
 
+use crate::md_slots::MetadataSlots;
 use crate::print_type;
 use crate::slots::FunctionSlots;
 
@@ -30,6 +31,7 @@ pub(crate) struct Printer<'m> {
     /// input happened to have.
     groups: Vec<Vec<Attribute>>,
     group_numbers: HashMap<Vec<Attribute>, u32>,
+    pub(crate) metadata: MetadataSlots,
 }
 
 impl<'m> Printer<'m> {
@@ -40,6 +42,7 @@ impl<'m> Printer<'m> {
             slots: FunctionSlots::default(),
             groups: Vec::new(),
             group_numbers: HashMap::new(),
+            metadata: MetadataSlots::default(),
         }
     }
 
@@ -99,6 +102,7 @@ impl<'m> Printer<'m> {
 
     pub(crate) fn module(&mut self) {
         self.assign_attribute_groups();
+        self.metadata = MetadataSlots::compute(self.module);
         if let Some(id) = &self.module.module_id {
             let _ = writeln!(self.out, "; ModuleID = '{id}'");
         }
@@ -177,31 +181,31 @@ impl<'m> Printer<'m> {
 
         if !self.module.named_metadata.is_empty() {
             self.push("\n");
-            for named in &self.module.named_metadata {
-                let operands: Vec<String> = named
-                    .operands
-                    .iter()
-                    .map(|id| format!("!{}", id.0))
-                    .collect();
-                let _ = writeln!(
-                    self.out,
-                    "!{} = !{{{}}}",
-                    metadata_name(&named.name),
-                    operands.join(", ")
-                );
+            for index in 0..self.module.named_metadata.len() {
+                let named = &self.module.named_metadata[index];
+                let name = metadata_name(&named.name);
+                let operands = named.operands.clone();
+                let _ = write!(self.out, "!{name} = !{{");
+                for (position, operand) in operands.iter().enumerate() {
+                    if position > 0 {
+                        self.push(", ");
+                    }
+                    self.metadata_reference(*operand);
+                }
+                self.push("}\n");
             }
         }
 
-        if self.module.metadata_nodes().next().is_some() {
+        if !self.metadata.order.is_empty() {
             self.push("\n");
-            let ids: Vec<_> = self.module.metadata_nodes().map(|(id, _)| id).collect();
-            for id in ids {
+            let ids: Vec<_> = self.metadata.order.clone();
+            for (number, id) in ids.into_iter().enumerate() {
                 let node = self
                     .module
                     .metadata_node(id)
-                    .expect("id came from the node list")
+                    .expect("id came from the traversal")
                     .clone();
-                let _ = write!(self.out, "!{} = ", id.0);
+                let _ = write!(self.out, "!{number} = ");
                 self.metadata_definition(&node);
                 self.push("\n");
             }

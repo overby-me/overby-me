@@ -63,6 +63,20 @@ same module:
   order (globals, then functions, then the call sites of each body), rather
   than echoing whichever groups the input happened to have.
 
+## Uniqued rather than kept
+
+Metadata nodes are uniqued: two structurally identical non-distinct nodes are
+one node, and `distinct` is the keyword that opts out. A module that writes
+the same tuple twice prints it once with both references pointing at the
+survivor, and node numbers come from walking the module rather than from the
+input. `DIExpression` and `DIArgList` are never numbered at all; they print
+in place at every use.
+
+We do this at print time rather than at parse time. The distinction is real
+but invisible from outside: nothing between parsing and printing needs
+uniqued metadata yet, and keeping the parsed numbering makes a parse error
+easier to trace back to the text that caused it.
+
 ## Known gaps, measured
 
 `llvm-upstream-assembler` and `llvm-upstream-verifier` run upstream's own

@@ -132,11 +132,11 @@ Runs over upstream's Assembler suite rather than the corpus, because the
 corpus is upstream's output already and would pass trivially. 100 of the 160
 files we both accept print identically. Only the two path-derived lines are
 normalised away; everything else counts.
-Largest remaining cause by far: upstream uniques metadata nodes, so two
-identical non-distinct nodes become one and the numbering collapses. We keep
-them separate. That is a real semantic property of MDNodes and wants
-interning plus print-time renumbering in upstream's traversal order.
-Acceptance: the number keeps rising, and metadata uniquing lands.
+Metadata uniquing landed, taking it to 105. The largest remaining cause is
+debug-info field defaults: upstream knows what a `DICompileUnit` field means
+and omits one left at its default, while we print back what was written.
+That is T1's `llvm-debuginfo`, not a table of defaults bolted to the printer.
+Acceptance: the number keeps rising.
 
 **B3. [todo] Surface inventory from `rustc_codegen_llvm`.**
 Extract every FFI call site from the pinned rustc's source (nixpkgs

@@ -110,7 +110,7 @@ in {
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this
     # pins it against inputs nobody wrote for us.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 100;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 105;
   };
 
   packages.rust-llvm = {lib, ...}:

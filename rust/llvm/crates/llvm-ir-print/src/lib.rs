@@ -13,6 +13,7 @@
 
 mod constants;
 mod instructions;
+mod md_slots;
 mod metadata;
 mod printer;
 mod slots;
