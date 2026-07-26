@@ -39,20 +39,21 @@
   # and getty), reload-time generator re-runs work (5c34f5a2), and the generated
   # unit starts. The test then cycles through several test_one cases.
   #
-  # It still does not reach /testok. The remaining failure was NOT isolated: the
-  # test loops format/start/wait/stop per algorithm and per separate-data mode,
-  # so the surviving question is WHICH case fails and on which assertion.
+  # FAILING CASE ISOLATED (from the same run, no extra VM time):
+  #   test_one crc32c 0   -> passes  (integrity metadata on the same device)
+  #   test_one crc32c 1   -> FAILS   (separate_data=1, i.e. --data-device=)
+  # and the script exits there without reaching /testok, with `systemctl
+  # list-units --failed` EMPTY. So no unit failed: an assertion inside the
+  # separate-data case tripped set -e, at the `udevadm wait --settle
+  # /dev/mapper/integrity_test` after the unit had started and exited.
   #
-  # NEXT STEP: capture the harness journal dump and find the last test_one
-  # invocation before the failure, i.e. which (algorithm, separate_data) pair.
-  # Do not assume it is the attach itself; the attach demonstrably works for at
-  # least the first case.
-  extraPackages = pkgs: [pkgs.cryptsetup];
-  extraUnits = [
-    "integritysetup.target"
-    "integritysetup-pre.target"
-    "remote-integritysetup.target"
-  ];
+  # So the plain attach works and only the SEPARATE DATA DEVICE variant does
+  # not. That is a much narrower target than "the attach is broken".
+  #
+  # NEXT STEP: compare how the generated unit for the separate-data case differs
+  # (integritytab gets a data-device= option, which the generator turns into an
+  # extra argument) against what crates/integritysetup does with it. Check
+  # whether the option is parsed at all before assuming the dm ioctl is wrong.
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
