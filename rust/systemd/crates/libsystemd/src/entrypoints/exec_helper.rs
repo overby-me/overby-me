@@ -2096,12 +2096,7 @@ pub fn run_exec_helper() {
     // DEST is an optional symlink alias (State/Runtime only); FLAGS may contain
     // "ro" for a read-only directory.
     fn parse_exec_dir_entry(entry: &str) -> (String, Option<String>, bool) {
-        let mut parts = entry.splitn(3, ':');
-        let src = parts.next().unwrap_or("").to_owned();
-        let dest = parts.next().filter(|s| !s.is_empty()).map(str::to_owned);
-        let flags = parts.next().unwrap_or("");
-        let read_only = flags.split([':', ',']).any(|f| f == "ro");
-        (src, dest, read_only)
+        crate::units::parse_exec_dir_entry(entry)
     }
     // Relative path from `from` to `to` (both absolute). e.g. state→config gives
     // "../../.config", so a symlink at <state>/foo can target "../../.config/foo".
