@@ -156,9 +156,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     }
                 }
                 if candidates.is_empty() && pending_cand_shown.is_empty() {
-                    p { class: "body-medium text-muted", style: "padding: 0 16px 12px;",
-                        "{t(\"vote.noCandidates\")}"
-                    }
+                    p { class: "body-medium list-subheader", "{t(\"vote.noCandidates\")}" }
                 }
                 // Candidates in an M3 carousel: a snapping, horizontally scrollable
                 // strip of rounded photo tiles with the name overlaid.
@@ -337,7 +335,6 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                 div {
                                     key: "{poll.id.0}",
                                     class: "stack stack-h",
-                                    style: "align-items: center;",
                                     Link {
                                         to: Route::PathPage { segments: full, app: None },
                                         class: "folder-item flex-grow",

@@ -105,11 +105,10 @@ pub(super) fn MenuList(segments: Vec<String>) -> Element {
             .map(|n| n.id.0)
     }));
 
-    let hint_style = "padding: 4px 16px;";
     let ctx = context.read().clone();
     match ctx {
         Some(Some(context_id)) => rsx! {
-            div { class: "list", style: "margin-top: 8px;",
+            div { class: "list mt-1",
                 DrawerLevel {
                     parent_id: context_id,
                     path_prefix: ctx_path.clone(),
@@ -120,7 +119,7 @@ pub(super) fn MenuList(segments: Vec<String>) -> Element {
         },
         Some(None) => rsx! {},
         None => rsx! {
-            p { class: "body-medium text-muted", style: "{hint_style}", "…" }
+            p { class: "body-medium list-subheader", "…" }
         },
     }
 }
@@ -213,9 +212,8 @@ pub(super) fn DrawerNodeItem(
     let node_id = node.id.0.clone();
     // Indent by depth from the spacing scale's base (so a global density change
     // retunes it) plus a fixed per-level step, rather than a hard-coded pixel sum.
-    let indent = format!(
-        "padding-left: calc(var(--md-sys-spacing-3) + {depth} * var(--nav-indent-step, 14px));"
-    );
+    let indent =
+        format!("padding-left: calc(var(--md-sys-spacing-3) + {depth} * var(--nav-indent-step));");
     let nav_path = full_path.clone();
 
     rsx! {
@@ -229,7 +227,7 @@ pub(super) fn DrawerNodeItem(
             } else {
                 "list-item"
             },
-            style: "cursor: pointer; {indent}",
+            style: "{indent}",
             onclick: move |_| {
                 nav.push(Route::PathPage {
                     segments: nav_path.clone(),
@@ -251,8 +249,7 @@ pub(super) fn DrawerNodeItem(
             }
             if expandable {
                 button {
-                    class: "btn-icon",
-                    style: "margin-left: auto;",
+                    class: "btn-icon list-item-trailing",
                     aria_label: "{t(\"common.expand\")}",
                     onclick: move |evt| {
                         evt.stop_propagation();

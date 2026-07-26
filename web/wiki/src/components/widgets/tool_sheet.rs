@@ -64,7 +64,7 @@ pub fn ExportAction(node_id: String, name: String) -> Element {
                 });
             },
             if *exporting.read() {
-                div { class: "spinner", style: "width: 18px; height: 18px;" }
+                div { class: "spinner spinner-xs" }
             } else {
                 span { class: "material-icons", "download" }
             }

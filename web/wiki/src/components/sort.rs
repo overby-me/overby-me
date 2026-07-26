@@ -90,7 +90,7 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
                         " {t(\"sort.saveSorting\")}"
                     }
                     if *saving.read() {
-                        div { class: "spinner", style: "margin-left: 8px;" }
+                        div { class: "spinner spinner-sm" }
                     }
                 }
             }
@@ -123,13 +123,9 @@ pub fn SortApp(node: NodeWithChildren) -> Element {
                             dragging_idx.set(None);
                         },
 
-                        // Drag handle
-                        span {
-                            class: "material-icons",
-                            class: "text-muted",
-                            style: "cursor: grab; margin-right: 8px;",
-                            "drag_indicator"
-                        }
+                        // The drag-handle glyph and the grab cursor are the
+                        // `.sort-list .sort-item` treatment (a ::before), so the
+                        // row never carries a second, hand-placed handle.
                         div { class: "avatar small",
                             {super::loader::node_icon_el(item.mime_id.as_deref().unwrap_or(""), item.data.as_ref().map(|d| &d.0))}
                         }

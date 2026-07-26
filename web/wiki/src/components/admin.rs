@@ -267,19 +267,22 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                             }
                         }
                         if active_headings.is_empty() {
-                            p { class: "body-small text-muted", style: "padding: 8px 16px;",
+                            p { class: "body-small list-subheader",
                                 "{t(\"console.focusNoSections\")}"
                             }
                         }
                         for (anchor , text , level) in active_headings.iter() {
                             {
-                                let indent = (*level as usize).saturating_sub(1) * 12 + 12;
+                                // Indent by heading depth ON the spacing scale (the
+                                // shape the drawer tree uses), so a density change
+                                // moves the console with everything else.
+                                let depth = (*level as usize).saturating_sub(1);
                                 let anchor = anchor.clone();
                                 rsx! {
                                     button {
                                         key: "{anchor}",
                                         class: "list-item admin-focus-item",
-                                        style: "padding-left: {indent}px;",
+                                        style: "padding-left: calc(var(--md-sys-spacing-3) + {depth} * var(--md-sys-spacing-3));",
                                         onclick: {
                                             let ctx = context_id.clone();
                                             let anchor = anchor.clone();
@@ -395,20 +398,16 @@ fn AdminPollRow(poll: PollSummaryFields, #[props(default)] can_manage: bool) -> 
                 span { class: "m3-cell-icon",
                     // Open (mutable) vs closed poll — the organizer's at-a-glance status.
                     span {
-                        class: "material-icons",
+                        // Open reads in the accent, closed in the muted tone —
+                        // the same status pairing the rest of the app uses.
+                        class: if poll.mutable { "material-icons text-accent" } else { "material-icons text-muted" },
                         title: if poll.mutable { "{t(\"speak.open\")}" } else { "{t(\"vote.closed\")}" },
-                        style: if poll.mutable {
-                            "font-size: 18px; color: var(--md-primary);"
-                        } else {
-                            "font-size: 18px; color: var(--md-on-surface-variant);"
-                        },
                         if poll.mutable { "lock_open" } else { "lock" }
                     }
                     if hidden {
                         span {
-                            class: "material-icons",
+                            class: "material-icons text-muted",
                             title: "{t(\"poll.hideResult\")}",
-                            style: "font-size: 18px; color: var(--md-on-surface-variant);",
                             "visibility_off"
                         }
                     }

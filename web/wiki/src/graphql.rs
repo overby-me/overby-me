@@ -3496,7 +3496,11 @@ pub async fn query_feedback(access_token: Option<&str>) -> Result<Vec<FeedbackIt
                             .and_then(|v| v.as_str())
                             .unwrap_or_default()
                             .to_string(),
-                        kind: if kind.is_empty() { "other".to_string() } else { kind },
+                        kind: if kind.is_empty() {
+                            "other".to_string()
+                        } else {
+                            kind
+                        },
                         message: field("message"),
                         image: if image.is_empty() { None } else { Some(image) },
                         path: field("path"),
@@ -3505,7 +3509,10 @@ pub async fn query_feedback(access_token: Option<&str>) -> Result<Vec<FeedbackIt
                             .and_then(|v| v.as_str())
                             .unwrap_or_default()
                             .to_string(),
-                        owner_id: n.get("ownerId").and_then(|v| v.as_str()).map(str::to_string),
+                        owner_id: n
+                            .get("ownerId")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string),
                         owner_name: n
                             .get("owner")
                             .and_then(|o| o.get("displayName"))

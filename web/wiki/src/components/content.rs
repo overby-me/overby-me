@@ -129,7 +129,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                 p {
                                     class: "content-hero-date",
                                     title: "{super::loader::full_datetime(iso)}",
-                                    span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
+                                    span { class: "material-icons icon-inline", "schedule" }
                                     " {super::loader::relative_time(iso)}"
                                 }
                             }
@@ -146,7 +146,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                 class: "body-small",
                                 class: "text-muted",
                                 title: "{super::loader::full_datetime(iso)}",
-                                span { class: "material-icons", style: "font-size: 13px; vertical-align: middle;", "schedule" }
+                                span { class: "material-icons icon-inline", "schedule" }
                                 " {super::loader::relative_time(iso)}"
                             }
                         }
@@ -352,7 +352,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             }
             // Author chips (the document's members), mirroring MemberChips.
             if !members.is_empty() {
-                div { class: "chip-row", style: "padding: 12px 16px 8px;",
+                div { class: "chip-row chip-row-authors",
                     for member in members.iter() {
                         super::loader::UserPopover {
                             key: "{member.id.0}",

@@ -128,7 +128,6 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                     div { class: "card mb-1",
                         div {
                             class: "card-content stack stack-h",
-                            style: "align-items: center; gap: 12px;",
                             span { class: "material-icons", "cloud_off" }
                             div { class: "flex-grow",
                                 div { class: "title-small", "{t(\"member.linkNudgeTitle\")}" }

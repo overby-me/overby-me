@@ -73,7 +73,7 @@ pub(super) fn SearchBar(
     let mut in_context = use_signal(|| false);
 
     rsx! {
-        div { style: "flex: 1; position: relative; display: flex; align-items: center; gap: 2px;",
+        div { class: "search-box",
             if has_context {
                 button {
                     class: "btn-icon",
@@ -89,8 +89,7 @@ pub(super) fn SearchBar(
                 }
             }
             input {
-                class: "breadcrumbs search-field",
-                style: "background: transparent; border: none; color: var(--md-on-surface); outline: none; font-size: 14px; flex: 1; min-width: 0;",
+                class: "search-input",
                 placeholder: "{t(\"common.search\")}",
                 aria_label: "{t(\"common.search\")}",
                 role: "combobox",

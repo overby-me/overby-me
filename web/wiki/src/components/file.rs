@@ -225,12 +225,11 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         } else if file_mime.starts_with("video/") {
                             video {
                                 controls: true,
-                                style: "width: 100%; max-height: 70vh; border-radius: var(--md-sys-shape-corner-large);",
                                 "referrerpolicy": "no-referrer",
                                 src: "{file_url}",
                             }
                         } else if file_mime.starts_with("audio/") {
-                            audio { controls: true, style: "width: 100%;", "referrerpolicy": "no-referrer", src: "{file_url}" }
+                            audio { controls: true, "referrerpolicy": "no-referrer", src: "{file_url}" }
                         } else if file_mime == "application/pdf" {
                             // DESIGN: frame document previews like the map/graph.
                             div { class: "viewport-frame",

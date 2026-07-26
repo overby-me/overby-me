@@ -357,7 +357,11 @@ fn setup_global_error_handlers() {
             let reason = pre.reason();
             let text = reason
                 .as_string()
-                .or_else(|| js_sys::JSON::stringify(&reason).ok().and_then(|s| s.as_string()))
+                .or_else(|| {
+                    js_sys::JSON::stringify(&reason)
+                        .ok()
+                        .and_then(|s| s.as_string())
+                })
                 .unwrap_or_else(|| "unhandled rejection".to_string());
             queue(make_entry("error", format!("UNHANDLED REJECTION: {text}")));
         }

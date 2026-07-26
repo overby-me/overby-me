@@ -195,7 +195,6 @@ pub fn ProfileApp() -> Element {
                                                 div {
                                                     key: "{actor.handle}",
                                                     class: "list-item",
-                                                    style: "cursor: pointer;",
                                                     onclick: move |_| {
                                                         bsky_handle.set(handle.clone());
                                                         sug_dismissed.set(true);
@@ -449,7 +448,6 @@ fn ContributionItem(node: model::ChildNodeFields) -> Element {
     rsx! {
         div {
             class: "list-item",
-            style: "cursor: pointer;",
             onclick: move |_| {
                 let node_id = node_id.clone();
                 let token = session.read().access_token.clone();

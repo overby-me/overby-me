@@ -176,8 +176,10 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     // reused across sibling navigations without remounting: a stale order carries
     // the previous poll's indices, and against a SHORTER ballot `opts[ri]` below
     // would be out of bounds (a panic). A fresh poll re-shuffles for its own set.
-    let order_memo =
-        use_memo(use_reactive!(|(options_len)| ballot_order(options_len, js_sys::Math::random)));
+    let order_memo = use_memo(use_reactive!(|(options_len)| ballot_order(
+        options_len,
+        js_sys::Math::random
+    )));
     let order: Vec<usize> = order_memo.read().clone();
     // The selection vector must likewise track the current ballot: reset to a
     // correctly sized, cleared set when the poll (or its option count) changes,
@@ -572,7 +574,6 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                                                 div {
                                                     class: if selected.read().get(ri).copied().unwrap_or(false) { "list-item ballot-option selected" } else { "list-item ballot-option" },
                                                     key: "{ri}",
-                                                    style: "gap: 8px; cursor: pointer;",
                                                     // DESIGN (functional): the whole option card selects, not
                                                     // just the small radio. Idempotent with the RadioItem for
                                                     // single-choice, so clicking either works.
@@ -603,7 +604,6 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                                         div {
                                             class: if selected.read().get(ri).copied().unwrap_or(false) { "list-item ballot-option selected" } else { "list-item ballot-option" },
                                             key: "{ri}",
-                                            style: "gap: 8px;",
                                             Checkbox {
                                                 checked: Some(if selected.read().get(ri).copied().unwrap_or(false) {
                                                     CheckboxState::Checked
@@ -623,7 +623,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                         }
                     }
                     if !error.read().is_empty() {
-                        p { class: "body-medium", style: "color: var(--md-error, #b3261e);", "{error}" }
+                        p { class: "body-medium text-error", "{error}" }
                     }
                     // The civic focal action: casting a vote is a democratic act,
                     // so it gets the magenta tertiary emphasis, not plain primary.
@@ -939,37 +939,37 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
                 }
             },
             if is_position && opt_count > 2 {
-                div { class: "body-medium", style: "margin-bottom: 4px;",
-                    "{range_label}: {min_vote} to {max_vote}"
-                }
-                input {
-                    r#type: "range",
-                    min: "1",
-                    max: "{max_range}",
-                    value: "{min_vote}",
-                    aria_label: t("poll.minVotesLabel"),
-                    aria_valuetext: "{min_vote}",
-                    style: "width: 100%;",
-                    oninput: move |e| {
-                        let v: usize = e.value().parse().unwrap_or(1);
-                        min_vote.set(v);
-                        if max_vote() < v {
-                            max_vote.set(v);
-                        }
-                    },
-                }
-                input {
-                    r#type: "range",
-                    min: "1",
-                    max: "{max_range}",
-                    value: "{max_vote}",
-                    aria_label: t("poll.maxVotesLabel"),
-                    aria_valuetext: "{max_vote}",
-                    style: "width: 100%; margin-bottom: 8px;",
-                    oninput: move |e| {
-                        let v: usize = e.value().parse().unwrap_or(1);
-                        max_vote.set(v.max(min_vote()));
-                    },
+                div { class: "range-field",
+                    div { class: "body-medium range-field-label",
+                        "{range_label}: {min_vote} to {max_vote}"
+                    }
+                    input {
+                        r#type: "range",
+                        min: "1",
+                        max: "{max_range}",
+                        value: "{min_vote}",
+                        aria_label: t("poll.minVotesLabel"),
+                        aria_valuetext: "{min_vote}",
+                        oninput: move |e| {
+                            let v: usize = e.value().parse().unwrap_or(1);
+                            min_vote.set(v);
+                            if max_vote() < v {
+                                max_vote.set(v);
+                            }
+                        },
+                    }
+                    input {
+                        r#type: "range",
+                        min: "1",
+                        max: "{max_range}",
+                        value: "{max_vote}",
+                        aria_label: t("poll.maxVotesLabel"),
+                        aria_valuetext: "{max_vote}",
+                        oninput: move |e| {
+                            let v: usize = e.value().parse().unwrap_or(1);
+                            max_vote.set(v.max(min_vote()));
+                        },
+                    }
                 }
             }
             div { class: "list-item switch-row",

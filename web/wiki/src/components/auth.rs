@@ -311,7 +311,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                 }
 
                 // Submit button
-                div { style: "position: relative; width: 100%;",
+                div { class: "btn-busy",
                     button {
                         class: "btn btn-primary btn-full",
                         r#type: "submit",
@@ -319,8 +319,8 @@ fn AuthForm(mode: AuthMode) -> Element {
                         "{title}"
                     }
                     if *loading.read() {
-                        div { style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);",
-                            div { class: "spinner" }
+                        div { class: "btn-busy-spinner",
+                            div { class: "spinner spinner-sm" }
                         }
                     }
                 }

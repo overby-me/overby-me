@@ -184,21 +184,18 @@ fn ContentSkeleton() -> Element {
             div { class: "skeleton-card",
                 div { class: "skeleton-row",
                     div { class: "skeleton skeleton-avatar" }
-                    div { style: "flex: 1;",
+                    div { class: "flex-grow",
+                        // Only the shape (the share of the line each placeholder
+                        // fills) is per-instance; every other value is the
+                        // .skeleton-line treatment.
                         div { class: "skeleton skeleton-line", style: "width: 45%;" }
-                        div {
-                            class: "skeleton skeleton-line",
-                            style: "width: 25%; margin-bottom: 0;",
-                        }
+                        div { class: "skeleton skeleton-line", style: "width: 25%;" }
                     }
                 }
                 div { class: "skeleton skeleton-line", style: "width: 92%;" }
                 div { class: "skeleton skeleton-line", style: "width: 97%;" }
                 div { class: "skeleton skeleton-line", style: "width: 83%;" }
-                div {
-                    class: "skeleton skeleton-line",
-                    style: "width: 89%; margin-bottom: 0;",
-                }
+                div { class: "skeleton skeleton-line", style: "width: 89%;" }
             }
         }
     }
@@ -299,7 +296,7 @@ fn TextNode(node: NodeWithChildren) -> Element {
                 if has_rich {
                     super::content::SlateRenderer { data: data.clone() }
                 } else if !text.is_empty() {
-                    p { class: "body-large", style: "white-space: pre-wrap;", "{text}" }
+                    p { class: "body-large text-preserve-breaks", "{text}" }
                 } else {
                     p { class: "body-medium text-muted", "{t(\"common.noContent\")}" }
                 }

@@ -207,6 +207,25 @@
 	color: var(--md-on-surface-variant);
 }
 
+/* The accented counterpart: text or a status glyph that should read as active /
+   open / affirmative. Like .text-muted it assumes a SURFACE background (rule 1),
+   so never put it on the coloured bar or a filled button. */
+.text-accent {
+	color: var(--md-primary);
+}
+
+/* Inline failure text (a form's validation message). Surface background only,
+   as above; a whole failed screen uses .error-state instead. */
+.text-error {
+	color: var(--md-error);
+}
+
+/* Author-entered plain text (a plain node body, a feedback message): keep the
+   line breaks the author typed instead of collapsing them. */
+.text-preserve-breaks {
+	white-space: pre-wrap;
+}
+
 * {
 	margin: 0;
 	padding: 0;
@@ -422,6 +441,11 @@ html {
 .skeleton-line {
 	height: 14px;
 	margin-bottom: var(--md-sys-spacing-2-5);
+}
+
+/* The closing line of a block does not push the block open. */
+.skeleton-line:last-child {
+	margin-bottom: 0;
 }
 
 /* DESIGN (functional: reading progress): a thin gradient bar across the very
@@ -660,7 +684,10 @@ html {
 	border-radius: var(--md-sys-shape-corner-large-increased);
 	box-shadow: 0 0 14px 0 color-mix(in srgb, var(--md-primary) 30%, transparent);
 }
-.nav-rail-label {
+/* Both nav surfaces label the same way (the rail on medium+, the bottom bar on
+   compact), so they share one rule rather than the bar going unstyled. */
+.nav-rail-label,
+.nav-bar-label {
 	color: inherit;
 	text-align: center;
 }
@@ -1247,6 +1274,23 @@ html {
 	);
 }
 
+/* The map embed inside that frame: a tall block filling the frame's width. */
+.map-embed {
+	display: block;
+	width: 100%;
+	height: 78vh;
+	border: 0;
+	border-radius: var(--md-sys-shape-corner-medium);
+}
+
+/* The generated graph SVG. It scales down to the pane but never below its own
+   natural width (set inline from the computed layout) — the card scrolls
+   instead, via .scroll-x on the card body. */
+.graph-svg {
+	max-width: 100%;
+	height: auto;
+}
+
 /* DESIGN (home hero): a bold tonal greeting header with an animated wave. */
 .home-hero-head {
 	display: flex;
@@ -1496,6 +1540,15 @@ html {
 	font-size: var(--md-sys-typescale-body-large-size);
 }
 
+/* An icon set INSIDE a line of running text — a clock before a timestamp, a
+   timer in a chip, a type glyph before a supporting line. It is sized from the
+   surrounding text (em, not a literal) instead of the 22px standalone default,
+   so one rule covers every type role it can sit in; .material-icons already
+   centres it on the text. Use this instead of a one-off inline font-size. */
+.material-icons.icon-inline {
+	font-size: 1.15em;
+}
+
 /* "Not submitted" badge overlaid on a node avatar (mutable draft nodes). */
 .avatar-badged {
 	position: relative;
@@ -1566,7 +1619,7 @@ html {
        light mode, dark in dark mode). The primary-container "on" colour is its
        natural counterpart, so the letter always contrasts with the glyph it sits
        on: a dark letter on the white glyph, a light letter on the dark glyph. */
-	color: var(--md-on-primary-container, #3f0018);
+	color: var(--md-on-primary-container);
 	text-shadow: none;
 }
 
@@ -1709,6 +1762,7 @@ html {
    narrow for all three, the row wraps instead of clipping the labels. */
 .feedback-types {
 	flex-wrap: wrap;
+	margin-bottom: var(--md-sys-spacing-3);
 }
 
 .feedback-types .btn {
@@ -1985,6 +2039,21 @@ html {
 	width: 100%;
 }
 
+/* In-flight submit: wrap a .btn-full in .btn-busy and put a .spinner-sm inside
+   .btn-busy-spinner to centre the loader over the button while the request runs
+   (the button itself stays in the layout, so nothing shifts). */
+.btn-busy {
+	position: relative;
+	width: 100%;
+}
+
+.btn-busy-spinner {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+}
+
 /* M3 keyboard-focus indicator: a clear ring shown only on keyboard navigation
    (:focus-visible), so pointer clicks don't leave a ring. Applies to every
    interactive surface the app draws itself. */
@@ -2010,6 +2079,27 @@ a.folder-item:focus-visible {
 .text-field {
 	width: 100%;
 	position: relative;
+}
+
+/* A field sized to its content rather than the row — a short numeric entry
+   (minutes, a count) sitting inline among buttons. */
+.text-field-compact {
+	width: 120px;
+	flex: 0 0 auto;
+}
+
+/* A labelled group of range sliders (the poll's min/max seat count): the label
+   sits over full-width tracks, and the group clears the control below it. */
+.range-field {
+	margin-bottom: var(--md-sys-spacing-2);
+}
+
+.range-field-label {
+	margin-bottom: var(--md-sys-spacing-1);
+}
+
+.range-field input[type="range"] {
+	width: 100%;
 }
 
 .text-field input,
@@ -2124,6 +2214,15 @@ a.folder-item:focus-visible {
 	color: var(--md-secondary);
 }
 
+/* The already-uploaded cover image shown in an upload row: a square crop on the
+   small corner, leading the "cover image" label. */
+.upload-thumb {
+	width: 56px;
+	height: 56px;
+	object-fit: cover;
+	border-radius: var(--md-sys-shape-corner-small);
+}
+
 /* Native <select> styled to match the text inputs (shadcn-ish), with a custom
  * chevron so it doesn't fall back to the browser's default look. */
 select {
@@ -2192,7 +2291,7 @@ select:focus {
 	gap: var(--md-sys-spacing-3);
 	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
 	cursor: pointer;
-	border-radius: 12px;
+	border-radius: var(--md-sys-shape-corner-medium);
 	margin: var(--md-sys-spacing-0-5) var(--md-sys-spacing-2);
 	transition: background-color 0.15s;
 }
@@ -2493,6 +2592,37 @@ select:focus {
 	color: var(--md-on-surface-variant);
 }
 
+/* A type glyph leading a supporting line sits a hair off its label. */
+.list-item-secondary .material-icons {
+	margin-right: var(--md-sys-spacing-0-5);
+}
+
+/* M3 list subheader: the small label that titles the rows beneath it (a year, a
+   section) or a note standing in for them, inside a .list or a card body. It
+   carries the list's own inset so the label lines up with the row text, plus the
+   muted on-surface tone; compose it with a type role — `class: "title-small
+   list-subheader"` — rather than padding the heading by hand. */
+.list-subheader {
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4);
+	color: var(--md-on-surface-variant);
+}
+
+/* Section header for a bare list (the drawer's groups/events): the compact
+   counterpart of .card-header — same avatar + title + trailing-action row, on
+   the list's own inset and without the card's tonal brow. */
+.list-section-header {
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4);
+}
+
+/* Matches .card-header h3, so both section headers read at the same weight. */
+.list-section-header h4 {
+	flex: 1;
+	font-weight: 600;
+}
+
 /* Trailing slot of the slot-based widgets::ListItem (badge / action). */
 .list-item-trailing {
 	margin-left: auto;
@@ -2666,7 +2796,7 @@ select:focus {
 	font-weight: 500;
 	cursor: pointer;
 	transition:
-		background-color var(--md-sys-motion-spring-fast, 0.2s),
+		background-color var(--md-sys-motion-duration-short4),
 		color var(--md-sys-motion-duration-short3) ease;
 }
 .m3-filter-chip:hover {
@@ -2907,7 +3037,7 @@ select:focus {
 	transform: translateX(-50%);
 	width: 32px;
 	height: 4px;
-	border-radius: 2px;
+	border-radius: var(--md-sys-shape-corner-full);
 	background: var(--md-outline-variant);
 }
 @media (min-width: 600px) {
@@ -2965,7 +3095,7 @@ select:focus {
 	background: color-mix(in srgb, var(--md-error) 11%, transparent);
 }
 .sheet-action:disabled {
-	opacity: var(--md-sys-state-disabled-opacity, 0.38);
+	opacity: var(--md-sys-state-disabled-content-opacity);
 	cursor: default;
 }
 
@@ -3066,6 +3196,12 @@ select:focus {
 	gap: var(--md-sys-spacing-1-5);
 	align-items: center;
 }
+
+/* The author-chip row that follows a card header or hero: inset to the card's
+   own content padding, so the chips line up with the text below them. */
+.chip-row-authors {
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4) var(--md-sys-spacing-2);
+}
 /* Outlined "secondary" chip, matching the old wiki's MUI
  * <Chip color="secondary" variant="outlined"> (author chips etc.): a pill with
  * a secondary-coloured border + label and a small inline icon. */
@@ -3128,6 +3264,11 @@ select:focus {
 	border-bottom: none;
 }
 
+/* The submitted text itself (its line breaks come from .text-preserve-breaks). */
+.feedback-message {
+	margin-top: var(--md-sys-spacing-2);
+}
+
 .chip-label {
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -3171,7 +3312,7 @@ select:focus {
 	height: 40px;
 	padding: 0 var(--md-sys-spacing-3);
 	border: 1px solid var(--md-outline);
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 	background: var(--md-surface);
 	color: var(--md-on-surface);
 	outline: none;
@@ -3193,7 +3334,7 @@ select:focus {
 	overflow-y: auto;
 	background: var(--md-surface);
 	border: 1px solid var(--md-outline);
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
@@ -3257,6 +3398,8 @@ select:focus {
 .ballot-option {
 	border: 2px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-large);
+	/* Tighter than the .list-item default: the radio sits close to its label. */
+	gap: var(--md-sys-spacing-2);
 	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-3-5);
 	margin-bottom: var(--md-sys-spacing-2);
 	background: var(--md-surface-container-low);
@@ -3337,7 +3480,7 @@ select:focus {
 	color: var(--md-on-primary-container);
 }
 .vote-rights-banner.cannot-vote {
-	background: var(--md-error-container, color-mix(in srgb, var(--md-error) 14%, transparent));
+	background: var(--md-error-container);
 	color: var(--md-error);
 }
 /* Reusable tonal info banner (primary-container) — e.g. the redirect forwarding
@@ -3354,68 +3497,208 @@ select:focus {
 	font-weight: 500;
 }
 
-/* Typography */
+/* ───────────────────────────────────────────────────────────────────────────
+   TYPOGRAPHY — the M3 type scale. One rule per role, no second copy.
+
+   Every role is driven end-to-end by the size / line / tracking tokens in
+   m3-tokens.css and answers to:
+     .md-<role>  the canonical M3 name (prefer this in new code),
+     .<role>     the short alias the existing components use,
+     h1…h6       the heading elements, mapped onto their role.
+   All fifteen roles carry both names, so either spelling always resolves.
+
+   Rule: a component NEVER restates a font-size / line-height / letter-spacing
+   literal — it applies a role. The EMPHASIZED tier at the end of this section
+   is the heavier Expressive cut, reserved for the one focal element on a
+   screen; it is spelled `md-` only.
+
+   Each role states its tracking even when the spec's value is zero: `body` sets
+   the body-large tracking on the whole document, so a role that stayed silent
+   would inherit 0.5px and a headline would not be the size the scale says.
+   ─────────────────────────────────────────────────────────────────────────── */
+.md-display-large,
+.display-large {
+	font-size: var(--md-sys-typescale-display-large-size);
+	line-height: var(--md-sys-typescale-display-large-line);
+	font-weight: 400;
+	letter-spacing: -0.015625em;
+}
+
+.md-display-medium,
+.display-medium {
+	font-size: var(--md-sys-typescale-display-medium-size);
+	line-height: var(--md-sys-typescale-display-medium-line);
+	font-weight: 400;
+	letter-spacing: normal;
+}
+
+.md-display-small,
+.display-small {
+	font-size: var(--md-sys-typescale-display-small-size);
+	line-height: var(--md-sys-typescale-display-small-line);
+	font-weight: 400;
+	letter-spacing: normal;
+}
+
 h1,
+.md-headline-large,
 .headline-large {
 	font-size: var(--md-sys-typescale-headline-large-size);
+	line-height: var(--md-sys-typescale-headline-large-line);
 	font-weight: 400;
-	line-height: 40px;
+	letter-spacing: normal;
 }
 
 h2,
+.md-headline-medium,
 .headline-medium {
 	font-size: var(--md-sys-typescale-headline-medium-size);
+	line-height: var(--md-sys-typescale-headline-medium-line);
 	font-weight: 400;
-	line-height: 36px;
+	letter-spacing: normal;
 }
 
 h3,
+.md-headline-small,
 .headline-small {
 	font-size: var(--md-sys-typescale-headline-small-size);
+	line-height: var(--md-sys-typescale-headline-small-line);
 	font-weight: 400;
-	line-height: 32px;
+	letter-spacing: normal;
 }
 
 h4,
+.md-title-large,
 .title-large {
 	font-size: var(--md-sys-typescale-title-large-size);
+	line-height: var(--md-sys-typescale-title-large-line);
 	font-weight: 400;
-	line-height: 28px;
+	letter-spacing: normal;
 }
 
 h5,
+.md-title-medium,
 .title-medium {
-	font-size: var(--md-sys-typescale-body-large-size);
+	font-size: var(--md-sys-typescale-title-medium-size);
+	line-height: var(--md-sys-typescale-title-medium-line);
 	font-weight: 500;
-	line-height: 24px;
-	letter-spacing: 0.15px;
+	letter-spacing: var(--md-sys-typescale-title-medium-tracking);
 }
 
 h6,
+.md-title-small,
 .title-small {
-	font-size: var(--md-sys-typescale-body-medium-size);
+	font-size: var(--md-sys-typescale-title-small-size);
+	line-height: var(--md-sys-typescale-title-small-line);
 	font-weight: 500;
-	line-height: 20px;
-	letter-spacing: 0.1px;
+	letter-spacing: var(--md-sys-typescale-title-small-tracking);
 }
 
+.md-body-large,
 .body-large {
 	font-size: var(--md-sys-typescale-body-large-size);
-	line-height: 24px;
-	letter-spacing: 0.5px;
+	line-height: var(--md-sys-typescale-body-large-line);
+	font-weight: 400;
+	letter-spacing: var(--md-sys-typescale-body-large-tracking);
 }
 
+.md-body-medium,
 .body-medium {
 	font-size: var(--md-sys-typescale-body-medium-size);
-	line-height: 20px;
-	letter-spacing: 0.25px;
+	line-height: var(--md-sys-typescale-body-medium-line);
+	font-weight: 400;
+	letter-spacing: var(--md-sys-typescale-body-medium-tracking);
 }
 
+.md-body-small,
+.body-small {
+	font-size: var(--md-sys-typescale-body-small-size);
+	line-height: var(--md-sys-typescale-body-small-line);
+	font-weight: 400;
+	letter-spacing: var(--md-sys-typescale-body-small-tracking);
+}
+
+.md-label-large,
 .label-large {
-	font-size: var(--md-sys-typescale-body-medium-size);
+	font-size: var(--md-sys-typescale-label-large-size);
+	line-height: var(--md-sys-typescale-label-large-line);
 	font-weight: 500;
-	line-height: 20px;
-	letter-spacing: 0.1px;
+	letter-spacing: var(--md-sys-typescale-label-large-tracking);
+}
+
+.md-label-medium,
+.label-medium {
+	font-size: var(--md-sys-typescale-label-medium-size);
+	line-height: var(--md-sys-typescale-label-medium-line);
+	font-weight: 500;
+	letter-spacing: var(--md-sys-typescale-label-medium-tracking);
+}
+
+.md-label-small,
+.label-small {
+	font-size: var(--md-sys-typescale-label-small-size);
+	line-height: var(--md-sys-typescale-label-small-line);
+	font-weight: 500;
+	letter-spacing: var(--md-sys-typescale-label-small-tracking);
+}
+
+/* Type scale — EMPHASIZED tier (Expressive): a genuinely heavier cut used ONLY
+   on the single focal element per screen (active nav label, current node title,
+   selected item, primary CTA, current speaker, open ballot). */
+.md-label-large-emphasized {
+	font-size: var(--md-sys-typescale-label-large-size);
+	line-height: var(--md-sys-typescale-label-large-line);
+	font-weight: 700;
+	letter-spacing: var(--md-sys-typescale-label-large-tracking);
+}
+
+.md-label-medium-emphasized {
+	font-size: var(--md-sys-typescale-label-medium-size);
+	line-height: var(--md-sys-typescale-label-medium-line);
+	font-weight: 700;
+	letter-spacing: var(--md-sys-typescale-label-medium-tracking);
+}
+
+.md-title-small-emphasized {
+	font-size: var(--md-sys-typescale-title-small-size);
+	line-height: var(--md-sys-typescale-title-small-line);
+	font-weight: 700;
+	letter-spacing: var(--md-sys-typescale-title-small-tracking);
+}
+
+.md-title-medium-emphasized {
+	font-size: var(--md-sys-typescale-title-medium-size);
+	line-height: var(--md-sys-typescale-title-medium-line);
+	font-weight: 700;
+	letter-spacing: var(--md-sys-typescale-title-medium-tracking);
+}
+
+.md-title-large-emphasized {
+	font-size: var(--md-sys-typescale-title-large-size);
+	line-height: var(--md-sys-typescale-title-large-line);
+	font-weight: 600;
+	letter-spacing: normal;
+}
+
+.md-headline-small-emphasized {
+	font-size: var(--md-sys-typescale-headline-small-size);
+	line-height: var(--md-sys-typescale-headline-small-line);
+	font-weight: 600;
+	letter-spacing: normal;
+}
+
+.md-headline-medium-emphasized {
+	font-size: var(--md-sys-typescale-headline-medium-size);
+	line-height: var(--md-sys-typescale-headline-medium-line);
+	font-weight: 600;
+	letter-spacing: normal;
+}
+
+.md-body-large-emphasized {
+	font-size: var(--md-sys-typescale-body-large-size);
+	line-height: var(--md-sys-typescale-body-large-line);
+	font-weight: 600;
+	letter-spacing: var(--md-sys-typescale-body-large-tracking);
 }
 
 /* Grid */
@@ -3449,6 +3732,16 @@ h6,
 .stack-h {
 	flex-direction: row;
 	align-items: center;
+}
+
+/* Modifiers, so a stack never needs an inline style to wrap or to push its
+   content to the trailing edge. */
+.stack-wrap {
+	flex-wrap: wrap;
+}
+
+.stack-end {
+	justify-content: flex-end;
 }
 
 /* Snackbar — M3: inverse-surface, extra-small corners, level-3 shadow. */
@@ -3501,11 +3794,23 @@ h6,
    feel, replacing the plain border-spin ring. (prefers-reduced-motion collapses
    it to a static shape via the global rule above.) */
 .spinner {
-	width: 44px;
-	height: 44px;
+	width: var(--spinner-size, 44px);
+	height: var(--spinner-size, 44px);
 	background: var(--md-primary);
 	border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
 	animation: m3-morph-spin 2.4s ease-in-out infinite;
+}
+
+/* Size modifiers. The bare .spinner is the page/section loader (inside
+   .spinner-overlay); a spinner that sits beside a label, in a button row or in a
+   toolbar takes an ICON footprint instead, so it occupies the slot the glyph it
+   replaces would have. */
+.spinner-sm {
+	--spinner-size: var(--md-sys-typescale-title-large-size); /* 22px, one icon slot */
+}
+
+.spinner-xs {
+	--spinner-size: 1.125rem; /* 18px, the small inline-icon step */
 }
 
 @keyframes m3-morph-spin {
@@ -3753,20 +4058,15 @@ h6,
 	flex: 1;
 	min-width: 0;
 	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-3);
-	color: #fff;
+	/* Inherits the top app bar's on-surface pairing. (It used to force #fff for
+	   the legacy dark green bar; on today's tonal bar that was white-on-light.) */
+	color: var(--md-on-surface);
 	font-size: var(--md-sys-typescale-body-medium-size);
 	overflow-x: auto;
 	overflow-y: hidden;
 	scrollbar-width: none;
 }
 
-/* The docked search input reuses .breadcrumbs but must read on the light top-app
-   bar surface (not the legacy dark bar), and its placeholder needs a visible,
-   muted colour. */
-.search-field::placeholder {
-	color: var(--md-on-surface-variant);
-	opacity: 1;
-}
 
 .breadcrumbs::-webkit-scrollbar {
 	display: none;
@@ -3814,7 +4114,8 @@ h6,
 	display: inline-flex;
 	align-items: center;
 	text-decoration: none;
-	color: #fff;
+	/* Take the crumb pill's own foreground rather than the global link colour. */
+	color: inherit;
 	cursor: pointer;
 }
 /* Breadcrumb links never underline on hover (overrides the global a:hover rule);
@@ -4066,7 +4367,7 @@ h6,
 .slate-content pre {
 	background: var(--md-surface-variant);
 	padding: var(--md-sys-spacing-4);
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 	overflow-x: auto;
 	font-family: monospace;
 }
@@ -4086,7 +4387,7 @@ h6,
 
 .slate-content img {
 	max-width: 100%;
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 }
 
 /* Speaker list (#14): highlight the current speaker and the one on deck so the
@@ -4095,13 +4396,13 @@ h6,
 	border-left: 4px solid var(--md-primary);
 	background: var(--md-primary-container);
 	color: var(--md-on-primary-container);
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 }
 
 .speak-next {
 	border-left: 4px solid var(--md-primary);
 	background: var(--md-surface-variant);
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 }
 
 /* On-deck speaker on the projector: the civic-magenta accent + a gentle pulse so
@@ -4187,7 +4488,7 @@ h6,
 	background: var(--md-primary);
 	color: var(--md-on-primary);
 	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-3-5);
-	border-radius: 20px;
+	border-radius: var(--md-sys-shape-corner-large-increased);
 	font-weight: 700;
 	font-variant-numeric: tabular-nums;
 	white-space: nowrap;
@@ -4196,8 +4497,8 @@ h6,
 /* Time is up: an unmistakable red pill (with a gentle pulse) so the chair and
    the speaker both see the limit was reached, instead of the timer vanishing. */
 .chip-timer-expired {
-	background: var(--md-sys-color-error, #ba1a1a);
-	color: var(--md-sys-color-on-error, #fff);
+	background: var(--md-sys-color-error);
+	color: var(--md-sys-color-on-error);
 	animation: chip-timer-pulse 1s ease-in-out infinite;
 }
 
@@ -4301,13 +4602,13 @@ h6,
 	max-height: 18rem;
 	width: auto;
 	height: auto;
-	border-radius: var(--md-sys-shape-corner-large, 16px);
+	border-radius: var(--md-sys-shape-corner-large);
 	/* DESIGN (functional): a tonal placeholder shows in the image box while it
 	   loads, instead of empty space; the loaded image paints over it. */
 	background: var(--md-surface-container-high);
 	/* Fade in on mount so images don't pop in abruptly. */
-	animation: image-fade-in var(--md-sys-motion-duration-medium2, 300ms)
-		var(--md-sys-motion-easing-standard, ease);
+	animation: image-fade-in var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-easing-standard);
 }
 
 @keyframes image-fade-in {
@@ -4325,7 +4626,7 @@ h6,
 	align-items: center;
 	justify-content: center;
 	min-height: 120px;
-	border-radius: var(--md-sys-shape-corner-medium, 12px);
+	border-radius: var(--md-sys-shape-corner-medium);
 	background: var(--md-surface-variant);
 	color: var(--md-on-surface-variant);
 }
@@ -4346,8 +4647,8 @@ h6,
 	padding: var(--md-sys-spacing-6);
 	outline: none;
 	/* M3 scrim fades in. */
-	animation: lightbox-scrim-in var(--md-sys-motion-duration-short4, 200ms)
-		var(--md-sys-motion-easing-standard, ease);
+	animation: lightbox-scrim-in var(--md-sys-motion-duration-short4)
+		var(--md-sys-motion-easing-standard);
 }
 
 @keyframes lightbox-scrim-in {
@@ -4362,12 +4663,12 @@ h6,
 .image-lightbox-img {
 	max-width: 96vw;
 	max-height: 92vh;
-	border-radius: var(--md-sys-shape-corner-extra-large, 28px);
+	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-5);
 	/* M3 emphasized expand: the image scales up as it fades in (a container-
 	   transform-like grow from the tapped thumbnail). */
-	animation: lightbox-img-in var(--md-sys-motion-duration-medium4, 400ms)
-		var(--md-sys-motion-spring-spatial-default, cubic-bezier(0.05, 0.7, 0.1, 1));
+	animation: lightbox-img-in var(--md-sys-motion-duration-long1)
+		var(--md-sys-motion-spring-spatial-default);
 }
 
 @keyframes lightbox-img-in {
@@ -4599,12 +4900,22 @@ h6,
 	padding: var(--md-sys-spacing-6);
 }
 
+/* The captured panic/error text. A tonal container rather than a fixed grey, so
+   the block stays legible in dark mode instead of going white-on-white. */
 .error-fallback pre {
-	background: #ededed;
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
 	padding: var(--md-sys-spacing-5);
 	overflow-x: auto;
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 	margin-top: var(--md-sys-spacing-3);
+}
+
+/* Error-probe screen (QA): a narrow, full-width column of trigger buttons. */
+.error-probe-actions {
+	align-items: stretch;
+	width: 100%;
+	max-width: 320px;
 }
 
 /* Auth form */
@@ -4664,12 +4975,20 @@ h6,
 
 .file-viewer img {
 	max-width: 100%;
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 }
 
 .file-viewer video,
 .file-viewer audio {
+	width: 100%;
 	max-width: 100%;
+}
+
+/* A video plays on the large corner (it reads as a framed surface of its own)
+   and is capped so the player never pushes the page controls off-screen. */
+.file-viewer video {
+	max-height: 70vh;
+	border-radius: var(--md-sys-shape-corner-large);
 }
 
 .file-viewer iframe {
@@ -4679,7 +4998,7 @@ h6,
 	height: calc(100vh - 160px);
 	min-height: 480px;
 	border: none;
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 }
 
 /* #119: dark mode for the embedded (white) Office / PDF viewers. The iframe is
@@ -4693,6 +5012,12 @@ h6,
 /* Utility */
 .flex-grow {
 	flex-grow: 1;
+}
+
+/* Let a pane scroll sideways for content that cannot reflow (a wide graph or
+   table) instead of bleeding past the card edge. */
+.scroll-x {
+	overflow-x: auto;
 }
 
 .hidden {
@@ -4830,10 +5155,10 @@ h6,
 	width: fit-content;
 	margin-bottom: var(--md-sys-spacing-3);
 	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-3-5);
-	border-radius: 999px;
+	border-radius: var(--md-sys-shape-corner-full);
 	font-weight: 600;
-	background: var(--md-sys-color-secondary-container, #d7e3d8);
-	color: var(--md-sys-color-on-secondary-container, #101f13);
+	background: var(--md-sys-color-secondary-container);
+	color: var(--md-sys-color-on-secondary-container);
 }
 .follow-pulse {
 	animation: follow-pulse 1.6s ease-in-out infinite;
@@ -4861,7 +5186,7 @@ h6,
 	gap: var(--md-sys-spacing-2-5);
 }
 .agenda-icon {
-	color: var(--md-on-surface-variant, #43483e);
+	color: var(--md-on-surface-variant);
 	font-size: var(--md-sys-typescale-title-large-size);
 }
 .agenda-name {
@@ -4875,15 +5200,15 @@ h6,
 }
 /* The item currently on the room screen: a tinted rail + a live chip. */
 .agenda-item.active {
-	background: var(--md-sys-color-secondary-container, #d7e3d8);
-	border-radius: 12px;
+	background: var(--md-sys-color-secondary-container);
+	border-radius: var(--md-sys-shape-corner-medium);
 }
 .agenda-item.active .agenda-icon {
-	color: var(--md-primary, #006d39);
+	color: var(--md-primary);
 }
 .agenda-live {
-	background: var(--md-primary, #006d39);
-	color: var(--md-on-primary, #fff);
+	background: var(--md-primary);
+	color: var(--md-on-primary);
 	display: inline-flex;
 	align-items: center;
 	gap: var(--md-sys-spacing-1);
@@ -4899,7 +5224,7 @@ h6,
 	display: block;
 }
 /* Trim the year sub-headers' top padding inside the home section cards. */
-.home-section-body > div:first-child .label-medium {
+.home-section-body > div:first-child .list-subheader {
 	padding-top: var(--md-sys-spacing-2);
 }
 
@@ -4936,6 +5261,37 @@ a.list-item:hover {
 	background-color: var(--md-surface-variant);
 }
 
+/* Docked search (layout::search::SearchBox). The scope toggle plus the input,
+   filling the .expressive-search pill; positioned so the results dropdown below
+   anchors to the box rather than to the whole bar. */
+.search-box {
+	flex: 1;
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-0-5);
+}
+
+/* The input itself. The pill around it owns the surface, so the field is
+   transparent and unbounded — it must NOT borrow .search-field, which is the
+   member table's standalone pill container. */
+.search-input {
+	flex: 1;
+	min-width: 0;
+	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-3);
+	border: none;
+	background: transparent;
+	outline: none;
+	color: var(--md-on-surface);
+	font-size: var(--md-sys-typescale-body-medium-size);
+}
+
+/* Give the placeholder a visible, muted colour on the light top-app-bar pill. */
+.search-input::placeholder {
+	color: var(--md-on-surface-variant);
+	opacity: 1;
+}
+
 /* Search results dropdown */
 .search-results {
 	position: absolute;
@@ -4944,7 +5300,7 @@ a.list-item:hover {
 	right: 0;
 	background: var(--md-surface);
 	border: 1px solid var(--md-outline);
-	border-radius: 12px;
+	border-radius: var(--md-sys-shape-corner-medium);
 	max-height: 300px;
 	overflow-y: auto;
 	z-index: 300;
@@ -5036,7 +5392,7 @@ a.list-item:hover {
 .user-pop-trigger:focus-visible > * {
 	outline: 2px solid var(--md-primary);
 	outline-offset: 2px;
-	border-radius: 4px;
+	border-radius: var(--md-sys-shape-corner-extra-small);
 }
 
 .user-pop-card {
@@ -5051,9 +5407,9 @@ a.list-item:hover {
 	min-width: 240px;
 	max-width: min(320px, 90vw);
 	padding: var(--md-sys-spacing-4);
-	background: var(--md-surface-container-high, var(--md-surface));
-	border: 1px solid var(--md-outline-variant, var(--md-outline));
-	border-radius: 16px;
+	background: var(--md-surface-container-high);
+	border: 1px solid var(--md-outline-variant);
+	border-radius: var(--md-sys-shape-corner-large);
 	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
@@ -5079,7 +5435,7 @@ a.list-item:hover {
 	right: 0;
 	background: var(--md-surface);
 	border: 1px solid var(--md-outline);
-	border-radius: 12px;
+	border-radius: var(--md-sys-shape-corner-medium);
 	min-width: 240px;
 	max-width: 300px;
 	z-index: 300;
@@ -5267,7 +5623,7 @@ a.list-item:hover {
 .editor-area {
 	min-height: 200px;
 	border: 1px solid var(--md-outline);
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 	padding: var(--md-sys-spacing-4);
 	outline: none;
 	font-size: var(--md-sys-typescale-body-large-size);
@@ -5326,7 +5682,7 @@ a.list-item:hover {
 	padding: var(--md-sys-spacing-2);
 	margin-bottom: var(--md-sys-spacing-2);
 	border: 1px solid var(--md-outline);
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 	background: var(--md-surface);
 }
 
@@ -5335,7 +5691,7 @@ a.list-item:hover {
 	height: 36px;
 	padding: 0 var(--md-sys-spacing-3);
 	border: 1px solid var(--md-outline);
-	border-radius: 8px;
+	border-radius: var(--md-sys-shape-corner-small);
 	background: var(--md-surface);
 	color: var(--md-on-surface);
 }
@@ -5433,7 +5789,7 @@ a.list-item:hover {
 
 .rich-editor code {
 	padding: var(--md-sys-spacing-0-25) var(--md-sys-spacing-1);
-	border-radius: 4px;
+	border-radius: var(--md-sys-shape-corner-extra-small);
 	background: var(--md-surface-variant);
 	font-family: "Courier New", monospace;
 }
@@ -5469,7 +5825,7 @@ a.list-item:hover {
 	min-height: 40px;
 	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-3);
 	border: 1px solid var(--md-outline);
-	border-radius: 12px;
+	border-radius: var(--md-sys-shape-corner-medium);
 	background: var(--md-surface);
 	color: var(--md-on-surface);
 	outline: none;
@@ -5762,7 +6118,7 @@ a.list-item:hover {
 	height: 40px;
 	margin-top: var(--md-sys-spacing-1-5);
 	border-radius: 50%;
-	background: var(--md-surface-container-high, var(--md-surface));
+	background: var(--md-surface-container-high);
 	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
 	color: var(--md-primary);
 	/* Default transform is set inline (follows the finger); opacity always eases. */

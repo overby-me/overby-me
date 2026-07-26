@@ -64,8 +64,13 @@ pub fn FeedbackDialog() -> Element {
                     if bytes.len() > MAX_SCREENSHOT_BYTES {
                         show_snackbar(&t("editor.imageTooLarge"));
                     } else {
-                        match crate::nhost::upload_file(token.as_deref(), bytes.to_vec(), &name, &ctype)
-                            .await
+                        match crate::nhost::upload_file(
+                            token.as_deref(),
+                            bytes.to_vec(),
+                            &name,
+                            &ctype,
+                        )
+                        .await
                         {
                             Ok(up) => {
                                 image_id.set(Some(up.id));
@@ -155,7 +160,7 @@ pub fn FeedbackDialog() -> Element {
                 }
             },
             // Type selector (bug / feature / other): a labelled toggle row.
-            div { class: "stack stack-h feedback-types", style: "margin-bottom: var(--md-sys-spacing-3);",
+            div { class: "stack stack-h feedback-types",
                 for (val , icon , label) in types {
                     button {
                         key: "{val}",
@@ -193,14 +198,12 @@ pub fn FeedbackDialog() -> Element {
                 if *image_uploading.read() {
                     div {
                         class: "stack stack-h mt-1",
-                        style: "align-items: center; gap: 8px;",
-                        div { class: "spinner" }
+                        div { class: "spinner spinner-sm" }
                         span { class: "body-small text-muted", "{t(\"feedback.addScreenshot\")}\u{2026}" }
                     }
                 } else if !image_name.read().is_empty() {
                     div {
-                        class: "file-upload-done stack stack-h mt-1",
-                        style: "align-items: center; gap: 8px;",
+                        class: "file-upload-done",
                         span { class: "material-icons", "check_circle" }
                         span { class: "flex-grow", "{image_name}" }
                         button {

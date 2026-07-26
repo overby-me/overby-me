@@ -93,7 +93,7 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
     rsx! {
         div { class: "stack stack-v",
             if can_add {
-                div { class: "stack stack-h", style: "justify-content: flex-end;",
+                div { class: "stack stack-h stack-end",
                     AddSpeakerListButton { context_id: context_id.0.clone() }
                 }
             }
@@ -357,7 +357,7 @@ fn SpeakList(
                     div {
                         class: if remaining == 0 { "chip-timer chip-timer-expired" } else { "chip-timer" },
                         title: "{t(\"speak.remaining\")}",
-                        span { class: "material-icons", style: "font-size: 18px; vertical-align: middle;", "timer" }
+                        span { class: "material-icons icon-inline", "timer" }
                         " {time_string(remaining)}"
                     }
                 }
@@ -427,11 +427,7 @@ fn SpeakList(
                                             div { class: "list-item-primary", "{name}" }
                                         }
                                         div { class: "list-item-secondary",
-                                            span {
-                                                class: "material-icons",
-                                                style: "font-size: 14px; vertical-align: middle; margin-right: 2px;",
-                                                "{type_icon}"
-                                            }
+                                            span { class: "material-icons icon-inline", "{type_icon}" }
                                             "{secondary}"
                                         }
                                     }
@@ -563,7 +559,7 @@ fn SpeakList(
                     h3 { class: "title-medium", "{t(\"speak.manageSpeakerList\")}" }
                 }
                 div { class: "card-content",
-                    div { class: "stack stack-h", style: "gap: 8px; flex-wrap: wrap; align-items: center;",
+                    div { class: "stack stack-h stack-wrap",
                         // Serve the queue: remove the current speaker and re-anchor
                         // the countdown for the new one, so the projected timer always
                         // reflects the person actually speaking.
@@ -702,7 +698,7 @@ fn SpeakList(
                                 " {t(\"speak.start\")}"
                             }
                         }
-                        div { class: "text-field", style: "margin: 0; width: 120px;",
+                        div { class: "text-field text-field-compact",
                             label { "{t(\"speak.speakingTime\")}" }
                             input {
                                 r#type: "number",

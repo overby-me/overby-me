@@ -86,7 +86,7 @@ pub fn HomeApp() -> Element {
                     // opens the identity popover (profile link etc.), same as the
                     // author chips on content nodes.
                     if !members.is_empty() {
-                        div { class: "chip-row", style: "padding: 12px 16px 0;",
+                        div { class: "chip-row chip-row-authors",
                             for member in members.iter() {
                                 super::loader::UserPopover {
                                     key: "{member.id.0}",

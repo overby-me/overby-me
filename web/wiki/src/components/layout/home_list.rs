@@ -94,7 +94,6 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     let mut events_expanded = use_signal(|| false);
 
     let state = contexts.read().clone();
-    let hint_style = "padding: 4px 16px;";
     // Pending invitations, split into the list they belong to (group vs event) so
     // each shows inline at the top of that list.
     let invited_by_mime = |mime: &str| -> Vec<model::InvitationFields> {
@@ -115,7 +114,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     let groups_body = rsx! {
         {match &state {
             None => rsx! {
-                p { class: "body-medium text-muted", style: "{hint_style}", "…" }
+                p { class: "body-medium list-subheader", "…" }
             },
             Some(Err(e)) => {
                 log::error!("home groups load failed: {e}");
@@ -127,7 +126,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                 }
             }
             Some(Ok((groups, _, _))) if groups.is_empty() && invited_groups.is_empty() => rsx! {
-                p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noGroups\")}" }
+                p { class: "body-medium list-subheader", "{t(\"layout.noGroups\")}" }
             },
             Some(Ok((groups, _, _))) => {
                 let expanded = *groups_expanded.read();
@@ -171,7 +170,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     let events_body = rsx! {
         {match &state {
             None => rsx! {
-                p { class: "body-medium text-muted", style: "{hint_style}", "…" }
+                p { class: "body-medium list-subheader", "…" }
             },
             Some(Err(e)) => {
                 log::error!("home events load failed: {e}");
@@ -183,7 +182,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                 }
             }
             Some(Ok((_, events, _))) if events.is_empty() && invited_events.is_empty() => rsx! {
-                p { class: "body-medium text-muted", style: "{hint_style}", "{t(\"layout.noEvents\")}" }
+                p { class: "body-medium list-subheader", "{t(\"layout.noEvents\")}" }
             },
             Some(Ok((_, events, _))) => {
                 let expanded = *events_expanded.read();
@@ -202,10 +201,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                     if expanded {
                         for (year , items) in group_by_year(events) {
                             div { key: "{year}",
-                                p { class: "label-medium",
-                                    class: "text-muted", style: "padding: 4px 16px; font-weight: 600;",
-                                    "{year}"
-                                }
+                                p { class: "title-small list-subheader", "{year}" }
                                 div { class: "list",
                                     for node in items.iter() {
                                         ContextItem { key: "{node.id.0}", node: node.clone() }
@@ -270,22 +266,18 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
         }
     } else {
         rsx! {
-            div { style: "margin-top: 16px;",
-                div { style: "display: flex; align-items: center; gap: 12px; padding: 8px 16px;",
+            div { class: "mt-2",
+                div { class: "list-section-header",
                     div { class: "avatar small", span { class: "material-icons", "groups" } }
-                    h4 { class: "title-medium", style: "flex: 1; margin: 0; font-weight: 700;",
-                        "{t(\"layout.groups\")}"
-                    }
+                    h4 { class: "title-medium", "{t(\"layout.groups\")}" }
                     if can_group {
                         NewContextButton { mime: "wiki/group".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
                     }
                 }
                 {groups_body}
-                div { style: "display: flex; align-items: center; gap: 12px; padding: 8px 16px; margin-top: 8px;",
+                div { class: "list-section-header mt-1",
                     div { class: "avatar small", span { class: "material-icons", "event" } }
-                    h4 { class: "title-medium", style: "flex: 1; margin: 0; font-weight: 700;",
-                        "{t(\"layout.events\")}"
-                    }
+                    h4 { class: "title-medium", "{t(\"layout.events\")}" }
                     if can_event {
                         NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
                     }
@@ -399,11 +391,7 @@ fn NewContextButton(mime: String, root_id: String, root_context_id: String) -> E
                 }
             }
             if !error.read().is_empty() {
-                p {
-                    class: "body-medium mt-1",
-                    style: "color: var(--md-error, #b3261e);",
-                    "{error}"
-                }
+                p { class: "body-medium text-error mt-1", "{error}" }
             }
         }
     }
@@ -421,7 +409,6 @@ pub(super) fn ContextItem(node: model::ContextNodeFields) -> Element {
     rsx! {
         div {
             class: "list-item",
-            style: "cursor: pointer;",
             onclick: move |_| {
                 let node_id = node_id.clone();
                 let token = session.read().access_token.clone();

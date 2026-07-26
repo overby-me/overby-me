@@ -35,8 +35,7 @@ pub fn ErrorPage() -> Element {
                     "(a console message, plus a Better Stack event in a remote-logging build)."
                 }
                 div {
-                    class: "stack stack-v mt-2",
-                    style: "gap: var(--md-sys-spacing-2); align-items: stretch; width: 100%; max-width: 320px;",
+                    class: "stack stack-v mt-2 error-probe-actions",
 
                     // A Rust panic → console stack trace + a shipped `PANIC:` entry.
                     button {

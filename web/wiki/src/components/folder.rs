@@ -548,9 +548,7 @@ pub fn FolderApp(
             }
             // Events section (#132) — always a list, even in grid mode.
             if !event_children.is_empty() {
-                h4 { class: "title-small", class: "text-muted", style: "padding: 8px 16px 0;",
-                    "{t(\"layout.events\")}"
-                }
+                h4 { class: "title-small list-subheader", "{t(\"layout.events\")}" }
                 div { class: "list",
                     for child in event_children.iter() {
                         FolderItem {
@@ -864,8 +862,8 @@ fn FolderAdd(
                         }
                     }
                     if *uploading.read() {
-                        div { class: "stack stack-h mt-1", style: "align-items: center; gap: 8px;",
-                            div { class: "spinner" }
+                        div { class: "stack stack-h mt-1",
+                            div { class: "spinner spinner-sm" }
                             span { class: "body-small text-muted", "{t(\"content.uploadFile\")}\u{2026}" }
                         }
                     } else if file_id.read().is_some() {
@@ -925,8 +923,7 @@ fn FolderItem(
     let copy_btn = rsx! {
         if selectable {
             button {
-                class: "btn-icon",
-                style: "margin-left: auto;",
+                class: "btn-icon list-item-trailing",
                 title: "{t(\"folder.copy\")}",
                 onclick: move |e| {
                     e.stop_propagation();

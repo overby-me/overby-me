@@ -94,9 +94,7 @@ pub fn FeedbackApp() -> Element {
             }
             div { class: "card-content",
                 if loading {
-                    div { class: "stack stack-h", style: "align-items: center; gap: 8px;",
-                        div { class: "spinner" }
-                    }
+                    super::widgets::Spinner {}
                 } else if items.is_empty() {
                     div { class: "empty-state empty-state-sm",
                         div { class: "empty-state-orb empty-state-orb-sm",
@@ -163,7 +161,7 @@ fn FeedbackRow(
 
     rsx! {
         div { class: "feedback-item",
-            div { class: "stack stack-h", style: "align-items: center; gap: 8px;",
+            div { class: "stack stack-h",
                 div { class: "avatar small", span { class: "material-icons", "{icon}" } }
                 span { class: "chip", span { class: "material-icons", "{icon}" }
                     span { class: "chip-label", "{t(label_key)}" }
@@ -184,21 +182,18 @@ fn FeedbackRow(
                     }
                 }
             }
-            p { class: "body-medium", style: "white-space: pre-wrap; margin-top: var(--md-sys-spacing-2);",
-                "{item.message}"
-            }
+            p { class: "body-medium text-preserve-breaks feedback-message", "{item.message}" }
             if let Some(url) = screenshot {
                 a { href: "{url}", target: "_blank", rel: "noopener",
                     img {
-                        class: "zoomable",
+                        class: "zoomable mt-1",
                         src: "{url}",
                         alt: t("feedback.screenshot"),
                         loading: "lazy",
-                        style: "margin-top: var(--md-sys-spacing-2);",
                     }
                 }
             }
-            div { class: "stack stack-h", style: "align-items: center; gap: 8px; margin-top: var(--md-sys-spacing-2);",
+            div { class: "stack stack-h mt-1",
                 if show_owner {
                     super::loader::UserPopover {
                         name: if item.owner_name.is_empty() { t("feedback.anonymous") } else { item.owner_name.clone() },

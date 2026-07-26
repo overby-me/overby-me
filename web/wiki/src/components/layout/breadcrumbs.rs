@@ -385,7 +385,6 @@ pub(super) fn BreadcrumbCrumb(
             div { class: if app_crumb { "crumb app-crumb crumb-toc" } else { "crumb crumb-toc" },
                 div {
                     class: "crumb-link",
-                    style: "cursor: pointer;",
                     onclick: move |_| {
                         let now = !TOC_OPEN();
                         if now {

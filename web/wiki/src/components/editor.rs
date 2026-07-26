@@ -400,7 +400,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
             reset_authors,
             reset_image,
             reset_date,
-            reset_html
+            reset_html,
         )| {
             if *seeded_for.peek() == node_id_dep {
                 return; // initial mount — onmounted already seeded this node
@@ -733,16 +733,14 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         if *image_uploading.read() {
                             div {
                                 class: "stack stack-h mt-1",
-                                style: "align-items: center; gap: 8px;",
-                                div { class: "spinner" }
+                                div { class: "spinner spinner-sm" }
                                 span { class: "body-small text-muted",
                                     "{t(\"content.uploadImage\")}\u{2026}"
                                 }
                             }
                         } else if !image_name.read().is_empty() {
                             div {
-                                class: "file-upload-done stack stack-h mt-1",
-                                style: "align-items: center; gap: 8px;",
+                                class: "file-upload-done",
                                 span { class: "material-icons", "check_circle" }
                                 span { class: "flex-grow", "{image_name}" }
                                 button {
@@ -759,12 +757,11 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         } else if image_id.read().is_some() {
                             div {
                                 class: "stack stack-h mt-1",
-                                style: "align-items: center; gap: 8px;",
                                 if let Some(url) = existing_image_url.clone() {
                                     img {
+                                        class: "upload-thumb",
                                         src: "{url}",
                                         alt: t("content.imageAlt"),
-                                        style: "width: 56px; height: 56px; object-fit: cover; border-radius: var(--md-sys-shape-corner-small, 8px);",
                                     }
                                 }
                                 span { class: "flex-grow body-small text-muted",
@@ -848,7 +845,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                             }
                         }
                         if *saving.read() {
-                            div { class: "spinner" }
+                            div { class: "spinner spinner-sm" }
                         }
                     }
 
@@ -1044,9 +1041,9 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                         }
                         input {
                             id: INLINE_IMAGE_INPUT_ID,
+                            class: "file-upload-input",
                             r#type: "file",
                             accept: "image/*",
-                            style: "display: none;",
                             onchange: on_pick_inline_image,
                         }
                     }

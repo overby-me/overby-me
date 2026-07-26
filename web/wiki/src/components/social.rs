@@ -41,7 +41,7 @@ pub fn SocialApp(node: NodeWithChildren) -> Element {
                 }
             }
             div { class: "card-content",
-                div { class: "text-field", style: "margin: 0;",
+                div { class: "text-field",
                     label { "{t(\"social.query\")}" }
                     input {
                         r#type: "text",

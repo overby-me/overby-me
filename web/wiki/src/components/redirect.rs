@@ -50,7 +50,7 @@ pub fn RedirectApp(node: NodeWithChildren) -> Element {
                     Some(url) => rsx! {
                         // DESIGN: a tonal forwarding banner with the morphing loader.
                         div { class: "tonal-banner",
-                            div { class: "spinner", style: "width: 22px; height: 22px;" }
+                            div { class: "spinner spinner-sm" }
                             span { class: "body-medium", "{t(\"redirect.forwarding\")}" }
                         }
                         a {
@@ -87,8 +87,8 @@ fn RedirectEdit(node_id: String, initial: String) -> Element {
     let mut saving = use_signal(|| false);
 
     rsx! {
-        div { class: "stack stack-h mt-2", style: "gap: 8px; align-items: flex-end;",
-            div { class: "text-field", style: "flex-grow: 1; margin: 0;",
+        div { class: "stack stack-h mt-2",
+            div { class: "text-field flex-grow",
                 label { "{t(\"redirect.targetUrl\")}" }
                 input {
                     r#type: "url",

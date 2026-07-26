@@ -35,7 +35,7 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                 div { class: "avatar", {icon_el("app/graph")} }
                 h3 { class: "title-medium", "{node.name}" }
             }
-            div { class: "card-content", style: "overflow-x: auto;",
+            div { class: "card-content scroll-x",
                 if children.is_empty() {
                     // DESIGN: orb empty state (consistent with the rest of the app).
                     div { class: "empty-state empty-state-sm",
@@ -48,9 +48,10 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     // DESIGN: frame the graph like the map's viewport.
                     div { class: "viewport-frame",
                     svg {
+                        class: "graph-svg",
                         width: "100%",
                         view_box: "0 0 {width} {height}",
-                        style: "min-width: {width}px; max-width: 100%; height: auto;",
+                        style: "min-width: {width}px;",
                         // The diagram is decorative-looking but conveys structure,
                         // so expose it as a single labelled image to assistive tech.
                         // (svg uses raw attribute names, not the typed HTML set.)

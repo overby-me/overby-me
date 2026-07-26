@@ -121,9 +121,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
         // the app does not visibly jump from a bare overlay to a card on load.
         None => rsx! {
             div { class: "card",
-                div { class: "spinner-overlay",
-                    div { class: "spinner" }
-                }
+                crate::components::widgets::Spinner {}
             }
         },
     };

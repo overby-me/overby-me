@@ -22,11 +22,7 @@ pub fn MapApp(node: NodeWithChildren) -> Element {
             }
             // DESIGN (framed viewport): a tonal rounded frame around the embed.
             div { class: "viewport-frame",
-                iframe {
-                    src: "{src}",
-                    style: "width: 100%; height: 78vh; border: 0; border-radius: var(--md-sys-shape-corner-medium); display: block;",
-                    title: "{name}",
-                }
+                iframe { class: "map-embed", src: "{src}", title: "{name}" }
             }
         }
     }

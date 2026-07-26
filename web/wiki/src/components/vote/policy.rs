@@ -115,7 +115,6 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                 div { key: "{item.id.0}", class: "amendment-item",
                                     div {
                                         class: "stack stack-h",
-                                        style: "align-items: center; gap: 8px;",
                                         div { class: "avatar small",
                                             {crate::components::loader::node_avatar("vote/change", &item.name, Some(n))}
                                         }
@@ -189,7 +188,6 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                 div {
                                     key: "{poll.id.0}",
                                     class: "stack stack-h",
-                                    style: "align-items: center;",
                                     Link {
                                         to: Route::PathPage { segments: full, app: None },
                                         class: "folder-item flex-grow",
