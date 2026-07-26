@@ -10617,6 +10617,22 @@ pub fn execute_command(
             // thread (which services it in its post-boot loop).
             request_manager_numa_reapply();
 
+            // Re-run generators, as upstream does on every daemon-reload.
+            // Their output directories are already in the unit search path, so
+            // refreshing their contents is enough for the rescan below to pick
+            // up new, changed or removed generated units. This is also what
+            // makes `systemd.unit-dropin.*` credentials staged after boot take
+            // effect.
+            //
+            // Deliberately NOT under the RuntimeInfo guard: generators are
+            // external programs, and holding the lock across fork/exec is the
+            // invariant-I1 violation that wedges the manager (see
+            // docs/ARCHITECTURE.md). Copy the paths out under a brief read,
+            // release, then run.
+            let generator_dirs: Vec<std::path::PathBuf> =
+                run_info.read_poisoned().config.unit_dirs.clone();
+            let _ = crate::generators::run_generators(&generator_dirs);
+
             // Hoist the disk rescan OUT of the write critical section: unit
             // file parsing takes hundreds of milliseconds and needs only the
             // config, so do it under a brief read and enter the write with

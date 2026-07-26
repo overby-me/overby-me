@@ -1,56 +1,52 @@
 {
   name = "55-OOMD";
-  # Baselined 2026-07-27. Two stale claims disproven, two real gaps found.
+  testTimeout = 300;
+  # Baselined 2026-07-27. Three claims tested, one stale, two real gaps closed,
+  # one real gap remaining. The chain for line 12 is now fully mapped.
   #
   # NOT the problem: "systemd-oomd stub only". With the unit wired in below,
-  # systemd-oomd starts and reaches "Ready and monitoring"; crates/oomd is a
-  # real implementation and upstream's guard only wants the binary executable.
+  # systemd-oomd starts and reaches "Ready and monitoring".
   extraUnits = [
     "systemd-oomd.service"
     "systemd-oomd.socket"
   ];
 
-  # FIRST FAILURE is line 12, before any oomd behaviour is exercised:
+  # FIRST FAILURE, line 12, before any oomd behaviour runs:
   #     test "$(cat /sys/fs/cgroup/init.scope/memory.high)" != "max"
-  # rust-systemd reads `max`, so the init.scope drop-in was never applied.
-  #
-  # Upstream delivers that drop-in as a SYSTEM CREDENTIAL,
-  # `systemd.unit-dropin.init.scope`, from its own VM harness
-  # (test/integration-tests/TEST-55-OOMD/meson.build), containing:
+  # Upstream delivers that value via a system credential,
+  # `systemd.unit-dropin.init.scope`, holding:
   #     [Scope]
   #     MemoryHigh=infinity
   #     StartupMemoryHigh=10G
   #
-  # TWO GAPS, both now understood:
+  # THREE THINGS ARE NEEDED. The first two are now implemented:
+  #   1. DONE: materialise `systemd.unit-dropin.*` / `systemd.extra-unit.*`
+  #      credentials (generators.rs, mirroring systemd-debug-generator).
+  #   2. DONE: re-run generators on `systemctl daemon-reload`, as upstream
+  #      does, so a credential staged after boot takes effect.
+  #   3. REMAINING: `init.scope` is not a unit in rust-systemd. It exists only
+  #      as a cgroup path constant (INIT_SCOPE_NAME in platform/cgroups/mod.rs).
+  #      There is no unit for a drop-in to attach to, and no [Scope] resource
+  #      control is ever applied to PID 1's own cgroup, so memory.high stays
+  #      `max` however the drop-in is delivered.
   #
-  #   1. Credential materialisation. IMPLEMENTED this session: generators.rs
-  #      now handles `systemd.extra-unit.*` and `systemd.unit-dropin.*[~name]`
-  #      exactly as upstream's systemd-debug-generator does (rust-systemd ships
-  #      no such binary, so it runs inline in run_generators_to).
-  #
-  #   2. Generators are NOT re-run on `systemctl daemon-reload`.
-  #      service_manager.rs:139 calls run_generators exactly once, at boot.
-  #      Upstream re-runs every generator on daemon-reload. This is what still
-  #      blocks the test: this harness can only stage a credential AFTER boot
-  #      (patchScript runs in the booted VM), so the credential is never seen.
-  #      Implementing reload-time generator re-runs is the real fix, and it is
-  #      an upstream-parity feature in its own right.
-  #
-  # A third thing to verify once those land: the drop-in relies on
-  # StartupMemoryHigh=, so line 12 only passes if that directive is applied
-  # during startup.
+  # NEXT STEP: model init.scope as a synthetic unit whose [Scope] resource
+  # control is applied to PID 1's cgroup. Worth more than this test: it is also
+  # what `systemctl show init.scope`, `systemctl set-property init.scope` and
+  # any per-manager resource limit need. Check StartupMemoryHigh= specifically,
+  # since line 12 depends on the startup-phase value.
   #
   # Beyond line 12 the test needs stress-ng, a swap file, and real
   # pressure-based kill decisions.
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: generators are not re-run on daemon-reload, so the init.scope credential drop-in never applies' >/skipped"
+      echo "echo 'rust-systemd: init.scope is not a configurable unit, so [Scope] resource control never applies to PID 1' >/skipped"
       echo "exit 77"
     } > TEST-55-OOMD.sh
     chmod +x TEST-55-OOMD.sh
   '';
-  # Skips rather than passes: credential drop-ins need reload-time generators
+  # Skips rather than passes: init.scope is not a unit, so its drop-in cannot apply
   # See ../docs/TEST-OVERRIDES.md.
   expectedSkip = true;
 }
