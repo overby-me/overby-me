@@ -27,11 +27,23 @@
   # crates/integritysetup does. That also means the attach path has still never
   # been exercised, so nothing is yet known about it.
   #
-  # NEXT STEP: provide the template unit from testsuite.nix, pointing ExecStart
-  # at rust-systemd's systemd-integritysetup, exactly as that file already does
-  # inline for systemd-ask-password and systemd-network-generator. That is
-  # environment parity with upstream's harness, which has the unit. extraUnits
-  # cannot help, since the file does not exist in the package to link.
+  # CORRECTED AGAIN, and the earlier plan to hand-write the unit in
+  # testsuite.nix was WRONG. systemd-integritysetup@.service has a man page but
+  # NO unit file anywhere in the systemd source tree: it is produced entirely by
+  # systemd-integritysetup-generator from /etc/integritytab. The test does
+  # exactly that (writes /etc/integritytab at line 100, then daemon-reload, then
+  # starts the instance), so the unit is meant to be GENERATED, not shipped.
+  #
+  # That makes reload-time generator re-runs a prerequisite, which landed this
+  # session as 5c34f5a2.
+  #
+  # NEXT STEP: determine whether rust-systemd discovers and runs the C
+  # systemd-integritysetup-generator. generators.rs documents an FHS search path
+  # (/run, /etc, /usr/local/lib, /usr/lib .../system-generators), and on NixOS
+  # the package's generator lives in the store rather than /usr/lib; there is a
+  # package_generator_dir() helper that may or may not cover it. Check that
+  # first: if the generator never runs, no amount of unit wiring will help, and
+  # if it does run, the next question is whether its output starts correctly.
   extraPackages = pkgs: [pkgs.cryptsetup];
   extraUnits = [
     "integritysetup.target"
