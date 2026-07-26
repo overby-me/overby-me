@@ -2062,18 +2062,29 @@ pub(crate) fn wait_for_helper_child(
             match pid_table_locked.get(&pid) {
                 Some(entry) => {
                     match entry {
+                        // These two were `unreachable!()`, but they are
+                        // reachable: a helper's pid is registered only after
+                        // Command::spawn() returns (see spawn_helper_child), so
+                        // a short-lived helper can be classified by the reaper
+                        // before that insert lands.
+                        //
+                        // Panicking here is the worst available response. This
+                        // runs on an activation thread holding the RuntimeInfo
+                        // read lock; the panic unwinds silently (PID 1's log
+                        // output does not reach the console) and the lock is
+                        // released only by luck of unwinding, leaving the unit
+                        // wedged in Starting. Claim the status instead: we hold
+                        // this child's handle, so nobody else can claim it, and
+                        // ServiceExited carries the same ChildTermination.
                         PidEntry::ServiceExited(_) => {
-                            // Should never happen
-                            unreachable!(
-                                "Was waiting on helper process but pid got saved as PidEntry::OneshotExited"
-                            );
+                            let entry_owned = pid_table_locked.remove(&pid).unwrap();
+                            if let PidEntry::ServiceExited(termination_owned) = entry_owned {
+                                return WaitResult::InTime(Ok(termination_owned));
+                            }
                         }
-                        PidEntry::Service(_, _) => {
-                            // Should never happen
-                            unreachable!(
-                                "Was waiting on helper process but pid got saved as PidEntry::Service"
-                            );
-                        }
+                        // Same race caught one step earlier: keep waiting, it
+                        // becomes ServiceExited above.
+                        PidEntry::Service(_, _) => {}
                         PidEntry::Helper(_, _) => {
                             // Need to wait longer
                         }
@@ -2086,8 +2097,15 @@ pub(crate) fn wait_for_helper_child(
                     }
                 }
                 None => {
-                    // Should not happen. Either there is an Helper entry or a Exited entry
-                    unreachable!("No entry for child found")
+                    // Also reachable: the reaper discards the exit of a pid it
+                    // does not recognise, which is exactly what happens when a
+                    // helper outruns its own registration. Report a failed wait
+                    // so the caller fails the command, which is recoverable,
+                    // rather than panicking and wedging the unit.
+                    log::warn!(
+                        "No pid_table entry for helper child {pid}; its exit status was lost"
+                    );
+                    return WaitResult::InTime(Err(nix::errno::Errno::ECHILD.into()));
                 }
             }
         }

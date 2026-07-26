@@ -1,48 +1,62 @@
 {
   name = "34-DYNAMICUSERMIGRATE";
   # Was a FAKE PASS (`touch /testok` with nothing run). Now an honest skip.
-  # Iterated 2026-07-26: `test_directory StateDirectory` now gets through its
-  # DynamicUser=0 phase, its DynamicUser=1 phase and the conversion back,
-  # including every host-side assertion. Seven exec-directory defects were fixed
-  # getting there; see docs/TEST-OVERRIDES.md and the git log.
+  # `test_directory StateDirectory` gets through its DynamicUser=0 phase, its
+  # DynamicUser=1 phase and the conversion back, including every host-side
+  # assertion. Seven exec-directory defects were fixed getting there; see
+  # docs/TEST-OVERRIDES.md and the git log.
   #
-  # FIRST REMAINING FAILURE: the unit-parsing section at the end of
-  # test_directory. `systemctl start --wait testservice-34.service` HANGS.
-  # Roughly three minutes later systemd-journald, systemd-oomd and systemd-udevd
-  # all dump core with SIGABRT: that is their WatchdogSec=3min firing because
-  # PID 1 has stopped servicing watchdog pings. The core dumps are the symptom.
+  # REMAINING FAILURE: the unit-parsing section at the end of test_directory.
+  # `systemctl start --wait testservice-34.service` never returns. The unit is a
+  # six-command Type=oneshot with TemporaryFileSystem= and an aliased
+  # StateDirectory=.
   #
-  # The unit is a six-command Type=oneshot with TemporaryFileSystem= and an
-  # aliased StateDirectory=. That shape matches the open invariant I1 in
-  # docs/ARCHITECTURE.md: activate.rs holds the RuntimeInfo read guard across a
-  # multi-command oneshot's exec waits, so nothing else in PID 1 can make
-  # progress. Treat that as the leading candidate, not as established: it has
-  # not been proven here, and this section only became reachable once exec
-  # directories started working under TemporaryFileSystem=, so the wedge may
-  # have been exposed rather than introduced.
+  # ESTABLISHED FROM THE HARNESS JOURNAL DUMP (do not re-derive):
+  #   - the unit reaches Started and STAYS there; it is not in
+  #     `systemctl list-units --failed`.
+  #   - exactly ONE `REAP ... -> ServiceExited` appears for a six-command
+  #     oneshot, and it is a Service pid, not a Helper. Commands 2-6 never run.
+  #   - Type=oneshot without RemainAfterExit= must go inactive when its commands
+  #     finish. This one never deactivates, so --wait blocks forever.
+  #   - PID 1 is wedged manager-wide, not just this job: on a full-length run the
+  #     watchdog cascade REPEATS every ~3 minutes indefinitely, SIGABRTing
+  #     journald, oomd, udevd, resolved, networkd, hostnamed and logind each
+  #     time. Something holds the RuntimeInfo lock and never lets go.
   #
-  # ALSO NEEDED by that same section: the unit uses `StateDirectory=zzz:x\:yz`,
-  # a backslash-escaped colon in the directory name. parse_exec_dir_entry splits
-  # on ':' without honouring `\:`, so it reads that as src=`zzz`, dest=`x\`.
+  # THREE HYPOTHESES TRIED AND DISPROVEN, so do not spend cycles on them again:
+  #   1. Invariant I1 via the INLINE multi-command oneshot loop. The inline
+  #      branch requires a source other than DeferNotifyWait; never confirmed.
+  #   2. The reaper filing an unregistered helper as ServiceExited, and
+  #      wait_for_helper_child then hitting `unreachable!()`. Handling that state
+  #      changed nothing.
+  #   3. The reaper DISCARDING the exit of an unregistered pid (its `None` arm),
+  #      leaving wait_for_helper_child polling forever. Parking the exit as an
+  #      unclaimed record changed nothing either, so it was reverted rather than
+  #      left in on a disproven rationale.
   #
-  # Established by instrumentation, so do not re-derive:
-  #   - the DynamicUser=0 <-> 1 migration is correct.
-  #   - `private/` is a deliberate 0700 root:root boundary and must not be
-  #     loosened; the namespace makes it permeable with a tmpfs instead.
-  #   - binding <base>/private/<name> onto the <base>/<name> symlink does
-  #     nothing: the kernel resolves the destination back to the source.
+  # TOOLING NOTE THAT COST SEVERAL CYCLES: PID 1's `log::` macros do NOT reach
+  # the console. The `REAP` lines come from `crate::entrypoints::kmsg()`. Any
+  # instrumentation added to PID 1 must use kmsg() or it is invisible at every
+  # log level, and its absence must not be read as the code path not running.
+  #
+  # SUGGESTED NEXT STEP: instrument with kmsg() at the oneshot branch point and
+  # around the exit handler's "Phase 2" thread (signal_handler.rs), which needs
+  # the RuntimeInfo read lock after a service exit. A blocked Phase 2 would
+  # explain the unit never leaving Started while the manager wedges. Setting
+  # `testTimeout = 150;` here makes the harness dump PID 1's journal in ~2
+  # minutes instead of 30, which is how the facts above were obtained.
   #
   # Further in, the test also needs nested exec directories (`quux/pief`,
   # `xxx/yyy:aaa/111`) and idmapped mounts on kernels >= 5.12.
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: multi-command oneshot with TemporaryFileSystem= wedges PID 1' >/skipped"
+      echo "echo 'rust-systemd: multi-command oneshot never deactivates and wedges PID 1' >/skipped"
       echo "exit 77"
     } > TEST-34-DYNAMICUSERMIGRATE.sh
     chmod +x TEST-34-DYNAMICUSERMIGRATE.sh
   '';
-  # Skips rather than passes: testservice-34.service hangs and trips watchdogs
+  # Skips rather than passes: testservice-34.service never deactivates
   # See ../docs/TEST-OVERRIDES.md.
   expectedSkip = true;
 }
