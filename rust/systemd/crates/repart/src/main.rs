@@ -65,6 +65,9 @@ const DEFAULT_WEIGHT: u32 = 1000;
 /// Maximum number of GPT partition entries (standard).
 const MAX_GPT_ENTRIES: u32 = 128;
 
+/// A GPT partition label holds 36 UTF-16 code units.
+const GPT_LABEL_MAX_UTF16: usize = 36;
+
 /// Alignment grain libfdisk uses for a fresh GPT's first usable LBA.
 const GPT_FIRST_LBA_GRAIN: u64 = 1024 * 1024;
 
@@ -163,6 +166,20 @@ fn resolve_arch_type(identifier: &str, arch: &str) -> Option<String> {
         "usr-verity" => Some(format!("usr-{arch}-verity")),
         "usr-verity-sig" => Some(format!("usr-{arch}-verity-sig")),
         _ => None,
+    }
+}
+
+/// Whether repart knows how to grow this partition type's file system,
+/// mirroring `gpt_partition_type_knows_growfs`: root, usr, home, srv, var, tmp
+/// and xbootldr, but not their verity siblings, which are read-only by nature.
+fn type_knows_growfs(type_uuid: &str) -> bool {
+    match type_uuid_to_identifier(&type_uuid.to_lowercase()) {
+        Some(id) => {
+            matches!(id, "home" | "srv" | "var" | "tmp" | "xbootldr")
+                || ((id.starts_with("root-") || id.starts_with("usr-"))
+                    && !id.ends_with("-verity"))
+        }
+        None => false,
     }
 }
 
@@ -647,10 +664,19 @@ impl PartitionDefinition {
         } else if let Some(false) = self.read_only {
             f &= !(1u64 << 60);
         }
-        if let Some(true) = self.grow_fs {
-            f |= 1u64 << 59;
-        } else if let Some(false) = self.grow_fs {
-            f &= !(1u64 << 59);
+        match self.grow_fs {
+            Some(true) => f |= 1u64 << 59,
+            Some(false) => f &= !(1u64 << 59),
+            // Upstream defaults growfs ON for every type whose file system it
+            // knows how to grow, unless the partition is read-only. A plain
+            // `Type=home` therefore carries GUID:59 with no GrowFileSystem= in
+            // the definition at all, which is what sfdisk reports as
+            // attrs="GUID:59".
+            None => {
+                if type_knows_growfs(&self.type_uuid) && !matches!(self.read_only, Some(true)) {
+                    f |= 1u64 << 59;
+                }
+            }
         }
         f
     }
@@ -724,11 +750,22 @@ fn parse_partition_definition(path: &Path, arch: &str) -> Result<PartitionDefini
                 }
             }
             "Label" => {
-                def.label = if value.is_empty() {
-                    None
+                // A GPT label holds 36 UTF-16 code units. Upstream validates
+                // here and IGNORES an over-long one, so an earlier Label= in
+                // the same file survives; silently truncating instead wrote a
+                // name nobody asked for. A definition may legitimately offer a
+                // long label and a short fallback in that order.
+                if value.encode_utf16().count() > GPT_LABEL_MAX_UTF16 {
+                    eprintln!(
+                        "Partition label too long for GPT table, ignoring: \"{value}\""
+                    );
                 } else {
-                    Some(value.to_string())
-                };
+                    def.label = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    };
+                }
             }
             "UUID" => {
                 def.uuid = if value.is_empty() {
@@ -959,6 +996,43 @@ fn load_definitions(dirs: &[&str], arch: &str) -> Result<Vec<PartitionDefinition
     Ok(defs)
 }
 
+/// Resolve a `--include-partitions=`/`--exclude-partitions=` entry to a type
+/// UUID. Entries may be a designator such as `home` or a bare UUID.
+fn filter_entry_uuid(entry: &str, arch: &str) -> Option<String> {
+    partition_type_uuid(entry, arch).or_else(|| uuid_bytes(entry).map(|_| entry.to_uppercase()))
+}
+
+/// Apply the partition type filter, mirroring upstream `partition_type_exclude`.
+///
+/// The two options are one list and one mode, not two independent lists: with
+/// an include list anything unlisted is dropped, with an exclude list anything
+/// listed is dropped, and with neither everything is kept.
+fn filter_definitions_by_type(
+    defs: Vec<PartitionDefinition>,
+    args: &Args,
+    arch: &str,
+) -> Vec<PartitionDefinition> {
+    let (list, include) = if !args.include_partitions.is_empty() {
+        (&args.include_partitions, true)
+    } else if !args.exclude_partitions.is_empty() {
+        (&args.exclude_partitions, false)
+    } else {
+        return defs;
+    };
+
+    let wanted: Vec<String> = list
+        .iter()
+        .filter_map(|e| filter_entry_uuid(e, arch))
+        .collect();
+
+    defs.into_iter()
+        .filter(|d| {
+            let listed = wanted.iter().any(|u| u.eq_ignore_ascii_case(&d.type_uuid));
+            if listed { include } else { !include }
+        })
+        .collect()
+}
+
 fn load_definitions_from_dir(dir: &str, arch: &str) -> Result<Vec<PartitionDefinition>, String> {
     load_definitions(&[dir], arch)
 }
@@ -1112,7 +1186,7 @@ fn parse_utf16le_name(data: &[u8]) -> String {
 
 fn encode_utf16le_name(name: &str) -> [u8; 72] {
     let mut buf = [0u8; 72];
-    for (i, code_unit) in name.encode_utf16().take(36).enumerate() {
+    for (i, code_unit) in name.encode_utf16().take(GPT_LABEL_MAX_UTF16).enumerate() {
         let bytes = code_unit.to_le_bytes();
         buf[i * 2] = bytes[0];
         buf[i * 2 + 1] = bytes[1];
@@ -2569,6 +2643,11 @@ fn run(argv: &[String]) -> Result<i32, String> {
         all_defs
     };
 
+    // --include-partitions=/--exclude-partitions= select by partition TYPE.
+    // Both were parsed and then never consulted, so a caller's explicit filter
+    // was silently ignored and the partitions it excluded were created anyway.
+    let defs = filter_definitions_by_type(defs, &args, arch);
+
     // Having no definitions is not by itself a reason to stop. Upstream reads
     // the definitions and then carries straight on to find_root(),
     // resize_backing_fd() and context_load_partition_table(), so
@@ -3415,6 +3494,107 @@ mod tests {
     fn test_encode_guid_short() {
         let encoded = encode_guid("invalid");
         assert_eq!(encoded, [0u8; 16]);
+    }
+
+    /// home.conf in TEST-58-REPART sets a short Label= then a too-long one.
+    /// The over-long value must be ignored so the short one survives, rather
+    /// than truncated to 36 characters.
+    #[test]
+    fn test_label_too_long_is_ignored_not_truncated() {
+        let tmp = TempDir::new().unwrap();
+        let conf = tmp.path().join("home.conf");
+        fs::write(
+            &conf,
+            "[Partition]\nType=home\nLabel=home-first\n\
+             Label=home-always-too-long-xxxxxxxxxxxxxx-%v\nFormat=vfat\n",
+        )
+        .unwrap();
+
+        let def = parse_partition_definition(&conf, "x86-64").unwrap();
+        assert_eq!(def.label.as_deref(), Some("home-first"));
+    }
+
+    /// A label of exactly 36 UTF-16 units still fits and must be accepted.
+    #[test]
+    fn test_label_at_limit_is_accepted() {
+        let tmp = TempDir::new().unwrap();
+        let conf = tmp.path().join("home.conf");
+        let exactly_36 = "x".repeat(36);
+        fs::write(
+            &conf,
+            format!("[Partition]\nType=home\nLabel={exactly_36}\n"),
+        )
+        .unwrap();
+
+        let def = parse_partition_definition(&conf, "x86-64").unwrap();
+        assert_eq!(def.label.as_deref(), Some(exactly_36.as_str()));
+    }
+
+    /// growfs defaults on for types repart can grow, so `Type=home` alone
+    /// carries GUID:59; swap cannot grow and must not.
+    #[test]
+    fn test_growfs_defaults_on_for_growable_types() {
+        let mk = |t: &str| {
+            let mut d = PartitionDefinition::default();
+            d.type_uuid = partition_type_uuid(t, "x86-64").unwrap();
+            d
+        };
+        const GROWFS: u64 = 1u64 << 59;
+
+        assert_eq!(mk("home").effective_flags() & GROWFS, GROWFS);
+        assert_eq!(mk("root").effective_flags() & GROWFS, GROWFS);
+        assert_eq!(mk("swap").effective_flags() & GROWFS, 0);
+        assert_eq!(mk("esp").effective_flags() & GROWFS, 0);
+
+        // Read-only suppresses the default.
+        let mut ro = mk("home");
+        ro.read_only = Some(true);
+        assert_eq!(ro.effective_flags() & GROWFS, 0);
+
+        // An explicit GrowFileSystem=no still wins.
+        let mut off = mk("home");
+        off.grow_fs = Some(false);
+        assert_eq!(off.effective_flags() & GROWFS, 0);
+    }
+
+    /// TEST-58-REPART passes --include-partitions=home,swap over definitions
+    /// that also declare root twice, and expects only home and swap on disk.
+    #[test]
+    fn test_filter_definitions_include() {
+        let mk = |t: &str| {
+            let mut d = PartitionDefinition::default();
+            d.type_uuid = partition_type_uuid(t, "x86-64").unwrap();
+            d
+        };
+        let defs = vec![mk("home"), mk("root"), mk("root"), mk("swap")];
+
+        let mut a = Args::default();
+        a.include_partitions = vec!["home".into(), "swap".into()];
+        let kept = filter_definitions_by_type(defs.clone(), &a, "x86-64");
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].type_uuid, partition_type_uuid("home", "x86-64").unwrap());
+        assert_eq!(kept[1].type_uuid, partition_type_uuid("swap", "x86-64").unwrap());
+
+        // Exclude is the same list with the opposite sense.
+        let mut b = Args::default();
+        b.exclude_partitions = vec!["root".into()];
+        let kept = filter_definitions_by_type(defs.clone(), &b, "x86-64");
+        assert_eq!(kept.len(), 2);
+
+        // With neither option nothing is dropped.
+        let kept = filter_definitions_by_type(defs, &Args::default(), "x86-64");
+        assert_eq!(kept.len(), 4);
+    }
+
+    /// A bare type UUID is accepted alongside a designator.
+    #[test]
+    fn test_filter_definitions_accepts_raw_uuid() {
+        let mut d = PartitionDefinition::default();
+        d.type_uuid = partition_type_uuid("swap", "x86-64").unwrap();
+
+        let mut a = Args::default();
+        a.include_partitions = vec![d.type_uuid.to_lowercase()];
+        assert_eq!(filter_definitions_by_type(vec![d], &a, "x86-64").len(), 1);
     }
 
     /// The exact values TEST-58-REPART asserts for its fixed seed. These pin
