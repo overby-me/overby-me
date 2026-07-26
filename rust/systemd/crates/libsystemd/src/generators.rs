@@ -140,6 +140,12 @@ pub fn run_generators_to(unit_dirs: &[PathBuf], output: GeneratorOutput) -> Gene
         return output;
     }
 
+    // Units and drop-ins delivered as system credentials. Upstream implements
+    // this in systemd-debug-generator; we do it inline because rust-systemd
+    // ships no such binary, and the output is identical: files written into the
+    // EARLY generator directory, which sorts ahead of /etc/systemd/system.
+    process_unit_credentials(&output.early_dir);
+
     // Discover all generators
     let generators = find_generators(unit_dirs);
 
@@ -1140,5 +1146,157 @@ ln -s ../my-generated.service "$1/multi-user.target.wants/my-generated.service"
         // Clean up
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+/// Materialise `systemd.extra-unit.*` and `systemd.unit-dropin.*` system
+/// credentials into `dest`.
+///
+/// Mirrors upstream's `systemd-debug-generator` (`process_unit_credentials`):
+///
+///   * `systemd.extra-unit.<name>` becomes a whole unit file `<dest>/<name>`.
+///   * `systemd.unit-dropin.<unit>` becomes
+///     `<dest>/<unit>.d/50-credential.conf`. An optional `~<name>` suffix
+///     chooses the drop-in name instead, so
+///     `systemd.unit-dropin.foo.service~10-my` writes `10-my.conf`.
+///
+/// This is how upstream delivers per-test and per-VM unit configuration
+/// (TEST-55-OOMD passes `systemd.unit-dropin.init.scope`, and vmspawn uses the
+/// same mechanism for sshd-vsock), so it is worth having beyond any one test.
+///
+/// Failures are logged and skipped rather than propagated: a malformed
+/// credential must not stop the boot.
+fn process_unit_credentials(dest: &Path) {
+    // $CREDENTIALS_DIRECTORY is what systemd exports when it invokes a
+    // generator. rust-systemd runs this inline from PID 1, where the variable
+    // is usually absent, so fall back to PID 1's own system credential
+    // directory.
+    let cred_dir = std::env::var_os("CREDENTIALS_DIRECTORY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/run/credentials/@system"));
+    let Ok(entries) = std::fs::read_dir(&cred_dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+
+        if let Some(unit) = name.strip_prefix("systemd.extra-unit.") {
+            if !credential_unit_name_is_valid(unit) {
+                warn!("generators: invalid unit name '{unit}' in credential '{name}', ignoring");
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(entry.path()) else {
+                warn!("generators: could not read credential '{name}', ignoring");
+                continue;
+            };
+            let path = dest.join(unit);
+            if let Err(e) = std::fs::write(&path, content) {
+                warn!("generators: could not write unit '{unit}' from credential '{name}': {e}");
+            } else {
+                debug!("generators: wrote unit '{unit}' from credential '{name}'");
+            }
+        } else if let Some(spec) = name.strip_prefix("systemd.unit-dropin.") {
+            // `<unit>` or `<unit>~<dropin-name>`
+            let (unit, dropin) = match spec.split_once('~') {
+                Some((u, d)) => (u, d),
+                None => (spec, "50-credential"),
+            };
+            if !credential_unit_name_is_valid(unit) {
+                warn!("generators: invalid unit name '{unit}' in credential '{name}', ignoring");
+                continue;
+            }
+            if dropin.is_empty() {
+                warn!("generators: empty drop-in name for '{unit}' in credential '{name}', ignoring");
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(entry.path()) else {
+                warn!("generators: could not read credential '{name}', ignoring");
+                continue;
+            };
+            let dir = dest.join(format!("{unit}.d"));
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                warn!("generators: could not create {dir:?}: {e}");
+                continue;
+            }
+            let path = dir.join(format!("{dropin}.conf"));
+            if let Err(e) = std::fs::write(&path, content) {
+                warn!("generators: could not write drop-in {path:?} from credential '{name}': {e}");
+            } else {
+                debug!("generators: wrote drop-in '{dropin}' for unit '{unit}' from credential '{name}'");
+            }
+        }
+    }
+}
+
+/// Minimal validity check for a unit name taken from a credential name.
+///
+/// Guards against a credential steering writes outside the generator
+/// directory; the full unit-name grammar is enforced later by the parser.
+fn credential_unit_name_is_valid(unit: &str) -> bool {
+    !unit.is_empty()
+        && !unit.contains('/')
+        && unit != "."
+        && unit != ".."
+        && unit.contains('.')
+}
+
+#[cfg(test)]
+mod credential_unit_tests {
+    use super::{credential_unit_name_is_valid, process_unit_credentials};
+
+    #[test]
+    fn a_credential_name_cannot_escape_the_generator_directory() {
+        assert!(!credential_unit_name_is_valid("../evil.service"));
+        assert!(!credential_unit_name_is_valid("a/b.service"));
+        assert!(!credential_unit_name_is_valid(""));
+        assert!(!credential_unit_name_is_valid("."));
+        assert!(!credential_unit_name_is_valid(".."));
+        // A unit name has to carry a type suffix.
+        assert!(!credential_unit_name_is_valid("noextension"));
+        assert!(credential_unit_name_is_valid("init.scope"));
+        assert!(credential_unit_name_is_valid("foo@bar.service"));
+    }
+
+    #[test]
+    fn dropin_and_extra_unit_credentials_are_materialised() {
+        let tmp = std::env::temp_dir().join(format!("rs-cred-{}", std::process::id()));
+        let creds = tmp.join("creds");
+        let dest = tmp.join("dest");
+        let _ = std::fs::create_dir_all(&creds);
+        let _ = std::fs::create_dir_all(&dest);
+
+        std::fs::write(
+            creds.join("systemd.unit-dropin.init.scope"),
+            "[Scope]\nMemoryHigh=infinity\n",
+        )
+        .unwrap();
+        // The `~` suffix picks the drop-in file name.
+        std::fs::write(creds.join("systemd.unit-dropin.foo.service~10-my"), "[Service]\n").unwrap();
+        std::fs::write(creds.join("systemd.extra-unit.bar.service"), "[Service]\n").unwrap();
+        // Neither prefix: must be ignored entirely.
+        std::fs::write(creds.join("unrelated.cred"), "nope").unwrap();
+
+        unsafe { std::env::set_var("CREDENTIALS_DIRECTORY", &creds) };
+        process_unit_credentials(&dest);
+        unsafe { std::env::remove_var("CREDENTIALS_DIRECTORY") };
+
+        let dropin = dest.join("init.scope.d/50-credential.conf");
+        assert!(dropin.is_file(), "default drop-in name should be 50-credential");
+        assert!(
+            std::fs::read_to_string(&dropin).unwrap().contains("MemoryHigh=infinity"),
+            "drop-in content should be the credential's content"
+        );
+        assert!(dest.join("foo.service.d/10-my.conf").is_file());
+        assert!(dest.join("bar.service").is_file());
+        assert!(!dest.join("unrelated.cred").exists());
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
