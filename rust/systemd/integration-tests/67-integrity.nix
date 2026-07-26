@@ -18,11 +18,20 @@
   # and the wait does not find the device, after which cleanup runs. So the
   # unit starts but /dev/mapper/integrity_test never appears.
   #
-  # NEXT STEP: check whether systemd-integritysetup@.service is even
-  # instantiable here (the C package ships integritysetup*.target but the
-  # per-device template may not be among them; if so add it to extraUnits), and
-  # then whether crates/integritysetup actually performs the dm-integrity
-  # attach for the instance name. Distinguish those two before writing code.
+  # RESOLVED WITHOUT A VM RUN: of the two candidates, it is the first.
+  # `systemd-integritysetup@.service` is NOT SHIPPED by this nixpkgs systemd
+  # build at all: neither example/systemd/system nor lib/systemd/system contains
+  # it, only lib/systemd/system-generators/systemd-integritysetup-generator,
+  # which upstream uses to generate instances from /etc/integritytab. The test
+  # starts the template directly, so it can never instantiate here whatever
+  # crates/integritysetup does. That also means the attach path has still never
+  # been exercised, so nothing is yet known about it.
+  #
+  # NEXT STEP: provide the template unit from testsuite.nix, pointing ExecStart
+  # at rust-systemd's systemd-integritysetup, exactly as that file already does
+  # inline for systemd-ask-password and systemd-network-generator. That is
+  # environment parity with upstream's harness, which has the unit. extraUnits
+  # cannot help, since the file does not exist in the package to link.
   extraPackages = pkgs: [pkgs.cryptsetup];
   extraUnits = [
     "integritysetup.target"
