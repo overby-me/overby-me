@@ -152,7 +152,36 @@ find what the hand-written one does not cover.
 | 23-UNIT-FILE ExecStopPost | Deleted `Type=dbus` and `Type=notify` sections. Both service types work now; re-run and see |
 | 23-UNIT-FILE type-exec | Deleted the `busctl` block for issue #20933 |
 | 07-PID1 issue-30412 | `socat` is backgrounded and killed after 2s instead of running in the foreground, so the test no longer proves the socket fd is dropped when `ExecStart` fails with 203. That is exactly what issue #30412 is about |
-| 34-DYNAMICUSERMIGRATE | The whole `DynamicUser=0` half now passes; six exec-directory bugs were fixed getting there (tmpfs shadowing, `:ro` tmpfs ordering, host-side alias symlinks under a tmpfs, `dir:alias:ro` parsing for Runtime/Cache/Logs, the 0<->1 migration itself, and `ProtectSystem=strict`'s implicit `ReadWritePaths=` re-deriving paths wrongly). Remaining: the first `DynamicUser=1` command cannot see its migrated state directory. Instrumentation has already established that the migration is correct and that binding `private/<name>` onto `<base>/<name>` is a no-op because the destination symlink resolves back to the source. The test wrapper carries the full evidence trail and the next step |
+| 34-DYNAMICUSERMIGRATE | `test_directory StateDirectory` now passes its `DynamicUser=0` phase, its `DynamicUser=1` phase and the conversion back. Remaining: the closing unit-parsing section hangs. `systemctl start --wait testservice-34.service` never returns and ~3 min later journald, oomd and udevd dump core on `WatchdogSec=3min`, i.e. PID 1 stopped servicing pings. The unit is a six-command `Type=oneshot` with `TemporaryFileSystem=`, matching open invariant I1 in ARCHITECTURE.md (the read guard held across a multi-command oneshot's exec waits). Also needs `parse_exec_dir_entry` to honour a backslash-escaped colon (`zzz:x\:yz`). The test wrapper carries the full evidence trail |
+
+### Exec directories: the `private/` rule
+
+Worth writing down, because the prose comment in upstream's `exec-invoke.c` is
+easy to misread and the authoritative version is elsewhere.
+
+`DynamicUser=` puts an exec directory at `<base>/private/<name>` with a
+`<base>/<name>` symlink. `private/` is mode 0700 owned root:root **on purpose**:
+it is a security boundary stopping unprivileged host users from reading state
+that belongs to a dynamic UID which may later be reused. It must not be loosened.
+The service reaches its own directory because the mount namespace replaces
+`private/` with a permissive tmpfs into which only that service's directories are
+bound. Binding `<base>/private/<name>` onto the `<base>/<name>` symlink instead
+does nothing: the kernel resolves the destination straight back to the source.
+
+Which directory types get this treatment is decided by
+`exec_directory_is_private` (`src/core/execute.c:377`), not by the comment:
+
+    dynamic_user must be set, and
+    the type must be one that gets chown'd (so never ConfigurationDirectory), and
+    RuntimeDirectory is excluded only when RuntimeDirectoryPreserve=no
+
+So `RuntimeDirectory=` *does* use `private/` whenever `RuntimeDirectoryPreserve=`
+is not `no`, which is why TEST-34-DYNAMICUSERMIGRATE sets it on every command and
+then asserts `/run/private/zzz` exists.
+
+**Open divergence:** rust-systemd applies `private/` to runtime directories
+unconditionally. Matching upstream needs `runtime_directory_preserve` plumbed
+from `exec_config` into `ExecHelperConfig`, which it is not today.
 
 ### Tier 3: new subsystems
 

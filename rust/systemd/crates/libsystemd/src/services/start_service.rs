@@ -1147,6 +1147,7 @@ fn start_service_with_filedescriptors(
         // Both computed by the exec helper itself once the directories exist.
         exec_dir_binds: Vec::new(),
         exec_dir_paths: Vec::new(),
+        private_dir_tmpfs: Vec::new(),
         invocation_id: srvc.invocation_id.clone(),
     };
 

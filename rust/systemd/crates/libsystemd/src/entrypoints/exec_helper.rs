@@ -946,6 +946,13 @@ pub struct ExecHelperConfig {
     /// SyslogLevelPrefix= — if true (default), strip kernel-style `<N>` priority prefixes.
     #[serde(default)]
     pub syslog_level_prefix: Option<bool>,
+    /// `<base>/private` directories to replace with a tmpfs inside the mount
+    /// namespace, so a `DynamicUser=` service can reach its own directory
+    /// without the 0700 root:root boundary on the host being loosened.
+    ///
+    /// Computed locally, never on the wire.
+    #[serde(skip)]
+    pub private_dir_tmpfs: Vec<String>,
     /// Every exec directory as the service sees it, e.g. `/var/lib/zzz` and any
     /// alias like `/var/lib/xxx`.
     ///
@@ -1933,8 +1940,30 @@ pub fn run_exec_helper() {
         let uid = nix::unistd::Uid::from_raw(config.user);
         let gid = nix::unistd::Gid::from_raw(config.group);
         if dynamic {
+            // `private/` is a deliberate security boundary, not an
+            // implementation detail: mode 0700 owned root:root so unprivileged
+            // host users cannot look into the state of a dynamic user whose UID
+            // may later be reused (upstream exec-invoke.c documents the same
+            // trick container managers use).  The mode is set explicitly rather
+            // than left to the inherited umask.
+            //
+            // The service itself reaches its directory because the mount
+            // namespace replaces `private/` with a tmpfs into which only that
+            // service's directory is bound; see `private_dir_tmpfs` below.
             let private_dir = base.join("private");
             let _ = std::fs::create_dir_all(&private_dir);
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(
+                    &private_dir,
+                    std::fs::Permissions::from_mode(0o700),
+                );
+                let _ = nix::unistd::chown(
+                    &private_dir,
+                    Some(nix::unistd::Uid::from_raw(0)),
+                    Some(nix::unistd::Gid::from_raw(0)),
+                );
+            }
             let full_path = private_dir.join(dir_name);
             let link_path = base.join(dir_name);
 
@@ -2101,6 +2130,8 @@ pub fn run_exec_helper() {
     // created below.  Used to bind them back over a TemporaryFileSystem= tmpfs,
     // which would otherwise hide the service's own StateDirectory= et al.
     let mut exec_dir_binds: Vec<(String, std::path::PathBuf)> = Vec::new();
+    // `<base>/private` dirs that need the namespace tmpfs treatment.
+    let mut exec_dir_private_bases: Vec<std::path::PathBuf> = Vec::new();
     // Roots of any TemporaryFileSystem= mounts, so directory creation can tell
     // whether a path it is about to write will be hidden by a tmpfs anyway.
     let tmpfs_roots: Vec<PathBuf> = config
@@ -2139,6 +2170,9 @@ pub fn run_exec_helper() {
                 create_managed_dir(&base, &src, mode, dynamic)
             };
             exec_dir_binds.push((full.clone(), src_path.clone()));
+            if dynamic {
+                exec_dir_private_bases.push(base.join("private"));
+            }
             // Optional destination: a symlink alias pointing at the source dir.
             if let Some(dest) = dest {
                 let dest_path = base.join(&dest);
@@ -2173,13 +2207,17 @@ pub fn run_exec_helper() {
                             mode: u32,
                             dynamic: bool,
                             ro_out: &mut Vec<PathBuf>,
-                            bind_out: &mut Vec<(String, PathBuf)>|
+                            bind_out: &mut Vec<(String, PathBuf)>,
+                            private_out: &mut Vec<PathBuf>|
      -> Vec<String> {
         let mut full_paths = Vec::with_capacity(entries.len());
         for entry in entries {
             let (src, dest, ro) = parse_exec_dir_entry(entry);
             let full = create_managed_dir(base, &src, mode, dynamic);
             bind_out.push((full.clone(), base.join(&src)));
+            if dynamic {
+                private_out.push(base.join("private"));
+            }
             full_paths.push(full.clone());
             if let Some(dest) = dest {
                 let dest_path = base.join(&dest);
@@ -2213,6 +2251,7 @@ pub fn run_exec_helper() {
             dynamic,
             &mut read_only_exec_dirs,
             &mut exec_dir_binds,
+            &mut exec_dir_private_bases,
         );
         unsafe { std::env::set_var("LOGS_DIRECTORY", full_paths.join(":")) };
     }
@@ -2226,6 +2265,7 @@ pub fn run_exec_helper() {
             dynamic,
             &mut read_only_exec_dirs,
             &mut exec_dir_binds,
+            &mut exec_dir_private_bases,
         );
         unsafe { std::env::set_var("RUNTIME_DIRECTORY", full_paths.join(":")) };
     }
@@ -2240,6 +2280,7 @@ pub fn run_exec_helper() {
             dynamic,
             &mut read_only_exec_dirs,
             &mut exec_dir_binds,
+            &mut exec_dir_private_bases,
         );
         unsafe { std::env::set_var("CACHE_DIRECTORY", full_paths.join(":")) };
     }
@@ -2303,6 +2344,30 @@ pub fn run_exec_helper() {
         .iter()
         .map(|(_, dest)| dest.to_string_lossy().into_owned())
         .collect();
+
+    // DynamicUser=: the namespace gets a tmpfs over `<base>/private`, and each
+    // of this service's directories is bound into it under the same name.  That
+    // reproduces upstream's arrangement exactly: the 0700 boundary still keeps
+    // other host users out, while the service reaches its own directory through
+    // the existing `<base>/<name>` symlink.  Binding the symlink path itself
+    // does nothing, because the kernel resolves it straight back to the source.
+    exec_dir_private_bases.sort();
+    exec_dir_private_bases.dedup();
+    config.private_dir_tmpfs = exec_dir_private_bases
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    for (source, _) in &exec_dir_binds {
+        let src = Path::new(source);
+        if exec_dir_private_bases
+            .iter()
+            .any(|b| src.parent() == Some(b.as_path()))
+        {
+            config
+                .exec_dir_binds
+                .push((source.clone(), source.clone()));
+        }
+    }
 
     if !exec_dir_binds.is_empty() {
         for (source, dest) in &exec_dir_binds {
@@ -3356,6 +3421,40 @@ pub fn run_exec_helper() {
         std::env::vars().count()
     );
 
+    // Last chance to notice that a service cannot reach its own exec
+    // directories: this runs inside the finished mount namespace and after the
+    // privilege drop, so it sees exactly what the service will.  A service
+    // silently failing because its StateDirectory= is unreachable is very hard
+    // to diagnose from the outside, so this warns rather than staying quiet.
+    for dir in &config.exec_dir_paths {
+        if let Err(e) = std::fs::metadata(dir) {
+            log::warn!(
+                "exec dir {dir} is unreachable as uid={} gid={}: {e}",
+                nix::unistd::getuid(),
+                nix::unistd::getgid(),
+            );
+            // Walk the ancestors to show which component denied access.
+            let mut ancestors: Vec<&Path> = Path::new(dir).ancestors().collect();
+            ancestors.reverse();
+            for a in ancestors {
+                match std::fs::symlink_metadata(a) {
+                    Ok(md) => {
+                        use std::os::unix::fs::MetadataExt;
+                        log::warn!(
+                            "  {} mode={:o} uid={} gid={} symlink={}",
+                            a.display(),
+                            md.mode() & 0o7777,
+                            md.uid(),
+                            md.gid(),
+                            md.file_type().is_symlink()
+                        );
+                    }
+                    Err(e) => log::warn!("  {}: {e}", a.display()),
+                }
+            }
+        }
+    }
+
     // Verify the binary exists and is readable before exec
     log::trace!(
         "cmd exists={}, is_file={}",
@@ -3910,6 +4009,31 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
     }
 
     // Step 2: mount TemporaryFileSystem
+    // DynamicUser=: replace the 0700 root:root `<base>/private` boundary with a
+    // permissive tmpfs, into which Step 3 binds only this service's own
+    // directories.  Must run after Step 1 has taken O_PATH fds on those
+    // directories, since the tmpfs hides the originals.
+    for path in &config.private_dir_tmpfs {
+        let Ok(c_path) = std::ffi::CString::new(path.as_str()) else {
+            continue;
+        };
+        let ret = unsafe {
+            libc::mount(
+                c"tmpfs".as_ptr(),
+                c_path.as_ptr(),
+                c"tmpfs".as_ptr(),
+                libc::MS_NOSUID | libc::MS_NODEV,
+                c"mode=0755".as_ptr().cast(),
+            )
+        };
+        if ret != 0 {
+            log::warn!(
+                "Failed to mount tmpfs over {path}: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+
     // TemporaryFileSystem= paths whose `ro` option is applied after the binds.
     let mut deferred_ro_tmpfs: Vec<String> = Vec::new();
     if !config.temporary_file_system.is_empty() {
