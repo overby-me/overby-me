@@ -109,6 +109,9 @@ impl Parser {
                 Ok(self.module.ctx.array_type(element, count))
             }
             Token::LocalName(name) => {
+                if let Some(alias) = self.module.ctx.lookup_type_alias(&name) {
+                    return Ok(alias);
+                }
                 let id = self.module.ctx.named_struct(&name);
                 Ok(self.module.ctx.named_struct_type(id))
             }

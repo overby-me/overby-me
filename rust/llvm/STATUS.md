@@ -34,6 +34,8 @@ and each row names the check that backs it.
 | Type layout: sizes, alignments, struct offsets | done | `llvm-unit` |
 | Verifier: structure, types, flags, call signatures, dominance | done for the modelled subset | `llvm-verify-corpus` |
 | Verifier: linkage against visibility, module flag shape, atomic orderings, index bounds | done | `llvm-verify-corpus` |
+| Verifier: sized-type rules, intrinsic-only types, reserved global shapes | done | `llvm-verify-corpus` |
+| Type aliases: `%name = type [8 x i8]` expands where used | done | `llvm-upstream-assembler` |
 | `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
 
 ## The round trip
@@ -60,8 +62,8 @@ skipped and counted separately rather than scored.
 
 | Suite | Agreed | Considered | Skipped | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 172 | 306 | 177 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 90 | 254 | 74 | `llvm-upstream-verifier` |
+| `llvm/test/Assembler` | 175 | 306 | 177 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 116 | 254 | 74 | `llvm-upstream-verifier` |
 
 The first measurement was 146 and 70. Both numbers are still low and both are
 the point: the gap is a to-do list, and

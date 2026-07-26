@@ -19,6 +19,11 @@ pub struct Context {
     type_ids: HashMap<TypeKind, TypeId>,
     structs: Vec<StructDef>,
     struct_ids: HashMap<String, StructId>,
+    /// `%name = type [8 x i8]` names a type that is not a struct. Upstream
+    /// expands those where they are used and never prints them, because only
+    /// identified structs have identity; this table is how that expansion
+    /// happens.
+    type_aliases: HashMap<String, TypeId>,
     constants: Vec<Constant>,
     constant_ids: HashMap<Constant, ConstId>,
 }
@@ -36,6 +41,7 @@ impl Context {
             type_ids: HashMap::new(),
             structs: Vec::new(),
             struct_ids: HashMap::new(),
+            type_aliases: HashMap::new(),
             constants: Vec::new(),
             constant_ids: HashMap::new(),
         }
@@ -158,6 +164,15 @@ impl Context {
 
     pub fn named_struct_type(&mut self, id: StructId) -> TypeId {
         self.intern_type(TypeKind::NamedStruct(id))
+    }
+
+    /// Records `%name = type <something that is not a struct>`.
+    pub fn set_type_alias(&mut self, name: &str, ty: TypeId) {
+        self.type_aliases.insert(name.to_string(), ty);
+    }
+
+    pub fn lookup_type_alias(&self, name: &str) -> Option<TypeId> {
+        self.type_aliases.get(name).copied()
     }
 
     pub fn lookup_named_struct(&self, name: &str) -> Option<StructId> {

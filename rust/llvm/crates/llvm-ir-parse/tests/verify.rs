@@ -172,6 +172,42 @@ const BROKEN: &[(&str, &str)] = &[
         "!llvm.ident = !{!0}\n\n!0 = !{i32 1}\n",
         "must be a node with one string",
     ),
+    (
+        "define void @f() {\nentry:\n  %p = alloca token, align 8\n  ret void\n}\n",
+        "invalid type for alloca",
+    ),
+    (
+        "@g = external global token\n",
+        "invalid type for a global variable",
+    ),
+    (
+        "define token @f() {\nentry:\n  ret token none\n}\n",
+        "returns a token but is not an intrinsic",
+    ),
+    (
+        "define void @f(x86_amx %a) {\nentry:\n  ret void\n}\n",
+        "takes a x86_amx but is not an intrinsic",
+    ),
+    (
+        "declare token @llvm.thing()\n\ndefine void @f() {\nentry:\n  %t = call token @llvm.thing()\n  %s = select i1 true, token %t, token %t\n  ret void\n}\n",
+        "select values cannot have token type",
+    ),
+    (
+        "@llvm.used = appending global [1 x i32] [i32 0], section \"llvm.metadata\"\n",
+        "wrong type for an intrinsic global",
+    ),
+    (
+        "@llvm.used = appending global [1 x ptr] zeroinitializer, section \"llvm.metadata\"\n",
+        "wrong initialiser for an intrinsic global",
+    ),
+    (
+        "@f = global i32 0\n@llvm.global_ctors = appending global [1 x { i32, ptr }] [{ i32, ptr } { i32 65535, ptr null }]\n",
+        "third field of the element type is mandatory",
+    ),
+    (
+        "$v = comdat any\n@v = common global i32 0, comdat($v), align 4\n",
+        "common global may not be in a comdat",
+    ),
 ];
 
 /// Input the parser itself has to refuse, with the message it owes.

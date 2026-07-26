@@ -114,15 +114,17 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 172, 70 to 90)*
-Landed: duplicate symbols, alignment bounds, aggregate and vector element
-types, linkage against visibility, cmpxchg orderings, getelementptr and
-aggregate index rules, module flag and ident node shapes, and metadata
-values that are not node references.
-Still open, largest first: the semantic half of the Verifier suite (x86_amx
-and token placement rules, intrinsic signatures, attribute combinations),
-module summary index syntax (`^0 = ...`), target-specific calling
-conventions, and metadata integers wider than 64 bits.
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 175, 70 to 116)*
+Landed in two passes: duplicate symbols, alignment bounds, aggregate and
+vector element types, linkage against visibility, cmpxchg orderings,
+getelementptr and aggregate index rules, module flag and ident node shapes,
+metadata values that are not node references, metadata attachments written
+in place, non-struct type aliases, sized-type rules for alloca and globals,
+token and x86_amx being intrinsic-only, and the shapes of `llvm.used` and
+`llvm.global_ctors`.
+Still open, largest first: attribute combination rules, intrinsic
+signatures, module summary index syntax (`^0 = ...`), target-specific
+calling conventions, and metadata integers wider than 64 bits.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [todo] Differential check against real `opt -S -passes=verify`.**

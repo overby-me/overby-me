@@ -91,8 +91,8 @@ in {
     # Conformance against upstream's own suites, measured rather than claimed.
     # Both numbers are low and both are honest: see STATUS.md for what the
     # remaining disagreements are.
-    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 172;
-    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 90;
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 175;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 116;
   };
 
   packages.rust-llvm = {lib, ...}:

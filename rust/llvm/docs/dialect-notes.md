@@ -63,6 +63,8 @@ recurring reasons are:
   and the `align(16)` spelling of a parameter attribute.
 
 Each of those is a bug, not a decision. When one is fixed the ratchet moves
-up in the same commit. The first pass took the Assembler suite from 146 to
-172 and the Verifier suite from 70 to 90 by adding the structural rules the
-parser was missing and the first handful of semantic ones.
+up in the same commit. Two passes so far have taken the Assembler suite from
+146 to 175 and the Verifier suite from 70 to 116, by adding the structural
+rules the parser was missing and then the semantic ones that come in
+clusters: which types can be stored, which may only cross an intrinsic
+boundary, and what shape the globals upstream reserves have to have.

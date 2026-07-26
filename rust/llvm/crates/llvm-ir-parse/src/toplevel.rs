@@ -142,10 +142,21 @@ impl Parser {
         if !self.eat_word("type") {
             return self.error("expected 'type' in a type definition");
         }
-        let id = self.module.ctx.named_struct(name);
         if self.eat_word("opaque") {
+            self.module.ctx.named_struct(name);
             return Ok(());
         }
+        // Only a struct body makes an identified type. Anything else is an
+        // alias that gets expanded where it is used, which is why upstream
+        // prints `byval([8 x i8])` for a parameter written `byval(%alias)`.
+        let is_struct = self.peek() == &Token::LeftBrace
+            || (self.peek() == &Token::Less && self.peek_at(1) == &Token::LeftBrace);
+        if !is_struct {
+            let ty = self.parse_type()?;
+            self.module.ctx.set_type_alias(name, ty);
+            return Ok(());
+        }
+        let id = self.module.ctx.named_struct(name);
         let (fields, packed) = self.parse_struct_body()?;
         self.module.ctx.set_struct_body(id, fields, packed);
         Ok(())

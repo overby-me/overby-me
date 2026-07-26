@@ -10,7 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::constant::CastOp;
+use crate::constant::{CastOp, ConstId, Constant};
 use crate::function::Function;
 use crate::global::{GlobalQualifiers, Linkage, Visibility};
 use crate::instruction::{AtomicOrdering, BinOp, InstKind, IntFlags};
@@ -113,6 +113,23 @@ impl Verifier<'_> {
             let name = describe(&global.name);
             let qualifiers = global.qualifiers.clone();
             self.linkage_and_visibility(&name, &qualifiers);
+            let value_type = global.value_type;
+            if !self.is_sized(value_type) {
+                self.report(format!("@{name} has an invalid type for a global variable"));
+            }
+            let (linkage, in_comdat) = {
+                let global = &self.module.globals[index];
+                (global.qualifiers.linkage, global.comdat.is_some())
+            };
+            // A common symbol is merged by the linker by being common, and a
+            // comdat is a different merging rule; upstream refuses to have
+            // both apply to one symbol.
+            if linkage == Some(Linkage::Common) && in_comdat {
+                self.report(format!("@{name}: a common global may not be in a comdat"));
+            }
+            let initializer = self.module.globals[index].initializer;
+            self.intrinsic_global(&name, value_type, initializer);
+            let global = &self.module.globals[index];
             if let Some(initializer) = global.initializer {
                 let actual = self.module.ctx.constant(initializer).ty();
                 self.check(
@@ -165,6 +182,74 @@ impl Verifier<'_> {
                     ));
                 }
             }
+        }
+    }
+
+    /// The globals whose names upstream reserves, and the shapes it insists
+    /// on for them. Getting one wrong is not a style problem: the linker and
+    /// the runtime both read these by layout.
+    fn intrinsic_global(&mut self, name: &str, value_type: TypeId, initializer: Option<ConstId>) {
+        match name {
+            "llvm.used" | "llvm.compiler.used" | "llvm.compiler_used" => {
+                let element = match self.module.ctx.type_kind(value_type) {
+                    TypeKind::Array { element, .. } => Some(*element),
+                    _ => None,
+                };
+                let ok = element.is_some_and(|e| {
+                    matches!(self.module.ctx.type_kind(e), TypeKind::Pointer { .. })
+                });
+                if !ok {
+                    self.report(format!(
+                        "@{name} has the wrong type for an intrinsic global"
+                    ));
+                    return;
+                }
+                // The list has to name its entries; a zeroed array names none
+                // of them and is what an accidental declaration produces.
+                let listed = initializer.is_some_and(|id| {
+                    matches!(self.module.ctx.constant(id), Constant::Array { .. })
+                });
+                let empty = matches!(
+                    self.module.ctx.type_kind(value_type),
+                    TypeKind::Array { count: 0, .. }
+                );
+                if !listed && !empty {
+                    self.report(format!(
+                        "@{name} has the wrong initialiser for an intrinsic global"
+                    ));
+                }
+            }
+            "llvm.global_ctors" | "llvm.global_dtors" => {
+                let element = match self.module.ctx.type_kind(value_type) {
+                    TypeKind::Array { element, .. } => *element,
+                    _ => {
+                        self.report(format!(
+                            "@{name} has the wrong type for an intrinsic global"
+                        ));
+                        return;
+                    }
+                };
+                let fields = match self.module.ctx.type_kind(element) {
+                    TypeKind::Struct { fields, .. } => fields.clone(),
+                    TypeKind::NamedStruct(id) => self
+                        .module
+                        .ctx
+                        .struct_def(*id)
+                        .fields
+                        .clone()
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
+                };
+                // { priority, function, associated data }. The two-field form
+                // was obsoleted, and a module still using it would silently
+                // lose its associated-data column.
+                if fields.len() != 3 {
+                    self.report(format!(
+                        "@{name}: the third field of the element type is mandatory"
+                    ));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -254,6 +339,22 @@ impl Verifier<'_> {
             let group = *group;
             if self.module.attribute_group(group).is_none() {
                 self.report(format!("refers to undefined attribute group #{group}"));
+            }
+        }
+
+        // token and x86_amx have no representation a caller could pass, so
+        // only an intrinsic may name them in its signature.
+        let intrinsic = matches!(&function.name, Name::Named(text) if text.starts_with("llvm."));
+        if !intrinsic {
+            let return_type = function.return_type;
+            let params: Vec<TypeId> = function.params.iter().map(|p| p.ty).collect();
+            if let Some(what) = self.opaque_value_type(return_type) {
+                self.report(format!("function returns a {what} but is not an intrinsic"));
+            }
+            for param in params {
+                if let Some(what) = self.opaque_value_type(param) {
+                    self.report(format!("function takes a {what} but is not an intrinsic"));
+                }
             }
         }
 
@@ -532,10 +633,17 @@ impl Verifier<'_> {
                     format!("{where_} has an invalid failure ordering"),
                 );
             }
-            InstKind::Alloca { .. } => self.check(
-                matches!(self.module.ctx.type_kind(ty), TypeKind::Pointer { .. }),
-                format!("{where_} does not produce a pointer"),
-            ),
+            InstKind::Alloca { allocated_type, .. } => {
+                let allocated_type = *allocated_type;
+                self.check(
+                    matches!(self.module.ctx.type_kind(ty), TypeKind::Pointer { .. }),
+                    format!("{where_} does not produce a pointer"),
+                );
+                self.check(
+                    self.is_sized(allocated_type),
+                    format!("{where_} has an invalid type for alloca"),
+                );
+            }
             InstKind::GetElementPtr {
                 source_type,
                 pointer_type,
@@ -554,6 +662,10 @@ impl Verifier<'_> {
             }
             InstKind::Phi { incoming, .. } => {
                 let incoming = incoming.clone();
+                self.check(
+                    !matches!(self.module.ctx.type_kind(ty), TypeKind::Token),
+                    format!("{where_}: phi values cannot have token type"),
+                );
                 for (value, _) in &incoming {
                     self.type_is(function, ty, *value, &where_);
                 }
@@ -581,6 +693,10 @@ impl Verifier<'_> {
                 self.type_is(function, condition_type, condition, &where_);
                 self.type_is(function, ty, if_true, &where_);
                 self.type_is(function, ty, if_false, &where_);
+                self.check(
+                    !matches!(self.module.ctx.type_kind(ty), TypeKind::Token),
+                    format!("{where_}: select values cannot have token type"),
+                );
             }
             InstKind::Freeze {
                 operand_type,
@@ -959,6 +1075,29 @@ impl Verifier<'_> {
         match self.module.ctx.type_kind(ty) {
             TypeKind::Vector { element, .. } => *element,
             _ => ty,
+        }
+    }
+
+    /// Whether a value of this type can be stored somewhere: allocated on the
+    /// stack, held in a global, or placed in an aggregate.
+    fn is_sized(&self, ty: TypeId) -> bool {
+        !matches!(
+            self.module.ctx.type_kind(ty),
+            TypeKind::Void
+                | TypeKind::Label
+                | TypeKind::Metadata
+                | TypeKind::Token
+                | TypeKind::X86Amx
+                | TypeKind::Function { .. }
+        )
+    }
+
+    /// Names the type when it is one only an intrinsic may pass or return.
+    fn opaque_value_type(&self, ty: TypeId) -> Option<&'static str> {
+        match self.module.ctx.type_kind(ty) {
+            TypeKind::Token => Some("token"),
+            TypeKind::X86Amx => Some("x86_amx"),
+            _ => None,
         }
     }
 

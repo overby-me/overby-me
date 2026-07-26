@@ -17,6 +17,9 @@ impl Parser {
     // ------------------------------------------------------------- functions
 
     pub(crate) fn parse_function(&mut self, is_define: bool) -> Result<(), ParseError> {
+        // `declare !dbg !12 i32 @f()` puts the attachments before everything
+        // else, which is the one place they lead rather than trail.
+        let leading_metadata = self.parse_metadata_attachments()?;
         let qualifiers = self.parse_global_qualifiers()?;
         let calling_conv = self.parse_calling_conv()?;
         let return_attrs = self.parse_attribute_set(false)?;
@@ -35,6 +38,7 @@ impl Parser {
         };
 
         let mut function = Function::new(name, return_type);
+        function.metadata = leading_metadata;
         function.qualifiers = qualifiers;
         function.calling_conv = calling_conv;
         function.return_attrs = return_attrs;
@@ -325,6 +329,20 @@ impl Parser {
         state: &mut FunctionState,
         ty: TypeId,
     ) -> Result<Value, ParseError> {
+        // A value of type metadata is a whole metadata operand, and inside a
+        // function it can name a local: `metadata ptr %s` is how a debug
+        // intrinsic is handed the variable it describes.
+        if matches!(self.module.ctx.type_kind(ty), TypeKind::Metadata) {
+            let operand = self.parse_metadata_operand(Some((function, state)))?;
+            let constant = self
+                .module
+                .ctx
+                .intern_constant(llvm_ir::constant::Constant::Metadata {
+                    ty,
+                    operand: Box::new(operand),
+                });
+            return Ok(Value::Constant(constant));
+        }
         match self.peek().clone() {
             Token::LocalName(name) => {
                 self.advance();

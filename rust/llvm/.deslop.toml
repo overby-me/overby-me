@@ -70,6 +70,12 @@ disabled_rules = [
   "rust_unbounded_read_to_string",
   "rust_aos_hot_path",
 
+  # `parse_value`, `parse_type`, `constant`, `module`: the vocabulary reads
+  # as generic because it is LangRef's, and renaming it to something more
+  # specific would make the code harder to check against the specification
+  # it implements.
+  "generic_name",
+
   # `Lexer::new` fills every field it has; the heuristic reads the borrowed
   # input plus the running position as a half-built value.
   "rust_partial_init_escape",
