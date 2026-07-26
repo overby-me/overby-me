@@ -4326,7 +4326,7 @@ fn resolve_program_path(name: &str) -> PathBuf {
 // ---------------------------------------------------------------------------
 
 /// Get the database file path for a device.
-pub fn device_db_path(event: &UEvent) -> PathBuf {
+pub fn device_id(event: &UEvent) -> String {
     // Upstream systemd convention:
     //   * block: b<maj>:<min>
     //   * char:  c<maj>:<min>
@@ -4334,18 +4334,22 @@ pub fn device_db_path(event: &UEvent) -> PathBuf {
     //   * else:  +<subsystem>:<sysname>
     if !event.major.is_empty() && !event.minor.is_empty() {
         let dev_type = if event.subsystem == "block" { 'b' } else { 'c' };
-        Path::new(DB_DIR).join(format!("{}{}:{}", dev_type, event.major, event.minor))
+        format!("{}{}:{}", dev_type, event.major, event.minor)
     } else if event.subsystem == "net"
         && let Some(ifindex) = event.env.get("IFINDEX")
         && !ifindex.is_empty()
     {
-        Path::new(DB_DIR).join(format!("n{ifindex}"))
+        format!("n{ifindex}")
     } else if !event.subsystem.is_empty() {
         let basename = event.devpath.rsplit('/').next().unwrap_or(&event.devpath);
-        Path::new(DB_DIR).join(format!("+{}:{}", event.subsystem, basename))
+        format!("+{}:{}", event.subsystem, basename)
     } else {
-        Path::new(DB_DIR).join(format!("n{}", event.devpath.replace('/', "\\x2f")))
+        format!("n{}", event.devpath.replace('/', "\\x2f"))
     }
+}
+
+pub fn device_db_path(event: &UEvent) -> PathBuf {
+    Path::new(DB_DIR).join(device_id(event))
 }
 
 /// Acquire an exclusive flock on the database lock file.
@@ -4596,67 +4600,209 @@ impl Drop for SymlinkLock {
     }
 }
 
-fn create_device_symlinks(event: &UEvent, symlinks: &[String]) {
+/// Escape a symlink path into a single filename, mirroring upstream's
+/// `udev_node_escape_path`: only `/` and `\` are encoded.
+fn udev_node_escape_path(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    for c in src.chars() {
+        match c {
+            '/' => out.push_str("\\x2f"),
+            '\\' => out.push_str("\\x5c"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// The `/run/udev/links/<escaped>` directory recording every device that
+/// currently claims `link_path`, one entry per device.
+fn stack_directory(link_path: &Path) -> Option<PathBuf> {
+    let name = link_path.strip_prefix("/dev").ok()?.to_str()?;
+    if name.is_empty() {
+        return None;
+    }
+    Some(Path::new("/run/udev/links").join(udev_node_escape_path(name)))
+}
+
+/// `OPTIONS="link_priority="` for this event, defaulting to 0 as upstream does.
+fn devlink_priority(options: &HashSet<String>) -> i32 {
+    options
+        .iter()
+        .find_map(|o| o.strip_prefix("link_priority="))
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .unwrap_or(0)
+}
+
+/// Record or withdraw this device's claim on a symlink.
+///
+/// The entry is itself a symlink named after the device id whose target is
+/// `<priority>:<devnode>`, so a claim can be read back without consulting the
+/// database, exactly as upstream's `stack_directory_update` stores it.
+fn stack_directory_update(dir: &Path, id: &str, devnode: &Path, priority: i32, add: bool) {
+    let entry = dir.join(id);
+    if add {
+        let data = format!("{}:{}", priority, devnode.display());
+        if let Ok(existing) = fs::read_link(&entry)
+            && existing.as_os_str() == data.as_str()
+        {
+            return;
+        }
+        let _ = fs::create_dir_all(dir);
+        let _ = fs::remove_file(&entry);
+        let _ = std::os::unix::fs::symlink(&data, &entry);
+    } else {
+        let _ = fs::remove_file(&entry);
+    }
+}
+
+/// Find the device node of the highest-priority device claiming a symlink.
+///
+/// Ours is seeded first when adding, so an equal priority keeps the device
+/// being processed: upstream only replaces on a strictly greater priority.
+fn stack_directory_find_prioritized(
+    dir: &Path,
+    id: &str,
+    own: Option<(PathBuf, i32)>,
+) -> Option<PathBuf> {
+    let (mut devnode, mut priority) = match own {
+        Some((n, p)) => (Some(n), p),
+        None => (None, i32::MIN),
+    };
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.file_name() == id {
+                continue;
+            }
+            let Ok(target) = fs::read_link(entry.path()) else {
+                continue;
+            };
+            let Some(target) = target.to_str().and_then(|t| {
+                let (prio, node) = t.split_once(':')?;
+                Some((prio.parse::<i32>().ok()?, PathBuf::from(node)))
+            }) else {
+                continue;
+            };
+            let (other_priority, other_devnode) = target;
+            // A claim whose device node is gone is stale; the removal uevent
+            // will clear the entry, so just skip it meanwhile.
+            if !other_devnode.exists() {
+                continue;
+            }
+            if devnode.is_some() && other_priority <= priority {
+                continue;
+            }
+            devnode = Some(other_devnode);
+            priority = other_priority;
+        }
+    }
+
+    devnode
+}
+
+/// Point a symlink at a device node, or remove it when nothing claims it.
+fn apply_symlink(link_path: &Path, winner: Option<&Path>) {
+    let Some(devnode) = winner else {
+        let _ = fs::remove_file(link_path);
+        return;
+    };
+
+    if let Some(parent) = link_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    // Use a relative symlink where possible
+    let target = if let (Some(link_parent), true) =
+        (link_path.parent(), devnode.starts_with("/dev"))
+    {
+        pathdiff(devnode, link_parent).unwrap_or_else(|_| devnode.to_path_buf())
+    } else {
+        devnode.to_path_buf()
+    };
+
+    if let Ok(existing) = fs::read_link(link_path)
+        && existing == target
+    {
+        return;
+    }
+
+    let _ = fs::remove_file(link_path);
+    if let Err(e) = std::os::unix::fs::symlink(&target, link_path) {
+        log::debug!(
+            "Failed to create symlink {} -> {}: {}",
+            link_path.display(),
+            target.display(),
+            e
+        );
+    } else {
+        log::debug!(
+            "Created symlink {} -> {}",
+            link_path.display(),
+            target.display()
+        );
+    }
+}
+
+fn resolve_link_path(link: &str) -> PathBuf {
+    if link.starts_with('/') {
+        PathBuf::from(link)
+    } else {
+        PathBuf::from("/dev").join(link)
+    }
+}
+
+/// Claim symlinks for a device and repoint each at whichever claimant has the
+/// highest `link_priority`.
+///
+/// Two devices can legitimately carry the same filesystem signature, so
+/// `/dev/disk/by-uuid/<uuid>` may be claimed by both a loop device and the
+/// dm device stacked on it. Last-writer-wins made that resolution arbitrary;
+/// `OPTIONS="link_priority="` is how a rule expresses which one should win.
+fn create_device_symlinks(event: &UEvent, symlinks: &[String], priority: i32) {
+    let Some(devnode) = event.devnode() else {
+        return;
+    };
+    let id = device_id(event);
+
     for link in symlinks {
-        let link_path = if link.starts_with('/') {
-            PathBuf::from(link)
-        } else {
-            PathBuf::from("/dev").join(link)
-        };
+        let link_path = resolve_link_path(link);
 
         // Serialize the update against other workers via udev's symlink lock.
         let _lock = SymlinkLock::acquire(&link_path);
 
-        if let Some(parent) = link_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
+        let Some(dir) = stack_directory(&link_path) else {
+            apply_symlink(&link_path, Some(&devnode));
+            continue;
+        };
 
-        // Remove existing symlink
-        let _ = fs::remove_file(&link_path);
-
-        // Create symlink to device node
-        if let Some(devnode) = event.devnode() {
-            // Use a relative symlink where possible
-            let target = if let (Some(link_parent), true) =
-                (link_path.parent(), devnode.starts_with("/dev"))
-            {
-                // Try to compute relative path
-                if let Ok(rel) = pathdiff(&devnode, link_parent) {
-                    rel
-                } else {
-                    devnode.clone()
-                }
-            } else {
-                devnode.clone()
-            };
-
-            if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
-                log::debug!(
-                    "Failed to create symlink {} -> {}: {}",
-                    link_path.display(),
-                    target.display(),
-                    e
-                );
-            } else {
-                log::debug!(
-                    "Created symlink {} -> {}",
-                    link_path.display(),
-                    target.display()
-                );
-            }
-        }
+        stack_directory_update(&dir, &id, &devnode, priority, true);
+        let winner =
+            stack_directory_find_prioritized(&dir, &id, Some((devnode.clone(), priority)));
+        apply_symlink(&link_path, winner.as_deref());
     }
 }
 
 /// Remove device symlinks.
-fn remove_device_symlinks(symlinks: &[String]) {
+///
+/// Withdrawing this device's claim does not necessarily remove the symlink:
+/// another device may still claim it, in which case the link is handed over
+/// rather than deleted.
+fn remove_device_symlinks(event: &UEvent, symlinks: &[String]) {
+    let id = device_id(event);
+
     for link in symlinks {
-        let link_path = if link.starts_with('/') {
-            PathBuf::from(link)
-        } else {
-            PathBuf::from("/dev").join(link)
+        let link_path = resolve_link_path(link);
+        let _lock = SymlinkLock::acquire(&link_path);
+
+        let Some(dir) = stack_directory(&link_path) else {
+            let _ = fs::remove_file(&link_path);
+            continue;
         };
-        let _ = fs::remove_file(&link_path);
+
+        stack_directory_update(&dir, &id, Path::new(""), 0, false);
+        let winner = stack_directory_find_prioritized(&dir, &id, None);
+        apply_symlink(&link_path, winner.as_deref());
+        let _ = fs::remove_dir(&dir);
     }
 }
 
@@ -5554,7 +5700,7 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
 
             // Create symlinks
             if !result.symlinks.is_empty() {
-                create_device_symlinks(event, &result.symlinks);
+                create_device_symlinks(event, &result.symlinks, devlink_priority(&result.options));
             }
 
             // Mark the device as still-being-processed if we will run
@@ -5603,7 +5749,7 @@ fn process_event(rules: &RuleSet, event: &mut UEvent, hwdb: Option<&Hwdb>) {
                     }
                 }
             }
-            remove_device_symlinks(&old_symlinks);
+            remove_device_symlinks(event, &old_symlinks);
 
             // Remove tags
             remove_device_tags(event);
@@ -8882,6 +9028,93 @@ mod tests {
 
         let result2 = expand_substitutions("%c{2+}", &event, "foo bar baz", "", &[]);
         assert_eq!(result2, "bar baz");
+    }
+
+    #[test]
+    fn test_udev_node_escape_path_slashes() {
+        assert_eq!(
+            udev_node_escape_path("disk/by-uuid/1234"),
+            "disk\\x2fby-uuid\\x2f1234"
+        );
+        assert_eq!(udev_node_escape_path("a\\b"), "a\\x5cb");
+        assert_eq!(udev_node_escape_path("plain"), "plain");
+    }
+
+    #[test]
+    fn test_stack_directory_name() {
+        assert_eq!(
+            stack_directory(Path::new("/dev/disk/by-uuid/abc")).unwrap(),
+            Path::new("/run/udev/links/disk\\x2fby-uuid\\x2fabc")
+        );
+        // Not under /dev, and /dev itself, have no stack directory.
+        assert!(stack_directory(Path::new("/srv/link")).is_none());
+        assert!(stack_directory(Path::new("/dev")).is_none());
+    }
+
+    #[test]
+    fn test_devlink_priority_parsing() {
+        let mut o = HashSet::new();
+        assert_eq!(devlink_priority(&o), 0);
+        o.insert("link_priority=-200".to_string());
+        assert_eq!(devlink_priority(&o), -200);
+        let mut o2 = HashSet::new();
+        o2.insert("link_priority=bogus".to_string());
+        assert_eq!(devlink_priority(&o2), 0);
+    }
+
+    /// The dm-over-loop case from TEST-67-INTEGRITY: both devices carry the
+    /// same filesystem, and the loop device is pushed down with
+    /// link_priority=-200 so the symlink resolves to the dm node.
+    #[test]
+    fn test_stack_directory_prefers_higher_priority() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("links");
+        let loopdev = tmp.path().join("loop1");
+        let dmdev = tmp.path().join("dm-0");
+        fs::write(&loopdev, "").unwrap();
+        fs::write(&dmdev, "").unwrap();
+
+        stack_directory_update(&dir, "b7:1", &loopdev, -200, true);
+        stack_directory_update(&dir, "b254:0", &dmdev, 0, true);
+
+        // Whichever device is being processed, the dm node wins.
+        assert_eq!(
+            stack_directory_find_prioritized(&dir, "b7:1", Some((loopdev.clone(), -200))),
+            Some(dmdev.clone())
+        );
+        assert_eq!(
+            stack_directory_find_prioritized(&dir, "b254:0", Some((dmdev.clone(), 0))),
+            Some(dmdev.clone())
+        );
+
+        // Once the dm device withdraws, the loop device takes the link over
+        // rather than the link disappearing.
+        stack_directory_update(&dir, "b254:0", Path::new(""), 0, false);
+        assert_eq!(
+            stack_directory_find_prioritized(&dir, "b254:0", None),
+            Some(loopdev)
+        );
+
+        // With no claimants left there is nothing to point at.
+        stack_directory_update(&dir, "b7:1", Path::new(""), 0, false);
+        assert_eq!(stack_directory_find_prioritized(&dir, "b7:1", None), None);
+    }
+
+    /// A claim whose device node has vanished must not win the symlink.
+    #[test]
+    fn test_stack_directory_skips_stale_claim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("links");
+        let live = tmp.path().join("live");
+        fs::write(&live, "").unwrap();
+
+        stack_directory_update(&dir, "b1:1", Path::new("/nonexistent/gone"), 100, true);
+        stack_directory_update(&dir, "b2:2", &live, 0, true);
+
+        assert_eq!(
+            stack_directory_find_prioritized(&dir, "b2:2", Some((live.clone(), 0))),
+            Some(live)
+        );
     }
 
     #[test]
