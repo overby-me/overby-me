@@ -18,13 +18,16 @@ backed by a check that passes or is marked unmeasured.
 
 ## What works
 
-Nothing is claimed here yet beyond the scaffold. This section grows one row
-per completed task in [CLAUDE.md](./CLAUDE.md) §4, and each row names the check
-that backs it.
+This section grows one row per completed task in [CLAUDE.md](./CLAUDE.md) §4,
+and each row names the check that backs it.
 
 | Area | State | Backed by |
 | --- | --- | --- |
-| Workspace, docs, nix wiring | in progress | task A1 |
+| Workspace, docs, nix wiring | done | `llvm-fmt`, `llvm-clippy`, `llvm-unit` |
+| APInt: arbitrary-width integer arithmetic, formatting, parsing | done | `llvm-unit`, cross-checked against native `u128` over an operand grid at eleven widths |
+| APFloat: bit-pattern carrier plus LLVM's textual forms | done | `llvm-unit`, including every `half` and `bfloat` bit pattern |
+| DataLayout: parsing, alignment queries, verbatim printing | done | `llvm-unit` |
+| Triple: component parsing, verbatim printing | done | `llvm-unit` |
 
 ## What is not started
 

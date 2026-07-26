@@ -73,10 +73,11 @@ says `[todo]` is a bug in this file.
 
 ### T0.1, IR core
 
-**A1. [todo] Workspace, docs and nix skeleton.**
-Flakelight module through `nix/lib/cargo`, flake import, `llvm-fmt`,
-`llvm-clippy`, `llvm-unit` checks.
-Acceptance: the three checks build.
+**A1. [done] Workspace, docs and nix skeleton.** *(2026-07-26)*
+Flakelight module, flake import, `llvm-fmt`, `llvm-clippy`, `llvm-unit`
+checks, all three building. The cargo-check harness needs no vendor
+directory because the workspace has no third-party dependencies; when that
+changes, copy rust/fe-c's `vendorFor`.
 
 **A2. [todo] `llvm-support`: APInt, APFloat, DataLayout, Triple.**
 Acceptance: unit tests including APInt cross-checked against `u128`/`i128`
