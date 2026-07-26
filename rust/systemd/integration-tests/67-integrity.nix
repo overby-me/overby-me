@@ -27,23 +27,26 @@
   # crates/integritysetup does. That also means the attach path has still never
   # been exercised, so nothing is yet known about it.
   #
-  # CORRECTED AGAIN, and the earlier plan to hand-write the unit in
-  # testsuite.nix was WRONG. systemd-integritysetup@.service has a man page but
-  # NO unit file anywhere in the systemd source tree: it is produced entirely by
-  # systemd-integritysetup-generator from /etc/integritytab. The test does
-  # exactly that (writes /etc/integritytab at line 100, then daemon-reload, then
-  # starts the instance), so the unit is meant to be GENERATED, not shipped.
+  # MECHANISM CONFIRMED WORKING (2026-07-27). The unit is GENERATED, not
+  # shipped: systemd-integritysetup-generator produces it from /etc/integritytab,
+  # which the test writes before daemon-reload. A run with everything wired shows
+  # the whole chain functioning:
+  #     [[ -e /run/systemd/generator/systemd-integritysetup@integrity_test.service ]]
+  #     systemctl start systemd-integritysetup@integrity_test.service
+  #     REAP ... systemd-integritysetup@integrity_test.service -> ServiceExited
+  # so the C generator IS discovered and run (package_generator_dir walks up from
+  # the running binary, which covers NixOS; BUILTIN_GENERATORS skips only fstab
+  # and getty), reload-time generator re-runs work (5c34f5a2), and the generated
+  # unit starts. The test then cycles through several test_one cases.
   #
-  # That makes reload-time generator re-runs a prerequisite, which landed this
-  # session as 5c34f5a2.
+  # It still does not reach /testok. The remaining failure was NOT isolated: the
+  # test loops format/start/wait/stop per algorithm and per separate-data mode,
+  # so the surviving question is WHICH case fails and on which assertion.
   #
-  # NEXT STEP: determine whether rust-systemd discovers and runs the C
-  # systemd-integritysetup-generator. generators.rs documents an FHS search path
-  # (/run, /etc, /usr/local/lib, /usr/lib .../system-generators), and on NixOS
-  # the package's generator lives in the store rather than /usr/lib; there is a
-  # package_generator_dir() helper that may or may not cover it. Check that
-  # first: if the generator never runs, no amount of unit wiring will help, and
-  # if it does run, the next question is whether its output starts correctly.
+  # NEXT STEP: capture the harness journal dump and find the last test_one
+  # invocation before the failure, i.e. which (algorithm, separate_data) pair.
+  # Do not assume it is the attach itself; the attach demonstrably works for at
+  # least the first case.
   extraPackages = pkgs: [pkgs.cryptsetup];
   extraUnits = [
     "integritysetup.target"
@@ -53,12 +56,12 @@
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: systemd-integritysetup@ starts but /dev/mapper/<name> never appears' >/skipped"
+      echo "echo 'rust-systemd: 67-INTEGRITY cycles several cases then fails; failing case not yet isolated' >/skipped"
       echo "exit 77"
     } > TEST-67-INTEGRITY.sh
     chmod +x TEST-67-INTEGRITY.sh
   '';
-  # Skips rather than passes: the dm-integrity attach does not happen
+  # Skips rather than passes: failing test_one case not yet isolated
   # See ../docs/TEST-OVERRIDES.md.
   expectedSkip = true;
 }
