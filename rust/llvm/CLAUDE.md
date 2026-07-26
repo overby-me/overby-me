@@ -107,11 +107,19 @@ unimplemented pass and bitcode output are both errors that say so.
 
 ### T0.2, conformance and the rustc seam
 
-**B1. [todo] Upstream `llvm/test/Assembler` and `llvm/test/Verifier` as an oracle.**
-From `pkgs.llvm.src`, not vendored. Ratcheted pass rates in STATUS.md, checks
-`llvm-upstream-assembler` and `llvm-upstream-verifier`.
-Acceptance: both checks green at the recorded ratchet, and the ratchet only
-ever moves up.
+**B1. [done] Upstream `llvm/test/Assembler` and `llvm/test/Verifier` as an oracle.** *(2026-07-27)*
+From `pkgs.llvm.src`, not vendored. Each test's own RUN lines say whether
+upstream accepts or rejects it, so both halves count. Baseline: 146 of 306
+considered Assembler files, 70 of 254 Verifier files. It already found a
+parser hang.
+The ratchets live in `default.nix` and only move up.
+
+**B1a. [todo] Raise the two ratchets.**
+`docs/dialect-notes.md` lists the recurring reasons. The cheapest wins are
+the structural checks the parser does not make (duplicate symbols, alignment
+bounds) and metadata integers wider than 64 bits; the largest is the
+semantic half of the Verifier suite.
+Acceptance: both numbers up, recorded in the same commit.
 
 **B2. [todo] Differential check against real `opt -S -passes=verify`.**
 For every corpus file, compare our output to the oracle's after normalising

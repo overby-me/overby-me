@@ -81,8 +81,11 @@ impl Parser {
         }
 
         // The trailing clause soup, in the order upstream writes it but
-        // accepted in any order because hand-written input varies.
+        // accepted in any order because hand-written input varies. Every arm
+        // has to consume something; the progress check at the bottom turns a
+        // future arm that does not into an error instead of a hang.
         loop {
+            let before = self.index;
             match self.peek().clone() {
                 Token::Word(word) => match word.as_str() {
                     "unnamed_addr" | "local_unnamed_addr" => {
@@ -143,11 +146,17 @@ impl Parser {
                     let attrs = self.parse_attribute_set(false)?;
                     function.attrs.attributes.extend(attrs.attributes);
                 }
-                Token::MetadataName(_) => {
+                // `!dbg !0` is an attachment; `!name = !{...}` on the next
+                // line is the start of the next top-level item and this
+                // function is over.
+                Token::MetadataName(_) if matches!(self.peek_at(1), Token::MetadataNumber(_)) => {
                     let attachments = self.parse_metadata_attachments()?;
                     function.metadata.extend(attachments);
                 }
                 _ => break,
+            }
+            if self.index == before {
+                return self.error("this clause was not understood");
             }
         }
 

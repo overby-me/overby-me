@@ -49,6 +49,24 @@ with upstream about slot numbering, predecessor order, blank lines, label
 padding, which defaults print as nothing, and the several places where the
 same attribute is spelled differently depending on where it sits.
 
+## Conformance against upstream's suites
+
+Measured, not claimed. Each upstream test says in its own RUN lines whether
+`llvm-as` should accept or reject it, so agreement counts both halves: a file
+we accept that upstream accepts, and a file we reject that upstream rejects.
+Files whose RUN lines need a tool or a pass this tier does not have are
+skipped and counted separately rather than scored.
+
+| Suite | Agreed | Considered | Skipped | Check |
+| --- | --- | --- | --- | --- |
+| `llvm/test/Assembler` | 146 | 306 | 177 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 70 | 254 | 74 | `llvm-upstream-verifier` |
+
+Both numbers are low and both are the point: the gap is a to-do list, and
+`docs/dialect-notes.md` groups the recurring reasons. The ratchets are in
+`default.nix` and only ever move up. The suites earned their place on the
+first run by finding a parser hang that the corpus never triggered.
+
 ## What is not started
 
 Everything else. Concretely, and to forestall the usual optimistic reading of

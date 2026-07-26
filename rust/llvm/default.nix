@@ -42,6 +42,19 @@
       ${script}
       touch $out
     '';
+  # Runs one upstream suite through our `opt` and holds the agreement count
+  # at or above a recorded number. The suite comes from `pkgs.llvm.src`, so
+  # nothing upstream is vendored into the tree and the version is pinned by
+  # the flake lock rather than by a copy that silently ages.
+  #
+  # The ratchet only moves up. A change that lowers it fails; a change that
+  # raises it prints the new number to record here.
+  upstreamCheck = pkgs: suite: ratchet:
+    cargoCheck pkgs "upstream-${lib.toLower suite}" ''
+      cargo build -p llvm-tools --offline --locked
+      nu corpus/check-upstream.nu "$CARGO_TARGET_DIR/debug/opt" \
+        "${pkgs.llvm.src}/llvm/test/${suite}" ${toString ratchet}
+    '';
 in {
   checks = {
     llvm-fmt = pkgs:
@@ -74,6 +87,12 @@ in {
       cargoCheck pkgs "verify-corpus" ''
         cargo test -p llvm-ir-parse --test verify --offline --locked -- --nocapture
       '';
+
+    # Conformance against upstream's own suites, measured rather than claimed.
+    # Both numbers are low and both are honest: see STATUS.md for what the
+    # remaining disagreements are.
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 146;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 70;
   };
 
   packages.rust-llvm = {lib, ...}:

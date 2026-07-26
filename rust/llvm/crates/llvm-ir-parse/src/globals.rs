@@ -115,7 +115,9 @@ impl Parser {
                 global.comdat = Some(self.parse_comdat_ref()?);
             } else if self.eat_word("align") {
                 global.align = Some(self.parse_align()?);
-            } else if matches!(self.peek(), Token::MetadataName(_)) {
+            } else if matches!(self.peek(), Token::MetadataName(_))
+                && matches!(self.peek_at(1), Token::MetadataNumber(_))
+            {
                 let attachments = self.parse_metadata_attachments()?;
                 global.metadata.extend(attachments);
             } else {
