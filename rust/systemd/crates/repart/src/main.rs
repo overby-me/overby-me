@@ -302,49 +302,112 @@ fn is_zero_guid(guid: &str) -> bool {
     guid == ZERO_GUID
 }
 
-/// Simple UUID v4-like generation from a seed + name using basic hashing.
-/// This produces deterministic UUIDs from a seed, matching systemd's approach.
-fn generate_uuid_from_seed(seed: &str, name: &str, counter: u32) -> String {
-    // Simple hash-based UUID generation (not cryptographic, but deterministic).
-    // In real systemd this uses HMAC-SHA256.
-    let mut h: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
-    for b in seed.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    for b in name.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    for b in counter.to_le_bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    let h2 = h
-        .wrapping_mul(0x517cc1b727220a95)
-        .wrapping_add(0x6c62272e07bb0142);
+/// HMAC-SHA256, as upstream uses to derive every reproducible UUID.
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    const BLOCK_SIZE: usize = 64;
 
-    let bytes_a = h.to_le_bytes();
-    let bytes_b = h2.to_le_bytes();
+    let mut padded_key = [0u8; BLOCK_SIZE];
+    if key.len() > BLOCK_SIZE {
+        padded_key[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        padded_key[..key.len()].copy_from_slice(key);
+    }
 
-    // Set version 4 and variant 1
-    let time_hi = (u16::from_le_bytes([bytes_a[6], bytes_a[7]]) & 0x0FFF) | 0x4000;
-    let clock_seq = (bytes_b[0] & 0x3F) | 0x80;
+    let mut ipad = [0x36u8; BLOCK_SIZE];
+    let mut opad = [0x5cu8; BLOCK_SIZE];
+    for i in 0..BLOCK_SIZE {
+        ipad[i] ^= padded_key[i];
+        opad[i] ^= padded_key[i];
+    }
 
+    let inner = {
+        let mut h = Sha256::new();
+        h.update(ipad);
+        h.update(data);
+        h.finalize()
+    };
+    let outer = {
+        let mut h = Sha256::new();
+        h.update(opad);
+        h.update(inner);
+        h.finalize()
+    };
+
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&outer);
+    out
+}
+
+/// The 16 raw bytes of a UUID in text order, ignoring dashes.
+fn uuid_bytes(uuid: &str) -> Option<[u8; 16]> {
+    let hex: String = uuid.chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 {
+        return None;
+    }
+    let mut out = [0u8; 16];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(hex.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some(out)
+}
+
+/// Take the first half of a digest and mark it as a v4 UUID, as
+/// `id128_make_v4_uuid` does.
+fn make_v4_uuid(digest: &[u8; 32]) -> String {
+    let mut b = [0u8; 16];
+    b.copy_from_slice(&digest[..16]);
+    b[6] = (b[6] & 0x0F) | 0x40;
+    b[8] = (b[8] & 0x3F) | 0x80;
+
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
     format!(
-        "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        u32::from_le_bytes([bytes_a[0], bytes_a[1], bytes_a[2], bytes_a[3]]),
-        u16::from_le_bytes([bytes_a[4], bytes_a[5]]),
-        time_hi,
-        clock_seq,
-        bytes_b[1],
-        bytes_b[2],
-        bytes_b[3],
-        bytes_b[4],
-        bytes_b[5],
-        bytes_b[6],
-        bytes_b[7]
+        "{}-{}-{}-{}-{}",
+        &h[0..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..32]
     )
+    .to_uppercase()
+}
+
+/// The HMAC key for a seed: its 16 raw bytes when it is a UUID (or a bare
+/// machine ID), otherwise the string itself, so an unusual seed still derives
+/// something stable rather than failing.
+fn seed_key(seed: &str) -> Vec<u8> {
+    match uuid_bytes(seed) {
+        Some(b) => b.to_vec(),
+        None => seed.as_bytes().to_vec(),
+    }
+}
+
+/// Derive a UUID from the seed and a token, mirroring upstream `derive_uuid`.
+///
+/// The seed is the HMAC *key*, never the plaintext, because the seed is
+/// typically the machine ID and must not leak into the result.
+fn derive_uuid(seed: &str, token: &str) -> String {
+    make_v4_uuid(&hmac_sha256(&seed_key(seed), token.as_bytes()))
+}
+
+/// Derive a partition's UUID from the seed, its type and its instance number,
+/// mirroring upstream `partition_acquire_uuid`.
+///
+/// The first partition of a given type hashes the bare type UUID; every later
+/// one appends its LE64 instance number, so adding a second partition of a type
+/// does not renumber the first.
+fn derive_partition_uuid(seed: &str, type_uuid: &str, instance: u64) -> String {
+    let type_bytes = match uuid_bytes(type_uuid) {
+        Some(b) => b.to_vec(),
+        None => type_uuid.as_bytes().to_vec(),
+    };
+
+    let mut msg = type_bytes;
+    if instance > 0 {
+        msg.extend_from_slice(&instance.to_le_bytes());
+    }
+
+    make_v4_uuid(&hmac_sha256(&seed_key(seed), &msg))
 }
 
 fn generate_random_uuid() -> String {
@@ -1533,6 +1596,23 @@ fn allocate_space(
         .map(|r| r.weight as u64 + r.padding_weight as u64)
         .sum();
 
+    // Upstream numbers partition UUIDs per type, in definition order: the first
+    // partition of a type hashes the bare type UUID and later ones append their
+    // instance number. Numbering by slot instead would change every partition's
+    // UUID whenever an unrelated type was added ahead of it.
+    let mut type_counts: HashMap<String, u64> = HashMap::new();
+    let type_instance: Vec<u64> = matched
+        .iter()
+        .map(|m| {
+            let counter = type_counts
+                .entry(defs[m.definition_index].type_uuid.clone())
+                .or_insert(0);
+            let instance = *counter;
+            *counter += 1;
+            instance
+        })
+        .collect();
+
     for req in &requests {
         let m = &mut matched[req.matched_idx];
         let def = &defs[m.definition_index];
@@ -1574,7 +1654,8 @@ fn allocate_space(
             if let Some(ref uuid) = def.uuid {
                 m.assigned_uuid = uuid.clone();
             } else {
-                m.assigned_uuid = generate_uuid_from_seed(seed, &def.type_uuid, next_slot);
+                m.assigned_uuid =
+                    derive_partition_uuid(seed, &def.type_uuid, type_instance[req.matched_idx]);
             }
 
             m.slot_index = next_slot;
@@ -2649,7 +2730,7 @@ fn run(argv: &[String]) -> Result<i32, String> {
                 let first_usable =
                     align_up(2 + entries_sectors, GPT_FIRST_LBA_GRAIN / sector_size);
                 let last_usable = disk_size_sectors - 1 - entries_sectors - 1;
-                let guid = generate_uuid_from_seed(&seed, "disk", 0);
+                let guid = derive_uuid(&seed, "disk-uuid");
                 (guid, first_usable, last_usable, Vec::new())
             }
         }
@@ -3336,37 +3417,59 @@ mod tests {
         assert_eq!(encoded, [0u8; 16]);
     }
 
+    /// The exact values TEST-58-REPART asserts for its fixed seed. These pin
+    /// the whole derivation: HMAC-SHA256 keyed by the seed's raw bytes, first
+    /// half of the digest, marked as v4.
     #[test]
-    fn test_generate_uuid_from_seed_deterministic() {
-        let a = generate_uuid_from_seed("seed1", "type1", 0);
-        let b = generate_uuid_from_seed("seed1", "type1", 0);
-        assert_eq!(a, b);
+    fn test_derive_uuid_matches_upstream() {
+        let seed = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        assert_eq!(
+            derive_uuid(seed, "disk-uuid"),
+            "1D2CE291-7CCE-4F7D-BC83-FDB49AD74EBD"
+        );
     }
 
     #[test]
-    fn test_generate_uuid_from_seed_different_seeds() {
-        let a = generate_uuid_from_seed("seed1", "type1", 0);
-        let b = generate_uuid_from_seed("seed2", "type1", 0);
-        assert_ne!(a, b);
+    fn test_derive_partition_uuid_matches_upstream() {
+        let seed = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        // home, first instance: the bare type UUID is hashed, with no counter.
+        assert_eq!(
+            derive_partition_uuid(seed, "933AC7E1-2EB4-4F13-B844-0E14E2AEF915", 0),
+            "4980595D-D74A-483A-AA9E-9903879A0EE5"
+        );
+        // swap, first instance.
+        assert_eq!(
+            derive_partition_uuid(seed, "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F", 0),
+            "78C92DB8-3D2B-4823-B0DC-792B78F66F1E"
+        );
+    }
+
+    /// A later instance of the same type appends its LE64 counter, so it must
+    /// differ from the first without disturbing it.
+    #[test]
+    fn test_derive_partition_uuid_instances_differ() {
+        let seed = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let t = "933AC7E1-2EB4-4F13-B844-0E14E2AEF915";
+        let first = derive_partition_uuid(seed, t, 0);
+        let second = derive_partition_uuid(seed, t, 1);
+        assert_ne!(first, second);
+        assert_eq!(first, derive_partition_uuid(seed, t, 0));
     }
 
     #[test]
-    fn test_generate_uuid_from_seed_different_names() {
-        let a = generate_uuid_from_seed("seed1", "type1", 0);
-        let b = generate_uuid_from_seed("seed1", "type2", 0);
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn test_generate_uuid_from_seed_different_counters() {
-        let a = generate_uuid_from_seed("seed1", "type1", 0);
-        let b = generate_uuid_from_seed("seed1", "type1", 1);
-        assert_ne!(a, b);
+    fn test_uuid_bytes_roundtrip() {
+        // Dashed and bare forms parse identically; a machine ID has no dashes.
+        assert_eq!(
+            uuid_bytes("750b6cd5-c4ae-4012-a15e-7be3c29e6a47"),
+            uuid_bytes("750b6cd5c4ae4012a15e7be3c29e6a47")
+        );
+        assert!(uuid_bytes("too-short").is_none());
+        assert!(uuid_bytes("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_none());
     }
 
     #[test]
     fn test_generate_uuid_has_version_4() {
-        let uuid = generate_uuid_from_seed("seed", "name", 0);
+        let uuid = derive_uuid("750b6cd5c4ae4012a15e7be3c29e6a47", "name");
         // Version nibble is at position 14 (in the 3rd group, first char)
         let parts: Vec<&str> = uuid.split('-').collect();
         assert_eq!(parts.len(), 5);
@@ -6323,17 +6426,16 @@ Weight=333
     }
 
     // -----------------------------------------------------------------------
-    // generate_uuid_from_seed: version and variant bits
+    // derive_uuid: version and variant bits
     // -----------------------------------------------------------------------
 
     #[test]
     fn test_generate_uuid_from_seed_version_and_variant() {
-        let uuid = generate_uuid_from_seed("seed", "name", 0);
-        // generate_uuid_from_seed sets version in time_hi (u16 with | 0x4000),
-        // so position 14 (first char of 3rd group) is '4'.
+        let uuid = derive_uuid("750b6cd5c4ae4012a15e7be3c29e6a47", "name");
+        // The v4 marking puts '4' at position 14 (first char of 3rd group).
         assert_eq!(uuid.chars().nth(14), Some('4'));
         // Variant 1: clock_seq high nibble at position 19 should be 8, 9, a, or b
-        let variant_char = uuid.chars().nth(19).unwrap();
+        let variant_char = uuid.chars().nth(19).unwrap().to_ascii_lowercase();
         assert!(
             "89ab".contains(variant_char),
             "variant char '{}' not in 89ab",
