@@ -996,6 +996,46 @@ fn load_definitions(dirs: &[&str], arch: &str) -> Result<Vec<PartitionDefinition
     Ok(defs)
 }
 
+/// Distribute free space across weighted claims, handing on whatever a capped
+/// claim cannot take.
+///
+/// Each entry is `(weight, cap)`, the cap being the most that claim can still
+/// absorb. A single weighted pass gives everyone their share and then clamps
+/// the ones that overshoot, which silently wastes the difference: on a 1 GiB
+/// disk holding an unbounded home and a swap capped at 64 MiB, home was left
+/// with half the disk and roughly 400 MiB went unused. Settling one capped
+/// claim at a time and sharing the rest out again is what upstream does.
+fn distribute_weighted(entries: &[(u64, u64)], free: u64) -> Vec<u64> {
+    let mut shares = vec![0u64; entries.len()];
+    let mut active: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].0 > 0).collect();
+    let mut free = free;
+
+    loop {
+        let total: u64 = active.iter().map(|&i| entries[i].0).sum();
+        if total == 0 || free == 0 {
+            break;
+        }
+
+        let weighted = |i: usize| (free as u128 * entries[i].0 as u128 / total as u128) as u64;
+
+        match active.iter().position(|&i| weighted(i) >= entries[i].1) {
+            Some(pos) => {
+                let i = active.remove(pos);
+                shares[i] = entries[i].1;
+                free -= entries[i].1;
+            }
+            None => {
+                for &i in &active {
+                    shares[i] = weighted(i);
+                }
+                break;
+            }
+        }
+    }
+
+    shares
+}
+
 /// Resolve a `--include-partitions=`/`--exclude-partitions=` entry to a type
 /// UUID. Entries may be a designator such as `home` or a bare UUID.
 fn filter_entry_uuid(entry: &str, arch: &str) -> Option<String> {
@@ -1663,12 +1703,30 @@ fn allocate_space(
         }
     }
 
-    // Distribute remaining space by weight
+    // Distribute remaining space by weight. Each request contributes two
+    // claims, the partition and its padding, so a capped partition hands its
+    // surplus to whatever else can still grow.
     let remaining = total_free_bytes.saturating_sub(fixed_bytes);
-    let total_weight: u64 = requests
-        .iter()
-        .map(|r| r.weight as u64 + r.padding_weight as u64)
-        .sum();
+    let mut claims: Vec<(u64, u64)> = Vec::with_capacity(requests.len() * 2);
+    for req in &requests {
+        let m = &matched[req.matched_idx];
+        let cap = if !m.is_new && m.existing.is_some() {
+            req.max_bytes
+        } else {
+            req.max_bytes.saturating_sub(req.min_bytes)
+        };
+        claims.push((req.weight as u64, cap));
+        claims.push((
+            req.padding_weight as u64,
+            req.padding_max.saturating_sub(req.padding_min),
+        ));
+    }
+    let shares = distribute_weighted(&claims, remaining);
+
+    // Upstream lays partitions out on a 4096-byte grain, not on the sector
+    // size, so a size that is sector-aligned but not grain-aligned is rounded
+    // down to the grain.
+    let grain = std::cmp::max(4096, sector_size);
 
     // Upstream numbers partition UUIDs per type, in definition order: the first
     // partition of a type hashes the bare type UUID and later ones append their
@@ -1687,7 +1745,7 @@ fn allocate_space(
         })
         .collect();
 
-    for req in &requests {
+    for (req_idx, req) in requests.iter().enumerate() {
         let m = &mut matched[req.matched_idx];
         let def = &defs[m.definition_index];
 
@@ -1695,23 +1753,13 @@ fn allocate_space(
             && let Some(existing) = &m.existing
         {
             // Growth of existing partition
-            let share = if total_weight > 0 {
-                (remaining as u128 * req.weight as u128 / total_weight as u128) as u64
-            } else {
-                0
-            };
-            let growth = share.min(req.max_bytes);
+            let growth = shares[req_idx * 2].min(req.max_bytes);
             let current_size = existing.size_bytes(sector_size);
             m.allocated_size = current_size + growth;
             m.is_grown = growth > 0;
         } else {
             // New partition
-            let share = if total_weight > 0 {
-                (remaining as u128 * req.weight as u128 / total_weight as u128) as u64
-            } else {
-                0
-            };
-            let size = (req.min_bytes + share)
+            let size = (req.min_bytes + shares[req_idx * 2])
                 .min(req.max_bytes)
                 .max(req.min_bytes);
             // Round DOWN to the sector size. The weight shares already sum to
@@ -1721,7 +1769,7 @@ fn allocate_space(
             // down keeps the sum within the region (min is sector-aligned, so a
             // partition never drops below its minimum) at the cost of a tiny
             // unused tail.
-            let aligned_size = align_down(size, sector_size);
+            let aligned_size = align_down(size, grain);
             m.allocated_size = aligned_size;
 
             // Assign UUID
@@ -1737,11 +1785,7 @@ fn allocate_space(
         }
 
         // Padding
-        let padding_share = if total_weight > 0 && req.padding_weight > 0 {
-            (remaining as u128 * req.padding_weight as u128 / total_weight as u128) as u64
-        } else {
-            0
-        };
+        let padding_share = shares[req_idx * 2 + 1];
         m.padding_size = (req.padding_min + padding_share)
             .min(req.padding_max)
             .max(req.padding_min);
@@ -3555,6 +3599,44 @@ mod tests {
         let mut off = mk("home");
         off.grow_fs = Some(false);
         assert_eq!(off.effective_flags() & GROWFS, 0);
+    }
+
+    /// The exact split TEST-58-REPART step 2 asserts: a 1 GiB image with an
+    /// unbounded home and a swap capped at 64 MiB, after 92 MiB of padding is
+    /// reserved. Home must absorb everything swap cannot take.
+    #[test]
+    fn test_distribute_weighted_redistributes_capped_surplus() {
+        let usable = (2097118u64 - 2048 + 1) * 512;
+        let free = usable - 92 * 1024 * 1024;
+        let swap_cap = 64 * 1024 * 1024;
+
+        // home (unbounded), home padding (no weight), swap (capped), swap padding.
+        let claims = [(1000, u64::MAX), (0, 0), (1000, swap_cap), (0, 0)];
+        let shares = distribute_weighted(&claims, free);
+
+        assert_eq!(shares[2], swap_cap, "swap takes exactly its cap");
+        assert_eq!(shares[0], free - swap_cap, "home absorbs the surplus");
+
+        // And with the 4096-byte grain applied, that is the asserted layout.
+        assert_eq!(align_down(shares[0], 4096) / 512, 1775576);
+        assert_eq!(shares[2] / 512, 131072);
+        assert_eq!(2048 + align_down(shares[0], 4096) / 512, 1777624);
+    }
+
+    /// Without any cap in play the split stays proportional.
+    #[test]
+    fn test_distribute_weighted_proportional_when_uncapped() {
+        let shares = distribute_weighted(&[(1000, u64::MAX), (3000, u64::MAX)], 4000);
+        assert_eq!(shares, vec![1000, 3000]);
+    }
+
+    /// A zero-weight claim never takes space, and a zero cap settles at once
+    /// rather than looping forever.
+    #[test]
+    fn test_distribute_weighted_degenerate_claims() {
+        assert_eq!(distribute_weighted(&[(0, 100), (1000, 50)], 500), vec![0, 50]);
+        assert_eq!(distribute_weighted(&[(1000, 0), (1000, 0)], 500), vec![0, 0]);
+        assert_eq!(distribute_weighted(&[], 500), Vec::<u64>::new());
     }
 
     /// TEST-58-REPART passes --include-partitions=home,swap over definitions
