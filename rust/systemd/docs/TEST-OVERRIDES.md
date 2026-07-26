@@ -152,7 +152,7 @@ find what the hand-written one does not cover.
 | 23-UNIT-FILE ExecStopPost | Deleted `Type=dbus` and `Type=notify` sections. Both service types work now; re-run and see |
 | 23-UNIT-FILE type-exec | Deleted the `busctl` block for issue #20933 |
 | 07-PID1 issue-30412 | `socat` is backgrounded and killed after 2s instead of running in the foreground, so the test no longer proves the socket fd is dropped when `ExecStart` fails with 203. That is exactly what issue #30412 is about |
-| 34-DYNAMICUSERMIGRATE | Exec directories must be bind-mounted into the namespace *after* `TemporaryFileSystem=`, or the tmpfs masks them and the service cannot see its own `StateDirectory`. That is the baselined first failure. The machinery already exists: `bind_entries` supports a `source_fd` opened before the tmpfs and bound from `/proc/self/fd/N` (`exec_helper.rs`, "Step 3"). Further in, the test also needs nested exec directories (`quux/pief`, `xxx/yyy:aaa/111`) and idmapped mounts on kernels >= 5.12 |
+| 34-DYNAMICUSERMIGRATE | The whole `DynamicUser=0` half now passes; six exec-directory bugs were fixed getting there (tmpfs shadowing, `:ro` tmpfs ordering, host-side alias symlinks under a tmpfs, `dir:alias:ro` parsing for Runtime/Cache/Logs, the 0<->1 migration itself, and `ProtectSystem=strict`'s implicit `ReadWritePaths=` re-deriving paths wrongly). Remaining: the first `DynamicUser=1` command cannot see its migrated state directory. Instrumentation has already established that the migration is correct and that binding `private/<name>` onto `<base>/<name>` is a no-op because the destination symlink resolves back to the source. The test wrapper carries the full evidence trail and the next step |
 
 ### Tier 3: new subsystems
 

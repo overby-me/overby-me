@@ -946,6 +946,23 @@ pub struct ExecHelperConfig {
     /// SyslogLevelPrefix= — if true (default), strip kernel-style `<N>` priority prefixes.
     #[serde(default)]
     pub syslog_level_prefix: Option<bool>,
+    /// Every exec directory as the service sees it, e.g. `/var/lib/zzz` and any
+    /// alias like `/var/lib/xxx`.
+    ///
+    /// One source of truth for `ProtectSystem=strict`'s implicit
+    /// `ReadWritePaths=`, which previously re-derived these with
+    /// `format!("/var/lib/{dir_name}")` per directory type and so mishandled
+    /// aliases (`zzz:xxx` became the nonexistent `/var/lib/zzz:xxx`) and
+    /// `DynamicUser=`'s `private/` layout.  Computed locally, never on the wire.
+    #[serde(skip)]
+    pub exec_dir_paths: Vec<String>,
+    /// Exec directories to bind back over a `TemporaryFileSystem=` tmpfs, as
+    /// (host source, path the service must see it at).
+    ///
+    /// Computed inside `run_exec_helper` after the directories are created, so
+    /// it is never serialized from PID 1; `skip` keeps it off the wire.
+    #[serde(skip)]
+    pub exec_dir_binds: Vec<(String, String)>,
     /// LogNamespace= — send stdout/stderr to the journal namespace instance
     /// listening on `/run/systemd/journal.<ns>/stdout` rather than the default
     /// `/run/systemd/journal/stdout`.
@@ -1930,14 +1947,20 @@ pub fn run_exec_helper() {
             if let Ok(md) = std::fs::symlink_metadata(&link_path)
                 && md.is_dir()
                 && !full_path.exists()
-                && let Err(e) = std::fs::rename(&link_path, &full_path)
             {
-                log::warn!(
-                    "DynamicUser=yes: could not migrate {:?} into {:?}: {}",
-                    link_path,
-                    full_path,
-                    e
-                );
+                match std::fs::rename(&link_path, &full_path) {
+                    Ok(()) => log::info!(
+                        "DynamicUser=yes: migrated {:?} into {:?}",
+                        link_path,
+                        full_path
+                    ),
+                    Err(e) => log::warn!(
+                        "DynamicUser=yes: could not migrate {:?} into {:?}: {}",
+                        link_path,
+                        full_path,
+                        e
+                    ),
+                }
             }
 
             if let Err(e) = std::fs::create_dir_all(&full_path) {
@@ -1964,6 +1987,14 @@ pub fn run_exec_helper() {
                     e
                 );
             }
+            log::info!(
+                "DynamicUser=yes exec dir: {:?} -> {:?} (uid={} gid={} mode={:o})",
+                link_path,
+                full_path,
+                config.user,
+                config.group,
+                mode
+            );
             full_path.to_string_lossy().into_owned()
         } else {
             let full_path = base.join(dir_name);
@@ -2066,6 +2097,23 @@ pub fn run_exec_helper() {
     // ExecDirectory= entries flagged `:ro` — collected here and enforced as
     // read-only bind mounts once the mount namespace is set up.
     let mut read_only_exec_dirs: Vec<std::path::PathBuf> = Vec::new();
+    // (host source, path the service must see it at) for every exec directory
+    // created below.  Used to bind them back over a TemporaryFileSystem= tmpfs,
+    // which would otherwise hide the service's own StateDirectory= et al.
+    let mut exec_dir_binds: Vec<(String, std::path::PathBuf)> = Vec::new();
+    // Roots of any TemporaryFileSystem= mounts, so directory creation can tell
+    // whether a path it is about to write will be hidden by a tmpfs anyway.
+    let tmpfs_roots: Vec<PathBuf> = config
+        .temporary_file_system
+        .iter()
+        .map(|e| PathBuf::from(e.split(':').next().unwrap_or(e)))
+        .collect();
+    // An exec-directory alias under a TemporaryFileSystem= is provided by the
+    // bind mount inside the namespace, so it must NOT also be created as a
+    // symlink on the host: upstream leaves no trace there, and
+    // TEST-34-DYNAMICUSERMIGRATE asserts exactly that (`zzz:yyy` without a
+    // tmpfs leaves a symlink, `zzz:xxx` with one leaves nothing).
+    let tmpfs_covered = |p: &Path| tmpfs_roots.iter().any(|root| p.starts_with(root));
 
     if !config.state_directory.is_empty() {
         let base = managed_dir_base("/var/lib", "XDG_STATE_HOME", ".local/state");
@@ -2090,13 +2138,21 @@ pub fn run_exec_helper() {
             } else {
                 create_managed_dir(&base, &src, mode, dynamic)
             };
+            exec_dir_binds.push((full.clone(), src_path.clone()));
             // Optional destination: a symlink alias pointing at the source dir.
             if let Some(dest) = dest {
                 let dest_path = base.join(&dest);
-                let _ = std::fs::remove_file(&dest_path);
-                if let Err(e) = std::os::unix::fs::symlink(&src, &dest_path) {
-                    log::warn!("Failed to symlink {dest_path:?} -> {src:?}: {e}");
+                if tmpfs_covered(&dest_path) {
+                    // The bind below provides it inside the namespace; leave
+                    // nothing behind on the host.
+                    let _ = std::fs::remove_file(&dest_path);
+                } else {
+                    let _ = std::fs::remove_file(&dest_path);
+                    if let Err(e) = std::os::unix::fs::symlink(&src, &dest_path) {
+                        log::warn!("Failed to symlink {dest_path:?} -> {src:?}: {e}");
+                    }
                 }
+                exec_dir_binds.push((full.clone(), dest_path));
             }
             if ro {
                 read_only_exec_dirs.push(base.join(&src));
@@ -2116,21 +2172,30 @@ pub fn run_exec_helper() {
                             entries: &[String],
                             mode: u32,
                             dynamic: bool,
-                            ro_out: &mut Vec<PathBuf>|
+                            ro_out: &mut Vec<PathBuf>,
+                            bind_out: &mut Vec<(String, PathBuf)>|
      -> Vec<String> {
         let mut full_paths = Vec::with_capacity(entries.len());
         for entry in entries {
             let (src, dest, ro) = parse_exec_dir_entry(entry);
-            full_paths.push(create_managed_dir(base, &src, mode, dynamic));
+            let full = create_managed_dir(base, &src, mode, dynamic);
+            bind_out.push((full.clone(), base.join(&src)));
+            full_paths.push(full.clone());
             if let Some(dest) = dest {
                 let dest_path = base.join(&dest);
-                if let Some(parent) = dest_path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
                 let _ = std::fs::remove_file(&dest_path);
-                if let Err(e) = std::os::unix::fs::symlink(&src, &dest_path) {
-                    log::warn!("Failed to symlink {dest_path:?} -> {src:?}: {e}");
+                if !tmpfs_covered(&dest_path) {
+                    if let Some(parent) = dest_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Err(e) = std::os::unix::fs::symlink(&src, &dest_path) {
+                        log::warn!("Failed to symlink {dest_path:?} -> {src:?}: {e}");
+                    }
                 }
+                // The alias is a symlink on the host, which a tmpfs over `base`
+                // would hide along with its target; bind the real directory
+                // onto the alias path so the service still sees it.
+                bind_out.push((full.clone(), dest_path));
             }
             if ro {
                 ro_out.push(base.join(&src));
@@ -2147,6 +2212,7 @@ pub fn run_exec_helper() {
             mode,
             dynamic,
             &mut read_only_exec_dirs,
+            &mut exec_dir_binds,
         );
         unsafe { std::env::set_var("LOGS_DIRECTORY", full_paths.join(":")) };
     }
@@ -2159,6 +2225,7 @@ pub fn run_exec_helper() {
             mode,
             dynamic,
             &mut read_only_exec_dirs,
+            &mut exec_dir_binds,
         );
         unsafe { std::env::set_var("RUNTIME_DIRECTORY", full_paths.join(":")) };
     }
@@ -2172,6 +2239,7 @@ pub fn run_exec_helper() {
             mode,
             dynamic,
             &mut read_only_exec_dirs,
+            &mut exec_dir_binds,
         );
         unsafe { std::env::set_var("CACHE_DIRECTORY", full_paths.join(":")) };
     }
@@ -2191,7 +2259,9 @@ pub fn run_exec_helper() {
                 if ro {
                     read_only_exec_dirs.push(base.join(&src));
                 }
-                create_managed_dir(&base, &src, mode, false)
+                let full = create_managed_dir(&base, &src, mode, false);
+                exec_dir_binds.push((full.clone(), base.join(&src)));
+                full
             })
             .collect();
         // TODO: Audit that the environment access only happens in single-threaded code.
@@ -2205,6 +2275,48 @@ pub fn run_exec_helper() {
         config
             .read_only_paths
             .push(dir.to_string_lossy().into_owned());
+    }
+
+    // A TemporaryFileSystem= over /var/lib (or /run, /var/cache, /var/log, /etc)
+    // hides the exec directories that were just created there, so a service with
+    // both StateDirectory=zzz and TemporaryFileSystem=/var/lib cannot see its own
+    // state directory.  Upstream always mounts exec directories into the
+    // namespace; bind them back over the tmpfs by reusing the BindPaths=
+    // machinery, which already opens an O_PATH fd for each source *before* the
+    // tmpfs is mounted and binds from /proc/self/fd/N afterwards.
+    //
+    // Scoped to directories a tmpfs actually covers, so a service without
+    // TemporaryFileSystem= keeps exactly its previous mount layout.
+    // Carried as an explicit (source, destination) pair rather than a
+    // BindPaths= string: an exec directory name may itself contain a colon
+    // (`StateDirectory=zzz:x\:yz`), which the `source:dest:options` syntax
+    // cannot express.
+    // Bind an exec directory into the namespace when the service could not
+    // otherwise reach it at the path it expects:
+    //
+    //  - a TemporaryFileSystem= tmpfs hides it, or
+    //  - DynamicUser=yes put the real directory under `<base>/private/`, which
+    //    the dynamic user would have to traverse.  Upstream keeps `private/`
+    //    closed and mounts the directory at `<base>/<name>` instead, so the
+    //    service never walks through it.  `source != dest` is exactly that case.
+    config.exec_dir_paths = exec_dir_binds
+        .iter()
+        .map(|(_, dest)| dest.to_string_lossy().into_owned())
+        .collect();
+
+    if !exec_dir_binds.is_empty() {
+        for (source, dest) in &exec_dir_binds {
+            if !tmpfs_covered(dest) && Path::new(source) == dest.as_path() {
+                continue;
+            }
+            log::trace!(
+                "exec dir {source} bound back over TemporaryFileSystem= at {}",
+                dest.display()
+            );
+            config
+                .exec_dir_binds
+                .push((source.clone(), dest.to_string_lossy().into_owned()));
+        }
     }
 
     // ── Namespace-based isolation (must happen before privilege drop) ──
@@ -3416,34 +3528,9 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
     // logs directories must be explicitly writable. systemd handles this
     // implicitly; we do the same.
     if config.protect_system == "strict" {
-        for dir_name in &config.runtime_directory {
-            let full = format!("/run/{}", dir_name);
-            if Path::new(&full).exists() {
-                bind_mount_readwrite(&full, config);
-            }
-        }
-        for dir_name in &config.state_directory {
-            let full = format!("/var/lib/{}", dir_name);
-            if Path::new(&full).exists() {
-                bind_mount_readwrite(&full, config);
-            }
-        }
-        for dir_name in &config.logs_directory {
-            let full = format!("/var/log/{}", dir_name);
-            if Path::new(&full).exists() {
-                bind_mount_readwrite(&full, config);
-            }
-        }
-        for dir_name in &config.cache_directory {
-            let full = format!("/var/cache/{}", dir_name);
-            if Path::new(&full).exists() {
-                bind_mount_readwrite(&full, config);
-            }
-        }
-        for dir_name in &config.configuration_directory {
-            let full = format!("/etc/{}", dir_name);
-            if Path::new(&full).exists() {
-                bind_mount_readwrite(&full, config);
+        for full in &config.exec_dir_paths {
+            if Path::new(full).exists() {
+                bind_mount_readwrite(full, config);
             }
         }
     }
@@ -3800,8 +3887,31 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
             bind_entries.push(be);
         }
     }
+    // Exec directories that a TemporaryFileSystem= tmpfs would hide.  Same
+    // open-then-bind treatment as BindPaths=, but with source and destination
+    // already split, since an exec directory name may contain a colon.
+    for (source, dest) in &config.exec_dir_binds {
+        if !Path::new(source).is_dir() {
+            log::warn!("exec dir bind source is not a directory, skipping: {source}");
+            continue;
+        }
+        let Ok(c_src) = std::ffi::CString::new(source.as_str()) else {
+            continue;
+        };
+        let fd = unsafe { libc::open(c_src.as_ptr(), libc::O_PATH | libc::O_CLOEXEC) };
+        bind_entries.push(BindEntry {
+            source_fd: if fd >= 0 { Some(fd) } else { None },
+            source_path: source.clone(),
+            dest: dest.clone(),
+            recursive: false,
+            is_dir: true,
+            read_only: false,
+        });
+    }
 
     // Step 2: mount TemporaryFileSystem
+    // TemporaryFileSystem= paths whose `ro` option is applied after the binds.
+    let mut deferred_ro_tmpfs: Vec<String> = Vec::new();
     if !config.temporary_file_system.is_empty() {
         log::trace!(
             "mount_ns: TemporaryFileSystem ({} entries)...",
@@ -3820,10 +3930,32 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            let opts = if options.is_empty() {
+            // A read-only tmpfs has to be mounted writable first: the bind step
+            // below still has to create mount points inside it for the exec
+            // directories (TEST-34-DYNAMICUSERMIGRATE uses
+            // `TemporaryFileSystem=/var/lib:ro` together with StateDirectory=).
+            // The read-only remount is deferred until after Step 3.  It is not
+            // recursive, so the exec directories bound inside stay writable,
+            // matching upstream.
+            let mut ro_tmpfs = false;
+            let kept: Vec<&str> = options
+                .split(',')
+                .filter(|o| {
+                    if *o == "ro" {
+                        ro_tmpfs = true;
+                        false
+                    } else {
+                        !o.is_empty()
+                    }
+                })
+                .collect();
+            if ro_tmpfs {
+                deferred_ro_tmpfs.push(path.to_string());
+            }
+            let opts = if kept.is_empty() {
                 "mode=0755".to_string()
             } else {
-                format!("mode=0755,{}", options)
+                format!("mode=0755,{}", kept.join(","))
             };
             let c_opts = match std::ffi::CString::new(opts.as_str()) {
                 Ok(c) => c,
@@ -3926,6 +4058,32 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
         // Close the O_PATH fd now that the bind mount is done
         if let Some(fd) = be.source_fd {
             unsafe { libc::close(fd) };
+        }
+    }
+
+    // Step 4: apply the deferred `ro` on TemporaryFileSystem= entries, now that
+    // the binds have created their mount points inside them.  Deliberately not
+    // MS_REC: the exec directories bound in above keep their own writability,
+    // which is what `TemporaryFileSystem=/var/lib:ro` plus `StateDirectory=` is
+    // supposed to give you.
+    for path in &deferred_ro_tmpfs {
+        let Ok(c_path) = std::ffi::CString::new(path.as_str()) else {
+            continue;
+        };
+        let ret = unsafe {
+            libc::mount(
+                std::ptr::null(),
+                c_path.as_ptr(),
+                std::ptr::null(),
+                libc::MS_REMOUNT | libc::MS_BIND | libc::MS_RDONLY,
+                std::ptr::null(),
+            )
+        };
+        if ret != 0 {
+            log::warn!(
+                "Failed to remount TemporaryFileSystem {path} read-only: {}",
+                std::io::Error::last_os_error()
+            );
         }
     }
 

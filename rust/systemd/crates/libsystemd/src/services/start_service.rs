@@ -1144,6 +1144,9 @@ fn start_service_with_filedescriptors(
         syslog_level: conf.exec_config.syslog_level.clone(),
         syslog_level_prefix: conf.exec_config.syslog_level_prefix,
         log_namespace: conf.exec_config.log_namespace.clone(),
+        // Both computed by the exec helper itself once the directories exist.
+        exec_dir_binds: Vec::new(),
+        exec_dir_paths: Vec::new(),
         invocation_id: srvc.invocation_id.clone(),
     };
 
