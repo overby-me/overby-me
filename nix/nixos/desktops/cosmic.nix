@@ -59,4 +59,36 @@
       };
     };
   };
+
+  # ── Home-Manager ──────────────────────────────────────────────────────────
+  home-manager.sharedModules = [
+    {
+      # Open COSMIC Terminal straight into zellij, the same way GNOME Console
+      # does through `org/gnome/Console`.`shell`.
+      #
+      # cosmic-config stores one file per config key and reads
+      # `cosmic/<app-id>/v1/<key>` out of the XDG data dirs as the default,
+      # with `~/.config/cosmic/<app-id>/v1/<key>` taking precedence. Shipping
+      # the profile as a data-dir default rather than a config file leaves the
+      # settings UI free to write, instead of pinning a read-only store
+      # symlink over the path it needs to save to.
+      xdg.dataFile = {
+        "cosmic/com.system76.CosmicTerm/v1/profiles".text = ''
+          {
+              0: (
+                  name: "Zellij",
+                  command: "zellij-cwd",
+                  syntax_theme_dark: "COSMIC Dark",
+                  syntax_theme_light: "COSMIC Light",
+                  tab_title: "",
+                  working_directory: "",
+                  drain_on_exit: false,
+              ),
+          }
+        '';
+        # Which of the above profiles new terminals launch with.
+        "cosmic/com.system76.CosmicTerm/v1/default_profile".text = "Some(0)";
+      };
+    }
+  ];
 }
