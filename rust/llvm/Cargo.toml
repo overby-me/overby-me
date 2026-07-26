@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/llvm-support"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+repository = "https://tangled.org/overby.me/overby.me"
+license = "Apache-2.0 WITH LLVM-exception"
+
+[workspace.dependencies]
+llvm-support = { path = "crates/llvm-support", version = "0.1.0" }
+
+# The IR data model is a large pile of enums with wide variants and many
+# constructors; these two lints fight the domain rather than the code.
+# Everything else stays on and `-D warnings` is the gate.
+[workspace.lints.clippy]
+large_enum_variant = "allow"
+too_many_arguments = "allow"
+
+[profile.release]
+# Compiler infrastructure: a backtrace through the parser is worth more than
+# the binary size it costs.
+debug = "line-tables-only"

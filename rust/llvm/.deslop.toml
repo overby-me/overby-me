@@ -1,0 +1,28 @@
+# deslop configuration for LLVM-rs.
+#
+# Rules are switched off here only with a written reason, the way rust/fe-c
+# and rust/bash do it, so a disabled rule stays a recorded decision rather
+# than a way to make a warning go away.
+
+disabled_rules = [
+  # Arbitrary-precision arithmetic is width narrowing by construction: an
+  # ApInt is a slice of u64 words, so every word access narrows a u128
+  # product to u64, a bit index to a word index, or a bit width to a word
+  # count. Each such cast is the algorithm, stated where it happens, and the
+  # results are cross-checked against native u128 arithmetic over an operand
+  # grid in apint.rs. Same call rust/fe-c makes for its packed capabilities.
+  "rust_narrowing_numeric_cast",
+
+  # LLVM's own vocabulary is long: "non-integral address space", "program
+  # address space", "function pointer alignment". Shortening those names
+  # would make this crate harder to check against LangRef, which is the only
+  # specification we have.
+  "overlong_name",
+
+  # llvm-support is a facade over four independent modules and re-exports
+  # their public types from the root on purpose: callers write
+  # `llvm_support::ApInt`, not `llvm_support::apint::ApInt`, and the modules
+  # stay separately readable. The root is the API, not a wall hiding
+  # structure.
+  "rust_root_reexport_wall",
+]
