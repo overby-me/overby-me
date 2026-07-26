@@ -289,7 +289,11 @@ impl Printer<'_> {
                     self.push("inalloca ");
                 }
                 self.ty(*allocated_type);
-                if let Some((ty, value)) = count {
+                // A count of exactly one is not an array allocation, and
+                // upstream leaves it out.
+                if let Some((ty, value)) = count
+                    && !self.is_constant_one(*value)
+                {
                     self.push(", ");
                     self.typed_value(function, *ty, *value);
                 }
@@ -688,15 +692,8 @@ impl Printer<'_> {
             self.value(function, arg.value);
         }
         self.push(")");
-        for group in &call.fn_attrs.groups {
+        if let Some(group) = self.group_for(&call.fn_attrs) {
             let _ = write!(self.out, " #{group}");
-        }
-        if !call.fn_attrs.attributes.is_empty() {
-            let _ = write!(
-                self.out,
-                " {}",
-                attribute_list(self.module, &call.fn_attrs, false)
-            );
         }
         if !call.bundles.is_empty() {
             self.push(" [ ");
@@ -790,6 +787,19 @@ impl Printer<'_> {
     pub(crate) fn sync_scope(&mut self, scope: &SyncScope) {
         if let Some(name) = &scope.0 {
             let _ = write!(self.out, " syncscope(\"{}\")", escape_string(name));
+        }
+    }
+
+    /// Whether a value is the integer constant one.
+    fn is_constant_one(&self, value: Value) -> bool {
+        match value {
+            Value::Constant(id) => self
+                .module
+                .ctx
+                .constant(id)
+                .as_integer()
+                .is_some_and(llvm_support::ApInt::is_one),
+            _ => false,
         }
     }
 }

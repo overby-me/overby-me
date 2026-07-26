@@ -54,10 +54,8 @@ impl Printer<'_> {
             let _ = write!(self.out, ", align {}", align.bytes());
         }
         self.metadata_attachments(&global.metadata, ", ");
-        if !global.attrs.groups.is_empty() {
-            for group in &global.attrs.groups {
-                let _ = write!(self.out, " #{group}");
-            }
+        if let Some(group) = self.group_for(&global.attrs) {
+            let _ = write!(self.out, " #{group}");
         }
     }
 
@@ -214,15 +212,8 @@ impl Printer<'_> {
         {
             let _ = write!(self.out, " addrspace({address_space})");
         }
-        for group in &function.attrs.groups {
+        if let Some(group) = self.group_for(&function.attrs) {
             let _ = write!(self.out, " #{group}");
-        }
-        if !function.attrs.attributes.is_empty() {
-            let _ = write!(
-                self.out,
-                " {}",
-                attribute_list(self.module, &function.attrs, false)
-            );
         }
         if let Some(section) = &function.section {
             let _ = write!(self.out, " section \"{}\"", escape_string(section));

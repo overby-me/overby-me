@@ -129,10 +129,6 @@ const BROKEN: &[(&str, &str)] = &[
         "uses a value defined where it cannot reach",
     ),
     (
-        "@g = global i32 0\n\ndefine i32 @f() {\nentry:\n  %x = load i32, ptr @g\n  ret i32 %x\n}\n",
-        "has no alignment",
-    ),
-    (
         "define internal hidden void @f() {\nentry:\n  ret void\n}\n",
         "symbol with local linkage must have default visibility",
     ),

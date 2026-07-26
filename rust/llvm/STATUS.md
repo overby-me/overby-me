@@ -36,6 +36,9 @@ and each row names the check that backs it.
 | Verifier: linkage against visibility, module flag shape, atomic orderings, index bounds | done | `llvm-verify-corpus` |
 | Verifier: sized-type rules, intrinsic-only types, reserved global shapes | done | `llvm-verify-corpus` |
 | Type aliases: `%name = type [8 x i8]` expands where used | done | `llvm-upstream-assembler` |
+| Default alignments filled in from the data layout | done | `llvm-opt-differential` |
+| Function attributes hoisted into numbered groups on output | done | `llvm-opt-differential`, `llvm-roundtrip` |
+| Verifier: placement rules for `!range`, `!align`, `!nonnull`, `!prof`, scope lists | done | `llvm-upstream-verifier` |
 | `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
 
 ## The round trip
@@ -63,7 +66,16 @@ skipped and counted separately rather than scored.
 | Suite | Agreed | Considered | Skipped | Check |
 | --- | --- | --- | --- | --- |
 | `llvm/test/Assembler` | 175 | 306 | 177 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 116 | 254 | 74 | `llvm-upstream-verifier` |
+| `llvm/test/Verifier` | 117 | 254 | 74 | `llvm-upstream-verifier` |
+
+A third check asks a different question: not whether we accept the same
+files, but whether we print the same text. For every Assembler file both we
+and upstream accept, `llvm-opt-differential` compares our `opt -S` output
+against `llvm-as | llvm-dis`, and **100 of 160** are identical. Two
+path-derived lines are normalised away, because upstream regenerates the
+ModuleID from whatever path it read and synthesises a `source_filename` when
+the file has none; the corpus round trip pins both fields properly against
+files that carry them.
 
 The first measurement was 146 and 70. Both numbers are still low and both are
 the point: the gap is a to-do list, and

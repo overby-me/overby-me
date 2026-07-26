@@ -49,6 +49,19 @@
   #
   # The ratchet only moves up. A change that lowers it fails; a change that
   # raises it prints the new number to record here.
+  # Compares what we print against what upstream prints, for every file in a
+  # suite that both accept. Needs the real tools, not only the sources, and
+  # they stay confined to this derivation.
+  differentialCheck = pkgs: suite: ratchet:
+    (cargoCheck pkgs "differential-${lib.toLower suite}" ''
+      cargo build -p llvm-tools --offline --locked
+      nu corpus/check-differential.nu "$CARGO_TARGET_DIR/debug/opt" \
+        "${pkgs.llvm.src}/llvm/test/${suite}" ${toString ratchet}
+    '')
+    .overrideAttrs (previous: {
+      nativeBuildInputs = previous.nativeBuildInputs ++ [pkgs.llvm];
+    });
+
   upstreamCheck = pkgs: suite: ratchet:
     cargoCheck pkgs "upstream-${lib.toLower suite}" ''
       cargo build -p llvm-tools --offline --locked
@@ -92,7 +105,12 @@ in {
     # Both numbers are low and both are honest: see STATUS.md for what the
     # remaining disagreements are.
     llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 175;
-    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 116;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 117;
+
+    # Not whether we accept the same files, but whether we print the same
+    # text. The corpus pins the printer against upstream's own output; this
+    # pins it against inputs nobody wrote for us.
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 100;
   };
 
   packages.rust-llvm = {lib, ...}:

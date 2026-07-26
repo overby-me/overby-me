@@ -160,7 +160,8 @@ fn read_input(input: &str) -> Result<String, String> {
 }
 
 fn write_output(output: Option<&str>, text: &str) -> Result<(), String> {
-    match output {
+    // `-o -` is standard output, the same way `-` is standard input.
+    match output.filter(|path| *path != "-") {
         None => {
             let stdout = std::io::stdout();
             let mut handle = stdout.lock();

@@ -114,7 +114,7 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 175, 70 to 116)*
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 175, 70 to 117)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -127,11 +127,16 @@ signatures, module summary index syntax (`^0 = ...`), target-specific
 calling conventions, and metadata integers wider than 64 bits.
 Acceptance: both numbers up again, recorded in the same commit.
 
-**B2. [todo] Differential check against real `opt -S -passes=verify`.**
-For every corpus file, compare our output to the oracle's after normalising
-the differences we have consciously accepted (recorded in
-`docs/dialect-notes.md`).
-Acceptance: `llvm-opt-differential` green, divergence list shrinking.
+**B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*
+Runs over upstream's Assembler suite rather than the corpus, because the
+corpus is upstream's output already and would pass trivially. 100 of the 160
+files we both accept print identically. Only the two path-derived lines are
+normalised away; everything else counts.
+Largest remaining cause by far: upstream uniques metadata nodes, so two
+identical non-distinct nodes become one and the numbering collapses. We keep
+them separate. That is a real semantic property of MDNodes and wants
+interning plus print-time renumbering in upstream's traversal order.
+Acceptance: the number keeps rising, and metadata uniquing lands.
 
 **B3. [todo] Surface inventory from `rustc_codegen_llvm`.**
 Extract every FFI call site from the pinned rustc's source (nixpkgs

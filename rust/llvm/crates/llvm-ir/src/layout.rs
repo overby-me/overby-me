@@ -105,6 +105,38 @@ pub fn abi_align(ctx: &Context, layout: &DataLayout, ty: TypeId) -> Result<Align
     Ok(Align::from_bytes_rounded_up(u64::from(bits).div_ceil(8)))
 }
 
+/// The alignment the target would choose if the ABI left it free, which is
+/// what an `alloca` with no explicit alignment gets.
+pub fn preferred_align(
+    ctx: &Context,
+    layout: &DataLayout,
+    ty: TypeId,
+) -> Result<Align, LayoutError> {
+    let bits = match ctx.type_kind(ty) {
+        TypeKind::Integer(width) => layout.integer_align(*width).preferred_bits,
+        TypeKind::Float(semantics) => layout.float_align(semantics.bit_width()).preferred_bits,
+        TypeKind::Pointer { address_space } => {
+            layout.pointer_spec(*address_space).align.preferred_bits
+        }
+        TypeKind::Array { element, .. } => return preferred_align(ctx, layout, *element),
+        TypeKind::Vector { scalable, .. } => {
+            if *scalable {
+                return Err(LayoutError::Scalable);
+            }
+            let size = size_in_bits(ctx, layout, ty)?;
+            layout.vector_align(size as u32).preferred_bits
+        }
+        // A struct's preferred alignment is its ABI alignment: the fields
+        // decide it, and each field already contributed its own.
+        TypeKind::Struct { .. } | TypeKind::NamedStruct(_) => {
+            return Ok(struct_layout(ctx, layout, ty)?.align);
+        }
+        TypeKind::X86Amx => 8192,
+        _ => return abi_align(ctx, layout, ty),
+    };
+    Ok(Align::from_bytes_rounded_up(u64::from(bits).div_ceil(8)))
+}
+
 /// Field offsets, total size and alignment of a struct.
 ///
 /// A packed struct takes byte alignment for every field and for itself; an

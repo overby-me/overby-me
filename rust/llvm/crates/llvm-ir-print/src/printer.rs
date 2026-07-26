@@ -1,9 +1,11 @@
 //! The printer's state and the module-level driver.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use llvm_ir::attribute::{Attribute, AttributeSet, IntAttr};
 use llvm_ir::function::Function;
+use llvm_ir::instruction::{CallData, InstKind};
 use llvm_ir::value::{Name, escape_name, needs_quotes};
 use llvm_ir::{BlockId, Module, StructId, TypeId, TypeKind};
 use llvm_support::Align;
@@ -21,6 +23,13 @@ pub(crate) struct Printer<'m> {
     pub(crate) module: &'m Module,
     pub(crate) out: String,
     pub(crate) slots: FunctionSlots,
+    /// Distinct function-attribute sets, in the order upstream first meets
+    /// them. Upstream never prints function attributes inline: it hoists
+    /// every set into a numbered group and writes a reference, so the printer
+    /// has to build the same table rather than echo whichever groups the
+    /// input happened to have.
+    groups: Vec<Vec<Attribute>>,
+    group_numbers: HashMap<Vec<Attribute>, u32>,
 }
 
 impl<'m> Printer<'m> {
@@ -29,6 +38,8 @@ impl<'m> Printer<'m> {
             module,
             out: String::new(),
             slots: FunctionSlots::default(),
+            groups: Vec::new(),
+            group_numbers: HashMap::new(),
         }
     }
 
@@ -46,7 +57,48 @@ impl<'m> Printer<'m> {
 
     // ---------------------------------------------------------------- module
 
+    /// Numbers every function-attribute set, in upstream's discovery order:
+    /// globals, aliases and ifuncs first, then each function, then the call
+    /// sites of each function body in turn.
+    fn assign_attribute_groups(&mut self) {
+        let module = self.module;
+        let mut sets: Vec<Vec<Attribute>> = Vec::new();
+        for global in &module.globals {
+            sets.push(self.resolved_attributes(&global.attrs));
+        }
+        for function in &module.functions {
+            sets.push(self.resolved_attributes(&function.attrs));
+        }
+        for function in &module.functions {
+            for (id, _) in function.blocks() {
+                for (_, instruction) in function.block_instructions(id) {
+                    if let Some(call) = call_data(&instruction.kind) {
+                        sets.push(self.resolved_attributes(&call.fn_attrs));
+                    }
+                }
+            }
+        }
+        for set in sets {
+            if set.is_empty() || self.group_numbers.contains_key(&set) {
+                continue;
+            }
+            let number = self.groups.len() as u32;
+            self.group_numbers.insert(set.clone(), number);
+            self.groups.push(set);
+        }
+    }
+
+    /// The group number an attribute set prints as, if it has one.
+    pub(crate) fn group_for(&self, set: &AttributeSet) -> Option<u32> {
+        let resolved = self.resolved_attributes(set);
+        if resolved.is_empty() {
+            return None;
+        }
+        self.group_numbers.get(&resolved).copied()
+    }
+
     pub(crate) fn module(&mut self) {
+        self.assign_attribute_groups();
         if let Some(id) = &self.module.module_id {
             let _ = writeln!(self.out, "; ModuleID = '{id}'");
         }
@@ -108,11 +160,13 @@ impl<'m> Printer<'m> {
             self.function(&self.module.functions[index]);
         }
 
-        if !self.module.attribute_groups.is_empty() {
+        if !self.groups.is_empty() {
             self.push("\n");
-            for (number, attributes) in &self.module.attribute_groups {
-                let mut set = AttributeSet::default();
-                set.attributes.clone_from(attributes);
+            for number in 0..self.groups.len() {
+                let set = AttributeSet {
+                    attributes: self.groups[number].clone(),
+                    groups: Vec::new(),
+                };
                 let _ = writeln!(
                     self.out,
                     "attributes #{number} = {{ {} }}",
@@ -409,5 +463,15 @@ impl Printer<'_> {
             }
         }
         all
+    }
+}
+
+/// The call data of whichever instruction carries some.
+fn call_data(kind: &InstKind) -> Option<&CallData> {
+    match kind {
+        InstKind::Call(call) | InstKind::Invoke { call, .. } | InstKind::CallBr { call, .. } => {
+            Some(call)
+        }
+        _ => None,
     }
 }

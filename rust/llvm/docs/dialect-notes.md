@@ -47,6 +47,22 @@ remains is `getelementptr`, the surviving casts, `extractelement`,
 **Use-list order directives.** `uselistorder` is an error. Re-emit without
 `-preserve-ll-uselistorder`.
 
+## Filled in rather than carried
+
+Two things upstream computes when the text leaves them out, and prints
+either way, so a module that omits them and one that spells them out are the
+same module:
+
+- **Alignment.** An `alloca` with no `align` takes the preferred alignment of
+  its type from the data layout; a `load`, `store`, `cmpxchg` or `atomicrmw`
+  takes the ABI alignment. The parser fills these in, which is why the
+  verifier's "has no alignment" rule is unreachable from text.
+- **Function attribute groups.** Upstream never prints function attributes
+  inline: it hoists every distinct set into a numbered group and writes a
+  reference. The printer builds that table itself, in upstream's discovery
+  order (globals, then functions, then the call sites of each body), rather
+  than echoing whichever groups the input happened to have.
+
 ## Known gaps, measured
 
 `llvm-upstream-assembler` and `llvm-upstream-verifier` run upstream's own
@@ -64,7 +80,7 @@ recurring reasons are:
 
 Each of those is a bug, not a decision. When one is fixed the ratchet moves
 up in the same commit. Two passes so far have taken the Assembler suite from
-146 to 175 and the Verifier suite from 70 to 116, by adding the structural
+146 to 175 and the Verifier suite from 70 to 117, by adding the structural
 rules the parser was missing and then the semantic ones that come in
 clusters: which types can be stored, which may only cross an intrinsic
 boundary, and what shape the globals upstream reserves have to have.

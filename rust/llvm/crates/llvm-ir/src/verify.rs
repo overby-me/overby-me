@@ -14,7 +14,7 @@ use crate::constant::{CastOp, ConstId, Constant};
 use crate::function::Function;
 use crate::global::{GlobalQualifiers, Linkage, Visibility};
 use crate::instruction::{AtomicOrdering, BinOp, InstKind, IntFlags};
-use crate::metadata::{MdOperand, MdRef};
+use crate::metadata::{MdOperand, MdRef, Metadata};
 use crate::module::Module;
 use crate::types::TypeKind;
 use crate::value::{BlockId, GlobalRef, InstId, MdId, Name, Value};
@@ -342,6 +342,18 @@ impl Verifier<'_> {
             }
         }
 
+        let profiles = function
+            .metadata
+            .iter()
+            .filter(|attachment| attachment.kind == "prof")
+            .count();
+        if profiles > 0 && !function.is_definition() {
+            self.report("a function declaration may not have a !prof attachment");
+        }
+        if profiles > 1 {
+            self.report("a function may have only one !prof attachment");
+        }
+
         // token and x86_amx have no representation a caller could pass, so
         // only an intrinsic may name them in its signature.
         let intrinsic = matches!(&function.name, Name::Named(text) if text.starts_with("llvm."));
@@ -429,6 +441,49 @@ impl Verifier<'_> {
         for successor in instruction.kind.successors() {
             if function.try_block(successor).is_none() {
                 self.report(format!("{where_} branches to a block outside the function"));
+            }
+        }
+
+        // Several well-known attachments only mean something on particular
+        // instructions, and upstream says so rather than ignoring them where
+        // they cannot apply.
+        let is_load = matches!(instruction.kind, InstKind::Load { .. });
+        let is_pointer = matches!(self.module.ctx.type_kind(ty), TypeKind::Pointer { .. });
+        let takes_range = matches!(
+            instruction.kind,
+            InstKind::Load { .. } | InstKind::Call(_) | InstKind::Invoke { .. }
+        );
+        let is_inttoptr = matches!(
+            instruction.kind,
+            InstKind::Cast {
+                op: CastOp::IntToPtr,
+                ..
+            }
+        );
+        for attachment in instruction.metadata.clone() {
+            let kind = attachment.kind.clone();
+            match kind.as_str() {
+                "alias.scope" | "noalias" => self.scope_list(&attachment.node, &where_),
+                "llvm.access.group" => self.access_group(&attachment.node, &where_),
+                "align" => self.check(
+                    is_load && is_pointer,
+                    format!("{where_}: align applies only to loads of a pointer"),
+                ),
+                "nonnull" => self.check(
+                    is_load && is_pointer,
+                    format!("{where_}: nonnull applies only to loads of a pointer"),
+                ),
+                "range" => self.check(
+                    takes_range,
+                    format!("{where_}: ranges are only for loads, calls and invokes"),
+                ),
+                "dereferenceable" | "dereferenceable_or_null" => self.check(
+                    is_load || is_inttoptr,
+                    format!(
+                        "{where_}: dereferenceable applies only to load and inttoptr instructions"
+                    ),
+                ),
+                _ => {}
             }
         }
 
@@ -580,6 +635,9 @@ impl Verifier<'_> {
                     loaded_type == ty,
                     format!("{where_} produces something other than what it loads"),
                 );
+                // Unreachable from parsed text, where an unwritten alignment
+                // is filled in from the data layout, but a module built by
+                // hand can still omit one.
                 self.check(align.is_some(), format!("{where_} has no alignment"));
             }
             InstKind::Store {
@@ -893,6 +951,84 @@ impl Verifier<'_> {
             if u64::from(*index) >= count {
                 self.report(format!("{where_}: invalid indices for {opcode}"));
                 return;
+            }
+        }
+    }
+
+    /// The node an attachment points at, whether it is named or written in
+    /// place.
+    fn resolve(&self, node: &MdRef) -> Option<Metadata> {
+        match node {
+            MdRef::Id(id) => self.module.metadata_node(*id).cloned(),
+            MdRef::Inline(inline) => Some((**inline).clone()),
+        }
+    }
+
+    /// `!alias.scope` and `!noalias` take a list of scopes, and a scope is a
+    /// node of two or three operands: its own identity, its domain, and an
+    /// optional description.
+    fn scope_list(&mut self, node: &MdRef, where_: &str) {
+        let Some(list) = self.resolve(node) else {
+            return;
+        };
+        let Some(operands) = list.as_tuple().map(<[MdOperand]>::to_vec) else {
+            self.report(format!("{where_}: scope list must consist of MDNodes"));
+            return;
+        };
+        for operand in &operands {
+            let scope = match operand {
+                MdOperand::Ref(id) => self.module.metadata_node(*id).cloned(),
+                MdOperand::Inline(inline) => Some((**inline).clone()),
+                _ => {
+                    self.report(format!("{where_}: scope list must consist of MDNodes"));
+                    continue;
+                }
+            };
+            let Some(scope) = scope else {
+                continue;
+            };
+            match scope.as_tuple() {
+                Some(fields) if (2..=3).contains(&fields.len()) => {}
+                _ => self.report(format!("{where_}: scope must have two or three operands")),
+            }
+        }
+    }
+
+    /// `!llvm.access.group` is either one group, which is a distinct empty
+    /// node, or a list of them.
+    fn access_group(&mut self, node: &MdRef, where_: &str) {
+        let Some(attached) = self.resolve(node) else {
+            return;
+        };
+        let Some(operands) = attached.as_tuple().map(<[MdOperand]>::to_vec) else {
+            self.report(format!(
+                "{where_}: access scope list must consist of MDNodes"
+            ));
+            return;
+        };
+        // A group itself is distinct and empty; anything else at this level
+        // has to be a list of groups.
+        if attached.is_distinct() && operands.is_empty() {
+            return;
+        }
+        for operand in &operands {
+            let group = match operand {
+                MdOperand::Ref(id) => self.module.metadata_node(*id).cloned(),
+                MdOperand::Inline(inline) => Some((**inline).clone()),
+                _ => {
+                    self.report(format!(
+                        "{where_}: access scope list must consist of MDNodes"
+                    ));
+                    continue;
+                }
+            };
+            let valid = group.as_ref().is_some_and(|g| {
+                g.is_distinct() && g.as_tuple().is_some_and(<[MdOperand]>::is_empty)
+            });
+            if !valid {
+                self.report(format!(
+                    "{where_}: access scope list contains an invalid scope"
+                ));
             }
         }
     }
