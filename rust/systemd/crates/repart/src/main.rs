@@ -65,6 +65,9 @@ const DEFAULT_WEIGHT: u32 = 1000;
 /// Maximum number of GPT partition entries (standard).
 const MAX_GPT_ENTRIES: u32 = 128;
 
+/// Alignment grain libfdisk uses for a fresh GPT's first usable LBA.
+const GPT_FIRST_LBA_GRAIN: u64 = 1024 * 1024;
+
 /// Standard repart.d search paths.
 const DEFINITION_SEARCH_PATHS: &[&str] = &[
     "/etc/repart.d",
@@ -1159,7 +1162,17 @@ fn build_gpt_header(
         (1u64, disk_size_sectors - 1, primary_entries_start)
     };
 
-    let first_usable_lba = 2 + entries_sectors;
+    // libfdisk, which upstream repart drives, opens a GPT's usable area on its
+    // 1 MiB grain rather than immediately after the entry array, so a fresh
+    // label reports first-lba 2048 at a 512-byte sector size. Never advance
+    // past a partition that already starts earlier, so rewriting a table laid
+    // out against the bare minimum keeps describing itself correctly.
+    let minimum_first_usable = 2 + entries_sectors;
+    let aligned_first_usable = align_up(minimum_first_usable, GPT_FIRST_LBA_GRAIN / sector_size);
+    let first_usable_lba = match partitions.iter().map(|p| p.first_lba).min() {
+        Some(earliest) => aligned_first_usable.min(earliest.max(minimum_first_usable)),
+        None => aligned_first_usable,
+    };
     let last_usable_lba = disk_size_sectors - 1 - entries_sectors - 1;
 
     let mut header = vec![0u8; sector_size as usize];
@@ -2463,7 +2476,13 @@ fn run(argv: &[String]) -> Result<i32, String> {
         all_defs
     };
 
-    if defs.is_empty() {
+    // Having no definitions is not by itself a reason to stop. Upstream reads
+    // the definitions and then carries straight on to find_root(),
+    // resize_backing_fd() and context_load_partition_table(), so
+    // `--empty=create --size=1G` writes an empty GPT image even when no
+    // *.conf matched. Returning early here skipped the image creation
+    // entirely, and the caller then failed on the missing file.
+    if defs.is_empty() && args.empty != EmptyMode::Create {
         eprintln!("No partition definitions found.");
         return Ok(0);
     }
@@ -2547,7 +2566,11 @@ fn run(argv: &[String]) -> Result<i32, String> {
                     .map(|d| d.size_min.max(MIN_PARTITION_SIZE) + d.padding_min)
                     .sum();
                 let entries_size = MAX_GPT_ENTRIES as u64 * GPT_ENTRY_SIZE;
-                let overhead = sector_size * 2 + entries_size * 2 + sector_size;
+                // The front reservation is the whole 1 MiB grain the first
+                // usable LBA is aligned to, not just the MBR, header and entry
+                // array: sizing it any smaller leaves a usable area too short
+                // for the partitions that were just measured.
+                let overhead = GPT_FIRST_LBA_GRAIN + entries_size + sector_size;
                 align_up(total_min + overhead, sector_size)
             }
             Some(s) => parse_size(s)?,
@@ -2607,7 +2630,12 @@ fn run(argv: &[String]) -> Result<i32, String> {
                 let disk_size_sectors = file_size / sector_size;
                 let entries_sectors =
                     (MAX_GPT_ENTRIES as u64 * GPT_ENTRY_SIZE).div_ceil(sector_size);
-                let first_usable = 2 + entries_sectors;
+                // libfdisk, which upstream repart drives, starts a fresh GPT's
+                // usable area on its 1 MiB grain rather than immediately after
+                // the entry array, so a new label reports first-lba 2048 at a
+                // 512-byte sector size, not 34.
+                let first_usable =
+                    align_up(2 + entries_sectors, GPT_FIRST_LBA_GRAIN / sector_size);
                 let last_usable = disk_size_sectors - 1 - entries_sectors - 1;
                 let guid = generate_uuid_from_seed(&seed, "disk", 0);
                 (guid, first_usable, last_usable, Vec::new())
@@ -2668,7 +2696,11 @@ fn run(argv: &[String]) -> Result<i32, String> {
     )?;
 
     // Check if anything changed
-    let has_changes = matched.iter().any(|m| m.is_new || m.is_grown);
+    // Writing a label onto a disk that had none is itself a change, even when
+    // no partition is added: `--empty=create` on a fresh image exists to
+    // produce exactly that, an empty but valid GPT.
+    let creates_label = existing_header.is_none();
+    let has_changes = creates_label || matched.iter().any(|m| m.is_new || m.is_grown);
 
     // Output
     match args.json_mode {
@@ -5878,6 +5910,34 @@ Weight=333
         let mut f = fs::File::open(&img_path).unwrap();
         let hdr = read_gpt_header(&mut f, 512).unwrap();
         assert!(hdr.is_some());
+    }
+
+    /// With no matching definitions, `--empty=create` must still write the
+    /// image. Upstream carries on past an empty definition set, so bailing out
+    /// early left the caller with no file at all.
+    #[test]
+    fn test_full_empty_create_without_definitions() {
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+
+        let img_path = tmp.path().join("zzz");
+        let result = run(&args(&[
+            "--dry-run=no",
+            "--empty=create",
+            "--size=1G",
+            "--seed=empty-defs",
+            &format!("--definitions={}", defs_dir.display()),
+            img_path.to_str().unwrap(),
+        ]));
+        assert!(result.is_ok(), "run failed: {result:?}");
+
+        let mut f = fs::File::open(&img_path).unwrap();
+        assert_eq!(f.metadata().unwrap().len(), 1024 * 1024 * 1024);
+        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        // Matches what `sfdisk -d` reports for an upstream-created empty image.
+        assert_eq!(hdr.first_usable_lba, 2048);
+        assert_eq!(hdr.last_usable_lba, 2097118);
     }
 
     // -----------------------------------------------------------------------
