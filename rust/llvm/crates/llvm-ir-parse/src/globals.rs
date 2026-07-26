@@ -10,6 +10,10 @@ use llvm_ir::global::{
 use llvm_ir::value::Name;
 use llvm_support::Align;
 
+/// The largest alignment upstream accepts, and the largest that fits its
+/// encoding.
+const MAXIMUM_ALIGNMENT: u64 = 1 << 32;
+
 impl Parser {
     // --------------------------------------------------------------- globals
 
@@ -194,6 +198,12 @@ impl Parser {
 
     pub(crate) fn parse_align(&mut self) -> Result<Align, ParseError> {
         let bytes = self.require_unsigned()?;
+        // Upstream caps alignment at 2^32 and rejects anything larger in the
+        // parser rather than the verifier, so the message points at the
+        // literal.
+        if bytes > MAXIMUM_ALIGNMENT {
+            return self.error(format!("huge alignment values are unsupported: {bytes}"));
+        }
         Align::from_bytes(bytes).map_or_else(
             || self.error(format!("alignment {bytes} is not a power of two")),
             Ok,

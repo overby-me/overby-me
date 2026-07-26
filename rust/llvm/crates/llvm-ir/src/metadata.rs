@@ -113,10 +113,19 @@ pub struct NamedMetadata {
     pub operands: Vec<MdId>,
 }
 
+/// A node an attachment or an operand points at: a number, or a node written
+/// in place. `!dbg !7` is the first; `!dbg !DILocation(scope: !1)` is the
+/// second, and upstream accepts both.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum MdRef {
+    Id(MdId),
+    Inline(Box<Metadata>),
+}
+
 /// A `!kind !node` attachment on an instruction, global or function.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MdAttachment {
     /// The kind name without its leading `!`, such as `dbg` or `range`.
     pub kind: String,
-    pub node: MdId,
+    pub node: MdRef,
 }

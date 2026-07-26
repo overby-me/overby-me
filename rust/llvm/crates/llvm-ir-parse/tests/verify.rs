@@ -132,7 +132,89 @@ const BROKEN: &[(&str, &str)] = &[
         "@g = global i32 0\n\ndefine i32 @f() {\nentry:\n  %x = load i32, ptr @g\n  ret i32 %x\n}\n",
         "has no alignment",
     ),
+    (
+        "define internal hidden void @f() {\nentry:\n  ret void\n}\n",
+        "symbol with local linkage must have default visibility",
+    ),
+    (
+        "@g = private protected global i32 0, align 4\n",
+        "symbol with local linkage must have default visibility",
+    ),
+    (
+        "define void @f(ptr %p, i32 %a, i32 %b) {\nentry:\n  %x = cmpxchg ptr %p, i32 %a, i32 %b unordered monotonic, align 4\n  ret void\n}\n",
+        "invalid success ordering",
+    ),
+    (
+        "define void @f(ptr %p, i32 %a, i32 %b) {\nentry:\n  %x = cmpxchg ptr %p, i32 %a, i32 %b seq_cst release, align 4\n  ret void\n}\n",
+        "invalid failure ordering",
+    ),
+    (
+        "%s = type { i32, i64 }\n\ndefine ptr @f(ptr %p) {\nentry:\n  %x = getelementptr %s, ptr %p, i32 0, i64 1\n  ret ptr %x\n}\n",
+        "invalid indices",
+    ),
+    (
+        "%s = type { i32, i64 }\n\ndefine ptr @f(ptr %p) {\nentry:\n  %x = getelementptr %s, ptr %p, i32 0, i32 7\n  ret ptr %x\n}\n",
+        "invalid indices",
+    ),
+    (
+        "define void @f() {\nentry:\n  %x = extractvalue [0 x i32] undef, 0\n  ret void\n}\n",
+        "invalid indices for extractvalue",
+    ),
+    (
+        "!llvm.module.flags = !{!0}\n\n!0 = !{i32 1, !\"k\"}\n",
+        "module flag must be a MDNode triple",
+    ),
+    (
+        "!llvm.module.flags = !{!0}\n\n!0 = !{i32 99, !\"k\", i32 1}\n",
+        "invalid behaviour operand",
+    ),
+    (
+        "!llvm.ident = !{!0}\n\n!0 = !{i32 1}\n",
+        "must be a node with one string",
+    ),
 ];
+
+/// Input the parser itself has to refuse, with the message it owes.
+const REJECTED: &[(&str, &str)] = &[
+    (
+        "@g = global i32 0\n@g = global i32 1\n",
+        "redefinition of global '@g'",
+    ),
+    (
+        "define void @f() {\nentry:\n  %p = alloca i1, align 8589934592\n  ret void\n}\n",
+        "huge alignment values are unsupported",
+    ),
+    (
+        "define void @f() {\nentry:\n  %p = alloca i1, align 3\n  ret void\n}\n",
+        "not a power of two",
+    ),
+    (
+        "@g = global [4 x token] zeroinitializer\n",
+        "invalid array element type",
+    ),
+    (
+        "@g = global <4 x label> zeroinitializer\n",
+        "invalid vector element type",
+    ),
+    ("%s = type { void }\n", "invalid structure element type"),
+    (
+        "define void @f(i8* %p) {\nentry:\n  ret void\n}\n",
+        "opaque",
+    ),
+];
+
+#[test]
+fn the_parser_refuses_what_it_should() {
+    for (text, expected) in REJECTED {
+        match llvm_ir_parse::parse_module(text) {
+            Ok(_) => panic!("this should not have parsed:\n{text}"),
+            Err(error) => assert!(
+                error.to_string().contains(expected),
+                "expected an error containing {expected:?}, got {error}\nfor:\n{text}"
+            ),
+        }
+    }
+}
 
 #[test]
 fn broken_modules_are_rejected_with_the_expected_message() {

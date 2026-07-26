@@ -91,6 +91,9 @@ impl Parser {
                 }
                 let element = self.parse_type()?;
                 self.require(Token::Greater)?;
+                if !self.is_valid_vector_element(element) {
+                    return self.error("invalid vector element type");
+                }
                 Ok(self.module.ctx.vector_type(element, count, scalable))
             }
             Token::LeftBracket => {
@@ -100,6 +103,9 @@ impl Parser {
                 }
                 let element = self.parse_type()?;
                 self.require(Token::RightBracket)?;
+                if !self.is_valid_aggregate_element(element) {
+                    return self.error("invalid array element type");
+                }
                 Ok(self.module.ctx.array_type(element, count))
             }
             Token::LocalName(name) => {
@@ -141,5 +147,32 @@ impl Parser {
         let space = self.require_unsigned()? as u32;
         self.require(Token::RightParen)?;
         Ok(Some(space))
+    }
+
+    /// What an array or a struct may hold: anything with a size. A `token`
+    /// has no representation, `x86_amx` may not be nested, and the rest have
+    /// no size at all.
+    pub(crate) fn is_valid_aggregate_element(&self, ty: TypeId) -> bool {
+        !matches!(
+            self.module.ctx.type_kind(ty),
+            TypeKind::Void
+                | TypeKind::Label
+                | TypeKind::Metadata
+                | TypeKind::Token
+                | TypeKind::X86Amx
+                | TypeKind::Function { .. }
+        ) && !matches!(
+            self.module.ctx.type_kind(ty),
+            TypeKind::Vector { scalable: true, .. }
+        )
+    }
+
+    /// What a vector may hold, which is narrower still: only the types a
+    /// lane can be.
+    pub(crate) fn is_valid_vector_element(&self, ty: TypeId) -> bool {
+        matches!(
+            self.module.ctx.type_kind(ty),
+            TypeKind::Integer(_) | TypeKind::Float(_) | TypeKind::Pointer { .. }
+        )
     }
 }

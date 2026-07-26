@@ -168,7 +168,11 @@ impl Parser {
                 self.advance();
                 break;
             }
-            fields.push(self.parse_type()?);
+            let field = self.parse_type()?;
+            if !self.is_valid_aggregate_element(field) {
+                return self.error("invalid structure element type");
+            }
+            fields.push(field);
         }
         if packed {
             self.require(Token::Greater)?;

@@ -11,8 +11,9 @@
 //! still accepts. Refusing the rest is the point.
 
 use crate::attribute::AsmDialect;
+use crate::metadata::MdOperand;
 use crate::types::TypeId;
-use crate::value::{GlobalRef, MdId, Name};
+use crate::value::{GlobalRef, Name};
 use llvm_support::{ApFloat, ApInt};
 
 /// An interned constant.
@@ -169,10 +170,13 @@ pub enum Constant {
         ty: TypeId,
         target: GlobalRef,
     },
-    /// Metadata used where a value is expected, as in a call argument.
+    /// Metadata where a value is expected, as in a debug intrinsic's
+    /// argument. It is a whole metadata operand rather than a reference,
+    /// because `metadata ptr %s` and `metadata !DIExpression()` are both
+    /// legal there.
     Metadata {
         ty: TypeId,
-        node: MdId,
+        operand: Box<MdOperand>,
     },
     InlineAsm(Box<InlineAsm>),
     Expression(Box<ConstExpr>),

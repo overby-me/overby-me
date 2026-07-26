@@ -12,11 +12,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::constant::CastOp;
 use crate::function::Function;
-use crate::instruction::{BinOp, InstKind, IntFlags};
+use crate::global::{GlobalQualifiers, Linkage, Visibility};
+use crate::instruction::{AtomicOrdering, BinOp, InstKind, IntFlags};
+use crate::metadata::{MdOperand, MdRef};
 use crate::module::Module;
 use crate::types::TypeKind;
 use crate::value::{BlockId, GlobalRef, InstId, MdId, Name, Value};
 use crate::{FunctionId, TypeId};
+use llvm_support::ApInt;
 
 /// One thing wrong with a module.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -69,6 +72,18 @@ impl Verifier<'_> {
         }
     }
 
+    /// An attachment either names a node that has to exist, or carries one.
+    fn attachment_resolves(&mut self, node: &MdRef, what: &str) {
+        match node {
+            MdRef::Id(id) => self.metadata_exists(*id, what),
+            MdRef::Inline(inline) => {
+                for referenced in referenced_metadata(inline) {
+                    self.metadata_exists(referenced, what);
+                }
+            }
+        }
+    }
+
     fn metadata_exists(&mut self, id: MdId, what: &str) {
         if self.module.metadata_node(id).is_none() {
             self.report(format!("{what} refers to undefined metadata !{}", id.0));
@@ -78,9 +93,26 @@ impl Verifier<'_> {
     // ----------------------------------------------------------- module rules
 
     fn module_level(&mut self) {
+        for index in 0..self.module.functions.len() {
+            let function = &self.module.functions[index];
+            let (name, qualifiers) = (describe(&function.name), function.qualifiers.clone());
+            self.linkage_and_visibility(&name, &qualifiers);
+        }
+        for index in 0..self.module.aliases.len() {
+            let alias = &self.module.aliases[index];
+            let (name, qualifiers) = (describe(&alias.name), alias.qualifiers.clone());
+            self.linkage_and_visibility(&name, &qualifiers);
+        }
+        for index in 0..self.module.ifuncs.len() {
+            let ifunc = &self.module.ifuncs[index];
+            let (name, qualifiers) = (describe(&ifunc.name), ifunc.qualifiers.clone());
+            self.linkage_and_visibility(&name, &qualifiers);
+        }
         for index in 0..self.module.globals.len() {
             let global = &self.module.globals[index];
             let name = describe(&global.name);
+            let qualifiers = global.qualifiers.clone();
+            self.linkage_and_visibility(&name, &qualifiers);
             if let Some(initializer) = global.initializer {
                 let actual = self.module.ctx.constant(initializer).ty();
                 self.check(
@@ -88,9 +120,8 @@ impl Verifier<'_> {
                     format!("@{name} has an initialiser of the wrong type"),
                 );
             }
-            for attachment in &global.metadata {
-                let node = attachment.node;
-                self.metadata_exists(node, &format!("@{name}"));
+            for attachment in global.metadata.clone() {
+                self.attachment_resolves(&attachment.node, &format!("@{name}"));
             }
             for group in &global.attrs.groups {
                 let group = *group;
@@ -104,8 +135,24 @@ impl Verifier<'_> {
 
         for named in &self.module.named_metadata {
             let name = named.name.clone();
-            for operand in named.operands.clone() {
-                self.metadata_exists(operand, &format!("!{name}"));
+            let operands = named.operands.clone();
+            for operand in &operands {
+                self.metadata_exists(*operand, &format!("!{name}"));
+            }
+            match name.as_str() {
+                "llvm.module.flags" => {
+                    for operand in &operands {
+                        self.module_flag(*operand);
+                    }
+                }
+                // Both of these are lists of one-string nodes, and both have
+                // upstream tests that say so.
+                "llvm.ident" | "llvm.commandline" => {
+                    for operand in &operands {
+                        self.string_node(&name, *operand);
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -121,15 +168,87 @@ impl Verifier<'_> {
         }
     }
 
+    /// A symbol nobody outside the module can name has nothing to be hidden
+    /// from, so upstream rejects the combination rather than ignoring it.
+    fn linkage_and_visibility(&mut self, name: &str, qualifiers: &GlobalQualifiers) {
+        let local = matches!(
+            qualifiers.linkage,
+            Some(Linkage::Private | Linkage::Internal)
+        );
+        let non_default = matches!(
+            qualifiers.visibility,
+            Some(Visibility::Hidden | Visibility::Protected)
+        );
+        if local && non_default {
+            self.report(format!(
+                "@{name}: symbol with local linkage must have default visibility"
+            ));
+        }
+    }
+
+    /// A module flag is `!{i32 behaviour, !"key", value}`.
+    fn module_flag(&mut self, id: MdId) {
+        let Some(node) = self.module.metadata_node(id) else {
+            return;
+        };
+        let Some(operands) = node.as_tuple() else {
+            self.report(format!("!{}: module flag must be a MDNode triple", id.0));
+            return;
+        };
+        if operands.len() != 3 {
+            self.report(format!("!{}: module flag must be a MDNode triple", id.0));
+            return;
+        }
+        let behaviour = match &operands[0] {
+            MdOperand::Value {
+                value: Value::Constant(constant),
+                ..
+            } => self
+                .module
+                .ctx
+                .constant(*constant)
+                .as_integer()
+                .and_then(ApInt::to_u64),
+            _ => None,
+        };
+        match behaviour {
+            // Error, Warning, Require, Override, Append, AppendUnique, Max,
+            // Min, in that order.
+            Some(1..=8) => {}
+            _ => self.report(format!(
+                "!{}: invalid behaviour operand in module flag",
+                id.0
+            )),
+        }
+        if !matches!(operands[1], MdOperand::String(_)) {
+            self.report(format!("!{}: invalid ID operand in module flag", id.0));
+        }
+    }
+
+    /// `!llvm.ident` and `!llvm.commandline` hold nodes of exactly one string.
+    fn string_node(&mut self, list: &str, id: MdId) {
+        let Some(node) = self.module.metadata_node(id) else {
+            return;
+        };
+        let ok = node.as_tuple().is_some_and(|operands| {
+            operands.len() == 1 && matches!(operands[0], MdOperand::String(_))
+        });
+        if !ok {
+            self.report(format!(
+                "!{list} operand !{} must be a node with one string",
+                id.0
+            ));
+        }
+    }
+
     // --------------------------------------------------------- function rules
 
     fn function(&mut self, id: FunctionId) {
         let function = self.module.function(id);
         self.function = Some(describe(&function.name));
 
-        for attachment in &function.metadata {
-            let node = attachment.node;
-            self.metadata_exists(node, "the function");
+        for attachment in function.metadata.clone() {
+            self.attachment_resolves(&attachment.node, "the function");
         }
         for group in &function.attrs.groups {
             let group = *group;
@@ -190,9 +309,8 @@ impl Verifier<'_> {
                 InstKind::DebugRecord { .. } => {}
                 _ => seen_non_phi = true,
             }
-            for attachment in &instruction.metadata {
-                let node = attachment.node;
-                self.metadata_exists(node, &format!("an instruction in {label}"));
+            for attachment in instruction.metadata.clone() {
+                self.attachment_resolves(&attachment.node, &format!("an instruction in {label}"));
             }
             self.instruction(function, id, inst_id);
         }
@@ -369,21 +487,70 @@ impl Verifier<'_> {
                 let (value_type, value) = (*value_type, *value);
                 self.type_is(function, value_type, value, &where_);
             }
+            InstKind::ExtractValue {
+                aggregate_type,
+                aggregate,
+                indices,
+            } => {
+                let (aggregate_type, aggregate) = (*aggregate_type, *aggregate);
+                let indices = indices.clone();
+                self.type_is(function, aggregate_type, aggregate, &where_);
+                self.constant_indices(aggregate_type, &indices, "extractvalue", &where_);
+            }
+            InstKind::InsertValue {
+                aggregate_type,
+                aggregate,
+                element_type,
+                element,
+                indices,
+            } => {
+                let (aggregate_type, aggregate) = (*aggregate_type, *aggregate);
+                let (element_type, element) = (*element_type, *element);
+                let indices = indices.clone();
+                self.type_is(function, aggregate_type, aggregate, &where_);
+                self.type_is(function, element_type, element, &where_);
+                self.constant_indices(aggregate_type, &indices, "insertvalue", &where_);
+            }
+            InstKind::CmpXchg {
+                success, failure, ..
+            } => {
+                let (success, failure) = (*success, *failure);
+                // Both orderings have to be at least monotonic, and a failure
+                // ordering cannot release anything, because there is nothing
+                // to release when the exchange did not happen.
+                self.check(
+                    success != AtomicOrdering::Unordered,
+                    format!("{where_} has an invalid success ordering"),
+                );
+                self.check(
+                    !matches!(
+                        failure,
+                        AtomicOrdering::Unordered
+                            | AtomicOrdering::Release
+                            | AtomicOrdering::AcqRel
+                    ),
+                    format!("{where_} has an invalid failure ordering"),
+                );
+            }
             InstKind::Alloca { .. } => self.check(
                 matches!(self.module.ctx.type_kind(ty), TypeKind::Pointer { .. }),
                 format!("{where_} does not produce a pointer"),
             ),
             InstKind::GetElementPtr {
+                source_type,
                 pointer_type,
                 pointer,
+                indices,
                 ..
             } => {
-                let (pointer_type, pointer) = (*pointer_type, *pointer);
+                let (source_type, pointer_type, pointer) = (*source_type, *pointer_type, *pointer);
+                let indices = indices.clone();
                 self.type_is(function, pointer_type, pointer, &where_);
                 self.check(
                     self.is_pointer_or_pointer_vector(pointer_type),
                     format!("{where_} indexes something that is not a pointer"),
                 );
+                self.walk_indices(source_type, &indices, &where_);
             }
             InstKind::Phi { incoming, .. } => {
                 let incoming = incoming.clone();
@@ -493,6 +660,124 @@ impl Verifier<'_> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Walks a `getelementptr` index list through the type it indexes. The
+    /// first index steps over the pointee and descends into nothing; a struct
+    /// takes only a constant `i32`, since the field it selects decides the
+    /// result type.
+    fn walk_indices(&mut self, source_type: TypeId, indices: &[(TypeId, Value)], where_: &str) {
+        let mut current = source_type;
+        for (position, (index_type, index)) in indices.iter().enumerate() {
+            if position == 0 {
+                continue;
+            }
+            match self.module.ctx.type_kind(current).clone() {
+                TypeKind::Array { element, .. } | TypeKind::Vector { element, .. } => {
+                    current = element;
+                }
+                TypeKind::Struct { fields, .. } => {
+                    match self.struct_index(*index_type, *index, fields.len(), where_) {
+                        Some(field) => current = fields[field],
+                        None => return,
+                    }
+                }
+                TypeKind::NamedStruct(id) => {
+                    let fields = match &self.module.ctx.struct_def(id).fields {
+                        Some(fields) => fields.clone(),
+                        None => {
+                            self.report(format!("{where_} indexes an opaque struct"));
+                            return;
+                        }
+                    };
+                    match self.struct_index(*index_type, *index, fields.len(), where_) {
+                        Some(field) => current = fields[field],
+                        None => return,
+                    }
+                }
+                _ => {
+                    self.report(format!("{where_} has invalid indices"));
+                    return;
+                }
+            }
+        }
+    }
+
+    /// A struct index, or `None` after reporting why it is not one.
+    fn struct_index(
+        &mut self,
+        index_type: TypeId,
+        index: Value,
+        fields: usize,
+        where_: &str,
+    ) -> Option<usize> {
+        if !matches!(self.module.ctx.type_kind(index_type), TypeKind::Integer(32)) {
+            self.report(format!("{where_} has invalid indices"));
+            return None;
+        }
+        let Value::Constant(constant) = index else {
+            self.report(format!("{where_} indexes a struct with a variable"));
+            return None;
+        };
+        let Some(value) = self
+            .module
+            .ctx
+            .constant(constant)
+            .as_integer()
+            .and_then(ApInt::to_u64)
+        else {
+            self.report(format!("{where_} has invalid indices"));
+            return None;
+        };
+        if value as usize >= fields {
+            self.report(format!("{where_} has invalid indices"));
+            return None;
+        }
+        Some(value as usize)
+    }
+
+    /// The literal index list of `extractvalue` and `insertvalue`, which has
+    /// to name a field that exists at every level and cannot be empty.
+    fn constant_indices(&mut self, aggregate: TypeId, indices: &[u32], opcode: &str, where_: &str) {
+        if indices.is_empty() {
+            self.report(format!("{where_}: invalid indices for {opcode}"));
+            return;
+        }
+        let mut current = aggregate;
+        for index in indices {
+            let count = match self.module.ctx.type_kind(current).clone() {
+                TypeKind::Array { element, count } => {
+                    current = element;
+                    count
+                }
+                TypeKind::Struct { fields, .. } => {
+                    let count = fields.len() as u64;
+                    if (*index as u64) < count {
+                        current = fields[*index as usize];
+                    }
+                    count
+                }
+                TypeKind::NamedStruct(id) => {
+                    let Some(fields) = self.module.ctx.struct_def(id).fields.clone() else {
+                        self.report(format!("{where_}: invalid indices for {opcode}"));
+                        return;
+                    };
+                    let count = fields.len() as u64;
+                    if (*index as u64) < count {
+                        current = fields[*index as usize];
+                    }
+                    count
+                }
+                _ => {
+                    self.report(format!("{where_}: invalid indices for {opcode}"));
+                    return;
+                }
+            };
+            if u64::from(*index) >= count {
+                self.report(format!("{where_}: invalid indices for {opcode}"));
+                return;
+            }
         }
     }
 

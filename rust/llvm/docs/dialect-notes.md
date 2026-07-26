@@ -63,4 +63,6 @@ recurring reasons are:
   and the `align(16)` spelling of a parameter attribute.
 
 Each of those is a bug, not a decision. When one is fixed the ratchet moves
-up in the same commit.
+up in the same commit. The first pass took the Assembler suite from 146 to
+172 and the Verifier suite from 70 to 90 by adding the structural rules the
+parser was missing and the first handful of semantic ones.

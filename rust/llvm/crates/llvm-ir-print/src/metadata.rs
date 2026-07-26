@@ -5,19 +5,20 @@ use std::fmt::Write as _;
 use llvm_ir::Value;
 
 use crate::{Printer, escape_string, metadata_name};
-use llvm_ir::metadata::{MdAttachment, MdField, MdOperand, Metadata, SpecializedArgs};
+use llvm_ir::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 
 impl Printer<'_> {
     // -------------------------------------------------------------- metadata
 
     pub(crate) fn metadata_attachments(&mut self, attachments: &[MdAttachment], separator: &str) {
         for attachment in attachments {
-            let _ = write!(
-                self.out,
-                "{separator}!{} !{}",
-                metadata_name(&attachment.kind),
-                attachment.node.0
-            );
+            let _ = write!(self.out, "{separator}!{} ", metadata_name(&attachment.kind));
+            match &attachment.node {
+                MdRef::Id(id) => {
+                    let _ = write!(self.out, "!{}", id.0);
+                }
+                MdRef::Inline(node) => self.metadata_definition(node),
+            }
         }
     }
 

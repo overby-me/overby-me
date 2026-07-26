@@ -8,7 +8,7 @@
 use crate::lexer::Token;
 use crate::{FunctionState, ParseError, Parser};
 use llvm_ir::function::Function;
-use llvm_ir::metadata::{MdAttachment, MdField, MdOperand, Metadata, SpecializedArgs};
+use llvm_ir::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use llvm_ir::value::MdId;
 
 /// Where a metadata operand is being read, which decides whether local values
@@ -220,17 +220,33 @@ impl Parser {
     pub(crate) fn parse_metadata_attachments(&mut self) -> Result<Vec<MdAttachment>, ParseError> {
         let mut attachments = Vec::new();
         while let Token::MetadataName(kind) = self.peek().clone() {
-            let Token::MetadataNumber(number) = self.peek_at(1).clone() else {
+            if !self.attachment_follows(1) {
                 break;
-            };
-            self.advance();
+            }
             self.advance();
             attachments.push(MdAttachment {
                 kind,
-                node: MdId(number),
+                node: self.parse_metadata_ref()?,
             });
         }
         Ok(attachments)
+    }
+
+    /// Whether the token this far ahead starts the node of an attachment: a
+    /// number, or a node written in place.
+    fn attachment_follows(&self, ahead: usize) -> bool {
+        matches!(
+            self.peek_at(ahead),
+            Token::MetadataNumber(_) | Token::MetadataName(_) | Token::Exclaim
+        )
+    }
+
+    fn parse_metadata_ref(&mut self) -> Result<MdRef, ParseError> {
+        if let Token::MetadataNumber(number) = self.peek().clone() {
+            self.advance();
+            return Ok(MdRef::Id(MdId(number)));
+        }
+        Ok(MdRef::Inline(Box::new(self.parse_metadata_definition()?)))
     }
 
     /// `, !dbg !7` attachments, which is how they appear on instructions and
@@ -246,15 +262,14 @@ impl Parser {
             let Token::MetadataName(kind) = self.peek_at(1).clone() else {
                 break;
             };
-            let Token::MetadataNumber(number) = self.peek_at(2).clone() else {
+            if !self.attachment_follows(2) {
                 break;
-            };
-            self.advance();
+            }
             self.advance();
             self.advance();
             attachments.push(MdAttachment {
                 kind,
-                node: MdId(number),
+                node: self.parse_metadata_ref()?,
             });
         }
         Ok(attachments)

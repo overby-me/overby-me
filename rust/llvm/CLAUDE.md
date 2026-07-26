@@ -114,12 +114,16 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [todo] Raise the two ratchets.**
-`docs/dialect-notes.md` lists the recurring reasons. The cheapest wins are
-the structural checks the parser does not make (duplicate symbols, alignment
-bounds) and metadata integers wider than 64 bits; the largest is the
-semantic half of the Verifier suite.
-Acceptance: both numbers up, recorded in the same commit.
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 172, 70 to 90)*
+Landed: duplicate symbols, alignment bounds, aggregate and vector element
+types, linkage against visibility, cmpxchg orderings, getelementptr and
+aggregate index rules, module flag and ident node shapes, and metadata
+values that are not node references.
+Still open, largest first: the semantic half of the Verifier suite (x86_amx
+and token placement rules, intrinsic signatures, attribute combinations),
+module summary index syntax (`^0 = ...`), target-specific calling
+conventions, and metadata integers wider than 64 bits.
+Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [todo] Differential check against real `opt -S -passes=verify`.**
 For every corpus file, compare our output to the oracle's after normalising

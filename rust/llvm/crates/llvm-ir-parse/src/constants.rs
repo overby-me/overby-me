@@ -15,7 +15,7 @@ use llvm_ir::TypeId;
 use llvm_ir::attribute::AsmDialect;
 use llvm_ir::constant::{CastOp, ConstExpr, ConstId, Constant, GepFlags, InlineAsm};
 use llvm_ir::types::TypeKind;
-use llvm_ir::value::{AliasId, FunctionId, GlobalRef, GlobalVarId, IFuncId, MdId, Name};
+use llvm_ir::value::{AliasId, FunctionId, GlobalRef, GlobalVarId, IFuncId, Name};
 use llvm_support::{ApFloat, FloatSemantics};
 
 impl Parser {
@@ -67,6 +67,12 @@ impl Parser {
                             GlobalRef::Variable(GlobalVarId(globals - 1))
                         }
                     };
+                    if symbols.contains_key(&name) {
+                        return Err(ParseError {
+                            position: self.tokens[index].position,
+                            message: format!("redefinition of global '@{}'", describe(&name)),
+                        });
+                    }
                     symbols.insert(name, id);
                 }
                 Token::Word(word) if word == "define" || word == "declare" => {
@@ -74,6 +80,12 @@ impl Parser {
                         let Some(name) = global_name(&self.tokens[ahead].token) else {
                             continue;
                         };
+                        if symbols.contains_key(&name) {
+                            return Err(ParseError {
+                                position: self.tokens[ahead].position,
+                                message: format!("redefinition of global '@{}'", describe(&name)),
+                            });
+                        }
                         symbols.insert(name, GlobalRef::Function(FunctionId(functions)));
                         functions += 1;
                         break;
@@ -189,21 +201,16 @@ impl Parser {
                     self.error("the only token constant is 'none'")
                 }
             }
-            TypeKind::Metadata => match self.advance() {
-                Token::MetadataNumber(number) => {
-                    Ok(self.module.ctx.intern_constant(Constant::Metadata {
-                        ty,
-                        node: MdId(number),
-                    }))
-                }
-                other => {
-                    self.index -= 1;
-                    self.error(format!(
-                        "expected a metadata reference, found {}",
-                        other.describe()
-                    ))
-                }
-            },
+            // `metadata ptr %s` and `metadata !DIExpression()` are both
+            // legal where a value of type metadata is wanted, so this is a
+            // whole metadata operand rather than only a reference.
+            TypeKind::Metadata => {
+                let operand = self.parse_metadata_operand(None)?;
+                Ok(self.module.ctx.intern_constant(Constant::Metadata {
+                    ty,
+                    operand: Box::new(operand),
+                }))
+            }
             other => self.error(format!("{other:?} has no constants")),
         }
     }
@@ -543,5 +550,12 @@ fn global_name(token: &Token) -> Option<Name> {
         Token::GlobalName(name) => Some(Name::Named(name.clone())),
         Token::GlobalNumber(number) => Some(Name::Number(*number)),
         _ => None,
+    }
+}
+
+fn describe(name: &Name) -> String {
+    match name {
+        Name::Named(text) => text.clone(),
+        Name::Number(number) => number.to_string(),
     }
 }

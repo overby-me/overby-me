@@ -109,9 +109,7 @@ impl Printer<'_> {
                 let text = self.global_ref_text(target);
                 let _ = write!(self.out, "no_cfi {text}");
             }
-            Constant::Metadata { node, .. } => {
-                let _ = write!(self.out, "!{}", node.0);
-            }
+            Constant::Metadata { operand, .. } => self.metadata_operand(&operand),
             Constant::InlineAsm(asm) => self.inline_asm(&asm),
             Constant::Expression(expr) => self.const_expr(&expr),
         }
