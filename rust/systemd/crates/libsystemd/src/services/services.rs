@@ -888,6 +888,18 @@ impl Service {
                 // (07-pid1-exec-deserialization).  Only for the thread-pool
                 // activation path (DeferNotifyWait), whose pool closure spawns
                 // the driver; other sources run the loop inline.
+                // kmsg, not log::, because PID 1's log output never reaches
+                // the console. Which branch this takes decides whether the
+                // table read lock is held across the exec waits.
+                crate::entrypoints::kmsg(&format!(
+                    "ONESHOT {name} {} cmds source={source:?} -> {}",
+                    conf.exec.len(),
+                    if matches!(source, ActivationSource::DeferNotifyWait) {
+                        "DEFERRED"
+                    } else {
+                        "INLINE"
+                    }
+                ));
                 if matches!(source, ActivationSource::DeferNotifyWait) {
                     self.current_exec_argv = None;
                     return Ok(StartResult::DeferredOneshotExec);

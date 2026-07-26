@@ -9964,6 +9964,30 @@ pub fn execute_command(
                     if let Some(unit) = ri.unit_table.get(id) {
                         let status = unit.common.status.read_poisoned();
                         match &*status {
+                            // A completed Type=oneshot deliberately STAYS in
+                            // Started (see the "Completed oneshot services stay
+                            // in Started status" note above, which avoids boot
+                            // activation-graph races). Waiting for it to reach
+                            // Stopped therefore never terminates, and
+                            // `systemctl start --wait` on any oneshot hung
+                            // forever. Treat "Started with the main process
+                            // already reaped" as the terminal state instead.
+                            //
+                            // try_read on the service state, never a blocking
+                            // read: we hold `ri`, and the exit handler holds
+                            // svc.state while waiting for `ri`. Not-yet-readable
+                            // simply means "still running", so we poll again.
+                            crate::units::UnitStatus::Started(_)
+                                if matches!(&unit.specific, Specific::Service(svc) if {
+                                    svc.conf.srcv_type == crate::units::ServiceType::OneShot
+                                        && svc
+                                            .state
+                                            .try_read()
+                                            .is_ok_and(|s| s.srvc.main_exit_pid.is_some())
+                                }) =>
+                            {
+                                seen_started.insert(id.clone());
+                            }
                             crate::units::UnitStatus::Started(_)
                             | crate::units::UnitStatus::Starting => {
                                 seen_started.insert(id.clone());

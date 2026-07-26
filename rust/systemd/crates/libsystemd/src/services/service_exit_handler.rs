@@ -312,15 +312,37 @@ pub fn service_exit_handler_new_thread(
     std::thread::spawn(move || {
         let (pending_trigger, pending_restart) = {
             // Use try_read() with retry to yield to pending writers.
+            //
+            // This spin has no deadline. If it never acquires, the unit that
+            // just exited is never completed and the manager looks wedged, so
+            // report a stuck acquisition rather than spinning silently. kmsg()
+            // is deliberate: PID 1's log:: macros do not reach the console.
+            let spin_start = std::time::Instant::now();
+            let mut warned = false;
             let guard = loop {
                 match run_info.try_read() {
                     Ok(g) => break g,
                     Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
                     Err(std::sync::TryLockError::WouldBlock) => {
+                        if !warned && spin_start.elapsed() >= std::time::Duration::from_secs(10) {
+                            warned = true;
+                            crate::entrypoints::kmsg(&format!(
+                                "EXIT-HANDLER STUCK pid={pid} {} waiting >10s for the RuntimeInfo \
+                                 read lock; the unit cannot complete until it is released",
+                                srvc_id.name
+                            ));
+                        }
                         std::thread::sleep(std::time::Duration::from_millis(5));
                     }
                 }
             };
+            if warned {
+                crate::entrypoints::kmsg(&format!(
+                    "EXIT-HANDLER RECOVERED pid={pid} {} acquired the read lock after {:?}",
+                    srvc_id.name,
+                    spin_start.elapsed()
+                ));
+            }
             match service_exit_handler(pid, srvc_id, code, &guard, &run_info) {
                 Ok(result) => result,
                 Err(e) => {
