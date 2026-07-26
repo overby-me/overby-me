@@ -119,11 +119,41 @@ Landed since the ledger was written (each regression-tested before push):
 | `3348e6bd` | Nested `ExecDirectory=` paths (four defects) |
 | `57c9a771` | `systemd.unit-dropin.*` / `systemd.extra-unit.*` credentials |
 | `5c34f5a2` | Generators re-run on `daemon-reload`, as upstream does |
-| (this) | 05-RLIMITS override removed; the test passes with the real `systemd-run -t` |
+| `9b8752b4` | 05-RLIMITS override removed; the test passes with the real `systemd-run -t` |
+| `0e8e2e08` | 26-SYSTEMCTL `--global` override removed |
+| `35a1bd4e` | repart writes the empty image it is asked for; fresh GPT reports `first-lba 2048` |
+| `bf1b465e` | `--empty=create` implies `--dry-run=no`, so the image reaches disk |
+| `3cc24e09` | udev resolves symlink collisions by `link_priority` instead of last-writer-wins |
 
 Both fake passes are gone. Several of these are user-facing bugs well beyond the
-tests that exposed them: `systemctl start --wait` hung on every oneshot, and
-generated units could not change without a reboot.
+tests that exposed them: `systemctl start --wait` hung on every oneshot,
+generated units could not change without a reboot, `systemd-repart
+--empty=create` silently wrote nothing, and `/dev/disk/by-uuid/` resolved
+arbitrarily whenever two devices carried the same filesystem signature.
+
+### A rationale is only as good as the tree it was measured on
+
+67-INTEGRITY's wrapper claimed for six commits that `extraPackages` supplied
+`cryptsetup`, while the attribute was never actually committed. Every finding
+attributed to it came from an uncommitted working copy and was void: the run
+that "proved" `test_one crc32c 0` passes had in fact died much earlier, on
+`integritysetup: command not found`. Confirm a wrapper's attributes are
+committed before trusting any evidence attributed to them.
+
+Two other retired rationales for the same reason:
+
+- 58-REPART: "definition discovery is the gap" was wrong. `--definitions=` was
+  always honoured; the `No partition definitions found.` line came from
+  `systemd-repart.service` running at boot with no `repart.d`, which is benign
+  and was never the failing command.
+- 67-INTEGRITY: neither recorded candidate was right. `udevadm wait` passes and
+  the dm device is created correctly; the failure was `blkid -U` resolving the
+  filesystem to the underlying loop device.
+
+Instrumentation is part of the tree under test. An `ERR` trap that writes to
+stdout fires inside `$(...)` too, where its output is captured into the
+caller's variable and corrupts the very comparison being diagnosed; that cost a
+VM run. Diagnostics must write to stderr.
 
 ### Open, with evidence recorded in the test wrappers
 
@@ -135,6 +165,10 @@ generated units could not change without a reboot.
   generators). The third: `init.scope` is not a unit in rust-systemd, only a
   cgroup path constant, so `[Scope]` resource control never reaches PID 1's
   cgroup. That also underpins `systemctl show`/`set-property init.scope`.
+- **58-REPART** and **67-INTEGRITY** are both unmasked and running for real.
+  Each had three genuine defects fixed against it; whether either now reaches
+  the end of its suite is still being measured, and later cases are not
+  expected to pass yet.
 
 ## Work tiers
 
