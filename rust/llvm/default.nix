@@ -10,6 +10,9 @@
       ./Cargo.toml
       ./Cargo.lock
       ./crates
+      # The round-trip check reads the corpus from the source tree, so it has
+      # to be part of the source the checks build from.
+      ./corpus
     ];
   };
 
@@ -54,6 +57,13 @@ in {
     llvm-unit = pkgs:
       cargoCheck pkgs "unit" ''
         cargo test --workspace --offline --locked
+      '';
+
+    # The T0 headline: every corpus file is canonical llvm-dis output, and
+    # parsing one and printing it back reproduces it byte for byte.
+    llvm-roundtrip = pkgs:
+      cargoCheck pkgs "roundtrip" ''
+        cargo test -p llvm-ir-parse --test roundtrip --offline --locked -- --nocapture
       '';
   };
 

@@ -25,4 +25,46 @@ disabled_rules = [
   # stay separately readable. The root is the API, not a wall hiding
   # structure.
   "rust_root_reexport_wall",
+
+  # The printer builds its output in a String through `write!`, which the
+  # unbuffered-write heuristic reads as writing to a file inside a loop.
+  # There is no file: the whole module is formatted into memory and returned,
+  # which is exactly the buffering the rule asks for.
+  "rust_unbuffered_file_writes",
+
+  # A `Token` in the lexer and parser is a lexical token, not a credential,
+  # so comparing one with `==` and printing one in a Debug impl are the parser
+  # doing its job. Renaming the vocabulary of a compiler front end to satisfy
+  # a secrets heuristic would make the code harder to check against LangRef.
+  "rust_secret_equality_compare",
+  "rust_debug_secret",
+
+  # The symbol table a parser builds is keyed by names from the input, which
+  # is exactly what upstream's StringMap is. A DoS-resistant hasher would cost
+  # every lookup in the hottest map in the crate to defend against an attacker
+  # who already controls the whole module being parsed.
+  "rust_hashmap_default_hasher",
+
+  # `vector_type(element, count, scalable)`, `struct_type(fields, packed)` and
+  # `function_type(result, params, is_var_arg)` take the booleans LangRef
+  # names as properties of those types. Wrapping each in a two-variant enum
+  # would rename the specification without clarifying anything.
+  "rust_public_bool_parameter_api",
+
+  # deslop indexes one file at a time, so a call to a function declared in an
+  # `extern` block, or to one in a sibling module, reads as unresolved even
+  # though it compiles. Same call rust/fe-c and rust/bash make.
+  "hallucinated_local_call",
+
+  # The corpus seeds under corpus/rustc/src are compiler inputs, not library
+  # code: each is a handful of lines whose only job is to make rustc emit a
+  # particular shape of IR. Their `unsafe` is the point, and the heuristic
+  # does not recognise the fn-level `pub unsafe fn` form even when the body
+  # carries a SAFETY comment (the same call rust/fe-c makes).
+  "unsafe_without_safety_comment",
+  "rust_unsafe_raw_pointer_cast",
+
+  # `Lexer::new` fills every field it has; the heuristic reads the borrowed
+  # input plus the running position as a half-built value.
+  "rust_partial_init_escape",
 ]

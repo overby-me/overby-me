@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/llvm-support"]
+members = [
+  "crates/llvm-ir",
+  "crates/llvm-ir-parse",
+  "crates/llvm-ir-print",
+  "crates/llvm-support",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +14,9 @@ repository = "https://tangled.org/overby.me/overby.me"
 license = "Apache-2.0 WITH LLVM-exception"
 
 [workspace.dependencies]
+llvm-ir = { path = "crates/llvm-ir", version = "0.1.0" }
+llvm-ir-parse = { path = "crates/llvm-ir-parse", version = "0.1.0" }
+llvm-ir-print = { path = "crates/llvm-ir-print", version = "0.1.0" }
 llvm-support = { path = "crates/llvm-support", version = "0.1.0" }
 
 # The IR data model is a large pile of enums with wide variants and many

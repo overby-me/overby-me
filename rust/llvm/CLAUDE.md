@@ -79,20 +79,20 @@ checks, all three building. The cargo-check harness needs no vendor
 directory because the workspace has no third-party dependencies; when that
 changes, copy rust/fe-c's `vendorFor`.
 
-**A2. [todo] `llvm-support`: APInt, APFloat, DataLayout, Triple.**
+**A2. [done] `llvm-support`: APInt, APFloat, DataLayout, Triple.** *(2026-07-26)*
 Acceptance: unit tests including APInt cross-checked against `u128`/`i128`
 native arithmetic over a wide operand grid, and datalayout strings from the
 corpus round-tripping byte for byte.
 
-**A3. [todo] `llvm-ir`: types, constants, instructions, attributes, metadata.**
-Acceptance: the data model expresses every construct in the seed corpus, shown
-by A4 and A5 round-tripping it.
+**A3. [done] `llvm-ir`: types, constants, instructions, attributes, metadata.** *(2026-07-27)*
+The data model expresses every construct in the corpus, which A4 and A5
+demonstrate by round-tripping it.
 
-**A4. [todo] `llvm-ir-print`: textual printer with LLVM's slot numbering.**
-Acceptance: `llvm-roundtrip` green over the corpus.
+**A4. [done] `llvm-ir-print`: textual printer with LLVM's slot numbering.** *(2026-07-27)*
+Byte-identical to `llvm-dis` over the whole corpus.
 
-**A5. [todo] `llvm-ir-parse`: lexer and recursive-descent parser.**
-Acceptance: same check; plus every parse error carries a line and column.
+**A5. [done] `llvm-ir-parse`: lexer and recursive-descent parser.** *(2026-07-27)*
+Same check; every parse error carries a line and a column.
 
 **A6. [todo] Verifier.**
 Structural, type and dominance rules for the emitted subset.

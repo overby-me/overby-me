@@ -4,7 +4,7 @@ What exists, what is a stub, and what claim is *not* being made yet. Written in
 the register [rust/fe-c](../fe-c/STATUS.md) uses: a sentence here is either
 backed by a check that passes or is marked unmeasured.
 
-**Last updated:** 2026-07-26.
+**Last updated:** 2026-07-27.
 **Tier:** T0 (PLAN.md §8), in progress.
 
 ## Pins
@@ -28,6 +28,24 @@ and each row names the check that backs it.
 | APFloat: bit-pattern carrier plus LLVM's textual forms | done | `llvm-unit`, including every `half` and `bfloat` bit pattern |
 | DataLayout: parsing, alignment queries, verbatim printing | done | `llvm-unit` |
 | Triple: component parsing, verbatim printing | done | `llvm-unit` |
+| IR data model: types, constants, instructions, attributes, metadata | done | `llvm-unit`, and the round trip below, which cannot pass without it |
+| Textual printer | done, byte-identical to `llvm-dis` over the corpus | `llvm-roundtrip` |
+| Textual parser | done for everything the corpus contains | `llvm-roundtrip` |
+| Type layout: sizes, alignments, struct offsets | done | `llvm-unit` |
+
+## The round trip
+
+Every file in `corpus/` is canonical `llvm-dis` output, and parsing one and
+printing it back reproduces it byte for byte. As of 2026-07-27 that is 9
+files and roughly 3,600 lines: 6 generated from real `rustc --emit=llvm-ir`
+(arithmetic, control flow, memory, atomics, calls, unwinding) and 3
+hand-written to pin syntax rustc never emits (module structure, one of every
+instruction, one of every constant and type form).
+
+This is a stronger property than "the parser accepted it". It says we agree
+with upstream about slot numbering, predecessor order, blank lines, label
+padding, which defaults print as nothing, and the several places where the
+same attribute is spelled differently depending on where it sits.
 
 ## What is not started
 

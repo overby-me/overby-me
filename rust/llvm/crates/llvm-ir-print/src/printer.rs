@@ -1,0 +1,413 @@
+//! The printer's state and the module-level driver.
+
+use std::fmt::Write as _;
+
+use llvm_ir::attribute::{Attribute, AttributeSet, IntAttr};
+use llvm_ir::function::Function;
+use llvm_ir::value::{Name, escape_name, needs_quotes};
+use llvm_ir::{BlockId, Module, StructId, TypeId, TypeKind};
+use llvm_support::Align;
+
+use crate::print_type;
+use crate::slots::FunctionSlots;
+
+/// The column upstream pads a block label to before its predecessor comment.
+pub(crate) const LABEL_COMMENT_COLUMN: usize = 50;
+/// The indent upstream uses for the continuation lines of `invoke`,
+/// `landingpad`, `catchswitch` and friends.
+pub(crate) const CONTINUATION: &str = "          ";
+
+pub(crate) struct Printer<'m> {
+    pub(crate) module: &'m Module,
+    pub(crate) out: String,
+    pub(crate) slots: FunctionSlots,
+}
+
+impl<'m> Printer<'m> {
+    pub(crate) fn new(module: &'m Module) -> Printer<'m> {
+        Printer {
+            module,
+            out: String::new(),
+            slots: FunctionSlots::default(),
+        }
+    }
+
+    pub(crate) fn push(&mut self, text: &str) {
+        self.out.push_str(text);
+    }
+
+    /// Length of the current output line, for the label padding rule.
+    pub(crate) fn column(&self) -> usize {
+        match self.out.rfind('\n') {
+            Some(index) => self.out.len() - index - 1,
+            None => self.out.len(),
+        }
+    }
+
+    // ---------------------------------------------------------------- module
+
+    pub(crate) fn module(&mut self) {
+        if let Some(id) = &self.module.module_id {
+            let _ = writeln!(self.out, "; ModuleID = '{id}'");
+        }
+        if let Some(name) = &self.module.source_filename {
+            let _ = writeln!(self.out, "source_filename = \"{}\"", escape_string(name));
+        }
+        if let Some(layout) = &self.module.data_layout {
+            let _ = writeln!(self.out, "target datalayout = \"{}\"", layout.as_str());
+        }
+        if let Some(triple) = &self.module.triple {
+            let _ = writeln!(self.out, "target triple = \"{}\"", triple.as_str());
+        }
+
+        if !self.module.module_asm.is_empty() {
+            self.push("\n");
+            for line in &self.module.module_asm {
+                let _ = writeln!(self.out, "module asm \"{}\"", escape_string(line));
+            }
+        }
+
+        self.type_identities();
+
+        if !self.module.comdats.is_empty() {
+            self.push("\n");
+            for comdat in &self.module.comdats {
+                let _ = writeln!(
+                    self.out,
+                    "${} = comdat {}",
+                    identifier(&comdat.name),
+                    comdat.kind.keyword()
+                );
+            }
+        }
+
+        if !self.module.globals.is_empty() {
+            self.push("\n");
+            for index in 0..self.module.globals.len() {
+                self.global(&self.module.globals[index]);
+                self.push("\n");
+            }
+        }
+
+        if !self.module.aliases.is_empty() {
+            self.push("\n");
+            for index in 0..self.module.aliases.len() {
+                self.alias(&self.module.aliases[index]);
+            }
+        }
+
+        if !self.module.ifuncs.is_empty() {
+            self.push("\n");
+            for index in 0..self.module.ifuncs.len() {
+                self.ifunc(&self.module.ifuncs[index]);
+            }
+        }
+
+        for index in 0..self.module.functions.len() {
+            self.push("\n");
+            self.function(&self.module.functions[index]);
+        }
+
+        if !self.module.attribute_groups.is_empty() {
+            self.push("\n");
+            for (number, attributes) in &self.module.attribute_groups {
+                let mut set = AttributeSet::default();
+                set.attributes.clone_from(attributes);
+                let _ = writeln!(
+                    self.out,
+                    "attributes #{number} = {{ {} }}",
+                    attribute_list(self.module, &set, true)
+                );
+            }
+        }
+
+        if !self.module.named_metadata.is_empty() {
+            self.push("\n");
+            for named in &self.module.named_metadata {
+                let operands: Vec<String> = named
+                    .operands
+                    .iter()
+                    .map(|id| format!("!{}", id.0))
+                    .collect();
+                let _ = writeln!(
+                    self.out,
+                    "!{} = !{{{}}}",
+                    metadata_name(&named.name),
+                    operands.join(", ")
+                );
+            }
+        }
+
+        if self.module.metadata_nodes().next().is_some() {
+            self.push("\n");
+            let ids: Vec<_> = self.module.metadata_nodes().map(|(id, _)| id).collect();
+            for id in ids {
+                let node = self
+                    .module
+                    .metadata_node(id)
+                    .expect("id came from the node list")
+                    .clone();
+                let _ = write!(self.out, "!{} = ", id.0);
+                self.metadata_definition(&node);
+                self.push("\n");
+            }
+        }
+    }
+
+    /// `%name = type { ... }` for every identified struct, in creation order.
+    pub(crate) fn type_identities(&mut self) {
+        let ids: Vec<StructId> = self.module.ctx.named_structs().map(|(id, _)| id).collect();
+        if ids.is_empty() {
+            return;
+        }
+        self.push("\n");
+        for id in ids {
+            let def = self.module.ctx.struct_def(id);
+            let name = def.name.clone();
+            let fields = def.fields.clone();
+            let packed = def.packed;
+            let _ = write!(self.out, "%{} = type ", identifier(&name));
+            match fields {
+                None => self.push("opaque"),
+                Some(fields) => self.struct_body(&fields, packed),
+            }
+            self.push("\n");
+        }
+    }
+
+    pub(crate) fn struct_body(&mut self, fields: &[TypeId], packed: bool) {
+        if packed {
+            self.push("<");
+        }
+        if fields.is_empty() {
+            self.push("{}");
+        } else {
+            self.push("{ ");
+            for (index, field) in fields.iter().enumerate() {
+                if index > 0 {
+                    self.push(", ");
+                }
+                self.ty(*field);
+            }
+            self.push(" }");
+        }
+        if packed {
+            self.push(">");
+        }
+    }
+
+    // ----------------------------------------------------------------- types
+
+    pub(crate) fn ty(&mut self, id: TypeId) {
+        match self.module.ctx.type_kind(id).clone() {
+            TypeKind::Void => self.push("void"),
+            TypeKind::Label => self.push("label"),
+            TypeKind::Metadata => self.push("metadata"),
+            TypeKind::Token => self.push("token"),
+            TypeKind::X86Amx => self.push("x86_amx"),
+            TypeKind::Integer(bits) => {
+                let _ = write!(self.out, "i{bits}");
+            }
+            TypeKind::Float(semantics) => self.push(semantics.type_name()),
+            TypeKind::Pointer { address_space } => {
+                self.push("ptr");
+                if address_space != 0 {
+                    let _ = write!(self.out, " addrspace({address_space})");
+                }
+            }
+            TypeKind::Array { element, count } => {
+                let _ = write!(self.out, "[{count} x ");
+                self.ty(element);
+                self.push("]");
+            }
+            TypeKind::Vector {
+                element,
+                count,
+                scalable,
+            } => {
+                self.push("<");
+                if scalable {
+                    self.push("vscale x ");
+                }
+                let _ = write!(self.out, "{count} x ");
+                self.ty(element);
+                self.push(">");
+            }
+            TypeKind::Struct { fields, packed } => self.struct_body(&fields, packed),
+            TypeKind::NamedStruct(struct_id) => {
+                let name = self.module.ctx.struct_def(struct_id).name.clone();
+                let _ = write!(self.out, "%{}", identifier(&name));
+            }
+            TypeKind::Function {
+                result,
+                params,
+                is_var_arg,
+            } => {
+                self.ty(result);
+                self.push(" (");
+                for (index, param) in params.iter().enumerate() {
+                    if index > 0 {
+                        self.push(", ");
+                    }
+                    self.ty(*param);
+                }
+                if is_var_arg {
+                    if params.is_empty() {
+                        self.push("...");
+                    } else {
+                        self.push(", ...");
+                    }
+                }
+                self.push(")");
+            }
+            TypeKind::Target { name, types, ints } => {
+                let _ = write!(self.out, "target(\"{}\"", escape_string(&name));
+                for ty in types {
+                    self.push(", ");
+                    self.ty(ty);
+                }
+                for int in ints {
+                    let _ = write!(self.out, ", {int}");
+                }
+                self.push(")");
+            }
+        }
+    }
+}
+
+/// Predecessor lists, indexed by block.
+///
+/// Upstream walks a block's use list, which grows at the front, so the
+/// predecessors come out in reverse order of the terminators that name them.
+/// A terminator naming the same block twice contributes two entries, exactly
+/// as upstream does.
+pub(crate) fn predecessors(function: &Function) -> Vec<Vec<BlockId>> {
+    let mut preds = vec![Vec::new(); function.block_count()];
+    for (id, _) in function.blocks() {
+        for (_, instruction) in function.block_instructions(id) {
+            for successor in instruction.kind.successors() {
+                preds[successor.0 as usize].push(id);
+            }
+        }
+    }
+    for list in &mut preds {
+        list.reverse();
+    }
+    preds
+}
+
+/// Escapes a string the way upstream's `printEscapedString` does: anything
+/// outside printable ASCII, plus the backslash and the double quote, becomes
+/// a backslash and two uppercase hex digits.
+pub(crate) fn escape_string(text: &str) -> String {
+    escape_bytes(text.as_bytes())
+}
+
+/// The same rule over raw bytes, which is what a `c"..."` string needs.
+///
+/// A backslash prints as a doubled backslash rather than as `\5C`, while a
+/// double quote prints as `\22`. That asymmetry is upstream's.
+pub(crate) fn escape_bytes(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for byte in bytes {
+        match byte {
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\22"),
+            0x20..=0x7e => out.push(*byte as char),
+            _ => {
+                let _ = write!(out, "\\{byte:02X}");
+            }
+        }
+    }
+    out
+}
+
+/// An identifier, quoted when it has to be.
+///
+/// Upstream's printer allows only alphanumerics, `-`, `.` and `_` bare, which
+/// is narrower than what its lexer accepts: a `$` in a mangled Rust symbol
+/// reads back fine unquoted but always prints quoted.
+pub(crate) fn identifier(name: &str) -> String {
+    if needs_quotes(name) || name.contains('$') {
+        format!("\"{}\"", escape_name(name))
+    } else {
+        name.to_string()
+    }
+}
+
+pub(crate) fn metadata_name(name: &str) -> String {
+    identifier(name)
+}
+
+pub(crate) fn name_text(name: &Name) -> String {
+    match name {
+        Name::Named(text) => identifier(text),
+        Name::Number(number) => number.to_string(),
+    }
+}
+
+pub(crate) fn align_text(align: Option<Align>) -> String {
+    match align {
+        Some(align) => format!(", align {}", align.bytes()),
+        None => String::new(),
+    }
+}
+
+/// The attributes of a set, space separated.
+///
+/// `in_group` picks between the two spellings upstream uses for the same
+/// attribute: `align 8` in a parameter list, `align=8` inside an attribute
+/// group. Getting this wrong is invisible until a round trip fails.
+pub(crate) fn attribute_list(module: &Module, set: &AttributeSet, in_group: bool) -> String {
+    set.attributes
+        .iter()
+        .map(|attribute| attribute_text(module, attribute, in_group))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub(crate) fn attribute_text(module: &Module, attribute: &Attribute, in_group: bool) -> String {
+    match attribute {
+        Attribute::Enum(kind) => kind.keyword().to_string(),
+        Attribute::Int {
+            kind,
+            first,
+            second,
+        } => match (kind, in_group, second) {
+            (IntAttr::Align, true, _) => format!("align={first}"),
+            (IntAttr::Align, false, _) => format!("align {first}"),
+            (IntAttr::AlignStack, true, _) => format!("alignstack={first}"),
+            (_, _, Some(second)) => format!("{}({first},{second})", kind.keyword()),
+            (_, _, None) => format!("{}({first})", kind.keyword()),
+        },
+        Attribute::Type { kind, ty } => {
+            format!("{}({})", kind.keyword(), print_type(module, *ty))
+        }
+        Attribute::Range { ty, lower, upper } => format!(
+            "range({} {}, {})",
+            print_type(module, *ty),
+            lower.to_string_signed(),
+            upper.to_string_signed()
+        ),
+        Attribute::Structured { kind, arguments } => {
+            format!("{}({arguments})", kind.keyword())
+        }
+        Attribute::String { key, value } => match value {
+            Some(value) => format!("\"{}\"=\"{}\"", escape_string(key), escape_string(value)),
+            None => format!("\"{}\"", escape_string(key)),
+        },
+    }
+}
+
+impl Printer<'_> {
+    /// A function's attributes, with any groups it names expanded in place.
+    pub(crate) fn resolved_attributes(&self, set: &AttributeSet) -> Vec<Attribute> {
+        let mut all = set.attributes.clone();
+        for group in &set.groups {
+            if let Some(attributes) = self.module.attribute_group(*group) {
+                all.extend(attributes.iter().cloned());
+            }
+        }
+        all
+    }
+}

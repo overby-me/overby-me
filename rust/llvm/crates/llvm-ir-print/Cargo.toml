@@ -1,0 +1,14 @@
+[package]
+name = "llvm-ir-print"
+version.workspace = true
+edition.workspace = true
+description = "Textual LLVM IR printer, byte-compatible with upstream's assembly writer"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+llvm-ir.workspace = true
+llvm-support.workspace = true
+
+[lints]
+workspace = true

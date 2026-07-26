@@ -3,5 +3,29 @@
 version = 4
 
 [[package]]
+name = "llvm-ir"
+version = "0.1.0"
+dependencies = [
+ "llvm-support",
+]
+
+[[package]]
+name = "llvm-ir-parse"
+version = "0.1.0"
+dependencies = [
+ "llvm-ir",
+ "llvm-ir-print",
+ "llvm-support",
+]
+
+[[package]]
+name = "llvm-ir-print"
+version = "0.1.0"
+dependencies = [
+ "llvm-ir",
+ "llvm-support",
+]
+
+[[package]]
 name = "llvm-support"
 version = "0.1.0"
