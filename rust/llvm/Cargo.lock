@@ -29,3 +29,12 @@ dependencies = [
 [[package]]
 name = "llvm-support"
 version = "0.1.0"
+
+[[package]]
+name = "llvm-tools"
+version = "0.1.0"
+dependencies = [
+ "llvm-ir",
+ "llvm-ir-parse",
+ "llvm-ir-print",
+]

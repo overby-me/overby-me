@@ -5,6 +5,7 @@ members = [
   "crates/llvm-ir-parse",
   "crates/llvm-ir-print",
   "crates/llvm-support",
+  "crates/llvm-tools",
 ]
 
 [workspace.package]

@@ -13,8 +13,10 @@ honest account of what exists right now.
 ## Where this is
 
 **Tier T0, in progress.** What works today is the IR core: parse textual LLVM
-IR, verify it, print it back. There is no optimizer, no code generator, no
-object emission, and no rustc backend yet. Nothing here compiles a Rust
+IR, verify it, print it back. Printing is byte-identical to upstream's own
+`llvm-dis` over the whole corpus, which is the property the rest of the
+project will be measured against. There is no optimizer, no code generator,
+no object emission, and no rustc backend yet. Nothing here compiles a Rust
 program. See [STATUS.md](./STATUS.md) for the per-area breakdown and for the
 claims that are explicitly *not* being made.
 

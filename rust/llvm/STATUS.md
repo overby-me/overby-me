@@ -32,6 +32,8 @@ and each row names the check that backs it.
 | Textual printer | done, byte-identical to `llvm-dis` over the corpus | `llvm-roundtrip` |
 | Textual parser | done for everything the corpus contains | `llvm-roundtrip` |
 | Type layout: sizes, alignments, struct offsets | done | `llvm-unit` |
+| Verifier: structure, types, flags, call signatures, dominance | done for the modelled subset | `llvm-verify-corpus` |
+| `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
 
 ## The round trip
 
@@ -55,7 +57,9 @@ a compiler project's README:
 - **No code generation.** No instruction selection, no register allocation, no
   object emission, no assembler. `llc` does not exist.
 - **No optimizer.** No pass manager beyond the identity, no analyses, no
-  transforms. `opt -passes=instcombine` is an error, not a no-op.
+  transforms. `opt -passes=instcombine` is an error, not a no-op. The
+  dominator tree the verifier computes is the only analysis that exists, and
+  it is not exposed.
 - **No bitcode.** Reading and writing `.bc` are both T3. `llvm-as` and
   `llvm-dis` do not exist because their contract is bitcode.
 - **No rustc backend.** `rustc_codegen_llvm` is not vendored, and no Rust

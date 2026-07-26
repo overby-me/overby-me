@@ -41,6 +41,7 @@ pub mod metadata;
 pub mod module;
 pub mod types;
 pub mod value;
+pub mod verify;
 
 pub use context::Context;
 pub use module::Module;
@@ -48,3 +49,4 @@ pub use types::{StructId, TypeId, TypeKind};
 pub use value::{
     AliasId, BlockId, FunctionId, GlobalRef, GlobalVarId, IFuncId, InstId, MdId, Name, Value,
 };
+pub use verify::{VerifyError, verify_module};

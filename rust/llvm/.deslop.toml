@@ -64,6 +64,12 @@ disabled_rules = [
   "unsafe_without_safety_comment",
   "rust_unsafe_raw_pointer_cast",
 
+  # `opt` reads a whole module into memory before parsing it, because that is
+  # what parsing a module means, and it sets fields of its options struct in
+  # the loop over argv, which is not a hot path by any definition.
+  "rust_unbounded_read_to_string",
+  "rust_aos_hot_path",
+
   # `Lexer::new` fills every field it has; the heuristic reads the borrowed
   # input plus the running position as a half-built value.
   "rust_partial_init_escape",

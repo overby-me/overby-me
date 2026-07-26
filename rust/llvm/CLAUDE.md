@@ -94,13 +94,16 @@ Byte-identical to `llvm-dis` over the whole corpus.
 **A5. [done] `llvm-ir-parse`: lexer and recursive-descent parser.** *(2026-07-27)*
 Same check; every parse error carries a line and a column.
 
-**A6. [todo] Verifier.**
-Structural, type and dominance rules for the emitted subset.
-Acceptance: `llvm-verify-corpus` green, and each rule has a test that a
-deliberately broken module is rejected with the expected message.
+**A6. [done] Verifier.** *(2026-07-27)*
+Structural, type, flag, signature and dominance rules. The corpus verifies
+clean, which is a real check because real `llvm-as` verified every one of
+those files, and a table of 18 deliberately broken modules is rejected with
+the message each rule owns.
 
-**A7. [todo] `opt` with an upstream-compatible CLI subset.**
-Acceptance: `llvm-roundtrip` drives the real binary, not a test harness.
+**A7. [done] `opt` with an upstream-compatible CLI subset.** *(2026-07-27)*
+`-S`, `-o`, `-passes=`, `--verify-each`, `-` for stdin. `llvm-roundtrip`
+drives the installed binary over the corpus, not just the library. An
+unimplemented pass and bitcode output are both errors that say so.
 
 ### T0.2, conformance and the rustc seam
 

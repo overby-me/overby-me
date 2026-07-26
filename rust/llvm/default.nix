@@ -64,10 +64,39 @@ in {
     llvm-roundtrip = pkgs:
       cargoCheck pkgs "roundtrip" ''
         cargo test -p llvm-ir-parse --test roundtrip --offline --locked -- --nocapture
+        cargo build -p llvm-tools --offline --locked
+        nu corpus/check-opt.nu "$CARGO_TARGET_DIR/debug/opt" corpus
+      '';
+
+    # The verifier accepts everything real llvm-as accepted, and rejects a
+    # table of deliberately broken modules with the message each rule owns.
+    llvm-verify-corpus = pkgs:
+      cargoCheck pkgs "verify-corpus" ''
+        cargo test -p llvm-ir-parse --test verify --offline --locked -- --nocapture
       '';
   };
 
-  # No `packages.rust-llvm` yet: the workspace is libraries only, so there is
-  # nothing to install. It arrives with the llvm-tools crate, along with the
-  # upstream-compatible `opt` name and its `opt-rs` alias (PLAN.md section 9.1).
+  packages.rust-llvm = {lib, ...}:
+    lib.buildCargoProject {
+      pname = "rust-llvm";
+      src = llvmSrc;
+      index = ../../nix/lib/cargo/index;
+      roots = ["llvm-tools"];
+
+      rootAttrs.postInstall = ''
+        # The upstream-compatible name is the point; the suffixed alias is
+        # for a PATH that already has real LLVM on it, the way rust/gcc does
+        # it for gcc and cc.
+        ln -s $out/bin/opt $out/bin/opt-rs
+      '';
+
+      meta = {
+        description = "LLVM-compatible compiler infrastructure written in Rust";
+        homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/llvm";
+        # Apache-2.0 WITH LLVM-exception, which nixpkgs spells as the pair.
+        license = [lib.licenses.asl20 lib.licenses.llvm-exception];
+        mainProgram = "opt";
+        platforms = lib.platforms.linux ++ lib.platforms.darwin;
+      };
+    };
 }
