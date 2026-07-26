@@ -15,13 +15,18 @@ Audited 2026-07-26 against nixpkgs systemd v258
 |-------|-------|---------|
 | Clean | 179 | No `patchScript`. Runs upstream verbatim. |
 | Environment-only | 224 | Patches NixOS-specific facts (absolute binary paths, `nobody`'s home, the harness `exit 123` line, `/testok` for standalone subtests). Not a coverage gap. |
-| **Full skip** | **14** | Script replaced by `exit 77`. Nothing runs. |
-| **Fake pass** | **2** | Script replaced by `touch /testok`. Nothing runs and it reports success. |
+| **Full skip** | **15** | Script replaced by `exit 77`. Nothing runs. |
+| **Fake pass** | **0** | Script replaced by `touch /testok`. Nothing runs and it reports success. |
 | **Mid-test skip** | **2** | Runs partway, then `touch /skipped; exit 0`. |
 | **Partial mask** | **12** | Assertions deleted from a real upstream script. |
 | **Substitute** | **9** | Upstream subtest replaced by a hand-written one. |
 
-40 tests carry a real override.
+38 tests carry a real override.
+
+**Retired so far:** 44-LOG-NAMESPACE (was a fake pass, now runs the upstream
+script to `/testok`). 34-DYNAMICUSERMIGRATE was the other fake pass; it is now an
+honest skip carrying its real first failure, so no test claims success without
+running. There are no fake passes left.
 
 Environment-only patches are legitimate and are not tracked here. They are:
 deleting `systemctl --no-block exit 123` (upstream's own VM-teardown line, which the
@@ -44,7 +49,7 @@ gets `/skipped` created for it. Every override in this file was therefore invisi
 zero lines of TEST-46-HOMED.sh.
 
 Fixed by the `expectedSkip` argument. A `/skipped` marker now fails the check unless the
-test opts in, and the opt-in list is the audit surface. 23 tests currently set it: the 16
+test opts in, and the opt-in list is the audit surface. 24 tests currently set it: the 17
 carrying a forced `exit 77` override, plus 7 where the upstream script takes its own skip
 path in this VM (06-SELINUX is not on a supported distro ID, 08-INITRD sees
 `InitRDTimestampMonotonic == 0` because `boot.initrd.systemd.enable` is off, 21-DFUZZER
@@ -89,8 +94,8 @@ Most skip comments predate the feature they name. Verified today:
 | 46-HOMED | "no systemd-homed service unit" | `crates/homed` is 7,411 lines; the unit exists in the C package, just unlinked |
 | 55-OOMD | "systemd-oomd stub only" | `crates/oomd` is 1,432 lines |
 | 67-INTEGRITY | "systemd-integritysetup stub only" | `crates/integritysetup` is 3,764 lines |
-| 44-LOG-NAMESPACE | "LogNamespace not yet implemented in journald" | journald runs namespace instances (`crates/journald/src/main.rs:3825-4031`); journalctl has `--list-namespaces` and `--namespace=` (`main.rs:359-363`) |
-| 34-DYNAMICUSERMIGRATE | "StateDirectory alias and DynamicUser migration not yet implemented" | `exec_helper.rs:1898-1922` already builds the `private/<name>` layout with the symlink |
+| 44-LOG-NAMESPACE | "LogNamespace not yet implemented in journald" | *Fixed.* journald already ran namespace instances and journalctl already had `--list-namespaces`; only the exec-side wiring was missing |
+| 34-DYNAMICUSERMIGRATE | "StateDirectory alias and DynamicUser migration not yet implemented" | *Partly fixed.* The `private/<name>` layout was already built; the 0<->1 migration and the `dir:alias:ro` syntax for Runtime/Cache/Logs directories are now implemented. Baselined to a different, real blocker (see Tier 2) |
 | 26-SYSTEMCTL | "`--global` flag not implemented" | `systemctl/src/main.rs:59,624,1071,1154` handles `--global` |
 | 05-RLIMITS | replaces `systemd-run -t` with `--pipe` | `crates/run/src/main.rs:86` implements `-t`/`--pty` |
 | 74-AUX-UTILS cgls | "user manager does not place transient units under app.slice" | `control.rs:3593-3604` defaults user transient units to `app.slice` |
@@ -114,8 +119,6 @@ Remove the override, run, record. Ordered by expected payoff.
 
 | Test | Override | Why it is likely close |
 |------|----------|------------------------|
-| 44-LOG-NAMESPACE | fake pass | 26-line test. Both ends exist; see below for the one missing link |
-| 34-DYNAMICUSERMIGRATE | fake pass | 240 lines of `RuntimeDirectory`/`StateDirectory`/`CacheDirectory`/`LogsDirectory` across `DynamicUser=0` -> `1`; the private/ layout is built |
 | 58-REPART | full skip | needs `extraUnits` + real binary, both present |
 | 46-HOMED | full skip | needs `extraUnits`. Note: the suite is 1,060 lines and leans on `userdbctl`, which has no rust crate, so expect the baseline to stop early |
 | 55-OOMD | full skip | needs `extraUnits` + oomd binary |
@@ -139,7 +142,6 @@ find what the hand-written one does not cover.
 
 | Test | Needed |
 |------|--------|
-| 44-LOG-NAMESPACE | `LogNamespace=` is parsed into `unit.rs:3350` and carried through `from_parsed_config.rs:799`, then dropped. Nothing in `exec_helper.rs` reads it. Needs: route the service's stdout/stderr to `/run/systemd/journal.<ns>/stdout` instead of the default socket, and add an implicit dependency on `systemd-journald@<ns>.socket` so the namespace instance is socket-activated |
 | 63-PATH | The `issue-24577` block asserts a queued job is visible in `list-jobs`. rust-systemd resolves dependencies inline and has no job objects, so nothing is ever pending. Needs minimal job objects (also the largest remaining item from the old upstream divergence map) |
 | 45-TIMEDATE | `testcase_timesyncd` needs a networkd dummy interface carrying link-local NTP servers so timesyncd picks them up |
 | 30-ONCLOCKCHANGE | The `alternate-path` section needs timedated to notify PID 1 of a timezone change over D-Bus (`SYSTEMD_ETC_LOCALTIME` override) |
@@ -150,6 +152,7 @@ find what the hand-written one does not cover.
 | 23-UNIT-FILE ExecStopPost | Deleted `Type=dbus` and `Type=notify` sections. Both service types work now; re-run and see |
 | 23-UNIT-FILE type-exec | Deleted the `busctl` block for issue #20933 |
 | 07-PID1 issue-30412 | `socat` is backgrounded and killed after 2s instead of running in the foreground, so the test no longer proves the socket fd is dropped when `ExecStart` fails with 203. That is exactly what issue #30412 is about |
+| 34-DYNAMICUSERMIGRATE | Exec directories must be bind-mounted into the namespace *after* `TemporaryFileSystem=`, or the tmpfs masks them and the service cannot see its own `StateDirectory`. That is the baselined first failure. The machinery already exists: `bind_entries` supports a `source_fd` opened before the tmpfs and bound from `/proc/self/fd/N` (`exec_helper.rs`, "Step 3"). Further in, the test also needs nested exec directories (`quux/pief`, `xxx/yyy:aaa/111`) and idmapped mounts on kernels >= 5.12 |
 
 ### Tier 3: new subsystems
 

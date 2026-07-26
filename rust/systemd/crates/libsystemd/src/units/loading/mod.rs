@@ -8,7 +8,8 @@ use crate::units::{ParsingError, Specific, Unit, UnitId, get_file_list, parse_fi
 
 pub use directory_deps::collect_dir_deps_for_unit;
 use directory_deps::{
-    DirectoryDependency, apply_directory_dependencies, apply_dropins, collect_dep_dir_entries,
+    DirectoryDependency, add_log_namespace_dependencies, apply_directory_dependencies,
+    apply_dropins, collect_dep_dir_entries,
     collect_dropin_entries, create_implicit_slices_from_dropins, generate_fstab_mount_units,
     generate_getty_units, insert_parsed_unit, instantiate_template_units, is_template_unit,
     is_unit_file, parse_dep_dir_name, parse_dropin_dir_name, resolve_specifiers,
@@ -128,6 +129,11 @@ fn load_all_units_inner(
             dep.child_unit
         );
     }
+
+    // LogNamespace= services need systemd-journald@<ns> up before they exec.
+    // Injected as Requires=/After= before instantiation so the template
+    // instances are created by the referenced-in-Requires= pass below.
+    add_log_namespace_dependencies(&mut unit_table, paths, &dropins);
 
     // Instantiate template units referenced by directory dependencies
     instantiate_template_units(&mut unit_table, &dir_deps, paths, &dropins);

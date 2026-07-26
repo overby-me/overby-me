@@ -1775,7 +1775,7 @@ fn main() {
     if cli.list_namespaces {
         // List journal namespaces. Namespaces are subdirectories under
         // /var/log/journal/<machine-id>.* or /run/log/journal/<machine-id>.*
-        let namespaces = discover_namespaces();
+        let namespaces = discover_namespaces(cli.root.as_deref().unwrap_or(""));
         if cli.output.starts_with("json") {
             let items: Vec<String> = namespaces.iter().map(|n| format!("\"{}\"", n)).collect();
             println!("[{}]", items.join(","));
@@ -3268,9 +3268,17 @@ fn find_namespace_dir(base: &PathBuf, namespace: &str) -> Option<PathBuf> {
 
 /// Discover journal namespaces by scanning journal directories for
 /// namespace-specific subdirectories (e.g., `<machine-id>.foobar`).
-fn discover_namespaces() -> Vec<String> {
+/// Discover journal namespaces under `root` (empty for the live system).
+///
+/// `--root=DIR` must be honoured here: TEST-44-LOG-NAMESPACE asserts that
+/// `journalctl --root=/tmp --list-namespaces --quiet` prints nothing, which only
+/// holds if the search is confined to the given tree rather than the host's.
+fn discover_namespaces(root: &str) -> Vec<String> {
     let mut namespaces = Vec::new();
-    let dirs = ["/var/log/journal", "/run/log/journal"];
+    let dirs = [
+        format!("{root}/var/log/journal"),
+        format!("{root}/run/log/journal"),
+    ];
 
     for dir in &dirs {
         let Ok(entries) = fs::read_dir(dir) else {

@@ -1491,6 +1491,107 @@ pub fn instantiate_template(
     }
 }
 
+/// The unit names a `LogNamespace=<ns>` service must be ordered after.
+///
+/// Upstream (`src/core/unit.c`, `unit_add_default_dependencies`) adds both
+/// `After=` and `Requires=` on `systemd-journald@<ns>.socket`,
+/// `systemd-journald-varlink@<ns>.socket` and `systemd-journald-sync@<ns>.service`.
+/// We wire the two sockets: the first is the one the exec helper connects
+/// stdout to (`/run/systemd/journal.<ns>/stdout`), and the second is what
+/// `journalctl --namespace=` talks to.  The sync service is not shipped by
+/// every build, so it is left out rather than turned into a hard requirement
+/// that could not be satisfied.
+pub fn log_namespace_dependencies(ns: &str) -> Vec<String> {
+    vec![
+        format!("systemd-journald@{ns}.socket"),
+        format!("systemd-journald-varlink@{ns}.socket"),
+    ]
+}
+
+/// Every template instance that must exist in the unit table for a
+/// `LogNamespace=<ns>` service to start.
+///
+/// This is a superset of [`log_namespace_dependencies`]: the sockets carry
+/// `Service=systemd-journald@%i.service`, and activating a socket whose
+/// `Service=` target is absent from the table fails with "Tried to activate a
+/// unit that can not be found".  The service is materialized but deliberately
+/// not added to `Requires=`, matching upstream, which lets the socket activate
+/// it.
+pub fn log_namespace_units(ns: &str) -> Vec<String> {
+    let mut units = log_namespace_dependencies(ns);
+    units.push(format!("systemd-journald@{ns}.service"));
+    units
+}
+
+/// Give every `LogNamespace=` service its implicit dependency on the journal
+/// namespace instance, and materialize the instances it needs.
+///
+/// Runs *before* [`instantiate_template_units`] so the `systemd-journald@<ns>`
+/// instances get created from their templates by the existing
+/// referenced-in-Requires= pass, rather than needing a second instantiation
+/// path.  The `.service` instance is not in any `Requires=` (the socket
+/// activates it), so it is instantiated explicitly here.
+pub fn add_log_namespace_dependencies(
+    unit_table: &mut HashMap<UnitId, Unit>,
+    unit_dirs: &[PathBuf],
+    dropins: &HashMap<String, Vec<(String, String)>>,
+) {
+    use crate::units::Specific;
+
+    let mut namespaces: Vec<(UnitId, String)> = Vec::new();
+    for unit in unit_table.values() {
+        let Specific::Service(svc) = &unit.specific else {
+            continue;
+        };
+        let Some(ns) = svc.conf.exec_config.log_namespace.as_deref() else {
+            continue;
+        };
+        if !ns.is_empty() {
+            namespaces.push((unit.id.clone(), ns.to_owned()));
+        }
+    }
+
+    for (unit_id, ns) in &namespaces {
+        let deps: Vec<UnitId> = log_namespace_dependencies(ns)
+            .iter()
+            .filter_map(|n| n.as_str().try_into().ok())
+            .collect();
+        let Some(unit) = unit_table.get_mut(unit_id) else {
+            continue;
+        };
+        let d = &mut unit.common.dependencies;
+        for dep in deps {
+            if !d.requires.contains(&dep) {
+                d.requires.push(dep.clone());
+            }
+            if !d.after.contains(&dep) {
+                d.after.push(dep);
+            }
+        }
+    }
+
+    for (_, ns) in &namespaces {
+        for name in log_namespace_units(ns) {
+            let Ok(id) = <&str as TryInto<UnitId>>::try_into(name.as_str()) else {
+                continue;
+            };
+            if unit_table.contains_key(&id) {
+                continue;
+            }
+            let Some((template_name, instance_name)) = parse_template_instance(&name) else {
+                continue;
+            };
+            if let Some(inst) =
+                instantiate_template(&template_name, &instance_name, &name, unit_dirs, dropins)
+            {
+                unit_table.insert(id, inst);
+            } else {
+                warn!("LogNamespace=: could not instantiate {name} from {template_name}");
+            }
+        }
+    }
+}
+
 /// Instantiate template units that are referenced by directory dependencies
 /// but not yet in the unit table.
 pub fn instantiate_template_units(
@@ -2869,6 +2970,7 @@ mod tests {
                     fragment_path: None,
                     refs_by_name: vec![],
                     default_dependencies: true,
+                    collect_mode: crate::units::CollectMode::default(),
                     conditions: vec![],
                     assertions: vec![],
                     success_action: crate::units::UnitAction::None,
@@ -3179,5 +3281,45 @@ mod tests {
         let dep = unit_table.get(&dep_id).unwrap();
         assert!(dep.common.dependencies.before.contains(&real_id));
         assert!(!dep.common.dependencies.before.contains(&alias_id));
+    }
+
+    #[test]
+    fn log_namespace_dependency_names_match_upstream_templates() {
+        // Upstream (src/core/unit.c) orders a LogNamespace= unit after the
+        // journald and journald-varlink sockets for that namespace.
+        assert_eq!(
+            log_namespace_dependencies("foobar"),
+            vec![
+                "systemd-journald@foobar.socket".to_owned(),
+                "systemd-journald-varlink@foobar.socket".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn log_namespace_units_adds_the_service_the_socket_activates() {
+        // The sockets carry Service=systemd-journald@%i.service; that instance
+        // has to exist in the unit table or activating the socket fails with
+        // "Tried to activate a unit that can not be found".  It is materialized
+        // but intentionally absent from the dependency list.
+        let units = log_namespace_units("foobar");
+        assert!(units.contains(&"systemd-journald@foobar.service".to_owned()));
+        for dep in log_namespace_dependencies("foobar") {
+            assert!(units.contains(&dep), "{dep} missing from log_namespace_units");
+        }
+        assert!(
+            !log_namespace_dependencies("foobar")
+                .contains(&"systemd-journald@foobar.service".to_owned())
+        );
+    }
+
+    #[test]
+    fn log_namespace_unit_names_are_parseable_template_instances() {
+        for name in log_namespace_units("ns-with-dashes") {
+            let (template, instance) =
+                parse_template_instance(&name).expect("should parse as a template instance");
+            assert!(template.contains('@'));
+            assert_eq!(instance, "ns-with-dashes");
+        }
     }
 }

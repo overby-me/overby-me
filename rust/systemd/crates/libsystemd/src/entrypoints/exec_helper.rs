@@ -946,6 +946,11 @@ pub struct ExecHelperConfig {
     /// SyslogLevelPrefix= — if true (default), strip kernel-style `<N>` priority prefixes.
     #[serde(default)]
     pub syslog_level_prefix: Option<bool>,
+    /// LogNamespace= — send stdout/stderr to the journal namespace instance
+    /// listening on `/run/systemd/journal.<ns>/stdout` rather than the default
+    /// `/run/systemd/journal/stdout`.
+    #[serde(default)]
+    pub log_namespace: Option<String>,
     /// The service's invocation ID (32-char hex UUID), sent to journald so it
     /// can tag entries with `_SYSTEMD_INVOCATION_ID`.
     #[serde(default)]
@@ -1286,7 +1291,15 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
         return;
     }
 
-    const SOCKET_PATH: &str = "/run/systemd/journal/stdout";
+    // LogNamespace=foo routes the stream to the `systemd-journald@foo` instance,
+    // which listens on /run/systemd/journal.foo/stdout (journald derives the
+    // same path from its namespace argument).  Without a namespace this is the
+    // default instance's socket.
+    let socket_path = match config.log_namespace.as_deref() {
+        Some(ns) if !ns.is_empty() => format!("/run/systemd/journal.{ns}/stdout"),
+        _ => "/run/systemd/journal/stdout".to_owned(),
+    };
+    let socket_path = socket_path.as_str();
 
     // Use SyslogIdentifier= if set, otherwise derive from the binary name
     // in the exec command path. This matches C systemd's behavior where
@@ -1305,7 +1318,7 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
 
     if config.stdout_is_journal
         && let Some(fd) = open_journal_stream_nonblock(
-            SOCKET_PATH,
+            socket_path,
             identifier,
             &config.name,
             priority,
@@ -1331,7 +1344,7 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
 
     if config.stderr_is_journal
         && let Some(fd) = open_journal_stream_nonblock(
-            SOCKET_PATH,
+            socket_path,
             identifier,
             &config.name,
             priority,
@@ -1906,6 +1919,27 @@ pub fn run_exec_helper() {
             let private_dir = base.join("private");
             let _ = std::fs::create_dir_all(&private_dir);
             let full_path = private_dir.join(dir_name);
+            let link_path = base.join(dir_name);
+
+            // DynamicUser=0 -> 1 migration.  A previous non-dynamic run left a
+            // real directory at <base>/<name>; upstream moves it under
+            // private/ and leaves a symlink behind, so the service keeps its
+            // data across the switch (TEST-34-DYNAMICUSERMIGRATE).  Only move
+            // when there is nothing at the destination: a populated private/
+            // copy is the newer state and must win.
+            if let Ok(md) = std::fs::symlink_metadata(&link_path)
+                && md.is_dir()
+                && !full_path.exists()
+                && let Err(e) = std::fs::rename(&link_path, &full_path)
+            {
+                log::warn!(
+                    "DynamicUser=yes: could not migrate {:?} into {:?}: {}",
+                    link_path,
+                    full_path,
+                    e
+                );
+            }
+
             if let Err(e) = std::fs::create_dir_all(&full_path) {
                 log::error!("Failed to create private directory {:?}: {}", full_path, e);
                 std::process::exit(1);
@@ -1920,7 +1954,6 @@ pub fn run_exec_helper() {
                 std::process::exit(1);
             }
             // Create symlink: <base>/<name> → private/<name>
-            let link_path = base.join(dir_name);
             let _ = std::fs::remove_file(&link_path); // remove stale symlink
             let target = Path::new("private").join(dir_name);
             if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
@@ -1934,6 +1967,32 @@ pub fn run_exec_helper() {
             full_path.to_string_lossy().into_owned()
         } else {
             let full_path = base.join(dir_name);
+
+            // DynamicUser=1 -> 0 migration, the mirror of the branch above.
+            // <base>/<name> is the symlink a dynamic run left behind; drop it
+            // and move the real directory back out, so the service keeps its
+            // data and <base>/<name> is a directory again.
+            //
+            // Only fires when the link actually points at private/<name>: an
+            // unrelated symlink an admin put there is left alone rather than
+            // being replaced by a directory.
+            let private_path = base.join("private").join(dir_name);
+            if std::fs::read_link(&full_path)
+                .is_ok_and(|t| t == Path::new("private").join(dir_name) || t == private_path)
+            {
+                let _ = std::fs::remove_file(&full_path);
+                if private_path.exists()
+                    && let Err(e) = std::fs::rename(&private_path, &full_path)
+                {
+                    log::warn!(
+                        "DynamicUser=no: could not migrate {:?} back to {:?}: {}",
+                        private_path,
+                        full_path,
+                        e
+                    );
+                }
+            }
+
             if let Err(e) = std::fs::create_dir_all(&full_path) {
                 log::error!("Failed to create directory {:?}: {}", full_path, e);
                 std::process::exit(1);
@@ -2047,37 +2106,73 @@ pub fn run_exec_helper() {
         unsafe { std::env::set_var("STATE_DIRECTORY", full_paths.join(":")) };
     }
 
+    // LogsDirectory=, RuntimeDirectory= and CacheDirectory= take the same
+    // `source[:destination[:access-mode]]` syntax as StateDirectory=: the
+    // destination is a symlink alias pointing at the source, and `:ro` makes
+    // the directory read-only for the service.  Passing the raw entry through
+    // would create a directory literally named `zzz:yyy`
+    // (TEST-34-DYNAMICUSERMIGRATE).
+    let create_exec_dirs = |base: &Path,
+                            entries: &[String],
+                            mode: u32,
+                            dynamic: bool,
+                            ro_out: &mut Vec<PathBuf>|
+     -> Vec<String> {
+        let mut full_paths = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let (src, dest, ro) = parse_exec_dir_entry(entry);
+            full_paths.push(create_managed_dir(base, &src, mode, dynamic));
+            if let Some(dest) = dest {
+                let dest_path = base.join(&dest);
+                if let Some(parent) = dest_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::remove_file(&dest_path);
+                if let Err(e) = std::os::unix::fs::symlink(&src, &dest_path) {
+                    log::warn!("Failed to symlink {dest_path:?} -> {src:?}: {e}");
+                }
+            }
+            if ro {
+                ro_out.push(base.join(&src));
+            }
+        }
+        full_paths
+    };
+
     if !config.logs_directory.is_empty() {
-        let base = Path::new("/var/log");
         let mode = config.logs_directory_mode.unwrap_or(0o755);
-        let full_paths: Vec<String> = config
-            .logs_directory
-            .iter()
-            .map(|d| create_managed_dir(base, d, mode, dynamic))
-            .collect();
+        let full_paths = create_exec_dirs(
+            Path::new("/var/log"),
+            &config.logs_directory,
+            mode,
+            dynamic,
+            &mut read_only_exec_dirs,
+        );
         unsafe { std::env::set_var("LOGS_DIRECTORY", full_paths.join(":")) };
     }
 
     if !config.runtime_directory.is_empty() {
-        let base = Path::new("/run");
         let mode = config.runtime_directory_mode.unwrap_or(0o755);
-        let full_paths: Vec<String> = config
-            .runtime_directory
-            .iter()
-            .map(|d| create_managed_dir(base, d, mode, dynamic))
-            .collect();
+        let full_paths = create_exec_dirs(
+            Path::new("/run"),
+            &config.runtime_directory,
+            mode,
+            dynamic,
+            &mut read_only_exec_dirs,
+        );
         unsafe { std::env::set_var("RUNTIME_DIRECTORY", full_paths.join(":")) };
     }
 
     // ── Create CacheDirectory= directories under /var/cache/ ──────────
     if !config.cache_directory.is_empty() {
-        let base = Path::new("/var/cache");
         let mode = config.cache_directory_mode.unwrap_or(0o755);
-        let full_paths: Vec<String> = config
-            .cache_directory
-            .iter()
-            .map(|d| create_managed_dir(base, d, mode, dynamic))
-            .collect();
+        let full_paths = create_exec_dirs(
+            Path::new("/var/cache"),
+            &config.cache_directory,
+            mode,
+            dynamic,
+            &mut read_only_exec_dirs,
+        );
         unsafe { std::env::set_var("CACHE_DIRECTORY", full_paths.join(":")) };
     }
 

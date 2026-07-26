@@ -1143,6 +1143,7 @@ fn start_service_with_filedescriptors(
         syslog_identifier: conf.exec_config.syslog_identifier.clone(),
         syslog_level: conf.exec_config.syslog_level.clone(),
         syslog_level_prefix: conf.exec_config.syslog_level_prefix,
+        log_namespace: conf.exec_config.log_namespace.clone(),
         invocation_id: srvc.invocation_id.clone(),
     };
 

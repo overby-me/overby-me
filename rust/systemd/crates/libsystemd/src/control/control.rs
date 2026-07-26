@@ -4184,6 +4184,9 @@ fn create_transient_unit(
                 "SyslogIdentifier" => {
                     service_conf.exec_config.syslog_identifier = Some(value.to_string());
                 }
+                "LogNamespace" => {
+                    service_conf.exec_config.log_namespace = Some(value.to_string());
+                }
                 "RootDirectory" => {
                     service_conf.exec_config.root_directory = Some(value.to_string());
                 }
@@ -5068,8 +5071,79 @@ fn create_transient_unit(
         unit.common.unit.fragment_path = Some(transient_path);
     }
 
+    /// `LogNamespace=` of a service unit, if it has one and it is non-empty.
+    fn unit_log_namespace(unit: &Unit) -> Option<String> {
+        match &unit.specific {
+            Specific::Service(svc) => svc
+                .conf
+                .exec_config
+                .log_namespace
+                .as_deref()
+                .filter(|ns| !ns.is_empty())
+                .map(str::to_owned),
+            _ => None,
+        }
+    }
+
+    // LogNamespace= on a transient unit: this path bypasses the loading
+    // pipeline, so wire the systemd-journald@<ns> dependency here and
+    // instantiate the templates below.  Without this the exec helper connects
+    // to /run/systemd/journal.<ns>/stdout before anything is listening on it.
+    let log_namespace_ns = unit_log_namespace(&unit);
+    let log_namespace_deps: Vec<String> = match &log_namespace_ns {
+        Some(ns) => crate::units::loading::directory_deps::log_namespace_dependencies(ns),
+        None => Vec::new(),
+    };
+    // Superset: the sockets' Service= target must be in the table too, or
+    // activating them fails with "unit can not be found".
+    let log_namespace_units: Vec<String> = match &log_namespace_ns {
+        Some(ns) => crate::units::loading::directory_deps::log_namespace_units(ns),
+        None => Vec::new(),
+    };
+    for name in &log_namespace_deps {
+        if let Ok(id) = <&str as TryInto<UnitId>>::try_into(name.as_str()) {
+            let deps = &mut unit.common.dependencies;
+            if !deps.requires.contains(&id) {
+                deps.requires.push(id.clone());
+            }
+            if !deps.after.contains(&id) {
+                deps.after.push(id);
+            }
+        }
+    }
+
     // Insert the transient unit into the unit table.
     let mut ri = run_info.write_poisoned_nonblocking();
+
+    for name in &log_namespace_units {
+        let Ok(id) = <&str as TryInto<UnitId>>::try_into(name.as_str()) else {
+            continue;
+        };
+        if ri.unit_table.contains_key(&id) {
+            continue;
+        }
+        let Some((template_name, instance_name)) =
+            crate::units::loading::directory_deps::parse_template_instance(name)
+        else {
+            continue;
+        };
+        let empty_dropins = std::collections::HashMap::new();
+        if let Some(inst) = crate::units::loading::directory_deps::instantiate_template(
+            &template_name,
+            &instance_name,
+            name,
+            &ri.config.unit_dirs,
+            &empty_dropins,
+        ) {
+            crate::units::insert_new_unit_lenient(inst, &mut ri);
+            info!("Instantiated {name} for LogNamespace=");
+        } else {
+            // Not fatal: the journal namespace units are optional in some
+            // builds, and a missing one should degrade to the default journal
+            // rather than fail the transient start outright.
+            warn!("LogNamespace=: could not instantiate {name} from {template_name}");
+        }
+    }
     // If a unit with the same name already exists and is stopped/failed
     // (or a completed oneshot still in Started state), remove it so the
     // new transient can replace it (matching systemd --collect behavior).
@@ -11361,6 +11435,7 @@ mod tests {
                     fragment_path: None,
                     refs_by_name: vec![],
                     default_dependencies: true,
+                    collect_mode: crate::units::CollectMode::default(),
                     conditions: vec![],
                     assertions: vec![],
                     success_action: crate::units::UnitAction::None,

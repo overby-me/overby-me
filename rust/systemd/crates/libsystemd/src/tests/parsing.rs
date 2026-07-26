@@ -44671,6 +44671,12 @@ fn test_mount_unit_mount_config_from_parsed() {
         force_unmount: true,
         directory_mode: 0o700,
         timeout_sec: Some(30),
+        configuration_directory: vec![],
+        runtime_directory: vec![],
+        state_directory: vec![],
+        cache_directory: vec![],
+        logs_directory: vec![],
+        runtime_directory_preserve: crate::units::RuntimeDirectoryPreserve::default(),
     };
 
     let config = MountConfig::from(parsed);
