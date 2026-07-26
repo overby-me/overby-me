@@ -104,6 +104,37 @@ Most skip comments predate the feature they name. Verified today:
 Re-baselining (delete the override, run once, record the real first failure) is the
 highest-information action available and costs one VM run each.
 
+## Progress log
+
+Landed since the ledger was written (each regression-tested before push):
+
+| Commit | What it fixed |
+|--------|---------------|
+| `8d929e42` | `expectedSkip` + `extraUnits`; a `/skipped` no longer scores as a pass |
+| `a348d327` | Six exec-directory defects; 44-LOG-NAMESPACE green |
+| `d112eef5` | `DynamicUser=` services can reach their `private/` exec dirs |
+| `84cab4c8` | Backslash-escaped colons in `ExecDirectory=` |
+| `d206d5f2` | Three `unreachable!()` panics removed from PID 1's helper wait |
+| `dd941ad7` | `systemctl start --wait` returned for no `Type=oneshot` unit at all |
+| `3348e6bd` | Nested `ExecDirectory=` paths (four defects) |
+| `57c9a771` | `systemd.unit-dropin.*` / `systemd.extra-unit.*` credentials |
+| `5c34f5a2` | Generators re-run on `daemon-reload`, as upstream does |
+
+Both fake passes are gone. Several of these are user-facing bugs well beyond the
+tests that exposed them: `systemctl start --wait` hung on every oneshot, and
+generated units could not change without a reboot.
+
+### Open, with evidence recorded in the test wrappers
+
+- **34-DYNAMICUSERMIGRATE** clears all four `test_directory` phases. Remaining:
+  exec directories end up read-only under `ProtectSystem=strict`. Three
+  approaches tried and reverted, all recorded; instrument
+  `/proc/self/mountinfo` before a fourth.
+- **55-OOMD** line 12 needs three things. Two are done (credentials, reload-time
+  generators). The third: `init.scope` is not a unit in rust-systemd, only a
+  cgroup path constant, so `[Scope]` resource control never reaches PID 1's
+  cgroup. That also underpins `systemctl show`/`set-property init.scope`.
+
 ## Work tiers
 
 ### Tier 0: make the ledger enforceable (done)
