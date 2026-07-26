@@ -2228,6 +2228,18 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         i += 1;
     }
 
+    // Upstream overrides --dry-run after parsing, in this order:
+    // --can-factory-reset only reports, so it implies a dry run and opens
+    // everything read-only; --empty=create makes a file that did not exist a
+    // moment ago, so there is nothing to protect and it implies --dry-run=no.
+    // Without the second rule an --empty=create invocation with no explicit
+    // --dry-run= prints its table and writes nothing.
+    if args.can_factory_reset {
+        args.dry_run = true;
+    } else if args.empty == EmptyMode::Create {
+        args.dry_run = false;
+    }
+
     Ok(args)
 }
 
@@ -5910,6 +5922,21 @@ Weight=333
         let mut f = fs::File::open(&img_path).unwrap();
         let hdr = read_gpt_header(&mut f, 512).unwrap();
         assert!(hdr.is_some());
+    }
+
+    /// `--empty=create` implies `--dry-run=no`: the test drives it with no
+    /// `--dry-run=` of its own and still expects an image on disk.
+    #[test]
+    fn test_parse_args_empty_create_implies_no_dry_run() {
+        let a = parse_args(&args(&["--empty=create", "--size=1G", "/tmp/x"])).unwrap();
+        assert!(!a.dry_run);
+        // An explicit --dry-run=yes does not survive it, matching upstream.
+        let a = parse_args(&args(&["--dry-run=yes", "--empty=create", "--size=1G", "/tmp/x"]))
+            .unwrap();
+        assert!(!a.dry_run);
+        // --can-factory-reset wins, and only reports.
+        let a = parse_args(&args(&["--can-factory-reset", "--empty=create"])).unwrap();
+        assert!(a.dry_run);
     }
 
     /// With no matching definitions, `--empty=create` must still write the
