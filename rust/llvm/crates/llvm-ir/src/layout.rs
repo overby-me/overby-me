@@ -126,10 +126,15 @@ pub fn preferred_align(
             let size = size_in_bits(ctx, layout, ty)?;
             layout.vector_align(size as u32).preferred_bits
         }
-        // A struct's preferred alignment is its ABI alignment: the fields
-        // decide it, and each field already contributed its own.
+        // A struct's fields decide its ABI alignment, and the layout's
+        // aggregate preference can ask for more: with the default `a:0:64`,
+        // an alloca of `{ i8 }` is eight-aligned even though nothing in it
+        // needs to be.
         TypeKind::Struct { .. } | TypeKind::NamedStruct(_) => {
-            return Ok(struct_layout(ctx, layout, ty)?.align);
+            let from_fields = struct_layout(ctx, layout, ty)?.align;
+            let preferred =
+                Align::from_bits(layout.aggregate_align().preferred_bits).unwrap_or(Align::ONE);
+            return Ok(from_fields.max(preferred));
         }
         TypeKind::X86Amx => 8192,
         _ => return abi_align(ctx, layout, ty),

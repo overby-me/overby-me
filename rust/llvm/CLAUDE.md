@@ -767,6 +767,19 @@ not it carries a kind, the bare spelling being the same attribute carrying
 its default. That last one the corpus caught too.
 Assembler 142 to 143, Feature 48 to 53, Other 121 to 126, Linker unchanged
 at 167. All four are ratchets now.
+A fifty-eighth pass fixed the alignment an alloca gets when it writes none.
+A struct's fields decide its ABI alignment, and the layout's aggregate
+preference can ask for more: with the default `a:0:64`, an alloca of
+`{ i8 }` is eight-aligned even though nothing in it needs to be. The comment
+in `layout.rs` had said a struct's preferred alignment is its ABI alignment,
+which is the one case where that is not so. Assembler 143 to 144, Feature 53
+to 54.
+What is left across the four print suites is led by the debug-info metadata
+upgrade, seventeen files between the `DICompileUnit` whose file gets filled
+in, the `DISubprogram` whose scope does, and the attribute group that goes
+with the declaration the upgrade drops. Six more want a data layout upstream
+supplies from the triple when the module writes none, which is target
+knowledge this tier does not have.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

@@ -257,6 +257,41 @@ fn only_the_types_the_module_reaches_are_written() {
 /// What else upstream folds or leaves out as it reads and prints.
 /// The order upstream writes an attribute set in, which is not the order the
 /// text used and not alphabetical either.
+/// The alignment an alloca gets when it writes none. A struct takes the
+/// larger of what its fields need and what the layout prefers for an
+/// aggregate, which with the default `a:0:64` is eight even for `{ i8 }`.
+const ALLOCA_ALIGN: &[(&str, &str, &str)] = &[
+    ("e", "{ i32, i32 }", "align 8"),
+    ("e", "{ i8 }", "align 8"),
+    ("e-a:0:32", "{ i32, i32 }", "align 4"),
+    ("e-a:16:128", "{ i8 }", "align 16"),
+    // An array takes its element's, and a scalar its own.
+    ("e", "[4 x i8]", "align 1"),
+    ("e", "[2 x i64]", "align 8"),
+    ("e", "i32", "align 4"),
+];
+
+#[test]
+fn an_alloca_takes_the_alignment_upstream_gives_it() {
+    for (layout, ty, expected) in ALLOCA_ALIGN {
+        let text = format!(
+            "target datalayout = \"{layout}\"\n\ndefine void @f() {{\nentry:\n  %a = alloca {ty}\n  ret void\n}}\n"
+        );
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("{text} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        let line = printed
+            .split("%a = alloca ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no alloca\n{printed}"));
+        let line = line.split('\n').next().unwrap_or_default();
+        assert!(
+            line.ends_with(expected),
+            "expected {expected:?} at the end of {line:?}\nlayout {layout}, type {ty}"
+        );
+    }
+}
+
 const ATTRIBUTE_ORDER: &[(&str, &str)] = &[
     // The plain keywords go in the order LLVM declares them, which is why
     // `nounwind` comes before `nonlazybind` and `optsize` before `ssp`.
