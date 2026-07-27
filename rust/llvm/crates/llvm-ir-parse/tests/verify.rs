@@ -277,6 +277,28 @@ const BROKEN: &[(&str, &str)] = &[
         "@g = external global i32, !absolute_symbol !0\n!0 = !{}\n",
         "!absolute_symbol takes ranges of two values",
     ),
+    // A global holds no scalable type at all once it has an initialiser to
+    // lay out, and a struct holds one only when it holds nothing else.
+    (
+        "%t = type { <vscale x 1 x i32> }\n@g = external global %t\n",
+        "has an invalid type for a global variable",
+    ),
+    (
+        "%u = type { i32, <vscale x 1 x i32> }\n\ndefine void @f() {\nentry:\n  %a = alloca %u, align 8\n  ret void\n}\n",
+        "has an invalid type for alloca",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  %a = load i32, ptr %p, align 4\n  ret void\n}\ndeclare void @g(ptr align 3 %p)\n",
+        "is not a power of two",
+    ),
+    (
+        "define void @f() sanitize_realtime sanitize_realtime_blocking {\nentry:\n  ret void\n}\n",
+        "sanitize_realtime and sanitize_realtime_blocking are incompatible",
+    ),
+    (
+        "%X = type opaque\n\ndefine void @f() {\nentry:\n  %a = alloca %X, align 8\n  ret void\n}\n",
+        "has an invalid type for alloca",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -610,9 +632,12 @@ const VERIFIES: &[&str] = &[
     "$v = comdat any\n@v = private global i32 0, comdat($v)\n",
     // Dominance says nothing about a block the entry cannot reach.
     "define void @f() {\nentry:\n  ret void\n\ndead:\n  %x = add i32 %x, 1\n  br label %dead\n}\n",
-    // A struct may hold scalable vectors, and a vector may hold a target
-    // extension type.
-    "%t = type { <vscale x 1 x i32>, <vscale x 1 x i32> }\n@g = external global %t\n",
+    // A declaration needs no size, which upstream's own
+    // 2009-02-28-StripOpaqueName.ll relies on.
+    "%A = type opaque\n@g1 = external global %A\n@g2 = global ptr @g1\n",
+    // A struct may hold scalable vectors when it holds nothing else, which
+    // an alloca of one is the way to say.
+    "%t = type { <vscale x 1 x i32>, <vscale x 1 x i32> }\n\ndefine void @f() {\nentry:\n  %a = alloca %t, align 8\n  ret void\n}\n",
     // An array's shape fields belong on an array.
     "!named = !{!0}\n!0 = !DICompositeType(tag: DW_TAG_array_type, name: \"A\", size: 64, rank: !DIExpression(DW_OP_deref))\n",
     // An alias writes an expression aliasee with no type in front, because

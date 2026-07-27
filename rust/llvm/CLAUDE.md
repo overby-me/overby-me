@@ -247,6 +247,16 @@ As before, accepting the syntax exposed the rules behind it: an
 unterminated block comment is an error rather than a run to the end of
 the file, and each of a signed pointer's four operands says something
 specific about its own type.
+A sixteenth pass was sizedness and alignment. A struct holds scalable
+vectors only when it holds nothing else, because mixing them leaves no
+offset for whatever follows; an opaque struct has no layout at all; and a
+global holds nothing scalable whether or not it is defined, while needing
+a body to lay out only when it is. Each of those came from asking llvm-as
+rather than reasoning: a test of my own invention claimed
+`@g = external global %scalable_struct` verifies, and it does not, while
+`@g = external global %opaque` does. Alongside them, an alignment is a
+power of two wherever it is written, which needed the call site's own
+argument attributes to be checked at all.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

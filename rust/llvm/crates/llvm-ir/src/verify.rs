@@ -142,7 +142,12 @@ impl Verifier<'_> {
             let qualifiers = global.qualifiers.clone();
             self.linkage_and_visibility(&name, &qualifiers);
             let value_type = global.value_type;
-            if !self.is_sized(value_type) {
+            // Two rules with different reach. What kind of type it is, and
+            // that it holds nothing scalable, hold either way. Having a body
+            // to lay out is only asked of a definition: upstream reads
+            // `@g = external global %opaque` and refuses to define one.
+            let defined = global.initializer.is_some();
+            if !self.fits_in_a_global(value_type) || (defined && !self.is_sized(value_type)) {
                 self.report(format!("@{name} has an invalid type for a global variable"));
             }
             let (linkage, in_comdat) = {
@@ -1026,6 +1031,10 @@ impl Verifier<'_> {
                     loaded_type == ty,
                     format!("{where_} produces something other than what it loads"),
                 );
+                self.check(
+                    self.is_sized(loaded_type),
+                    format!("{where_} loads a type with no size"),
+                );
                 // Unreachable from parsed text, where an unwritten alignment
                 // is filled in from the data layout, but a module built by
                 // hand can still omit one.
@@ -1042,6 +1051,10 @@ impl Verifier<'_> {
             } => {
                 let (value_type, value) = (*value_type, *value);
                 self.type_is(function, value_type, value, &where_);
+                self.check(
+                    self.is_sized(value_type),
+                    format!("{where_} stores a type with no size"),
+                );
             }
             InstKind::ExtractValue {
                 aggregate_type,
@@ -1195,6 +1208,12 @@ impl Verifier<'_> {
                 } else {
                     self.report(format!("{where_} has a callee type that is not a function"));
                 }
+                for (position, arg) in call.args.iter().enumerate() {
+                    let attrs = arg.attrs.clone();
+                    self.attribute_set(&attrs, arg.ty, &format!("argument {position} of {where_}"));
+                }
+                let return_attrs = call.return_attrs.clone();
+                self.attribute_set(&return_attrs, ty, &format!("the result of {where_}"));
                 // A chain call replaces the current wave rather than
                 // returning to it, so it is only ever a tail call.
                 if matches!(
@@ -1738,18 +1757,96 @@ impl Verifier<'_> {
     /// Whether a value of this type can be stored somewhere: allocated on the
     /// stack, held in a global, or placed in an aggregate.
     fn is_sized(&self, ty: TypeId) -> bool {
-        !matches!(
-            self.module.ctx.type_kind(ty),
+        match self.module.ctx.type_kind(ty) {
             TypeKind::Void
-                | TypeKind::Label
-                | TypeKind::Metadata
-                | TypeKind::Token
-                | TypeKind::X86Amx
-                | TypeKind::Function { .. }
-        )
+            | TypeKind::Label
+            | TypeKind::Metadata
+            | TypeKind::Token
+            | TypeKind::X86Amx
+            | TypeKind::Function { .. } => false,
+            // A struct is as sized as its fields, and a body it has not been
+            // given yet has no layout at all.
+            TypeKind::Struct { fields, .. } => self.struct_is_sized(&fields.clone()),
+            TypeKind::NamedStruct(id) => match &self.module.ctx.struct_def(*id).fields {
+                Some(fields) => self.struct_is_sized(&fields.clone()),
+                None => false,
+            },
+            TypeKind::Array { element, .. } => self.has_a_fixed_size(*element),
+            _ => true,
+        }
     }
 
-    /// Names the type when it is one only an intrinsic may pass or return.
+    /// A struct holds scalable vectors only when it holds nothing else.
+    /// Mixing them with fixed-size fields leaves no offset for whatever
+    /// follows the scalable one, which is why upstream refuses `{i32,
+    /// <vscale x 1 x i32>}` and reads `{<vscale x 1 x i32>, <vscale x 1 x
+    /// i32>}`.
+    fn struct_is_sized(&self, fields: &[TypeId]) -> bool {
+        if !fields.iter().all(|field| self.is_sized(*field)) {
+            return false;
+        }
+        let scalable = |ty: TypeId| {
+            matches!(
+                self.module.ctx.type_kind(ty),
+                TypeKind::Vector { scalable: true, .. }
+            )
+        };
+        let any = fields.iter().any(|field| scalable(*field));
+        let all = fields.iter().all(|field| scalable(*field));
+        !any || all
+    }
+
+    /// What a global may hold whether or not it is defined here: a type with
+    /// a representation, and nothing scalable.
+    fn fits_in_a_global(&self, ty: TypeId) -> bool {
+        match self.module.ctx.type_kind(ty) {
+            TypeKind::Void
+            | TypeKind::Label
+            | TypeKind::Metadata
+            | TypeKind::Token
+            | TypeKind::X86Amx
+            | TypeKind::Function { .. } => false,
+            TypeKind::Vector { scalable, .. } => !scalable,
+            TypeKind::Struct { fields, .. } => fields
+                .clone()
+                .iter()
+                .all(|field| self.fits_in_a_global(*field)),
+            TypeKind::NamedStruct(id) => match &self.module.ctx.struct_def(*id).fields {
+                Some(fields) => fields
+                    .clone()
+                    .iter()
+                    .all(|field| self.fits_in_a_global(*field)),
+                None => true,
+            },
+            TypeKind::Array { element, .. } => self.fits_in_a_global(*element),
+            _ => true,
+        }
+    }
+
+    /// Whether a type has a size the layout can state as a number. A scalable
+    /// vector has a size, but not one a global can use.
+    fn has_a_fixed_size(&self, ty: TypeId) -> bool {
+        if !self.is_sized(ty) {
+            return false;
+        }
+        match self.module.ctx.type_kind(ty) {
+            TypeKind::Vector { scalable, .. } => !scalable,
+            TypeKind::Struct { fields, .. } => fields
+                .clone()
+                .iter()
+                .all(|field| self.has_a_fixed_size(*field)),
+            TypeKind::NamedStruct(id) => match &self.module.ctx.struct_def(*id).fields {
+                Some(fields) => fields
+                    .clone()
+                    .iter()
+                    .all(|field| self.has_a_fixed_size(*field)),
+                None => false,
+            },
+            TypeKind::Array { element, .. } => self.has_a_fixed_size(*element),
+            _ => true,
+        }
+    }
+
     /// The debug-info rules that are the verifier's rather than the
     /// parser's: the grammar is checked when the node is read, and this is
     /// what needs the node's neighbours to make sense of.
@@ -1884,6 +1981,18 @@ impl Verifier<'_> {
                         | EnumAttr::SwiftSelf
                         | EnumAttr::Writable
                 ),
+                Attribute::Int {
+                    kind: IntAttr::Align,
+                    first,
+                    ..
+                } => {
+                    if !first.is_power_of_two() {
+                        self.report(format!(
+                            "an alignment of {first} on {where_} is not a power of two"
+                        ));
+                    }
+                    true
+                }
                 Attribute::Int { kind, .. } => matches!(
                     kind,
                     IntAttr::Align | IntAttr::Dereferenceable | IntAttr::DereferenceableOrNull
@@ -1965,6 +2074,10 @@ impl Verifier<'_> {
             (EnumAttr::AlwaysInline, EnumAttr::NoInline),
             (EnumAttr::AlwaysInline, EnumAttr::OptNone),
             (EnumAttr::ReadNone, EnumAttr::ReadOnly),
+            (
+                EnumAttr::SanitizeRealtime,
+                EnumAttr::SanitizeRealtimeBlocking,
+            ),
         ] {
             if has(first) && has(second) {
                 self.report(format!(
