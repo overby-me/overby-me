@@ -65,7 +65,9 @@ impl Parser {
                     second: None,
                 });
             }
-            if !in_group && kind == IntAttr::Align {
+            // Upstream prints `align 4` in a parameter list but reads
+            // `align(4)` there too, and its own tests use both.
+            if !in_group && kind == IntAttr::Align && self.peek() != &Token::LeftParen {
                 let first = self.require_unsigned()?;
                 return Ok(Attribute::Int {
                     kind,

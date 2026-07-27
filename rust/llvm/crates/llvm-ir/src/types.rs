@@ -70,6 +70,10 @@ pub struct StructDef {
     pub name: String,
     pub fields: Option<Vec<TypeId>>,
     pub packed: bool,
+    /// `%0 = type { ... }` names a struct by number. It prints bare, while a
+    /// struct whose name happens to be the word "0" prints quoted, so the two
+    /// cannot share a representation.
+    pub numbered: bool,
 }
 
 impl TypeKind {

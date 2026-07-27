@@ -76,8 +76,13 @@ impl Parser {
                     self.advance();
                     self.parse_type_definition(&name)?;
                 }
-                Token::LocalNumber(_) => {
-                    return self.error("numbered type definitions are not modelled");
+                // `%0 = type { ... }` names a struct by number. Upstream
+                // prints those back by number, so the name is the digits.
+                Token::LocalNumber(number) => {
+                    self.advance();
+                    self.parse_type_definition(&number.to_string())?;
+                    let id = self.module.ctx.named_struct(&number.to_string());
+                    self.module.ctx.set_struct_numbered(id);
                 }
                 Token::GlobalName(name) => {
                     self.advance();

@@ -228,6 +228,13 @@ impl Constant {
 /// module that still uses them is written for an older dialect.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ConstExpr {
+    /// `add`, `sub` and `xor` outlived the other arithmetic expressions.
+    Binary {
+        op: crate::instruction::BinOp,
+        lhs: ConstId,
+        rhs: ConstId,
+        ty: TypeId,
+    },
     Cast {
         op: CastOp,
         operand: ConstId,
@@ -266,7 +273,8 @@ pub enum ConstExpr {
 impl ConstExpr {
     pub fn ty(&self) -> TypeId {
         match self {
-            ConstExpr::Cast { ty, .. }
+            ConstExpr::Binary { ty, .. }
+            | ConstExpr::Cast { ty, .. }
             | ConstExpr::GetElementPtr { ty, .. }
             | ConstExpr::ExtractElement { ty, .. }
             | ConstExpr::InsertElement { ty, .. }
@@ -276,6 +284,7 @@ impl ConstExpr {
 
     pub fn keyword(&self) -> &'static str {
         match self {
+            ConstExpr::Binary { op, .. } => op.keyword(),
             ConstExpr::Cast { op, .. } => op.keyword(),
             ConstExpr::GetElementPtr { .. } => "getelementptr",
             ConstExpr::ExtractElement { .. } => "extractelement",

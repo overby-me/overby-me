@@ -115,6 +115,16 @@ impl Parser {
                 let id = self.module.ctx.named_struct(&name);
                 Ok(self.module.ctx.named_struct_type(id))
             }
+            // `%0` in type position is a struct named by number.
+            Token::LocalNumber(number) => {
+                let name = number.to_string();
+                if let Some(alias) = self.module.ctx.lookup_type_alias(&name) {
+                    return Ok(alias);
+                }
+                let id = self.module.ctx.named_struct(&name);
+                self.module.ctx.set_struct_numbered(id);
+                Ok(self.module.ctx.named_struct_type(id))
+            }
             other => {
                 self.index -= 1;
                 self.error(format!("expected a type, found {}", other.describe()))

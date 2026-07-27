@@ -35,8 +35,10 @@ pub enum MdOperand {
 /// A field of a specialized node, such as `line: 42` or `scope: !3`.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum MdField {
-    Unsigned(u64),
-    Signed(i64),
+    /// Wide enough for a `DIEnumerator` value, which is an arbitrary integer
+    /// and routinely exceeds 64 bits.
+    Unsigned(u128),
+    Signed(i128),
     Bool(bool),
     /// A quoted string field, such as a name or a filename.
     Str(String),

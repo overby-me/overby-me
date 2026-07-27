@@ -225,6 +225,16 @@ define_keyword_enum! {
         Aarch64SveVectorPcs => "aarch64_sve_vector_pcs",
         Win64 => "win64cc",
         X8664SysV => "x86_64_sysvcc",
+        AmdgpuCsChain => "amdgpu_cs_chain",
+        AmdgpuCsChainPreserve => "amdgpu_cs_chain_preserve",
+        AmdgpuCs => "amdgpu_cs",
+        AmdgpuKernel => "amdgpu_kernel",
+        AmdgpuGfx => "amdgpu_gfx",
+        SpirKernel => "spir_kernel",
+        SpirFunc => "spir_func",
+        PtxKernel => "ptx_kernel",
+        PtxDevice => "ptx_device",
+        RiscvVectorCc => "riscv_vector_cc",
     }
 }
 

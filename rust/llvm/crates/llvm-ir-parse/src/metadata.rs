@@ -97,13 +97,13 @@ impl Parser {
             Token::Integer { negative, digits } => {
                 self.advance();
                 if negative {
-                    let value: i64 = digits.parse().map_err(|_| {
+                    let value: i128 = digits.parse().map_err(|_| {
                         self.error::<()>(format!("{digits} does not fit"))
                             .unwrap_err()
                     })?;
                     Ok(MdField::Signed(-value))
                 } else {
-                    let value: u64 = digits.parse().map_err(|_| {
+                    let value: u128 = digits.parse().map_err(|_| {
                         self.error::<()>(format!("{digits} does not fit"))
                             .unwrap_err()
                     })?;

@@ -114,7 +114,7 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 175, 70 to 121)*
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 180, 70 to 125)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -130,9 +130,17 @@ put the signature at the call site; a load of a type with no computable
 layout still has no alignment to report; and an instruction after a
 terminator opens a new anonymous block rather than being a second
 terminator.
-Still open, largest first: attribute combination rules, intrinsic
-signatures, module summary index syntax (`^0 = ...`), target-specific
-calling conventions, and metadata integers wider than 64 bits.
+A fourth pass took the reject side: numbered struct types, the deprecated
+sized aggregate alignment, `align(4)` as well as `align 4`, a phi with no
+edges, the three arithmetic constant expressions that outlived the others,
+inline string attributes on a global, more calling conventions, an address
+space written before a call's type, and metadata integers past 64 bits.
+Fixing the layout parser exposed eleven files whose real rule was that a
+bitcast may not change an address space or a size, which now applies to
+constant expressions as well as instructions.
+Still open, largest first: module summary index syntax (`^0 = ...`, nine
+files), intrinsics used without a declaration, attribute combination rules,
+and `ptrauth` and `splat` constants.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

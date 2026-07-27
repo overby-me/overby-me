@@ -192,6 +192,22 @@ const BROKEN: &[(&str, &str)] = &[
         "$v = comdat any\n@v = common global i32 0, comdat($v), align 4\n",
         "common global may not be in a comdat",
     ),
+    (
+        "define ptr @f(ptr %p) {\nentry:\n  %x = bitcast ptr %p to ptr addrspace(1)\n  ret ptr %p\n}\n",
+        "casts between the wrong kinds of type",
+    ),
+    (
+        "define i64 @f(ptr %p) {\nentry:\n  %x = bitcast ptr %p to i64\n  ret i64 %x\n}\n",
+        "casts between the wrong kinds of type",
+    ),
+    (
+        "@a = global i32 0\n@b = global ptr addrspace(1) bitcast (ptr @a to ptr addrspace(1)), align 8\n",
+        "casts between the wrong kinds of type",
+    ),
+    (
+        "define i16 @f(i32 %x) {\nentry:\n  %y = bitcast i32 %x to i16\n  ret i16 %y\n}\n",
+        "changes the size of its operand",
+    ),
 ];
 
 /// Input the parser itself has to refuse, with the message it owes.
@@ -289,4 +305,35 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
         llvm_ir_print::print_module(&module),
         "\ndefine void @f() {\nentry:\n  ret void\n\n0:                                                ; No predecessors!\n  ret void\n}\n"
     );
+}
+
+/// Syntax upstream accepts that we used to refuse. Each was found by the
+/// upstream suites rather than by reading LangRef.
+const ACCEPTED: &[&str] = &[
+    // A struct named by number rather than by word.
+    "%0 = type { i32, i64 }\n@g = global %0 zeroinitializer, align 8\n",
+    // The deprecated sized spelling of the aggregate alignment.
+    "target datalayout = \"e-a0:0:32\"\n",
+    // `align(4)` as well as `align 4` in a parameter list.
+    "define void @f(ptr align(4) %p) {\nentry:\n  ret void\n}\n",
+    // A phi with no edges, in a block nothing reaches.
+    "define void @f() {\nentry:\n  ret void\n\ndead:\n  %p = phi i32\n  ret void\n}\n",
+    // The three arithmetic constant expressions that outlived the others.
+    "@a = global i32 add (i32 2, i32 3)\n@b = global i32 sub (i32 9, i32 4)\n@c = global i32 xor (i32 1, i32 3)\n",
+    // Inline string attributes on a global, with no comma before them.
+    "@g = global i32 7 \"key\" = \"value\"\n",
+    // A calling convention only one target has.
+    "declare amdgpu_cs_chain void @f()\n",
+    // The address space written before the type rather than after it.
+    "declare void @g()\n\ndefine void @f() {\nentry:\n  call addrspace(0) void @g()\n  ret void\n}\n",
+    // A metadata integer that does not fit 64 bits.
+    "!named = !{!0}\n!0 = !DIEnumerator(name: \"x\", value: 170141183460469231731687303715884105727)\n",
+];
+
+#[test]
+fn what_upstream_accepts_parses() {
+    for text in ACCEPTED {
+        llvm_ir_parse::parse_module(text)
+            .unwrap_or_else(|error| panic!("upstream accepts this: {error}\n{text}"));
+    }
 }

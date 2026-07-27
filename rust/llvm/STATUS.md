@@ -67,13 +67,13 @@ skipped and counted separately rather than scored.
 
 | Suite | Agreed | Considered | Skipped | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 175 | 304 | 179 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 121 | 252 | 76 | `llvm-upstream-verifier` |
+| `llvm/test/Assembler` | 180 | 304 | 179 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 125 | 252 | 76 | `llvm-upstream-verifier` |
 
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against `llvm-as | llvm-dis`, and **105 of 163** are identical. Two
+against `llvm-as | llvm-dis`, and **111 of 181** are identical. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against

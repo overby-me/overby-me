@@ -142,7 +142,13 @@ impl Parser {
         if let Some(word) = self.peek_word()
             && (matches!(
                 word,
-                "getelementptr" | "extractelement" | "insertelement" | "shufflevector"
+                "getelementptr"
+                    | "extractelement"
+                    | "insertelement"
+                    | "shufflevector"
+                    | "add"
+                    | "sub"
+                    | "xor"
             ) || CastOp::from_keyword(word).is_some())
         {
             return self.parse_constant_expression(ty);
@@ -439,6 +445,18 @@ impl Parser {
                     inrange,
                     ty,
                 }
+            }
+            // Three of the arithmetic expressions survived the removals; the
+            // rest are errors naming the opcode, and `select` says so itself.
+            "add" | "sub" | "xor" => {
+                let op = llvm_ir::instruction::BinOp::from_keyword(&word)
+                    .expect("the match arm listed these");
+                self.require(Token::LeftParen)?;
+                let (_, lhs) = self.parse_typed_constant()?;
+                self.require(Token::Comma)?;
+                let (_, rhs) = self.parse_typed_constant()?;
+                self.require(Token::RightParen)?;
+                ConstExpr::Binary { op, lhs, rhs, ty }
             }
             "extractelement" => {
                 self.require(Token::LeftParen)?;

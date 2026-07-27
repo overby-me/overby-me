@@ -39,10 +39,12 @@ parentheses is uninterpreted.
 **Typed pointers.** `i8*` is an error naming the dialect, not an alias for
 `ptr`. PLAN.md section 1.2.
 
-**Constant expressions upstream removed.** `add`, `sub`, `mul`, `select`,
-`icmp` and the casts that went with them are errors naming the opcode. What
-remains is `getelementptr`, the surviving casts, `extractelement`,
-`insertelement` and `shufflevector`.
+**Constant expressions upstream removed.** The removals were selective, and
+measuring beat guessing: `add`, `sub` and `xor` still parse in LLVM 21,
+while `mul`, `and`, `or`, `shl`, `icmp` and `select` do not. What remains
+here is exactly that set plus `getelementptr`, the surviving casts,
+`extractelement`, `insertelement` and `shufflevector`; anything else is an
+error naming the opcode.
 
 **A numbered metadata string.** `!0 = !"text"` is refused, because upstream
 refuses it: a string is an operand and a node definition is a tuple or a

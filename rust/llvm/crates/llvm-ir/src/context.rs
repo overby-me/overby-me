@@ -131,6 +131,7 @@ impl Context {
             name: name.to_string(),
             fields: None,
             packed: false,
+            numbered: false,
         });
         self.struct_ids.insert(name.to_string(), id);
         id
@@ -150,6 +151,11 @@ impl Context {
             }
             counter += 1;
         }
+    }
+
+    /// Marks a struct as one named by number rather than by word.
+    pub fn set_struct_numbered(&mut self, id: StructId) {
+        self.structs[id.0 as usize].numbered = true;
     }
 
     pub fn set_struct_body(&mut self, id: StructId, fields: Vec<TypeId>, packed: bool) {

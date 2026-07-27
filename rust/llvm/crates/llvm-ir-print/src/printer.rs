@@ -221,10 +221,10 @@ impl<'m> Printer<'m> {
         self.push("\n");
         for id in ids {
             let def = self.module.ctx.struct_def(id);
-            let name = def.name.clone();
+            let name = struct_name(def);
             let fields = def.fields.clone();
             let packed = def.packed;
-            let _ = write!(self.out, "%{} = type ", identifier(&name));
+            let _ = write!(self.out, "%{name} = type ");
             match fields {
                 None => self.push("opaque"),
                 Some(fields) => self.struct_body(&fields, packed),
@@ -293,8 +293,8 @@ impl<'m> Printer<'m> {
             }
             TypeKind::Struct { fields, packed } => self.struct_body(&fields, packed),
             TypeKind::NamedStruct(struct_id) => {
-                let name = self.module.ctx.struct_def(struct_id).name.clone();
-                let _ = write!(self.out, "%{}", identifier(&name));
+                let name = struct_name(self.module.ctx.struct_def(struct_id));
+                let _ = write!(self.out, "%{name}");
             }
             TypeKind::Function {
                 result,
@@ -390,6 +390,16 @@ pub(crate) fn identifier(name: &str) -> String {
         format!("\"{}\"", escape_name(name))
     } else {
         name.to_string()
+    }
+}
+
+/// A struct's name as it prints: bare when the struct is numbered, quoted
+/// when the word needs it.
+fn struct_name(def: &llvm_ir::types::StructDef) -> String {
+    if def.numbered {
+        def.name.clone()
+    } else {
+        identifier(&def.name)
     }
 }
 

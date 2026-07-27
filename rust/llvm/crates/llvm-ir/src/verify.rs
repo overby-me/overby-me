@@ -140,14 +140,6 @@ impl Verifier<'_> {
             for attachment in global.metadata.clone() {
                 self.attachment_resolves(&attachment.node, &format!("@{name}"));
             }
-            for group in &global.attrs.groups {
-                let group = *group;
-                if self.module.attribute_group(group).is_none() {
-                    self.report(format!(
-                        "@{name} refers to undefined attribute group #{group}"
-                    ));
-                }
-            }
         }
 
         for named in &self.module.named_metadata {
@@ -170,6 +162,20 @@ impl Verifier<'_> {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // Constant expressions obey the same cast rules as instructions, and
+        // a module keeps only the constants it uses, so checking the whole
+        // table checks exactly what appears.
+        for index in 0..self.module.ctx.constant_count() {
+            let constant = self.module.ctx.constant(ConstId(index as u32)).clone();
+            let Constant::Expression(expr) = constant else {
+                continue;
+            };
+            if let crate::constant::ConstExpr::Cast { op, operand, ty } = *expr {
+                let from = self.module.ctx.constant(operand).ty();
+                self.cast_shape(op, from, ty, "a constant expression");
             }
         }
 
@@ -797,14 +803,6 @@ impl Verifier<'_> {
                 } else {
                     self.report(format!("{where_} has a callee type that is not a function"));
                 }
-                for group in &call.fn_attrs.groups {
-                    let group = *group;
-                    if self.module.attribute_group(group).is_none() {
-                        self.report(format!(
-                            "{where_} refers to undefined attribute group #{group}"
-                        ));
-                    }
-                }
                 // Opaque pointers mean the callee carries no signature of its
                 // own, so a call to a known function is the only place the two
                 // can be compared. `call void @g()` against `declare void
@@ -1092,12 +1090,34 @@ impl Verifier<'_> {
             CastOp::PtrToInt | CastOp::PtrToAddr => pointer(self, from) && int(self, to),
             CastOp::IntToPtr => int(self, from) && pointer(self, to),
             CastOp::AddrSpaceCast => pointer(self, from) && pointer(self, to),
-            CastOp::BitCast => true,
+            // A bitcast reinterprets the same bits, so it may not cross
+            // between a pointer and anything else, may not change an address
+            // space (that is what addrspacecast is for), and may not apply to
+            // an aggregate.
+            CastOp::BitCast => {
+                let from_pointer = pointer(self, from);
+                let to_pointer = pointer(self, to);
+                from_pointer == to_pointer
+                    && (!from_pointer || self.address_space_of(from) == self.address_space_of(to))
+                    && !self.module.ctx.type_kind(from).is_aggregate()
+                    && !self.module.ctx.type_kind(to).is_aggregate()
+            }
         };
         self.check(
             ok,
             format!("{where_} casts between the wrong kinds of type"),
         );
+
+        // Reinterpreting bits cannot change how many there are.
+        if op == CastOp::BitCast
+            && let (Some(from_bits), Some(to_bits)) =
+                (self.size_in_bits(from), self.size_in_bits(to))
+        {
+            self.check(
+                from_bits == to_bits,
+                format!("{where_} changes the size of its operand"),
+            );
+        }
 
         if let (Some(from_bits), Some(to_bits)) = (self.scalar_bits(from), self.scalar_bits(to)) {
             let widening = matches!(op, CastOp::ZExt | CastOp::SExt | CastOp::FpExt);
@@ -1256,6 +1276,20 @@ impl Verifier<'_> {
             self.module.ctx.type_kind(self.element_or_self(ty)),
             TypeKind::Pointer { .. }
         )
+    }
+
+    /// The address space of a pointer, or of a vector of them.
+    fn address_space_of(&self, ty: TypeId) -> Option<u32> {
+        match self.module.ctx.type_kind(self.element_or_self(ty)) {
+            TypeKind::Pointer { address_space } => Some(*address_space),
+            _ => None,
+        }
+    }
+
+    /// The total width of a type, when the data layout can give one.
+    fn size_in_bits(&self, ty: TypeId) -> Option<u64> {
+        let layout = self.module.data_layout.clone().unwrap_or_default();
+        crate::layout::size_in_bits(&self.module.ctx, &layout, ty).ok()
     }
 
     /// Width of a scalar or of a vector's element, for the widen and narrow

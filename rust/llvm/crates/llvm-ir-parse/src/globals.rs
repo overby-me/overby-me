@@ -128,10 +128,20 @@ impl Parser {
                 return self.error("unexpected clause after a global");
             }
         }
-        while let Token::AttributeGroup(number) = self.peek() {
-            let number = *number;
-            self.advance();
-            global.attrs.groups.push(number);
+        // `@g = global i32 7 "key" = "value" #0`: a global's own attributes
+        // come last, with no comma, and can be either strings or groups.
+        loop {
+            match self.peek().clone() {
+                Token::AttributeGroup(number) => {
+                    self.advance();
+                    global.attrs.groups.push(number);
+                }
+                Token::Quoted(_) => {
+                    let attribute = self.parse_attribute(false)?;
+                    global.attrs.push(attribute);
+                }
+                _ => break,
+            }
         }
         self.module.add_global(global);
         Ok(())
@@ -160,6 +170,9 @@ impl Parser {
                     | "extractelement"
                     | "insertelement"
                     | "shufflevector"
+                    | "add"
+                    | "sub"
+                    | "xor"
                     | "blockaddress"
                     | "dso_local_equivalent"
                     | "no_cfi"

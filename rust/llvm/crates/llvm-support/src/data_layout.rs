@@ -282,7 +282,10 @@ impl DataLayout {
                 table.push(entry);
             }
             'a' => {
-                if fields.len() < 2 || !fields[0].is_empty() {
+                // `a:8:16` is the modern spelling and `a0:8:16` the
+                // deprecated one; upstream still reads the size and ignores
+                // it, because an aggregate has no width of its own.
+                if fields.len() < 2 || !(fields[0].is_empty() || fields[0] == "0") {
                     return Err(fail("aggregate alignment takes no size"));
                 }
                 let abi_bits = number(fields[1], "ABI alignment")?;

@@ -1088,7 +1088,9 @@ impl Parser {
                 self.parse_operation_flags(&mut flags, &mut fast_math);
                 let ty = self.parse_type()?;
                 let mut incoming = Vec::new();
-                loop {
+                // A phi with no edges at all is legal: upstream accepts one
+                // in a block nothing branches to.
+                while self.peek() == &Token::LeftBracket || !incoming.is_empty() {
                     if !incoming.is_empty() && !self.eat(&Token::Comma) {
                         break;
                     }
@@ -1267,9 +1269,14 @@ impl Parser {
         self.parse_operation_flags(&mut flags, &mut fast_math);
         let calling_conv = self.parse_calling_conv()?;
         let return_attrs = self.parse_attribute_set(false)?;
+        // `call addrspace(0) void @f()` puts the space before the type;
+        // upstream also accepts it after, so both are read.
+        let leading_address_space = self.parse_optional_address_space()?;
         let written_type = self.parse_type_atom()?;
         let written_type = self.parse_type_suffix(written_type)?;
-        let address_space = self.parse_optional_address_space()?;
+        let address_space = self
+            .parse_optional_address_space()?
+            .or(leading_address_space);
 
         let callee_type = self.module.ctx.pointer_type(address_space.unwrap_or(0));
         let callee = self.parse_value(function, state, callee_type)?;
