@@ -161,12 +161,21 @@
   # Left undiagnosed rather than guessed at.
   #
   # c-systemd-test-35-login was run to decide environmental-vs-defect and CANNOT
-  # settle it: the C oracle fails EARLIER and for an unrelated reason, in
-  # testcase_ambient_caps, where a `systemd-run -p PAMName= -p Type=oneshot
-  # -p User=logind-test-user` unit fails to start at all under C systemd in this
-  # VM. rust-systemd therefore gets STRICTLY FURTHER through this test than the
-  # reference implementation does here: it clears testcase_ambient_caps and all
-  # of testcase_background, and dies in the third testcase.
+  # settle it. The C oracle fails EARLIER, in testcase_ambient_caps, where a
+  # `systemd-run -p PAMName= -p Type=oneshot -p User=logind-test-user` unit will
+  # not start at all. The reason is a PACKAGING ASYMMETRY, not a behavioural gap:
+  # default.nix's mkPamWithSystemd symlinks pam_systemd.so into linux-pam's
+  # securedir and feeds that libpam to the rust build via the libsystemd PAM_LIB
+  # crate override, because rust's exec_helper dlopens libpam and the 35-LOGIN
+  # PAM stack references the module by bare name. The C build gets stock NixOS
+  # pam, whose securedir omits pam_systemd.so since NixOS pam.d files normally
+  # use absolute module paths. So the two managers do not even load the same
+  # libpam here, and the oracle cannot be cited as evidence either way for this
+  # test.
+  #
+  # rust-systemd does still get further through the file than the C build does
+  # in this VM, but that is a statement about the packaging, not a claim that
+  # rust is more correct than upstream.
   #
   # NO OVERRIDE: the red result is honest, and there are ~13 further testcases
   # after this one that have never been reached.

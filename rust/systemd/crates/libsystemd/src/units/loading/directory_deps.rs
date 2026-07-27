@@ -1410,14 +1410,29 @@ fn has_unresolved_specifiers(s: &str) -> bool {
     crate::specifier::has_unresolved_specifiers(s)
 }
 
-/// Lazily-initialized system specifier context.
+/// Lazily-initialized specifier context for this manager.
 ///
-/// Created once on first use so that every `resolve_specifiers` call
-/// shares the same snapshot of hostname, machine-id, boot-id, etc.
-fn system_specifier_context() -> &'static crate::specifier::SpecifierContext {
+/// Created once on first use so that every `resolve_specifiers` call shares the
+/// same snapshot of hostname, machine-id, boot-id, etc. A process is either the
+/// system manager or a user manager for its whole life, so the flavour can be
+/// decided once here.
+///
+/// This used to be hardcoded to `for_system()`, which left
+/// `SpecifierContext::for_user()` dead code and gave every unit loaded by a
+/// USER manager system values: `%t` resolved to `/run` rather than
+/// `$XDG_RUNTIME_DIR` (so a user `dbus.socket` with `ListenStream=%t/bus` tried
+/// to bind the system bus path), and `%S`, `%C`, `%h` were wrong the same way.
+fn manager_specifier_context() -> &'static crate::specifier::SpecifierContext {
     use std::sync::OnceLock;
     static CTX: OnceLock<crate::specifier::SpecifierContext> = OnceLock::new();
-    CTX.get_or_init(crate::specifier::SpecifierContext::for_system)
+    CTX.get_or_init(|| {
+        // Set by run_user_manager() before any unit is loaded.
+        if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
+            crate::specifier::SpecifierContext::for_user()
+        } else {
+            crate::specifier::SpecifierContext::for_system()
+        }
+    })
 }
 
 /// Resolve systemd specifiers in a unit file content string.
@@ -1449,7 +1464,7 @@ pub fn instance_of(unit_name: &str) -> &str {
 }
 
 pub fn resolve_specifiers(content: &str, unit_name: &str, instance: &str) -> String {
-    crate::specifier::resolve_specifiers(content, unit_name, instance, system_specifier_context())
+    crate::specifier::resolve_specifiers(content, unit_name, instance, manager_specifier_context())
 }
 
 /// Load a template unit, instantiate it with the given instance name,

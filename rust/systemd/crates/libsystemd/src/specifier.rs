@@ -863,6 +863,31 @@ mod tests {
 
     // --- directory specifiers ---
 
+    /// The system and user managers must not share a runtime directory.
+    ///
+    /// The unit loader used to build a `for_system()` context unconditionally,
+    /// so a user manager resolved `%t` to `/run` and a user `dbus.socket` with
+    /// `ListenStream=%t/bus` tried to bind the system bus path.
+    #[test]
+    fn system_and_user_contexts_differ_in_runtime_dir() {
+        let system = SpecifierContext::for_system();
+        assert_eq!(system.runtime_dir, "/run");
+
+        let user = SpecifierContext::for_user();
+        assert_ne!(
+            user.runtime_dir, "/run",
+            "a user manager must not resolve %t to the system runtime dir"
+        );
+        match std::env::var("XDG_RUNTIME_DIR") {
+            Ok(x) if !x.is_empty() => assert_eq!(user.runtime_dir, x),
+            _ => assert!(
+                user.runtime_dir.starts_with("/run/user/"),
+                "expected a per-user runtime dir, got {}",
+                user.runtime_dir
+            ),
+        }
+    }
+
     #[test]
     fn test_t_runtime_dir() {
         let c = ctx();

@@ -400,6 +400,9 @@ in {
         [Service]
         User=%i
         Type=notify-reload
+        # Upstream gets XDG_RUNTIME_DIR from PAMName=systemd-user; set it
+        # explicitly so the manager's %t, %S and %C resolve per-user.
+        Environment=XDG_RUNTIME_DIR=/run/user/%i
         ExecStart=$out/lib/systemd/systemd --user
         Slice=user-%i.slice
         KillMode=mixed
