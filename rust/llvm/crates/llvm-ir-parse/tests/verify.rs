@@ -560,3 +560,46 @@ fn what_upstream_accepts_parses() {
             .unwrap_or_else(|error| panic!("upstream accepts this: {error}\n{text}"));
     }
 }
+
+/// The ThinLTO summary index, which is a grammar of its own.
+///
+/// It cannot be pinned by the corpus the way everything else is, because
+/// `llvm-dis` regenerates the index from the bitcode rather than preserving
+/// what was written: the module path and hash come from the file it read and
+/// a `; guid = N` comment is appended. So the property to hold is ours, that
+/// what we print back is what was written.
+const SUMMARY: &str = r#"; ModuleID = 'summary.ll'
+source_filename = "summary.ll"
+
+define void @f() {
+entry:
+  ret void
+}
+
+^0 = module: (path: "summary.o", hash: (1, 2, 3, 4, 5))
+^1 = gv: (name: "f", summaries: (function: (module: ^0, flags: (linkage: external, visibility: default, notEligibleToImport: 0, live: 0, dsoLocal: 1, canAutoHide: 0, importType: definition), insts: 1, funcFlags: (readNone: 0, noRecurse: 1), calls: ((callee: ^1)), allocs: ((versions: (none), memProf: ((type: notcold, stackIds: ())))))))
+^2 = typeidCompatibleVTable: (name: "_ZTSN3FooE", summary: ((offset: 16, ^1)))
+^3 = flags: 8
+^4 = blockcount: 1
+"#;
+
+#[test]
+fn a_summary_index_round_trips() {
+    let module = llvm_ir_parse::parse_module(SUMMARY).expect("upstream accepts this");
+    assert!(llvm_ir::verify_module(&module).is_empty());
+    assert_eq!(llvm_ir_print::print_module(&module), SUMMARY);
+}
+
+#[test]
+fn a_summary_index_names_symbols_this_module_has() {
+    let text = "^0 = module: (path: \"a.o\", hash: (0, 0, 0, 0, 0))\n^1 = gv: (name: \"absent\")\n";
+    let module = llvm_ir_parse::parse_module(text).expect("this case should parse");
+    let errors = llvm_ir::verify_module(&module);
+    let messages: Vec<String> = errors.iter().map(ToString::to_string).collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("the summary index names @absent")),
+        "{messages:?}"
+    );
+}

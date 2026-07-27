@@ -40,6 +40,7 @@ mod keyword;
 pub mod layout;
 pub mod metadata;
 pub mod module;
+pub mod summary;
 pub mod types;
 pub mod value;
 pub mod verify;

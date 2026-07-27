@@ -36,6 +36,9 @@ pub struct Module {
     /// Metadata indexed by the number it prints as. Holes are numbers nothing
     /// defined, which the verifier reports as unresolved references.
     pub metadata: Vec<Option<Metadata>>,
+    /// The ThinLTO summary index, `^0 = module: (...)`, written after the
+    /// module body and printed back as it was written.
+    pub summary: Vec<crate::summary::SummaryEntry>,
     symbols: HashMap<Name, GlobalRef>,
 }
 
@@ -62,6 +65,7 @@ impl Module {
             attribute_groups: Vec::new(),
             named_metadata: Vec::new(),
             metadata: Vec::new(),
+            summary: Vec::new(),
             symbols: HashMap::new(),
         }
     }

@@ -17,6 +17,7 @@ use crate::global::{GlobalQualifiers, Linkage, Visibility};
 use crate::instruction::{AtomicOrdering, BinOp, InstKind, IntFlags};
 use crate::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use crate::module::Module;
+use crate::summary::SummaryValue;
 use crate::types::TypeKind;
 use crate::value::{BlockId, GlobalRef, InstId, MdId, Name, Value};
 use crate::{FunctionId, TypeId};
@@ -94,6 +95,7 @@ impl Verifier<'_> {
     // ----------------------------------------------------------- module rules
 
     fn module_level(&mut self) {
+        self.summary_index();
         for index in 0..self.module.metadata.len() {
             if let Some(node) = self.module.metadata[index].clone() {
                 self.debug_info_node(&node);
@@ -271,6 +273,49 @@ impl Verifier<'_> {
                 _ => None,
             },
             _ => None,
+        }
+    }
+
+    /// A `gv` entry that names a symbol has to name one this module has.
+    /// Upstream reports it as a parse error; the effect is the same and the
+    /// name table is easier to reach from here.
+    fn summary_index(&mut self) {
+        let named: HashSet<String> = self
+            .module
+            .globals
+            .iter()
+            .map(|global| &global.name)
+            .chain(self.module.functions.iter().map(|f| &f.name))
+            .chain(self.module.aliases.iter().map(|a| &a.name))
+            .chain(self.module.ifuncs.iter().map(|i| &i.name))
+            .filter_map(|name| match name {
+                Name::Named(text) => Some(text.clone()),
+                Name::Number(_) => None,
+            })
+            .collect();
+        let missing: Vec<String> = self
+            .module
+            .summary
+            .iter()
+            .filter(|entry| entry.kind == "gv")
+            .filter_map(|entry| match &entry.value {
+                SummaryValue::Tuple(fields) => {
+                    fields
+                        .iter()
+                        .find_map(|field| match (field.key.as_deref(), &field.value) {
+                            (Some("name"), SummaryValue::String(text)) if !named.contains(text) => {
+                                Some(text.clone())
+                            }
+                            _ => None,
+                        })
+                }
+                _ => None,
+            })
+            .collect();
+        for name in missing {
+            self.report(format!(
+                "the summary index names @{name}, which this module has not"
+            ));
         }
     }
 

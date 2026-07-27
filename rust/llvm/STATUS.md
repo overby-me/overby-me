@@ -66,14 +66,14 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 378 | 483 | 41 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 389 | 483 | 30 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 212 | 328 | 4 | `llvm-upstream-verifier` |
 
 The two halves of the gap are not equally bad, so each suite has two
-bounds. We **refuse 45 modules llvm-as reads**, which is the failure that
-matters: mostly parse gaps, led by the module summary index syntax
-(`^0 = ...`, ten files) and intrinsics used without a declaration. That
-count is a ceiling that may only fall. We **read 176 modules llvm-as
+bounds. We **refuse 34 modules llvm-as reads**, which is the failure that
+matters: parse gaps, led now by intrinsics used without a declaration, the
+`splat` and `ptrauth` constants, and escaped bytes in a metadata string.
+That count is a ceiling that may only fall. We **read 176 modules llvm-as
 refuses**, which is a missing verifier rule each, and agreement is a floor
 that may only rise.
 
@@ -85,7 +85,7 @@ what happened when five such rules came out at once: Verifier agreement
 fell 215 to 212 while the modules we wrongly refuse fell 53 to 45. Without
 the second bound the ratchet would have argued for keeping the bugs.
 
-Three of the 45 are permanent by design: typed-pointer IR is rejected here
+Three of the 34 are permanent by design: typed-pointer IR is rejected here
 on purpose (PLAN §1.2), and `llvm-as` still reads `i8*` and folds it to
 `ptr` rather than refusing it as this dialect does.
 
@@ -102,7 +102,7 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against `llvm-as | llvm-dis`, and **112 of 183** are identical. Two
+against `llvm-as | llvm-dis`, and **115 of 199** are identical. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against

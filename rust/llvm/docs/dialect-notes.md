@@ -152,6 +152,17 @@ suffix together, so `call void @llvm.made.up.name.i32(i32 1, i32 2)`
 against a one-argument declaration names something that does not exist,
 and upstream says so.
 
+## Preserved rather than regenerated
+
+**The ThinLTO summary index prints back what was written.** `llvm-dis`
+rebuilds the index from the bitcode instead: it takes the module path and
+hash from the file it read, fills in defaults it knows about
+(`visibility: default`, `importType: definition`), appends a `blockcount`
+entry and a `; guid = N` comment. None of that is reproducible from the
+text alone, and reproducing it means modelling ThinLTO rather than its
+syntax. So the corpus cannot pin this one and a dedicated round-trip test
+holds the property that is ours: what we print is what was written.
+
 ## Refused although upstream reads it
 
 **Typed-pointer syntax.** `llvm-as` in LLVM 21 still parses `i8*` and folds

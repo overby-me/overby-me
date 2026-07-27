@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use llvm_ir::attribute::{Attribute, AttributeSet, IntAttr};
 use llvm_ir::function::Function;
 use llvm_ir::instruction::{CallData, InstKind};
+use llvm_ir::summary::SummaryValue;
 use llvm_ir::value::{Name, escape_name, needs_quotes};
 use llvm_ir::{BlockId, Module, StructId, TypeId, TypeKind};
 use llvm_support::Align;
@@ -176,6 +177,18 @@ impl<'m> Printer<'m> {
                     "attributes #{number} = {{ {} }}",
                     attribute_list(self.module, &set, true)
                 );
+            }
+        }
+
+        // Upstream writes the summary index between the attribute groups and
+        // the named metadata.
+        if !self.module.summary.is_empty() {
+            self.push("\n");
+            for index in 0..self.module.summary.len() {
+                let entry = self.module.summary[index].clone();
+                let _ = write!(self.out, "^{} = {}: ", entry.id, entry.kind);
+                self.summary_value(&entry.value);
+                self.push("\n");
             }
         }
 
@@ -400,6 +413,36 @@ fn struct_name(def: &llvm_ir::types::StructDef) -> String {
         def.name.clone()
     } else {
         identifier(&def.name)
+    }
+}
+
+impl Printer<'_> {
+    fn summary_value(&mut self, value: &SummaryValue) {
+        match value {
+            SummaryValue::Number(number) => {
+                let _ = write!(self.out, "{number}");
+            }
+            SummaryValue::String(text) => {
+                let _ = write!(self.out, "\"{}\"", escape_string(text));
+            }
+            SummaryValue::Ref(id) => {
+                let _ = write!(self.out, "^{id}");
+            }
+            SummaryValue::Word(word) => self.push(word),
+            SummaryValue::Tuple(fields) => {
+                self.push("(");
+                for (position, field) in fields.iter().enumerate() {
+                    if position > 0 {
+                        self.push(", ");
+                    }
+                    if let Some(key) = &field.key {
+                        let _ = write!(self.out, "{key}: ");
+                    }
+                    self.summary_value(&field.value);
+                }
+                self.push(")");
+            }
+        }
     }
 }
 

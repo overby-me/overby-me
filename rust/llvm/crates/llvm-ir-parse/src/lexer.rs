@@ -39,6 +39,8 @@ pub enum Token {
     MetadataName(String),
     /// `!3`.
     MetadataNumber(u32),
+    /// `^3`, a reference into the ThinLTO summary index.
+    SummaryNumber(u32),
     /// `!"text"`.
     MetadataString(String),
     /// A lone `!`, which starts an inline tuple.
@@ -101,6 +103,7 @@ impl Token {
             Token::ComdatName(name) => format!("${name}"),
             Token::MetadataName(name) => format!("!{name}"),
             Token::MetadataNumber(n) => format!("!{n}"),
+            Token::SummaryNumber(n) => format!("^{n}"),
             Token::MetadataString(_) => "a metadata string".to_string(),
             Token::Exclaim => "!".to_string(),
             Token::AttributeGroup(n) => format!("#{n}"),
@@ -289,6 +292,13 @@ impl<'a> Lexer<'a> {
                     Some(b) if b.is_ascii_digit() => Token::MetadataNumber(self.number()?),
                     Some(b) if is_name_byte(b) => Token::MetadataName(self.bare_name()),
                     _ => Token::Exclaim,
+                }
+            }
+            b'^' => {
+                self.bump();
+                match self.peek() {
+                    Some(b) if b.is_ascii_digit() => Token::SummaryNumber(self.number()?),
+                    _ => return Err(self.error("expected a summary number after '^'")),
                 }
             }
             b'#' => {

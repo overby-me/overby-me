@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 378 of 483 with 41 wrongly refused, Verifier 212 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 389 of 483 with 30 wrongly refused, Verifier 212 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -204,6 +204,14 @@ recognises the name; `@llvm.not.a.real.intrinsic` is still "use of
 undefined value". Declaring every `llvm.*` name we see gained five files
 and lost eleven. Doing it properly needs the base-name table, which is the
 same table per-intrinsic signatures need.
+An eleventh pass took the ThinLTO summary index, `^0 = module: (...)`,
+which was the largest single parse gap at ten files. It is modelled
+syntactically in `crates/llvm-ir/src/summary.rs`, the way specialized
+debug-info nodes are, because the grammar is uniform all the way down: a
+keyword, a value, and tuples of keyed or positional values nested to any
+depth. Nothing reads what the keywords mean.
+One verifier rule came with it, worth the eleventh file: a `gv` entry that
+names a symbol has to name one this module has.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;
