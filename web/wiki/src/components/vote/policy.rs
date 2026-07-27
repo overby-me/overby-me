@@ -153,7 +153,7 @@ pub fn PolicyApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                         }
                                     }
                                     if is_open {
-                                        div { class: "amendment-preview amendment-diff",
+                                        div { class: "amendment-preview",
                                             AmendmentDiffView {
                                                 original: motion_text.clone(),
                                                 proposed: amendment_text.clone(),

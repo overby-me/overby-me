@@ -62,7 +62,7 @@ pub fn HomeApp() -> Element {
         div { class: "grid grid-3",
             // Main content column
             div {
-                div { class: "card home-hero",
+                div { class: "card",
                     div { class: "home-hero-head",
                         div { class: "home-hero-icon",
                             span { class: "material-icons", "waving_hand" }
@@ -265,10 +265,9 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                     }
                     if let Some(iso) = created.as_ref() {
                         if author.is_some() {
-                            span { class: "recent-sep", "\u{00b7}" }
+                            span { "\u{00b7}" }
                         }
                         span {
-                            class: "recent-time",
                             title: "{super::loader::full_datetime(iso)}",
                             "{super::loader::relative_time(iso)}"
                         }

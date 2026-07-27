@@ -116,7 +116,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     let polls = polls.read().clone().unwrap_or_default();
 
     rsx! {
-        div { class: "console",
+        div {
             // Jump to the room-facing views without leaving the console flow.
             div { class: "console-actions",
                 Link {

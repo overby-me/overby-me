@@ -368,7 +368,7 @@ fn ContributionList(items: Vec<model::ChildNodeFields>) -> Element {
         }
         if items.len() > n {
             button {
-                class: "btn btn-text list-expand-toggle",
+                class: "btn btn-text",
                 onclick: move |_| {
                     let s = *shown.read();
                     shown.set(s + STEP);
@@ -412,7 +412,7 @@ fn ContextList(contexts: Vec<model::ContextNodeFields>) -> Element {
         }
         if contexts.len() > n {
             button {
-                class: "btn btn-text list-expand-toggle",
+                class: "btn btn-text",
                 onclick: move |_| {
                     let s = *shown.read();
                     shown.set(s + STEP);

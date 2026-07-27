@@ -108,7 +108,6 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(String::from);
-    let has_image = image_file_id.is_some();
     let image_url = super::loader::use_file_object_url(image_file_id.unwrap_or_default());
     // A candidate's photo is a portrait, not a landscape cover, so the wide hero
     // band crops it hard. Candidate heroes get the taller frame; documents keep
@@ -116,7 +115,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     let portrait_hero = node.mime_id.as_deref() == Some("vote/candidate");
 
     rsx! {
-        div { class: if has_image { "card has-hero" } else { "card" },
+        div { class: "card",
             // Identity zone: when the document carries an image it becomes a full-bleed
             // cover hero with the title/date overlaid on a legibility scrim, so the
             // image frames the document instead of sitting as a plain block above it.

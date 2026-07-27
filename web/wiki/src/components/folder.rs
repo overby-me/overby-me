@@ -206,7 +206,7 @@ pub fn FolderApp(
     );
 
     rsx! {
-        div { class: if has_cover { "card has-hero" } else { "card" },
+        div { class: "card",
             div { class: if has_cover { "context-header has-cover" } else { "context-header" },
                 // Identity: the cover image (data.image) as a full-bleed hero with
                 // the title on a legibility veil, the same treatment ContentApp

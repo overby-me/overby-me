@@ -40,7 +40,7 @@ pub(super) fn NavigationRail(tree_open: bool, on_toggle: EventHandler<()>) -> El
                         "aria-current": if active { "page" } else { "false" },
                         title: "{label}",
                         span { class: "nav-rail-indicator",
-                            span { class: "app-rail-icon", {crate::components::loader::icon_el(mime_id)} }
+                            span { {crate::components::loader::icon_el(mime_id)} }
                             if mime_id == "app/home" && pending > 0 {
                                 crate::components::widgets::Badge { count: Some(pending) }
                             }
@@ -89,7 +89,7 @@ pub(super) fn NavigationBar() -> Element {
                     title: "{label}",
                     aria_label: "{label}",
                     span { class: "nav-bar-indicator",
-                        span { class: "app-rail-icon", {crate::components::loader::icon_el(mime_id)} }
+                        span { {crate::components::loader::icon_el(mime_id)} }
                         if mime_id == "app/home" && pending > 0 {
                             crate::components::widgets::Badge { count: Some(pending) }
                         }

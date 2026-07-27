@@ -1327,6 +1327,12 @@ html {
 	color: var(--md-on-primary-container);
 	box-shadow: var(--md-sys-elevation-1);
 }
+/* The greeting + title column of the hero head. A flex item defaults to
+   min-width: auto, so a long unbroken word in the title would push the row wider
+   than the card instead of wrapping; 0 lets it shrink and wrap. */
+.home-hero-text {
+	min-width: 0;
+}
 .home-hero-icon .material-icons {
 	font-size: 2.125rem;
 	transform-origin: 70% 70%;
@@ -4570,6 +4576,13 @@ h6,
 }
 .program-item:hover .program-dot {
 	box-shadow: 0 0 0 4px color-mix(in srgb, var(--md-primary) 18%, transparent);
+}
+
+/* The agenda item's text cell (the 1fr column). A grid track defaults to
+   min-width: auto, so a long item name would widen the whole row past the card
+   and scroll it sideways; 0 keeps the overflow inside the cell. */
+.program-body {
+	min-width: 0;
 }
 
 /* The rail: a vertical line drawn behind each marker cell so consecutive dots

@@ -690,7 +690,7 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
                                         class: if picker_cat() == i { "reaction-picker-tab is-active" } else { "reaction-picker-tab" },
                                         title: "{label}",
                                         onclick: move |_| picker_cat.set(i),
-                                        span { class: "reaction-picker-tab-emoji", "{EMOJI_CATEGORIES[i].1[0]}" }
+                                        span { "{EMOJI_CATEGORIES[i].1[0]}" }
                                     }
                                 }
                             }
@@ -847,7 +847,7 @@ fn CommentComposer(
                 oninput: move |evt| text.set(evt.value()),
             }
             button {
-                class: "btn-icon comment-send",
+                class: "btn-icon",
                 r#type: "button",
                 aria_label: "{t(\"common.send\")}",
                 disabled: *posting.read(),

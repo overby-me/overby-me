@@ -148,7 +148,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                     }
                     if total > LIST_LIMIT {
                         button {
-                            class: "btn btn-text list-expand-toggle",
+                            class: "btn btn-text",
                             // Stop the click reaching the drawer's close-on-item handler,
                             // so expanding the list on mobile doesn't dismiss the drawer.
                             onclick: move |evt: Event<MouseData>| {
@@ -218,7 +218,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                     }
                     if total > LIST_LIMIT {
                         button {
-                            class: "btn btn-text list-expand-toggle",
+                            class: "btn btn-text",
                             onclick: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
                                 let e = *events_expanded.read();
