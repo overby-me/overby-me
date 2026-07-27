@@ -188,15 +188,13 @@ VM run. Diagnostics must write to stderr.
 
   `test_check_idmapped_mounts` sits behind it and has its own genuine bug.
 
-  Its recorded rationale was **inverted**, not merely stale, and that is the
-  lesson worth keeping. It said the exec directories ended up read-only and the
-  service "sees 0" writable directories; instrumenting the mount table showed
-  all of them already writable. The service asserts `find / -type d -writable`
-  returns exactly 8, so it failed because *too much* was writable. Three
-  approaches had been tried and reverted trying to make writable something that
-  already was. The defect was in `ProtectSystem=strict` restoring `/run`,
-  `/tmp`, `/var/tmp` and `/var/log` to read-write, which upstream's
-  `protect_system_strict_table` does not.
+  Its recorded rationale said the service sees zero writable directories, and
+  that is correct: the service's own trace ends `+ [[ 0 == 8 ]]`. I overturned
+  that once on the strength of an instrument that called `access(W_OK)` as
+  **root** before the service drops to its dynamic uid, and concluded the
+  opposite. Root sees a writable filesystem whatever the modes are. Measure as
+  the principal the assertion is about.
+
 - **55-OOMD** line 12 needs three things. Two are done (credentials, reload-time
   generators). The third: `init.scope` is not a unit in rust-systemd, only a
   cgroup path constant, so `[Scope]` resource control never reaches PID 1's
