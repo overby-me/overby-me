@@ -53,6 +53,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     };
     let node_id = node.id.0.clone();
     let mut confirm_open = use_signal(|| false);
+    // Submitting is irreversible (it makes the node immutable), so the sheet's
+    // row opens the same warning dialog the editor's submit button opens.
+    let mut confirm_submit = use_signal(|| false);
     let name = node.name.clone();
     let members = node.members.clone();
     let created = node.created_at.as_ref().map(|t| t.0.clone());
@@ -343,6 +346,16 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                 {icon_el("app/editor")}
                                 "{t(\"mime.editor\")}"
                             }
+                            // Submit without going through the editor: the node is
+                            // written already, and submitting only makes it
+                            // immutable. Same gate as editing (`can_edit` is owner
+                            // AND still mutable), so it disappears once submitted.
+                            button {
+                                class: "sheet-action",
+                                onclick: move |_| confirm_submit.set(true),
+                                span { class: "material-icons", "publish" }
+                                "{t(\"content.submit\")}"
+                            }
                         }
                         // Close (or reopen) what members may add here, the same
                         // lock a folder has over its content.
@@ -400,6 +413,61 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                             "{t(\"common.delete\")}"
                         }
                     }
+                }
+            }
+            // Submit confirm, carrying the same warning the editor's does: after
+            // this the node can no longer be edited.
+            if can_edit {
+                super::widgets::Dialog {
+                    open: confirm_submit(),
+                    on_dismiss: move |_| confirm_submit.set(false),
+                    headline: t("content.submit"),
+                    icon: "publish".to_string(),
+                    actions: rsx! {
+                        button {
+                            class: "btn btn-outlined",
+                            onclick: move |_| confirm_submit.set(false),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            onclick: {
+                                let id = node_id.clone();
+                                move |_| {
+                                    confirm_submit.set(false);
+                                    let token = session.read().access_token.clone();
+                                    let id = id.clone();
+                                    spawn(async move {
+                                        match graphql::update_node(
+                                            token.as_deref(),
+                                            &id,
+                                            crate::model::NodesSetInput {
+                                                mutable: Some(false),
+                                                ..Default::default()
+                                            },
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => {
+                                                crate::session::bump_data_version();
+                                                crate::snackbar::show_snackbar(&t(
+                                                    "content.submit",
+                                                ));
+                                            }
+                                            Err(e) => {
+                                                log::error!("submit failed: {e}");
+                                                crate::snackbar::show_snackbar(&t(
+                                                    "error.somethingWentWrong",
+                                                ));
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            "{t(\"content.submit\")}"
+                        }
+                    },
+                    p { class: "body-medium", "{t(\"content.submitWarning\")}" }
                 }
             }
             if can_manage && !segments.is_empty() {
