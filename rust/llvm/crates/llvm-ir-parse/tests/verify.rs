@@ -61,6 +61,38 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "define void @f(ptr %p) {\nentry:\n  %v = load atomic i24, ptr %p monotonic, align 4\n  ret void\n}\n",
+        "moves 24 bits, which is not a size an atomic comes in",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  %v = load atomic <2 x i32>, ptr %p monotonic, align 8\n  ret void\n}\n",
+        "moves a type an atomic cannot move",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  %r = atomicrmw fadd ptr %p, <3 x half> undef seq_cst, align 4\n  ret void\n}\n",
+        "moves 48 bits, which is not a size an atomic comes in",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  %x = cmpxchg ptr %p, float 0.0, float 1.0 monotonic monotonic\n  ret void\n}\n",
+        "compares something other than an integer or a pointer",
+    ),
+    (
+        "define void @f() {\nentry:\n  %x = shufflevector <2 x i32> undef, <2 x i32> undef, <2 x i32> <i32 0, i32 4>\n  ret void\n}\n",
+        "picks a lane the two vectors together do not have",
+    ),
+    (
+        "define void @f() {\nentry:\n  %x = shufflevector <2 x i32> undef, <2 x i32> undef, <2 x i32> <i32 0, i32 -1>\n  ret void\n}\n",
+        "picks a lane the two vectors together do not have",
+    ),
+    (
+        "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %b, label %b\n\nb:\n  %p = phi i32 [ 0, %entry ]\n  ret void\n}\n",
+        "does not name exactly its block's incoming edges",
+    ),
+    (
+        "define void @f(i32 %x) {\nentry:\n  switch i32 %x, label %d [ i32 1, label %b\n i32 2, label %b ]\n\nb:\n  %p = phi i32 [ 0, %entry ], [ 1, %entry ]\n  ret void\n\nd:\n  ret void\n}\n",
+        "gives %entry two values for one arrival",
+    ),
+    (
         "define void @f() personality ptr null {\nentry:\n  %c = catchswitch within none [ label %h ] unwind to caller\n\nh:\n  %p = catchpad within %c []\n  catchret from %p to label %e\n\ne:\n  ret void\n}\n",
         "catchswitch opens the entry block",
     ),
@@ -98,7 +130,7 @@ const BROKEN: &[(&str, &str)] = &[
     ),
     (
         "define i32 @f(i1 %c) {\nentry:\n  br i1 %c, label %a, label %b\na:\n  br label %join\nb:\n  br label %join\njoin:\n  %p = phi i32 [ 0, %a ]\n  ret i32 %p\n}\n",
-        "does not name exactly its block's predecessors",
+        "does not name exactly its block's incoming edges",
     ),
     (
         "define void @f() {\nentry:\n  ret i32 0\n}\n",
@@ -756,6 +788,14 @@ const BROKEN: &[(&str, &str)] = &[
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
     (
+        "define void @f(ptr %p) {\nentry:\n  %v = load atomic i32, ptr %p monotonic\n  ret void\n}\n",
+        "atomic load needs an alignment of its own",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  store atomic i32 0, ptr %p monotonic\n  ret void\n}\n",
+        "atomic store needs an alignment of its own",
+    ),
+    (
         "@g = global i32 0\n@g = global i32 1\n",
         "redefinition of global '@g'",
     ),
@@ -976,6 +1016,15 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // 128 bits is a size an atomic comes in, and so is a vector of floats
+    // whose lanes multiply out to one.
+    "define void @f(ptr %p) {\nentry:\n  %v = load atomic i128, ptr %p monotonic, align 16\n  %r = atomicrmw fadd ptr %p, <2 x half> undef seq_cst, align 4\n  ret void\n}\n",
+    // The last lane of the second vector is in range, and a lane that does
+    // not matter is written rather than indexed.
+    "define void @f() {\nentry:\n  %x = shufflevector <2 x i32> undef, <2 x i32> undef, <2 x i32> <i32 0, i32 3>\n  %y = shufflevector <2 x i32> undef, <2 x i32> undef, <2 x i32> <i32 0, i32 poison>\n  ret void\n}\n",
+    // Two edges from one block need two entries, and they agree because both
+    // arrive at once.
+    "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %b, label %b\n\nb:\n  %p = phi i32 [ 0, %entry ], [ 0, %entry ]\n  ret void\n}\n",
     // The shape the funclet rules are the negative of: an invoke unwinding to
     // a catchswitch, whose handler opens with a catchpad.
     "declare void @g()\n\ndefine void @f() personality ptr null {\nentry:\n  invoke void @g() to label %n unwind label %s\n\nn:\n  ret void\n\ns:\n  %c = catchswitch within none [ label %h ] unwind to caller\n\nh:\n  %p = catchpad within %c []\n  catchret from %p to label %n\n}\n",

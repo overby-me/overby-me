@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 453 of 483 with 13 wrongly refused, Verifier 285 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 453 of 483 with 13 wrongly refused, Verifier 286 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -440,6 +440,28 @@ waits for the whole module, because the function may not have been read
 when the constant is built, and it looks at named labels only: matching
 `%3` needs the slot numbers, which the printer works out and the verifier
 does not have.
+A forty-second pass took the phi and the atomic, both from probing. A phi
+has one entry per arrival rather than per predecessor, so `br i1 %c, label
+%b, label %b` needs two and a switch with two cases going to one block
+needs two, and two entries from one block cannot disagree about the value
+because they arrive at the same time.
+An atomic access moves one scalar the target can move in a single
+instruction: a size that is a power of two and at least eight bits, which
+is why `x86_fp80` cannot be moved atomically and `fp128` can, and a kind
+that is an integer, a float or a pointer. `atomicrmw` takes the size half
+of that rule only, its own operand check already saying which kinds each
+operation takes, and a vector of floats is one of them: `<2 x half>` is
+thirty-two bits and fine while `<3 x half>` is forty-eight and not. That
+distinction came out of the table of modules that must verify clean, which
+caught the first attempt refusing a vector outright.
+An atomic load or store also writes its own alignment rather than taking
+one from the data layout, which is a parse rule because the parser fills
+the default in, the way upstream's does.
+With them, a shuffle mask picks lanes out of the two operands laid end to
+end, so `<i32 0, i32 4>` across two two-lane vectors picks nothing. A lane
+that does not matter is written `undef` or `poison` rather than as an
+out-of-range index, and a scalable mask is not checked because its length
+is not known here.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

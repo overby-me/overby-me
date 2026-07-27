@@ -1668,6 +1668,7 @@ impl Verifier<'_> {
                 );
                 // A load reads, so it can acquire and cannot release.
                 if let Some((_, ordering)) = instruction.kind.atomic_ordering() {
+                    self.atomic_operand(loaded_type, &where_);
                     self.check(
                         !matches!(ordering, AtomicOrdering::Release | AtomicOrdering::AcqRel),
                         format!("{where_} has an ordering a load cannot have"),
@@ -1711,6 +1712,7 @@ impl Verifier<'_> {
                         "{where_} operates on a type its operation cannot take"
                     ));
                 }
+                self.atomic_size(value_type, &where_);
             }
             InstKind::Store {
                 value_type,
@@ -1726,6 +1728,8 @@ impl Verifier<'_> {
                         ),
                         format!("{where_} stores a type an atomic cannot move"),
                     );
+                    let value_type = *value_type;
+                    self.atomic_operand(value_type, &where_);
                     // A store writes, so it can release and cannot acquire.
                     self.check(
                         !matches!(ordering, AtomicOrdering::Acquire | AtomicOrdering::AcqRel),
@@ -1777,6 +1781,17 @@ impl Verifier<'_> {
             } => {
                 let (compare_type, new) = (*compare_type, *new);
                 self.type_is(function, compare_type, new, &where_);
+                // A compare-and-swap compares bit patterns, and two floats
+                // that differ in their bits can still be equal, so upstream
+                // takes an integer or a pointer and nothing else.
+                self.check(
+                    matches!(
+                        self.module.ctx.type_kind(compare_type),
+                        TypeKind::Integer(_) | TypeKind::Pointer { .. }
+                    ),
+                    format!("{where_} compares something other than an integer or a pointer"),
+                );
+                self.atomic_operand(compare_type, &where_);
                 let (success, failure) = (*success, *failure);
                 // Both orderings have to be at least monotonic, and a failure
                 // ordering cannot release anything, because there is nothing
@@ -1859,6 +1874,37 @@ impl Verifier<'_> {
                     self.report(format!("{where_} inserts a type the vector does not hold"));
                 }
             }
+            InstKind::ShuffleVector {
+                vector_type, mask, ..
+            } => {
+                // A mask picks lanes out of the two operands laid end to end,
+                // so an index past the second one picks nothing. `undef` and
+                // `poison` mean the lane does not matter and are not indices.
+                let vector_type = *vector_type;
+                let mask = *mask;
+                let lanes = TypeKind::as_vector(self.module.ctx.type_kind(vector_type))
+                    .filter(|(_, _, scalable)| !scalable)
+                    .map(|(_, lanes, _)| lanes);
+                if let (Some(lanes), Value::Constant(id)) = (lanes, &mask)
+                    && let Constant::Vector { elements, .. } = self.module.ctx.constant(*id).clone()
+                {
+                    let reach = lanes * 2;
+                    for element in elements {
+                        let constant = self.module.ctx.constant(element).clone();
+                        if matches!(constant, Constant::Undef(_) | Constant::Poison(_)) {
+                            continue;
+                        }
+                        let Some(index) = constant.as_integer() else {
+                            continue;
+                        };
+                        if index.is_negative() || index.to_u64().is_none_or(|n| n >= reach) {
+                            self.report(format!(
+                                "{where_} picks a lane the two vectors together do not have"
+                            ));
+                        }
+                    }
+                }
+            }
             InstKind::Phi { incoming, .. } if !self.module.ctx.type_kind(ty).is_first_class() => {
                 let _ = incoming;
                 self.report(format!("{where_} produces a type no register can hold"));
@@ -1872,17 +1918,30 @@ impl Verifier<'_> {
                 for (value, _) in &incoming {
                     self.type_is(function, ty, *value, &where_);
                 }
-                let expected: Vec<BlockId> = predecessors_of(function, block);
+                // One entry per edge, not per predecessor: `br i1 %c, label
+                // %b, label %b` arrives twice and a switch may arrive many
+                // times, and upstream counts each arrival.
                 let mut named: Vec<BlockId> = incoming.iter().map(|(_, b)| *b).collect();
                 named.sort_by_key(|b| b.0);
-                named.dedup();
-                let mut wanted = expected.clone();
+                let mut wanted = predecessor_edges(function, block);
                 wanted.sort_by_key(|b| b.0);
-                wanted.dedup();
                 self.check(
                     named == wanted,
-                    format!("{where_} does not name exactly its block's predecessors"),
+                    format!("{where_} does not name exactly its block's incoming edges"),
                 );
+                // Two edges from one block arrive at the same time, so they
+                // cannot disagree about what the phi holds.
+                for (index, (value, from)) in incoming.iter().enumerate() {
+                    let disagrees = incoming[..index]
+                        .iter()
+                        .any(|(earlier, block)| block == from && earlier != value);
+                    if disagrees {
+                        self.report(format!(
+                            "{where_} gives {} two values for one arrival",
+                            describe_block(function, *from)
+                        ));
+                    }
+                }
             }
             InstKind::Select {
                 condition_type,
@@ -3502,6 +3561,35 @@ impl Verifier<'_> {
     }
 
     /// The total width of a type, when the data layout can give one.
+    /// What an atomic access may move: one scalar the target can load or
+    /// store in a single instruction. That rules out vectors and aggregates
+    /// whatever their size, and it rules out a scalar whose size is not a
+    /// power of two, which is why `x86_fp80` cannot be moved atomically and
+    /// `fp128` can.
+    fn atomic_operand(&mut self, ty: TypeId, where_: &str) {
+        let kind = self.module.ctx.type_kind(ty).clone();
+        match kind {
+            TypeKind::Integer(_) | TypeKind::Float(_) => self.atomic_size(ty, where_),
+            TypeKind::Pointer { .. } => {}
+            _ => self.report(format!("{where_} moves a type an atomic cannot move")),
+        }
+    }
+
+    /// The size half of the same rule, for `atomicrmw`, whose own operand
+    /// check already says which kinds its operation takes. A vector is one of
+    /// them for the floating-point operations, and `<3 x half>` is refused
+    /// for its 48 bits rather than for being a vector.
+    fn atomic_size(&mut self, ty: TypeId, where_: &str) {
+        let Some(bits) = self.size_in_bits(ty) else {
+            return;
+        };
+        if bits < 8 || !bits.is_power_of_two() {
+            self.report(format!(
+                "{where_} moves {bits} bits, which is not a size an atomic comes in"
+            ));
+        }
+    }
+
     fn size_in_bits(&self, ty: TypeId) -> Option<u64> {
         let layout = self.module.data_layout.clone().unwrap_or_default();
         crate::layout::size_in_bits(&self.module.ctx, &layout, ty).ok()
@@ -3541,17 +3629,20 @@ fn describe_block(function: &Function, id: BlockId) -> String {
     }
 }
 
-fn predecessors_of(function: &Function, target: BlockId) -> Vec<BlockId> {
-    let mut preds = Vec::new();
+/// Every arrival at `target`, counted once per edge, so a terminator that
+/// names it twice appears twice.
+fn predecessor_edges(function: &Function, target: BlockId) -> Vec<BlockId> {
+    let mut edges = Vec::new();
     for (id, _) in function.blocks() {
         for (_, instruction) in function.block_instructions(id) {
-            if instruction.kind.successors().contains(&target) {
-                preds.push(id);
-                break;
+            for successor in instruction.kind.successors() {
+                if successor == target {
+                    edges.push(id);
+                }
             }
         }
     }
-    preds
+    edges
 }
 
 /// Every value an instruction reads, flattened.

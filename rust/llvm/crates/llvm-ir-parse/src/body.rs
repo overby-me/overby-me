@@ -910,6 +910,13 @@ impl Parser {
                         break;
                     }
                 }
+                // An ordinary load takes its alignment from the data layout
+                // when it writes none, but an atomic one says what it is:
+                // the target has to know the access is single-copy before it
+                // picks an instruction for it.
+                if atomic.is_some() && align.is_none() {
+                    return self.error("atomic load needs an alignment of its own".to_string());
+                }
                 let align = align.or_else(|| self.module.default_align(loaded_type, false));
                 Ok((
                     loaded_type,
@@ -942,6 +949,9 @@ impl Parser {
                         self.index -= 1;
                         break;
                     }
+                }
+                if atomic.is_some() && align.is_none() {
+                    return self.error("atomic store needs an alignment of its own".to_string());
                 }
                 let align = align.or_else(|| self.module.default_align(value_type, false));
                 Ok((
