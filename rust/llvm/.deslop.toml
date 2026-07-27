@@ -5,6 +5,12 @@
 # than a way to make a warning go away.
 
 disabled_rules = [
+  # A metadata name is lexed once where it is written, and there are a
+  # handful in a module. `String::from_utf8` there is a correctness check
+  # against a name upstream would refuse, not a cost in a hot path. The
+  # heuristic cannot tell a lexer's one-shot decode from a per-byte one.
+  "rust_utf8_validate_hot_path",
+
   # Arbitrary-precision arithmetic is width narrowing by construction: an
   # ApInt is a slice of u64 words, so every word access narrows a u128
   # product to u64, a bit index to a word index, or a bit width to a word

@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 398 of 483 with 23 wrongly refused, Verifier 212 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 400 of 483 with 21 wrongly refused, Verifier 212 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -225,6 +225,12 @@ argument list, a chain call is only ever a tail call, and the vector
 indices of one getelementptr all have the same width. The last of those had
 to reach constant expressions too, which is why the verifier now walks
 every interned constant once rather than finding them again at each use.
+A thirteenth pass took the odd corners of the text grammar: a metadata
+name escapes what the bare grammar has no room for (`!\23pragma`), an
+escape that is not one keeps its backslash (`!\xfoo` prints `!\5Cxfoo`),
+a metadata attachment follows the same comma an index list uses, the
+summary index writes a space before a colon and lets a word qualify the
+value after it, and a block label can be named `"2"` or `-3`.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;
@@ -276,6 +282,18 @@ to accept it, so we could emit something llvm-as would refuse.
 Still not covered: debug info, which is T1's `llvm-debuginfo`, and the
 funclet-based personality (catchswitch, catchpad, cleanuppad), which is
 Windows and deferred with the rest of that target.
+
+**B6. [todo] Text is bytes, not UTF-8.**
+Quoted strings and metadata names are `String` throughout, and LLVM's are
+byte strings: `!DIFile(filename: "\FF")` and `!\FFfoo` are both modules
+llvm-as reads and we refuse. It is two files in the suites and it would be
+every module on a system with a non-UTF-8 path, so the count understates
+it. The fix is `Vec<u8>` in `Token::Quoted`, `MdField::Str`,
+`Name::Named`, `NamedMetadata::name` and `MdAttachment::kind`, with
+`kind == "prof"` becoming a helper; eleven comparison sites. Deliberately
+not done in a loop iteration: it is a model change across three crates and
+deserves its own pass.
+Acceptance: those two files agree, and nothing else moves.
 
 **B5. [todo] Vendor `rustc_codegen_llvm` into `crates/rustc-codegen-llvmrs`.**
 Needs a pinned nightly with `rustc-dev` and a `rust-toolchain.toml` (PLAN §6.1).

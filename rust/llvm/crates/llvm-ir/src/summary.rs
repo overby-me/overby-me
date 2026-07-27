@@ -36,6 +36,9 @@ pub enum SummaryValue {
     Word(String),
     /// `(a: 1, b: 2)` or `(1, 2, 3)`, and every mixture of the two.
     Tuple(Vec<SummaryField>),
+    /// `writeonly ^14`: a word qualifying the value that follows it, with no
+    /// punctuation between them.
+    Qualified(String, Box<SummaryValue>),
 }
 
 /// One item of a tuple, named or positional.

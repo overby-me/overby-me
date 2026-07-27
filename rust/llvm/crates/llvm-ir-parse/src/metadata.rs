@@ -362,6 +362,14 @@ impl Parser {
         Ok(attachments)
     }
 
+    /// Whether a metadata attachment, rather than another operand, follows
+    /// the comma the parser is sitting on.
+    pub(crate) fn attachment_after_comma(&self) -> bool {
+        self.peek() == &Token::Comma
+            && matches!(self.peek_at(1), Token::MetadataName(_))
+            && self.attachment_follows(2)
+    }
+
     /// Whether the token this far ahead starts the node of an attachment: a
     /// number, or a node written in place.
     fn attachment_follows(&self, ahead: usize) -> bool {

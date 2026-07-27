@@ -41,6 +41,8 @@ pub enum Token {
     MetadataNumber(u32),
     /// `^3`, a reference into the ThinLTO summary index.
     SummaryNumber(u32),
+    /// A colon standing on its own, which only the summary index writes.
+    Colon,
     /// `!"text"`.
     MetadataString(String),
     /// A lone `!`, which starts an inline tuple.
@@ -104,6 +106,7 @@ impl Token {
             Token::MetadataName(name) => format!("!{name}"),
             Token::MetadataNumber(n) => format!("!{n}"),
             Token::SummaryNumber(n) => format!("^{n}"),
+            Token::Colon => ":".to_string(),
             Token::MetadataString(_) => "a metadata string".to_string(),
             Token::Exclaim => "!".to_string(),
             Token::AttributeGroup(n) => format!("#{n}"),
@@ -290,9 +293,17 @@ impl<'a> Lexer<'a> {
                 match self.peek() {
                     Some(b'"') => Token::MetadataString(self.quoted_string()?),
                     Some(b) if b.is_ascii_digit() => Token::MetadataNumber(self.number()?),
-                    Some(b) if is_name_byte(b) => Token::MetadataName(self.bare_name()),
+                    Some(b) if is_name_byte(b) || b == b'\\' => {
+                        Token::MetadataName(self.escaped_name()?)
+                    }
                     _ => Token::Exclaim,
                 }
+            }
+            // A colon is part of a label or a keyed field almost everywhere,
+            // and the summary index is the one place it stands alone.
+            b':' => {
+                self.bump();
+                Token::Colon
             }
             b'^' => {
                 self.bump();
@@ -421,6 +432,46 @@ impl<'a> Lexer<'a> {
             }
         }
         self.text[start..self.offset].to_string()
+    }
+
+    /// A metadata name, which may spell a byte the bare grammar has no room
+    /// for as `\\23`. Upstream escapes rather than quotes here, so
+    /// `!\\23pragma` is the named metadata `#pragma`.
+    fn escaped_name(&mut self) -> Result<String, LexError> {
+        let mut bytes = Vec::new();
+        while let Some(byte) = self.peek() {
+            if is_name_byte(byte) {
+                bytes.push(byte);
+                self.bump();
+            } else if byte == b'\\' {
+                // `\x` is not an escape, so upstream keeps the backslash and
+                // prints it back as `\5C`.
+                match (self.hex_at(1), self.hex_at(2)) {
+                    (Some(high), Some(low)) => {
+                        self.bump();
+                        self.bump();
+                        self.bump();
+                        bytes.push(high * 16 + low);
+                    }
+                    _ => {
+                        self.bump();
+                        bytes.push(b'\\');
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        String::from_utf8(bytes).map_err(|_| self.error("metadata name is not valid UTF-8"))
+    }
+
+    fn hex_at(&self, ahead: usize) -> Option<u8> {
+        match self.text.as_bytes().get(self.offset + ahead)? {
+            byte @ b'0'..=b'9' => Some(byte - b'0'),
+            byte @ b'a'..=b'f' => Some(byte - b'a' + 10),
+            byte @ b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
     }
 
     fn number(&mut self) -> Result<u32, LexError> {

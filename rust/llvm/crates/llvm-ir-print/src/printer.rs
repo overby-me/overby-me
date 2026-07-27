@@ -429,6 +429,10 @@ impl Printer<'_> {
                 let _ = write!(self.out, "^{id}");
             }
             SummaryValue::Word(word) => self.push(word),
+            SummaryValue::Qualified(word, value) => {
+                let _ = write!(self.out, "{word} ");
+                self.summary_value(value);
+            }
             SummaryValue::Tuple(fields) => {
                 self.push("(");
                 for (position, field) in fields.iter().enumerate() {
@@ -446,8 +450,18 @@ impl Printer<'_> {
     }
 }
 
+/// A metadata name prints with `\\xx` for anything the bare grammar has no
+/// room for, rather than being quoted the way a value's name is.
 pub(crate) fn metadata_name(name: &str) -> String {
-    identifier(name)
+    let mut out = String::new();
+    for byte in name.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$' | b'-') {
+            out.push(byte as char);
+        } else {
+            let _ = write!(out, "\\{byte:02X}");
+        }
+    }
+    out
 }
 
 pub(crate) fn name_text(name: &Name) -> String {

@@ -163,6 +163,17 @@ text alone, and reproducing it means modelling ThinLTO rather than its
 syntax. So the corpus cannot pin this one and a dedicated round-trip test
 holds the property that is ours: what we print is what was written.
 
+## Assumed to be UTF-8
+
+**Quoted strings and metadata names are Rust `String`s, and LLVM's are
+bytes.** `!DIFile(filename: "\00\01\80\FF")` is a module `llvm-as` reads
+and writes back unchanged, and we refuse it with a lexer error. So is
+`!\FFfoo` as a named-metadata name. The escapes themselves are handled:
+`!\23pragma` parses and prints back, and `!\xfoo` keeps its backslash and
+prints as `!\5Cxfoo`, because `\x` is not an escape. What is missing is
+only the bytes outside UTF-8, and the fix is a model change rather than a
+lexer one. B6 in [CLAUDE.md](../CLAUDE.md) says what it costs.
+
 ## Refused although upstream reads it
 
 **Typed-pointer syntax.** `llvm-as` in LLVM 21 still parses `i8*` and folds

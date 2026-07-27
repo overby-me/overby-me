@@ -574,6 +574,14 @@ const VERIFIES: &[&str] = &[
     // A struct indexed lanewise, and the sanitizer clauses a global carries.
     "define <2 x ptr> @f(<2 x ptr> %a) {\nentry:\n  %w = getelementptr {i32, i32}, <2 x ptr> %a, <2 x i32> <i32 5, i32 9>, <2 x i32> zeroinitializer\n  ret <2 x ptr> %w\n}\n",
     "@g = global i32 2, no_sanitize_address, no_sanitize_hwaddress, sanitize_memtag, align 4\n",
+    // A metadata name escapes what the bare grammar has no room for, and an
+    // escape that is not one keeps its backslash.
+    "!\\23pragma = !{!0}\n!0 = !{}\n",
+    "!\\5Cxfoo = !{!0}\n!0 = !{}\n",
+    // An attachment follows the same comma an index list uses.
+    "define i32 @f({{i32, i32}, i32} %a) {\nentry:\n  %x = extractvalue {{i32, i32}, i32} %a, 0, 1, !foo !0\n  ret i32 %x\n}\n\n!0 = !{}\n",
+    // A block label whose name only looks like a number.
+    "define void @f() {\nentry:\n  br label %\"2\"\n\n\"2\":\n  br label %-3\n\n-3:\n  ret void\n}\n",
     // Two conventions we had never heard of.
     "define amdgpu_ps float @f(i32 %x) {\nentry:\n  ret float 0.000000e+00\n}\n",
     "define riscv_vls_cc(32) void @g() {\nentry:\n  ret void\n}\n",
@@ -618,6 +626,22 @@ entry:
 ^3 = flags: 8
 ^4 = blockcount: 1
 "#;
+
+/// The summary index writes a space before a colon and lets a word qualify
+/// the value after it, both of which upstream's own thinlto-summary.ll does.
+const SUMMARY_SPACING: &str = r#"^0 = module: (path: "a.o", hash: (0, 0, 0, 0, 0))
+^1 = gv: (guid: 1, summaries: (function: (module: ^0, noUnwind : 1, refs: (writeonly ^1, readonly ^1, ^1))))
+"#;
+
+#[test]
+fn a_summary_index_tolerates_upstream_spacing() {
+    let module = llvm_ir_parse::parse_module(SUMMARY_SPACING).expect("upstream accepts this");
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("refs: (writeonly ^1, readonly ^1, ^1)"),
+        "{printed}"
+    );
+}
 
 #[test]
 fn a_summary_index_round_trips() {

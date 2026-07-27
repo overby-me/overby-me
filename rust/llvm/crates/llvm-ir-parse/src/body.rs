@@ -221,6 +221,15 @@ impl Parser {
         Ok(CallingConv::C)
     }
 
+    /// Whether a block label starts here, in any of its spellings.
+    fn starts_a_block_label(&self) -> bool {
+        match self.peek() {
+            Token::Label(_) | Token::LabelNumber(_) => true,
+            Token::Quoted(_) | Token::Integer { .. } => self.peek_at(1) == &Token::Colon,
+            _ => false,
+        }
+    }
+
     fn parse_function_body(
         &mut self,
         function: &mut Function,
@@ -229,7 +238,7 @@ impl Parser {
         // An unnamed entry block has no label at all, so the body may start
         // straight into instructions.
         let mut current = match self.peek().clone() {
-            Token::Label(_) | Token::LabelNumber(_) => None,
+            _ if self.starts_a_block_label() => None,
             _ => {
                 let id = function.reserve_block();
                 function.place_block(id);
@@ -253,6 +262,30 @@ impl Parser {
                     let id = self.block_by_name(function, state, &Name::Number(number))?;
                     function.place_block(id);
                     state.next_number = state.next_number.max(number + 1);
+                    current = Some(id);
+                }
+                // `"2":` and `-3:` are labels whose names only look like
+                // numbers. The lexer cannot tell before the colon, so the
+                // block loop reads the two tokens together.
+                Token::Quoted(text) if self.peek_at(1) == &Token::Colon => {
+                    self.advance();
+                    self.advance();
+                    let id = self.block_by_name(function, state, &Name::Named(text.clone()))?;
+                    function.block_mut(id).name = Some(Name::Named(text));
+                    function.place_block(id);
+                    current = Some(id);
+                }
+                Token::Integer { negative, digits } if self.peek_at(1) == &Token::Colon => {
+                    self.advance();
+                    self.advance();
+                    let name = if negative {
+                        format!("-{digits}")
+                    } else {
+                        digits
+                    };
+                    let id = self.block_by_name(function, state, &Name::Named(name.clone()))?;
+                    function.block_mut(id).name = Some(Name::Named(name));
+                    function.place_block(id);
                     current = Some(id);
                 }
                 _ => {
@@ -1058,7 +1091,9 @@ impl Parser {
             "extractvalue" => {
                 let (aggregate_type, aggregate) = self.parse_typed_value(function, state)?;
                 let mut indices = Vec::new();
-                while self.eat(&Token::Comma) {
+                // A metadata attachment follows the same comma, so the index
+                // list ends where one begins.
+                while !self.attachment_after_comma() && self.eat(&Token::Comma) {
                     indices.push(self.require_unsigned()? as u32);
                 }
                 let ty = self.aggregate_element_type(aggregate_type, &indices)?;
@@ -1076,7 +1111,9 @@ impl Parser {
                 self.require(Token::Comma)?;
                 let (element_type, element) = self.parse_typed_value(function, state)?;
                 let mut indices = Vec::new();
-                while self.eat(&Token::Comma) {
+                // A metadata attachment follows the same comma, so the index
+                // list ends where one begins.
+                while !self.attachment_after_comma() && self.eat(&Token::Comma) {
                     indices.push(self.require_unsigned()? as u32);
                 }
                 Ok((

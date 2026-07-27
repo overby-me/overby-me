@@ -232,9 +232,14 @@ impl Parser {
         self.require(Token::Equals)?;
         // A word followed by a colon lexes as a label everywhere in this
         // grammar, which is exactly what a summary keyword is.
-        let Token::Label(kind) = self.advance() else {
-            self.index -= 1;
-            return self.error("expected a summary keyword");
+        let kind = match self.advance() {
+            Token::Label(kind) => kind,
+            // A space before the colon is legal and upstream writes one.
+            Token::Word(kind) if self.eat(&Token::Colon) => kind,
+            _ => {
+                self.index -= 1;
+                return self.error("expected a summary keyword");
+            }
         };
         let value = self.parse_summary_value()?;
         self.module.summary.push(SummaryEntry { id, kind, value });
@@ -245,7 +250,17 @@ impl Parser {
         match self.advance() {
             Token::SummaryNumber(number) => Ok(SummaryValue::Ref(number)),
             Token::Quoted(text) => Ok(SummaryValue::String(text)),
-            Token::Word(word) => Ok(SummaryValue::Word(word)),
+            Token::Word(word) => {
+                // `writeonly ^14`: a word can qualify the value after it.
+                if matches!(
+                    self.peek(),
+                    Token::SummaryNumber(_) | Token::Quoted(_) | Token::Integer { .. }
+                ) {
+                    let value = self.parse_summary_value()?;
+                    return Ok(SummaryValue::Qualified(word, Box::new(value)));
+                }
+                Ok(SummaryValue::Word(word))
+            }
             Token::Integer { negative, digits } => {
                 let value: u64 = digits.parse().map_err(|_| {
                     self.error::<()>(format!("{digits} does not fit a summary value"))
@@ -284,6 +299,16 @@ impl Parser {
     /// tuples of one item.
     fn parse_summary_field(&mut self) -> Result<SummaryField, ParseError> {
         if let Token::Label(key) = self.peek().clone() {
+            self.advance();
+            return Ok(SummaryField {
+                key: Some(key),
+                value: self.parse_summary_value()?,
+            });
+        }
+        if let Token::Word(key) = self.peek().clone()
+            && self.peek_at(1) == &Token::Colon
+        {
+            self.advance();
             self.advance();
             return Ok(SummaryField {
                 key: Some(key),
