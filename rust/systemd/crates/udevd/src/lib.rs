@@ -4272,6 +4272,74 @@ fn handle_builtin_import(cmd: &str, event: &mut UEvent, hwdb: Option<&Hwdb>) {
 }
 
 /// Run a program and capture its stdout output.
+/// Deadline for a spawned rule program, in seconds.
+///
+/// Refreshed from udev.conf at start-up and on every reload. A PROGRAM= that
+/// never returns used to wedge its event forever, since the spawn simply
+/// waited; upstream kills it when the event timeout expires and carries on
+/// with the program counting as a non-match.
+static EVENT_TIMEOUT: AtomicU64 = AtomicU64::new(EVENT_TIMEOUT_SECS);
+
+/// Read `event_timeout=` from udev.conf and its drop-in directories.
+///
+/// Later directories win, so a drop-in under /run overrides /usr/lib and one
+/// under /etc overrides both, which is the order the test's
+/// /run/udev/udev.conf.d/ file relies on.
+fn load_event_timeout() -> u64 {
+    load_event_timeout_from(
+        Path::new("/etc/udev/udev.conf"),
+        &[
+            "/usr/lib/udev/udev.conf.d",
+            "/run/udev/udev.conf.d",
+            "/etc/udev/udev.conf.d",
+        ],
+    )
+}
+
+fn load_event_timeout_from(conf: &Path, dirs: &[&str]) -> u64 {
+    let mut timeout = EVENT_TIMEOUT_SECS;
+
+    let mut files: Vec<PathBuf> = vec![conf.to_path_buf()];
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        let mut confs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "conf"))
+            .collect();
+        confs.sort();
+        files.extend(confs);
+    }
+
+    for file in files {
+        let Ok(content) = fs::read_to_string(&file) else {
+            continue;
+        };
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(val) = line.strip_prefix("event_timeout=")
+                && let Ok(secs) = val.trim().parse::<u64>()
+            {
+                timeout = secs;
+            }
+        }
+    }
+
+    timeout
+}
+
+/// Re-read the parts of udev.conf that affect event processing.
+fn refresh_udev_config() {
+    let timeout = load_event_timeout();
+    EVENT_TIMEOUT.store(timeout, Ordering::Relaxed);
+    log::debug!("udev.conf: event_timeout={timeout}");
+}
+
 fn run_program_capture(cmd: &str, event: &UEvent) -> Option<String> {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     if parts.is_empty() {
@@ -4295,7 +4363,36 @@ fn run_program_capture(cmd: &str, event: &UEvent) -> Option<String> {
         child_cmd.env(k, v);
     }
 
-    match child_cmd.output() {
+    // Spawn and wait with a deadline. The wait happens on a helper thread so
+    // the child's stdout is drained while we wait: polling for exit without
+    // reading would let a chatty program fill the pipe and block.
+    let child = match child_cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            log::debug!("Failed to execute '{}': {}", cmd, e);
+            return None;
+        }
+    };
+    let pid = child.id() as libc::pid_t;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    let timeout = std::time::Duration::from_secs(EVENT_TIMEOUT.load(Ordering::Relaxed));
+    let result = match rx.recv_timeout(timeout) {
+        Ok(r) => r,
+        Err(_) => {
+            log::debug!("Program '{cmd}' timed out after {timeout:?}, killing it");
+            // SAFETY: pid names a child of this process that has not been
+            // reaped, since the waiting thread has not reported it yet.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+            return None;
+        }
+    };
+
+    match result {
         Ok(output) if output.status.success() => {
             // Strip only trailing newlines — leading/trailing SPACE inside
             // the captured value is significant for IMPORT{program}
@@ -6675,6 +6772,7 @@ pub fn run_daemon() {
     ensure_runtime_dirs();
 
     // Load rules (Arc for sharing with worker threads)
+    refresh_udev_config();
     let mut rules = Arc::new(RuleSet::load());
 
     // Load hardware database (hwdb.bin)
@@ -6846,6 +6944,7 @@ pub fn run_daemon() {
             RELOAD_FLAG.store(false, Ordering::SeqCst);
             rules_reload_needed = false;
             log::info!("Reloading rules...");
+            refresh_udev_config();
             rules = Arc::new(RuleSet::load());
             // Also reload hwdb
             hwdb = Arc::new(match Hwdb::open_default() {
@@ -9049,6 +9148,67 @@ mod tests {
 
         let result2 = expand_substitutions("%c{2+}", &event, "foo bar baz", "", &[]);
         assert_eq!(result2, "bar baz");
+    }
+
+    /// A PROGRAM= deadline comes from udev.conf, with drop-ins layered on top
+    /// in /usr/lib, /run and /etc order. TEST-17-UDEV.failed-event writes its
+    /// event_timeout into /run/udev/udev.conf.d/.
+    #[test]
+    fn test_load_event_timeout_from_dropins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf = tmp.path().join("udev.conf");
+        let lib_d = tmp.path().join("lib.d");
+        let run_d = tmp.path().join("run.d");
+        fs::create_dir_all(&lib_d).unwrap();
+        fs::create_dir_all(&run_d).unwrap();
+
+        let dirs = [lib_d.to_str().unwrap(), run_d.to_str().unwrap()];
+
+        // Nothing configured anywhere: the built-in default stands.
+        assert_eq!(
+            load_event_timeout_from(Path::new("/nonexistent"), &dirs),
+            EVENT_TIMEOUT_SECS
+        );
+
+        // udev.conf alone.
+        fs::write(&conf, "# comment\n\nevent_timeout=30\n").unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 30);
+
+        // A drop-in overrides udev.conf, and a later directory overrides an
+        // earlier one.
+        fs::write(lib_d.join("10-a.conf"), "event_timeout=20\n").unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 20);
+        fs::write(run_d.join("test-17.conf"), "event_timeout=10\n").unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 10);
+
+        // Unrelated and malformed settings are ignored, not fatal.
+        fs::write(
+            run_d.join("test-17.conf"),
+            "timeout_signal=SIGABRT\nevent_timeout=notanumber\nevent_timeout=15\n",
+        )
+        .unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 15);
+
+        // Files that are not *.conf are not drop-ins.
+        fs::write(run_d.join("ignored.txt"), "event_timeout=99\n").unwrap();
+        assert_eq!(load_event_timeout_from(&conf, &dirs), 15);
+    }
+
+    /// A program that never returns must not wedge its event forever.
+    #[test]
+    fn test_run_program_capture_kills_on_timeout() {
+        let event = make_test_event("add", "/devices/virtual/mem/null", "mem");
+        let previous = EVENT_TIMEOUT.swap(1, Ordering::Relaxed);
+        let started = std::time::Instant::now();
+        let result = run_program_capture("/bin/sleep 60", &event);
+        let elapsed = started.elapsed();
+        EVENT_TIMEOUT.store(previous, Ordering::Relaxed);
+
+        assert!(result.is_none(), "a killed program must not match");
+        assert!(
+            elapsed < std::time::Duration::from_secs(30),
+            "returned after {elapsed:?}, so it waited for the program"
+        );
     }
 
     /// `dmsetup udevflags` quotes its values, and the dm rules compare the

@@ -26,8 +26,23 @@
   # notion of a worker dying by signal to report. This half needs a worker
   # process model, not a small fix.
   #
-  # The timeout half is the bounded one and is worth doing on its own: honour
-  # event_timeout= and timeout_signal= from udev.conf.d, give a spawned PROGRAM=
-  # a deadline, and kill and report rather than block forever. A rule that hangs
-  # currently wedges its event indefinitely, which matters well beyond this test.
+  # The spawn deadline is now implemented: udev.conf and its drop-ins are read
+  # for event_timeout=, and a PROGRAM= that outlives it is killed and counts as
+  # a non-match instead of blocking forever. That was worth doing on its own,
+  # because a hanging rule used to wedge its event indefinitely.
+  #
+  # It did NOT move this test, so the timeout half is NOT simply the missing
+  # deadline. Measured after the change: `udevadm trigger --action add /dev/null`
+  # reports "triggered 1 device(s)" and `udevadm monitor --udev --property
+  # --subsystem-match=mem` is running, but PROGRAM_RESULT never appears in its
+  # output. Note ENV{PROGRAM_RESULT} is set by the RULE, not by udevd, so the
+  # remaining question is which of these is true, and it has not been measured:
+  #   - the rule never fires, i.e. `PROGRAM!="/usr/bin/sleep 60"` does not
+  #     evaluate as a match when the program fails or is killed. Worth checking
+  #     that /usr/bin/sleep does not exist on NixOS at all, which should make
+  #     the != match outright, independently of any timeout;
+  #   - or the rule does fire and `udevadm monitor --property` does not emit the
+  #     device's properties, in which case the gap is in monitor, not in rules.
+  # `udevadm info /dev/null` after the trigger separates the two: if
+  # PROGRAM_RESULT is in the database, the rule fired and monitor is at fault.
 }
