@@ -1092,6 +1092,18 @@ fn grow_claims(claims: &[SpanClaim], span: u64, grain: u64) -> Vec<u64> {
     sizes.into_iter().map(|s| s.unwrap_or(0)).collect()
 }
 
+/// Whether `--defer-partitions=` names this partition's type.
+///
+/// A deferred partition is allocated and numbered exactly as if it were being
+/// created, so everything after it keeps its offset and slot, but no entry for
+/// it is written to the table. It is left for a later run to fill in.
+fn type_is_deferred(type_uuid: &str, deferred: &[String], arch: &str) -> bool {
+    deferred
+        .iter()
+        .filter_map(|e| filter_entry_uuid(e, arch))
+        .any(|u| u.eq_ignore_ascii_case(type_uuid))
+}
+
 /// Build partition definitions from an existing image, for `--copy-from=`.
 ///
 /// Every used partition in the source becomes a definition pinned to that
@@ -3162,6 +3174,11 @@ fn run(argv: &[String]) -> Result<i32, String> {
     for m in &matched {
         if m.is_new && m.allocated_size > 0 {
             let def = &defs[m.definition_index];
+            // A deferred partition has already taken its space and its slot
+            // above; it just does not get written to the table.
+            if type_is_deferred(&def.type_uuid, &args.defer_partitions, arch) {
+                continue;
+            }
             final_partitions.push(GptPartition {
                 type_guid: def.type_uuid.clone(),
                 unique_guid: m.assigned_uuid.clone(),
@@ -3864,6 +3881,54 @@ mod tests {
         let none = [SpanClaim { weight: 0, min: 0, max: 100 }];
         assert_eq!(grow_claims(&none, 500, 1), vec![0]);
         assert_eq!(grow_claims(&[], 500, 4096), Vec::<u64>::new());
+    }
+
+    /// --defer-partitions= leaves the named types out of the table while they
+    /// still take their space and slot, so everything after keeps its offset.
+    /// TEST-58-REPART defers home and root and expects only swap left, still
+    /// numbered 4 and still at the offset it had with all four present.
+    #[test]
+    fn test_full_defer_partitions_keeps_layout() {
+        const SEED: &str = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+        fs::write(
+            defs_dir.join("home.conf"),
+            "[Partition]\nType=home\nLabel=home-first\nFormat=vfat\n",
+        )
+        .unwrap();
+        for name in ["root.conf", "root2.conf"] {
+            fs::write(defs_dir.join(name), "[Partition]\nType=root\nFormat=vfat\n").unwrap();
+        }
+        fs::write(
+            defs_dir.join("swap.conf"),
+            "[Partition]\nType=swap\nSizeMaxBytes=64M\nPaddingMinBytes=92M\n",
+        )
+        .unwrap();
+
+        let img = tmp.path().join("zzz");
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=1G",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            "--defer-partitions=home,root",
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "run failed: {r:?}");
+
+        let mut f = fs::File::open(&img).unwrap();
+        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        let parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
+
+        assert_eq!(parts.len(), 1, "only swap should be written");
+        assert_eq!(parts[0].name, "swap");
+        assert_eq!(parts[0].first_lba, 1777624, "swap keeps its offset");
+        assert_eq!(parts[0].last_lba - parts[0].first_lba + 1, 131072);
+        // Slot 4 of the table, i.e. sfdisk's zzz4, with 1..3 left empty.
+        assert_eq!(parts[0].slot_index, 3);
     }
 
     /// End-to-end --copy-from=, pinned to the exact table TEST-58-REPART
