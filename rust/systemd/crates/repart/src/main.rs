@@ -2002,14 +2002,15 @@ fn allocate_space(
         for &ri in &members {
             let req = &requests[ri];
             let m = &matched[req.matched_idx];
-            let (min, max) = match &m.existing {
-                // An existing partition never shrinks, and may grow by at most
-                // max_bytes beyond what it already occupies.
-                Some(existing_part) if !m.is_new => {
-                    let current = existing_part.size_bytes(sector_size);
-                    (current, current.saturating_add(req.max_bytes))
-                }
-                _ => (req.min_bytes, req.max_bytes),
+            // An existing partition's claim is on GROWTH only. It already
+            // occupies its own space; what it competes for is the gap that
+            // follows, and its final size is what it has plus what it wins
+            // there. Claiming its current size instead would cap it at the size
+            // of that gap.
+            let (min, max) = if m.is_new {
+                (req.min_bytes, req.max_bytes)
+            } else {
+                (0, req.max_bytes)
             };
             claims.push(SpanClaim {
                 weight: req.weight as u64,
@@ -2056,8 +2057,8 @@ fn allocate_space(
         {
             // Growth of existing partition
             let current_size = existing.size_bytes(sector_size);
-            m.allocated_size = sizes[req_idx * 2].max(current_size);
-            m.is_grown = m.allocated_size > current_size;
+            m.allocated_size = current_size + sizes[req_idx * 2];
+            m.is_grown = sizes[req_idx * 2] > 0;
         } else {
             // New partition. grow_claims already clamped to the definition's
             // bounds and aligned to the grain.
@@ -4089,6 +4090,20 @@ mod tests {
         let mut f = fs::File::open(&img).unwrap();
         let after = read_gpt_header(&mut f, 512).unwrap().unwrap();
         assert_eq!(after.last_usable_lba, 4194270, "usable area follows the grow");
+
+        // The existing partition grows INTO the new space: its final size is
+        // what it already had plus the gap that opened after it, not merely the
+        // size of that gap.
+        let parts = read_gpt_partitions(&mut f, &after, 512).unwrap();
+        assert_eq!(parts.len(), 1);
+        let grown = parts[0].last_lba - parts[0].first_lba + 1;
+        assert!(
+            grown > 2097118 - 2048,
+            "partition did not grow past the old disk: {grown} sectors"
+        );
+        // It reaches the end of the usable area bar the grain-alignment tail.
+        let tail = after.last_usable_lba - (parts[0].first_lba + grown - 1);
+        assert!(tail < 4096 / 512, "left {tail} sectors unused at the end");
     }
 
     /// Refilling deferred partitions onto a disk that already holds swap: the
