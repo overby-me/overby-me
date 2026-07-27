@@ -17,11 +17,11 @@ Audited 2026-07-26 against nixpkgs systemd v258
 | Environment-only | 224 | Patches NixOS-specific facts (absolute binary paths, `nobody`'s home, the harness `exit 123` line, `/testok` for standalone subtests). Not a coverage gap. |
 | **Full skip** | **15** | Script replaced by `exit 77`. Nothing runs. |
 | **Fake pass** | **0** | Script replaced by `touch /testok`. Nothing runs and it reports success. |
-| **Mid-test skip** | **2** | Runs partway, then `touch /skipped; exit 0`. |
+| **Mid-test skip** | **1** | Runs partway, then `touch /skipped; exit 0`. |
 | **Partial mask** | **12** | Assertions deleted from a real upstream script. |
 | **Substitute** | **9** | Upstream subtest replaced by a hand-written one. |
 
-38 tests carry a real override.
+37 tests carry a real override.
 
 **Retired so far:** 44-LOG-NAMESPACE (was a fake pass, now runs the upstream
 script to `/testok`). 34-DYNAMICUSERMIGRATE was the other fake pass; it is now an
@@ -311,7 +311,6 @@ find what the hand-written one does not cover.
 |------|--------|
 | 63-PATH | The `issue-24577` block asserts a queued job is visible in `list-jobs`. rust-systemd resolves dependencies inline and has no job objects, so nothing is ever pending. Needs minimal job objects (also the largest remaining item from the old upstream divergence map) |
 | 45-TIMEDATE | `testcase_timesyncd` needs a networkd dummy interface carrying link-local NTP servers so timesyncd picks them up |
-| 30-ONCLOCKCHANGE | The `alternate-path` section needs timedated to notify PID 1 of a timezone change over D-Bus (`SYSTEMD_ETC_LOCALTIME` override) |
 | 54-CREDS | `ImportCredential=`, the creds Varlink interface, and the `run0` credential path. Also restore the deleted `(! unshare -m ...)` assertion, which checks that the system credential directory is not visible inside a private mount namespace |
 | 26-SYSTEMCTL | Interactive `systemctl edit` (the `EDITOR=... script -ec` lines) is blocked by a separate live bug: util-linux `script(1)` hangs under rust-systemd as PID 1 (parent-side termios/poll setup). The `override.conf` `cmp` assertions go with it |
 | 07-PID1 protect-control-groups | `testcase_delegate_subgroup_pam` needs unprivileged PAM session management |
