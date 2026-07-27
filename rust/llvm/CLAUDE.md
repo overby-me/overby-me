@@ -138,13 +138,13 @@ and omits one left at its default, while we print back what was written.
 That is T1's `llvm-debuginfo`, not a table of defaults bolted to the printer.
 Acceptance: the number keeps rising.
 
-**B3. [todo] Surface inventory from `rustc_codegen_llvm`.**
-Extract every FFI call site from the pinned rustc's source (nixpkgs
-`rustc.src`, not a clone) into `docs/surface-inventory.md`, mapped to the
-areas in PLAN §3, with a count per area. This is what turns "scope" from a
-guess into a number.
-Acceptance: the document exists, its counts are reproducible by a committed
-nushell script, and STATUS.md cites them.
+**B3. [done] Surface inventory from `rustc_codegen_llvm`.** *(2026-07-27)*
+363 entry points, 532 call sites, 125 of them `LLVMRust*` shims, measured
+against rustc 1.95.0 from `nixpkgs#rustc.src`. Reproducible with
+`nu docs/surface-inventory.nu <crate>`; the reading is in
+`docs/surface-inventory.md` and STATUS.md cites the totals.
+The useful shape: two thirds of the surface is the tier that already exists,
+and the areas that are almost all `LLVMRust*` shims are the later tiers.
 
 **B4. [todo] IR builder API sufficient for the fork's call sites.**
 Whatever B3 says the fork needs, phrased as safe Rust rather than as an FFI

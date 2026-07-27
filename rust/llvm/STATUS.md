@@ -84,6 +84,24 @@ the point: the gap is a to-do list, and
 `default.nix` and only ever move up. The suites earned their place on the
 first run by finding a parser hang that the corpus never triggered.
 
+## How large the job is
+
+Measured, not estimated. `rustc_codegen_llvm` at rustc 1.95.0 declares **363
+distinct LLVM entry points** and mentions them **532 times**; **125** of them
+are `LLVMRust*` shims rather than the stable C API. Nothing is declared and
+unused.
+
+Two thirds of that surface (240 entry points) is IR construction, attributes
+and metadata, module and context, and targets, which is the area T0 has been
+building. Debug info is the largest area outside it at 40. The areas that are
+almost entirely `LLVMRust*` shims, and so carry the churn risk PLAN.md
+section 2.2 flags, are the later tiers: all 19 LTO, PGO and coverage entry
+points are shims.
+
+The full table and what it does and does not mean are in
+[docs/surface-inventory.md](./docs/surface-inventory.md), reproducible with
+`nu docs/surface-inventory.nu`.
+
 ## What is not started
 
 Everything else. Concretely, and to forestall the usual optimistic reading of
