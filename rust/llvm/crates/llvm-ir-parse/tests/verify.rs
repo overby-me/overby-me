@@ -580,6 +580,10 @@ const BROKEN: &[(&str, &str)] = &[
         "@g = global i32 0\n@a = alias i32, ptr @a\n",
         "aliases its way back to itself",
     ),
+    (
+        "define void @f(<4 x i32> %v) {\nentry:\n  %b = insertelement <4 x i32> %v, i64 0, i32 0\n  ret void\n}\n",
+        "inserts a type the vector does not hold",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -725,6 +729,10 @@ const REJECTED: &[(&str, &str)] = &[
     ),
     ("%s = type { void }\n", "invalid structure element type"),
     ("@i2 = common global i8388609 0, align 4\n", "is too wide"),
+    (
+        "define void @f(<4 x i32> %a, <2 x i32> %b) {\nentry:\n  %r = shufflevector <4 x i32> %a, <2 x i32> %b, <4 x i32> zeroinitializer\n  ret void\n}\n",
+        "shuffles two vectors of different types",
+    ),
     (
         "define void @f() {\nentry:\n  %x = add i32 0, 1\n  %x = add i32 0, 1\n  ret void\n}\n",
         "redefinition of '%x'",

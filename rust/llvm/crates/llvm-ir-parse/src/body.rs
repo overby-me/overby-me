@@ -1115,9 +1115,14 @@ impl Parser {
             "shufflevector" => {
                 let (vector_type, first) = self.parse_typed_value(function, state)?;
                 self.require(Token::Comma)?;
-                let (_, second) = self.parse_typed_value(function, state)?;
+                let (second_type, second) = self.parse_typed_value(function, state)?;
                 self.require(Token::Comma)?;
                 let (mask_type, mask) = self.parse_typed_value(function, state)?;
+                // Both halves are shuffled together, so they are the same
+                // vector; only one type is kept because there is only one.
+                if second_type != vector_type {
+                    return self.error("shufflevector shuffles two vectors of different types");
+                }
                 let ty = self.shuffle_result_type(vector_type, mask_type)?;
                 Ok((
                     ty,

@@ -1708,6 +1708,19 @@ impl Verifier<'_> {
                 self.gep_vector_widths(pointer_type, &indices, &where_);
                 self.walk_indices(source_type, &indices, &where_);
             }
+            InstKind::InsertElement {
+                vector_type,
+                element_type,
+                ..
+            } => {
+                let (vector_type, element_type) = (*vector_type, *element_type);
+                if let Some((wanted, _, _)) =
+                    TypeKind::as_vector(self.module.ctx.type_kind(vector_type))
+                    && wanted != element_type
+                {
+                    self.report(format!("{where_} inserts a type the vector does not hold"));
+                }
+            }
             InstKind::Phi { incoming, .. } if !self.module.ctx.type_kind(ty).is_first_class() => {
                 let _ = incoming;
                 self.report(format!("{where_} produces a type no register can hold"));
