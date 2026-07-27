@@ -703,6 +703,17 @@ fn try_create_transient_unit(
     Ok(Some(result))
 }
 
+/// Parse a `yes`/`no`/`auto` tristate the way upstream's
+/// `parse_tristate_argument_with_auto()` does: `auto` (and anything
+/// unrecognised) leaves the decision to the caller's default.
+fn parse_tristate(v: &str) -> Option<bool> {
+    match v {
+        "1" | "yes" | "true" | "on" => Some(true),
+        "0" | "no" | "false" | "off" => Some(false),
+        _ => None,
+    }
+}
+
 /// Translate a `run0 [OPTIONS] COMMAND...` invocation into the equivalent
 /// `systemd-run` argument vector.  `run0` is upstream a multi-call alias of
 /// systemd-run that elevates: it runs COMMAND as the target user (root by
@@ -719,11 +730,101 @@ fn translate_run0(raw: &[String]) -> Vec<String> {
         "--pipe".to_string(),
         "--wait".to_string(),
     ];
+
+    // run0 runs its command under a PAM stack so logind registers a session for
+    // it (upstream run.c: `PAMName=systemd-run0`). Without this no session is
+    // created at all and the session class below would have nothing to apply to.
+    out.push("--property".to_string());
+    out.push("PAMName=systemd-run0".to_string());
+
+    // Pre-scan for the target user and for an explicit XDG_SESSION_CLASS: both
+    // decide the session class below, and either can appear after the flag that
+    // needs it.
+    let mut target_user: Option<String> = None;
+    let mut class_preset = false;
+    let mut lightweight: Option<bool> = None;
+    {
+        let mut j = 1;
+        while j < raw.len() {
+            let a = raw[j].as_str();
+            let next = raw.get(j + 1).map(String::as_str);
+            match a {
+                "-u" | "--user" => {
+                    if let Some(v) = next {
+                        target_user = Some(v.to_string());
+                    }
+                }
+                "-E" | "--setenv" => {
+                    if next.is_some_and(|v| v.starts_with("XDG_SESSION_CLASS=")) {
+                        class_preset = true;
+                    }
+                }
+                s if s.starts_with("--user=") => target_user = Some(s["--user=".len()..].to_string()),
+                s if s.starts_with("--setenv=") => {
+                    if s["--setenv=".len()..].starts_with("XDG_SESSION_CLASS=") {
+                        class_preset = true;
+                    }
+                }
+                s if s.starts_with("--lightweight=") => {
+                    lightweight = parse_tristate(&s["--lightweight=".len()..]);
+                }
+                "--lightweight" => {
+                    if let Some(v) = next {
+                        lightweight = parse_tristate(v);
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+    }
+
+    // run0 with no --user targets root.
+    let become_root = target_user
+        .as_deref()
+        .is_none_or(|u| u == "root" || u == "0");
+
+    // Mirrors run.c: escalating to root should NOT pull in a full user service
+    // manager by default, because logind cannot tell run0-style escalation on a
+    // TTY apart from a getty-style login. A regular user transitioning to
+    // another regular user keeps the full environment, so no default there.
+    if lightweight.is_none() && become_root {
+        lightweight = Some(true);
+    }
+
+    if let Some(lw) = lightweight
+        && !class_preset
+    {
+        // Upstream keys the interactive variants off ARG_STDIO_PTY; we allocate
+        // a pty only when stdin is a terminal.
+        let pty = unsafe { libc::isatty(0) } == 1;
+        let class = match (lw, pty, become_root) {
+            (true, true, true) => "user-early-light",
+            (true, true, false) => "user-light",
+            (true, false, _) => "background-light",
+            (false, true, true) => "user-early",
+            (false, true, false) => "user",
+            (false, false, _) => "background",
+        };
+        out.push("--setenv".to_string());
+        out.push(format!("XDG_SESSION_CLASS={class}"));
+    }
+
     let mut cmd: Vec<String> = Vec::new();
     let mut i = 1;
     while i < raw.len() {
         let a = &raw[i];
         match a.as_str() {
+            // Consumed by the pre-scan above; never forwarded to systemd-run,
+            // which has no such option.
+            "--lightweight" => {
+                i += if raw.get(i + 1).is_some() { 2 } else { 1 };
+                continue;
+            }
+            s if s.starts_with("--lightweight=") => {
+                i += 1;
+                continue;
+            }
             "-u" | "--user" => {
                 if i + 1 < raw.len() {
                     out.push(format!("--uid={}", raw[i + 1]));

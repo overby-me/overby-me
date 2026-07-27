@@ -12,7 +12,7 @@ use directory_deps::{
     apply_dropins, collect_dep_dir_entries,
     collect_dropin_entries, create_implicit_slices_from_dropins, generate_fstab_mount_units,
     generate_getty_units, insert_parsed_unit, instantiate_template_units, is_template_unit,
-    is_unit_file, parse_dep_dir_name, parse_dropin_dir_name, resolve_specifiers,
+    instance_of, is_unit_file, parse_dep_dir_name, parse_dropin_dir_name, resolve_specifiers,
     resolve_symlink_aliases,
 };
 
@@ -489,8 +489,9 @@ fn parse_all_units(
             };
 
             // Resolve specifiers (%n, %i, %p, etc.) before parsing.
-            // For non-template units the instance is empty.
-            let raw = resolve_specifiers(&raw, &filename, "");
+            // An instantiated name like getty@tty2.service carries its instance;
+            // plain and template units resolve to an empty one.
+            let raw = resolve_specifiers(&raw, &filename, instance_of(&filename));
 
             let parsed_file = match parse_file(&raw) {
                 Ok(pf) => pf,

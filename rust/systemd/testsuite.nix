@@ -201,6 +201,14 @@ in
           })
         );
 
+      # run0 runs its command with PAMName=systemd-run0, matching upstream, so
+      # logind registers a session for it. The C systemd package ships a
+      # lib/pam.d/systemd-run0 stack but NixOS does not wire it into /etc/pam.d,
+      # and without an /etc/pam.d entry pam_start() fails and no session is
+      # created. startSession pulls pam_systemd.so into the session stack, which
+      # is the module that talks to logind.
+      security.pam.services.systemd-run0.startSession = true;
+
       # sudo-rs
       security.sudo.enable = false;
       security.sudo-rs = {

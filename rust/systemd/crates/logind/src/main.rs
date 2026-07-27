@@ -806,6 +806,9 @@ impl LoginManager {
         user_entry.sessions.push(id.clone());
         user_entry.state = "active".to_string();
 
+        // Start the per-user service manager, if this session's class wants one.
+        start_user_manager_if_wanted(uid, class);
+
         // Write session file
         self.write_session_file(&session);
 
@@ -2305,6 +2308,72 @@ fn check_seat0_graphical() -> bool {
 }
 
 /// Resolve a user's primary GID from /etc/passwd
+impl LoginManager {
+    /// Drop sessions whose leader process is gone.
+    ///
+    /// The stale-session-file check at load time only covers sessions inherited
+    /// from a previous logind; a session created in this process stayed in the
+    /// table forever once its leader exited. That made `loginctl` report dead
+    /// sessions as live, so a caller checking for a session of some class could
+    /// match one belonging to a service that had already been stopped.
+    ///
+    /// Sessions with no recorded leader (leader == 0) are left alone: there is
+    /// nothing to test liveness against.
+    fn gc_dead_sessions(&mut self) {
+        let dead: Vec<String> = self
+            .sessions
+            .values()
+            .filter(|s| s.leader > 0 && unsafe { libc::kill(s.leader as i32, 0) } != 0)
+            .map(|s| s.id.clone())
+            .collect();
+
+        for id in dead {
+            log::debug!("Reaping session {id}: leader exited");
+            self.release_session(&id);
+        }
+    }
+}
+
+/// Whether a session of this class should get a per-user service manager.
+///
+/// Mirrors SESSION_CLASS_WANTS_SERVICE_MANAGER (src/login/logind-session.h):
+/// user, user-early, greeter, lock-screen and background get one. The "-light"
+/// classes exist precisely to opt out of it, and "none"/"manager" never get one.
+fn session_class_wants_service_manager(class: &str) -> bool {
+    matches!(
+        class,
+        "user" | "user-early" | "greeter" | "lock-screen" | "background"
+    )
+}
+
+/// Start `user@<uid>.service` for a newly created session, if its class wants a
+/// service manager.
+///
+/// Runs on a detached thread: this is called from the CreateSession D-Bus
+/// handler, which pam_systemd invokes from inside the very service PID 1 is
+/// still starting. Blocking here to wait for the job would deadlock a
+/// Type=exec/notify service against PID 1's own start handling, so the reply
+/// goes out first and the unit start proceeds behind it.
+fn start_user_manager_if_wanted(uid: u32, class: &str) {
+    if !session_class_wants_service_manager(class) {
+        log::debug!("session class '{class}' wants no service manager for uid {uid}");
+        return;
+    }
+    let unit = format!("user@{uid}.service");
+    thread::spawn(move || {
+        log::info!("Starting {unit} for the new session");
+        match std::process::Command::new("systemctl")
+            .arg("start")
+            .arg(&unit)
+            .status()
+        {
+            Ok(s) if s.success() => log::info!("{unit} started"),
+            Ok(s) => log::error!("{unit} failed to start: {:?}", s.code()),
+            Err(e) => log::error!("could not start {unit}: {e}"),
+        }
+    });
+}
+
 fn resolve_user_gid(uid: u32) -> u32 {
     if let Ok(content) = fs::read_to_string("/etc/passwd") {
         for line in content.lines() {
@@ -4251,6 +4320,7 @@ fn handle_control_command(mgr: &mut LoginManager, cmd: &str) -> String {
         "status" => mgr.format_status(),
 
         "list-sessions" => {
+            mgr.gc_dead_sessions();
             let sessions: Vec<&Session> = mgr.sessions.values().collect();
             match serde_json::to_string_pretty(&sessions) {
                 Ok(json) => json,

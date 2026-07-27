@@ -255,6 +255,7 @@ type PamStartFn = unsafe extern "C" fn(
 ) -> libc::c_int;
 type PamFlagsFn = unsafe extern "C" fn(*mut libc::c_void, libc::c_int) -> libc::c_int;
 type PamEndFn = unsafe extern "C" fn(*mut libc::c_void, libc::c_int) -> libc::c_int;
+type PamPutenvFn = unsafe extern "C" fn(*mut libc::c_void, *const libc::c_char) -> libc::c_int;
 
 /// Run the account + session phases of the named PAM stack for `user`, as the
 /// current (root) process. On success the process's ambient capability set
@@ -265,7 +266,7 @@ type PamEndFn = unsafe extern "C" fn(*mut libc::c_void, libc::c_int) -> libc::c_
 /// without the session — running a service without its PAM stack matches the
 /// pre-existing behaviour (PAMName= used to be ignored), so this can never
 /// regress a service that previously started.
-fn run_pam_session(service: &str, user: &str) -> Result<(), String> {
+fn run_pam_session(service: &str, user: &str, env: &[(String, String)]) -> Result<(), String> {
     use std::ffi::CString;
 
     let c_service =
@@ -294,6 +295,7 @@ fn run_pam_session(service: &str, user: &str) -> Result<(), String> {
     let pam_acct_mgmt = sym!("pam_acct_mgmt", PamFlagsFn);
     let pam_setcred = sym!("pam_setcred", PamFlagsFn);
     let pam_open_session = sym!("pam_open_session", PamFlagsFn);
+    let pam_putenv = sym!("pam_putenv", PamPutenvFn);
     let pam_end = sym!("pam_end", PamEndFn);
 
     let conv = PamConv {
@@ -313,6 +315,27 @@ fn run_pam_session(service: &str, user: &str) -> Result<(), String> {
     if r != PAM_SUCCESS {
         log::warn!("pam_acct_mgmt for service '{service}' returned {r}, continuing");
     }
+    // Publish the service's Environment= into the PAM handle BEFORE the session
+    // stack runs, matching upstream's order in setup_pam()
+    // (src/core/exec-invoke.c: pam_putenv, then pam_setcred(PAM_ESTABLISH_CRED),
+    // then pam_open_session).
+    //
+    // This is what lets a session module read settings from the unit. pam_systemd
+    // takes the session CLASS from XDG_SESSION_CLASS here; without it every
+    // PAMName= service was announced to logind with pam_systemd's fallback class
+    // regardless of what the unit asked for. The process environment is no help:
+    // config.env is not applied to it until much later, after the UID drop.
+    for (k, v) in env {
+        let Ok(nv) = CString::new(format!("{k}={v}")) else {
+            log::warn!("PAM environment for '{service}': skipping {k} (NUL byte)");
+            continue;
+        };
+        let r = unsafe { pam_putenv(pamh, nv.as_ptr()) };
+        if r != PAM_SUCCESS {
+            log::warn!("pam_putenv({k}) for service '{service}' returned {r}, continuing");
+        }
+    }
+
     let r = unsafe { pam_setcred(pamh, PAM_ESTABLISH_CRED | PAM_SILENT) };
     if r != PAM_SUCCESS {
         log::warn!("pam_setcred for service '{service}' returned {r}, continuing");
@@ -3113,7 +3136,7 @@ pub fn run_exec_helper() {
             .flatten()
             .map(|u| u.name)
             .unwrap_or_else(|| config.user.to_string());
-        match run_pam_session(pam_name, &username) {
+        match run_pam_session(pam_name, &username, &config.env) {
             Ok(()) => {
                 pam_ambient_caps = read_ambient_caps();
                 log::trace!(

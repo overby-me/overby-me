@@ -1024,7 +1024,7 @@ fn collect_applicable_dropins(
         && let Some(overrides) = dropins.get(type_suffix)
     {
         for (filename, content) in overrides {
-            let resolved = resolve_specifiers(content, unit_name, "");
+            let resolved = resolve_specifiers(content, unit_name, instance_of(unit_name));
             result.push((filename.clone(), resolved));
         }
     }
@@ -1041,7 +1041,7 @@ fn collect_applicable_dropins(
             let key = format!("{prefix}-{suffix}"); // e.g., "a-.service"
             if let Some(overrides) = dropins.get(&key) {
                 for (filename, content) in overrides {
-                    let resolved = resolve_specifiers(content, unit_name, "");
+                    let resolved = resolve_specifiers(content, unit_name, instance_of(unit_name));
                     result.push((filename.clone(), resolved));
                 }
             }
@@ -1051,7 +1051,7 @@ fn collect_applicable_dropins(
     // 3. Exact unit name drop-ins
     if let Some(overrides) = dropins.get(unit_name) {
         for (filename, content) in overrides {
-            let resolved = resolve_specifiers(content, unit_name, "");
+            let resolved = resolve_specifiers(content, unit_name, instance_of(unit_name));
             result.push((filename.clone(), resolved));
         }
     }
@@ -1153,7 +1153,7 @@ pub fn apply_dropins(
             };
 
         // Resolve specifiers in the base content (%n, %i, %p, etc.)
-        let base_content = resolve_specifiers(&base_content, &unit_name, "");
+        let base_content = resolve_specifiers(&base_content, &unit_name, instance_of(&unit_name));
 
         // Merge base + all drop-in contents
         let merged = merge_unit_contents(&base_content, &overrides);
@@ -1428,6 +1428,26 @@ fn system_specifier_context() -> &'static crate::specifier::SpecifierContext {
 /// `%S`, `%T`, `%V`, `%%`, and more).
 ///
 /// Delegates to [`crate::specifier::resolve_specifiers`].
+/// Extract the instance name from an instantiated unit name.
+///
+/// `getty@tty2.service` -> `tty2`; a plain or template unit -> `""`.
+///
+/// Drop-in and base content used to be specifier-resolved with a hardcoded
+/// empty instance, so `%i`/`%I` in a drop-in on an instantiated template
+/// silently expanded to nothing. That is how
+/// `ExecStart=-agetty --autologin u --noclear %I $TERM` became
+/// `agetty ... --noclear dumb`, with $TERM landing in the tty slot.
+pub fn instance_of(unit_name: &str) -> &str {
+    let Some(at) = unit_name.find('@') else {
+        return "";
+    };
+    let rest = &unit_name[at + 1..];
+    match rest.rfind('.') {
+        Some(dot) => &rest[..dot],
+        None => rest,
+    }
+}
+
 pub fn resolve_specifiers(content: &str, unit_name: &str, instance: &str) -> String {
     crate::specifier::resolve_specifiers(content, unit_name, instance, system_specifier_context())
 }
@@ -3321,5 +3341,34 @@ mod tests {
             assert!(template.contains('@'));
             assert_eq!(instance, "ns-with-dashes");
         }
+    }
+
+    /// Guards the drop-in specifier fix: `%i`/`%I` in a drop-in on an
+    /// instantiated template used to expand to nothing because the instance was
+    /// hardcoded empty, which silently corrupted the resulting ExecStart=.
+    #[test]
+    fn instance_of_extracts_template_instances() {
+        assert_eq!(instance_of("getty@tty2.service"), "tty2");
+        assert_eq!(instance_of("user@1002.service"), "1002");
+        assert_eq!(instance_of("systemd-fsck@dev-sda1.service"), "dev-sda1");
+
+        // A template itself has no instance, and neither does a plain unit.
+        assert_eq!(instance_of("getty@.service"), "");
+        assert_eq!(instance_of("sshd.service"), "");
+
+        // Instances may contain dots and dashes; only the type suffix is cut.
+        assert_eq!(instance_of("mnt-data\\x2ddir@foo.bar.mount"), "foo.bar");
+        assert_eq!(instance_of("a@b"), "b");
+    }
+
+    /// The concrete regression: a getty drop-in must keep its tty argument.
+    #[test]
+    fn dropin_specifiers_resolve_against_the_instance() {
+        let dropin = "[Service]\nExecStart=-agetty --noclear %I $TERM\n";
+        let out = resolve_specifiers(dropin, "getty@tty2.service", instance_of("getty@tty2.service"));
+        assert!(
+            out.contains("--noclear tty2"),
+            "%I must expand to the instance, got: {out}"
+        );
     }
 }

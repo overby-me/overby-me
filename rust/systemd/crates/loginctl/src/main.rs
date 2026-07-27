@@ -115,6 +115,10 @@ struct Session {
     #[serde(default)]
     leader: u32,
     #[serde(default)]
+    idle_hint: bool,
+    #[serde(default)]
+    idle_since_hint: u64,
+    #[serde(default)]
     since: u64,
 }
 
@@ -165,21 +169,37 @@ fn print_sessions(json: &str, no_legend: bool) {
         }
     };
 
+    // Columns and their order match upstream's list_sessions()
+    // (src/login/loginctl.c: table_new("session", "uid", "user", "seat",
+    // "leader", "class", "tty", "idle", "since")). CLASS in particular is what
+    // tells a caller whether a session got a service manager, so leaving it out
+    // made the session class unobservable from the command line.
     if !no_legend {
         println!(
-            "{:<10} {:<10} {:<16} {:<12} {:<8}",
-            "SESSION", "UID", "USER", "SEAT", "TTY"
+            "{:<10} {:<6} {:<16} {:<8} {:<8} {:<17} {:<10} {:<5} {}",
+            "SESSION", "UID", "USER", "SEAT", "LEADER", "CLASS", "TTY", "IDLE", "SINCE"
         );
     }
 
     for s in &sessions {
         println!(
-            "{:<10} {:<10} {:<16} {:<12} {:<8}",
+            "{:<10} {:<6} {:<16} {:<8} {:<8} {:<17} {:<10} {:<5} {}",
             s.id,
             s.uid,
             s.user,
             s.seat.as_deref().unwrap_or("-"),
-            if s.tty.is_empty() { "-" } else { &s.tty }
+            s.leader,
+            if s.class.is_empty() { "-" } else { &s.class },
+            if s.tty.is_empty() { "-" } else { &s.tty },
+            if s.idle_hint { "yes" } else { "no" },
+            // Upstream's last column is the IDLE timestamp, not the session
+            // start time, and it is blank while the session is not idle
+            // (loginctl.c passes idle_timestamp_monotonic here).
+            if s.idle_hint && s.idle_since_hint > 0 {
+                format_timestamp(s.idle_since_hint)
+            } else {
+                "-".to_string()
+            },
         );
     }
 

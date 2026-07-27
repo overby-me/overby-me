@@ -377,6 +377,53 @@ in {
         StateDirectory=systemd/journal-upload
         UPLOAD_SERVICE
 
+                # Install the user-manager units.  The C package ships these under
+                # example/systemd/system with ExecStart= pointing at the C binary, so
+                # linking those in would start the C manager under rust PID 1.  Write
+                # our own into BOTH lib/ and example/ (the extraUnits search in
+                # testsuite.nix looks at example/ first, so the copy there has to be
+                # ours too) pointing at the rust manager.
+                #
+                # Type=notify-reload matches upstream and works because
+                # run_user_manager() sends READY=1 once its control socket is bound.
+                for dir in "$out/lib/systemd/system" "$out/example/systemd/system"; do
+                  mkdir -p "$dir"
+                  rm -f "$dir/user@.service" "$dir/user-runtime-dir@.service"
+
+                  cat > "$dir/user@.service" <<USER_SERVICE
+        [Unit]
+        Description=User Manager for UID %i
+        BindsTo=user-runtime-dir@%i.service
+        After=systemd-logind.service user-runtime-dir@%i.service
+        IgnoreOnIsolate=yes
+
+        [Service]
+        User=%i
+        Type=notify-reload
+        ExecStart=$out/lib/systemd/systemd --user
+        Slice=user-%i.slice
+        KillMode=mixed
+        TasksMax=infinity
+        TimeoutStopSec=120s
+        KeyringMode=inherit
+        USER_SERVICE
+
+                  # rust-systemd has no systemd-user-runtime-dir binary; the
+                  # directory is all the manager needs for XDG_RUNTIME_DIR.
+                  cat > "$dir/user-runtime-dir@.service" <<RUNTIME_DIR_SERVICE
+        [Unit]
+        Description=User Runtime Directory /run/user/%i
+        After=systemd-logind.service
+        IgnoreOnIsolate=yes
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/bin/sh -c 'mkdir -p /run/user/%i && chmod 0700 /run/user/%i && chown %i /run/user/%i'
+        ExecStop=/bin/sh -c 'rm -rf /run/user/%i'
+        RUNTIME_DIR_SERVICE
+                done
+
                 # Install test binaries at paths expected by upstream integration tests.
                 mkdir -p $out/lib/systemd/tests/unit-tests/manual
                 for name in test-journal-append test-sleep test-thp; do
