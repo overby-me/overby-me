@@ -189,8 +189,14 @@ impl Verifier<'_> {
             let global = &self.module.globals[index];
             let declaration = global.initializer.is_none()
                 || global.qualifiers.linkage == Some(Linkage::AvailableExternally);
-            if global.comdat.is_some() {
+            if let Some(comdat) = &global.comdat {
                 self.comdat_member(&name, declaration);
+                let wanted = comdat.name.clone().unwrap_or_else(|| name.clone());
+                if !self.module.comdats.iter().any(|c| c.name == wanted) {
+                    self.report(format!(
+                        "@{name} is in comdat ${wanted}, which does not exist"
+                    ));
+                }
             }
         }
         for index in 0..self.module.ifuncs.len() {
@@ -1000,6 +1006,16 @@ impl Verifier<'_> {
             function.return_type,
             "the return value",
         );
+        // `immarg` says an argument is written as a literal, so a result
+        // cannot be one, and `builtin` describes a call rather than a value.
+        for kind in [EnumAttr::ImmArg, EnumAttr::Builtin] {
+            if function.return_attrs.has(kind) {
+                self.report(format!(
+                    "{} on the return value, which it does not describe",
+                    kind.keyword()
+                ));
+            }
+        }
         for (index, param) in function.params.iter().enumerate() {
             self.attribute_set(&param.attrs, param.ty, &format!("parameter {index}"));
         }
@@ -1489,6 +1505,11 @@ impl Verifier<'_> {
                 self.type_is(function, aggregate_type, aggregate, &where_);
                 self.type_is(function, element_type, element, &where_);
                 self.constant_indices(aggregate_type, &indices, "insertvalue", &where_);
+                if let Some(field) = self.aggregate_field(aggregate_type, &indices)
+                    && field != element_type
+                {
+                    self.report(format!("{where_} writes a value the field cannot hold"));
+                }
             }
             InstKind::CmpXchg {
                 success, failure, ..
@@ -1998,6 +2019,27 @@ impl Verifier<'_> {
     }
 
     /// A struct index, or `None` after reporting why it is not one.
+    /// The type at the end of a constant index path, when the path is one
+    /// the aggregate actually has.
+    fn aggregate_field(&self, aggregate: TypeId, indices: &[u32]) -> Option<TypeId> {
+        let mut current = aggregate;
+        for index in indices {
+            current = match self.module.ctx.type_kind(current).clone() {
+                TypeKind::Array { element, count } if u64::from(*index) < count => element,
+                TypeKind::Struct { fields, .. } => *fields.get(*index as usize)?,
+                TypeKind::NamedStruct(id) => *self
+                    .module
+                    .ctx
+                    .struct_def(id)
+                    .fields
+                    .as_ref()?
+                    .get(*index as usize)?,
+                _ => return None,
+            };
+        }
+        Some(current)
+    }
+
     /// The one value a struct index carries, whether it is written as a
     /// number or as a vector every lane of which holds that number.
     fn uniform_index(&self, constant: ConstId) -> Option<u64> {
@@ -2804,6 +2846,12 @@ impl Verifier<'_> {
         }
         for attribute in &attributes {
             match attribute {
+                Attribute::Enum(kind @ (EnumAttr::Builtin | EnumAttr::ImmArg)) => {
+                    self.report(format!(
+                        "{} describes a call site rather than a function",
+                        kind.keyword()
+                    ));
+                }
                 Attribute::Enum(EnumAttr::JumpTable) if !unnamed => {
                     self.report("jumptable requires unnamed_addr");
                 }

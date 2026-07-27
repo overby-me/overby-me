@@ -477,6 +477,24 @@ const BROKEN: &[(&str, &str)] = &[
         "declare dso_local dllimport void @fun()\n",
         "both dllimport and dso_local",
     ),
+    // Where an attribute belongs, and what a field can hold.
+    (
+        "declare void @llvm.f() immarg\n",
+        "immarg describes a call site rather than a function",
+    ),
+    (
+        "declare immarg i32 @llvm.g(i32 %x)\n",
+        "immarg on the return value",
+    ),
+    ("@v = global i32 0, comdat($v)\n", "which does not exist"),
+    (
+        "define void @f() {\nentry:\n  %r = insertvalue { i32, i32 } undef, ptr null, 0\n  ret void\n}\n",
+        "writes a value the field cannot hold",
+    ),
+    (
+        "define void @f() builtin {\nentry:\n  ret void\n}\n",
+        "builtin describes a call site rather than a function",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
