@@ -413,6 +413,9 @@ A thirty-eighth pass, also from probing rather than the suites: an
 `insertelement` inserts what the vector holds, and a `shufflevector`
 shuffles two vectors of the same type. The second is a parser rule because
 the model keeps one type for both halves, there being only one.
+A thirty-ninth pass, again from probing: a load reads so it can acquire
+and cannot release, a store writes so it can release and cannot acquire,
+and a fence with an ordering that names no direction orders nothing.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

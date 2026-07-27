@@ -333,6 +333,16 @@ pub enum LandingPadClause {
     Filter { ty: TypeId, value: Value },
 }
 
+impl InstKind {
+    /// The ordering an atomic memory operation carries, if it is one.
+    pub fn atomic_ordering(&self) -> Option<(SyncScope, AtomicOrdering)> {
+        match self {
+            InstKind::Load { atomic, .. } | InstKind::Store { atomic, .. } => atomic.clone(),
+            _ => None,
+        }
+    }
+}
+
 /// Where a funclet-style terminator unwinds to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UnwindTarget {

@@ -584,6 +584,18 @@ const BROKEN: &[(&str, &str)] = &[
         "define void @f(<4 x i32> %v) {\nentry:\n  %b = insertelement <4 x i32> %v, i64 0, i32 0\n  ret void\n}\n",
         "inserts a type the vector does not hold",
     ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  fence monotonic\n  ret void\n}\n",
+        "ordering that orders nothing",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  %r = load atomic i32, ptr %p release, align 4\n  ret void\n}\n",
+        "ordering a load cannot have",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  store atomic i32 0, ptr %p acquire, align 4\n  ret void\n}\n",
+        "ordering a store cannot have",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -985,6 +997,9 @@ const VERIFIES: &[&str] = &[
     // A call may write the address space it goes through, and then that is
     // what has to match rather than the program's.
     "target datalayout = \"P42\"\n\ndefine i8 @f(ptr %p0) {\nentry:\n  %r = call addrspace(0) i8 %p0(i32 0)\n  ret i8 %r\n}\n",
+    // A load acquires and a store releases, which are the directions each
+    // can order in.
+    "define void @f(ptr %p) {\nentry:\n  %r = load atomic i32, ptr %p acquire, align 4\n  store atomic i32 0, ptr %p release, align 4\n  ret void\n}\n",
     // A pointer to a type does not make the type contain itself, which is
     // what makes a linked list legal.
     "%node = type { i32, ptr }\n@head = global %node zeroinitializer\n",

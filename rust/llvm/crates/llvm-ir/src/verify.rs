@@ -1552,6 +1552,13 @@ impl Verifier<'_> {
                     self.is_sized(loaded_type),
                     format!("{where_} loads a type with no size"),
                 );
+                // A load reads, so it can acquire and cannot release.
+                if let Some((_, ordering)) = instruction.kind.atomic_ordering() {
+                    self.check(
+                        !matches!(ordering, AtomicOrdering::Release | AtomicOrdering::AcqRel),
+                        format!("{where_} has an ordering a load cannot have"),
+                    );
+                }
                 // Unreachable from parsed text, where an unwritten alignment
                 // is filled in from the data layout, but a module built by
                 // hand can still omit one.
@@ -1597,13 +1604,18 @@ impl Verifier<'_> {
                 atomic,
                 ..
             } => {
-                if atomic.is_some() {
+                if let Some((_, ordering)) = atomic {
                     self.check(
                         matches!(
                             self.module.ctx.type_kind(*value_type),
                             TypeKind::Integer(_) | TypeKind::Float(_) | TypeKind::Pointer { .. }
                         ),
                         format!("{where_} stores a type an atomic cannot move"),
+                    );
+                    // A store writes, so it can release and cannot acquire.
+                    self.check(
+                        !matches!(ordering, AtomicOrdering::Acquire | AtomicOrdering::AcqRel),
+                        format!("{where_} has an ordering a store cannot have"),
                     );
                 }
                 let (value_type, value) = (*value_type, *value);
@@ -1707,6 +1719,18 @@ impl Verifier<'_> {
                 );
                 self.gep_vector_widths(pointer_type, &indices, &where_);
                 self.walk_indices(source_type, &indices, &where_);
+            }
+            InstKind::Fence { ordering, .. } => {
+                self.check(
+                    matches!(
+                        ordering,
+                        AtomicOrdering::Acquire
+                            | AtomicOrdering::Release
+                            | AtomicOrdering::AcqRel
+                            | AtomicOrdering::SeqCst
+                    ),
+                    format!("{where_} has an ordering that orders nothing"),
+                );
             }
             InstKind::InsertElement {
                 vector_type,
