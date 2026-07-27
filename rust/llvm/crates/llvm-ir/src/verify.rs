@@ -1780,6 +1780,14 @@ impl Verifier<'_> {
                 let (condition_type, condition) = (*condition_type, *condition);
                 let (if_true, if_false) = (*if_true, *if_false);
                 self.type_is(function, condition_type, condition, &where_);
+                // A select picks lane by lane, so the condition has as many
+                // lanes as the values it picks between.
+                let lanes = |verifier: &Self, ty: TypeId| {
+                    TypeKind::as_vector(verifier.module.ctx.type_kind(ty)).map(|(_, n, s)| (n, s))
+                };
+                if lanes(self, condition_type) != lanes(self, ty) {
+                    self.report(format!("{where_} picks with a condition of another width"));
+                }
                 self.type_is(function, ty, if_true, &where_);
                 self.type_is(function, ty, if_false, &where_);
                 self.check(

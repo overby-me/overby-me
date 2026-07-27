@@ -253,6 +253,9 @@ impl Parser {
                 Token::Label(name) => {
                     self.advance();
                     let id = self.block_by_name(function, state, &Name::Named(name.clone()))?;
+                    if function.block_order.contains(&id) {
+                        return self.error(format!("redefinition of block '%{name}'"));
+                    }
                     function.block_mut(id).name = Some(Name::Named(name));
                     function.place_block(id);
                     current = Some(id);
@@ -861,6 +864,8 @@ impl Parser {
                     } else if matches!(self.peek(), Token::MetadataName(_)) {
                         self.index -= 1;
                         break;
+                    } else if count.is_some() {
+                        return self.error("an alloca counts its elements once");
                     } else {
                         count = Some(self.parse_typed_value(function, state)?);
                     }

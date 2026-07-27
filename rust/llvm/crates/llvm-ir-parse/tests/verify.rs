@@ -596,6 +596,10 @@ const BROKEN: &[(&str, &str)] = &[
         "define void @f(ptr %p) {\nentry:\n  store atomic i32 0, ptr %p acquire, align 4\n  ret void\n}\n",
         "ordering a store cannot have",
     ),
+    (
+        "define void @f(<4 x i1> %c, <2 x i32> %a, <2 x i32> %b) {\nentry:\n  %r = select <4 x i1> %c, <2 x i32> %a, <2 x i32> %b\n  ret void\n}\n",
+        "picks with a condition of another width",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -741,6 +745,14 @@ const REJECTED: &[(&str, &str)] = &[
     ),
     ("%s = type { void }\n", "invalid structure element type"),
     ("@i2 = common global i8388609 0, align 4\n", "is too wide"),
+    (
+        "define void @f() {\nentry:\n  %a = alloca i32, i32 4, i32 4, align 4\n  ret void\n}\n",
+        "counts its elements once",
+    ),
+    (
+        "define void @f() {\nentry:\n  ret void\n\nentry:\n  ret void\n}\n",
+        "redefinition of block '%entry'",
+    ),
     (
         "define void @f(<4 x i32> %a, <2 x i32> %b) {\nentry:\n  %r = shufflevector <4 x i32> %a, <2 x i32> %b, <4 x i32> zeroinitializer\n  ret void\n}\n",
         "shuffles two vectors of different types",
