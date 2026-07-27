@@ -196,6 +196,18 @@ impl Verifier<'_> {
             if !self.names_a_symbol(resolver) {
                 self.report(format!("@{name} must have a function as its resolver"));
             }
+            let linkage = self.module.ifuncs[index].qualifiers.linkage;
+            if matches!(
+                linkage,
+                Some(
+                    Linkage::ExternWeak
+                        | Linkage::AvailableExternally
+                        | Linkage::Common
+                        | Linkage::Appending
+                )
+            ) {
+                self.report(format!("@{name} has a linkage an ifunc may not have"));
+            }
         }
 
         for named in &self.module.named_metadata {
@@ -1108,8 +1120,20 @@ impl Verifier<'_> {
                 );
             }
             InstKind::Store {
-                value_type, value, ..
+                value_type,
+                value,
+                atomic,
+                ..
             } => {
+                if atomic.is_some() {
+                    self.check(
+                        matches!(
+                            self.module.ctx.type_kind(*value_type),
+                            TypeKind::Integer(_) | TypeKind::Float(_) | TypeKind::Pointer { .. }
+                        ),
+                        format!("{where_} stores a type an atomic cannot move"),
+                    );
+                }
                 let (value_type, value) = (*value_type, *value);
                 self.type_is(function, value_type, value, &where_);
                 self.check(
@@ -1280,6 +1304,18 @@ impl Verifier<'_> {
                         self.report(format!(
                             "{where_} has inalloca on an argument that is not the last"
                         ));
+                    }
+                }
+                // Some bundle tags say one thing about the call, so a second
+                // one of the same tag has nothing left to say.
+                for tag in ["kcfi", "ptrauth", "deopt", "funclet", "gc-transition"] {
+                    let count = call
+                        .bundles
+                        .iter()
+                        .filter(|bundle| bundle.tag == tag)
+                        .count();
+                    if count > 1 {
+                        self.report(format!("{where_} carries {count} {tag} operand bundles"));
                     }
                 }
                 // `speculatable` promises something about a function, not
@@ -2197,6 +2233,37 @@ impl Verifier<'_> {
                         }
                     }
                 }
+                // `allocsize(0, 1)` names parameters by position, so the
+                // positions have to exist.
+                Attribute::Int {
+                    kind: IntAttr::AllocSize,
+                    first,
+                    second,
+                } => {
+                    let params = function.params.len() as u64;
+                    for index in [Some(*first), *second].into_iter().flatten() {
+                        if index >= params {
+                            self.report(format!(
+                                "allocsize names parameter {index} of a function with {params}"
+                            ));
+                        }
+                    }
+                }
+                // `allockind("alloc,zeroed")` says which of the three things
+                // this function does, and it does exactly one of them.
+                Attribute::Structured {
+                    kind: crate::attribute::StructuredAttr::AllocKind,
+                    arguments,
+                } => {
+                    let kinds = arguments
+                        .split(',')
+                        .map(|word| word.trim().trim_matches('"'))
+                        .filter(|word| matches!(*word, "alloc" | "realloc" | "free"))
+                        .count();
+                    if kinds != 1 {
+                        self.report("allockind names none or several of alloc, realloc and free");
+                    }
+                }
                 Attribute::String { key, value } => self.string_attribute(key, value.as_deref()),
                 _ => {}
             }
@@ -2222,6 +2289,17 @@ impl Verifier<'_> {
                 self.report(format!("invalid value for '{key}' attribute: {value}"));
             }
             "sign-return-address-key" if !matches!(value, "a_key" | "b_key") => {
+                self.report(format!("invalid value for '{key}' attribute: {value}"));
+            }
+            "no-jump-tables"
+            | "less-precise-fpmad"
+            | "no-infs-fp-math"
+            | "no-nans-fp-math"
+            | "no-signed-zeros-fp-math"
+            | "unsafe-fp-math"
+            | "use-soft-float"
+                if !matches!(value, "true" | "false") =>
+            {
                 self.report(format!("invalid value for '{key}' attribute: {value}"));
             }
             "alloc-variant-zeroed" if value.is_empty() => {

@@ -323,6 +323,30 @@ const BROKEN: &[(&str, &str)] = &[
         "declare void @g()\n\ndefine void @f() {\nentry:\n  call void @g() speculatable\n  ret void\n}\n",
         "carries speculatable, which a call site may not",
     ),
+    (
+        "define void @f(ptr %fn) {\nentry:\n  call void %fn() [ \"kcfi\"(i32 42), \"kcfi\"(i32 42) ]\n  ret void\n}\n",
+        "carries 2 kcfi operand bundles",
+    ),
+    (
+        "define void @f(ptr %p, [4 x i32] %v) {\nentry:\n  store atomic [4 x i32] %v, ptr %p seq_cst, align 16\n  ret void\n}\n",
+        "stores a type an atomic cannot move",
+    ),
+    (
+        "define ptr @resolver() {\nentry:\n  ret ptr null\n}\n\n@f = extern_weak ifunc void (), ptr @resolver\n",
+        "has a linkage an ifunc may not have",
+    ),
+    (
+        "define void @f() \"no-jump-tables\"=\"yes\" {\nentry:\n  ret void\n}\n",
+        "invalid value for 'no-jump-tables' attribute: yes",
+    ),
+    (
+        "declare ptr @a(i32) allocsize(1)\n",
+        "allocsize names parameter 1",
+    ),
+    (
+        "declare ptr @a(i32) allockind(\"aligned\")\n",
+        "allockind names none or several of alloc, realloc and free",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",

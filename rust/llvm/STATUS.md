@@ -66,8 +66,8 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 409 | 483 | 14 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 245 | 328 | 4 | `llvm-upstream-verifier` |
+| `llvm/test/Assembler` | 411 | 483 | 14 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 252 | 328 | 4 | `llvm-upstream-verifier` |
 
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse 18 modules llvm-as reads**, which is the failure that

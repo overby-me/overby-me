@@ -265,6 +265,12 @@ argument list to start, `inalloca` marks the argument pushed last,
 `speculatable` promises something about a function rather than one call to
 it, and an indirect call has no declaration to name a token in so it may
 not produce one.
+An eighteenth pass took the rules that count things: a call carries one
+bundle of each tag that says one thing, `allocsize` names parameters that
+have to exist, `allockind` names exactly one of alloc, realloc and free,
+an atomic store moves something the target can move in one instruction, an
+ifunc has a linkage the loader can resolve, and seven more quoted
+attributes take a word for true or false.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;
