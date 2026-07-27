@@ -499,6 +499,33 @@ const BROKEN: &[(&str, &str)] = &[
         "declare void @f()\n\ndefine void @g() {\nentry:\n  call void @f() align 8\n  ret void\n}\n",
         "describes an argument rather than a call",
     ),
+    // What a value can be, and where an attribute describes one.
+    (
+        "define void @f(label %bb) {\nentry:\n  ret void\n}\n",
+        "parameter 0 has a type no caller can pass",
+    ),
+    (
+        "declare void @foo(i32 safestack %x)\n",
+        "safestack on parameter 0",
+    ),
+    (
+        "declare safestack void @foo()\n",
+        "safestack on the return value",
+    ),
+    (
+        "define void @f() {\nentry:\n  %p = phi void ()\n  ret void\n}\n",
+        "produces a type no register can hold",
+    ),
+    (
+        "define void @f(i8 range(i8 1, 1) %x) {\nentry:\n  ret void\n}\n",
+        "an empty range on parameter 0 constrains nothing",
+    ),
+    // A type that contains itself has no size, and walking it without a
+    // trail does not return. This case used to abort the process.
+    (
+        "%s = type { %s }\n@g = global %s zeroinitializer\n",
+        "has an invalid type for a global variable",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",

@@ -998,6 +998,16 @@ impl Verifier<'_> {
                 }
             }
         }
+        // A parameter holds a value the caller passes, and a label is a
+        // place in this function rather than a value at all.
+        for (index, param) in function.params.iter().enumerate() {
+            if matches!(
+                self.module.ctx.type_kind(param.ty),
+                TypeKind::Label | TypeKind::Function { .. }
+            ) {
+                self.report(format!("parameter {index} has a type no caller can pass"));
+            }
+        }
 
         self.calling_convention(function);
         self.function_attributes(function);
@@ -1008,7 +1018,7 @@ impl Verifier<'_> {
         );
         // `immarg` says an argument is written as a literal, so a result
         // cannot be one, and `builtin` describes a call rather than a value.
-        for kind in [EnumAttr::ImmArg, EnumAttr::Builtin] {
+        for kind in [EnumAttr::ImmArg, EnumAttr::Builtin, EnumAttr::SafeStack] {
             if function.return_attrs.has(kind) {
                 self.report(format!(
                     "{} on the return value, which it does not describe",
@@ -1018,6 +1028,11 @@ impl Verifier<'_> {
         }
         for (index, param) in function.params.iter().enumerate() {
             self.attribute_set(&param.attrs, param.ty, &format!("parameter {index}"));
+            if param.attrs.has(EnumAttr::SafeStack) {
+                self.report(format!(
+                    "safestack on parameter {index}, which it does not describe"
+                ));
+            }
         }
         self.at_most_one_of(function);
 
@@ -1570,6 +1585,10 @@ impl Verifier<'_> {
                 );
                 self.gep_vector_widths(pointer_type, &indices, &where_);
                 self.walk_indices(source_type, &indices, &where_);
+            }
+            InstKind::Phi { incoming, .. } if !self.module.ctx.type_kind(ty).is_first_class() => {
+                let _ = incoming;
+                self.report(format!("{where_} produces a type no register can hold"));
             }
             InstKind::Phi { incoming, .. } => {
                 let incoming = incoming.clone();
@@ -2462,6 +2481,24 @@ impl Verifier<'_> {
     /// Whether a value of this type can be stored somewhere: allocated on the
     /// stack, held in a global, or placed in an aggregate.
     fn is_sized(&self, ty: TypeId) -> bool {
+        self.is_sized_within(ty, &mut Vec::new())
+    }
+
+    /// A named struct may name itself, directly or through others, and a
+    /// type that contains itself has no size to compute. Upstream refuses
+    /// `%s = type { %s }` as a global for that reason, and walking it
+    /// without the trail below does not return.
+    fn is_sized_within(&self, ty: TypeId, trail: &mut Vec<TypeId>) -> bool {
+        if trail.contains(&ty) {
+            return false;
+        }
+        trail.push(ty);
+        let sized = self.is_sized_step(ty, trail);
+        trail.pop();
+        sized
+    }
+
+    fn is_sized_step(&self, ty: TypeId, trail: &mut Vec<TypeId>) -> bool {
         match self.module.ctx.type_kind(ty) {
             TypeKind::Void
             | TypeKind::Label
@@ -2471,12 +2508,12 @@ impl Verifier<'_> {
             | TypeKind::Function { .. } => false,
             // A struct is as sized as its fields, and a body it has not been
             // given yet has no layout at all.
-            TypeKind::Struct { fields, .. } => self.struct_is_sized(&fields.clone()),
+            TypeKind::Struct { fields, .. } => self.struct_is_sized(&fields.clone(), trail),
             TypeKind::NamedStruct(id) => match &self.module.ctx.struct_def(*id).fields {
-                Some(fields) => self.struct_is_sized(&fields.clone()),
+                Some(fields) => self.struct_is_sized(&fields.clone(), trail),
                 None => false,
             },
-            TypeKind::Array { element, .. } => self.has_a_fixed_size(*element),
+            TypeKind::Array { element, .. } => self.has_a_fixed_size_within(*element, trail),
             _ => true,
         }
     }
@@ -2486,8 +2523,11 @@ impl Verifier<'_> {
     /// follows the scalable one, which is why upstream refuses `{i32,
     /// <vscale x 1 x i32>}` and reads `{<vscale x 1 x i32>, <vscale x 1 x
     /// i32>}`.
-    fn struct_is_sized(&self, fields: &[TypeId]) -> bool {
-        if !fields.iter().all(|field| self.is_sized(*field)) {
+    fn struct_is_sized(&self, fields: &[TypeId], trail: &mut Vec<TypeId>) -> bool {
+        if !fields
+            .iter()
+            .all(|field| self.is_sized_within(*field, trail))
+        {
             return false;
         }
         let scalable = |ty: TypeId| {
@@ -2504,6 +2544,20 @@ impl Verifier<'_> {
     /// What a global may hold whether or not it is defined here: a type with
     /// a representation, and nothing scalable.
     fn fits_in_a_global(&self, ty: TypeId) -> bool {
+        self.fits_in_a_global_within(ty, &mut Vec::new())
+    }
+
+    fn fits_in_a_global_within(&self, ty: TypeId, trail: &mut Vec<TypeId>) -> bool {
+        if trail.contains(&ty) {
+            return false;
+        }
+        trail.push(ty);
+        let fits = self.fits_in_a_global_step(ty, trail);
+        trail.pop();
+        fits
+    }
+
+    fn fits_in_a_global_step(&self, ty: TypeId, trail: &mut Vec<TypeId>) -> bool {
         match self.module.ctx.type_kind(ty) {
             TypeKind::Void
             | TypeKind::Label
@@ -2520,39 +2574,49 @@ impl Verifier<'_> {
             TypeKind::Struct { fields, .. } => fields
                 .clone()
                 .iter()
-                .all(|field| self.fits_in_a_global(*field)),
+                .all(|field| self.fits_in_a_global_within(*field, trail)),
             TypeKind::NamedStruct(id) => match &self.module.ctx.struct_def(*id).fields {
                 Some(fields) => fields
                     .clone()
                     .iter()
-                    .all(|field| self.fits_in_a_global(*field)),
+                    .all(|field| self.fits_in_a_global_within(*field, trail)),
                 None => true,
             },
-            TypeKind::Array { element, .. } => self.fits_in_a_global(*element),
+            TypeKind::Array { element, .. } => self.fits_in_a_global_within(*element, trail),
             _ => true,
         }
     }
 
     /// Whether a type has a size the layout can state as a number. A scalable
     /// vector has a size, but not one a global can use.
-    fn has_a_fixed_size(&self, ty: TypeId) -> bool {
-        if !self.is_sized(ty) {
+    fn has_a_fixed_size_within(&self, ty: TypeId, trail: &mut Vec<TypeId>) -> bool {
+        if trail.contains(&ty) {
             return false;
         }
+        if !self.is_sized_within(ty, trail) {
+            return false;
+        }
+        trail.push(ty);
+        let fixed = self.has_a_fixed_size_step(ty, trail);
+        trail.pop();
+        fixed
+    }
+
+    fn has_a_fixed_size_step(&self, ty: TypeId, trail: &mut Vec<TypeId>) -> bool {
         match self.module.ctx.type_kind(ty) {
             TypeKind::Vector { scalable, .. } => !scalable,
             TypeKind::Struct { fields, .. } => fields
                 .clone()
                 .iter()
-                .all(|field| self.has_a_fixed_size(*field)),
+                .all(|field| self.has_a_fixed_size_within(*field, trail)),
             TypeKind::NamedStruct(id) => match &self.module.ctx.struct_def(*id).fields {
                 Some(fields) => fields
                     .clone()
                     .iter()
-                    .all(|field| self.has_a_fixed_size(*field)),
+                    .all(|field| self.has_a_fixed_size_within(*field, trail)),
                 None => false,
             },
-            TypeKind::Array { element, .. } => self.has_a_fixed_size(*element),
+            TypeKind::Array { element, .. } => self.has_a_fixed_size_within(*element, trail),
             _ => true,
         }
     }
@@ -2794,6 +2858,14 @@ impl Verifier<'_> {
             match attribute {
                 // `range(i8 1, 0)` says what it constrains, so the width has
                 // to be the width of the thing it is attached to.
+                Attribute::Range {
+                    ty: range_ty,
+                    lower,
+                    upper,
+                } if lower == upper => {
+                    let _ = range_ty;
+                    self.report(format!("an empty range on {where_} constrains nothing"));
+                }
                 Attribute::Range { ty: range_ty, .. } => {
                     let element = self.element_or_self(ty);
                     let TypeKind::Integer(bits) = *self.module.ctx.type_kind(element) else {

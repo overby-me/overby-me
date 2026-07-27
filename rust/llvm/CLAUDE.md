@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 430 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 435 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -355,6 +355,18 @@ which four files showed. A call's own `align` describes an argument rather
 than the call, but its `preallocated(T)` does not, so banning every
 type-valued attribute there cost a file. The alloca address space in a
 data layout is twenty-four bits.
+A thirtieth pass added five value rules and found a crash. A parameter
+holds something a caller can pass, which a label and a function type are
+not. `safestack` describes a frame rather than a value, so it belongs on
+neither a parameter nor a result. A phi produces something a register can
+hold. An empty `range` constrains nothing.
+The crash was `%s = type { %s }` as a global: three of the sizedness
+walks recursed through a named struct's fields without remembering where
+they had been, and a type containing itself made them run until the stack
+ran out. Each now carries a trail, and a type on it is unsized rather than
+an abort. It was found by testing an upstream file rather than by
+reasoning about the walk, which is the second time a crash has come out of
+this suite.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five
