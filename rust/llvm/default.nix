@@ -112,12 +112,12 @@ in {
     # Both numbers are low and both are honest: see STATUS.md for what the
     # remaining disagreements are.
     llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 226;
-    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 161;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 169;
 
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this
     # pins it against inputs nobody wrote for us.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 111;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 112;
   };
 
   packages.rust-llvm = {lib, ...}:

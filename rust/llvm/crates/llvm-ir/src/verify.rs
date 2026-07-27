@@ -134,6 +134,12 @@ impl Verifier<'_> {
                 self.report(format!("@{name}: a common global may not be in a comdat"));
             }
             let initializer = self.module.globals[index].initializer;
+            if let Some(initializer) = initializer
+                && !name.starts_with("llvm.")
+                && let Some(intrinsic) = self.mentions_an_intrinsic(initializer)
+            {
+                self.report(format!("@{name} takes the address of @{intrinsic}"));
+            }
             self.intrinsic_global(&name, value_type, initializer);
             let global = &self.module.globals[index];
             if let Some(initializer) = global.initializer {
@@ -220,6 +226,48 @@ impl Verifier<'_> {
     /// The globals whose names upstream reserves, and the shapes it insists
     /// on for them. Getting one wrong is not a style problem: the linker and
     /// the runtime both read these by layout.
+    /// Whether an instruction is a call to the named intrinsic.
+    fn calls_intrinsic(&self, function: &Function, id: InstId, wanted: &str) -> bool {
+        let InstKind::Call(call) = &function.instruction(id).kind else {
+            return false;
+        };
+        let Value::Constant(callee) = call.callee else {
+            return false;
+        };
+        matches!(
+            self.module.ctx.constant(callee).as_global(),
+            Some(GlobalRef::Function(id))
+                if matches!(&self.module.function(id).name, Name::Named(name) if name == wanted)
+        )
+    }
+
+    /// The intrinsic a constant names, if it names one. An intrinsic is
+    /// lowered where it is called, so there is nothing for its address to
+    /// point at and taking one is an error rather than a missing definition.
+    fn mentions_an_intrinsic(&self, id: ConstId) -> Option<String> {
+        let named = |target: &GlobalRef| match target {
+            GlobalRef::Function(id) => match &self.module.function(*id).name {
+                Name::Named(name) if name.starts_with("llvm.") => Some(name.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        match self.module.ctx.constant(id) {
+            Constant::Global { target, .. } => named(target),
+            Constant::Struct { fields, .. } => {
+                fields.iter().find_map(|f| self.mentions_an_intrinsic(*f))
+            }
+            Constant::Array { elements, .. } | Constant::Vector { elements, .. } => {
+                elements.iter().find_map(|e| self.mentions_an_intrinsic(*e))
+            }
+            Constant::Expression(expr) => match **expr {
+                ConstExpr::Cast { operand, .. } => self.mentions_an_intrinsic(operand),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Whether a constant names a symbol, through any number of casts.
     fn names_a_symbol(&self, id: ConstId) -> bool {
         match self.module.ctx.constant(id) {
@@ -441,6 +489,9 @@ impl Verifier<'_> {
         // token and x86_amx have no representation a caller could pass, so
         // only an intrinsic may name them in its signature.
         let intrinsic = matches!(&function.name, Name::Named(text) if text.starts_with("llvm."));
+        if intrinsic && function.is_definition() {
+            self.report("an intrinsic is provided by the compiler and cannot be defined");
+        }
         if !intrinsic {
             let return_type = function.return_type;
             let params: Vec<TypeId> = function.params.iter().map(|p| p.ty).collect();
@@ -475,6 +526,18 @@ impl Verifier<'_> {
             self.basic_block(function, *block_id);
         }
         self.dominance(function);
+        // A frame's escaped locals are described once, because the recover
+        // side indexes into that one list.
+        let escapes = blocks
+            .iter()
+            .flat_map(|block| function.block(*block).instructions.clone())
+            .filter(|inst| self.calls_intrinsic(function, *inst, "llvm.localescape"))
+            .count();
+        if escapes > 1 {
+            self.report(format!(
+                "{escapes} calls to llvm.localescape in one function, which allows one"
+            ));
+        }
         self.function = None;
     }
 
@@ -898,32 +961,65 @@ impl Verifier<'_> {
                 } else {
                     self.report(format!("{where_} has a callee type that is not a function"));
                 }
-                // Opaque pointers mean the callee carries no signature of its
-                // own, so a call to a known function is the only place the two
-                // can be compared. `call void @g()` against `declare void
-                // @g(i32)` is well typed at the call site and still wrong.
+                // A call to an ordinary function is deliberately *not*
+                // compared against that function's declared signature: opaque
+                // pointers put the signature at the call site, and real
+                // llvm-as accepts `call void @g()` against `declare void
+                // @g(i32)`. An intrinsic is different, because it is selected
+                // by its name and mangled suffix together, so a call with
+                // another signature is a call to something that does not
+                // exist.
                 if let Value::Constant(id) = call.callee
                     && let Some(GlobalRef::Function(callee)) =
                         self.module.ctx.constant(id).as_global()
                 {
                     let callee = self.module.function(callee);
-                    let (result, params, is_var_arg) =
-                        match self.module.ctx.type_kind(call.function_type) {
-                            TypeKind::Function {
-                                result,
-                                params,
-                                is_var_arg,
-                            } => (*result, params.clone(), *is_var_arg),
-                            _ => (call.function_type, Vec::new(), false),
+                    let is_intrinsic =
+                        matches!(&callee.name, Name::Named(name) if name.starts_with("llvm."));
+                    let immediate: Vec<bool> = callee
+                        .params
+                        .iter()
+                        .map(|param| param.attrs.has(EnumAttr::ImmArg))
+                        .collect();
+                    if is_intrinsic {
+                        let (result, params, is_var_arg) =
+                            match self.module.ctx.type_kind(call.function_type) {
+                                TypeKind::Function {
+                                    result,
+                                    params,
+                                    is_var_arg,
+                                } => (*result, params.clone(), *is_var_arg),
+                                _ => (call.function_type, Vec::new(), false),
+                            };
+                        let declared: Vec<TypeId> = callee.params.iter().map(|p| p.ty).collect();
+                        let matches = result == callee.return_type
+                            && params == declared
+                            && is_var_arg == callee.is_var_arg;
+                        self.check(
+                            matches,
+                            format!("{where_} calls an intrinsic with an incompatible signature"),
+                        );
+                    }
+                    for (position, arg) in call.args.iter().enumerate() {
+                        // A constant expression counts: upstream folds one
+                        // before the verifier looks, so `add (i32 2, i32 3)`
+                        // reaches it as the number 5.
+                        let immediate_value = match arg.value {
+                            Value::Constant(id) => matches!(
+                                self.module.ctx.constant(id),
+                                Constant::Integer { .. }
+                                    | Constant::Float { .. }
+                                    | Constant::ZeroInitializer(_)
+                                    | Constant::Expression(_)
+                            ),
+                            _ => false,
                         };
-                    let declared: Vec<TypeId> = callee.params.iter().map(|p| p.ty).collect();
-                    let matches = result == callee.return_type
-                        && params == declared
-                        && is_var_arg == callee.is_var_arg;
-                    self.check(
-                        matches,
-                        format!("{where_} does not match the signature of the function it calls"),
-                    );
+                        if immediate.get(position) == Some(&true) && !immediate_value {
+                            self.report(format!(
+                                "{where_} passes a non-immediate to an immarg parameter"
+                            ));
+                        }
+                    }
                 }
             }
             _ => {}

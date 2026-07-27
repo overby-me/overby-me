@@ -114,7 +114,7 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 226, 70 to 161)*
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 226, 70 to 169)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -129,7 +129,10 @@ match the signature its callee was declared with, because opaque pointers
 put the signature at the call site; a load of a type with no computable
 layout still has no alignment to report; and an instruction after a
 terminator opens a new anonymous block rather than being a second
-terminator.
+terminator. (The second of those was recorded as removed and was not: the
+code was still there and still rejecting IR real llvm-as accepts. The
+eighth pass removed it for real, and found the narrower rule it should
+have been.)
 A fourth pass took the reject side: numbered struct types, the deprecated
 sized aggregate alignment, `align(4)` as well as `align 4`, a phi with no
 edges, the three arithmetic constant expressions that outlived the others,
@@ -161,10 +164,19 @@ and `!absolute_symbol` have shapes. Both of the last two were too strict
 on the first try and cost an Assembler file each, which is why
 `what_upstream_verifies_verifies` now exists: a table of modules that must
 verify clean, next to the table of modules that must not.
-Still open, largest first: intrinsic signatures (the largest Verifier
-cluster left), module summary index syntax (`^0 = ...`, nine files),
-intrinsics used without a declaration, uses of `llvm.used` and friends
-(which needs def-use chains we do not build yet), the DWARF
+An eighth pass took the rules an intrinsic owes without needing a table of
+intrinsic signatures: it may not be defined, its address may not be taken,
+an `immarg` parameter takes a literal (or a constant expression, which
+upstream folds before the verifier looks) and not `undef` or an SSA value,
+and `llvm.localescape` is called once per function. The signature rule
+came back here in the shape it should always have had: an ordinary call is
+not compared against its callee's declaration, but an intrinsic call is,
+because an intrinsic is selected by its name and mangled suffix together.
+Still open, largest first: per-intrinsic signatures (`bswap` on an odd
+number of bytes, `masked_load` alignment, `get_active_lane_mask` element
+type), which is the last big Verifier cluster and does need the table;
+module summary index syntax (`^0 = ...`, nine files); uses of `llvm.used`
+and friends (which needs def-use chains we do not build yet); the DWARF
 vocabulary itself (`DW_TAG_badtag` and friends, three files, which needs a
 list of every valid enumerator that no readable specification in the tree
 provides), and `ptrauth` and `splat` constants.

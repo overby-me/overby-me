@@ -281,6 +281,31 @@ const BROKEN: &[(&str, &str)] = &[
         "@g = external global i32, !absolute_symbol !0\n!0 = !{}\n",
         "!absolute_symbol takes ranges of two values",
     ),
+    // An intrinsic is the compiler's, not the module's.
+    (
+        "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
+        "an intrinsic is provided by the compiler and cannot be defined",
+    ),
+    (
+        "declare i32 @llvm.umax.i32(i32, i32)\n@g = global ptr @llvm.umax.i32\n",
+        "@g takes the address of @llvm.umax.i32",
+    ),
+    (
+        "declare void @llvm.made.up.name.i32(i32)\n\ndefine void @f() {\nentry:\n  call void @llvm.made.up.name.i32(i32 1, i32 2)\n  ret void\n}\n",
+        "calls an intrinsic with an incompatible signature",
+    ),
+    (
+        "declare void @llvm.t.immarg.i32(i32 immarg)\n\ndefine void @f(i32 %x) {\nentry:\n  call void @llvm.t.immarg.i32(i32 %x)\n  ret void\n}\n",
+        "passes a non-immediate to an immarg parameter",
+    ),
+    (
+        "declare void @llvm.t.immarg.i32(i32 immarg)\n\ndefine void @f() {\nentry:\n  call void @llvm.t.immarg.i32(i32 undef)\n  ret void\n}\n",
+        "passes a non-immediate to an immarg parameter",
+    ),
+    (
+        "declare void @llvm.localescape(...)\n\ndefine internal void @f() {\nentry:\n  %a = alloca i8, align 1\n  call void (...) @llvm.localescape(ptr %a)\n  call void (...) @llvm.localescape(ptr %a)\n  ret void\n}\n",
+        "2 calls to llvm.localescape in one function",
+    ),
 ];
 
 /// Input the parser itself has to refuse, with the message it owes.
@@ -471,6 +496,12 @@ const VERIFIES: &[&str] = &[
     "define ptr @resolver() {\nentry:\n  ret ptr null\n}\n\n@f = ifunc void (), ptr addrspacecast (ptr @resolver to ptr)\n",
     // `!absolute_symbol` may carry more than one range.
     "@g = external global i32, !absolute_symbol !0\n!0 = !{i64 1, i64 2, i64 4, i64 8}\n",
+    // Opaque pointers put the signature at the call site, so a call that does
+    // not match the callee's declaration is not an error.
+    "declare void @g(i32)\n\ndefine void @f() {\nentry:\n  call void @g()\n  ret void\n}\n",
+    // An immarg argument may be a constant expression, because upstream folds
+    // one before the verifier sees it.
+    "declare void @llvm.t.immarg.i32(i32 immarg)\n\ndefine void @f() {\nentry:\n  call void @llvm.t.immarg.i32(i32 add (i32 2, i32 3))\n  ret void\n}\n",
 ];
 
 #[test]

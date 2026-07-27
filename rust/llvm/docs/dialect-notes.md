@@ -140,3 +140,14 @@ here, because rejecting it needs a list of every valid `DW_TAG_*`,
 `DW_LANG_*` and `DIFlag*`, and no specification we are allowed to read
 enumerates them. Guessing the list would reject valid input, which is the
 worse of the two failures.
+
+## Checked for intrinsics only
+
+**A call is not compared against its callee's declaration, unless the
+callee is an intrinsic.** Opaque pointers put the signature at the call
+site, and real `llvm-as` accepts `call void @g()` against `declare void
+@g(i32)`, so a general rule here would reject IR upstream reads. An
+intrinsic is the exception: it is selected by its name and its mangled
+suffix together, so `call void @llvm.made.up.name.i32(i32 1, i32 2)`
+against a one-argument declaration names something that does not exist,
+and upstream says so.
