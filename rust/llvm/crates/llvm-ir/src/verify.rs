@@ -285,6 +285,8 @@ impl Verifier<'_> {
         arguments: &[TypeId],
         values: &[Value],
         attributes: &[AttributeSet],
+        bundles: &[String],
+        returns_next: bool,
         where_: &str,
     ) {
         let base = crate::intrinsic_table::base_name(name);
@@ -444,6 +446,18 @@ impl Verifier<'_> {
                     self.report(format!(
                         "{where_} reaches through argument {position} without an elementtype"
                     ));
+                }
+            }
+            // A deoptimising call does not come back, so the only thing that
+            // may follow it is the return it stands in for.
+            "llvm.experimental.deoptimize" if !returns_next => {
+                self.report(format!("{where_} is not followed by a return"));
+            }
+            // A guard carries the state to deoptimise into, once.
+            "llvm.experimental.guard" => {
+                let deopt = bundles.iter().filter(|tag| *tag == "deopt").count();
+                if deopt != 1 {
+                    self.report(format!("{where_} carries {deopt} deopt bundles, not one"));
                 }
             }
             _ => {}
@@ -1100,6 +1114,7 @@ impl Verifier<'_> {
     }
 
     fn instruction(&mut self, function: &Function, block: BlockId, id: InstId) {
+        let this_instruction = id;
         let instruction = function.instruction(id);
         let ty = instruction.ty;
         let where_ = format!(
@@ -1745,12 +1760,24 @@ impl Verifier<'_> {
                         let values: Vec<Value> = call.args.iter().map(|a| a.value).collect();
                         let attributes: Vec<AttributeSet> =
                             call.args.iter().map(|a| a.attrs.clone()).collect();
+                        let bundles: Vec<String> =
+                            call.bundles.iter().map(|b| b.tag.clone()).collect();
+                        let returns_next = function
+                            .block(block)
+                            .instructions
+                            .iter()
+                            .skip_while(|other| **other != this_instruction)
+                            .nth(1)
+                            .and_then(|next| function.try_instruction(*next))
+                            .is_some_and(|next| matches!(next.kind, InstKind::Ret { .. }));
                         self.intrinsic_rule(
                             &intrinsic,
                             ty,
                             &arguments,
                             &values,
                             &attributes,
+                            &bundles,
+                            returns_next,
                             &where_,
                         );
                     }
@@ -2351,6 +2378,11 @@ impl Verifier<'_> {
             | TypeKind::X86Amx
             | TypeKind::Function { .. } => false,
             TypeKind::Vector { scalable, .. } => !scalable,
+            // Not target extension types: whether one can be a global is a
+            // property of the target rather than of the IR, and upstream
+            // reads `target("spirv.DeviceEvent")` while refusing
+            // `target("opaque")`. Without that property we would refuse
+            // both.
             TypeKind::Struct { fields, .. } => fields
                 .clone()
                 .iter()
@@ -2570,18 +2602,31 @@ impl Verifier<'_> {
                 ),
                 _ => false,
             };
-            // A byval argument is copied onto the stack, and a copy of four
-            // gigabytes is not something a caller does.
+            // Passing something by value means copying it, which needs a
+            // size, and a copy of four gigabytes is not something a caller
+            // does. The default layout is enough to catch the huge ones, so
+            // a module that states none is still held to this.
             if let Attribute::Type {
-                kind: TypeAttr::ByVal,
+                kind: kind @ (TypeAttr::ByVal | TypeAttr::InAlloca | TypeAttr::Preallocated),
                 ty: pointee,
             } = attribute
-                && let Some(layout) = &self.module.data_layout
-                && let Ok(size) =
-                    crate::layout::alloc_size_bytes(&self.module.ctx, layout, *pointee)
-                && size >= 1 << 32
             {
-                self.report(format!("a byval of {size} bytes on {where_} is too large"));
+                if !self.is_sized(*pointee) {
+                    self.report(format!(
+                        "{} on {where_} names a type with no size",
+                        kind.keyword()
+                    ));
+                }
+                let layout = self.module.data_layout.clone().unwrap_or_default();
+                if let Ok(size) =
+                    crate::layout::alloc_size_bytes(&self.module.ctx, &layout, *pointee)
+                    && size >= 1 << 32
+                {
+                    self.report(format!(
+                        "a {} of {size} bytes on {where_} is too large",
+                        kind.keyword()
+                    ));
+                }
             }
             // `initializes((0, 4), (8, 12))` lists ranges that each run
             // forwards and do not overlap.

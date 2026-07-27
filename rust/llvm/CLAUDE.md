@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 400 of 483 with 21 wrongly refused, Verifier 226 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 413 of 483 with 14 wrongly refused, Verifier 282 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -317,17 +317,26 @@ produces a scalar integer, `vector.splice` indexes inside its own vector,
 `vector.extract` and `vector.insert` start at a multiple of the
 subvector's length, and the statepoint and the load-exclusive families
 reach through a pointer whose pointee the type system no longer records,
-so the call carries an `elementtype` that says what it is. Nine rules,
-sixteen files, and the table earned its place by knowing how to find a
-base name.
-Still open, largest first: per-intrinsic signatures (`bswap` on an odd
-number of bytes, `masked_load` alignment, `get_active_lane_mask` element
-type), which is the last big Verifier cluster and does need the table;
-module summary index syntax (`^0 = ...`, nine files); uses of `llvm.used`
-and friends (which needs def-use chains we do not build yet); the DWARF
-vocabulary itself (`DW_TAG_badtag` and friends, three files, which needs a
-list of every valid enumerator that no readable specification in the tree
-provides), and `ptrauth` and `splat` constants.
+so the call carries an `elementtype` that says what it is. A twenty-fifth pass added four more, and the count is
+now thirteen rules across twenty-five files: a deoptimising call does not
+come back so a return is the only thing that may follow it, a guard
+carries exactly one deopt bundle, and anything passed by value needs a
+type with a size and a size below four gigabytes.
+A fifth was tried and reverted: whether a target extension type can be a
+global is the target's business rather than the IR's, and upstream reads
+`target("spirv.DeviceEvent")` while refusing `target("opaque")`.
+Still open, and each entry says what it is waiting on rather than only
+what it is. Which argument of an intrinsic is `immarg` when the
+declaration does not say so (four files): LangRef writes `immarg` in five
+`declare` lines out of eight hundred, so there is nothing to harvest.
+Uses of `llvm.used` and `llvm.global_ctors` (two files): needs the def-use
+chains PLAN §4.2 puts off until the first pass that wants them. The DWARF
+vocabulary, so that `DW_TAG_badtag` is refused (three files): needs a list
+of every valid enumerator that no specification we may read enumerates.
+`DIExpression` opcode sequences (three files): needs the stack discipline
+of a DWARF expression, which is `llvm-debuginfo`'s at T1. Module flag
+value shapes, and a handful of one-off rules that each cost more to state
+than they return.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

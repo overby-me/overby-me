@@ -66,15 +66,15 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 411 | 483 | 14 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 278 | 328 | 4 | `llvm-upstream-verifier` |
+| `llvm/test/Assembler` | 413 | 483 | 14 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 282 | 328 | 4 | `llvm-upstream-verifier` |
 
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse 18 modules llvm-as reads**, which is the failure that
 matters: parse gaps, led now by intrinsics used without a declaration
 (five files), which needs more than a table of intrinsic names. That count is
 a ceiling that may only fall. We
-**read 104 modules llvm-as refuses**, which is a missing verifier rule
+**read 98 modules llvm-as refuses**, which is a missing verifier rule
 each, and agreement is a floor that may only rise.
 
 Most of what is left on the second count is one thing: upstream knows what

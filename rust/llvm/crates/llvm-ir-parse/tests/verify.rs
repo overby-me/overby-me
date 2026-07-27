@@ -423,6 +423,22 @@ const BROKEN: &[(&str, &str)] = &[
         "declare i64 @llvm.aarch64.ldxr.p0(ptr)\n\ndefine void @f(ptr %p) {\nentry:\n  %r = call i64 @llvm.aarch64.ldxr.p0(ptr %p)\n  ret void\n}\n",
         "reaches through argument 0 without an elementtype",
     ),
+    (
+        "declare void @llvm.experimental.deoptimize.isVoid(...)\n\ndefine void @f() {\nentry:\n  call void (...) @llvm.experimental.deoptimize.isVoid() [ \"deopt\"() ]\n  br label %next\n\nnext:\n  ret void\n}\n",
+        "is not followed by a return",
+    ),
+    (
+        "declare void @llvm.experimental.guard(i1, ...)\n\ndefine void @f(i1 %c) {\nentry:\n  call void (i1, ...) @llvm.experimental.guard(i1 %c)\n  ret void\n}\n",
+        "carries 0 deopt bundles, not one",
+    ),
+    (
+        "%X = type opaque\ndeclare void @g(ptr inalloca(%X) %p)\n",
+        "inalloca on parameter 0 names a type with no size",
+    ),
+    (
+        "define void @f(ptr byval([2147483648 x i16]) %p) {\nentry:\n  ret void\n}\n",
+        "is too large",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -794,6 +810,9 @@ const VERIFIES: &[&str] = &[
     "/* a comment */\n@g = external global i32\n",
     "!named = !{!1}\n!0 = !{}\n!1 = !GenericDINode(tag: 3, header: \"h\", operands: {!0, !0})\n",
     "!named = !{!0}\n!0 = !DIEnumerator(name: \"D\", value: 2722258935367507707706996859454145691648, isUnsigned: true)\n",
+    // Whether a target extension type can be a global is the target's
+    // business, and upstream reads this one.
+    "@g = global target(\"spirv.DeviceEvent\") zeroinitializer\n",
     // An elementtype says what the pointer reaches through.
     "declare i64 @llvm.aarch64.ldxr.p0(ptr)\n\ndefine void @f(ptr %p) {\nentry:\n  %r = call i64 @llvm.aarch64.ldxr.p0(ptr elementtype(i64) %p)\n  ret void\n}\n",
     // The older spelling of an intrinsic has fewer arguments than LangRef
