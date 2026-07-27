@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 413 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 422 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -334,6 +334,16 @@ eight wrong acceptances to three for six. Still reverted, and worth
 re-measuring again as the verifier grows: the trade improves with it, and
 rustc declares its intrinsics anyway, so the practical benefit is close to
 nothing.
+A twenty-seventh pass went at the Assembler suite's own wrongly-accepted
+pile for the first time, which had been the larger of the two all along.
+An `atomicrmw` operates on what its operation can operate on, and the
+floating-point ones are the only ones a target does lane by lane. Every
+cast but a bitcast works lane by lane, so both sides are vectors of the
+same width or neither is. An address space is twenty-four bits. A symbol
+cannot be imported from another image and local to this one at once.
+Nine files, and the boundary between the atomic rules was found by asking
+llvm-as which operations take a vector rather than by assuming they all
+did.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

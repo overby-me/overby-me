@@ -13,9 +13,9 @@ use std::collections::{HashMap, HashSet};
 use crate::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr, TypeAttr};
 use crate::constant::{CastOp, ConstExpr, ConstId, Constant};
 use crate::function::Function;
-use crate::global::{DllStorageClass, GlobalQualifiers, Linkage, Visibility};
+use crate::global::{DllStorageClass, GlobalQualifiers, Linkage, RuntimePreemption, Visibility};
 use crate::instruction::{
-    AtomicOrdering, BinOp, CallingConv, InstKind, IntFlags, NamedCallingConv, TailKind,
+    AtomicOrdering, AtomicRmwOp, BinOp, CallingConv, InstKind, IntFlags, NamedCallingConv, TailKind,
 };
 use crate::intrinsic_table::Parameter;
 use crate::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
@@ -860,6 +860,13 @@ impl Verifier<'_> {
                 "@{name}: symbol with local linkage must have default visibility"
             ));
         }
+        // Importing a symbol from another image and promising it is local
+        // to this one say opposite things.
+        if qualifiers.dll_storage == Some(DllStorageClass::Import)
+            && qualifiers.preemption == Some(RuntimePreemption::DsoLocal)
+        {
+            self.report(format!("@{name} is both dllimport and dso_local"));
+        }
         // An exported symbol has to be visible to be exported.
         if qualifiers.dll_storage == Some(DllStorageClass::Export)
             && qualifiers.visibility == Some(Visibility::Hidden)
@@ -1409,6 +1416,34 @@ impl Verifier<'_> {
                     format!("{where_} has no alignment"),
                 );
             }
+            InstKind::AtomicRmw { op, value_type, .. } => {
+                let (op, value_type) = (*op, *value_type);
+                let kind = self.module.ctx.type_kind(value_type).clone();
+                let integer = matches!(kind, TypeKind::Integer(_));
+                let float = matches!(kind, TypeKind::Float(_));
+                let pointer = matches!(kind, TypeKind::Pointer { .. });
+                // Arithmetic on the value needs a value the target can do
+                // arithmetic on, and only an exchange takes anything else.
+                let wanted = match op {
+                    // An exchange moves the value without reading it, but
+                    // still one register's worth.
+                    AtomicRmwOp::Xchg => integer || float || pointer,
+                    // The floating-point ones are the only ones a target
+                    // does lane by lane.
+                    AtomicRmwOp::FAdd
+                    | AtomicRmwOp::FSub
+                    | AtomicRmwOp::FMax
+                    | AtomicRmwOp::FMin
+                    | AtomicRmwOp::FMaximum
+                    | AtomicRmwOp::FMinimum => self.is_float_or_float_vector(value_type),
+                    _ => integer,
+                };
+                if !wanted {
+                    self.report(format!(
+                        "{where_} operates on a type its operation cannot take"
+                    ));
+                }
+            }
             InstKind::Store {
                 value_type,
                 value,
@@ -1476,7 +1511,18 @@ impl Verifier<'_> {
                     format!("{where_} has an invalid failure ordering"),
                 );
             }
-            InstKind::Alloca { allocated_type, .. } => {
+            InstKind::Alloca {
+                allocated_type,
+                address_space,
+                ..
+            } => {
+                if let Some(space) = address_space
+                    && *space >= 1 << 24
+                {
+                    self.report(format!(
+                        "{where_} names address space {space}, which is too large"
+                    ));
+                }
                 let allocated_type = *allocated_type;
                 self.check(
                     matches!(self.module.ctx.type_kind(ty), TypeKind::Pointer { .. }),
@@ -2203,6 +2249,17 @@ impl Verifier<'_> {
             ok,
             format!("{where_} casts between the wrong kinds of type"),
         );
+
+        // Every cast but a bitcast works lane by lane, so both sides are
+        // vectors of the same width or neither is a vector at all.
+        if op != CastOp::BitCast {
+            let lanes = |verifier: &Self, ty: TypeId| {
+                TypeKind::as_vector(verifier.module.ctx.type_kind(ty)).map(|(_, n, s)| (n, s))
+            };
+            if lanes(self, from) != lanes(self, to) {
+                self.report(format!("{where_} casts between different vector shapes"));
+            }
+        }
 
         // Reinterpreting bits cannot change how many there are.
         if op == CastOp::BitCast

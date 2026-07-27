@@ -447,6 +447,36 @@ const BROKEN: &[(&str, &str)] = &[
         "declare <4 x float> @llvm.matrix.transpose.v4f32(<4 x float>, i32, i32)\n\ndefine void @f(<4 x float> %m) {\nentry:\n  %r = call <4 x float> @llvm.matrix.transpose.v4f32(<4 x float> %m, i32 3, i32 2)\n  ret void\n}\n",
         "transposes a 3 by 2 matrix held in 4 lanes",
     ),
+    // The operation an atomicrmw performs says what it can perform it on.
+    (
+        "define void @f(ptr %p) {\nentry:\n  %r = atomicrmw add ptr %p, float 1.000000e+00 seq_cst, align 4\n  ret void\n}\n",
+        "operates on a type its operation cannot take",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  %r = atomicrmw fadd ptr %p, i32 2 seq_cst, align 4\n  ret void\n}\n",
+        "operates on a type its operation cannot take",
+    ),
+    (
+        "define void @f(ptr %p, <2 x float> %v) {\nentry:\n  %r = atomicrmw xchg ptr %p, <2 x float> %v seq_cst, align 8\n  ret void\n}\n",
+        "operates on a type its operation cannot take",
+    ),
+    // Every cast but a bitcast works lane by lane.
+    (
+        "define void @f(<4 x i64> %x) {\nentry:\n  %y = trunc <4 x i64> %x to i8\n  ret void\n}\n",
+        "casts between different vector shapes",
+    ),
+    (
+        "define void @f(<4 x i64> %x) {\nentry:\n  %y = trunc <4 x i64> %x to <3 x i8>\n  ret void\n}\n",
+        "casts between different vector shapes",
+    ),
+    (
+        "define void @f() {\nentry:\n  %y = alloca i32, addrspace(16777216), align 4\n  ret void\n}\n",
+        "which is too large",
+    ),
+    (
+        "declare dso_local dllimport void @fun()\n",
+        "both dllimport and dso_local",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -821,6 +851,8 @@ const VERIFIES: &[&str] = &[
     // Whether a target extension type can be a global is the target's
     // business, and upstream reads this one.
     "@g = global target(\"spirv.DeviceEvent\") zeroinitializer\n",
+    // The floating-point atomics are the ones a target does lane by lane.
+    "define void @f(ptr %p, <2 x half> %v) {\nentry:\n  %r = atomicrmw fadd ptr %p, <2 x half> %v seq_cst, align 4\n  ret void\n}\n",
     // An elementtype says what the pointer reaches through.
     "declare i64 @llvm.aarch64.ldxr.p0(ptr)\n\ndefine void @f(ptr %p) {\nentry:\n  %r = call i64 @llvm.aarch64.ldxr.p0(ptr elementtype(i64) %p)\n  ret void\n}\n",
     // The older spelling of an intrinsic has fewer arguments than LangRef
