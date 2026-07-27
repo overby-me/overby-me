@@ -1597,6 +1597,11 @@ html {
 	color: var(--md-on-surface-variant);
 }
 
+/* The status mark on an avatar's corner. Tertiary, not primary: the avatar it
+   sits on is itself --md-primary, so a primary badge was the same fill as its
+   own circle and only the ring told them apart. Magenta is this scheme's accent
+   for exactly this ("de to farver bør altid optræde sammen"), and it carries no
+   error meaning, which a draft is not. */
 .avatar-badge {
 	position: absolute;
 	right: -3px;
@@ -1604,8 +1609,8 @@ html {
 	width: 16px;
 	height: 16px;
 	border-radius: 50%;
-	background: var(--md-primary);
-	color: var(--md-on-primary);
+	background: var(--md-tertiary);
+	color: var(--md-on-tertiary);
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
