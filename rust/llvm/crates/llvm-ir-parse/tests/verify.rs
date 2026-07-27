@@ -266,10 +266,6 @@ const BROKEN: &[(&str, &str)] = &[
         "@v is a declaration and may not be in a comdat",
     ),
     (
-        "$v = comdat any\n@v = private global i32 0, comdat($v)\n",
-        "@v has private linkage and may not be in a comdat",
-    ),
-    (
         "define ptr @resolver() {\nentry:\n  ret ptr null\n}\n\n@f = ifunc void (), ptr getelementptr (i8, ptr @resolver, i32 4)\n",
         "@f must have a function as its resolver",
     ),
@@ -535,6 +531,14 @@ const VERIFIES: &[&str] = &[
     // A composite type's elements may contain a null entry: upstream's own
     // set1.ll does exactly that and llvm-as reads it.
     "!named = !{!0, !1}\n!0 = !{null}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"C\", size: 64, elements: !0)\n",
+    // Private linkage in a comdat is a COFF rule, not an IR one: upstream
+    // reports it only for a Windows triple and llvm-as reads this.
+    "$v = comdat any\n@v = private global i32 0, comdat($v)\n",
+    // Dominance says nothing about a block the entry cannot reach.
+    "define void @f() {\nentry:\n  ret void\n\ndead:\n  %x = add i32 %x, 1\n  br label %dead\n}\n",
+    // A struct may hold scalable vectors, and a vector may hold a target
+    // extension type.
+    "%t = type { <vscale x 1 x i32>, <vscale x 1 x i32> }\n@g = external global %t\n",
     // An array's shape fields belong on an array.
     "!named = !{!0}\n!0 = !DICompositeType(tag: DW_TAG_array_type, name: \"A\", size: 64, rank: !DIExpression(DW_OP_deref))\n",
 ];

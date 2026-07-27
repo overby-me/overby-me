@@ -15,11 +15,15 @@
 # Nothing is skipped. Every `.ll` file in the suite is a module llvm-as either
 # reads or refuses, so every file has an answer to agree or disagree with.
 #
-# The ratchet is the number of files we have to agree with. It only ever goes
-# up: a change that drops it fails the check, and a change that raises it is
-# expected to record the new number in the same commit.
+# There are two bounds, because agreement alone can be gamed. Refusing a
+# module for a rule that does not exist scores as agreement whenever upstream
+# refuses it for a different reason, so deleting that wrong rule *lowers* the
+# agreement count while making the parser more correct. The second bound is
+# the number of modules we refuse that llvm-as reads, which is the failure
+# that actually matters, and it may only fall. Together they say: agree more,
+# and never buy agreement by refusing valid input.
 
-def main [opt: path, llvm_as: path, suite: path, ratchet: int] {
+def main [opt: path, llvm_as: path, suite: path, ratchet: int, refusals: int] {
   let files = (glob ([$suite "*.ll"] | path join) | sort)
   if ($files | is-empty) {
     error make {msg: $"no .ll files in ($suite)"}
@@ -44,7 +48,7 @@ def main [opt: path, llvm_as: path, suite: path, ratchet: int] {
 
   print $"suite:    ($suite | path basename)"
   print $"agreed:   ($agreed) of ($files | length)"
-  print $"ratchet:  ($ratchet)"
+  print $"ratchet:  ($ratchet) agreed, at most ($refusals) refused"
   if ($we_reject | is-not-empty) {
     print ""
     print $"we refuse ($we_reject | length) modules llvm-as reads:"
@@ -62,11 +66,14 @@ def main [opt: path, llvm_as: path, suite: path, ratchet: int] {
     }
   }
 
+  if ($we_reject | length) > $refusals {
+    error make {msg: $"we now refuse ($we_reject | length) modules llvm-as reads, up from ($refusals); that ceiling only moves down"}
+  }
   if $agreed < $ratchet {
     error make {msg: $"agreement fell from ($ratchet) to ($agreed); the ratchet only moves up"}
   }
-  if $agreed > $ratchet {
+  if $agreed > $ratchet or ($we_reject | length) < $refusals {
     print ""
-    print $"agreement rose to ($agreed); raise the ratchet in default.nix to hold it"
+    print $"now ($agreed) agreed and ($we_reject | length) refused; record both in default.nix"
   }
 }

@@ -154,13 +154,10 @@ impl Verifier<'_> {
                 self.global_attachment(&name, &attachment);
             }
             let global = &self.module.globals[index];
-            let (declaration, private) = (
-                global.initializer.is_none()
-                    || global.qualifiers.linkage == Some(Linkage::AvailableExternally),
-                global.qualifiers.linkage == Some(Linkage::Private),
-            );
+            let declaration = global.initializer.is_none()
+                || global.qualifiers.linkage == Some(Linkage::AvailableExternally);
             if global.comdat.is_some() {
-                self.comdat_member(&name, declaration, private);
+                self.comdat_member(&name, declaration);
             }
         }
         for index in 0..self.module.ifuncs.len() {
@@ -290,16 +287,16 @@ impl Verifier<'_> {
     }
 
     /// A comdat groups definitions that the linker picks one of, which needs
-    /// a definition to pick and a name the linker can see.
-    fn comdat_member(&mut self, name: &str, declaration: bool, private: bool) {
+    /// a definition to pick.
+    ///
+    /// It also needs a name the linker can see, and private linkage does not
+    /// give it one, but that rule is COFF's rather than the IR's: upstream
+    /// reports it only for a Windows triple, and llvm-as reads the same
+    /// module without one.
+    fn comdat_member(&mut self, name: &str, declaration: bool) {
         if declaration {
             self.report(format!(
                 "@{name} is a declaration and may not be in a comdat"
-            ));
-        }
-        if private {
-            self.report(format!(
-                "@{name} has private linkage and may not be in a comdat"
             ));
         }
     }
@@ -1338,6 +1335,14 @@ impl Verifier<'_> {
     /// from. This is the rule that makes SSA mean anything.
     fn dominance(&mut self, function: &Function) {
         let dominators = immediate_dominators(function);
+        // Dominance says nothing about a block the entry cannot reach, and
+        // upstream agrees: `%x = add i32 %x, 1` in dead code is a module
+        // llvm-as reads. Restricting the check to reachable blocks is the
+        // rule, not a concession.
+        let reachable: HashSet<BlockId> = match function.entry_block() {
+            Some(entry) => reverse_postorder(function, entry).into_iter().collect(),
+            None => HashSet::new(),
+        };
         let mut defining_block: HashMap<InstId, BlockId> = HashMap::new();
         let mut position: HashMap<InstId, usize> = HashMap::new();
         for (block_id, block) in function.blocks() {
@@ -1348,6 +1353,9 @@ impl Verifier<'_> {
         }
 
         for (block_id, block) in function.blocks() {
+            if !reachable.contains(&block_id) {
+                continue;
+            }
             for (index, inst) in block.instructions.iter().enumerate() {
                 let Some(instruction) = function.try_instruction(*inst) else {
                     continue;
@@ -1710,9 +1718,10 @@ impl Verifier<'_> {
                 self.report(format!("{count} parameters are {name}, which allows one"));
             }
         }
+        // `preallocated` is not on this list: upstream's preallocated-valid.ll
+        // puts it on two parameters of one function and llvm-as reads it.
         const ONCE_TYPED: &[(TypeAttr, &str)] = &[
             (TypeAttr::InAlloca, "inalloca"),
-            (TypeAttr::Preallocated, "preallocated"),
             (TypeAttr::StructRet, "sret"),
         ];
         for (attribute, name) in ONCE_TYPED {

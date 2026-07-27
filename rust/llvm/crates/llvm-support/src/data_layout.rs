@@ -316,6 +316,10 @@ impl DataLayout {
                     align_bits,
                 });
             }
+            // `s` was the stack natural alignment. LLVM dropped the meaning
+            // and kept reading the syntax, and so do we: the string is
+            // printed back verbatim either way.
+            's' => {}
             other => return Err(fail(&format!("unknown specification '{other}'"))),
         }
         Ok(())

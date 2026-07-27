@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 373 of 483 Assembler, 215 of 328 Verifier, on the llvm-as oracle)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 378 of 483 with 41 wrongly refused, Verifier 212 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -185,6 +185,25 @@ part, and template parameters have to be a tuple of template parameter
 nodes. A tenth rule was written and then deleted: upstream's own `set1.ll`
 has a composite type whose `elements` is `!{null}` and llvm-as reads it, so
 "no null entry" is not the rule it looked like.
+A tenth pass went at the other half of the gap, the modules we refuse that
+llvm-as reads, and most of what it found were rules of ours that should
+not exist. Dominance says nothing about a block the entry cannot reach, so
+`%x = add i32 %x, 1` in dead code is fine. A struct may hold scalable
+vectors and a vector may hold a target extension type. `preallocated` may
+appear on more than one parameter. Private linkage in a comdat is COFF's
+rule, not the IR's, and upstream reports it only for a Windows triple. The
+`s` datalayout specification is dead and still parsed.
+Deleting those five cost three files of Verifier agreement, because a wrong
+rule scores as agreement whenever upstream refuses the same file for a
+different reason. That is why each suite now has a second bound: the count
+of modules we refuse that llvm-as reads, which may only fall. Without it
+the ratchet would have argued for keeping the bugs.
+Implicit intrinsic declarations were tried and reverted. Upstream
+materialises a declaration for an undeclared `llvm.*` name only when it
+recognises the name; `@llvm.not.a.real.intrinsic` is still "use of
+undefined value". Declaring every `llvm.*` name we see gained five files
+and lost eleven. Doing it properly needs the base-name table, which is the
+same table per-intrinsic signatures need.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

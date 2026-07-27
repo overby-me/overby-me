@@ -62,12 +62,12 @@
       nativeBuildInputs = previous.nativeBuildInputs ++ [pkgs.llvm];
     });
 
-  upstreamCheck = pkgs: suite: ratchet:
+  upstreamCheck = pkgs: suite: ratchet: refusals:
     (cargoCheck pkgs "upstream-${lib.toLower suite}" ''
       cargo build -p llvm-tools --offline --locked
       nu corpus/check-upstream.nu "$CARGO_TARGET_DIR/debug/opt" \
         "${lib.getExe' pkgs.llvm "llvm-as"}" \
-        "${pkgs.llvm.src}/llvm/test/${suite}" ${toString ratchet}
+        "${pkgs.llvm.src}/llvm/test/${suite}" ${toString ratchet} ${toString refusals}
     '')
     .overrideAttrs (previous: {
       nativeBuildInputs = previous.nativeBuildInputs ++ [pkgs.llvm];
@@ -115,13 +115,13 @@ in {
     # Conformance against upstream's own suites, measured rather than claimed:
     # every file in the suite, scored against what real llvm-as does with it.
     # See STATUS.md for what the remaining disagreements are.
-    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 373;
-    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 215;
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 378 41;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 212 4;
 
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this
     # pins it against inputs nobody wrote for us.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 112;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 115;
   };
 
   packages.rust-llvm = {lib, ...}:

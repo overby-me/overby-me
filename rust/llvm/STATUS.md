@@ -64,17 +64,30 @@ Measured, not claimed. Every `.ll` file in the suite is run through our
 they reach the same verdict about whether the file is a module. Nothing is
 skipped, so the denominator is the whole suite.
 
-| Suite | Agreed | Files | Check |
-| --- | --- | --- | --- |
-| `llvm/test/Assembler` | 373 | 483 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 215 | 328 | `llvm-upstream-verifier` |
+| Suite | Agreed | Files | Refused but valid | Check |
+| --- | --- | --- | --- | --- |
+| `llvm/test/Assembler` | 378 | 483 | 41 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 212 | 328 | 4 | `llvm-upstream-verifier` |
 
-The two halves of the gap are not equally bad. We **refuse 53 modules
-llvm-as reads**, which is the failure that matters: mostly parse gaps, led
-by the module summary index syntax (`^0 = ...`, ten files) and intrinsics
-used without a declaration. We **read 170 modules llvm-as refuses**, which
-is a missing verifier rule each. Two of the 53 are permanent by design:
-typed-pointer IR is rejected here on purpose (PLAN §1.2).
+The two halves of the gap are not equally bad, so each suite has two
+bounds. We **refuse 45 modules llvm-as reads**, which is the failure that
+matters: mostly parse gaps, led by the module summary index syntax
+(`^0 = ...`, ten files) and intrinsics used without a declaration. That
+count is a ceiling that may only fall. We **read 176 modules llvm-as
+refuses**, which is a missing verifier rule each, and agreement is a floor
+that may only rise.
+
+Two bounds rather than one, because agreement alone can be gamed. Refusing
+a module for a rule that does not exist scores as agreement whenever
+upstream refuses it for another reason, so deleting that wrong rule lowers
+the agreement count while making the parser more correct. That is exactly
+what happened when five such rules came out at once: Verifier agreement
+fell 215 to 212 while the modules we wrongly refuse fell 53 to 45. Without
+the second bound the ratchet would have argued for keeping the bugs.
+
+Three of the 45 are permanent by design: typed-pointer IR is rejected here
+on purpose (PLAN §1.2), and `llvm-as` still reads `i8*` and folds it to
+`ptr` rather than refusing it as this dialect does.
 
 An earlier version of this measurement read each test's RUN lines to decide
 what upstream would do with it. That was wrong often enough to matter: a

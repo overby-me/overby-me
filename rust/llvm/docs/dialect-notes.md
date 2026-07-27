@@ -151,3 +151,13 @@ intrinsic is the exception: it is selected by its name and its mangled
 suffix together, so `call void @llvm.made.up.name.i32(i32 1, i32 2)`
 against a one-argument declaration names something that does not exist,
 and upstream says so.
+
+## Refused although upstream reads it
+
+**Typed-pointer syntax.** `llvm-as` in LLVM 21 still parses `i8*` and folds
+it to `ptr`; the typed-pointer *type system* is gone but the spelling
+survives as a parse-level alias. This dialect refuses it instead, which
+PLAN §1.2 asks for. It is measured rather than assumed: three files in
+upstream's suites are refused here for that reason alone, and they are
+counted in the "refused but valid" column in STATUS.md rather than written
+off.

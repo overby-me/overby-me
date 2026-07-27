@@ -174,9 +174,6 @@ impl Parser {
                 | TypeKind::Token
                 | TypeKind::X86Amx
                 | TypeKind::Function { .. }
-        ) && !matches!(
-            self.module.ctx.type_kind(ty),
-            TypeKind::Vector { scalable: true, .. }
         )
     }
 
@@ -185,7 +182,13 @@ impl Parser {
     pub(crate) fn is_valid_vector_element(&self, ty: TypeId) -> bool {
         matches!(
             self.module.ctx.type_kind(ty),
-            TypeKind::Integer(_) | TypeKind::Float(_) | TypeKind::Pointer { .. }
+            // A target extension type is opaque to us and may still be a
+            // vector element: upstream's own target-ext-vector.ll builds
+            // `<2 x target(...)>` and llvm-as reads it.
+            TypeKind::Integer(_)
+                | TypeKind::Float(_)
+                | TypeKind::Pointer { .. }
+                | TypeKind::Target { .. }
         )
     }
 }
