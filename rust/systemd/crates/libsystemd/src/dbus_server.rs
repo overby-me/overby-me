@@ -1296,6 +1296,43 @@ mod inner {
             properties: Vec<(String, zbus::zvariant::OwnedValue)>,
             _aux: Vec<(String, Vec<(String, zbus::zvariant::OwnedValue)>)>,
         ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
+            // Reject exec commands carrying an empty argv, as upstream does
+            // (systemd issue #20933). An a(sasb) entry with no argv flattens to
+            // an empty string further down and would then be accepted silently,
+            // so the malformed call has to be refused here where an error can
+            // still be returned. Every entry is checked, not just the last:
+            // the test's "bad-middle" case puts the empty argv second of three.
+            for (key, value) in &properties {
+                let base = key.strip_suffix("Ex").unwrap_or(key.as_str());
+                if !matches!(
+                    base,
+                    "ExecStart"
+                        | "ExecStartPre"
+                        | "ExecStartPost"
+                        | "ExecCondition"
+                        | "ExecReload"
+                        | "ExecStop"
+                        | "ExecStopPost"
+                ) {
+                    continue;
+                }
+                if let zbus::zvariant::Value::Array(items) = &**value {
+                    for item in items.iter() {
+                        if let zbus::zvariant::Value::Structure(st) = item {
+                            let empty = match st.fields().get(1) {
+                                Some(zbus::zvariant::Value::Array(args)) => args.is_empty(),
+                                _ => true,
+                            };
+                            if empty {
+                                return Err(zbus::fdo::Error::InvalidArgs(format!(
+                                    "{key}: executable path is empty"
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+
             let mut params = crate::control::TransientUnitParams {
                 unit_name: name.clone(),
                 command: None,
