@@ -265,6 +265,9 @@ pub struct UdevEventParams {
 pub struct TransientUnitParams {
     pub unit_name: String,
     pub command: Option<Vec<String>>,
+    /// Emit `ExecStart=:...`, i.e. suppress environment-variable substitution
+    /// into the command line (systemd-run --expand-environment=no).
+    pub no_env_expand: bool,
     pub description: Option<String>,
     pub user: Option<String>,
     pub group: Option<String>,
@@ -739,6 +742,10 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         .get("remain_after_exit")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
+                    let no_env_expand = obj
+                        .get("no_env_expand")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     let properties = obj
                         .get("properties")
                         .and_then(|v| v.as_array())
@@ -831,6 +838,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                     let nice = obj.get("nice").and_then(|v| v.as_i64()).map(|n| n as i32);
 
                     Command::StartTransient(TransientUnitParams {
+                        no_env_expand,
                         unit_name,
                         command,
                         description,
@@ -3196,7 +3204,10 @@ fn write_transient_service_file(
             })
             .collect::<Vec<_>>()
             .join(" ");
-        writeln!(f, "ExecStart={cmd_str}")?;
+        // ':' suppresses environment-variable substitution into the command
+        // line and nothing else (systemd.service(5)).
+        let prefix = if params.no_env_expand { ":" } else { "" };
+        writeln!(f, "ExecStart={prefix}{cmd_str}")?;
     }
 
     Ok(())
@@ -13326,6 +13337,7 @@ mod tests {
     #[test]
     fn test_transient_unit_params_debug() {
         let params = TransientUnitParams {
+            no_env_expand: false,
             unit_name: "run-test.service".to_string(),
             command: Some(vec!["/bin/echo".to_string(), "hello".to_string()]),
             description: Some("A test".to_string()),
@@ -13362,6 +13374,7 @@ mod tests {
     #[test]
     fn test_transient_unit_params_clone() {
         let params = TransientUnitParams {
+            no_env_expand: false,
             unit_name: "run-clone.service".to_string(),
             command: Some(vec!["/bin/true".to_string()]),
             description: None,

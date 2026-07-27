@@ -118,6 +118,13 @@ struct Cli {
     #[arg(short = 'd', long)]
     same_dir: bool,
 
+    /// Control expansion of $FOO/${FOO} in the command line (default yes).
+    /// --expand-environment=no maps to the same "no-env-expand" flag as the
+    /// `:` ExecStart prefix: the variables are still passed to the service,
+    /// they are just not substituted into its argv.
+    #[arg(long, value_name = "BOOL")]
+    expand_environment: Option<String>,
+
     /// Set an environment variable for the spawned process. Can be
     /// specified multiple times. Format: NAME=VALUE
     #[arg(short = 'E', long = "setenv", value_name = "NAME=VALUE")]
@@ -514,6 +521,13 @@ fn try_create_transient_unit(
 
     if let Some(desc) = cli.description.last() {
         properties.insert("description".into(), Value::String(desc.clone()));
+    }
+
+    // --expand-environment=no becomes the ':' ExecStart prefix on the transient
+    // unit. Anything unparseable is treated as the default (expand), matching
+    // upstream's parse_boolean_argument fallback rather than failing the run.
+    if cli.expand_environment.as_deref().and_then(parse_tristate) == Some(false) {
+        properties.insert("no_env_expand".into(), Value::Bool(true));
     }
 
     if !cli.command.is_empty() {

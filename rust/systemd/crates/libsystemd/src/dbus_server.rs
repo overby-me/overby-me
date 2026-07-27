@@ -1334,6 +1334,7 @@ mod inner {
             }
 
             let mut params = crate::control::TransientUnitParams {
+                no_env_expand: false,
                 unit_name: name.clone(),
                 command: None,
                 description: None,

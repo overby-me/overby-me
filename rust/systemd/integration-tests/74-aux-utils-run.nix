@@ -35,7 +35,9 @@
   #      the same route as a hand-written `:`, rather than a parallel path.
   #
   # The script also clears --property=LimitCORE last-wins with PrivateTmp=yes,
-  # --uid=testuser and --gid=testuser. Remaining upstream flags beyond that:
-  # --json=, --quiet, --job-mode=, --via-shell, --shell, --pty, --machine=,
-  # --bind, --mask, --empower, --recursive-errors=, --system, --user=.
+  # --uid=testuser, --gid=testuser and --expand-environment=no. It now stops at
+  # a `systemctl cat` issued after `systemctl stop` on a transient unit.
+  # Remaining upstream flags beyond that: --json=, --quiet, --job-mode=,
+  # --via-shell, --shell, --pty, --machine=, --bind, --mask, --empower,
+  # --recursive-errors=, --system, --user=.
 }
