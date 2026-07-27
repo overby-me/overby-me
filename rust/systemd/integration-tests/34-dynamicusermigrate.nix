@@ -147,9 +147,26 @@
   # measurements — per-bind instrumentation for the EPERM, and stat() from the
   # correct namespace for the EOVERFLOW.
   #
-  # WHERE IT STOPS NOW, past the mount layer entirely: test_check_idmapped_mounts
-  # fails at `[[ '' == 0 ]]`, a command substitution returning empty where a uid
-  # was expected. Diagnose that on its own terms; it is not a mount problem.
+  # PRIVATEUSERS= WAS ALSO WRONG, found by chasing that empty value. Upstream's
+  # PRIVATE_USERS_SELF identity-maps TWO ids so both are representable inside:
+  #     <saved_uid> <saved_uid> 1
+  #     <uid>       <uid>       1
+  # rust wrote a single "0 0 1". That one line caused two separate symptoms: the
+  # empty `awk NR==2 /proc/self/uid_map` here, and the EINVAL on dropping to the
+  # service's uid that was earlier worked around by dropping to (0, 0) instead.
+  # The workaround is removed: with the map correct it would leave the service
+  # running as namespace root rather than its own identity. The service's own
+  # assertion now passes.
+  #
+  # WHERE IT STOPS NOW, and it is no longer about ids at all: the OUTER, host-side
+  #     [[ $(stat -c "%u" /var/lib/private/testidmapped/testfile) == 65534 ]]
+  # gets an empty value, i.e. the host cannot find the file the service created.
+  # The service wrote /var/lib/sampleservice/testfile successfully.
+  # StateDirectory=testidmapped:sampleservice means the second name is an ALIAS
+  # of the first, so both must resolve to one directory; if rust creates them as
+  # two independent directories the write simply lands somewhere the assertion
+  # does not look. Check how StateDirectory= handles the "A:B" alias form before
+  # assuming anything about mounts.
   #
   # THREE WRONG GUESSES were made before that, all about kernel rules, each
   # costing a VM run: that an already-attached mount could be idmapped (it

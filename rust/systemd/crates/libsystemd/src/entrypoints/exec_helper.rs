@@ -2775,7 +2775,26 @@ pub fn run_exec_helper() {
                     "0 0 4294967295\n".to_string(),
                     false,
                 ),
-                _ => (format!("0 {uid} 1\n"), format!("0 {gid} 1\n"), true),
+                // PrivateUsers=yes/self. Upstream (PRIVATE_USERS_SELF in
+                // exec-invoke.c) identity-maps TWO ids: the caller's own, and
+                // the service's target id, so both are representable inside.
+                //     <saved_uid> <saved_uid> 1
+                //     <uid>       <uid>       1
+                // Writing only "0 <uid> 1" left the service's own uid with no
+                // mapping, which is why dropping to it used to fail EINVAL, and
+                // why /proc/self/uid_map had a single line where
+                // TEST-34's check_idmapped reads field 1 of line 2.
+                _ => {
+                    let mut um = format!("{uid} {uid} 1\n");
+                    let mut gm = format!("{gid} {gid} 1\n");
+                    if config.user != uid {
+                        um.push_str(&format!("{} {} 1\n", config.user, config.user));
+                    }
+                    if config.group != gid {
+                        gm.push_str(&format!("{} {} 1\n", config.group, config.group));
+                    }
+                    (um, gm, true)
+                }
             };
             let _ = std::fs::write("/proc/self/uid_map", &uid_map);
             if deny_setgroups {
@@ -3186,23 +3205,16 @@ pub fn run_exec_helper() {
             .iter()
             .map(|gid| nix::unistd::Gid::from_raw(*gid))
             .collect();
-        // Inside a PrivateUsers= namespace the only ids that exist are the ones
-        // the map covers. The default map is "0 <uid> 1", i.e. namespace id 0
-        // IS the service's uid as seen from outside, and no other id is
-        // representable; dropping to the outside uid/gid there fails with
-        // EINVAL. Upstream drops to the in-namespace ids for the same reason.
-        // "identity" and "full" map ids through unchanged, so they drop as
-        // usual.
-        let mapped_identically = matches!(
-            config.private_users_mode.as_str(),
-            "identity" | "full"
-        );
-        let (drop_uid, drop_gid, drop_supp) =
-            if config.private_users && !config.privileged_prefix && !mapped_identically {
-                (0, 0, Vec::new())
-            } else {
-                (config.user, config.group, supp_gids.clone())
-            };
+        // Every PrivateUsers= mode now maps ids through unchanged: yes/self
+        // identity-maps the caller's id and the service's id (see the uid_map
+        // above), identity and full map whole ranges. So the service always
+        // drops to its real uid/gid.
+        //
+        // This used to drop to (0, 0) for yes/self, because the map written
+        // then was "0 <uid> 1" and the service's own id was not representable.
+        // With the map corrected that workaround is wrong: it would leave the
+        // service running as namespace root instead of its own identity.
+        let (drop_uid, drop_gid, drop_supp) = (config.user, config.group, supp_gids.clone());
 
         match crate::platform::drop_privileges(
             nix::unistd::Gid::from_raw(drop_gid),
