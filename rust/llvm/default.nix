@@ -138,7 +138,7 @@ in {
     llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 122;
 
     # Ten thousand pass tests, none of them written with a parser in mind.
-    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10102;
+    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10146;
   };
 
   packages.rust-llvm = {lib, ...}:

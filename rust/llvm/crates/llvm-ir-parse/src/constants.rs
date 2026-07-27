@@ -112,8 +112,14 @@ impl Parser {
             if symbols.contains_key(&name) || implied.contains(&name) {
                 continue;
             }
-            let base = llvm_ir::intrinsic_table::base_name(text);
-            if llvm_ir::intrinsic_table::signature(base).is_some() {
+            // Either table will do: LangRef names 419 intrinsics in its
+            // `declare` lines and gives a usable signature for fewer, and
+            // recognising the name is all that is needed to build the
+            // declaration from the call.
+            let base = llvm_ir::intrinsic::table::base_name(text);
+            if llvm_ir::intrinsic::names::is_documented(base)
+                || llvm_ir::intrinsic::table::signature(base).is_some()
+            {
                 implied.push(name);
             }
         }

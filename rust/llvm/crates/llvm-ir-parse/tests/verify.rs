@@ -61,6 +61,10 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "define void @f(ptr %p) naked {\nentry:\n  %g = getelementptr i8, ptr %p, i64 1\n  unreachable\n}\n",
+        "a naked function reads an argument it was never given",
+    ),
+    (
         "define void @f(<4 x i32> %a, <4 x i32> %b) {\nentry:\n  %r = call <8 x i32> @llvm.scmp.v8i32.v4i32(<4 x i32> %a, <4 x i32> %b)\n  ret void\n}\n",
         "answers in a different number of lanes than it compares",
     ),
@@ -1056,6 +1060,8 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // A naked function may take arguments; what it may not do is read them.
+    "define void @f(ptr %p) naked {\nentry:\n  unreachable\n}\n",
     // An intrinsic LangRef documents needs no declaration: the call says what
     // its signature is. An alias to a thread-local is thread-local, which is
     // what upstream's own threadlocal-pass.ll leans on.

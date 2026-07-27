@@ -302,7 +302,7 @@ costs eight wrong acceptances, so the names are a script and not a table.
 `corpus/intrinsic-signatures.nu` then harvested the signatures from the
 same `declare` lines, 314 of them, recording a position only where its
 type is the same in every documented instantiation. That table is in
-`crates/llvm-ir/src/intrinsic_table.rs` and moves neither ratchet: what it
+`crates/llvm-ir/src/intrinsic/table.rs` and moves neither ratchet: what it
 catches is a module that declares an intrinsic consistently wrongly, which
 upstream's suites do not contain and real IR will. Checking the argument
 count was tried and reverted, because upstream auto-upgrades the older
@@ -534,7 +534,7 @@ refused called an intrinsic without declaring it, which is five times
 everything else put together. Upstream builds the declaration from the call
 for any name it recognises, and appends it after everything the module
 writes, in the order the names were first used. So does this now, gated on
-`intrinsic_table::signature` so that an undocumented `llvm.*` name is still
+`intrinsic::table::signature` so that an undocumented `llvm.*` name is still
 "use of undefined value". The ids have to be reserved in the pre-scan, next
 to every other global symbol, or the pre-scan and the parse disagree about
 which function is which.
@@ -554,6 +554,15 @@ one, which is what upstream's own threadlocal-pass.ll leans on and what the
 first attempt at the rule refused.
 Every bound moved the right way: Assembler refusals 13 to 12, Verifier 286
 to 287 with refusals 4 to 2, and the tree 9,853 to 10,102 of 10,305.
+Then the gate widened. The signature table names 165 intrinsics, and the 126
+files still refused were calling the other ones, `llvm.memcpy` among them.
+`corpus/intrinsic-names.nu` had been harvesting LangRef's 419 base names into
+a text file since the twenty-second pass, when the answer was no and a script
+was enough; it now writes `crates/llvm-ir/src/intrinsic/names.rs`, next to it under one module, and the
+gate takes either table. The tree went to 10,146.
+That cost one file and paid for it: a naked function has no prologue, so
+nothing put its arguments anywhere the body could read them, and reading one
+is an error. Taking one and leaving it alone is not.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

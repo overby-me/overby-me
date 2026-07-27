@@ -17,7 +17,7 @@ use crate::global::{DllStorageClass, GlobalQualifiers, Linkage, RuntimePreemptio
 use crate::instruction::{
     AtomicOrdering, AtomicRmwOp, BinOp, CallingConv, InstKind, IntFlags, NamedCallingConv, TailKind,
 };
-use crate::intrinsic_table::Parameter;
+use crate::intrinsic::table::Parameter;
 use crate::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use crate::module::Module;
 use crate::summary::SummaryValue;
@@ -352,7 +352,7 @@ impl Verifier<'_> {
         returns_next: bool,
         where_: &str,
     ) {
-        let base = crate::intrinsic_table::base_name(name);
+        let base = crate::intrinsic::table::base_name(name);
         let element = |verifier: &Self, ty: TypeId| verifier.innermost_element(ty);
         match base {
             // A three-way compare answers lane by lane, in a result wide
@@ -1415,6 +1415,25 @@ impl Verifier<'_> {
                 );
             }
         }
+        // A naked function has no prologue, so nothing put its arguments
+        // anywhere the body could read them.
+        if has_enum_attribute(&function.attrs, EnumAttr::Naked) {
+            let reads_one = blocks.iter().any(|block| {
+                function
+                    .block(*block)
+                    .instructions
+                    .iter()
+                    .filter_map(|inst| function.try_instruction(*inst))
+                    .any(|instruction| {
+                        operand_values(&instruction.kind)
+                            .iter()
+                            .any(|value| matches!(value, Value::Argument(_)))
+                    })
+            });
+            if reads_one {
+                self.report("a naked function reads an argument it was never given");
+            }
+        }
         // A collector has to be named before its barriers mean anything.
         if function.gc.is_none() {
             let uses_gc = blocks.iter().any(|block| {
@@ -2345,7 +2364,7 @@ impl Verifier<'_> {
                     // instantiation are the ones a call has to get right.
                     if is_intrinsic
                         && let Name::Named(intrinsic) = callee.name.clone()
-                        && let Some(documented) = crate::intrinsic_table::signature(&intrinsic)
+                        && let Some(documented) = crate::intrinsic::table::signature(&intrinsic)
                     {
                         // Not the argument count: upstream auto-upgrades the
                         // older spelling of an intrinsic, so a call with
@@ -3769,13 +3788,20 @@ fn predecessor_edges(function: &Function, target: BlockId) -> Vec<BlockId> {
 }
 
 /// Every value an instruction reads, flattened.
+/// The instructions an instruction reads, which is what dominance needs.
 fn operands(kind: &InstKind) -> Vec<InstId> {
+    operand_values(kind)
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::Instruction(id) => Some(id),
+            _ => None,
+        })
+        .collect()
+}
+
+fn operand_values(kind: &InstKind) -> Vec<Value> {
     let mut out = Vec::new();
-    let mut push = |value: &Value| {
-        if let Value::Instruction(id) = value {
-            out.push(*id);
-        }
-    };
+    let mut push = |value: &Value| out.push(*value);
     match kind {
         InstKind::Ret(Some((_, value)))
         | InstKind::Resume { value, .. }
