@@ -4442,6 +4442,30 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
         }
     }
 
+    // Did each exec-directory bind actually take? If a dest resolves to the
+    // same (st_dev, st_ino) as its source, the two are one directory and a
+    // write through either is visible through the other. Different values mean
+    // the bind did not land and the service's writes go somewhere private,
+    // succeeding silently while the host sees nothing.
+    if IDMAP_USERNS.get().is_some() {
+        for (source, dest) in &config.exec_dir_binds {
+            let mut a: libc::stat = unsafe { std::mem::zeroed() };
+            let mut b: libc::stat = unsafe { std::mem::zeroed() };
+            if let (Ok(cs), Ok(cd)) = (
+                std::ffi::CString::new(source.as_str()),
+                std::ffi::CString::new(dest.as_str()),
+            ) && unsafe { libc::stat(cs.as_ptr(), &mut a) } == 0
+                && unsafe { libc::stat(cd.as_ptr(), &mut b) } == 0
+                && (a.st_dev != b.st_dev || a.st_ino != b.st_ino)
+            {
+                crate::entrypoints::service_manager::kmsg(&format!(
+                    "IDMAP bind-not-shared src={source} ({}:{}) dest={dest} ({}:{})",
+                    a.st_dev, a.st_ino, b.st_dev, b.st_ino
+                ));
+            }
+        }
+    }
+
     // Step 4: apply the deferred `ro` on TemporaryFileSystem= entries, now that
     // the binds have created their mount points inside them.  Deliberately not
     // MS_REC: the exec directories bound in above keep their own writability,

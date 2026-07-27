@@ -171,15 +171,27 @@
   # filesystem and a service's writes should reach the host. That was the
   # obvious explanation for "write succeeds, host sees nothing" and it is wrong.
   #
-  # STILL UNEXPLAINED, and worth stating plainly rather than guessing a twelfth
-  # time: the service creates /var/lib/sampleservice/testfile successfully, its
-  # own in-namespace assertion passes, the bind source is real, and yet the host
-  # cannot stat /var/lib/private/testidmapped/testfile. The next measurement
-  # should establish WHERE the file actually landed — e.g. have PID 1 walk the
-  # real state directory after the service exits, or compare st_dev/st_ino of
-  # the source before the bind with the file's after — rather than proposing
-  # another mechanism. Every mechanism proposed for this test so far has died;
-  # the two that ever held up came from measuring.
+  # ALSO RULED OUT, measured: the binds DO land. Comparing (st_dev, st_ino) of
+  # every source against its destination after the bind reports no mismatch, so
+  # each dest really is the same directory as its source and a write through one
+  # is a write through the other.
+  #
+  # SO FOUR THINGS ARE ESTABLISHED AND CONSISTENT, and the bug is still not
+  # explained: the bind source is the real filesystem (not the
+  # TemporaryFileSystem= tmpfs), the binds share inodes, the service's write
+  # succeeds, and its own in-namespace assertion passes — yet the host cannot
+  # stat /var/lib/private/testidmapped/testfile afterwards.
+  #
+  # Everything measurable from inside exec_helper now agrees. The next
+  # measurement therefore has to STRADDLE the boundary: compare the source
+  # directory's (st_dev, st_ino) as PID 1 sees it in the host mount namespace
+  # with what exec_helper sees after unsharing, which is the one comparison
+  # nothing so far has made. If they differ, the service has been writing into a
+  # correctly-bound directory that simply is not the host's.
+  #
+  # TWELVE mechanisms have now been proposed and killed on this test. The only
+  # ones that ever survived came from measurement, so do not add a thirteenth
+  # without one.
   #
   # THREE WRONG GUESSES were made before that, all about kernel rules, each
   # costing a VM run: that an already-attached mount could be idmapped (it
