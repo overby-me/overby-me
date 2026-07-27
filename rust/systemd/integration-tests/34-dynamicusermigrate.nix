@@ -94,11 +94,17 @@
   #     mount_setattr(MOUNT_ATTR_IDMAP) -> EPERM
   #     move_mount                  -> not reached
   # So the sequence is right and the attribute itself is refused. The kernel's
-  # can_idmap_mount() denies with EPERM when the caller lacks CAP_SYS_ADMIN in
-  # the SUPERBLOCK's user namespace (s_user_ns), and with EINVAL when the
-  # filesystem lacks FS_ALLOW_IDMAP; this is EPERM, so look at the capability
-  # side first, and check what the exec helper's effective capabilities are at
-  # that point rather than assuming they are full.
+  # can_idmap_mount() denies with EPERM in only two cases, and EVERY other
+  # rejection there returns EINVAL. Both EPERM cases have now been measured at
+  # the failure point:
+  #     CapEff: 000001ffffffffff   (every capability, CAP_SYS_ADMIN included)
+  #     userns: user:[4026531837]  (the INITIAL user namespace)
+  # so ns_capable(fs_userns, CAP_SYS_ADMIN) cannot be what fails. That leaves
+  # is_idmapped_mnt(), i.e. the kernel thinks the mount is ALREADY idmapped.
+  # Worth checking whether the self-bind or the clone is inheriting an idmap,
+  # or whether the same source is being processed more than once: all three
+  # exec dirs fail, and two of them (/var/lib/testidmapped and
+  # /var/lib/sampleservice) are aliases of the same underlying directory.
   #
   # THREE WRONG GUESSES were made before that, all about kernel rules, each
   # costing a VM run: that an already-attached mount could be idmapped (it
