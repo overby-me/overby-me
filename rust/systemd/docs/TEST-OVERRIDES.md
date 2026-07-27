@@ -99,7 +99,7 @@ Most skip comments predate the feature they name. Verified today:
 | 26-SYSTEMCTL | "`--global` flag not implemented" | `systemctl/src/main.rs:59,624,1071,1154` handles `--global` |
 | 05-RLIMITS | replaces `systemd-run -t` with `--pipe` | `crates/run/src/main.rs:86` implements `-t`/`--pty` |
 | 74-AUX-UTILS cgls | "user manager does not place transient units under app.slice" | `control.rs:3593-3604` defaults user transient units to `app.slice` |
-| 35-LOGIN | "logind session suite not implemented" | *Wrong.* `crates/logind` is 7,237 lines and the suite reaches `testcase_background`; the real blocker is the missing user manager, so `user@<uid>.service` never starts for a `background` session |
+| 35-LOGIN | "logind session suite not implemented" | *Wrong, twice.* `crates/logind` is 7,237 lines. The follow-up claim that rust had no user manager was also wrong: `run_user_manager()` existed and already sent `READY=1`. logind simply never started any unit. Fixed; `testcase_background` now passes end to end |
 | 82-SOFTREBOOT, 84-STORAGETM, 60-MOUNT-RATELIMIT | baselined 2026-07-22 | still accurate |
 
 Re-baselining (delete the override, run once, record the real first failure) is the
@@ -358,7 +358,7 @@ from `exec_config` into `ExecHelperConfig`, which it is not today.
 | 25-IMPORT | `systemd-importd` does not exist as a crate; `machinectl import-raw` needs it | |
 | 84-STORAGETM | `systemd-storagetm` does not exist as a crate. The VM does have nvme-cli and `nvmet_tcp`, so the test runs for real | |
 | 60-MOUNT-RATELIMIT | Event-source rate limiting for the mountinfo watcher, plus delayed mount start-jobs while it is throttled. Today a post-burst `systemctl start` races the backlogged monitor | The mountinfo monitor itself is implemented |
-| 35-LOGIN | Full logind session/seat suite past `testcase_ambient_caps`: real session management and PAM | `crates/logind` is 7,237 lines and `PAMName=` now runs the PAM stack, so this may be closer than the comment suggests |
+| 35-LOGIN | Autologin sessions in `testcase_list_users_sessions_seats`: the agetty session opens and closes at once | No override. `testcase_ambient_caps` and all of `testcase_background` now pass, which is further than the C oracle reaches in this VM (it fails in `testcase_ambient_caps`), so the oracle cannot arbitrate environmental-vs-defect here |
 | 04-JOURNAL journal | Two things. (a) journald stores boot-time stdout streams in the fd store but never sends `FDSTORE=1` for a stream opened at runtime, so `systemctl restart systemd-journald` loses it. (b) `journalctl --follow` needs stream reconnection | The `journalctl -b <script>` mask is environmental: the NixOS driver runs the script from the backdoor shell, not as a unit, so no entry has a matching `_EXE` |
 
 ### Tier 4: VM provisioning, not rust code

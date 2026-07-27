@@ -147,6 +147,29 @@
   # values. %t resolves to /run rather than $XDG_RUNTIME_DIR, which is why the
   # user dbus.socket tried to bind /run/bus; %S, %C and %h are wrong the same
   # way. Fixing it means threading a system/user flavour through the loader.
+  # WHERE IT STOPS NOW, and the C ORACLE CANNOT ARBITRATE.
+  # testcase_list_users_sessions_seats fails in check_session with "no session
+  # or multiple sessions". The %I fix above did work: agetty no longer dies on
+  # /dev/dumb. What happens instead is that the autologin session opens and
+  # closes at once:
+  #     login[N]: pam_unix(login:session): session closed for user logind-test-user
+  #     logind: Released session 33
+  #     getty@tty2.service -> ServiceExited
+  # so agetty and login both run and the user's shell exits immediately.
+  # /usr/bin/bash IS symlinked by testsuite.nix, and TTYPath=/StandardInput=tty
+  # handling does exist in exec_helper.rs, so neither of those is the cause.
+  # Left undiagnosed rather than guessed at.
+  #
+  # c-systemd-test-35-login was run to decide environmental-vs-defect and CANNOT
+  # settle it: the C oracle fails EARLIER and for an unrelated reason, in
+  # testcase_ambient_caps, where a `systemd-run -p PAMName= -p Type=oneshot
+  # -p User=logind-test-user` unit fails to start at all under C systemd in this
+  # VM. rust-systemd therefore gets STRICTLY FURTHER through this test than the
+  # reference implementation does here: it clears testcase_ambient_caps and all
+  # of testcase_background, and dies in the third testcase.
+  #
+  # NO OVERRIDE: the red result is honest, and there are ~13 further testcases
+  # after this one that have never been reached.
   extraUnits = [
     "user@.service"
     "user-runtime-dir@.service"
