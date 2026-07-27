@@ -2742,30 +2742,18 @@ pub fn run_exec_helper() {
         // one rather than creating a second: the translation only lines up if
         // the service ends up in the very namespace the mapping was made
         // against. Its maps are already written, so nothing more to do.
-        // If the exec directories were id-mapped through a namespace, JOIN that
-        // one rather than creating a second.
+        // The service gets its OWN namespace and never joins the mount's.
         //
-        // Giving the service its OWN namespace instead was tried and does NOT
-        // fix the EOVERFLOW: with the two separated the writes still fail the
-        // same way, so the "mapping applied twice" theory is dead too. Restored
-        // rather than left changed, since there is no evidence the separation
-        // helps and it alters what PrivateUsers= means for the process.
-        let joined = match IDMAP_USERNS.get() {
-            Some(fd) => {
-                use std::os::fd::AsRawFd;
-                let ret = unsafe { libc::setns(fd.as_raw_fd(), libc::CLONE_NEWUSER) };
-                if ret != 0 {
-                    log::warn!(
-                        "Failed to join the id-mapping user namespace: {}",
-                        std::io::Error::last_os_error()
-                    );
-                    false
-                } else {
-                    true
-                }
-            }
-            None => false,
-        };
+        // These two namespaces carry OPPOSITE maps and cannot be the same one.
+        // The mount idmap needs the on-disk owner on the inside ("<uid> 0 1");
+        // the process needs root on the inside ("0 <uid> 1") so its uid 0 is the
+        // service's uid on the host. Joining the mount's namespace would hand
+        // the process a mapping in which in-namespace 61221 is host root.
+        //
+        // Separating them ALONE was tried earlier and did not fix the EOVERFLOW,
+        // because the map direction was still wrong; the two changes only mean
+        // anything together. Upstream keeps them separate for the same reason.
+        let joined = false;
 
         let ret = if joined { 0 } else { unsafe { libc::unshare(libc::CLONE_NEWUSER) } };
         if joined {
@@ -4547,8 +4535,17 @@ fn create_mapped_userns(uid: u32, gid: u32) -> Option<std::os::fd::OwnedFd> {
     let ns_fd = if unshared {
         // Deny setgroups before gid_map, as the kernel requires.
         let _ = std::fs::write(format!("/proc/{pid}/setgroups"), "deny\n");
-        let uid_ok = std::fs::write(format!("/proc/{pid}/uid_map"), format!("0 {uid} 1\n")).is_ok();
-        let gid_ok = std::fs::write(format!("/proc/{pid}/gid_map"), format!("0 {gid} 1\n")).is_ok();
+        // Mount-idmap direction: the kernel resolves a file's on-disk id by
+        // looking it up on the INSIDE of this namespace, so the on-disk owner
+        // goes there and the id the service should see goes outside. Upstream's
+        // make_userns() writes the same shape for REMOUNT_IDMAPPING_HOST_OWNER:
+        // "<source_owner> <uid_shift> 1".
+        //
+        // Written "0 <uid> 1" before, which left the on-disk id with no entry on
+        // the side being looked up, so every mapped file resolved to nobody
+        // (65534) and each write failed with EOVERFLOW.
+        let uid_ok = std::fs::write(format!("/proc/{pid}/uid_map"), format!("{uid} 0 1\n")).is_ok();
+        let gid_ok = std::fs::write(format!("/proc/{pid}/gid_map"), format!("{gid} 0 1\n")).is_ok();
         if uid_ok && gid_ok {
             let path = format!("/proc/{pid}/ns/user");
             match std::ffi::CString::new(path) {
