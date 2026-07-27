@@ -114,7 +114,7 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 225, 70 to 125)*
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 226, 70 to 155)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -144,9 +144,19 @@ required fields, fields that may not be null or empty, numeric ranges and
 the two nodes that have to be `distinct` are all upstream *parse* errors,
 and modelling debug info syntactically had made every one of them silently
 fine. That alone was 45 files, with nothing on the accept side lost.
-Still open, largest first: attribute rules and intrinsic signatures on the
-Verifier side (the whole remaining gap there), module summary index syntax
-(`^0 = ...`, nine files), intrinsics used without a declaration, the DWARF
+A sixth pass was the Verifier's turn, and attributes were most of it: the
+eleven that describe something only a pointer has, `nofpclass` on a type
+with no float in it, a `range` whose width is not the width it constrains,
+the five that may appear on only one parameter, `swifterror` on a return
+value, `vscale_range` bounds, `jumptable` without `unnamed_addr`, and the
+quoted attributes whose value upstream reads rather than carries
+(`frame-pointer`, `denormal-fp-math`, `patchable-function-entry`). One
+debug-info rule came with them, worth nine files on its own: a DWARF
+address space says where a pointer points, so a typedef or a qualifier
+cannot carry one.
+Still open, largest first: intrinsic signatures (the largest Verifier
+cluster left), module summary index syntax (`^0 = ...`, nine files),
+intrinsics used without a declaration, comdat and ifunc rules, the DWARF
 vocabulary itself (`DW_TAG_badtag` and friends, three files, which needs a
 list of every valid enumerator that no readable specification in the tree
 provides), and `ptrauth` and `splat` constants.

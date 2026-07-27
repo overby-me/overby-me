@@ -208,6 +208,58 @@ const BROKEN: &[(&str, &str)] = &[
         "define i16 @f(i32 %x) {\nentry:\n  %y = bitcast i32 %x to i16\n  ret i16 %y\n}\n",
         "changes the size of its operand",
     ),
+    // Attributes that describe something only a pointer has.
+    (
+        "declare void @f(i32 byval(i32) %n)\n",
+        "byval on parameter 0, which is not a pointer",
+    ),
+    (
+        "define void @f(i32 writable %p) {\nentry:\n  ret void\n}\n",
+        "writable on parameter 0, which is not a pointer",
+    ),
+    (
+        "define void @f(i32 nofpclass(nan) %x) {\nentry:\n  ret void\n}\n",
+        "nofpclass on parameter 0, which is not a floating-point type",
+    ),
+    (
+        "define void @f(i32 range(i8 1, 0) %x) {\nentry:\n  ret void\n}\n",
+        "range of i8 on parameter 0, which is i32",
+    ),
+    (
+        "declare void @a(ptr sret(i32) %a, ptr sret(i32) %b)\n",
+        "2 parameters are sret, which allows one",
+    ),
+    (
+        "declare swifterror void @c(ptr swifterror %a)\n",
+        "swifterror on the return value",
+    ),
+    // A function attribute whose own value is wrong.
+    (
+        "define void @f() \"frame-pointer\"=\"arst\" {\nentry:\n  ret void\n}\n",
+        "invalid value for 'frame-pointer': arst",
+    ),
+    (
+        "define void @f() \"patchable-function-entry\"=\"-1\" {\nentry:\n  ret void\n}\n",
+        "'patchable-function-entry' takes an unsigned integer: -1",
+    ),
+    (
+        "define void @f() \"denormal-fp-math\"=\"ieee,ieee,ieee\" {\nentry:\n  ret void\n}\n",
+        "invalid value for 'denormal-fp-math': ieee,ieee,ieee",
+    ),
+    (
+        "declare ptr @c(ptr) vscale_range(3, 16)\n",
+        "the vscale_range minimum must be a power of two",
+    ),
+    (
+        "define i32 @f() jumptable {\nentry:\n  ret i32 0\n}\n",
+        "jumptable requires unnamed_addr",
+    ),
+    // The DWARF address space says where a pointer points, so a typedef has
+    // nowhere to put it.
+    (
+        "!named = !{!1}\n!0 = !DIBasicType(name: \"n\")\n!1 = !DIDerivedType(tag: DW_TAG_typedef, baseType: !0, dwarfAddressSpace: 1)\n",
+        "DWARF address space only applies to pointer or reference types",
+    ),
 ];
 
 /// Input the parser itself has to refuse, with the message it owes.
@@ -387,6 +439,8 @@ const ACCEPTED: &[&str] = &[
     "!named = !{!0, !1}\n!0 = !{}\n!1 = !DILocation(line: 4294967295, column: 65535, scope: !0)\n",
     "!named = !{!0}\n!0 = !DISubrange(count: -1, lowerBound: -9223372036854775808)\n",
     "!named = !{!0}\n!0 = !GenericDINode(tag: 65535)\n",
+    // `nofpclass` reaches through arrays as well as vectors.
+    "define void @f([8 x [4 x float]] nofpclass(nan) %x) {\nentry:\n  ret void\n}\n",
 ];
 
 #[test]

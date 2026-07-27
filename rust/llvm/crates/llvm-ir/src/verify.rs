@@ -10,11 +10,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr, TypeAttr};
 use crate::constant::{CastOp, ConstId, Constant};
 use crate::function::Function;
 use crate::global::{GlobalQualifiers, Linkage, Visibility};
 use crate::instruction::{AtomicOrdering, BinOp, InstKind, IntFlags};
-use crate::metadata::{MdOperand, MdRef, Metadata};
+use crate::metadata::{MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use crate::module::Module;
 use crate::types::TypeKind;
 use crate::value::{BlockId, GlobalRef, InstId, MdId, Name, Value};
@@ -93,6 +94,11 @@ impl Verifier<'_> {
     // ----------------------------------------------------------- module rules
 
     fn module_level(&mut self) {
+        for index in 0..self.module.metadata.len() {
+            if let Some(node) = self.module.metadata[index].clone() {
+                self.debug_info_node(&node);
+            }
+        }
         for index in 0..self.module.functions.len() {
             let function = &self.module.functions[index];
             let (name, qualifiers) = (describe(&function.name), function.qualifiers.clone());
@@ -369,6 +375,17 @@ impl Verifier<'_> {
                 }
             }
         }
+
+        self.function_attributes(function);
+        self.attribute_set(
+            &function.return_attrs,
+            function.return_type,
+            "the return value",
+        );
+        for (index, param) in function.params.iter().enumerate() {
+            self.attribute_set(&param.attrs, param.ty, &format!("parameter {index}"));
+        }
+        self.at_most_one_of(function);
 
         if !function.is_definition() {
             self.function = None;
@@ -1249,6 +1266,227 @@ impl Verifier<'_> {
     }
 
     /// Names the type when it is one only an intrinsic may pass or return.
+    /// The debug-info rules that are the verifier's rather than the
+    /// parser's: the grammar is checked when the node is read, and this is
+    /// what needs the node's neighbours to make sense of.
+    fn debug_info_node(&mut self, node: &Metadata) {
+        let Metadata::Specialized { tag, args, .. } = node else {
+            return;
+        };
+        let SpecializedArgs::Named(fields) = args else {
+            return;
+        };
+        if tag == "DIDerivedType" && field_of(fields, "dwarfAddressSpace").is_some() {
+            // The address space says where a pointer points. A typedef or a
+            // qualifier has nowhere to put it.
+            let pointer = matches!(
+                field_of(fields, "tag"),
+                Some(MdField::Words(words))
+                    if words.iter().any(|word| matches!(
+                        word.as_str(),
+                        "DW_TAG_pointer_type"
+                            | "DW_TAG_reference_type"
+                            | "DW_TAG_rvalue_reference_type"
+                    ))
+            );
+            if !pointer {
+                self.report("DWARF address space only applies to pointer or reference types");
+            }
+        }
+    }
+
+    /// Attributes that describe something only a pointer has. Upstream words
+    /// every one of these the same way, so the check is one rule and not
+    /// twenty.
+    fn attribute_set(&mut self, attrs: &AttributeSet, ty: TypeId, where_: &str) {
+        let pointer = matches!(self.module.ctx.type_kind(ty), TypeKind::Pointer { .. });
+        for attribute in &attrs.attributes {
+            let wants_a_pointer = match attribute {
+                Attribute::Enum(kind) => matches!(
+                    kind,
+                    EnumAttr::AllocPtr
+                        | EnumAttr::DeadOnReturn
+                        | EnumAttr::DeadOnUnwind
+                        | EnumAttr::Nest
+                        | EnumAttr::NoAlias
+                        | EnumAttr::NoCapture
+                        | EnumAttr::NonNull
+                        | EnumAttr::SwiftAsync
+                        | EnumAttr::SwiftError
+                        | EnumAttr::SwiftSelf
+                        | EnumAttr::Writable
+                ),
+                Attribute::Int { kind, .. } => matches!(
+                    kind,
+                    IntAttr::Align | IntAttr::Dereferenceable | IntAttr::DereferenceableOrNull
+                ),
+                Attribute::Type { kind, .. } => matches!(
+                    kind,
+                    TypeAttr::ByRef
+                        | TypeAttr::ByVal
+                        | TypeAttr::ElementType
+                        | TypeAttr::InAlloca
+                        | TypeAttr::Preallocated
+                        | TypeAttr::StructRet
+                ),
+                _ => false,
+            };
+            if wants_a_pointer && !pointer {
+                self.report(format!(
+                    "{} on {where_}, which is not a pointer",
+                    describe_attribute(attribute)
+                ));
+                continue;
+            }
+            match attribute {
+                // `range(i8 1, 0)` says what it constrains, so the width has
+                // to be the width of the thing it is attached to.
+                Attribute::Range { ty: range_ty, .. } => {
+                    let element = self.element_or_self(ty);
+                    let TypeKind::Integer(bits) = *self.module.ctx.type_kind(element) else {
+                        self.report(format!("range on {where_}, which is not an integer"));
+                        continue;
+                    };
+                    if let TypeKind::Integer(range_bits) = *self.module.ctx.type_kind(*range_ty)
+                        && range_bits != bits
+                    {
+                        self.report(format!(
+                            "range of i{range_bits} on {where_}, which is i{bits}"
+                        ));
+                    }
+                }
+                Attribute::Structured { kind, .. }
+                    if *kind == crate::attribute::StructuredAttr::NoFpClass =>
+                {
+                    // Unlike `range`, this one reaches through arrays as well
+                    // as vectors: `[8 x [4 x float]]` may carry it.
+                    let element = self.innermost_element(ty);
+                    if !matches!(self.module.ctx.type_kind(element), TypeKind::Float(_)) {
+                        self.report(format!(
+                            "nofpclass on {where_}, which is not a floating-point type"
+                        ));
+                    }
+                }
+                Attribute::Enum(EnumAttr::NoUndef)
+                    if matches!(self.module.ctx.type_kind(ty), TypeKind::Void) =>
+                {
+                    self.report(format!("noundef on {where_}, which is void"));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Rules about a function attribute's own value, which have nothing to do
+    /// with the type it is attached to.
+    fn function_attributes(&mut self, function: &Function) {
+        let unnamed = function.qualifiers.unnamed_addr.is_some();
+        let mut attributes: Vec<Attribute> = function.attrs.attributes.clone();
+        for group in &function.attrs.groups {
+            if let Some(contents) = self.module.attribute_group(*group) {
+                attributes.extend(contents.iter().cloned());
+            }
+        }
+        for attribute in &attributes {
+            match attribute {
+                Attribute::Enum(EnumAttr::JumpTable) if !unnamed => {
+                    self.report("jumptable requires unnamed_addr");
+                }
+                Attribute::Int {
+                    kind: IntAttr::VScaleRange,
+                    first,
+                    second,
+                } => {
+                    if *first == 0 {
+                        self.report("the vscale_range minimum must be greater than zero");
+                    } else if !first.is_power_of_two() {
+                        self.report("the vscale_range minimum must be a power of two");
+                    }
+                    if let Some(max) = second {
+                        if *max != 0 && !max.is_power_of_two() {
+                            self.report("the vscale_range maximum must be a power of two");
+                        }
+                        if first > max {
+                            self.report(
+                                "the vscale_range minimum may not be greater than the maximum",
+                            );
+                        }
+                    }
+                }
+                Attribute::String { key, value } => self.string_attribute(key, value.as_deref()),
+                _ => {}
+            }
+        }
+    }
+
+    /// The quoted attributes whose value upstream reads rather than carries.
+    fn string_attribute(&mut self, key: &str, value: Option<&str>) {
+        let value = value.unwrap_or("");
+        match key {
+            "frame-pointer" if !matches!(value, "all" | "non-leaf" | "none" | "reserved") => {
+                self.report(format!("invalid value for 'frame-pointer': {value}"));
+            }
+            "denormal-fp-math" | "denormal-fp-math-f32" if !is_a_denormal_mode(value) => {
+                self.report(format!("invalid value for '{key}': {value}"));
+            }
+            "patchable-function-entry" | "patchable-function-prefix"
+                if value.parse::<u64>().is_err() =>
+            {
+                self.report(format!("'{key}' takes an unsigned integer: {value}"));
+            }
+            _ => {}
+        }
+    }
+
+    /// The attributes a function may carry on only one of its parameters.
+    fn at_most_one_of(&mut self, function: &Function) {
+        const ONCE: &[(EnumAttr, &str)] = &[
+            (EnumAttr::SwiftAsync, "swiftasync"),
+            (EnumAttr::SwiftError, "swifterror"),
+            (EnumAttr::SwiftSelf, "swiftself"),
+        ];
+        for (attribute, name) in ONCE {
+            let count = function
+                .params
+                .iter()
+                .filter(|param| param.attrs.has(*attribute))
+                .count();
+            if count > 1 {
+                self.report(format!("{count} parameters are {name}, which allows one"));
+            }
+        }
+        const ONCE_TYPED: &[(TypeAttr, &str)] = &[
+            (TypeAttr::InAlloca, "inalloca"),
+            (TypeAttr::Preallocated, "preallocated"),
+            (TypeAttr::StructRet, "sret"),
+        ];
+        for (attribute, name) in ONCE_TYPED {
+            let count = function
+                .params
+                .iter()
+                .filter(|param| has_type_attribute(&param.attrs, *attribute))
+                .count();
+            if count > 1 {
+                self.report(format!("{count} parameters are {name}, which allows one"));
+            }
+        }
+        // swifterror describes where a callee writes an error, which a return
+        // value has no room for.
+        if function.return_attrs.has(EnumAttr::SwiftError) {
+            self.report("swifterror on the return value, which it does not apply to");
+        }
+    }
+
+    /// The scalar at the bottom of any nest of arrays and vectors.
+    fn innermost_element(&self, ty: TypeId) -> TypeId {
+        match self.module.ctx.type_kind(ty) {
+            TypeKind::Array { element, .. } | TypeKind::Vector { element, .. } => {
+                self.innermost_element(*element)
+            }
+            _ => ty,
+        }
+    }
+
     fn opaque_value_type(&self, ty: TypeId) -> Option<&'static str> {
         match self.module.ctx.type_kind(ty) {
             TypeKind::Token => Some("token"),
@@ -1626,4 +1864,42 @@ fn referenced_metadata(node: &crate::metadata::Metadata) -> Vec<MdId> {
         }
     }
     out
+}
+
+fn has_type_attribute(attrs: &AttributeSet, wanted: TypeAttr) -> bool {
+    attrs
+        .attributes
+        .iter()
+        .any(|a| matches!(a, Attribute::Type { kind, .. } if *kind == wanted))
+}
+
+/// An attribute's keyword, without its argument.
+fn describe_attribute(attribute: &Attribute) -> String {
+    match attribute {
+        Attribute::Enum(kind) => kind.keyword().to_string(),
+        Attribute::Int { kind, .. } => kind.keyword().to_string(),
+        Attribute::Type { kind, .. } => kind.keyword().to_string(),
+        Attribute::Range { .. } => "range".to_string(),
+        Attribute::Structured { kind, .. } => kind.keyword().to_string(),
+        Attribute::String { key, .. } => format!("\"{key}\""),
+    }
+}
+
+fn field_of<'a>(fields: &'a [(String, MdField)], wanted: &str) -> Option<&'a MdField> {
+    fields
+        .iter()
+        .find(|(name, _)| name == wanted)
+        .map(|(_, value)| value)
+}
+
+/// `denormal-fp-math` is one mode, or the input mode and the output mode.
+fn is_a_denormal_mode(value: &str) -> bool {
+    let modes: Vec<&str> = value.split(',').collect();
+    modes.len() <= 2
+        && modes.iter().all(|mode| {
+            matches!(
+                *mode,
+                "ieee" | "preserve-sign" | "positive-zero" | "dynamic"
+            )
+        })
 }
