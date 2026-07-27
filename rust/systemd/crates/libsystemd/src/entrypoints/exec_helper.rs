@@ -2742,6 +2742,14 @@ pub fn run_exec_helper() {
         // one rather than creating a second: the translation only lines up if
         // the service ends up in the very namespace the mapping was made
         // against. Its maps are already written, so nothing more to do.
+        // If the exec directories were id-mapped through a namespace, JOIN that
+        // one rather than creating a second.
+        //
+        // Giving the service its OWN namespace instead was tried and does NOT
+        // fix the EOVERFLOW: with the two separated the writes still fail the
+        // same way, so the "mapping applied twice" theory is dead too. Restored
+        // rather than left changed, since there is no evidence the separation
+        // helps and it alters what PrivateUsers= means for the process.
         let joined = match IDMAP_USERNS.get() {
             Some(fd) => {
                 use std::os::fd::AsRawFd;

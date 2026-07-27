@@ -118,26 +118,40 @@
   # THE FAILURE HAS MOVED, which is what says the diagnosis was right:
   #     touch: cannot touch '/var/lib/sampleservice/testfile':
   #         Value too large for defined data type      (EOVERFLOW, was EPERM)
-  # MEASURED, and it says the map is INVERTED rather than merely too narrow.
-  # stat()ing a mapped destination right after the bind reports
-  #     st_uid=65534 st_gid=65534   for a directory owned on disk by 61221
-  # 65534 is nobody, i.e. the id the mapping produced cannot be represented by
-  # the viewer. So the mapping IS applied (an unapplied one would still show
-  # 61221) and it lands on an unmapped id, which is what makes every later
-  # write fail with EOVERFLOW.
+  # THE FAILURE IS NOW EOVERFLOW, and two further hypotheses about it are dead.
+  # Measured FROM INSIDE the service's own namespace (the earlier probe sat in
+  # setup_mount_namespace(), which runs BEFORE the userns join at
+  # exec_helper.rs:2745, so it was reading from the initial namespace and could
+  # say nothing about what the service sees — the same "measured the wrong
+  # principal" mistake as the access(W_OK)-as-root one above):
+  #     IDMAP in-ns /var/lib/private/testidmapped st_uid=65534 st_gid=65534
+  #     IDMAP in-ns /var/lib/sampleservice        st_uid=65534 st_gid=65534
+  #     IDMAP in-ns /var/lib/testidmapped         st_uid=65534 st_gid=65534
+  # for an on-disk owner of 61221. 65534 is nobody, i.e. UNMAPPED rather than
+  # mapped to the wrong id.
   #
-  # rust writes "0 <uid> 1" (inside=0, outside=uid). Upstream's make_userns()
-  # (src/shared/mount-util.c:1519) writes "<source_owner> <uid_shift> 1" for
-  # REMOUNT_IDMAPPING_HOST_OWNER, the case exec directories want — inside and
-  # outside the other way round. The two are inverses.
+  # DEAD HYPOTHESIS 7, "the map is inverted": an inverted map would resolve to
+  # some other specific id, not to nobody. A claim that it was inverted was
+  # briefly recorded here and in commit b664a76a; it is retracted.
   #
-  # NOT simply flipped here, because create_mapped_userns() is ALSO the
-  # namespace the service itself joins (exec_helper.rs:2745 deliberately makes
-  # the service enter the very namespace the mapping was made against).
-  # Upstream keeps those two separate: the mount idmap userns is NOT the
-  # process's userns. Flipping the map without separating them changes what
-  # `PrivateUsers=` means for the process at the same time, so the next step is
-  # to give the mount its own userns fd and only then correct the direction.
+  # DEAD HYPOTHESIS 8, "the mapping is applied twice because the service joins
+  # the very namespace the mount was idmapped against": tested by giving the
+  # service its own namespace instead (`let joined = false`). The writes still
+  # fail with EOVERFLOW, so that is not it either, and the change was reverted
+  # since nothing supports it and it alters PrivateUsers= semantics.
+  #
+  # NOTE ON THAT RUN: the in-ns probe lived inside the `if joined` arm, so
+  # setting joined=false silently removed the very measurement being relied on.
+  # The probe is unconditional now. Put diagnostics OUTSIDE the branch whose
+  # behaviour is under test.
+  #
+  # WHAT IS STILL UNKNOWN: why an on-disk id of 61221, with a mount idmap whose
+  # uid_map is "0 61221 1", presents as unmapped. Worth checking next, with a
+  # measurement rather than another theory: whether the mount actually carries
+  # the idmap after move_mount (read /proc/self/mountinfo for the dest and look
+  # for the idmap field), and what upstream's make_userns() writes for this case
+  # (src/shared/mount-util.c:1519, REMOUNT_IDMAPPING_HOST_OWNER emits
+  # "<source_owner> <uid_shift> 1").
   #
   # THREE WRONG GUESSES were made before that, all about kernel rules, each
   # costing a VM run: that an already-attached mount could be idmapped (it
