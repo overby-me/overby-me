@@ -22,7 +22,7 @@ use crate::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, Special
 use crate::module::Module;
 use crate::summary::SummaryValue;
 use crate::types::{StructId, TypeKind};
-use crate::value::{AliasId, BlockId, GlobalRef, InstId, MdId, Name, Value};
+use crate::value::{AliasId, BlockId, GlobalRef, GlobalVarId, InstId, MdId, Name, Value};
 use crate::{FunctionId, TypeId};
 use llvm_support::{ApInt, DataLayout};
 
@@ -98,6 +98,7 @@ impl Verifier<'_> {
     // ----------------------------------------------------------- module rules
 
     fn module_level(&mut self) {
+        self.reserved_globals_are_unread();
         // A blockaddress names a label in a function that may not have been
         // read yet when the constant is built, so the check waits until the
         // whole module is here. Only named labels are checked: matching `%3`
@@ -742,6 +743,83 @@ impl Verifier<'_> {
         }
     }
 
+    /// An x86 interrupt handler is called by the processor, which has already
+    /// pushed the interrupt frame onto the stack before the handler starts. So
+    /// the first parameter is the frame, passed by reference to the memory the
+    /// processor wrote it to: a `ptr byval(T)` and nothing else. A handler for
+    /// an interrupt that carries an error code takes it as a second parameter,
+    /// and that one is an ordinary value.
+    fn x86_interrupt(&mut self, function: &Function) {
+        if !matches!(
+            function.calling_conv,
+            CallingConv::Named(NamedCallingConv::X86Intr)
+        ) {
+            return;
+        }
+        let Some(first) = function.params.first() else {
+            return;
+        };
+        let pointer = matches!(
+            self.module.ctx.type_kind(first.ty),
+            TypeKind::Pointer { .. }
+        );
+        if !pointer || !has_type_attribute(&first.attrs, TypeAttr::ByVal) {
+            let name = describe(&function.name);
+            self.report(format!(
+                "@{name}: calling convention parameter requires byval"
+            ));
+        }
+    }
+
+    /// What a function does to AArch64's streaming mode and its two matrix
+    /// state registers, written as quoted attributes. Each register is either
+    /// created fresh, read, written, both, preserved, or left to the caller to
+    /// decide, and those are six answers to one question rather than six
+    /// independent claims. Streaming mode is the same shape with two answers:
+    /// `aarch64_pstate_sm_body` says what the body does and sits alongside
+    /// either.
+    fn sme_state(&mut self, attrs: &AttributeSet) {
+        const ZA: [&str; 6] = [
+            "aarch64_new_za",
+            "aarch64_in_za",
+            "aarch64_out_za",
+            "aarch64_inout_za",
+            "aarch64_preserves_za",
+            "aarch64_za_state_agnostic",
+        ];
+        const ZT0: [&str; 6] = [
+            "aarch64_new_zt0",
+            "aarch64_in_zt0",
+            "aarch64_out_zt0",
+            "aarch64_inout_zt0",
+            "aarch64_preserves_zt0",
+            "aarch64_za_state_agnostic",
+        ];
+        let written = |key: &str| {
+            attrs
+                .attributes
+                .iter()
+                .any(|a| matches!(a, Attribute::String { key: k, .. } if k == key))
+        };
+        if written("aarch64_pstate_sm_enabled") && written("aarch64_pstate_sm_compatible") {
+            self.report(
+                "'aarch64_pstate_sm_enabled' and 'aarch64_pstate_sm_compatible' are incompatible",
+            );
+        }
+        for (group, register) in [(ZA, "za"), (ZT0, "zt0")] {
+            if group.iter().filter(|key| written(key)).count() > 1 {
+                self.report(format!(
+                    "the attributes describing {register} state are mutually exclusive"
+                ));
+            }
+        }
+        // Whether the register's contents matter after this one call is the
+        // caller's knowledge, not something the callee can declare.
+        if written("aarch64_zt0_undef") {
+            self.report("'aarch64_zt0_undef' can only be applied to a callsite");
+        }
+    }
+
     /// An alias needs something to alias. A declaration is not a definition,
     /// and neither is an `available_externally` body, which the linker is
     /// entitled to drop.
@@ -1040,6 +1118,92 @@ impl Verifier<'_> {
         }
     }
 
+    /// The four globals whose contents mean something to whoever consumes the
+    /// module rather than to the module itself. `llvm.used` keeps a symbol
+    /// alive and `llvm.global_ctors` names what runs before main; neither
+    /// holds a pointer the program reads, so upstream refuses a module that
+    /// reads one. `llvm.compiler_used`, spelled with an underscore, is not
+    /// one of the four and may be read like any other global.
+    fn reserved_globals_are_unread(&mut self) {
+        let reserved: Vec<(GlobalVarId, String)> = self
+            .module
+            .globals
+            .iter()
+            .enumerate()
+            .filter_map(|(index, global)| {
+                let Name::Named(name) = &global.name else {
+                    return None;
+                };
+                matches!(
+                    name.as_str(),
+                    "llvm.used" | "llvm.compiler.used" | "llvm.global_ctors" | "llvm.global_dtors"
+                )
+                .then(|| (GlobalVarId(index as u32), name.clone()))
+            })
+            .collect();
+        if reserved.is_empty() {
+            return;
+        }
+
+        let mut mentioned: HashSet<GlobalVarId> = HashSet::new();
+        let mut seen: HashSet<ConstId> = HashSet::new();
+        let mut pending: Vec<ConstId> = Vec::new();
+        // A global's own initializer is where a reserved global lists what it
+        // keeps, so it is not a site that reads one; every other constant is.
+        for (index, global) in self.module.globals.iter().enumerate() {
+            let here = GlobalVarId(index as u32);
+            if let Some(initializer) = global.initializer
+                && !reserved.iter().any(|(id, _)| *id == here)
+            {
+                pending.push(initializer);
+            }
+        }
+        for alias in &self.module.aliases {
+            pending.push(alias.aliasee);
+        }
+        for ifunc in &self.module.ifuncs {
+            pending.push(ifunc.resolver);
+        }
+        for function in &self.module.functions {
+            for (id, _) in function.blocks() {
+                for (_, instruction) in function.block_instructions(id) {
+                    for value in instruction.kind.operand_values() {
+                        if let Value::Constant(id) = value {
+                            pending.push(id);
+                        }
+                    }
+                }
+            }
+        }
+
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            match self.module.ctx.constant(id) {
+                Constant::Global {
+                    target: GlobalRef::Variable(id),
+                    ..
+                } => {
+                    mentioned.insert(*id);
+                }
+                Constant::Struct { fields, .. } => pending.extend(fields.iter().copied()),
+                Constant::Array { elements, .. } | Constant::Vector { elements, .. } => {
+                    pending.extend(elements.iter().copied());
+                }
+                Constant::Splat { element, .. } => pending.push(*element),
+                Constant::Expression(expr) => pending.extend(expr.parts().0),
+                _ => {}
+            }
+        }
+
+        for (id, name) in reserved {
+            if mentioned.contains(&id) {
+                self.report(format!("invalid uses of intrinsic global variable @{name}"));
+            }
+        }
+    }
+
     /// A symbol nobody outside the module can name has nothing to be hidden
     /// from, so upstream rejects the combination rather than ignoring it.
     fn linkage_and_visibility(&mut self, name: &str, qualifiers: &GlobalQualifiers) {
@@ -1246,6 +1410,8 @@ impl Verifier<'_> {
         }
 
         self.calling_convention(function);
+        self.x86_interrupt(function);
+        self.sme_state(&function.attrs);
         self.function_attributes(function);
         if function.comdat.is_some() {
             let name = describe(&function.name);

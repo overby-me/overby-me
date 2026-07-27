@@ -843,12 +843,28 @@ of a node rather than what it means: `SemanticInterposition` answers yes or
 no with a number rather than a word, a `CG Profile` edge names a caller, a
 callee and a count, and a type-based alias tag has three operands or four.
 Verifier 289 to 292.
+A sixty-fifth pass took three more, and one of them was recorded as
+blocked and was not. `llvm.used`, `llvm.compiler.used`, `llvm.global_ctors`
+and `llvm.global_dtors` say something to whoever consumes the module rather
+than to the module itself, so nothing in the module may read one back.
+That had been filed as needing def-use chains, and it does not: the
+question is whether any constant reachable from a global's initializer, an
+aliasee, a resolver or an instruction operand names one of the four, which
+is a walk forwards rather than a use list. `llvm.compiler_used`, spelled
+with an underscore, is not one of the four and may be read like any other
+global, which is the kind of boundary only a probe finds.
+An x86 interrupt handler is called by the processor with the interrupt
+frame already on the stack, so its first parameter is a `ptr byval(T)` and
+nothing else; what follows it is the error code and is unconstrained. And
+what a function does to AArch64's streaming mode and its two matrix state
+registers is one answer per register out of six, not six independent
+claims, while `aarch64_zt0_undef` describes one call rather than the
+function it calls. Verifier 292 to 296.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five
 `declare` lines out of eight hundred, so there is nothing to harvest.
-Uses of `llvm.used` and `llvm.global_ctors` (two files): needs the def-use
-chains PLAN §4.2 puts off until the first pass that wants them. The DWARF
+The DWARF
 vocabulary, so that `DW_TAG_badtag` is refused (three files): needs a list
 of every valid enumerator that no specification we may read enumerates.
 `DIExpression` opcode sequences (three files): needs the stack discipline

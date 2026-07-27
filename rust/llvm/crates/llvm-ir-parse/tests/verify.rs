@@ -61,6 +61,42 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "define x86_intrcc void @f(ptr %p) {\nentry:\n  ret void\n}\n",
+        "calling convention parameter requires byval",
+    ),
+    (
+        "declare x86_intrcc void @f(i32)\n",
+        "calling convention parameter requires byval",
+    ),
+    (
+        "declare void @f() \"aarch64_pstate_sm_enabled\" \"aarch64_pstate_sm_compatible\"\n",
+        "are incompatible",
+    ),
+    (
+        "declare void @f() \"aarch64_new_za\" \"aarch64_in_za\"\n",
+        "the attributes describing za state are mutually exclusive",
+    ),
+    (
+        "declare void @f() \"aarch64_inout_zt0\" \"aarch64_za_state_agnostic\"\n",
+        "the attributes describing zt0 state are mutually exclusive",
+    ),
+    (
+        "declare void @f() \"aarch64_zt0_undef\"\n",
+        "can only be applied to a callsite",
+    ),
+    (
+        "@x = global i32 0\n@llvm.used = appending global [1 x ptr] [ptr @x], section \"llvm.metadata\"\n@p = global ptr @llvm.used\n",
+        "invalid uses of intrinsic global variable @llvm.used",
+    ),
+    (
+        "@x = global i32 0\n@llvm.used = appending global [1 x ptr] [ptr @x], section \"llvm.metadata\"\n\ndefine ptr @f() {\nentry:\n  ret ptr @llvm.used\n}\n",
+        "invalid uses of intrinsic global variable @llvm.used",
+    ),
+    (
+        "@llvm.global_ctors = appending global [1 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 65535, ptr @c, ptr null }]\n@p = global ptr @llvm.global_ctors\n\ndefine void @c() {\nentry:\n  ret void\n}\n",
+        "invalid uses of intrinsic global variable @llvm.global_ctors",
+    ),
+    (
         "!llvm.module.flags = !{!0}\n\n!0 = !{i32 1, !\"SemanticInterposition\", !\"yes\"}\n",
         "SemanticInterposition is a number rather than a word",
     ),
@@ -1192,6 +1228,22 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // The interrupt frame passed the way the processor left it, a handler
+    // taking no frame at all, and the same first parameter under a convention
+    // that says nothing about it.
+    "define x86_intrcc void @f(ptr byval(i32) %p) {\nentry:\n  ret void\n}\n",
+    "define x86_intrcc void @f() {\nentry:\n  ret void\n}\n",
+    "define x86_intrcc void @f(ptr byval(i32) %p, i64 %e) {\nentry:\n  ret void\n}\n",
+    "define ccc void @f(i32 %p) {\nentry:\n  ret void\n}\n",
+    // One answer per register, and one from each of the two groups at once.
+    "declare void @f() \"aarch64_pstate_sm_enabled\" \"aarch64_pstate_sm_body\"\n",
+    "declare void @f() \"aarch64_in_za\" \"aarch64_in_zt0\"\n",
+    "define void @f() {\nentry:\n  call void @g() \"aarch64_zt0_undef\"\n  ret void\n}\n\ndeclare void @g()\n",
+    // A reserved global that nothing reads, and the two names next door that
+    // are not reserved: the underscore spelling, and any other `llvm.*`.
+    "@x = global i32 0\n@llvm.used = appending global [1 x ptr] [ptr @x], section \"llvm.metadata\"\n",
+    "@x = global i32 0\n@llvm.compiler_used = appending global [1 x ptr] [ptr @x], section \"llvm.metadata\"\n@p = global ptr @llvm.compiler_used\n",
+    "@x = global i32 0\n@llvm.foo = appending global [1 x ptr] [ptr @x]\n@p = global ptr @llvm.foo\n",
     // The same three in the shapes they are meant to have.
     "!llvm.module.flags = !{!0}\n\n!0 = !{i32 1, !\"SemanticInterposition\", i32 1}\n",
     "declare void @a()\n\ndeclare void @b()\n\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 5, !\"CG Profile\", !1}\n!1 = !{!2}\n!2 = !{ptr @a, ptr @b, i64 5}\n",

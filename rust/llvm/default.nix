@@ -137,7 +137,7 @@ in {
     # that had nothing to do with what those files test, which is what the
     # second bound is for. Folding typed pointers took it back to 449.
     llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 449 5;
-    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 292 0;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 296 0;
 
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this
