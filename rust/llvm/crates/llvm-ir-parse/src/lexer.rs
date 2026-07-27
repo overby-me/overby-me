@@ -206,6 +206,13 @@ impl<'a> Lexer<'a> {
         self.bytes.get(self.offset + ahead).copied()
     }
 
+    /// Moves back to an earlier offset. Only ever used inside a run of name
+    /// bytes, which hold no newline, so the line count needs no undoing.
+    fn rewind_to(&mut self, offset: usize) {
+        debug_assert!(offset <= self.offset);
+        self.offset = offset;
+    }
+
     fn bump(&mut self) -> Option<u8> {
         let byte = self.peek()?;
         self.offset += 1;
@@ -434,7 +441,7 @@ impl<'a> Lexer<'a> {
                 }
                 Ok(numbered(value))
             }
-            Some(b) if is_name_byte(b) => Ok(named(self.bare_name())),
+            Some(b) if is_name_byte(b) || b == b'-' => Ok(named(self.bare_name())),
             _ => Err(LexError {
                 position,
                 message: "expected a name after the sigil".to_string(),
@@ -442,10 +449,13 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// A name after a sigil, which may hold a hyphen where a bare word may
+    /// not: `%-3` is a block upstream reads and `i16-1` is a type and a
+    /// negative number rather than one word.
     fn bare_name(&mut self) -> String {
         let start = self.offset;
         while let Some(byte) = self.peek() {
-            if is_name_byte(byte) {
+            if is_name_byte(byte) || byte == b'-' {
                 self.bump();
             } else {
                 break;
@@ -460,7 +470,7 @@ impl<'a> Lexer<'a> {
     fn escaped_name(&mut self) -> Result<Vec<u8>, LexError> {
         let mut bytes = Vec::new();
         while let Some(byte) = self.peek() {
-            if is_name_byte(byte) {
+            if is_name_byte(byte) || byte == b'-' {
                 bytes.push(byte);
                 self.bump();
             } else if byte == b'\\' {
@@ -652,18 +662,31 @@ impl<'a> Lexer<'a> {
     /// block label when a colon follows.
     fn word_or_label(&mut self) -> Result<Token, LexError> {
         let start = self.offset;
+        // A label may hold a hyphen and a keyword may not: upstream writes
+        // `for.cond2thread-pre-split:` as one label and `i16-1` as a type and
+        // a negative number. Which one this is only becomes clear at the
+        // `:`, so the run is scanned with hyphens and given back to the
+        // first one when no colon follows.
+        let mut first_hyphen = None;
         while let Some(byte) = self.peek() {
             if is_name_byte(byte) {
+                self.bump();
+            } else if byte == b'-' {
+                first_hyphen.get_or_insert(self.offset);
                 self.bump();
             } else {
                 break;
             }
         }
-        let word = self.text[start..self.offset].to_string();
         if self.peek() == Some(b':') {
+            let word = self.text[start..self.offset].to_string();
             self.bump();
             return Ok(Token::Label(word));
         }
+        if let Some(hyphen) = first_hyphen {
+            self.rewind_to(hyphen);
+        }
+        let word = self.text[start..self.offset].to_string();
         if let Some(bits) = word.strip_prefix('i')
             && !bits.is_empty()
             && bits.chars().all(|c| c.is_ascii_digit())
@@ -687,7 +710,10 @@ fn is_name_start(byte: u8) -> bool {
 }
 
 fn is_name_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$' | b'-')
+    // No hyphen: upstream's identifiers are `[A-Za-z$._][A-Za-z$._0-9]*`, and
+    // taking one would make `i16-1` a single word rather than a type and a
+    // negative number, which is how five CodeGen tests write it.
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$')
 }
 
 #[cfg(test)]

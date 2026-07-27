@@ -1022,6 +1022,14 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // A label may hold a hyphen where a keyword may not: the same run of
+    // bytes is one label here and a type and a negative number below.
+    "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %a-b, label %c-d\n\na-b:\n  ret void\n\nc-d:\n  ret void\n}\n",
+    "define <4 x i16> @f(<4 x i16> %b) {\nentry:\n  %r = xor <4 x i16> %b, < i16 -1, i16 -1, i16 -1, i16-1 >\n  ret <4 x i16> %r\n}\n",
+    // The eight calling conventions the CodeGen tree uses and the suites do
+    // not, two of which upstream prints with a doubled space.
+    "declare msp430_intrcc void @a()\n\ndeclare intel_ocl_bicc void @b()\n\ndeclare m68k_rtdcc void @c()\n\ndeclare avr_intrcc void @d()\n\ndeclare avr_signalcc void @e()\n\ndeclare aarch64_sme_preservemost_from_x0 void @g()\n\ndeclare aarch64_sme_preservemost_from_x1 void @h()\n\ndeclare aarch64_sme_preservemost_from_x2 void @i()\n",
+    "define void @f() hybrid_patchable {\nentry:\n  ret void\n}\n",
     // An instruction written without a `%N =` still takes the next number,
     // and a phi above it may already have referred to that number. Reserving
     // a second slot rather than reusing the placeholder left the phi pointing

@@ -147,6 +147,78 @@ impl Parser {
         }
     }
 
+    /// The shorthand upstream folds an aggregate into when every element
+    /// says the same thing.
+    ///
+    /// All zero is `zeroinitializer`, all undef is `undef` and all poison is
+    /// `poison`, for a vector, an array or a struct alike. A vector whose
+    /// lanes are all the same and not one of those is `splat (T v)`, which an
+    /// array of the same shape is not: upstream folds the splat form for
+    /// vectors only.
+    fn fold_aggregate(&mut self, ty: TypeId, elements: &[ConstId], is_vector: bool) -> ConstId {
+        if elements.is_empty() {
+            return self.module.ctx.intern_constant(if is_vector {
+                Constant::Vector {
+                    ty,
+                    elements: Vec::new(),
+                }
+            } else {
+                Constant::Array {
+                    ty,
+                    elements: Vec::new(),
+                }
+            });
+        }
+        // Zero is checked element by element rather than by identity, because
+        // a struct's fields need not be the same constant to be all zero:
+        // `{ i16, [2 x i16] } { i16 0, [2 x i16] zeroinitializer }` is one.
+        if elements
+            .iter()
+            .all(|element| self.is_zero_constant(*element))
+        {
+            return self
+                .module
+                .ctx
+                .intern_constant(Constant::ZeroInitializer(ty));
+        }
+        let same = elements.windows(2).all(|pair| pair[0] == pair[1]);
+        if same {
+            let first = elements[0];
+            match self.module.ctx.constant(first) {
+                Constant::Undef(_) => {
+                    return self.module.ctx.intern_constant(Constant::Undef(ty));
+                }
+                Constant::Poison(_) => {
+                    return self.module.ctx.intern_constant(Constant::Poison(ty));
+                }
+                _ => {}
+            }
+            if is_vector {
+                return self
+                    .module
+                    .ctx
+                    .intern_constant(Constant::Splat { ty, element: first });
+            }
+        }
+        let elements = elements.to_vec();
+        self.module.ctx.intern_constant(if is_vector {
+            Constant::Vector { ty, elements }
+        } else {
+            Constant::Array { ty, elements }
+        })
+    }
+
+    /// Whether a constant is the all-zero bit pattern, which `zeroinitializer`
+    /// stands for. A negative zero is not: it has a bit set.
+    fn is_zero_constant(&self, id: ConstId) -> bool {
+        match self.module.ctx.constant(id) {
+            Constant::ZeroInitializer(_) | Constant::Null(_) => true,
+            Constant::Integer { value, .. } => value.is_zero(),
+            Constant::Float { value, .. } => value.bits().is_zero(),
+            _ => false,
+        }
+    }
+
     /// A reference to a global as a constant of the given pointer type.
     pub(crate) fn global_constant(
         &mut self,
@@ -211,19 +283,13 @@ impl Parser {
                 _ => {
                     self.require(Token::LeftBracket)?;
                     let elements = self.parse_constant_list(Token::RightBracket, element)?;
-                    Ok(self
-                        .module
-                        .ctx
-                        .intern_constant(Constant::Array { ty, elements }))
+                    Ok(self.fold_aggregate(ty, &elements, false))
                 }
             },
             TypeKind::Vector { element, .. } => {
                 self.require(Token::Less)?;
                 let elements = self.parse_constant_list(Token::Greater, element)?;
-                Ok(self
-                    .module
-                    .ctx
-                    .intern_constant(Constant::Vector { ty, elements }))
+                Ok(self.fold_aggregate(ty, &elements, true))
             }
             TypeKind::Struct { fields, packed } => self.parse_struct_constant(ty, &fields, packed),
             TypeKind::NamedStruct(id) => {
@@ -361,6 +427,14 @@ impl Parser {
         self.require(Token::RightBrace)?;
         if packed {
             self.require(Token::Greater)?;
+        }
+        // A struct folds to `zeroinitializer` the same way, but never to a
+        // splat: its fields need not have one type.
+        if !values.is_empty() && values.iter().all(|field| self.is_zero_constant(*field)) {
+            return Ok(self
+                .module
+                .ctx
+                .intern_constant(Constant::ZeroInitializer(ty)));
         }
         Ok(self
             .module

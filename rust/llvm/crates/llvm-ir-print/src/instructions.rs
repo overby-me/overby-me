@@ -9,7 +9,7 @@ use crate::{CONTINUATION, Printer, attribute_list, escape_string, name_text};
 use llvm_ir::BlockId;
 use llvm_ir::instruction::{
     CallData, CallingConv, FastMathFlags, InstKind, Instruction, IntFlags, LandingPadClause,
-    SyncScope, UnwindTarget,
+    NamedCallingConv, SyncScope, UnwindTarget,
 };
 
 use crate::align_text;
@@ -733,7 +733,15 @@ impl Printer<'_> {
         match conv {
             CallingConv::C => {}
             CallingConv::Named(named) => {
-                let _ = write!(self.out, "{} ", named.keyword());
+                // Upstream's own spelling of these two ends in a space, so it
+                // prints two where every other convention prints one. It is a
+                // quirk rather than a rule, and reproducing it is what makes
+                // the printed text match.
+                let padding = match named {
+                    NamedCallingConv::AvrIntr | NamedCallingConv::AvrSignal => "  ",
+                    _ => " ",
+                };
+                let _ = write!(self.out, "{}{padding}", named.keyword());
             }
             CallingConv::Numbered(number) => {
                 let _ = write!(self.out, "cc{number} ");

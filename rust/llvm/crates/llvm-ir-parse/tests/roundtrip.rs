@@ -114,3 +114,71 @@ fn printing_is_idempotent() {
         );
     }
 }
+
+/// What upstream folds an aggregate into when every element says the same
+/// thing. Written out longhand on the left, folded on the right, which is a
+/// change the corpus cannot pin because `llvm-dis` never writes the longhand.
+const FOLDED: &[(&str, &str)] = &[
+    (
+        "@g = global <4 x i16> <i16 -1, i16 -1, i16 -1, i16 -1>\n",
+        "@g = global <4 x i16> splat (i16 -1)\n",
+    ),
+    (
+        "@g = global <4 x i16> <i16 0, i16 0, i16 0, i16 0>\n",
+        "@g = global <4 x i16> zeroinitializer\n",
+    ),
+    (
+        "@g = global <2 x ptr> <ptr null, ptr null>\n",
+        "@g = global <2 x ptr> zeroinitializer\n",
+    ),
+    (
+        "@g = global <4 x i16> <i16 undef, i16 undef, i16 undef, i16 undef>\n",
+        "@g = global <4 x i16> undef\n",
+    ),
+    (
+        "@g = global <4 x i16> <i16 poison, i16 poison, i16 poison, i16 poison>\n",
+        "@g = global <4 x i16> poison\n",
+    ),
+    // A negative zero has a bit set, so it splats rather than zeroing.
+    (
+        "@g = global <2 x float> <float -0.0, float -0.0>\n",
+        "@g = global <2 x float> splat (float -0.000000e+00)\n",
+    ),
+    // An array folds to zero but never to a splat, which is upstream's rule
+    // and not one a reader would guess.
+    (
+        "@g = global [4 x i16] [i16 0, i16 0, i16 0, i16 0]\n",
+        "@g = global [4 x i16] zeroinitializer\n",
+    ),
+    (
+        "@g = global [2 x i16] [i16 -1, i16 -1]\n",
+        "@g = global [2 x i16] [i16 -1, i16 -1]\n",
+    ),
+    // A struct is all zero when each field is, which they need not be the
+    // same constant to be.
+    (
+        "@g = global { i16, [2 x i16] } { i16 0, [2 x i16] zeroinitializer }\n",
+        "@g = global { i16, [2 x i16] } zeroinitializer\n",
+    ),
+    // One lane out of step and nothing folds.
+    (
+        "@g = global <4 x i16> <i16 -1, i16 -1, i16 -1, i16 undef>\n",
+        "@g = global <4 x i16> <i16 -1, i16 -1, i16 -1, i16 undef>\n",
+    ),
+];
+
+#[test]
+fn uniform_aggregates_fold_the_way_upstream_folds_them() {
+    for (written, expected) in FOLDED {
+        let module = llvm_ir_parse::parse_module(written)
+            .unwrap_or_else(|error| panic!("{written} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        // A module prints with a leading blank line where its header would
+        // be, which these fragments have none of.
+        assert_eq!(
+            printed.trim_start_matches('\n'),
+            *expected,
+            "\nfrom: {written}"
+        );
+    }
+}

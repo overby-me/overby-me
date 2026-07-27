@@ -135,13 +135,14 @@ in {
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this
     # pins it against inputs nobody wrote for us.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 122;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 123;
 
     # Ten thousand pass tests, none of them written with a parser in mind,
     # and fourteen hundred analysis tests that are older on average and use
     # the implicit numbering more.
-    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10162;
+    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10166;
     llvm-tree-analysis = pkgs: treeCheck pkgs "Analysis" 1391;
+    llvm-tree-codegen = pkgs: treeCheck pkgs "CodeGen" 22162;
   };
 
   packages.rust-llvm = {lib, ...}:

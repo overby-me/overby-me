@@ -78,6 +78,7 @@ define_keyword_enum! {
         ReturnsTwice => "returns_twice",
         SafeStack => "safestack",
         SanitizeAddress => "sanitize_address",
+        HybridPatchable => "hybrid_patchable",
         SanitizeHwAddress => "sanitize_hwaddress",
         SanitizeMemTag => "sanitize_memtag",
         SanitizeMemory => "sanitize_memory",

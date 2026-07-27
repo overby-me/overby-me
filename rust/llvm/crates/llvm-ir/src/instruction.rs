@@ -241,6 +241,14 @@ define_keyword_enum! {
         PtxKernel => "ptx_kernel",
         PtxDevice => "ptx_device",
         RiscvVectorCc => "riscv_vector_cc",
+        Msp430Intr => "msp430_intrcc",
+        IntelOclBi => "intel_ocl_bicc",
+        M68kRtd => "m68k_rtdcc",
+        AvrIntr => "avr_intrcc",
+        AvrSignal => "avr_signalcc",
+        Aarch64SmePreserveMostFromX0 => "aarch64_sme_preservemost_from_x0",
+        Aarch64SmePreserveMostFromX1 => "aarch64_sme_preservemost_from_x1",
+        Aarch64SmePreserveMostFromX2 => "aarch64_sme_preservemost_from_x2",
     }
 }
 

@@ -85,6 +85,12 @@ olt = "olt"
 # intrinsics (`llvm.seh.scope.begin` and friends), not a misspelt "she".
 seh = "seh"
 SEH = "SEH"
+
+# SME = Scalable Matrix Extension, which names AArch64 calling conventions
+# (`aarch64_sme_preservemost_from_x0` and friends), not a misspelt "some".
+sme = "sme"
+SME = "SME"
+Sme = "Sme"
 Olt = "Olt"
 
 [default.extend-identifiers]

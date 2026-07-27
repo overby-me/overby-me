@@ -591,6 +591,32 @@ phi above it may already have made a placeholder for that number. Reserving
 a second slot rather than reusing the placeholder left the phi pointing at
 an instruction that never arrived. That is 1,391 now, and the tree is a
 fifth ratchet.
+A forty-eighth pass swept `llvm/test/CodeGen`, 23,311 files and by far the
+largest tree, and took the classes it showed that the other two do not.
+The largest is not a gap: 179 of the 644 files it refused write typed
+pointers, which is the deliberate divergence of PLAN 1.2, and 410 more call
+a target intrinsic no LangRef line names. Those are recorded rather than
+closed. What was left came to four things.
+A uniform aggregate folds, and this is a printer rule rather than a parse
+one: all zero is `zeroinitializer`, all undef is `undef`, all poison is
+`poison`, and a vector whose lanes are all the same is `splat (T v)`, which
+an array of the same shape is not. Zero is checked element by element rather
+than by identity, because a struct's fields need not be the same constant to
+be all zero. That moved the differential ratchet, which no parse fix had
+done.
+`i16-1` is a type and a negative number rather than one word, because
+upstream's identifiers hold no hyphen. Taking the hyphen out of the word
+lexer broke six files in a way no unit test and neither suite caught: a
+*label* may hold one, so `for.cond2thread-pre-split:` stopped lexing. The
+run is scanned with hyphens and given back to the first one when no colon
+follows, which is the only way to tell the two apart. The tree ratchets are
+what caught that, which is the first time they have caught a regression the
+suites missed.
+Eight calling conventions the CodeGen tree uses and the suites do not, two
+of which upstream prints with a doubled space, its own spelling of
+`avr_intrcc` and `avr_signalcc` ending in one. And `hybrid_patchable`, which
+llvm-as reads and llvm-dis cannot read back: it writes an attribute kind its
+own reader rejects, so that one is pinned on the exit code alone.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

@@ -90,8 +90,14 @@ reading a module upstream reads is right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/Transforms` | 10,162 | 10,305 | `llvm-tree-transforms` |
+| `llvm/test/Transforms` | 10,166 | 10,305 | `llvm-tree-transforms` |
 | `llvm/test/Analysis` | 1,391 | 1,403 | `llvm-tree-analysis` |
+| `llvm/test/CodeGen` | 22,162 | 22,785 | `llvm-tree-codegen` |
+
+What CodeGen still refuses is mostly not a gap: 179 of its 644 write typed
+pointers, which is the deliberate divergence of PLAN 1.2, and 410 more call
+a target intrinsic no LangRef line names, which is the gap the intrinsic
+name table is honest about having.
 
 The first sweep read 2,781 of the first 2,992 and the gaps it showed were not
 the ones the suites show. Four fixes closed 110 of them: the attribute
@@ -176,7 +182,7 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against `llvm-as | llvm-dis`, and **122 of 216** are identical. Two
+against `llvm-as | llvm-dis`, and **123 of 216** are identical. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against
