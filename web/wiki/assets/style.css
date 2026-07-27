@@ -74,6 +74,19 @@
 	--md-scrim: var(--md-sys-color-scrim);
 }
 
+/* ═══ Native control chrome follows the theme ═══
+   A stylesheet only reaches the parts of a form control the PAGE draws. The date
+   picker panel and its calendar glyph, the number spinners, the open select's
+   option list and the autofill wash are drawn by the BROWSER, and with no
+   declared scheme it draws them light inside the dark theme. theme.rs always
+   sets data-theme on <html>, so pin the scheme to it. */
+html[data-theme="light"] {
+	color-scheme: light;
+}
+html[data-theme="dark"] {
+	color-scheme: dark;
+}
+
 /* ═══ Adaptive spacing per window-size class (M3: 600 / 840 / 1200 / 1600 dp) ══
    The pane / rail / margin tokens default to COMPACT in m3-tokens.css; step them
    up as the viewport widens so panes, gutters and body margins breathe on the

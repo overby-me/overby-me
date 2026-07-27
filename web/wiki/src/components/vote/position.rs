@@ -376,6 +376,9 @@ fn AddCandidateButton(
     let mut open = use_signal(|| false);
     let mut name = use_signal(String::new);
     let mut photo_id = use_signal(|| Option::<String>::None);
+    // The uploaded file's name, shown in the picker's done row (as the editor and
+    // feedback pickers do) and the flag for "a photo is attached".
+    let mut photo_name = use_signal(String::new);
     let mut uploading = use_signal(|| false);
 
     // Upload the chosen photo immediately; the Add button attaches its id.
@@ -388,6 +391,7 @@ fn AddCandidateButton(
         let token = session.read().access_token.clone();
         uploading.set(true);
         photo_id.set(None);
+        photo_name.set(String::new());
         spawn(async move {
             match fd.read_bytes().await {
                 Ok(bytes) => {
@@ -399,7 +403,10 @@ fn AddCandidateButton(
                     )
                     .await
                     {
-                        Ok(up) => photo_id.set(Some(up.id)),
+                        Ok(up) => {
+                            photo_id.set(Some(up.id));
+                            photo_name.set(fname);
+                        }
                         Err(e) => crate::snackbar::show_snackbar(&format!(
                             "{}: {e}",
                             t("error.somethingWentWrong")
@@ -439,6 +446,7 @@ fn AddCandidateButton(
             open.set(false);
             name.set(String::new());
             photo_id.set(None);
+            photo_name.set(String::new());
             spawn(async move {
                 let data = img.map(|fid| model::Jsonb(serde_json::json!({ "image": fid })));
                 let input = model::NodesInsertInput {
@@ -498,13 +506,39 @@ fn AddCandidateButton(
                     oninput: move |e| name.set(e.value()),
                 }
             }
-            div { class: "text-field mt-2",
-                label { "{t(\"vote.candidatePhoto\")}" }
-                input { r#type: "file", accept: "image/*", onchange: on_pick }
+            // Photo picker: the dashed drop-zone the editor, feedback and folder
+            // pickers use, so it matches the rest of the Material UI instead of
+            // dropping the browser's native file input into a text field.
+            div { class: "mt-2",
+                div { class: "file-upload-label", "{t(\"vote.candidatePhoto\")}" }
+                label { class: "file-upload",
+                    input {
+                        r#type: "file",
+                        accept: "image/*",
+                        class: "file-upload-input",
+                        onchange: on_pick,
+                    }
+                    span { class: "material-icons", "image" }
+                    span { class: "file-upload-text", "{t(\"vote.uploadPhoto\")}" }
+                }
                 if *uploading.read() {
-                    span { class: "body-small text-muted", "{t(\"vote.sending\")}" }
-                } else if photo_id.read().is_some() {
-                    span { class: "body-small", "{t(\"vote.photoReady\")}" }
+                    div { class: "stack stack-h mt-1",
+                        div { class: "spinner spinner-sm" }
+                        span { class: "body-small text-muted", "{t(\"vote.uploadPhoto\")}\u{2026}" }
+                    }
+                } else if !photo_name.read().is_empty() {
+                    div { class: "file-upload-done",
+                        span { class: "material-icons", "check_circle" }
+                        span { class: "flex-grow", "{photo_name}" }
+                        button {
+                            class: "btn btn-text",
+                            onclick: move |_| {
+                                photo_id.set(None);
+                                photo_name.set(String::new());
+                            },
+                            "{t(\"content.removeImage\")}"
+                        }
+                    }
                 }
             }
         }
