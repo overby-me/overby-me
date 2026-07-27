@@ -30,8 +30,8 @@ mod types;
 use std::collections::{HashMap, HashSet};
 
 use lexer::{Lexer, Position, Spanned};
-use llvm_ir::Module;
 use llvm_ir::value::{BlockId, GlobalRef, InstId, Name};
+use llvm_ir::{Module, TypeId};
 
 pub use lexer::LexError;
 
@@ -67,10 +67,13 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         index: 0,
         module: Module::new(),
         symbols: HashMap::new(),
+        implied_intrinsics: Vec::new(),
+        implied_signatures: HashMap::new(),
     };
     parser.module.module_id = module_id;
     parser.prescan_symbols()?;
     parser.parse_top_level()?;
+    parser.add_implied_intrinsics();
     Ok(parser.module)
 }
 
@@ -81,6 +84,11 @@ pub(crate) struct Parser {
     /// Every global-scope name and the id it will get, worked out before
     /// parsing so that forward references resolve without placeholders.
     pub(crate) symbols: HashMap<Name, GlobalRef>,
+    /// The `llvm.*` names nothing declares, in the order they are first used,
+    /// which is the order upstream appends their declarations in.
+    pub(crate) implied_intrinsics: Vec<Name>,
+    /// What the first call to each of them says its signature is.
+    pub(crate) implied_signatures: HashMap<Name, (TypeId, Vec<TypeId>)>,
 }
 
 /// Everything the parser has to remember while inside one function body.

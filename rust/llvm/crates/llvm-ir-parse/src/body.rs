@@ -2,6 +2,7 @@
 
 use crate::lexer::Token;
 use crate::{FunctionState, ParseError, Parser};
+use llvm_ir::attribute::AttributeSet;
 use llvm_ir::constant::{CastOp, GepFlags};
 use llvm_ir::function::{Function, Param};
 use llvm_ir::instruction::{
@@ -1380,6 +1381,42 @@ impl Parser {
         ))
     }
 
+    /// The name of the callee about to be read, when it is an `llvm.*` name
+    /// nothing declares and LangRef documents. Upstream materialises a
+    /// declaration for exactly that set: an undocumented `llvm.*` name is
+    /// still "use of undefined value", and a name it recognises is declared
+    /// from the call's own signature.
+    fn undeclared_intrinsic(&self) -> Option<Name> {
+        let Token::GlobalName(text) = self.peek() else {
+            return None;
+        };
+        let name = Name::Named(text.clone());
+        self.implied_intrinsics.contains(&name).then_some(name)
+    }
+
+    /// Adds the declarations the calls implied, after everything the module
+    /// writes, which is where upstream puts them. The attributes upstream
+    /// gives an intrinsic are not here: they come from a per-intrinsic table
+    /// LangRef does not document, so the declaration is printed back without
+    /// them rather than with a guess at them.
+    pub(crate) fn add_implied_intrinsics(&mut self) {
+        for name in self.implied_intrinsics.clone() {
+            let Some((return_type, params)) = self.implied_signatures.get(&name).cloned() else {
+                continue;
+            };
+            let mut declaration = Function::new(name, return_type);
+            declaration.params = params
+                .into_iter()
+                .map(|ty| Param {
+                    ty,
+                    attrs: AttributeSet::default(),
+                    name: None,
+                })
+                .collect();
+            self.module.add_function(declaration);
+        }
+    }
+
     fn parse_call_data(
         &mut self,
         function: &mut Function,
@@ -1401,6 +1438,11 @@ impl Parser {
             .or(leading_address_space);
 
         let callee_type = self.module.ctx.pointer_type(address_space.unwrap_or(0));
+        // An intrinsic needs no declaration: upstream builds one from the
+        // call when it recognises the name. The signature is not known until
+        // the arguments have been read, so the callee is set aside and
+        // resolved after them.
+        let undeclared = self.undeclared_intrinsic();
         let callee = self.parse_value(function, state, callee_type)?;
 
         self.require(Token::LeftParen)?;
@@ -1416,6 +1458,19 @@ impl Parser {
             let attrs = self.parse_attribute_set(false)?;
             let value = self.parse_value(function, state, ty)?;
             args.push(CallArg { ty, attrs, value });
+        }
+
+        // The declaration upstream builds takes its shape from the first
+        // call, so the first one to arrive is the one recorded.
+        if let Some(name) = undeclared
+            && !self.implied_signatures.contains_key(&name)
+        {
+            let result = match self.module.ctx.type_kind(written_type) {
+                TypeKind::Function { result, .. } => *result,
+                _ => written_type,
+            };
+            let params = args.iter().map(|arg| arg.ty).collect();
+            self.implied_signatures.insert(name, (result, params));
         }
 
         let fn_attrs = self.parse_function_attribute_set()?;

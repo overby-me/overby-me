@@ -355,6 +355,83 @@ impl Verifier<'_> {
         let base = crate::intrinsic_table::base_name(name);
         let element = |verifier: &Self, ty: TypeId| verifier.innermost_element(ty);
         match base {
+            // A three-way compare answers lane by lane, in a result wide
+            // enough to hold the three answers.
+            "llvm.scmp" | "llvm.ucmp" => {
+                let lanes = |verifier: &Self, ty: TypeId| {
+                    TypeKind::as_vector(verifier.module.ctx.type_kind(ty)).map(|(_, n, s)| (n, s))
+                };
+                if let Some(argument) = arguments.first()
+                    && lanes(self, *argument) != lanes(self, result)
+                {
+                    self.report(format!(
+                        "{where_} answers in a different number of lanes than it compares"
+                    ));
+                }
+                if let TypeKind::Integer(bits) = self.module.ctx.type_kind(element(self, result))
+                    && *bits < 2
+                {
+                    self.report(format!(
+                        "{where_} answers three ways in {bits} bit, which holds two"
+                    ));
+                }
+            }
+            // A predicated cast casts lane by lane like any other.
+            _ if base.starts_with("llvm.vp.")
+                && matches!(
+                    base.trim_start_matches("llvm.vp."),
+                    "fptosi"
+                        | "fptoui"
+                        | "sitofp"
+                        | "uitofp"
+                        | "fptrunc"
+                        | "fpext"
+                        | "trunc"
+                        | "zext"
+                        | "sext"
+                        | "ptrtoint"
+                        | "inttoptr"
+                ) =>
+            {
+                let lanes = |verifier: &Self, ty: TypeId| {
+                    TypeKind::as_vector(verifier.module.ctx.type_kind(ty)).map(|(_, n, s)| (n, s))
+                };
+                if let Some(argument) = arguments.first()
+                    && lanes(self, *argument) != lanes(self, result)
+                {
+                    self.report(format!(
+                        "{where_} casts a different number of lanes than it produces"
+                    ));
+                }
+            }
+            // The address of a thread's copy is only a thing a thread-local
+            // has, so the argument names one rather than being any pointer.
+            "llvm.threadlocal.address" => {
+                let names_one = values.first().is_some_and(|value| {
+                    let Value::Constant(id) = value else {
+                        return false;
+                    };
+                    let Constant::Global { target, .. } = self.module.ctx.constant(*id) else {
+                        return false;
+                    };
+                    // An alias to one is one, which is what upstream's own
+                    // threadlocal-pass.ll leans on.
+                    match target {
+                        GlobalRef::Variable(id) => {
+                            self.module.global(*id).qualifiers.thread_local.is_some()
+                        }
+                        GlobalRef::Alias(id) => {
+                            self.module.alias(*id).qualifiers.thread_local.is_some()
+                        }
+                        _ => false,
+                    }
+                });
+                if !names_one {
+                    self.report(format!(
+                        "{where_} takes the address of something that is not thread-local"
+                    ));
+                }
+            }
             // The declaration says where one scope begins, so it names one
             // scope: a list holding a single node, not a string and not two.
             "llvm.experimental.noalias.scope.decl" => {

@@ -528,6 +528,32 @@ behind it. Reproducing that needs a per-intrinsic attribute table LangRef
 does not document, and without it the module parses and prints back wrong,
 which is worse than refusing it. On the suites the trade is five files
 gained against nine wrongly accepted.
+A forty-fifth pass answered the intrinsic-declaration question for the
+fourth time, and this time yes. 375 of the 452 files the tree sweep still
+refused called an intrinsic without declaring it, which is five times
+everything else put together. Upstream builds the declaration from the call
+for any name it recognises, and appends it after everything the module
+writes, in the order the names were first used. So does this now, gated on
+`intrinsic_table::signature` so that an undocumented `llvm.*` name is still
+"use of undefined value". The ids have to be reserved in the pre-scan, next
+to every other global symbol, or the pre-scan and the parse disagree about
+which function is which.
+What is still not built is the attributes upstream gives an intrinsic:
+`@llvm.assume` comes back with five function attributes and an `i1 noundef`
+parameter, from a table LangRef does not document. Those declarations print
+back without them, which is a divergence, and a smaller one than refusing
+the module.
+The three earlier measurements said no because they scored the trade on the
+suites alone, where it was five files gained against nine wrongly accepted.
+The nine turned out to be nine rules, four of them worth writing here. A
+three-way compare answers lane by lane in a result wide enough to hold three
+answers, so `i1` is too narrow. A predicated cast casts lane by lane like
+any other. And `llvm.threadlocal.address` takes the address of a thread's
+copy of something, so its argument is a thread-local global, or an alias to
+one, which is what upstream's own threadlocal-pass.ll leans on and what the
+first attempt at the rule refused.
+Every bound moved the right way: Assembler refusals 13 to 12, Verifier 286
+to 287 with refusals 4 to 2, and the tree 9,853 to 10,102 of 10,305.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

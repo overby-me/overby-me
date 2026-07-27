@@ -95,6 +95,34 @@ impl Parser {
             }
         }
 
+        // An intrinsic needs no declaration: upstream builds one from the
+        // call when it recognises the name, and appends it after everything
+        // the module writes, in the order the names were first used. Its id
+        // has to be reserved here so that the pre-scan and the parse agree
+        // about which function is which.
+        let mut implied = Vec::new();
+        for spanned in &self.tokens {
+            let Token::GlobalName(text) = &spanned.token else {
+                continue;
+            };
+            if !text.starts_with("llvm.") {
+                continue;
+            }
+            let name = Name::Named(text.clone());
+            if symbols.contains_key(&name) || implied.contains(&name) {
+                continue;
+            }
+            let base = llvm_ir::intrinsic_table::base_name(text);
+            if llvm_ir::intrinsic_table::signature(base).is_some() {
+                implied.push(name);
+            }
+        }
+        for name in implied {
+            symbols.insert(name.clone(), GlobalRef::Function(FunctionId(functions)));
+            functions += 1;
+            self.implied_intrinsics.push(name);
+        }
+
         self.symbols = symbols;
         Ok(())
     }

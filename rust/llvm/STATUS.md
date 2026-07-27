@@ -77,8 +77,8 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 453 | 483 | 13 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 286 | 328 | 4 | `llvm-upstream-verifier` |
+| `llvm/test/Assembler` | 453 | 483 | 12 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 287 | 328 | 2 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 
@@ -90,16 +90,22 @@ reading a module upstream reads is right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/Transforms` | 9,853 | 10,305 | `llvm-tree-transforms` |
+| `llvm/test/Transforms` | 10,102 | 10,305 | `llvm-tree-transforms` |
 
 The first sweep read 2,781 of the first 2,992 and the gaps it showed were not
 the ones the suites show. Four fixes closed 110 of them: the attribute
 spellings that predate `memory(...)`, a phi carrying a `!dbg`, an integer
 literal past its type's width (upstream truncates rather than complaining),
 and the `u0x` and `s0x` forms for an integer too wide to write in decimal.
-What is left is led by intrinsics called without a declaration, 84 files in
-that sample, which needs upstream's per-intrinsic attribute table to print
-back and so is recorded rather than done.
+The gap after those was one thing: 375 of the 452 remaining files called an
+intrinsic without declaring it. That is now read the way upstream reads it,
+by building the declaration from the call for any `llvm.*` name LangRef
+documents, and appending it after everything the module writes. What is not
+built is the attributes upstream gives an intrinsic, which come from a table
+LangRef does not document, so those declarations print back without them.
+Doing it exposed four verifier rules that had been unreachable, and all four
+are real, which is why both suite ratchets ended up better than they started
+rather than worse.
 
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse 18 modules llvm-as reads**, which is the failure that

@@ -61,6 +61,22 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "define void @f(<4 x i32> %a, <4 x i32> %b) {\nentry:\n  %r = call <8 x i32> @llvm.scmp.v8i32.v4i32(<4 x i32> %a, <4 x i32> %b)\n  ret void\n}\n",
+        "answers in a different number of lanes than it compares",
+    ),
+    (
+        "define void @f(i32 %a, i32 %b) {\nentry:\n  %r = call i1 @llvm.scmp.i1.i32(i32 %a, i32 %b)\n  ret void\n}\n",
+        "answers three ways in 1 bit, which holds two",
+    ),
+    (
+        "define void @f(<8 x float> %s, <4 x i1> %m, i32 %n) {\nentry:\n  %r = call <4 x i32> @llvm.vp.fptosi.v4i32.v8f32(<8 x float> %s, <4 x i1> %m, i32 %n)\n  ret void\n}\n",
+        "casts a different number of lanes than it produces",
+    ),
+    (
+        "@v = global i32 0\n\ndefine void @f() {\nentry:\n  %p = call ptr @llvm.threadlocal.address(ptr @v)\n  ret void\n}\n",
+        "takes the address of something that is not thread-local",
+    ),
+    (
         "declare void @llvm.experimental.noalias.scope.decl(metadata)\n\ndefine void @f() {\nentry:\n  call void @llvm.experimental.noalias.scope.decl(metadata !0)\n  ret void\n}\n\n!0 = !{!1, !2}\n!1 = !{!1}\n!2 = !{!2}\n",
         "declares something other than one scope",
     ),
@@ -796,6 +812,10 @@ const BROKEN: &[(&str, &str)] = &[
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
     (
+        "define void @f() {\nentry:\n  call void @llvm.not.a.real.intrinsic()\n  ret void\n}\n",
+        "reference to undefined symbol @llvm.not.a.real.intrinsic",
+    ),
+    (
         "define void @f(ptr %p) {\nentry:\n  %v = load atomic i32, ptr %p monotonic\n  ret void\n}\n",
         "atomic load needs an alignment of its own",
     ),
@@ -1036,6 +1056,10 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // An intrinsic LangRef documents needs no declaration: the call says what
+    // its signature is. An alias to a thread-local is thread-local, which is
+    // what upstream's own threadlocal-pass.ll leans on.
+    "@v = thread_local global i32 0\n@a = thread_local alias i32, ptr @v\n\ndefine void @f(<4 x i32> %x, <4 x i32> %y, <8 x float> %s, <8 x i1> %m, i32 %n) {\nentry:\n  %p = call ptr @llvm.threadlocal.address(ptr @a)\n  %c = call <4 x i32> @llvm.scmp.v4i32.v4i32(<4 x i32> %x, <4 x i32> %y)\n  %v = call <8 x i32> @llvm.vp.fptosi.v8i32.v8f32(<8 x float> %s, <8 x i1> %m, i32 %n)\n  ret void\n}\n",
     // One scope is what the declaration of a scope declares, and a tail
     // convention hands the frame over without anything in a register.
     "declare void @llvm.experimental.noalias.scope.decl(metadata)\n\ndeclare tailcc void @g(i32)\n\ndefine tailcc void @f(i32 %x) {\nentry:\n  call void @llvm.experimental.noalias.scope.decl(metadata !0)\n  musttail call tailcc void @g(i32 %x)\n  ret void\n}\n\n!0 = !{!1}\n!1 = !{!1}\n",
