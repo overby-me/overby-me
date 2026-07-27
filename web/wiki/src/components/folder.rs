@@ -96,6 +96,15 @@ pub fn FolderApp(
     let has_cover = cover_id.is_some();
     let cover_url = super::loader::use_file_object_url(cover_id.unwrap_or_default());
 
+    // The header avatar shows what this node's own row shows in a list: a folder
+    // carries the folder glyph with its initial, not the bare glyph. Built from
+    // the shared `node_avatar`, so the header can never drift from the lists.
+    let header_icon = super::loader::node_avatar(
+        &super::loader::node_icon_mime_id(&mime_id, node.data.as_ref().map(|d| &d.0)),
+        &name,
+        node.get_index.filter(|i| *i >= 1).map(|i| (i - 1) as usize),
+    );
+
     // Parity with ContentApp: a group/event/folder is content too, so it gets the
     // same tools (project, edit, delete, share, comments-on-screen). A node/context
     // owner may manage; editing also requires the node to still be mutable. The
@@ -173,7 +182,6 @@ pub fn FolderApp(
     // Use live children once loaded; fall back to the already-resolved set.
     let children = children_res.read().clone().flatten().unwrap_or(initial);
     let children = &children;
-    let mime_id = mime_id.as_str();
     let name = name.as_str();
 
     // Folder view mode: list (default) or a tile grid (#125). Remembered across
@@ -217,14 +225,14 @@ pub fn FolderApp(
                     div { class: "content-hero",
                         super::widgets::ZoomableImage { src: url, alt: name.to_string() }
                         div { class: "content-hero-veil",
-                            div { class: "avatar content-hero-avatar", {icon_el(mime_id)} }
+                            div { class: "avatar content-hero-avatar", {header_icon.clone()} }
                             div { class: "content-hero-meta",
                                 h3 { class: "content-hero-title", "{name}" }
                             }
                         }
                     }
                 } else {
-                    div { class: "avatar context-header-icon", {icon_el(mime_id)} }
+                    div { class: "avatar context-header-icon", {header_icon.clone()} }
                     h3 { class: "context-header-title", "{name}" }
                 }
                 // Secondary/admin folder actions live in the M3 tools sheet
