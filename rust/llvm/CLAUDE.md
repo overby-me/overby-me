@@ -311,8 +311,15 @@ The rest of the intrinsic gap is not signatures at all, and a
 twenty-third pass started writing it out by hand instead: `llvm.bswap`
 swaps a whole number of byte pairs, a masked access takes an alignment
 that is one, `get_active_lane_mask` produces a mask of `i1`, and
-`llvm.ptrmask` masks a pointer. Four rules, five files, and the table
-earned its place after all by knowing how to find a base name.
+`llvm.ptrmask` masks a pointer. A twenty-fourth pass added five more:
+`get.vector.length` asks for a factor above zero, `get.dynamic.area.offset`
+produces a scalar integer, `vector.splice` indexes inside its own vector,
+`vector.extract` and `vector.insert` start at a multiple of the
+subvector's length, and the statepoint and the load-exclusive families
+reach through a pointer whose pointee the type system no longer records,
+so the call carries an `elementtype` that says what it is. Nine rules,
+sixteen files, and the table earned its place by knowing how to find a
+base name.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

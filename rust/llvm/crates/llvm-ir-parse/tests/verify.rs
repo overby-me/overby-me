@@ -403,6 +403,26 @@ const BROKEN: &[(&str, &str)] = &[
         "declare i32 @llvm.ptrmask.i32.i32(i32, i32)\n\ndefine void @f(i32 %p, i32 %m) {\nentry:\n  %r = call i32 @llvm.ptrmask.i32.i32(i32 %p, i32 %m)\n  ret void\n}\n",
         "masks something that is not a pointer",
     ),
+    (
+        "declare i32 @llvm.experimental.get.vector.length.i32(i32, i32, i1)\n\ndefine void @f(i32 %n) {\nentry:\n  %r = call i32 @llvm.experimental.get.vector.length.i32(i32 %n, i32 0, i1 true)\n  ret void\n}\n",
+        "asks for a vector factor of zero",
+    ),
+    (
+        "declare <4 x i32> @llvm.vector.splice.v4i32(<4 x i32>, <4 x i32>, i32)\n\ndefine void @f(<4 x i32> %a, <4 x i32> %b) {\nentry:\n  %r = call <4 x i32> @llvm.vector.splice.v4i32(<4 x i32> %a, <4 x i32> %b, i32 9)\n  ret void\n}\n",
+        "splices at 9, which is outside a vector of 4",
+    ),
+    (
+        "declare <2 x i32> @llvm.vector.extract.v2i32.v4i32(<4 x i32>, i64)\n\ndefine void @f(<4 x i32> %a) {\nentry:\n  %r = call <2 x i32> @llvm.vector.extract.v2i32.v4i32(<4 x i32> %a, i64 1)\n  ret void\n}\n",
+        "starts at 1, which is not a multiple of 2",
+    ),
+    (
+        "declare <4 x i32> @llvm.get.dynamic.area.offset.v4i32()\n\ndefine void @f() {\nentry:\n  %r = call <4 x i32> @llvm.get.dynamic.area.offset.v4i32()\n  ret void\n}\n",
+        "other than a scalar integer",
+    ),
+    (
+        "declare i64 @llvm.aarch64.ldxr.p0(ptr)\n\ndefine void @f(ptr %p) {\nentry:\n  %r = call i64 @llvm.aarch64.ldxr.p0(ptr %p)\n  ret void\n}\n",
+        "reaches through argument 0 without an elementtype",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -774,6 +794,8 @@ const VERIFIES: &[&str] = &[
     "/* a comment */\n@g = external global i32\n",
     "!named = !{!1}\n!0 = !{}\n!1 = !GenericDINode(tag: 3, header: \"h\", operands: {!0, !0})\n",
     "!named = !{!0}\n!0 = !DIEnumerator(name: \"D\", value: 2722258935367507707706996859454145691648, isUnsigned: true)\n",
+    // An elementtype says what the pointer reaches through.
+    "declare i64 @llvm.aarch64.ldxr.p0(ptr)\n\ndefine void @f(ptr %p) {\nentry:\n  %r = call i64 @llvm.aarch64.ldxr.p0(ptr elementtype(i64) %p)\n  ret void\n}\n",
     // The older spelling of an intrinsic has fewer arguments than LangRef
     // documents, and upstream upgrades it rather than refusing it.
     "declare i64 @llvm.objectsize.i64.p0(ptr, i1)\n\ndefine void @f(ptr %p) {\nentry:\n  %r = call i64 @llvm.objectsize.i64.p0(ptr %p, i1 false)\n  ret void\n}\n",

@@ -284,6 +284,7 @@ impl Verifier<'_> {
         result: TypeId,
         arguments: &[TypeId],
         values: &[Value],
+        attributes: &[AttributeSet],
         where_: &str,
     ) {
         let base = crate::intrinsic_table::base_name(name);
@@ -345,6 +346,104 @@ impl Verifier<'_> {
                 if !pointer(self, result) || arguments.first().is_none_or(|ty| !pointer(self, *ty))
                 {
                     self.report(format!("{where_} masks something that is not a pointer"));
+                }
+            }
+            // The vector length it asks for is a length.
+            "llvm.experimental.get.vector.length" => {
+                if let Some(Value::Constant(id)) = values.get(1)
+                    && self
+                        .module
+                        .ctx
+                        .constant(*id)
+                        .as_integer()
+                        .and_then(ApInt::to_u64)
+                        == Some(0)
+                {
+                    self.report(format!("{where_} asks for a vector factor of zero"));
+                }
+            }
+            // The offset is a number of bytes.
+            "llvm.get.dynamic.area.offset"
+                if !matches!(self.module.ctx.type_kind(result), TypeKind::Integer(_)) =>
+            {
+                self.report(format!(
+                    "{where_} produces something other than a scalar integer"
+                ));
+            }
+            // Splicing takes an index into the concatenation of the two
+            // halves, counted from either end.
+            "llvm.vector.splice" => {
+                if let Some((_, count, false)) = arguments
+                    .first()
+                    .map(|ty| self.module.ctx.type_kind(*ty))
+                    .and_then(TypeKind::as_vector)
+                    && let Some(Value::Constant(id)) = values.get(2)
+                    && let Some(written) = self.module.ctx.constant(*id).as_integer()
+                    && let Ok(index) = i64::try_from(
+                        written.to_u64_truncating() as i128
+                            - if written.is_negative() {
+                                1i128 << written.bits()
+                            } else {
+                                0
+                            },
+                    )
+                    && (index >= count as i64 || index < -(count as i64))
+                {
+                    self.report(format!(
+                        "{where_} splices at {index}, which is outside a vector of {count}"
+                    ));
+                }
+            }
+            // A subvector starts at a multiple of its own length.
+            "llvm.vector.extract" | "llvm.vector.insert" => {
+                let subvector = if base == "llvm.vector.extract" {
+                    Some(result)
+                } else {
+                    arguments.get(1).copied()
+                };
+                if let Some((_, lanes, false)) = subvector
+                    .map(|ty| self.module.ctx.type_kind(ty))
+                    .and_then(TypeKind::as_vector)
+                    && let Some(Value::Constant(id)) = values.last()
+                    && let Some(index) = self
+                        .module
+                        .ctx
+                        .constant(*id)
+                        .as_integer()
+                        .and_then(ApInt::to_u64)
+                    && lanes != 0
+                    && index % lanes != 0
+                {
+                    self.report(format!(
+                        "{where_} starts at {index}, which is not a multiple of {lanes}"
+                    ));
+                }
+            }
+            // These reach through a pointer whose pointee the opaque type
+            // system no longer records, so the call has to say what it is.
+            "llvm.experimental.gc.statepoint"
+            | "llvm.aarch64.ldxr"
+            | "llvm.aarch64.ldaxr"
+            | "llvm.aarch64.stxr"
+            | "llvm.aarch64.stlxr"
+            | "llvm.arm.ldrex"
+            | "llvm.arm.ldaex"
+            | "llvm.arm.strex"
+            | "llvm.arm.stlex" => {
+                // The statepoint's callee is its third argument; everything
+                // else here reaches through the pointer it is given, which is
+                // the last one.
+                let position = if base == "llvm.experimental.gc.statepoint" {
+                    2
+                } else {
+                    attributes.len().saturating_sub(1)
+                };
+                if let Some(attrs) = attributes.get(position)
+                    && !has_type_attribute(attrs, TypeAttr::ElementType)
+                {
+                    self.report(format!(
+                        "{where_} reaches through argument {position} without an elementtype"
+                    ));
                 }
             }
             _ => {}
@@ -1644,7 +1743,16 @@ impl Verifier<'_> {
                     if is_intrinsic && let Name::Named(intrinsic) = callee.name.clone() {
                         let arguments: Vec<TypeId> = call.args.iter().map(|a| a.ty).collect();
                         let values: Vec<Value> = call.args.iter().map(|a| a.value).collect();
-                        self.intrinsic_rule(&intrinsic, ty, &arguments, &values, &where_);
+                        let attributes: Vec<AttributeSet> =
+                            call.args.iter().map(|a| a.attrs.clone()).collect();
+                        self.intrinsic_rule(
+                            &intrinsic,
+                            ty,
+                            &arguments,
+                            &values,
+                            &attributes,
+                            &where_,
+                        );
                     }
                     if is_intrinsic {
                         let (result, params, is_var_arg) =

@@ -67,14 +67,14 @@ skipped, so the denominator is the whole suite.
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
 | `llvm/test/Assembler` | 411 | 483 | 14 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 267 | 328 | 4 | `llvm-upstream-verifier` |
+| `llvm/test/Verifier` | 278 | 328 | 4 | `llvm-upstream-verifier` |
 
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse 18 modules llvm-as reads**, which is the failure that
 matters: parse gaps, led now by intrinsics used without a declaration
 (five files), which needs more than a table of intrinsic names. That count is
 a ceiling that may only fall. We
-**read 115 modules llvm-as refuses**, which is a missing verifier rule
+**read 104 modules llvm-as refuses**, which is a missing verifier rule
 each, and agreement is a floor that may only rise.
 
 Most of what is left on the second count is one thing: upstream knows what
@@ -93,11 +93,15 @@ catches is a module that declares an intrinsic *consistently* wrongly, so
 the call matches its own declaration and only LangRef knows better;
 upstream's suites contain no such module and a compiler reading real IR
 will meet one. What it cannot reach is the rest of the gap, because those rules are prose
-rather than types. Those are being written one at a time instead, keyed on
-the base name the table knows how to find: `llvm.bswap` swapping a whole
-number of byte pairs, a masked access taking an alignment that is one,
-`get_active_lane_mask` producing a mask of `i1`, and `llvm.ptrmask`
-masking a pointer. Checking the argument *count* was
+rather than types. Those are being written one at a time instead, keyed on the base name the
+table knows how to find. Nine so far: `llvm.bswap` swapping a whole number
+of byte pairs, a masked access taking an alignment that is one,
+`get_active_lane_mask` producing a mask of `i1`, `llvm.ptrmask` masking a
+pointer, `get.vector.length` asking for a factor above zero,
+`get.dynamic.area.offset` producing a scalar integer, `vector.splice`
+indexing inside its own vector, `vector.extract` and `vector.insert`
+starting at a multiple of the subvector's length, and the intrinsics that
+reach through a pointer needing an `elementtype` to say what they reach. Checking the argument *count* was
 tried and reverted, since upstream auto-upgrades the older spelling of an
 intrinsic and demanding LangRef's arity cost two files.
 
