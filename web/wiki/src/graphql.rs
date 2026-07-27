@@ -127,6 +127,7 @@ impl From<NodeWithChildren> for model::NodeWithChildren {
             owner_id: n.owner_id.map(Into::into),
             mutable: n.mutable,
             index: n.index,
+            get_index: n.get_index,
             data: n.data.map(Into::into),
             mime: n.mime.map(Into::into),
             parent: n.parent.map(|p| Box::new((*p).into())),
@@ -408,6 +409,10 @@ pub struct NodeWithChildren {
     pub owner_id: Option<Uuid>,
     pub mutable: bool,
     pub index: i32,
+    // Computed ordinal among same-type siblings (1-based), as NodeFields selects
+    // for the drawer: it is what letters a policy A/B/C and numbers a change
+    // 1/2/3 on its own page, where no sibling list is loaded to count from.
+    pub get_index: Option<i32>,
     pub data: Option<Jsonb>,
     pub mime: Option<MimeFields>,
     pub parent: Option<Box<ParentNodeFields>>,

@@ -41,6 +41,9 @@ pub struct NodeWithChildren {
     pub owner_id: Option<Uuid>,
     pub mutable: bool,
     pub index: i32,
+    /// Ordinal among same-type siblings (1-based, backend-computed): the A/B/C of
+    /// a policy and the 1/2/3 of a change, on a page that loads no sibling list.
+    pub get_index: Option<i32>,
     pub data: Option<Jsonb>,
     pub mime: Option<MimeFields>,
     pub parent: Option<Box<ParentNodeFields>>,

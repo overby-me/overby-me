@@ -116,12 +116,19 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     // band crops it hard. Candidate heroes get the taller frame; documents keep
     // the wide cover proportions.
     let portrait_hero = node.mime_id.as_deref() == Some("vote/candidate");
-    // The header avatar takes the node's OWN icon. ContentApp is not only the
-    // document view: candidates, positions, policies and changes all render
-    // through it, and every one of them was wearing the document icon.
-    let header_icon = super::loader::node_icon_el(
-        node.mime_id.as_deref().unwrap_or("wiki/document"),
-        data.as_ref(),
+    // The header avatar shows what the node's own row shows in a list: its icon,
+    // or the A/B/C of a policy and the 1/2/3 of a change. ContentApp is not only
+    // the document view (candidates, positions, policies and changes all render
+    // through it), so it must not assume the document icon. `get_index` is the
+    // backend's 1-based ordinal among same-type siblings; `node_avatar` wants it
+    // 0-based, and ignores it for every mime that is not lettered or numbered.
+    let header_icon = super::loader::node_avatar(
+        &super::loader::node_icon_mime_id(
+            node.mime_id.as_deref().unwrap_or("wiki/document"),
+            data.as_ref(),
+        ),
+        &name,
+        node.get_index.filter(|i| *i >= 1).map(|i| (i - 1) as usize),
     );
 
     rsx! {
