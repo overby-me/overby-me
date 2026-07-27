@@ -37,7 +37,6 @@
 use clap::Parser;
 use std::ffi::CString;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
 use std::process;
 
 #[derive(Parser, Debug)]
@@ -63,6 +62,10 @@ struct Cli {
     /// Place the transient unit in the specified slice.
     #[arg(long, value_name = "SLICE")]
     slice: Option<String>,
+
+    /// Inherit the slice from the caller, prefixing any --slice= value.
+    #[arg(long)]
+    slice_inherit: bool,
 
     /// Set a unit property. Can be specified multiple times.
     /// Format: NAME=VALUE
@@ -104,7 +107,16 @@ struct Cli {
 
     /// Set the working directory for the spawned process.
     #[arg(long, value_name = "DIR")]
-    working_directory: Option<PathBuf>,
+    /// Repeatable: an empty value RESETS it and the last value wins, matching
+    /// upstream. Kept as String rather than PathBuf because clap's PathBuf
+    /// parser rejects an empty value outright ("a value is required ... but
+    /// none was supplied"), which made `--working-directory=` a hard error
+    /// instead of a reset.
+    working_directory: Vec<String>,
+
+    /// Run in the caller's current directory (upstream `-d`).
+    #[arg(short = 'd', long)]
+    same_dir: bool,
 
     /// Set an environment variable for the spawned process. Can be
     /// specified multiple times. Format: NAME=VALUE
@@ -329,7 +341,7 @@ fn print_unit_info(cli: &Cli, unit_name: &str) {
         eprintln!("Description: {desc}");
     }
 
-    if let Some(ref slice) = cli.slice {
+    if let Some(ref slice) = effective_slice(cli.slice.as_deref(), cli.slice_inherit) {
         eprintln!("Slice: {slice}");
     }
 
@@ -349,8 +361,8 @@ fn print_unit_info(cli: &Cli, unit_name: &str) {
         eprintln!("Group: {gid}");
     }
 
-    if let Some(ref wd) = cli.working_directory {
-        eprintln!("Working directory: {}", wd.display());
+    if let Some(wd) = effective_working_directory(&cli.working_directory, cli.same_dir) {
+        eprintln!("Working directory: {wd}");
     }
 
     for env in &cli.setenv {
@@ -442,9 +454,9 @@ fn apply_process_properties(cli: &Cli) -> Result<(), String> {
     }
 
     // Apply working directory
-    if let Some(ref wd) = cli.working_directory {
-        std::env::set_current_dir(wd)
-            .map_err(|e| format!("Failed to change directory to {}: {e}", wd.display()))?;
+    if let Some(wd) = effective_working_directory(&cli.working_directory, cli.same_dir) {
+        std::env::set_current_dir(&wd)
+            .map_err(|e| format!("Failed to change directory to {wd}: {e}"))?;
     }
 
     // Apply environment variables
@@ -525,11 +537,8 @@ fn try_create_transient_unit(
         properties.insert("nice".into(), Value::Number(nice.into()));
     }
 
-    if let Some(ref wd) = cli.working_directory {
-        properties.insert(
-            "working_directory".into(),
-            Value::String(wd.to_string_lossy().to_string()),
-        );
+    if let Some(wd) = effective_working_directory(&cli.working_directory, cli.same_dir) {
+        properties.insert("working_directory".into(), Value::String(wd));
     }
 
     if cli.scope {
@@ -547,8 +556,8 @@ fn try_create_transient_unit(
         properties.insert("pipe".into(), Value::Bool(true));
     }
 
-    if let Some(ref slice) = cli.slice {
-        properties.insert("slice".into(), Value::String(slice.clone()));
+    if let Some(slice) = effective_slice(cli.slice.as_deref(), cli.slice_inherit) {
+        properties.insert("slice".into(), Value::String(slice));
     }
 
     if let Some(service_type) = cli.service_type.last() {
@@ -701,6 +710,68 @@ fn try_create_transient_unit(
         .cloned()
         .unwrap_or(serde_json::Value::Null);
     Ok(Some(result))
+}
+
+/// The effective working directory, honouring upstream's reset semantics.
+///
+/// `--working-directory` may be repeated; the last occurrence wins and an empty
+/// value means "unset", so `--working-directory= --working-directory=/tmp`
+/// yields /tmp. `--same-dir` (`-d`) means the caller's own cwd, which is what
+/// run.c does with safe_getcwd().
+///
+/// Upstream parses both in one getopt loop, so strictly the last of the two
+/// wins. Here an explicit --working-directory takes precedence whenever it is
+/// given at all, and --same-dir applies only when it is not; the two are not
+/// combined in practice and this avoids depending on clap occurrence ordering.
+fn effective_working_directory(values: &[String], same_dir: bool) -> Option<String> {
+    if !values.is_empty() {
+        return values.last().filter(|s| !s.is_empty()).cloned();
+    }
+    if same_dir {
+        return std::env::current_dir()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned());
+    }
+    None
+}
+
+/// The slice the calling process itself lives in, e.g. `system.slice`.
+///
+/// Read from the cgroup v2 line in /proc/self/cgroup, taking the LAST path
+/// component ending in `.slice` so a nested slice wins over its parent.
+fn caller_slice() -> Option<String> {
+    let content = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let path = content.lines().find_map(|l| l.strip_prefix("0::"))?;
+    path.split('/')
+        .filter(|c| c.ends_with(".slice"))
+        .next_back()
+        .map(str::to_owned)
+}
+
+/// Resolve the effective `Slice=` for the transient unit.
+///
+/// Mirrors run.c: with --slice-inherit the caller's slice has its `.slice`
+/// suffix stripped and becomes a prefix, an explicit --slice= is appended after
+/// a `-`, and the result is re-suffixed. So `--slice-inherit --slice=foo` from
+/// inside system.slice gives `system-foo.slice`, which is how slice nesting is
+/// spelled. Without --slice-inherit the value is passed through untouched and
+/// PID 1 mangles it.
+fn effective_slice(slice: Option<&str>, inherit: bool) -> Option<String> {
+    if !inherit {
+        return slice.map(str::to_owned);
+    }
+    let Some(caller) = caller_slice() else {
+        eprintln!("Failed to determine the caller's slice for --slice-inherit");
+        std::process::exit(1);
+    };
+    let base = caller.strip_suffix(".slice").unwrap_or(&caller);
+    Some(match slice.filter(|s| !s.is_empty()) {
+        Some(extra) => {
+            let extra = extra.strip_suffix(".slice").unwrap_or(extra);
+            format!("{base}-{extra}.slice")
+        }
+        None => format!("{base}.slice"),
+    })
 }
 
 /// Parse a `yes`/`no`/`auto` tristate the way upstream's
