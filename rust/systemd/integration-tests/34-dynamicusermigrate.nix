@@ -30,10 +30,47 @@
   # whole runtime and log trees, so `find` reported far more than 8.
   #
   # REMAINING FAILURE: test_check_idmapped_mounts. The kernel here is new
-  # enough (6.18 >= 5.12) that upstream's version gate lets it run, and
-  # testservice-34-check-idmapped.service fails to start. That is id-mapped
-  # mount support for exec directories, a different feature from anything
-  # above, and it has not been investigated.
+  # enough (6.18 >= 5.12) that upstream's version gate lets it run. The service
+  # uses MountAPIVFS=yes, DynamicUser=yes, PrivateUsers=yes and
+  # TemporaryFileSystem=/run /var/opt /var/lib /vol, and logged three failures:
+  #     Failed to mount tmpfs on /var/opt: No such file or directory
+  #     Failed to mount tmpfs on /vol: No such file or directory
+  #     Failed to create user namespace for PrivateUsers=: Operation not permitted
+  #
+  # The first two look easy and are NOT. Upstream mkdir -p's every mount entry's
+  # path before mounting it (namespace.c:1397 and friends), so
+  # TemporaryFileSystem=/vol works on a host with no /vol. Adding a bare
+  # create_dir_all() before the tmpfs mount in exec_helper.rs REGRESSED
+  # test_check_writable, which had been passing: that mount block is shared with
+  # the private/ tmpfs, so creating missing directories there adds writable
+  # directories and breaks the exact-8 assertion. TRIED AND REVERTED; a fix has
+  # to create the directory only for genuine TemporaryFileSystem= entries, not
+  # for every caller of that block.
+  #
+  # The THIRD is the real blocker and has NOT been diagnosed. Do not guess at
+  # it; two plausible causes have already been narrowed:
+  #   - it is NOT an ordering problem. rust sets up the mount namespace before
+  #     unsharing CLONE_NEWUSER, and upstream does the same whenever it holds
+  #     CAP_SYS_ADMIN (exec-invoke.c: apply_mount_namespace then
+  #     setup_private_users).
+  #   - upstream does FORK before unsharing: setup_private_users_child()
+  #     unshares CLONE_NEWUSER in a child and the parent, still outside the new
+  #     namespace, writes its /proc/<pid>/uid_map and gid_map. rust unshares
+  #     in-process. That difference matters for writing the maps, but the EPERM
+  #     here is on the unshare itself, so it does not explain this.
+  #
+  # THE ORACLE IS NO HELP HERE, already tried:
+  # `c-systemd-test-34-dynamicusermigrate` fails far EARLIER than rust does, at
+  # testservice-34.service in the very first test_directory phase, so upstream
+  # systemd cannot get through this test in this VM at all. That makes the
+  # oracle inconclusive about the PrivateUsers failure rather than evidence that
+  # it is environmental. Note rust-systemd currently gets substantially further
+  # through this test than the C oracle does; the C variant's own early failure
+  # is worth a look on its own, since it suggests the c-systemd harness wiring
+  # is incomplete for this test.
+  #
+  # STILL TO MEASURE: `sysctl user.max_user_namespaces` inside the VM, which
+  # returns EPERM to root as well when it is 0.
   #
   # TOOLING NOTES:
   #   - PID 1's `log::` macros do NOT reach the console, only
