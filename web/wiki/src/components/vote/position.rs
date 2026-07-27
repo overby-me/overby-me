@@ -86,7 +86,10 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
             .iter()
             .any(|m| m == "vote/candidate")
     });
-    let can_add_candidate = (*can_add_candidate_res.read()).unwrap_or(false);
+    // ...and only while candidature is open: `attachable` is the owner's lock on
+    // adding children, which ContentApp's tools sheet toggles for a position the
+    // same way FolderApp's does for a folder's motions.
+    let can_add_candidate = (*can_add_candidate_res.read()).unwrap_or(false) && node.attachable;
 
     // Add a question (a `vote/question` child carrying `data.text`), mirroring
     // React AddQuestionButton. The node is immutable; its name records the author.

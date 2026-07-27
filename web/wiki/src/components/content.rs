@@ -64,6 +64,24 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     // Still mutable means not yet submitted: the header avatar carries the same
     // badge the node's row carries in a list.
     let is_mutable = node.mutable;
+
+    // A position takes member-inserted candidatures, the only such pair in the
+    // context permission template besides a folder's motions, so its owner needs
+    // the same way to close them: the `attachable` lock a folder already has.
+    // Nothing else ContentApp renders accepts member-inserted children.
+    let lockable = node.mime_id.as_deref() == Some("vote/position");
+    // Optimistic lock/unlock: flip now, reconcile against the refetched node,
+    // revert on error (the same shape FolderApp uses).
+    let mut attachable_opt = use_signal(|| None::<bool>);
+    {
+        let na = node.attachable;
+        use_effect(use_reactive!(|(na)| {
+            if *attachable_opt.peek() == Some(na) {
+                attachable_opt.set(None);
+            }
+        }));
+    }
+    let attachable = attachable_opt().unwrap_or(node.attachable);
     // A context owner may reorder this node's children (candidates in an election,
     // amendments on a motion, questions), when there is more than one to arrange.
     // Restores the old per-list "sort" affordance the port had dropped, in one
@@ -290,7 +308,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                 //
                 // Gated on the disjunction of its rows: an empty group would still
                 // draw its header.
-                if !segments.is_empty() && (can_edit || (is_ctx_owner && reorderable_children)) {
+                if !segments.is_empty()
+                    && (can_edit || (is_ctx_owner && (reorderable_children || lockable)))
+                {
                     super::widgets::SheetGroup { title: t("common.toolsManage"),
                         if is_ctx_owner && reorderable_children {
                             Link {
@@ -312,6 +332,51 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                 class: "sheet-action",
                                 {icon_el("app/editor")}
                                 "{t(\"mime.editor\")}"
+                            }
+                        }
+                        // Close (or reopen) candidature, the position's equivalent
+                        // of a folder locking its motions.
+                        if lockable && is_ctx_owner {
+                            button {
+                                class: "sheet-action",
+                                onclick: {
+                                    let id = node_id.clone();
+                                    move |_| {
+                                        let token = session.read().access_token.clone();
+                                        let id = id.clone();
+                                        let new_val = !attachable;
+                                        attachable_opt.set(Some(new_val));
+                                        spawn(async move {
+                                            match graphql::update_node(
+                                                token.as_deref(),
+                                                &id,
+                                                crate::model::NodesSetInput {
+                                                    attachable: Some(new_val),
+                                                    ..Default::default()
+                                                },
+                                            )
+                                            .await
+                                            {
+                                                Ok(_) => crate::session::bump_data_version(),
+                                                Err(e) => {
+                                                    attachable_opt.set(None);
+                                                    log::error!("lock toggle failed: {e}");
+                                                    crate::snackbar::show_snackbar(
+                                                        &t("error.somethingWentWrong"),
+                                                    );
+                                                }
+                                            }
+                                        });
+                                    }
+                                },
+                                span { class: "material-icons",
+                                    if attachable { "lock_open" } else { "lock" }
+                                }
+                                if attachable {
+                                    "{t(\"folder.lock\")}"
+                                } else {
+                                    "{t(\"folder.unlock\")}"
+                                }
                             }
                         }
                     }
