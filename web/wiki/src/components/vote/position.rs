@@ -139,8 +139,6 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         // Position text + edit / delete. The comment thread renders at the very
         // end, below the candidate gallery.
         ContentApp { node: node.clone() }
-        // Owner-only: open a poll whose options are the candidates.
-        StartPollButton { node: node.clone(), path: path.clone() }
 
         // Candidate gallery (photos from `data.image`). Shown, with an empty state,
         // to members who can add a candidature so they can add the first one.
@@ -305,6 +303,11 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                 }
             }
         }
+
+        // Polls come after the candidates they are opened on: a poll is voted on
+        // the field, so the field is read first. Owner-only creation sits with
+        // them rather than above the gallery.
+        StartPollButton { node: node.clone(), path: path.clone() }
 
         // Polls opened on this position.
         if !polls.is_empty() {

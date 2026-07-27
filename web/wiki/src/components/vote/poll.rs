@@ -837,7 +837,10 @@ pub(super) fn StartPollButton(node: NodeWithChildren, path: Vec<String>) -> Elem
     rsx! {
         div { class: "card mt-1",
             div { class: "card-header",
-                div { class: "avatar", {icon_el("vote/poll")} }
+                // `small`, like every other section card on the pages this sits
+                // among (candidates, questions, amendments, polls): a full-size
+                // avatar belongs to a page header, not to a section of one.
+                div { class: "avatar small", {icon_el("vote/poll")} }
                 h3 { class: "title-medium", "{t(\"poll.newPoll\")}" }
                 div { class: "flex-grow" }
                 button {
