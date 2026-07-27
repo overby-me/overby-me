@@ -110,6 +110,10 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
         .map(String::from);
     let has_image = image_file_id.is_some();
     let image_url = super::loader::use_file_object_url(image_file_id.unwrap_or_default());
+    // A candidate's photo is a portrait, not a landscape cover, so the wide hero
+    // band crops it hard. Candidate heroes get the taller frame; documents keep
+    // the wide cover proportions.
+    let portrait_hero = node.mime_id.as_deref() == Some("vote/candidate");
 
     rsx! {
         div { class: if has_image { "card has-hero" } else { "card" },
@@ -117,7 +121,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             // cover hero with the title/date overlaid on a legibility scrim, so the
             // image frames the document instead of sitting as a plain block above it.
             if let Some(url) = image_url {
-                div { class: "content-hero",
+                div { class: if portrait_hero { "content-hero is-portrait" } else { "content-hero" },
                     // ZoomableImage keeps the click-to-expand lightbox; the veil above
                     // is click-through so the image underneath still receives it.
                     super::widgets::ZoomableImage { src: url.clone(), alt: t("content.imageAlt") }

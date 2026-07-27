@@ -1376,6 +1376,16 @@ html {
 	overflow: hidden;
 	background: var(--md-surface-container-high);
 }
+/* A candidate's photo is a portrait, so the wide cover crop cuts the head off.
+   The candidate hero (content.rs, `vote/candidate`) therefore gets a frame
+   taller than it is wide, close to a portrait's own proportions so the crop
+   keeps the face, while document and group/event covers keep the wide
+   proportions. The viewport clamp stops the header from swallowing a short
+   laptop screen. */
+.content-hero.is-portrait {
+	aspect-ratio: 4 / 5;
+	max-height: min(75vh, 680px);
+}
 /* The hero image is a ZoomableImage; fill the hero as a cover crop (overriding the
    contained-thumbnail defaults of .zoomable) while keeping its click-to-expand. */
 .content-hero .zoomable,
