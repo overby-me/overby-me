@@ -2046,6 +2046,14 @@ impl Verifier<'_> {
                     self.report(format!("{shape} appears on a type that is not an array"));
                 }
             }
+            // A type is passed by reference or by value, not both.
+            if let Some(MdField::Words(words)) = field_of(fields, "flags") {
+                let by_reference = words.iter().any(|word| word == "DIFlagTypePassByReference");
+                let by_value = words.iter().any(|word| word == "DIFlagTypePassByValue");
+                if by_reference && by_value {
+                    self.report("a type is marked as passed both by reference and by value");
+                }
+            }
             if field_of(fields, "discriminator").is_some() && !variant_part {
                 self.report("a discriminator appears on a type that is not a variant part");
             }

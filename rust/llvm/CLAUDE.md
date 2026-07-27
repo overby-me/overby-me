@@ -276,6 +276,15 @@ keeping a null alive keeps nothing alive; a function's `!prof` node starts
 with the annotation's name; a `musttail` call hands its frame over, so the
 conventions have to agree; and a byval of four gigabytes is not something
 a caller copies onto the stack.
+A twentieth pass found one rule and unlearned two. A type is passed by
+reference or by value and not both. Against that, "a composite type's
+elements may not contain a null" and "every DICompileUnit is listed in
+llvm.dbg.cu" both looked right, print a diagnostic from llvm-as, and are
+not rules: llvm-as returns zero for `set1.ll` and for `llvm.loop.cu.ll`.
+Some verifier checks warn without failing, so the oracle reads the exit
+code and never the message. A rule was deleted on that evidence earlier,
+restored here on the message, and deleted again on the exit code; the
+second deletion is the one with a test behind it.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

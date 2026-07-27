@@ -67,7 +67,7 @@ skipped, so the denominator is the whole suite.
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
 | `llvm/test/Assembler` | 411 | 483 | 14 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 256 | 328 | 4 | `llvm-upstream-verifier` |
+| `llvm/test/Verifier` | 257 | 328 | 4 | `llvm-upstream-verifier` |
 
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse 18 modules llvm-as reads**, which is the failure that
@@ -89,6 +89,12 @@ Five of the 18 are permanent by design: two are use-list order directives,
 which this tier does not model, and three are typed-pointer IR, rejected
 here on purpose (PLAN §1.2) although `llvm-as` still reads `i8*` and folds
 it to `ptr`.
+
+The oracle is `llvm-as`'s exit code, not its output. Those differ: some
+verifier checks print a diagnostic and still return zero, so `set1.ll`
+prints "invalid set base type" and is a module upstream reads. Reading the
+message instead would invent rules that do not exist, which it did once
+before the difference was noticed.
 
 An earlier version of this measurement read each test's RUN lines to decide
 what upstream would do with it. That was wrong often enough to matter: a
