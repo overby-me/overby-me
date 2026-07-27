@@ -151,6 +151,7 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                         AddCandidateButton {
                             parent_id: node_id.clone(),
                             context_id: context_id.clone(),
+                            path: path.clone(),
                             pending: pending_cand,
                         }
                     }
@@ -364,15 +365,22 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 /// an optional photo (uploaded to NHost storage, stored as `data.image`). This is
 /// the "inline add-candidate" the position view was missing (the photo upload it
 /// depended on already exists as `nhost::upload_file`).
+///
+/// Adding one lands in the new candidate's editor, so its text can be written
+/// straight away, the same way [`AddChangeButton`] opens a new amendment.
 #[component]
 fn AddCandidateButton(
     parent_id: String,
     context_id: Option<String>,
+    /// The position's own path; the new candidate's key is appended to it to
+    /// route into its editor.
+    path: Vec<String>,
     /// Optimistic candidates owned by PositionApp: this button pushes the new
     /// candidate here (shown at once), reconciled/rolled back there and here.
     mut pending: Signal<Vec<PendingCandidate>>,
 ) -> Element {
     let session = use_session();
+    let nav = use_navigator();
     let mut open = use_signal(|| false);
     let mut name = use_signal(String::new);
     let mut photo_id = use_signal(|| Option::<String>::None);
@@ -422,6 +430,7 @@ fn AddCandidateButton(
     let submit = {
         let parent_id = parent_id.clone();
         let context_id = context_id.clone();
+        let path = path.clone();
         move |_| {
             let cname = name.read().trim().to_string();
             if cname.is_empty() || *uploading.read() {
@@ -430,6 +439,7 @@ fn AddCandidateButton(
             let token = session.read().access_token.clone();
             let parent_id = parent_id.clone();
             let context_id = context_id.clone();
+            let path = path.clone();
             let img = photo_id.read().clone();
             let key = format!(
                 "{}-{}",
@@ -460,7 +470,17 @@ fn AddCandidateButton(
                     index: None,
                 };
                 match graphql::insert_node(token.as_deref(), input).await {
-                    Ok(_) => crate::session::bump_data_version(),
+                    Ok(_) => {
+                        crate::session::bump_data_version();
+                        // Land in the new candidate's editor so its text can be
+                        // written now, as adding an amendment does.
+                        let mut full = path.clone();
+                        full.push(key);
+                        nav.push(Route::PathPage {
+                            segments: full,
+                            app: Some("editor".to_string()),
+                        });
+                    }
                     Err(e) => {
                         pending.write().retain(|p| p.key != key);
                         log::error!("add candidate failed: {e}");
