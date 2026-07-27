@@ -230,6 +230,12 @@ define_keyword_enum! {
         AmdgpuCs => "amdgpu_cs",
         AmdgpuKernel => "amdgpu_kernel",
         AmdgpuGfx => "amdgpu_gfx",
+        AmdgpuVs => "amdgpu_vs",
+        AmdgpuLs => "amdgpu_ls",
+        AmdgpuHs => "amdgpu_hs",
+        AmdgpuEs => "amdgpu_es",
+        AmdgpuGs => "amdgpu_gs",
+        AmdgpuPs => "amdgpu_ps",
         SpirKernel => "spir_kernel",
         SpirFunc => "spir_func",
         PtxKernel => "ptx_kernel",
@@ -246,6 +252,9 @@ pub enum CallingConv {
     C,
     Named(NamedCallingConv),
     Numbered(u32),
+    /// `riscv_vls_cc(32)`, the one convention that takes an argument. The
+    /// number is the vector length its ABI is fixed to.
+    RiscvVls(u32),
 }
 
 /// The scope an atomic operation synchronises with. `None` is the system

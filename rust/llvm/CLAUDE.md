@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 389 of 483 with 30 wrongly refused, Verifier 212 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 398 of 483 with 23 wrongly refused, Verifier 212 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -212,6 +212,19 @@ keyword, a value, and tuples of keyed or positional values nested to any
 depth. Nothing reads what the keywords mean.
 One verifier rule came with it, worth the eleventh file: a `gv` entry that
 names a symbol has to name one this module has.
+A twelfth pass cleared the scattered parse gaps: an alias writes an
+expression aliasee with no type in front, so the expression has to say what
+it produces; wrapping flags on a constant expression; the sanitizer clauses
+a global carries; the AMDGPU shader conventions and `riscv_vls_cc(N)`; and
+a struct indexed lanewise by a vector every element of which picks the same
+field.
+Four of those opened verifier rules that had been unreachable behind the
+parse error, and all four are real: an alias needs something this module
+defines, the kernel conventions return nothing and take no variable
+argument list, a chain call is only ever a tail call, and the vector
+indices of one getelementptr all have the same width. The last of those had
+to reach constant expressions too, which is why the verifier now walks
+every interned constant once rather than finding them again at each use.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

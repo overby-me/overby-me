@@ -131,7 +131,17 @@ pub struct GlobalVariable {
     /// `!type !0` sanitizer metadata prints after the initialiser, but a
     /// `code_model` or similar sits before it; kept in source order.
     pub code_model: Option<String>,
-    pub sanitizer: Option<String>,
+    pub sanitizer: Sanitizers,
+}
+
+/// The sanitizer clauses a global carries. Upstream prints them right after
+/// the initialiser in this order, whatever order they were written in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Sanitizers {
+    pub no_address: bool,
+    pub no_hwaddress: bool,
+    pub address_dyninit: bool,
+    pub memtag: bool,
 }
 
 /// `@a = alias i8, ptr @b`.

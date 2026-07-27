@@ -231,6 +231,9 @@ pub enum ConstExpr {
     /// `add`, `sub` and `xor` outlived the other arithmetic expressions.
     Binary {
         op: crate::instruction::BinOp,
+        /// `add nuw nsw (...)`: the wrapping flags a constant expression can
+        /// carry, exactly as the instruction can.
+        flags: crate::instruction::IntFlags,
         lhs: ConstId,
         rhs: ConstId,
         ty: TypeId,

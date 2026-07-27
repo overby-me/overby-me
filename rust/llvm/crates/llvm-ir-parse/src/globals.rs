@@ -5,7 +5,7 @@ use crate::{ParseError, Parser};
 use llvm_ir::attribute::AttributeSet;
 use llvm_ir::global::{
     Alias, ComdatRef, DllStorageClass, GlobalQualifiers, GlobalVariable, IFunc, Linkage,
-    RuntimePreemption, TlsModel, UnnamedAddr, Visibility,
+    RuntimePreemption, Sanitizers, TlsModel, UnnamedAddr, Visibility,
 };
 use llvm_ir::value::Name;
 use llvm_support::Align;
@@ -25,7 +25,14 @@ impl Parser {
         if self.eat_word("alias") {
             let value_type = self.parse_type()?;
             self.require(Token::Comma)?;
-            let (_, aliasee) = self.parse_typed_constant()?;
+            // `alias i32, getelementptr (...)`: the aliasee is written
+            // without a type of its own when it is an expression, because the
+            // expression says what it produces.
+            let aliasee = if self.starts_a_typeless_expression() {
+                self.parse_untyped_constant_expression()?
+            } else {
+                self.parse_typed_constant()?.1
+            };
             let mut alias = Alias {
                 name,
                 qualifiers,
@@ -105,7 +112,7 @@ impl Parser {
             metadata: Vec::new(),
             attrs: AttributeSet::default(),
             code_model: None,
-            sanitizer: None,
+            sanitizer: Sanitizers::default(),
         };
 
         while self.eat(&Token::Comma) {
@@ -119,6 +126,14 @@ impl Parser {
                 global.comdat = Some(self.parse_comdat_ref()?);
             } else if self.eat_word("align") {
                 global.align = Some(self.parse_align()?);
+            } else if self.eat_word("no_sanitize_address") {
+                global.sanitizer.no_address = true;
+            } else if self.eat_word("no_sanitize_hwaddress") {
+                global.sanitizer.no_hwaddress = true;
+            } else if self.eat_word("sanitize_address_dyninit") {
+                global.sanitizer.address_dyninit = true;
+            } else if self.eat_word("sanitize_memtag") {
+                global.sanitizer.memtag = true;
             } else if matches!(self.peek(), Token::MetadataName(_))
                 && matches!(self.peek_at(1), Token::MetadataNumber(_))
             {
@@ -149,6 +164,26 @@ impl Parser {
 
     /// Whether the next token could begin a constant, which is how a global
     /// with no initialiser is told apart from one with a `zeroinitializer`.
+    /// The constant-expression opcodes that need no type in front.
+    pub(crate) fn starts_a_typeless_expression(&self) -> bool {
+        matches!(self.peek(), Token::Word(word) if matches!(
+            word.as_str(),
+            "getelementptr"
+                | "bitcast"
+                | "inttoptr"
+                | "ptrtoint"
+                | "ptrtoaddr"
+                | "addrspacecast"
+                | "trunc"
+                | "extractelement"
+                | "insertelement"
+                | "shufflevector"
+                | "add"
+                | "sub"
+                | "xor"
+        ))
+    }
+
     pub(crate) fn starts_a_constant(&self) -> bool {
         match self.peek() {
             Token::Word(word) => matches!(

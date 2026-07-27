@@ -38,6 +38,16 @@ impl Printer<'_> {
             self.push(" ");
             self.constant(initializer);
         }
+        for (set, word) in [
+            (global.sanitizer.no_address, "no_sanitize_address"),
+            (global.sanitizer.no_hwaddress, "no_sanitize_hwaddress"),
+            (global.sanitizer.address_dyninit, "sanitize_address_dyninit"),
+            (global.sanitizer.memtag, "sanitize_memtag"),
+        ] {
+            if set {
+                let _ = write!(self.out, ", {word}");
+            }
+        }
         if let Some(section) = &global.section {
             let _ = write!(self.out, ", section \"{}\"", escape_string(section));
         }

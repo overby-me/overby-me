@@ -299,6 +299,30 @@ const BROKEN: &[(&str, &str)] = &[
         "passes a non-immediate to an immarg parameter",
     ),
     (
+        "@f = external global i32\n@fa = alias i32, ptr @f\n",
+        "@fa aliases something this module does not define",
+    ),
+    (
+        "define amdgpu_kernel i32 @f() {\nentry:\n  ret i32 0\n}\n",
+        "the amdgpu_kernel convention returns nothing",
+    ),
+    (
+        "define amdgpu_ps void @f(...) {\nentry:\n  ret void\n}\n",
+        "the amdgpu_ps convention does not take a variable argument list",
+    ),
+    (
+        "declare amdgpu_cs_chain void @g()\n\ndefine void @f() {\nentry:\n  call amdgpu_cs_chain void @g()\n  ret void\n}\n",
+        "uses a convention that does not permit calls",
+    ),
+    (
+        "define <2 x ptr> @f(<4 x ptr> %a) {\nentry:\n  %w = getelementptr i32, <4 x ptr> %a, <2 x i32> <i32 1, i32 2>\n  ret <2 x ptr> %w\n}\n",
+        "has vector indices of different widths",
+    ),
+    (
+        "define void @f(<vscale x 2 x ptr> %a) {\nentry:\n  %w = getelementptr {i32, i32}, <vscale x 2 x ptr> %a, <vscale x 2 x i32> zeroinitializer, <vscale x 2 x i32> zeroinitializer\n  ret void\n}\n",
+        "has invalid indices",
+    ),
+    (
         "declare void @llvm.localescape(...)\n\ndefine internal void @f() {\nentry:\n  %a = alloca i8, align 1\n  call void (...) @llvm.localescape(ptr %a)\n  call void (...) @llvm.localescape(ptr %a)\n  ret void\n}\n",
         "2 calls to llvm.localescape in one function",
     ),
@@ -541,6 +565,18 @@ const VERIFIES: &[&str] = &[
     "%t = type { <vscale x 1 x i32>, <vscale x 1 x i32> }\n@g = external global %t\n",
     // An array's shape fields belong on an array.
     "!named = !{!0}\n!0 = !DICompositeType(tag: DW_TAG_array_type, name: \"A\", size: 64, rank: !DIExpression(DW_OP_deref))\n",
+    // An alias writes an expression aliasee with no type in front, because
+    // the expression says what it produces.
+    "@a = global i32 0\n@b = alias i32, getelementptr inbounds (i32, ptr @a, i64 1)\n",
+    "@i = global i32 0\n@ia = alias ptr, addrspacecast (ptr @i to ptr addrspace(3))\n",
+    // Wrapping flags on a constant expression.
+    "@addr = external global i64\n@a = global i64 add nuw nsw (i64 ptrtoint (ptr @addr to i64), i64 91)\n",
+    // A struct indexed lanewise, and the sanitizer clauses a global carries.
+    "define <2 x ptr> @f(<2 x ptr> %a) {\nentry:\n  %w = getelementptr {i32, i32}, <2 x ptr> %a, <2 x i32> <i32 5, i32 9>, <2 x i32> zeroinitializer\n  ret <2 x ptr> %w\n}\n",
+    "@g = global i32 2, no_sanitize_address, no_sanitize_hwaddress, sanitize_memtag, align 4\n",
+    // Two conventions we had never heard of.
+    "define amdgpu_ps float @f(i32 %x) {\nentry:\n  ret float 0.000000e+00\n}\n",
+    "define riscv_vls_cc(32) void @g() {\nentry:\n  ret void\n}\n",
 ];
 
 #[test]

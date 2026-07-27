@@ -66,16 +66,16 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 389 | 483 | 30 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 398 | 483 | 23 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 212 | 328 | 4 | `llvm-upstream-verifier` |
 
 The two halves of the gap are not equally bad, so each suite has two
-bounds. We **refuse 34 modules llvm-as reads**, which is the failure that
-matters: parse gaps, led now by intrinsics used without a declaration, the
-`splat` and `ptrauth` constants, and escaped bytes in a metadata string.
-That count is a ceiling that may only fall. We **read 176 modules llvm-as
-refuses**, which is a missing verifier rule each, and agreement is a floor
-that may only rise.
+bounds. We **refuse 27 modules llvm-as reads**, which is the failure that
+matters: parse gaps, led now by intrinsics used without a declaration
+(five files), escaped bytes in a metadata string (three), and the `splat`
+and `ptrauth` constants. That count is a ceiling that may only fall. We
+**read 174 modules llvm-as refuses**, which is a missing verifier rule
+each, and agreement is a floor that may only rise.
 
 Two bounds rather than one, because agreement alone can be gamed. Refusing
 a module for a rule that does not exist scores as agreement whenever
@@ -85,9 +85,10 @@ what happened when five such rules came out at once: Verifier agreement
 fell 215 to 212 while the modules we wrongly refuse fell 53 to 45. Without
 the second bound the ratchet would have argued for keeping the bugs.
 
-Three of the 34 are permanent by design: typed-pointer IR is rejected here
-on purpose (PLAN §1.2), and `llvm-as` still reads `i8*` and folds it to
-`ptr` rather than refusing it as this dialect does.
+Five of the 27 are permanent by design: two are use-list order directives,
+which this tier does not model, and three are typed-pointer IR, rejected
+here on purpose (PLAN §1.2) although `llvm-as` still reads `i8*` and folds
+it to `ptr`.
 
 An earlier version of this measurement read each test's RUN lines to decide
 what upstream would do with it. That was wrong often enough to matter: a
@@ -102,7 +103,7 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against `llvm-as | llvm-dis`, and **115 of 199** are identical. Two
+against `llvm-as | llvm-dis`, and **116 of 206** are identical. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against

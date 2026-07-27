@@ -92,7 +92,7 @@ impl Module {
             metadata: Vec::new(),
             attrs: crate::attribute::AttributeSet::default(),
             code_model: None,
-            sanitizer: None,
+            sanitizer: crate::global::Sanitizers::default(),
         })
     }
 

@@ -210,6 +210,14 @@ impl Parser {
             let number = self.require_unsigned()? as u32;
             return Ok(CallingConv::Numbered(number));
         }
+        // The one convention that takes an argument.
+        if word == "riscv_vls_cc" && self.peek_at(1) == &Token::LeftParen {
+            self.advance();
+            self.advance();
+            let number = self.require_unsigned()? as u32;
+            self.require(Token::RightParen)?;
+            return Ok(CallingConv::RiscvVls(number));
+        }
         Ok(CallingConv::C)
     }
 
@@ -1353,7 +1361,11 @@ impl Parser {
     }
 
     /// The flag keywords that can follow an opcode, in any order.
-    fn parse_operation_flags(&mut self, flags: &mut IntFlags, fast_math: &mut FastMathFlags) {
+    pub(crate) fn parse_operation_flags(
+        &mut self,
+        flags: &mut IntFlags,
+        fast_math: &mut FastMathFlags,
+    ) {
         loop {
             let Some(word) = self.peek_word() else {
                 return;

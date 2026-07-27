@@ -143,8 +143,21 @@ impl Printer<'_> {
 
     pub(crate) fn const_expr(&mut self, expr: &ConstExpr) {
         match expr {
-            ConstExpr::Binary { op, lhs, rhs, .. } => {
-                let _ = write!(self.out, "{} (", op.keyword());
+            ConstExpr::Binary {
+                op,
+                flags,
+                lhs,
+                rhs,
+                ..
+            } => {
+                let _ = write!(self.out, "{}", op.keyword());
+                if flags.nuw {
+                    self.push(" nuw");
+                }
+                if flags.nsw {
+                    self.push(" nsw");
+                }
+                self.push(" (");
                 self.constant_with_type(*lhs);
                 self.push(", ");
                 self.constant_with_type(*rhs);

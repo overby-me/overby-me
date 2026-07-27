@@ -402,6 +402,20 @@ impl Parser {
     /// The constant expressions LLVM 21 still accepts. Anything else, notably
     /// the arithmetic ones upstream removed, is an error naming the opcode.
     pub(crate) fn parse_constant_expression(&mut self, ty: TypeId) -> Result<ConstId, ParseError> {
+        self.parse_constant_expression_of(Some(ty))
+    }
+
+    /// The same, where the type is not written in front and the expression
+    /// has to say what it produces. An alias writes its aliasee that way:
+    /// `@a = alias i32, getelementptr inbounds (i32, ptr @b, i64 1)`.
+    pub(crate) fn parse_untyped_constant_expression(&mut self) -> Result<ConstId, ParseError> {
+        self.parse_constant_expression_of(None)
+    }
+
+    fn parse_constant_expression_of(
+        &mut self,
+        expected: Option<TypeId>,
+    ) -> Result<ConstId, ParseError> {
         let word = self.require_word()?;
         let expr = match word.as_str() {
             "getelementptr" => {
@@ -430,7 +444,7 @@ impl Parser {
                 self.require(Token::LeftParen)?;
                 let source_type = self.parse_type()?;
                 self.require(Token::Comma)?;
-                let (_, base) = self.parse_typed_constant()?;
+                let (base_type, base) = self.parse_typed_constant()?;
                 let mut indices = Vec::new();
                 while self.eat(&Token::Comma) {
                     let (_, index) = self.parse_typed_constant()?;
@@ -443,7 +457,7 @@ impl Parser {
                     indices,
                     flags,
                     inrange,
-                    ty,
+                    ty: expected.unwrap_or(base_type),
                 }
             }
             // Three of the arithmetic expressions survived the removals; the
@@ -451,24 +465,40 @@ impl Parser {
             "add" | "sub" | "xor" => {
                 let op = llvm_ir::instruction::BinOp::from_keyword(&word)
                     .expect("the match arm listed these");
+                let mut flags = llvm_ir::instruction::IntFlags::default();
+                let mut discard = llvm_ir::instruction::FastMathFlags::default();
+                self.parse_operation_flags(&mut flags, &mut discard);
                 self.require(Token::LeftParen)?;
-                let (_, lhs) = self.parse_typed_constant()?;
+                let (lhs_type, lhs) = self.parse_typed_constant()?;
                 self.require(Token::Comma)?;
                 let (_, rhs) = self.parse_typed_constant()?;
                 self.require(Token::RightParen)?;
-                ConstExpr::Binary { op, lhs, rhs, ty }
+                ConstExpr::Binary {
+                    op,
+                    flags,
+                    lhs,
+                    rhs,
+                    ty: expected.unwrap_or(lhs_type),
+                }
             }
             "extractelement" => {
                 self.require(Token::LeftParen)?;
-                let (_, vector) = self.parse_typed_constant()?;
+                let (vector_type, vector) = self.parse_typed_constant()?;
                 self.require(Token::Comma)?;
                 let (_, index) = self.parse_typed_constant()?;
                 self.require(Token::RightParen)?;
+                let ty = match expected {
+                    Some(ty) => ty,
+                    None => match self.module.ctx.type_kind(vector_type).as_vector() {
+                        Some((element, _, _)) => element,
+                        None => return self.error("extractelement needs a vector"),
+                    },
+                };
                 ConstExpr::ExtractElement { vector, index, ty }
             }
             "insertelement" => {
                 self.require(Token::LeftParen)?;
-                let (_, vector) = self.parse_typed_constant()?;
+                let (vector_type, vector) = self.parse_typed_constant()?;
                 self.require(Token::Comma)?;
                 let (_, element) = self.parse_typed_constant()?;
                 self.require(Token::Comma)?;
@@ -478,12 +508,12 @@ impl Parser {
                     vector,
                     element,
                     index,
-                    ty,
+                    ty: expected.unwrap_or(vector_type),
                 }
             }
             "shufflevector" => {
                 self.require(Token::LeftParen)?;
-                let (_, first) = self.parse_typed_constant()?;
+                let (first_type, first) = self.parse_typed_constant()?;
                 self.require(Token::Comma)?;
                 let (_, second) = self.parse_typed_constant()?;
                 self.require(Token::Comma)?;
@@ -493,7 +523,7 @@ impl Parser {
                     first,
                     second,
                     mask,
-                    ty,
+                    ty: expected.unwrap_or(first_type),
                 }
             }
             other => match CastOp::from_keyword(other) {
@@ -505,10 +535,16 @@ impl Parser {
                     }
                     let target = self.parse_type()?;
                     self.require(Token::RightParen)?;
-                    if target != ty {
+                    if let Some(ty) = expected
+                        && target != ty
+                    {
                         return self.error("cast expression does not produce the expected type");
                     }
-                    ConstExpr::Cast { op, operand, ty }
+                    ConstExpr::Cast {
+                        op,
+                        operand,
+                        ty: target,
+                    }
                 }
                 None => {
                     return self.error(format!(

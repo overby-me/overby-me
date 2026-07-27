@@ -730,6 +730,9 @@ impl Printer<'_> {
             CallingConv::Numbered(number) => {
                 let _ = write!(self.out, "cc{number} ");
             }
+            CallingConv::RiscvVls(length) => {
+                let _ = write!(self.out, "riscv_vls_cc({length}) ");
+            }
         }
     }
 

@@ -14,7 +14,9 @@ use crate::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr, TypeAttr};
 use crate::constant::{CastOp, ConstExpr, ConstId, Constant};
 use crate::function::Function;
 use crate::global::{GlobalQualifiers, Linkage, Visibility};
-use crate::instruction::{AtomicOrdering, BinOp, InstKind, IntFlags};
+use crate::instruction::{
+    AtomicOrdering, BinOp, CallingConv, InstKind, IntFlags, NamedCallingConv, TailKind,
+};
 use crate::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use crate::module::Module;
 use crate::summary::SummaryValue;
@@ -96,6 +98,24 @@ impl Verifier<'_> {
 
     fn module_level(&mut self) {
         self.summary_index();
+        self.alias_targets();
+        // Constant expressions are interned rather than owned by whatever
+        // mentions them, so checking every one once beats finding them again
+        // at each use.
+        for index in 0..self.module.ctx.constant_count() {
+            let id = ConstId(index as u32);
+            let Constant::Expression(expr) = self.module.ctx.constant(id) else {
+                continue;
+            };
+            if let ConstExpr::GetElementPtr { base, indices, .. } = &**expr {
+                let base_type = self.module.ctx.constant(*base).ty();
+                let indices: Vec<(TypeId, Value)> = indices
+                    .iter()
+                    .map(|id| (self.module.ctx.constant(*id).ty(), Value::Constant(*id)))
+                    .collect();
+                self.gep_vector_widths(base_type, &indices, "a getelementptr expression");
+            }
+        }
         for index in 0..self.module.metadata.len() {
             if let Some(node) = self.module.metadata[index].clone() {
                 self.debug_info_node(&node);
@@ -270,6 +290,94 @@ impl Verifier<'_> {
             }
             Constant::Expression(expr) => match **expr {
                 ConstExpr::Cast { operand, .. } => self.mentions_an_intrinsic(operand),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The conventions that describe a GPU entry point, which the hardware
+    /// calls rather than another function: they return nothing, take a fixed
+    /// argument list, and two of them cannot be called at all.
+    fn calling_convention(&mut self, function: &Function) {
+        let conv = match function.calling_conv {
+            CallingConv::Named(named) => named,
+            _ => return,
+        };
+        let entry_point = matches!(
+            conv,
+            NamedCallingConv::AmdgpuKernel
+                | NamedCallingConv::AmdgpuVs
+                | NamedCallingConv::AmdgpuLs
+                | NamedCallingConv::AmdgpuHs
+                | NamedCallingConv::AmdgpuEs
+                | NamedCallingConv::AmdgpuGs
+                | NamedCallingConv::AmdgpuPs
+                | NamedCallingConv::AmdgpuCs
+                | NamedCallingConv::SpirKernel
+        );
+        if !entry_point {
+            return;
+        }
+        if function.is_var_arg {
+            self.report(format!(
+                "the {} convention does not take a variable argument list",
+                conv.keyword()
+            ));
+        }
+        // `amdgpu_ps` and its siblings return a value to the fixed-function
+        // hardware; the two kernel conventions return to nobody.
+        let kernel = matches!(
+            conv,
+            NamedCallingConv::AmdgpuKernel | NamedCallingConv::SpirKernel
+        );
+        if kernel
+            && !matches!(
+                self.module.ctx.type_kind(function.return_type),
+                TypeKind::Void
+            )
+        {
+            self.report(format!("the {} convention returns nothing", conv.keyword()));
+        }
+    }
+
+    /// An alias needs something to alias. A declaration is not a definition,
+    /// and neither is an `available_externally` body, which the linker is
+    /// entitled to drop.
+    fn alias_targets(&mut self) {
+        for index in 0..self.module.aliases.len() {
+            let alias = &self.module.aliases[index];
+            let (name, aliasee) = (describe(&alias.name), alias.aliasee);
+            let Some(target) = self.resolve_symbol(aliasee) else {
+                continue;
+            };
+            let defined = match target {
+                GlobalRef::Function(id) => {
+                    let function = self.module.function(id);
+                    function.is_definition()
+                        && function.qualifiers.linkage != Some(Linkage::AvailableExternally)
+                }
+                GlobalRef::Variable(id) => {
+                    let global = &self.module.globals[id.0 as usize];
+                    global.initializer.is_some()
+                        && global.qualifiers.linkage != Some(Linkage::AvailableExternally)
+                }
+                GlobalRef::Alias(_) | GlobalRef::IFunc(_) => true,
+            };
+            if !defined {
+                self.report(format!(
+                    "@{name} aliases something this module does not define"
+                ));
+            }
+        }
+    }
+
+    /// The symbol a constant names, through any number of casts.
+    fn resolve_symbol(&self, id: ConstId) -> Option<GlobalRef> {
+        match self.module.ctx.constant(id) {
+            Constant::Global { target, .. } => Some(*target),
+            Constant::Expression(expr) => match **expr {
+                ConstExpr::Cast { operand, .. } => self.resolve_symbol(operand),
                 _ => None,
             },
             _ => None,
@@ -556,6 +664,7 @@ impl Verifier<'_> {
             }
         }
 
+        self.calling_convention(function);
         self.function_attributes(function);
         self.attribute_set(
             &function.return_attrs,
@@ -931,6 +1040,7 @@ impl Verifier<'_> {
                     self.is_pointer_or_pointer_vector(pointer_type),
                     format!("{where_} indexes something that is not a pointer"),
                 );
+                self.gep_vector_widths(pointer_type, &indices, &where_);
                 self.walk_indices(source_type, &indices, &where_);
             }
             InstKind::Phi { incoming, .. } => {
@@ -1012,6 +1122,19 @@ impl Verifier<'_> {
                 } else {
                     self.report(format!("{where_} has a callee type that is not a function"));
                 }
+                // A chain call replaces the current wave rather than
+                // returning to it, so it is only ever a tail call.
+                if matches!(
+                    call.calling_conv,
+                    CallingConv::Named(
+                        NamedCallingConv::AmdgpuCsChain | NamedCallingConv::AmdgpuCsChainPreserve
+                    )
+                ) && call.tail != TailKind::MustTail
+                {
+                    self.report(format!(
+                        "{where_} uses a convention that does not permit calls"
+                    ));
+                }
                 // A call to an ordinary function is deliberately *not*
                 // compared against that function's declared signature: opaque
                 // pointers put the signature at the call site, and real
@@ -1081,6 +1204,37 @@ impl Verifier<'_> {
     /// first index steps over the pointee and descends into nothing; a struct
     /// takes only a constant `i32`, since the field it selects decides the
     /// result type.
+    /// A getelementptr that indexes lanewise does so with one width. Every
+    /// vector among the base and the indices has to agree on how many lanes
+    /// there are, and a scalable vector never indexes a struct.
+    fn gep_vector_widths(
+        &mut self,
+        pointer_type: TypeId,
+        indices: &[(TypeId, Value)],
+        where_: &str,
+    ) {
+        let mut width: Option<(u64, bool)> = self
+            .module
+            .ctx
+            .type_kind(pointer_type)
+            .as_vector()
+            .map(|(_, count, scalable)| (count, scalable));
+        for (index_type, _) in indices {
+            let Some((_, count, scalable)) = self.module.ctx.type_kind(*index_type).as_vector()
+            else {
+                continue;
+            };
+            match width {
+                Some(seen) if seen != (count, scalable) => {
+                    self.report(format!("{where_} has vector indices of different widths"));
+                    return;
+                }
+                Some(_) => {}
+                None => width = Some((count, scalable)),
+            }
+        }
+    }
+
     fn walk_indices(&mut self, source_type: TypeId, indices: &[(TypeId, Value)], where_: &str) {
         let mut current = source_type;
         for (position, (index_type, index)) in indices.iter().enumerate() {
@@ -1119,6 +1273,22 @@ impl Verifier<'_> {
     }
 
     /// A struct index, or `None` after reporting why it is not one.
+    /// The one value a struct index carries, whether it is written as a
+    /// number or as a vector every lane of which holds that number.
+    fn uniform_index(&self, constant: ConstId) -> Option<u64> {
+        match self.module.ctx.constant(constant) {
+            Constant::ZeroInitializer(_) => Some(0),
+            Constant::Vector { elements, .. } => {
+                let first = self.uniform_index(*elements.first()?)?;
+                elements
+                    .iter()
+                    .all(|element| self.uniform_index(*element) == Some(first))
+                    .then_some(first)
+            }
+            other => other.as_integer().and_then(ApInt::to_u64),
+        }
+    }
+
     fn struct_index(
         &mut self,
         index_type: TypeId,
@@ -1126,7 +1296,18 @@ impl Verifier<'_> {
         fields: usize,
         where_: &str,
     ) -> Option<usize> {
-        if !matches!(self.module.ctx.type_kind(index_type), TypeKind::Integer(32)) {
+        // A gep over a vector of pointers indexes a struct with a vector of
+        // i32, every lane of which has to pick the same field. A scalable
+        // vector cannot: nothing says what its lanes hold.
+        if matches!(
+            self.module.ctx.type_kind(index_type),
+            TypeKind::Vector { scalable: true, .. }
+        ) {
+            self.report(format!("{where_} has invalid indices"));
+            return None;
+        }
+        let scalar = self.innermost_element(index_type);
+        if !matches!(self.module.ctx.type_kind(scalar), TypeKind::Integer(32)) {
             self.report(format!("{where_} has invalid indices"));
             return None;
         }
@@ -1134,13 +1315,7 @@ impl Verifier<'_> {
             self.report(format!("{where_} indexes a struct with a variable"));
             return None;
         };
-        let Some(value) = self
-            .module
-            .ctx
-            .constant(constant)
-            .as_integer()
-            .and_then(ApInt::to_u64)
-        else {
+        let Some(value) = self.uniform_index(constant) else {
             self.report(format!("{where_} has invalid indices"));
             return None;
         };
