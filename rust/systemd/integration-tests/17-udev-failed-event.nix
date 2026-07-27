@@ -31,8 +31,22 @@
   # a non-match instead of blocking forever. That was worth doing on its own,
   # because a hanging rule used to wedge its event indefinitely.
   #
-  # It did NOT move this test, so the timeout half is NOT simply the missing
-  # deadline. Measured after the change: `udevadm trigger --action add /dev/null`
+  # It did NOT move this test, and the reason is now MEASURED rather than
+  # guessed. Dumping the udev database right after the trigger shows:
+  #     E: MAJOR=1  DEVPATH=...  DEVNAME=null  MINOR=3  DEVMODE=0666  SUBSYSTEM=mem
+  # and NO PROGRAM_RESULT. Since ENV{PROGRAM_RESULT} is set by the RULE, not by
+  # udevd, that rules out the `udevadm monitor --property` theory: the property
+  # never exists in the first place, so the gap is in RULE EVALUATION.
+  #
+  # The same run also reported `udevadm settle: timeout reached` after 15s, so
+  # the event was still in flight. The test writes event_timeout=10 into
+  # /run/udev/udev.conf.d/ and then runs `systemctl reload systemd-udevd.service`,
+  # so the next thing to check is whether that reload actually reaches
+  # refresh_udev_config(): if the deadline never gets re-read, the `sleep 60`
+  # PROGRAM blocks its worker for the full 60s and `PROGRAM!=` is never
+  # evaluated at all, which would explain both observations at once.
+  #
+  # So the timeout half is NOT simply the missing deadline. Measured after the change: `udevadm trigger --action add /dev/null`
   # reports "triggered 1 device(s)" and `udevadm monitor --udev --property
   # --subsystem-match=mem` is running, but PROGRAM_RESULT never appears in its
   # output. Note ENV{PROGRAM_RESULT} is set by the RULE, not by udevd, so the
