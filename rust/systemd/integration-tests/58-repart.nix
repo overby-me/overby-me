@@ -28,15 +28,33 @@
   # testcase_basic steps 1 and 2 now match upstream byte for byte, including
   # every UUID, label, attribute and sector offset.
   #
-  # CURRENT FAILURE, a genuinely missing feature rather than a defect:
+  # --copy-from= IS NOW IMPLEMENTED: it reads the source image's GPT, turns
+  # every used partition into a definition pinned to that partition's exact
+  # size, type, UUID, label, GPT flags and trailing padding, and copies the
+  # bytes across after the table is written. Passing the same image twice
+  # duplicates its partitions, which is what this test does. A unit test builds
+  # a source image and copies it twice, checking the six partitions come out
+  # contiguous with their UUIDs and labels duplicated verbatim.
+  #
+  # TWO DIVERGENCES REMAIN in the copied result, and NEITHER belongs to
+  # --copy-from; both are visible in the source image on its own:
+  #   - three equally weighted partitions in a 50M image come out
+  #     33432/33432/33432 sectors where upstream gets 33432/33440/33440. The
+  #     allocator aligns each partition's byte share down to the 4096-byte grain
+  #     independently and drops the remainder; upstream allocates in whole
+  #     grains and hands the leftover ones back out.
+  #   - the default label for a partition with no Label= is "root" here, where
+  #     upstream derives it from the type designator as "root-x86-64", and
+  #     numbers a repeat of the same type "root-x86-64-2".
+  # Both are worth fixing on their own account, since every multi-partition
+  # layout and every unlabelled partition is affected, not just this test.
+  #
+  # OLDER NOTE, now superseded:
   #     systemd-repart --definitions "" \
   #                    --copy-from="$imgs/qqq" --copy-from="$imgs/qqq" \
   #                    "$imgs/copy"
   # must copy every partition, and its contents, out of one image into another,
-  # twice over, producing six partitions. rust-systemd does not implement
-  # --copy-from at all: it is not parsed, so the run produces a valid but empty
-  # GPT. Implementing it is new feature work, not a fix, and it needs partition
-  # content copying as well as table construction.
+  # twice over, producing six partitions.
   extraUnits = [
     "systemd-repart.service"
   ];
