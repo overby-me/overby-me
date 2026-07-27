@@ -99,7 +99,8 @@ Most skip comments predate the feature they name. Verified today:
 | 26-SYSTEMCTL | "`--global` flag not implemented" | `systemctl/src/main.rs:59,624,1071,1154` handles `--global` |
 | 05-RLIMITS | replaces `systemd-run -t` with `--pipe` | `crates/run/src/main.rs:86` implements `-t`/`--pty` |
 | 74-AUX-UTILS cgls | "user manager does not place transient units under app.slice" | `control.rs:3593-3604` defaults user transient units to `app.slice` |
-| 35-LOGIN, 82-SOFTREBOOT, 84-STORAGETM, 60-MOUNT-RATELIMIT | baselined 2026-07-22 | still accurate |
+| 35-LOGIN | "logind session suite not implemented" | *Wrong.* `crates/logind` is 7,237 lines and the suite reaches `testcase_background`; the real blocker is the missing user manager, so `user@<uid>.service` never starts for a `background` session |
+| 82-SOFTREBOOT, 84-STORAGETM, 60-MOUNT-RATELIMIT | baselined 2026-07-22 | still accurate |
 
 Re-baselining (delete the override, run once, record the real first failure) is the
 highest-information action available and costs one VM run each.
