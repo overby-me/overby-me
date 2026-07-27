@@ -298,15 +298,21 @@ impl Printer<'_> {
                 }
                 self.ty(*allocated_type);
                 // A count of exactly one is not an array allocation, and
-                // upstream leaves it out.
+                // upstream leaves it out. Only when it is written in the
+                // width a count defaults to, though: `alloca i1, i64 1` keeps
+                // its count because dropping it would change the width back
+                // to i32.
                 if let Some((ty, value)) = count
-                    && !self.is_constant_one(*value)
+                    && !(self.is_constant_one(*value) && self.is_default_count_width(*ty))
                 {
                     self.push(", ");
                     self.typed_value(function, *ty, *value);
                 }
                 self.push(&align_text(*align));
-                if let Some(address_space) = address_space {
+                // The default address space is not written, here as anywhere.
+                if let Some(address_space) = address_space
+                    && *address_space != 0
+                {
                     let _ = write!(self.out, ", addrspace({address_space})");
                 }
             }
@@ -727,6 +733,15 @@ impl Printer<'_> {
             UnwindTarget::Caller => self.push("to caller"),
             UnwindTarget::Block(block) => self.block_operand(function, block),
         }
+    }
+
+    /// Whether a type is the width an alloca count defaults to, which is
+    /// what makes a count of one droppable.
+    fn is_default_count_width(&self, ty: llvm_ir::TypeId) -> bool {
+        matches!(
+            self.module.ctx.type_kind(ty),
+            llvm_ir::TypeKind::Integer(32)
+        )
     }
 
     pub(crate) fn calling_conv(&mut self, conv: CallingConv) {

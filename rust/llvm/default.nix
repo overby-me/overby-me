@@ -146,7 +146,7 @@ in {
     # performs. Measuring against `llvm-as | llvm-dis` instead counted the
     # bitcode reader's compatibility upgrades as print differences, which is
     # what thirteen of them were.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 137;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 142;
 
     # Ten thousand pass tests, none of them written with a parser in mind,
     # and fourteen hundred analysis tests that are older on average and use

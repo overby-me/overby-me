@@ -738,6 +738,20 @@ module defining `%A` then `%B = type { %A }` and using only `%B` prints `%B`
 first. The walk is in `crates/llvm-ir-print/src/type_finder.rs`, and it has
 to reach through attributes as well as operands: the corpus caught that, an
 `sret(%pair)` being the only place that struct is named.
+A fifty-sixth pass took five more of what upstream folds as it reads, all
+found by the new oracle and all pinned against it. A struct with no fields
+is `zeroinitializer` and an array with no elements is `poison`, which is not
+a pair a reader would guess. The default address space is not written on an
+alloca. An alloca's count of one goes only when it is written in the width a
+count defaults to, because dropping `i64 1` would change the width back to
+i32. And a getelementptr that moves nowhere is the pointer it started from,
+whether it has no indices at all or all-zero ones. 137 to 142 of 223.
+What is left in that suite is mostly not printing. The largest remaining
+classes are compatibility upgrades this does not perform: the debug-info
+metadata upgrade that fills in a `DICompileUnit`'s file and a
+`DISubprogram`'s scope, the intrinsic name upgrades that add a mangling
+suffix, and the per-intrinsic attributes that come with the table LangRef
+does not document.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

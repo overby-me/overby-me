@@ -254,6 +254,61 @@ fn only_the_types_the_module_reaches_are_written() {
     }
 }
 
+/// What else upstream folds or leaves out as it reads and prints.
+const PRINTED: &[(&str, &str)] = &[
+    // A struct with no fields is all zero; an array with no elements is
+    // poison. Neither is a guess a reader would make.
+    (
+        "define void @f(ptr %x) {\nentry:\n  store {} {}, ptr %x, align 4\n  ret void\n}\n",
+        "  store {} zeroinitializer, ptr %x, align 4",
+    ),
+    (
+        "define void @f(ptr %x) {\nentry:\n  store [0 x i32] [], ptr %x, align 4\n  ret void\n}\n",
+        "  store [0 x i32] poison, ptr %x, align 4",
+    ),
+    // The default address space is not written.
+    (
+        "define void @f() {\nentry:\n  %a = alloca i32, align 4, addrspace(0)\n  ret void\n}\n",
+        "  %a = alloca i32, align 4",
+    ),
+    (
+        "define void @f() {\nentry:\n  %a = alloca i32, align 4, addrspace(3)\n  ret void\n}\n",
+        "  %a = alloca i32, align 4, addrspace(3)",
+    ),
+    // A count of one goes only when it is written in the width a count
+    // defaults to: dropping `i64 1` would change the width back to i32.
+    (
+        "define void @f() {\nentry:\n  %a = alloca i1, i32 1, align 8\n  ret void\n}\n",
+        "  %a = alloca i1, align 8",
+    ),
+    (
+        "define void @f() {\nentry:\n  %a = alloca i1, i64 1, align 8\n  ret void\n}\n",
+        "  %a = alloca i1, i64 1, align 8",
+    ),
+    // A getelementptr that moves nowhere is the pointer it started from.
+    (
+        "@a = global [4 x i32] zeroinitializer\n@g = constant ptr getelementptr inbounds ([4 x i32], ptr @a, i64 0, i64 0)\n",
+        "@g = constant ptr @a",
+    ),
+    (
+        "@a = global [4 x i32] zeroinitializer\n@g = constant ptr getelementptr ([4 x i32], ptr @a, i64 0, i64 2)\n",
+        "@g = constant ptr getelementptr ([4 x i32], ptr @a, i64 0, i64 2)",
+    ),
+];
+
+#[test]
+fn what_upstream_folds_as_it_reads_is_folded() {
+    for (written, expected) in PRINTED {
+        let module = llvm_ir_parse::parse_module(written)
+            .unwrap_or_else(|error| panic!("{written} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(
+            printed.lines().any(|line| line == *expected),
+            "expected a line {expected:?}\n--- printed ---\n{printed}"
+        );
+    }
+}
+
 const FOLDED: &[(&str, &str)] = &[
     (
         "@g = global <4 x i16> <i16 -1, i16 -1, i16 -1, i16 -1>\n",

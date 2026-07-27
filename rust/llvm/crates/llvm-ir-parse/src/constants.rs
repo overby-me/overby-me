@@ -156,6 +156,10 @@ impl Parser {
     /// array of the same shape is not: upstream folds the splat form for
     /// vectors only.
     fn fold_aggregate(&mut self, ty: TypeId, elements: &[ConstId], is_vector: bool) -> ConstId {
+        // An array with no elements is written `[]` and printed back as
+        // `poison`, where a struct with no fields is printed back as
+        // `zeroinitializer`. Measured, both, and neither is a guess a reader
+        // would make.
         if elements.is_empty() {
             return self.module.ctx.intern_constant(if is_vector {
                 Constant::Vector {
@@ -163,10 +167,7 @@ impl Parser {
                     elements: Vec::new(),
                 }
             } else {
-                Constant::Array {
-                    ty,
-                    elements: Vec::new(),
-                }
+                Constant::Poison(ty)
             });
         }
         // Zero is checked element by element rather than by identity, because
@@ -429,8 +430,9 @@ impl Parser {
             self.require(Token::Greater)?;
         }
         // A struct folds to `zeroinitializer` the same way, but never to a
-        // splat: its fields need not have one type.
-        if !values.is_empty() && values.iter().all(|field| self.is_zero_constant(*field)) {
+        // splat: its fields need not have one type. A struct with no fields
+        // folds too, there being nothing in it that is not zero.
+        if values.iter().all(|field| self.is_zero_constant(*field)) {
             return Ok(self
                 .module
                 .ctx
@@ -728,6 +730,15 @@ impl Parser {
                 }
             },
         };
+        // A getelementptr that moves nowhere is the pointer it started from,
+        // and upstream folds it away as it reads: `getelementptr (i32, ptr
+        // @foo)` and `getelementptr inbounds ([4 x i32], ptr @a, i64 0, i64
+        // 0)` both print back as the base.
+        if let ConstExpr::GetElementPtr { base, indices, .. } = &expr
+            && indices.iter().all(|index| self.is_zero_constant(*index))
+        {
+            return Ok(*base);
+        }
         Ok(self
             .module
             .ctx
