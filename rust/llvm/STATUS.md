@@ -183,6 +183,11 @@ model never holds a typed pointer either way; what changed is that a module
 written in the older spelling is a module rather than an error, which is
 what `llvm-as` says it is.
 
+Two derivations feed the metadata schema, both measured against upstream
+rather than reasoned about: `corpus/md-required-fields.nu` says which fields
+a node cannot be written without, and `corpus/md-field-defaults.nu` says
+which are dropped when written at their default.
+
 The oracle is `llvm-as`'s exit code, not its output. Those differ: some
 verifier checks print a diagnostic and still return zero, so `set1.ll`
 prints "invalid set base type" and is a module upstream reads. Reading the

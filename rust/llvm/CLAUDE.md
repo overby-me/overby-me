@@ -805,6 +805,23 @@ output. It is an allow-list rather than a rule with exceptions, which is the
 second thing the corpus taught this pass: the rule-with-exceptions version
 dropped `isOptimized: false` from every rustc compile unit, and the probe set
 had no `DICompileUnit` in it to catch that.
+A sixty-second pass asked whether the debug-info metadata upgrade was worth
+doing and found something else on the way in. A `DICompileUnit` with no
+`file:` is "missing required field 'file'" upstream and was a module here,
+so `corpus/md-required-fields.nu` now writes each node once per field with
+that field left out and reports which absences upstream refuses. Seven were
+missing from the schema: a compile unit's file, a `DIGlobalVariableExpression`
+without either of its two, a `DIMacro` without its type or name, and a
+`DIModule` without its scope or name. Neither suite ratchet moves, those
+files being ones upstream refuses for other reasons too, but the modules we
+wrongly accept is a count the suites do not show and this is seven fewer.
+The upgrade itself is still not done. It is not one transformation but a
+family: filling a `DICompileUnit`'s file from a `DISubprogram` that names it,
+moving a `DISubprogram`'s scope out of a field that no longer exists,
+rewriting `DIExpression` opcodes. Each needs the shape of the *older* debug
+info to be modelled, which is a dialect this tier does not read, and the
+files that want it are twenty-four of the four print suites' 165. Recorded
+rather than started.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

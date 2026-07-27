@@ -815,6 +815,20 @@ const BROKEN: &[(&str, &str)] = &[
 
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
+    // Seven fields a node cannot be written without, derived by
+    // `corpus/md-required-fields.nu` and missing from the schema before it.
+    (
+        "!llvm.dbg.cu = !{!0}\n!llvm.module.flags = !{!1}\n\n!0 = distinct !DICompileUnit(language: DW_LANG_C99, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!1 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
+        "missing required field",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DIModule(name: \"M\")\n",
+        "missing required field",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DIMacro(type: DW_MACINFO_define, value: \"v\")\n",
+        "missing required field",
+    ),
     (
         "@a = global i32 0\n\nuselistorder ptr @a, { 0, 0 }\n",
         "uselistorder indexes are a permutation, so they are distinct",
@@ -1058,6 +1072,10 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // The same three with the field they need.
+    "!llvm.dbg.cu = !{!0}\n!llvm.module.flags = !{!1}\n\n!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!1 = !{i32 2, !\"Debug Info Version\", i32 3}\n!2 = !DIFile(filename: \"a\", directory: \"d\")\n",
+    "!named = !{!0}\n!0 = !DIModule(scope: null, name: \"M\")\n",
+    "!named = !{!0}\n!0 = !DIMacro(type: DW_MACINFO_define, name: \"m\", value: \"v\")\n",
     // A pointer to a function, in the older spelling, where a return type
     // and where an operand type. `ret void` still returns nothing: what
     // follows the word is what settles it.

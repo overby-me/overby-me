@@ -149,6 +149,7 @@ static TABLE: &[(&str, Node)] = &[
                     ..field("language")
                 },
                 Field {
+                    required: true,
                     non_null: true,
                     ..field("file")
                 },
@@ -321,7 +322,7 @@ static TABLE: &[(&str, Node)] = &[
     (
         "DIGlobalVariableExpression",
         Node {
-            fields: &[field("var"), field("expr")],
+            fields: &[required("var"), required("expr")],
             distinct: Distinct::Optional,
             positional: false,
         },
@@ -412,7 +413,12 @@ static TABLE: &[(&str, Node)] = &[
     (
         "DIMacro",
         Node {
-            fields: &[field("type"), field("line"), field("name"), field("value")],
+            fields: &[
+                required("type"),
+                field("line"),
+                required("name"),
+                field("value"),
+            ],
             distinct: Distinct::Optional,
             positional: false,
         },
@@ -429,8 +435,8 @@ static TABLE: &[(&str, Node)] = &[
         "DIModule",
         Node {
             fields: &[
-                field("scope"),
-                field("name"),
+                required("scope"),
+                required("name"),
                 field("configMacros"),
                 field("includePath"),
                 field("apinotes"),
