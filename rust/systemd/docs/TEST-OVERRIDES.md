@@ -134,7 +134,8 @@ Landed since the ledger was written (each regression-tested before push):
 | `e7c7c8a9` | repart settles space claims sequentially, keeping grain remainders |
 | `c4d604db` | repart honours `--defer-partitions=` |
 | `8bdeea73` | repart allocates per free area, not across their sum |
-| (this) | repart fills the lowest free slots, applies `--size=` to an existing image, and lets an existing partition grow into the gap after it |
+| `0a28d1d8` | a free area's span includes the partition before it, so an existing one can claim a total size |
+| (this) | repart fills the lowest free slots, applies `--size=` to an existing image, and copies `CopyBlocks=` contents from a definition |
 | `45c404c3` | repart derives partition labels from the type designator, numbering repeats |
 | `e7c7c8a9` | repart settles space claims sequentially, keeping grain remainders |
 | `c4d604db` | repart honours `--defer-partitions=` |
@@ -200,14 +201,19 @@ VM run. Diagnostics must write to stderr.
   real wedge, but it did not green the subtest; the wrapper records the next
   measurement to make. The second half needs udev workers to be processes rather
   than threads, which is architectural.
-- **58-REPART** got FOURTEEN real defects fixed against it and now matches upstream
-  byte for byte through `testcase_basic` steps 1 to 4 and most of 5. It is masked
-  again at the 3G resize, where a newly added partition gets half the new space
-  because the existing partition before it still competes for size in the same
-  area. Upstream treats a free area as the preceding partition's *padding*
-  area, so only a new partition competes there for size. The wrapper records
-  what that reading does not yet explain, and says not to implement on it
-  alone.
+- **58-REPART** got SIXTEEN real defects fixed against it and now matches upstream
+  byte for byte through `testcase_basic` steps 1 to 5, including the whole
+  six-partition `--copy-from=` table, `--defer-partitions=`, the deferred
+  refill, both resizes and the `CopyBlocks=` contents check. It is masked again
+  at step 6, where `--size=auto` has to grow an image that is already full and
+  rust only honours `auto` while creating one.
+
+  FOUR of the sixteen were options parsed into the argument struct, unit tested
+  for parsing, and then never consulted: `--include-partitions=`,
+  `--exclude-partitions=`, `--defer-partitions=` and `CopyBlocks=`. The last is
+  the sharpest: the partition *table* was byte-for-byte correct while the
+  partition *contents* were never written, so no table assertion could have
+  caught it. Assert the effect, not the table.
 
   Four of the ten defects were options parsed into the argument struct, unit
   tested for parsing, and then never consulted: `--include-partitions=`,
