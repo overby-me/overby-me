@@ -390,6 +390,11 @@ wrapped in a value. The first was written for every call at first, which
 refused `ifunc-program-addrspace.ll`, because a named symbol carries its
 own address space and only a call through a value has to match the
 program's.
+A false positive from the thirty-fourth pass was found by probing rather
+than by the suite, which does not cover it: a call may write the address
+space it goes through, and then that is what the callee has to match
+rather than the program's. `call addrspace(0)` under a `P42` layout is a
+module llvm-as reads and we were refusing it.
 A thirty-fifth pass: a struct that reaches itself by value has no size and
 upstream says so where the type is defined rather than where it is used,
 which is two files; a comdat is declared once; and a function attribute on

@@ -24,7 +24,7 @@ use crate::summary::SummaryValue;
 use crate::types::{StructId, TypeKind};
 use crate::value::{BlockId, GlobalRef, InstId, MdId, Name, Value};
 use crate::{FunctionId, TypeId};
-use llvm_support::ApInt;
+use llvm_support::{ApInt, DataLayout};
 
 /// One thing wrong with a module.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -1881,15 +1881,28 @@ impl Verifier<'_> {
                 let names_a_symbol = matches!(call.callee, Value::Constant(id)
                     if self.module.ctx.constant(id).as_global().is_some());
                 if !names_a_symbol
-                    && let Some(layout) = &self.module.data_layout
                     && let Some(space) = self
                         .value_type(function, call.callee)
                         .and_then(|ty| self.module.ctx.type_kind(ty).pointer_address_space())
-                    && space != layout.program_address_space()
                 {
-                    self.report(format!(
-                        "{where_} calls through address space {space} rather than the program's"
-                    ));
+                    // A call may write the space it goes through, and then
+                    // that is what the callee has to be in. Written or not,
+                    // the two have to agree; unwritten it is the program's.
+                    let wanted = match call.address_space {
+                        Some(written) => Some(written),
+                        None => self
+                            .module
+                            .data_layout
+                            .as_ref()
+                            .map(DataLayout::program_address_space),
+                    };
+                    if let Some(wanted) = wanted
+                        && space != wanted
+                    {
+                        self.report(format!(
+                            "{where_} calls through address space {space} rather than {wanted}"
+                        ));
+                    }
                 }
                 let direct = matches!(call.callee, Value::Constant(id)
                     if matches!(self.module.ctx.constant(id).as_global(), Some(GlobalRef::Function(_))));

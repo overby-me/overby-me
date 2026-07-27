@@ -544,7 +544,7 @@ const BROKEN: &[(&str, &str)] = &[
     ),
     (
         "target datalayout = \"P200\"\n\ndefine void @f(ptr %fn) {\nentry:\n  %r = call i8 %fn(i32 0)\n  ret void\n}\n",
-        "rather than the program's",
+        "rather than 200",
     ),
     (
         "define void @f() {\nentry:\n  ret void, !bar !1\n}\n\n!0 = !{}\n!1 = !{metadata !0}\n",
@@ -956,6 +956,9 @@ const VERIFIES: &[&str] = &[
     // The address space follows the alignment, which is where the grammar
     // puts it.
     "define void @f() {\nentry:\n  %y = alloca i32, align 4, addrspace(3)\n  ret void\n}\n",
+    // A call may write the address space it goes through, and then that is
+    // what has to match rather than the program's.
+    "target datalayout = \"P42\"\n\ndefine i8 @f(ptr %p0) {\nentry:\n  %r = call addrspace(0) i8 %p0(i32 0)\n  ret i8 %r\n}\n",
     // A pointer to a type does not make the type contain itself, which is
     // what makes a linked list legal.
     "%node = type { i32, ptr }\n@head = global %node zeroinitializer\n",
