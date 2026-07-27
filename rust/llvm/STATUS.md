@@ -77,7 +77,7 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 454 | 483 | 11 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 447 | 483 | 8 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 288 | 328 | 1 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
@@ -91,19 +91,19 @@ right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/CodeGen` | 22,180 | 22,785 | `llvm-tree-codegen` |
-| `llvm/test/Transforms` | 10,177 | 10,305 | `llvm-tree-transforms` |
-| `llvm/test/Analysis` | 1,391 | 1,403 | `llvm-tree-analysis` |
+| `llvm/test/CodeGen` | 22,187 | 22,785 | `llvm-tree-codegen` |
+| `llvm/test/Transforms` | 10,207 | 10,305 | `llvm-tree-transforms` |
+| `llvm/test/Analysis` | 1,393 | 1,403 | `llvm-tree-analysis` |
 | `llvm/test/DebugInfo` | 1,096 | 1,101 | `llvm-tree-debuginfo` |
 | `llvm/test/Instrumentation` | 499 | 508 | `llvm-tree-instrumentation` |
 | `llvm/test/Linker` | 334 | 338 | `llvm-tree-linker` |
-| `llvm/test/ThinLTO` | 251 | 260 | `llvm-tree-thinlto` |
+| `llvm/test/ThinLTO` | 259 | 260 | `llvm-tree-thinlto` |
 | `llvm/test/Other` | 160 | 160 | `llvm-tree-other` |
 | `llvm/test/MC` | 159 | 160 | `llvm-tree-mc` |
-| `llvm/test/Bitcode` | 152 | 232 | `llvm-tree-bitcode` |
+| `llvm/test/Bitcode` | 153 | 232 | `llvm-tree-bitcode` |
 | `llvm/test/Feature` | 79 | 82 | `llvm-tree-feature` |
 
-That is 36,478 of the 37,334 modules llvm-as reads across eleven trees, and
+That is 36,526 of the 37,334 modules llvm-as reads across eleven trees, and
 what is left is mostly not a gap. Two decisions account for most of it. Typed
 pointers are refused on purpose (PLAN 1.2), which costs 179 files in CodeGen
 and 78 of Bitcode's 81, that tree existing to test reading older bitcode; it
@@ -127,6 +127,12 @@ LangRef does not document, so those declarations print back without them.
 Doing it exposed four verifier rules that had been unreachable, and all four
 are real, which is why both suite ratchets ended up better than they started
 rather than worse.
+
+Assembler agreement fell from 454 to 447 when the use-list order directives
+started parsing: eighteen of that suite's files are negative tests for them,
+seven of which check the indexes against a use list this does not build.
+Refusing every such module had scored as agreement for a reason that had
+nothing to do with what those files test.
 
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse 18 modules llvm-as reads**, which is the failure that
@@ -196,7 +202,7 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against `llvm-as | llvm-dis`, and **123 of 216** are identical. Two
+against `llvm-as | llvm-dis`, and **128 of 216** are identical. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against

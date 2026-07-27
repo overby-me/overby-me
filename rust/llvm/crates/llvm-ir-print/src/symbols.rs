@@ -75,7 +75,16 @@ impl Printer<'_> {
         self.push("alias ");
         self.ty(alias.value_type);
         self.push(", ");
-        self.constant_with_type(alias.aliasee);
+        // A constant expression aliasee writes what it produces itself, so
+        // upstream puts no type in front of it. A bare symbol does need one.
+        if matches!(
+            self.module.ctx.constant(alias.aliasee),
+            llvm_ir::constant::Constant::Expression(_)
+        ) {
+            self.constant(alias.aliasee);
+        } else {
+            self.constant_with_type(alias.aliasee);
+        }
         if let Some(partition) = &alias.partition {
             let _ = write!(self.out, ", partition \"{}\"", escape_string(partition));
         }

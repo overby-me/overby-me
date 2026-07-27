@@ -7,7 +7,7 @@ use llvm_ir::TypeId;
 use llvm_ir::global::{Comdat, ComdatKind};
 use llvm_ir::metadata::NamedMetadata;
 use llvm_ir::summary::{SummaryEntry, SummaryField, SummaryValue};
-use llvm_ir::value::{MdId, Name};
+use llvm_ir::value::{GlobalRef, MdId, Name};
 use llvm_support::{DataLayout, Triple};
 
 impl Parser {
@@ -65,10 +65,7 @@ impl Parser {
                         self.parse_attribute_group()?;
                     }
                     "uselistorder" | "uselistorder_bb" => {
-                        return self.error(
-                            "use-list order directives are not modelled; \
-                             re-emit without -preserve-ll-uselistorder",
-                        );
+                        self.parse_use_list_order()?;
                     }
                     other => {
                         return self.error(format!("unexpected top-level keyword '{other}'"));
@@ -165,6 +162,130 @@ impl Parser {
                 }
             }
         }
+    }
+
+    /// A `uselistorder` or `uselistorder_bb` directive, read and dropped.
+    ///
+    /// The directive records what order a value's uses were in, so that
+    /// bitcode round-trips through the textual form without reordering them.
+    /// `llvm-dis` prints none of them unless asked to, so reading one and
+    /// keeping nothing is what reproduces upstream's output; keeping them
+    /// would print something upstream does not.
+    ///
+    /// What is not checked is whether the indexes are a permutation of the
+    /// use list, which upstream does check. That needs the def-use chains
+    /// this does not build, so a module with nonsense indexes is read where
+    /// upstream refuses it.
+    pub(crate) fn parse_use_list_order(&mut self) -> Result<(), ParseError> {
+        // `uselistorder_bb` names a function and a block, so it has one more
+        // comma-separated item before the index list than `uselistorder`.
+        let by_block = self.require_word()? == "uselistorder_bb";
+        if by_block {
+            let name = match self.advance() {
+                Token::GlobalName(name) => Name::Named(name),
+                Token::GlobalNumber(number) => Name::Number(number),
+                other => {
+                    self.index -= 1;
+                    return self.error(format!(
+                        "expected a function name in uselistorder_bb, found {}",
+                        other.describe()
+                    ));
+                }
+            };
+            let function = match self.symbols.get(&name) {
+                Some(GlobalRef::Function(id)) => *id,
+                _ => {
+                    return self
+                        .error("uselistorder_bb names a function this module does not have");
+                }
+            };
+            self.require(Token::Comma)?;
+            let block = match self.advance() {
+                Token::LocalName(text) => text,
+                // A block is named here even when it prints as a number
+                // elsewhere: upstream has no way to reach a numbered one.
+                Token::LocalNumber(_) => {
+                    self.index -= 1;
+                    return self.error("uselistorder_bb needs a named block, not a numbered one");
+                }
+                other => {
+                    self.index -= 1;
+                    return self.error(format!(
+                        "expected a block in uselistorder_bb, found {}",
+                        other.describe()
+                    ));
+                }
+            };
+            let target = self.module.function(function);
+            if target.block_order.is_empty() {
+                return self.error("uselistorder_bb names a function with no body");
+            }
+            let defined = target
+                .block_order
+                .iter()
+                .any(|id| target.block(*id).name.as_ref() == Some(&Name::Named(block.clone())));
+            if !defined {
+                return self.error("uselistorder_bb names a block its function does not define");
+            }
+            self.require(Token::Comma)?;
+            return self.parse_use_list_indexes();
+        }
+        let items = 1;
+        // What names the value is skipped rather than read: it may be a
+        // constant expression with commas and parentheses of its own, and
+        // nothing here needs to know which value it was. The scan stops at
+        // the comma before the index list, which is the first one outside
+        // any bracket.
+        for item in 0..items {
+            if item > 0 {
+                self.require(Token::Comma)?;
+            }
+            let mut depth = 0i32;
+            loop {
+                match self.peek() {
+                    Token::LeftParen | Token::LeftBracket | Token::Less | Token::LeftBrace => {
+                        depth += 1;
+                    }
+                    Token::RightParen
+                    | Token::RightBracket
+                    | Token::Greater
+                    | Token::RightBrace => depth -= 1,
+                    Token::Comma if depth == 0 => break,
+                    Token::Eof => return self.error("unterminated uselistorder directive"),
+                    _ => {}
+                }
+                self.advance();
+            }
+        }
+        self.require(Token::Comma)?;
+        self.parse_use_list_indexes()
+    }
+
+    /// The `{ 1, 0 }` half of a directive.
+    ///
+    /// The indexes are a permutation of a use list, so they are distinct and
+    /// they change the order: upstream refuses `{ 0, 1 }` for saying nothing.
+    /// Whether they cover the list is not checked, that needing the use lists
+    /// this does not build.
+    fn parse_use_list_indexes(&mut self) -> Result<(), ParseError> {
+        self.require(Token::LeftBrace)?;
+        let mut indexes = Vec::new();
+        while !self.eat(&Token::RightBrace) {
+            if !indexes.is_empty() {
+                self.require(Token::Comma)?;
+            }
+            indexes.push(self.require_unsigned()?);
+        }
+        let mut sorted = indexes.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        if sorted.len() != indexes.len() {
+            return self.error("uselistorder indexes are a permutation, so they are distinct");
+        }
+        if indexes.windows(2).all(|pair| pair[0] < pair[1]) {
+            return self.error("uselistorder indexes that are already in order say nothing");
+        }
+        Ok(())
     }
 
     fn parse_type_definition(&mut self, name: &str) -> Result<(), ParseError> {

@@ -816,6 +816,26 @@ const BROKEN: &[(&str, &str)] = &[
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
     (
+        "@a = global i32 0\n\nuselistorder ptr @a, { 0, 0 }\n",
+        "uselistorder indexes are a permutation, so they are distinct",
+    ),
+    (
+        "@a = global i32 0\n\nuselistorder ptr @a, { 0, 1 }\n",
+        "uselistorder indexes that are already in order say nothing",
+    ),
+    (
+        "define void @f() {\nentry:\n  ret void\n}\n\nuselistorder_bb @f, %missing, { 1, 0 }\n",
+        "uselistorder_bb names a block its function does not define",
+    ),
+    (
+        "declare void @f()\n\nuselistorder_bb @f, %entry, { 1, 0 }\n",
+        "uselistorder_bb names a function with no body",
+    ),
+    (
+        "define void @f() {\nentry:\n  ret void\n}\n\nuselistorder_bb @missing, %entry, { 1, 0 }\n",
+        "uselistorder_bb names a function this module does not have",
+    ),
+    (
         "!named = !{!{i32 1}}\n",
         "a named metadata list holds references, not nodes",
     ),
@@ -1042,6 +1062,11 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // A use-list order directive sits among the instructions and after the
+    // globals, and says what order a value's uses were in. `llvm-dis` prints
+    // none of them unless asked to, so reading one and keeping nothing is
+    // what reproduces upstream's output.
+    "@a = global i32 0\n@b = global i32 0\n\ndefine i32 @f(i32 %x) {\nentry:\n  %p = add i32 %x, 1\n  %q = add i32 %x, 2\n  %r = add i32 %p, %q\n  uselistorder i32 %x, { 1, 0 }\n  ret i32 %r\n}\n\nuselistorder ptr @a, { 1, 0 }\nuselistorder_bb @f, %entry, { 1, 0 }\n",
     // `extern_weak` is a linkage rather than the `external` keyword, and it
     // declares just as `external` does, so the next global is the next
     // global rather than this one's initializer.

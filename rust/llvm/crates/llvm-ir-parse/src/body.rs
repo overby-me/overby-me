@@ -307,6 +307,12 @@ impl Parser {
                     function.place_block(id);
                     current = Some(id);
                 }
+                // A use-list order directive sits among the instructions and
+                // is not one: it says what order a value's uses were in, and
+                // upstream drops it on the way out.
+                Token::Word(word) if word == "uselistorder" || word == "uselistorder_bb" => {
+                    self.parse_use_list_order()?;
+                }
                 _ => {
                     let Some(block) = current else {
                         return self.error("an instruction outside any block");

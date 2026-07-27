@@ -659,8 +659,35 @@ named metadata list may hold one of the two node kinds written at every use
 rather than numbered, and may not hold any other node written in place. And a
 metadata field may be an aggregate constant, `extraData: [4 x i32] [...]`.
 Assembler 453 to 454 with refusals 12 to 11, Transforms to 10,177, CodeGen to
-22,180, and eleven trees now have a bound: 36,478 of the 37,334 modules
+22,187, and eleven trees now have a bound: 36,526 of the 37,334 modules
 llvm-as reads.
+A fifty-second pass took the use-list order directives, which had been a
+recorded non-divergence since the start and were the largest closable class
+left: 45 files across five trees.
+They turned out to need no model at all. A directive says what order a
+value's uses were in, so that bitcode round-trips through the textual form
+without reordering them, and `llvm-dis` prints none of them unless asked to.
+Reading one and keeping nothing is therefore what reproduces upstream's
+output; keeping them would print something upstream does not.
+Transforms 10,177 to 10,207, ThinLTO 251 to 259, Analysis to 1,393, Bitcode
+to 153.
+It cost Assembler agreement, 454 to 447, and that is the trade the second
+bound exists to make legible. Eighteen of that suite's files are negative
+tests for these directives. Eight of them check things that need no use
+list, and those are checked: `uselistorder_bb` names a function this module
+has, with a body, and a block that function defines and that is named rather
+than numbered; the indexes are distinct; and indexes already in order say
+nothing. The other seven check the indexes against the use list itself, and
+that needs the def-use chains PLAN 4.2 is still waiting on. Refusing every
+such module scored as agreement for a reason that had nothing to do with
+what those files test. The bound that matters went the right way, 11 to 8.
+Two printer divergences surfaced while measuring, both unrelated to the
+directives. An alias whose aliasee is a constant expression writes no type
+in front of it, where a bare symbol does: `@b = alias i1, getelementptr (...)`
+and `@b = alias i32, ptr @a`. That one moved the differential ratchet 123 to
+128. The other is not closable: upstream's predecessor comments follow the
+use list, so a module whose directives permute it lists its predecessors in
+that permuted order, and reproducing that needs the same chains.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

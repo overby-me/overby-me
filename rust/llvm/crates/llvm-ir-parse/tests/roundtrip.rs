@@ -152,6 +152,39 @@ fn debug_intrinsic_calls_become_records() {
     }
 }
 
+/// What upstream drops on the way out. `llvm-dis` prints no use-list order
+/// directives unless asked to, so a module holding them prints back without
+/// them, and an alias whose aliasee is an expression writes no type in front
+/// of it.
+const DROPPED: &[(&str, &str)] = &[
+    (
+        "@a = global i32 0\n\nuselistorder ptr @a, { 1, 0 }\n",
+        "@a = global i32 0\n",
+    ),
+    (
+        "@a = global [4 x i1] zeroinitializer\n@b = alias i1, getelementptr ([4 x i1], ptr @a, i64 0, i64 2)\n",
+        "@a = global [4 x i1] zeroinitializer\n\n@b = alias i1, getelementptr ([4 x i1], ptr @a, i64 0, i64 2)\n",
+    ),
+    (
+        "@a = global i32 0\n@b = alias i32, ptr @a\n",
+        "@a = global i32 0\n\n@b = alias i32, ptr @a\n",
+    ),
+];
+
+#[test]
+fn what_upstream_drops_is_dropped() {
+    for (written, expected) in DROPPED {
+        let module = llvm_ir_parse::parse_module(written)
+            .unwrap_or_else(|error| panic!("{written} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert_eq!(
+            printed.trim_start_matches('\n'),
+            *expected,
+            "\nfrom: {written}"
+        );
+    }
+}
+
 const FOLDED: &[(&str, &str)] = &[
     (
         "@g = global <4 x i16> <i16 -1, i16 -1, i16 -1, i16 -1>\n",
