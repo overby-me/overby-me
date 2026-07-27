@@ -118,6 +118,40 @@ fn printing_is_idempotent() {
 /// What upstream folds an aggregate into when every element says the same
 /// thing. Written out longhand on the left, folded on the right, which is a
 /// change the corpus cannot pin because `llvm-dis` never writes the longhand.
+const UPGRADED: &[(&str, &str)] = &[
+    // The four debug-info intrinsics are the older spelling of the debug
+    // records, and upstream reads a call to one as the record, taking the
+    // location from the call's `!dbg` and dropping the declaration.
+    (
+        "declare void @llvm.dbg.declare(metadata, metadata, metadata)\n\ndefine void @f(ptr %p) !dbg !5 {\nentry:\n  call void @llvm.dbg.declare(metadata ptr %p, metadata !4, metadata !DIExpression()), !dbg !8\n  ret void\n}\n\n!llvm.module.flags = !{!0}\n!llvm.dbg.cu = !{!1}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!1 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!2 = !DIFile(filename: \"a.c\", directory: \"/\")\n!4 = !DILocalVariable(name: \"v\", scope: !5, file: !2, line: 1)\n!5 = distinct !DISubprogram(name: \"f\", scope: !2, file: !2, line: 1, type: !6, spFlags: DISPFlagDefinition, unit: !1)\n!6 = !DISubroutineType(types: !7)\n!7 = !{null}\n!8 = !DILocation(line: 1, column: 1, scope: !5)\n",
+        "    #dbg_declare(ptr %p, !6, !DIExpression(), !7)",
+    ),
+    // The declaration goes even when nothing called it.
+    (
+        "declare void @llvm.dbg.value(metadata, metadata, metadata)\n\ndefine void @f() {\nentry:\n  ret void\n}\n",
+        "define void @f() {",
+    ),
+];
+
+#[test]
+fn debug_intrinsic_calls_become_records() {
+    for (written, expected) in UPGRADED {
+        let module = llvm_ir_parse::parse_module(written)
+            .unwrap_or_else(|error| panic!("{written} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(
+            printed.lines().any(|line| line == *expected),
+            "expected a line {expected:?}\n--- printed ---\n{printed}"
+        );
+        assert!(
+            !printed
+                .lines()
+                .any(|line| line.starts_with("declare") && line.contains("llvm.dbg.")),
+            "the declaration should not be printed\n--- printed ---\n{printed}"
+        );
+    }
+}
+
 const FOLDED: &[(&str, &str)] = &[
     (
         "@g = global <4 x i16> <i16 -1, i16 -1, i16 -1, i16 -1>\n",

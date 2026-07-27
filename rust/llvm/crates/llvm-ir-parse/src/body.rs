@@ -3,13 +3,14 @@
 use crate::lexer::Token;
 use crate::{FunctionState, ParseError, Parser};
 use llvm_ir::attribute::AttributeSet;
-use llvm_ir::constant::{CastOp, GepFlags};
+use llvm_ir::constant::{CastOp, Constant, GepFlags};
 use llvm_ir::function::{Function, Param};
 use llvm_ir::instruction::{
     AtomicOrdering, AtomicRmwOp, BinOp, CallArg, CallData, CallingConv, FastMathFlags,
     FloatPredicate, InstKind, Instruction, IntFlags, IntPredicate, LandingPadClause,
     NamedCallingConv, OperandBundle, SyncScope, TailKind, UnwindTarget,
 };
+use llvm_ir::metadata::{MdOperand, MdRef};
 use llvm_ir::types::TypeKind;
 use llvm_ir::value::{BlockId, InstId, Name};
 use llvm_ir::{TypeId, Value};
@@ -532,7 +533,31 @@ impl Parser {
             None => function.reserve_instruction(),
         };
 
-        let metadata = self.parse_metadata_attachments_after_comma()?;
+        let mut metadata = self.parse_metadata_attachments_after_comma()?;
+        // A debug record built from a call to one of the `llvm.dbg.*`
+        // intrinsics takes its location from the `!dbg` the call carried,
+        // which is the last operand rather than an attachment.
+        let mut kind = kind;
+        let one_short = match &kind {
+            InstKind::DebugRecord { operands, .. } => {
+                operands.len() + 1 == debug_record_arity(&kind).unwrap_or(0)
+            }
+            _ => false,
+        };
+        if one_short {
+            let location = metadata
+                .iter()
+                .position(|attachment| attachment.kind == "dbg")
+                .map(|at| metadata.remove(at).node);
+            let location = match location {
+                Some(MdRef::Id(id)) => MdOperand::Ref(id),
+                Some(MdRef::Inline(node)) => MdOperand::Inline(node),
+                None => MdOperand::Null,
+            };
+            if let InstKind::DebugRecord { operands, .. } = &mut kind {
+                operands.push(location);
+            }
+        }
         function.define_instruction(
             id,
             Instruction {
@@ -552,6 +577,7 @@ impl Parser {
     ) -> Result<(TypeId, InstKind), ParseError> {
         if let Token::DebugRecord(name) = self.peek().clone() {
             self.advance();
+            self.wrote_debug_record = true;
             self.require(Token::LeftParen)?;
             let mut operands = Vec::new();
             while !self.eat(&Token::RightParen) {
@@ -1352,6 +1378,30 @@ impl Parser {
                     return self.error("expected 'call' after a tail marker");
                 }
                 let (ty, call) = self.parse_call_data(function, state, tail)?;
+                // Upstream reads a call to one of the four `llvm.dbg.*`
+                // intrinsics as the record it is the older spelling of, and
+                // prints the record back. The location comes from the call's
+                // `!dbg` attachment, which the caller moves across once the
+                // attachments have been read.
+                if let Some(name) = self.debug_record_name(&call) {
+                    self.wrote_debug_intrinsic = true;
+                    let operands = call
+                        .args
+                        .iter()
+                        .map(|arg| match arg.value {
+                            Value::Constant(id) => match self.module.ctx.constant(id).clone() {
+                                Constant::Metadata { operand, .. } => *operand,
+                                _ => MdOperand::Value {
+                                    ty: arg.ty,
+                                    value: arg.value,
+                                },
+                            },
+                            value => MdOperand::Value { ty: arg.ty, value },
+                        })
+                        .collect();
+                    let void = self.module.ctx.void_type();
+                    return Ok((void, InstKind::DebugRecord { name, operands }));
+                }
                 Ok((ty, InstKind::Call(Box::new(call))))
             }
             other => self.error(format!("unknown instruction '{other}'")),
@@ -1433,6 +1483,30 @@ impl Parser {
                 .collect();
             self.module.add_function(declaration);
         }
+    }
+
+    /// The debug record a call is the older spelling of, if it is one.
+    fn debug_record_name(&self, call: &CallData) -> Option<String> {
+        let Value::Constant(id) = call.callee else {
+            return None;
+        };
+        let Constant::Global { target, .. } = self.module.ctx.constant(id) else {
+            return None;
+        };
+        // The symbol table rather than the function arena: the declaration
+        // may sit after the call in the text, so its slot in the arena is
+        // reserved and not yet filled.
+        [
+            ("llvm.dbg.declare", "dbg_declare"),
+            ("llvm.dbg.value", "dbg_value"),
+            ("llvm.dbg.assign", "dbg_assign"),
+            ("llvm.dbg.label", "dbg_label"),
+        ]
+        .into_iter()
+        .find(|(intrinsic, _)| {
+            self.symbols.get(&Name::Named((*intrinsic).to_string())) == Some(target)
+        })
+        .map(|(_, record)| record.to_string())
     }
 
     fn parse_call_data(
@@ -1704,5 +1778,20 @@ impl Parser {
             };
         }
         Ok(current)
+    }
+}
+
+/// How many operands each kind of debug record takes, counting the location
+/// it ends with. A record built from a call to the matching intrinsic is one
+/// short until that location is moved across from the call's `!dbg`.
+fn debug_record_arity(kind: &InstKind) -> Option<usize> {
+    let InstKind::DebugRecord { name, .. } = kind else {
+        return None;
+    };
+    match name.as_str() {
+        "dbg_declare" | "dbg_value" => Some(4),
+        "dbg_assign" => Some(7),
+        "dbg_label" => Some(2),
+        _ => None,
     }
 }

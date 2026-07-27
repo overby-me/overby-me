@@ -632,11 +632,17 @@ them. A module writes its debug info as records or as calls to the
 `llvm.dbg.*` intrinsics and upstream refuses one holding both, and there are
 four kinds of debug record, so `#dbg_invalid` is a misspelling rather than a
 kind this parser has not met.
-One divergence is recorded rather than closed: upstream rewrites a
-`call void @llvm.dbg.value(...)` into a `#dbg_value(...)` record as it
-reads, and this does not. The module parses either way, which is what the
-tree ratchets measure, but the printed text differs for a module written in
-the older spelling.
+A fiftieth pass closed that divergence rather than leaving it recorded.
+Upstream reads a call to one of the four `llvm.dbg.*` intrinsics as the
+record it is the older spelling of, takes the location from the call's
+`!dbg`, and drops the declaration whether it was called or not. So does
+this now. The declaration stays in the model, because a constant built
+while parsing still points at it, and goes unprinted.
+Doing it took the mixed-spelling rule out of the verifier and put it in the
+parser, where it now has to live: once every call is a record, there is
+nothing left to tell the two apart by, so the two spellings are counted as
+they are read. Verifier 287 to 288, with the modules we refuse that llvm-as
+reads down to one.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

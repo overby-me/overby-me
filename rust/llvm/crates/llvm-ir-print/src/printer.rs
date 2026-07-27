@@ -161,6 +161,14 @@ impl<'m> Printer<'m> {
         }
 
         for index in 0..self.module.functions.len() {
+            // The four debug-info intrinsics are the older spelling of the
+            // debug records, and upstream's reader replaces every call to
+            // one and drops the declaration, whether it was called or not.
+            // The declaration is kept in the model so that a constant built
+            // during parsing still resolves, and left unprinted here.
+            if is_debug_intrinsic(&self.module.functions[index]) {
+                continue;
+            }
             self.push("\n");
             self.function(&self.module.functions[index]);
         }
@@ -545,4 +553,15 @@ fn call_data(kind: &InstKind) -> Option<&CallData> {
         }
         _ => None,
     }
+}
+
+/// Whether a function is one of the four debug-info intrinsics, which are
+/// read as records and never written back.
+fn is_debug_intrinsic(function: &llvm_ir::function::Function) -> bool {
+    function.block_order.is_empty()
+        && matches!(&function.name, llvm_ir::value::Name::Named(name)
+        if matches!(
+            name.as_str(),
+            "llvm.dbg.declare" | "llvm.dbg.value" | "llvm.dbg.assign" | "llvm.dbg.label"
+        ))
 }

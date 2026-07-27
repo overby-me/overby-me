@@ -130,7 +130,7 @@ in {
     # every file in the suite, scored against what real llvm-as does with it.
     # See STATUS.md for what the remaining disagreements are.
     llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 453 12;
-    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 287 2;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 288 1;
 
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this

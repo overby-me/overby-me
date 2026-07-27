@@ -70,6 +70,8 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         implied_intrinsics: Vec::new(),
         implied_signatures: HashMap::new(),
         next_inline_metadata: 0,
+        wrote_debug_record: false,
+        wrote_debug_intrinsic: false,
     };
     parser.next_inline_metadata = parser
         .tokens
@@ -83,6 +85,11 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
     parser.module.module_id = module_id;
     parser.prescan_symbols()?;
     parser.parse_top_level()?;
+    if parser.wrote_debug_record && parser.wrote_debug_intrinsic {
+        return parser.error(
+            "the module writes debug info as records in one place and as intrinsic calls in another",
+        );
+    }
     parser.add_implied_intrinsics();
     Ok(parser.module)
 }
@@ -104,6 +111,13 @@ pub(crate) struct Parser {
     /// inside another is hoisted out and numbered. Starting past every
     /// number the text writes keeps the two from colliding.
     pub(crate) next_inline_metadata: u32,
+    /// Whether the text wrote a `#dbg_` record, and whether it wrote a call
+    /// to one of the intrinsics that are the older spelling of one. A module
+    /// uses one spelling or the other, and upstream refuses a mix; by the
+    /// time the module is built both look the same, so the two have to be
+    /// noticed as they are read.
+    pub(crate) wrote_debug_record: bool,
+    pub(crate) wrote_debug_intrinsic: bool,
 }
 
 /// Everything the parser has to remember while inside one function body.
