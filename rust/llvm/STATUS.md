@@ -91,6 +91,7 @@ reading a module upstream reads is right in every case.
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
 | `llvm/test/Transforms` | 10,162 | 10,305 | `llvm-tree-transforms` |
+| `llvm/test/Analysis` | 1,391 | 1,403 | `llvm-tree-analysis` |
 
 The first sweep read 2,781 of the first 2,992 and the gaps it showed were not
 the ones the suites show. Four fixes closed 110 of them: the attribute

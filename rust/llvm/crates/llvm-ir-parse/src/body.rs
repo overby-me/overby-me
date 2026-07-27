@@ -515,14 +515,21 @@ impl Parser {
 
         let id = match reserved {
             Some(id) => id,
-            None => {
-                let id = function.reserve_instruction();
-                if produces_value {
-                    state.numbered_values.insert(state.next_number, id);
-                    state.next_number += 1;
-                }
+            None if produces_value => {
+                // An instruction written without a `%N =` still takes the
+                // next number, and `%N` elsewhere may already have made a
+                // placeholder for it. Reusing that placeholder rather than
+                // reserving a second slot is what keeps a forward reference
+                // pointing at the instruction that arrives.
+                let id = match state.numbered_values.get(&state.next_number) {
+                    Some(id) => *id,
+                    None => function.reserve_instruction(),
+                };
+                state.numbered_values.insert(state.next_number, id);
+                state.next_number += 1;
                 id
             }
+            None => function.reserve_instruction(),
         };
 
         let metadata = self.parse_metadata_attachments_after_comma()?;

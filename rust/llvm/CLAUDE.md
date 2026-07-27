@@ -581,6 +581,16 @@ or inside another node. So the parser hoists them now, at parse time, into
 numbers past every number the text writes. That fixed the global case from
 the pass before as well, which had the same divergence and had not been
 noticed because only the parse was measured.
+A forty-seventh pass swept `llvm/test/Analysis`, 1,415 files that are older
+on average than the pass tests and use the implicit numbering far more. It
+read 1,387 of the 1,403 llvm-as reads, and four of the sixteen it refused
+were not refusals at all: they aborted.
+The bug was the value half of the one the forty-first pass fixed for blocks.
+An instruction written without a `%N =` still takes the next number, and a
+phi above it may already have made a placeholder for that number. Reserving
+a second slot rather than reusing the placeholder left the phi pointing at
+an instruction that never arrived. That is 1,391 now, and the tree is a
+fifth ratchet.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

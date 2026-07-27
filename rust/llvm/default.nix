@@ -137,8 +137,11 @@ in {
     # pins it against inputs nobody wrote for us.
     llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 122;
 
-    # Ten thousand pass tests, none of them written with a parser in mind.
+    # Ten thousand pass tests, none of them written with a parser in mind,
+    # and fourteen hundred analysis tests that are older on average and use
+    # the implicit numbering more.
     llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10162;
+    llvm-tree-analysis = pkgs: treeCheck pkgs "Analysis" 1391;
   };
 
   packages.rust-llvm = {lib, ...}:

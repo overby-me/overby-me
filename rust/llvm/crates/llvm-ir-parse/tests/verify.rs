@@ -1022,6 +1022,11 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // An instruction written without a `%N =` still takes the next number,
+    // and a phi above it may already have referred to that number. Reserving
+    // a second slot rather than reusing the placeholder left the phi pointing
+    // at an instruction that never arrived, which aborted rather than failing.
+    "define void @f(i32 %n) {\nentry:\n  br label %bb\n\nbb:\n  %j = phi i32 [ %0, %bb ], [ 0, %entry ]\n  add i32 %j, 1\n  icmp slt i32 %0, %n\n  br i1 %1, label %bb, label %out\n\nout:\n  ret void\n}\n",
     // A global's `align` with no comma before it is an attribute rather than
     // the alignment clause, which is how upstream tells the two apart.
     "@g = external global i32 align 4\n",
