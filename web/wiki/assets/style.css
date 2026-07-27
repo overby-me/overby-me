@@ -677,7 +677,7 @@ html {
 		height var(--md-sys-motion-duration-medium1)
 			var(--md-sys-motion-spring-spatial-default),
 		border-radius var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default),
+			var(--md-sys-motion-easing-emphasized),
 		background-color var(--md-sys-motion-duration-short3)
 			var(--md-sys-motion-easing-standard),
 		box-shadow var(--md-sys-motion-duration-short3)
@@ -1688,7 +1688,7 @@ html {
 		transform var(--md-sys-motion-duration-medium1)
 		var(--md-sys-motion-spring-spatial-default),
 		border-radius var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-spring-spatial-default),
+		var(--md-sys-motion-easing-emphasized),
 		box-shadow var(--md-sys-motion-duration-short4)
 		var(--md-sys-motion-easing-standard);
 }
@@ -1855,7 +1855,7 @@ html {
 		transform var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-spring-spatial-fast),
 		border-radius var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-spring-spatial-default);
+		var(--md-sys-motion-easing-emphasized);
 	text-decoration: none;
 }
 
@@ -2046,7 +2046,7 @@ html {
 		background-color var(--md-sys-motion-duration-short4)
 		var(--md-sys-motion-easing-standard),
 		border-radius var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-spring-spatial-default),
+		var(--md-sys-motion-easing-emphasized),
 		box-shadow var(--md-sys-motion-duration-short4)
 		var(--md-sys-motion-easing-standard),
 		transform var(--md-sys-motion-duration-short3)
@@ -2154,7 +2154,7 @@ a.folder-item:focus-visible {
 		background-color var(--md-sys-motion-duration-short3)
 			var(--md-sys-motion-easing-standard),
 		border-radius var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default);
+			var(--md-sys-motion-easing-emphasized);
 }
 
 /* DESIGN (expressive text field): focus morphs the corner larger, thickens
@@ -3157,7 +3157,7 @@ select:focus {
 		transform var(--md-sys-motion-duration-short3)
 			var(--md-sys-motion-spring-spatial-default),
 		border-radius var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-spring-spatial-default),
+			var(--md-sys-motion-easing-emphasized),
 		background-color var(--md-sys-motion-duration-short4)
 			var(--md-sys-motion-easing-standard);
 }

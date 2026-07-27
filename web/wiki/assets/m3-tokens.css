@@ -157,7 +157,15 @@
        Spatial springs (position/size/corner/rotation) OVERSHOOT slightly;
        effects springs (colour/opacity) settle without overshoot. cubic-bezier
        here is the universal fallback; the @supports block below upgrades the
-       spatial ones to physically-accurate CSS linear() where available. */
+       spatial ones to physically-accurate CSS linear() where available.
+
+       NEVER spring a border-radius that starts or ends at corner-full. That
+       token is 9999px, a "clamp to half the height" idiom rather than a real
+       radius, so a morph to (say) 16px interpolates across ~9983px and the
+       spring's ~10% undershoot lands near -1000px, which clamps to 0: the
+       control flashes fully square mid-press. Use easing-emphasized for radius,
+       which is monotonic, and keep the springs for transform, where the
+       overshoot is the point and the range is small. */
 	--md-sys-motion-spring-spatial-fast: cubic-bezier(0.3, 1.3, 0.5, 1);
 	--md-sys-motion-spring-spatial-default: cubic-bezier(0.34, 1.5, 0.5, 1);
 	--md-sys-motion-spring-spatial-slow: cubic-bezier(0.36, 1.66, 0.55, 1);
