@@ -115,7 +115,19 @@ impl Parser {
         }
     }
 
+    /// A quoted string that has to be text: a section name, a triple, an
+    /// attribute key. Bytes outside UTF-8 are an error here rather than
+    /// silently mangled, and metadata takes the bytes instead.
     pub(crate) fn require_quoted(&mut self) -> Result<String, ParseError> {
+        let bytes = self.require_quoted_bytes()?;
+        match String::from_utf8(bytes) {
+            Ok(text) => Ok(text),
+            Err(_) => self.error("this string has to be valid UTF-8"),
+        }
+    }
+
+    /// A quoted string as written, for the places LLVM allows any byte.
+    pub(crate) fn require_quoted_bytes(&mut self) -> Result<Vec<u8>, ParseError> {
         match self.advance() {
             Token::Quoted(text) => Ok(text),
             other => {

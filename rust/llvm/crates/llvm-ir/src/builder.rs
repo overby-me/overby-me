@@ -135,7 +135,7 @@ impl Module {
     /// numbered string, so `!0 = !"text"` does not parse and a string only
     /// ever appears inside a node.
     pub fn md_string(&mut self, text: &str) -> MdOperand {
-        MdOperand::String(text.to_string())
+        MdOperand::String(text.into())
     }
 
     pub fn md_tuple(&mut self, operands: Vec<MdOperand>, distinct: bool) -> MdId {
@@ -158,7 +158,7 @@ impl Module {
 
     pub fn add_named_metadata(&mut self, name: &str, operands: Vec<MdId>) {
         self.named_metadata.push(NamedMetadata {
-            name: name.to_string(),
+            name: name.into(),
             operands,
         });
     }
@@ -657,7 +657,7 @@ impl<'m> Builder<'m> {
             .instruction_mut(id)
             .metadata
             .push(MdAttachment {
-                kind: kind.to_string(),
+                kind: kind.into(),
                 node: MdRef::Id(node),
             });
     }

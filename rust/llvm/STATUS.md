@@ -66,14 +66,14 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 400 | 483 | 21 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 402 | 483 | 19 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 226 | 328 | 4 | `llvm-upstream-verifier` |
 
 The two halves of the gap are not equally bad, so each suite has two
-bounds. We **refuse 25 modules llvm-as reads**, which is the failure that
+bounds. We **refuse 23 modules llvm-as reads**, which is the failure that
 matters: parse gaps, led now by intrinsics used without a declaration
-(five files), text that is not valid UTF-8 (two), and the `splat` and
-`ptrauth` constants. That count is a ceiling that may only fall. We
+(five files), and the `splat` and `ptrauth` constants. That count is a
+ceiling that may only fall. We
 **read 174 modules llvm-as refuses**, which is a missing verifier rule
 each, and agreement is a floor that may only rise.
 
@@ -85,7 +85,7 @@ what happened when five such rules came out at once: Verifier agreement
 fell 215 to 212 while the modules we wrongly refuse fell 53 to 45. Without
 the second bound the ratchet would have argued for keeping the bugs.
 
-Five of the 25 are permanent by design: two are use-list order directives,
+Five of the 23 are permanent by design: two are use-list order directives,
 which this tier does not model, and three are typed-pointer IR, rejected
 here on purpose (PLAN §1.2) although `llvm-as` still reads `i8*` and folds
 it to `ptr`.
@@ -103,7 +103,7 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against `llvm-as | llvm-dis`, and **116 of 208** are identical. Two
+against `llvm-as | llvm-dis`, and **117 of 210** are identical. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against

@@ -267,9 +267,12 @@ impl Parser {
                 // `"2":` and `-3:` are labels whose names only look like
                 // numbers. The lexer cannot tell before the colon, so the
                 // block loop reads the two tokens together.
-                Token::Quoted(text) if self.peek_at(1) == &Token::Colon => {
+                Token::Quoted(bytes) if self.peek_at(1) == &Token::Colon => {
                     self.advance();
                     self.advance();
+                    let Ok(text) = String::from_utf8(bytes) else {
+                        return self.error("a block label has to be valid UTF-8");
+                    };
                     let id = self.block_by_name(function, state, &Name::Named(text.clone()))?;
                     function.block_mut(id).name = Some(Name::Named(text));
                     function.place_block(id);

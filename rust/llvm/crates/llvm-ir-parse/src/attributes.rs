@@ -14,8 +14,11 @@ impl Parser {
     /// uses for the same attribute: `align 8` in a parameter list and
     /// `align=8` inside an attribute group.
     pub(crate) fn parse_attribute(&mut self, in_group: bool) -> Result<Attribute, ParseError> {
-        if let Token::Quoted(key) = self.peek().clone() {
+        if let Token::Quoted(bytes) = self.peek().clone() {
             self.advance();
+            let Ok(key) = String::from_utf8(bytes) else {
+                return self.error("an attribute key has to be valid UTF-8");
+            };
             let value = if self.eat(&Token::Equals) {
                 Some(self.require_quoted()?)
             } else {
@@ -130,7 +133,7 @@ impl Parser {
                 Token::Comma => ",".to_string(),
                 Token::LeftParen => "(".to_string(),
                 Token::RightParen => ")".to_string(),
-                Token::Quoted(text) => format!("\"{text}\""),
+                Token::Quoted(text) => format!("\"{}\"", String::from_utf8_lossy(text.as_slice())),
                 other => other.describe(),
             };
             let is_word = matches!(token, Token::Word(_) | Token::Integer { .. });

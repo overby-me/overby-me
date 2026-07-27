@@ -11,6 +11,7 @@
 //! module with sparse numbers prints differently through us than through
 //! `llvm-dis`; canonical input, which is what the corpus holds, is unaffected.
 
+use crate::ByteString;
 use crate::types::TypeId;
 use crate::value::{MdId, Value};
 
@@ -21,7 +22,7 @@ pub enum MdOperand {
     Null,
     Ref(MdId),
     /// An inline `!"text"`.
-    String(String),
+    String(ByteString),
     /// A typed value, as in `!{i32 1}`.
     Value {
         ty: TypeId,
@@ -40,8 +41,9 @@ pub enum MdField {
     Unsigned(u128),
     Signed(i128),
     Bool(bool),
-    /// A quoted string field, such as a name or a filename.
-    Str(String),
+    /// A quoted string field, such as a name or a filename. Bytes rather
+    /// than characters, because a filename need not be UTF-8.
+    Str(ByteString),
     Ref(MdId),
     Null,
     /// One or more bare words, which is how enumerators and flag sets are
@@ -70,7 +72,7 @@ pub enum SpecializedArgs {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Metadata {
     /// `!0 = !"text"`.
-    String(String),
+    String(ByteString),
     /// `!0 = !{...}` or `!0 = distinct !{...}`.
     Tuple {
         distinct: bool,
@@ -101,7 +103,7 @@ impl Metadata {
 
     pub fn as_string(&self) -> Option<&str> {
         match self {
-            Metadata::String(text) => Some(text),
+            Metadata::String(text) => text.as_str(),
             _ => None,
         }
     }
@@ -110,8 +112,9 @@ impl Metadata {
 /// `!llvm.module.flags = !{!0, !1}`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct NamedMetadata {
-    /// The name without its leading `!`.
-    pub name: String,
+    /// The name without its leading `!`. Bytes, because upstream escapes
+    /// any byte into one with `\\FF`.
+    pub name: ByteString,
     pub operands: Vec<MdId>,
 }
 
@@ -128,6 +131,6 @@ pub enum MdRef {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MdAttachment {
     /// The kind name without its leading `!`, such as `dbg` or `range`.
-    pub kind: String,
+    pub kind: ByteString,
     pub node: MdRef,
 }

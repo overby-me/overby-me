@@ -130,9 +130,10 @@ impl Parser {
                             }
                         }
                     }
-                    self.module
-                        .named_metadata
-                        .push(NamedMetadata { name, operands });
+                    self.module.named_metadata.push(NamedMetadata {
+                        name: name.into(),
+                        operands,
+                    });
                 }
                 Token::MetadataNumber(number) => {
                     self.advance();
@@ -249,7 +250,10 @@ impl Parser {
     fn parse_summary_value(&mut self) -> Result<SummaryValue, ParseError> {
         match self.advance() {
             Token::SummaryNumber(number) => Ok(SummaryValue::Ref(number)),
-            Token::Quoted(text) => Ok(SummaryValue::String(text)),
+            Token::Quoted(bytes) => match String::from_utf8(bytes) {
+                Ok(text) => Ok(SummaryValue::String(text)),
+                Err(_) => self.error("a summary string has to be valid UTF-8"),
+            },
             Token::Word(word) => {
                 // `writeonly ^14`: a word can qualify the value after it.
                 if matches!(

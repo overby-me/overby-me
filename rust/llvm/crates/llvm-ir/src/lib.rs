@@ -41,7 +41,10 @@ pub mod layout;
 pub mod metadata;
 pub mod module;
 pub mod summary;
+pub mod text;
 pub mod types;
+
+pub use text::ByteString;
 pub mod value;
 pub mod verify;
 

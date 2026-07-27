@@ -43,8 +43,11 @@ impl Parser {
                 }
                 Ok(Metadata::Tuple { distinct, operands })
             }
-            Token::MetadataName(tag) => {
+            Token::MetadataName(bytes) => {
                 self.advance();
+                // A node kind is a word. A name that is not even UTF-8 is
+                // certainly not one of the thirty-two.
+                let tag = String::from_utf8(bytes).unwrap_or_default();
                 let Some(schema) = md_schema::node(&tag) else {
                     self.index -= 1;
                     return self.error("expected metadata type");
@@ -242,7 +245,7 @@ impl Parser {
             }
             Token::Quoted(text) => {
                 self.advance();
-                Ok(MdField::Str(text))
+                Ok(MdField::Str(text.into()))
             }
             Token::MetadataNumber(number) => {
                 self.advance();
@@ -250,7 +253,7 @@ impl Parser {
             }
             Token::MetadataString(text) => {
                 self.advance();
-                Ok(MdField::Inline(Box::new(Metadata::String(text))))
+                Ok(MdField::Inline(Box::new(Metadata::String(text.into()))))
             }
             Token::MetadataName(_) | Token::Exclaim => {
                 let node = self.parse_metadata_definition()?;
@@ -320,7 +323,7 @@ impl Parser {
             }
             Token::MetadataString(text) => {
                 self.advance();
-                Ok(MdOperand::String(text))
+                Ok(MdOperand::String(text.into()))
             }
             Token::MetadataName(_) | Token::Exclaim => {
                 let node = self.parse_metadata_definition()?;
@@ -355,7 +358,7 @@ impl Parser {
             }
             self.advance();
             attachments.push(MdAttachment {
-                kind,
+                kind: kind.into(),
                 node: self.parse_metadata_ref()?,
             });
         }
@@ -406,7 +409,7 @@ impl Parser {
             self.advance();
             self.advance();
             attachments.push(MdAttachment {
-                kind,
+                kind: kind.into(),
                 node: self.parse_metadata_ref()?,
             });
         }

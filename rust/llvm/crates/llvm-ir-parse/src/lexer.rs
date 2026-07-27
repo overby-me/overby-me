@@ -36,7 +36,7 @@ pub enum Token {
     /// `$name`.
     ComdatName(String),
     /// `!name`, including specialized node tags such as `DILocation`.
-    MetadataName(String),
+    MetadataName(Vec<u8>),
     /// `!3`.
     MetadataNumber(u32),
     /// `^3`, a reference into the ThinLTO summary index.
@@ -44,7 +44,7 @@ pub enum Token {
     /// A colon standing on its own, which only the summary index writes.
     Colon,
     /// `!"text"`.
-    MetadataString(String),
+    MetadataString(Vec<u8>),
     /// A lone `!`, which starts an inline tuple.
     Exclaim,
     /// `#3`.
@@ -73,7 +73,9 @@ pub enum Token {
         digits: String,
     },
     /// `"text"`, unescaped.
-    Quoted(String),
+    /// `"..."`, as bytes: LLVM's strings are byte strings and a debug-info
+    /// path need not be UTF-8.
+    Quoted(Vec<u8>),
     /// `c"bytes"`, unescaped.
     ByteString(Vec<u8>),
     Comma,
@@ -103,7 +105,7 @@ impl Token {
             Token::GlobalName(name) => format!("@{name}"),
             Token::GlobalNumber(n) => format!("@{n}"),
             Token::ComdatName(name) => format!("${name}"),
-            Token::MetadataName(name) => format!("!{name}"),
+            Token::MetadataName(name) => format!("!{}", String::from_utf8_lossy(name)),
             Token::MetadataNumber(n) => format!("!{n}"),
             Token::SummaryNumber(n) => format!("^{n}"),
             Token::Colon => ":".to_string(),
@@ -291,7 +293,7 @@ impl<'a> Lexer<'a> {
             b'!' => {
                 self.bump();
                 match self.peek() {
-                    Some(b'"') => Token::MetadataString(self.quoted_string()?),
+                    Some(b'"') => Token::MetadataString(self.quoted_bytes()?),
                     Some(b) if b.is_ascii_digit() => Token::MetadataNumber(self.number()?),
                     Some(b) if is_name_byte(b) || b == b'\\' => {
                         Token::MetadataName(self.escaped_name()?)
@@ -321,12 +323,14 @@ impl<'a> Lexer<'a> {
                 }
             }
             b'"' => {
-                let text = self.quoted_string()?;
+                let bytes = self.quoted_bytes()?;
                 if self.peek() == Some(b':') {
                     self.bump();
+                    let text = String::from_utf8(bytes)
+                        .map_err(|_| self.error("a label has to be valid UTF-8"))?;
                     Token::Label(text)
                 } else {
-                    Token::Quoted(text)
+                    Token::Quoted(bytes)
                 }
             }
             b'c' if self.peek_at(1) == Some(b'"') => {
@@ -437,7 +441,7 @@ impl<'a> Lexer<'a> {
     /// A metadata name, which may spell a byte the bare grammar has no room
     /// for as `\\23`. Upstream escapes rather than quotes here, so
     /// `!\\23pragma` is the named metadata `#pragma`.
-    fn escaped_name(&mut self) -> Result<String, LexError> {
+    fn escaped_name(&mut self) -> Result<Vec<u8>, LexError> {
         let mut bytes = Vec::new();
         while let Some(byte) = self.peek() {
             if is_name_byte(byte) {
@@ -462,7 +466,7 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        String::from_utf8(bytes).map_err(|_| self.error("metadata name is not valid UTF-8"))
+        Ok(bytes)
     }
 
     fn hex_at(&self, ahead: usize) -> Option<u8> {
@@ -682,7 +686,7 @@ mod tests {
                 Token::LocalName("a".to_string()),
                 Token::GlobalName("b".to_string()),
                 Token::ComdatName("c".to_string()),
-                Token::MetadataName("d".to_string()),
+                Token::MetadataName("d".as_bytes().to_vec()),
                 Token::AttributeGroup(0),
                 Token::Eof,
             ]
@@ -793,8 +797,8 @@ mod tests {
             tokens(r#"c"hi\0A" "plain" "quote\22inside""#),
             vec![
                 Token::ByteString(vec![b'h', b'i', 0x0a]),
-                Token::Quoted("plain".to_string()),
-                Token::Quoted("quote\"inside".to_string()),
+                Token::Quoted("plain".as_bytes().to_vec()),
+                Token::Quoted("quote\"inside".as_bytes().to_vec()),
                 Token::Eof,
             ]
         );
@@ -833,10 +837,10 @@ mod tests {
                 Token::LeftBrace,
                 Token::MetadataNumber(0),
                 Token::Comma,
-                Token::MetadataString("s".to_string()),
+                Token::MetadataString("s".as_bytes().to_vec()),
                 Token::RightBrace,
-                Token::MetadataName("DILocation".to_string()),
-                Token::MetadataName("dbg".to_string()),
+                Token::MetadataName("DILocation".as_bytes().to_vec()),
+                Token::MetadataName("dbg".as_bytes().to_vec()),
                 Token::Eof,
             ]
         );

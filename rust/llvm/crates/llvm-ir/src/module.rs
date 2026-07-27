@@ -232,7 +232,7 @@ mod tests {
         let mut module = Module::new();
         // A forward reference writes a high number first; the table grows and
         // the gap stays empty until something fills it.
-        module.set_metadata(MdId(3), Metadata::String("late".to_string()));
+        module.set_metadata(MdId(3), Metadata::String("late".into()));
         assert_eq!(module.metadata.len(), 4);
         assert!(module.metadata_node(MdId(0)).is_none());
         assert_eq!(
@@ -241,7 +241,7 @@ mod tests {
         );
         assert_eq!(module.metadata_nodes().count(), 1);
 
-        module.set_metadata(MdId(0), Metadata::String("early".to_string()));
+        module.set_metadata(MdId(0), Metadata::String("early".into()));
         assert_eq!(module.metadata_nodes().count(), 2);
         assert_eq!(module.next_metadata_id(), MdId(4));
     }

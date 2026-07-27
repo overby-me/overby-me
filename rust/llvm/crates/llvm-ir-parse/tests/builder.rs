@@ -165,7 +165,7 @@ fn build_unwinding() -> Module {
                 ty: i32,
                 value: Value::Constant(behaviour),
             },
-            MdOperand::String("PIC Level".to_string()),
+            MdOperand::String("PIC Level".into()),
             MdOperand::Value {
                 ty: i32,
                 value: Value::Constant(level),

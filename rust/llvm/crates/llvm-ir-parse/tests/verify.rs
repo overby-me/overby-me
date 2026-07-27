@@ -622,6 +622,11 @@ const VERIFIES: &[&str] = &[
     "define i32 @f({{i32, i32}, i32} %a) {\nentry:\n  %x = extractvalue {{i32, i32}, i32} %a, 0, 1, !foo !0\n  ret i32 %x\n}\n\n!0 = !{}\n",
     // A block label whose name only looks like a number.
     "define void @f() {\nentry:\n  br label %\"2\"\n\n\"2\":\n  br label %-3\n\n-3:\n  ret void\n}\n",
+    // Text that is not UTF-8. A debug-info path is bytes, and both the
+    // string and the name it sits in have to survive being read.
+    "!named = !{!0}\n!0 = !DIFile(filename: \"\\00\\01\\02\\80\\81\\82\\FD\\FE\\FF\", directory: \"/dir\")\n",
+    "!\\FFfoo = !{!0}\n!0 = !{}\n",
+    "!named = !{!0}\n!0 = !{!\"\\FF\"}\n",
     // Two conventions we had never heard of.
     "define amdgpu_ps float @f(i32 %x) {\nentry:\n  ret float 0.000000e+00\n}\n",
     "define riscv_vls_cc(32) void @g() {\nentry:\n  ret void\n}\n",
@@ -702,4 +707,19 @@ fn a_summary_index_names_symbols_this_module_has() {
             .any(|message| message.contains("the summary index names @absent")),
         "{messages:?}"
     );
+}
+
+/// Bytes that are not UTF-8 survive a round trip rather than being mangled
+/// or refused, which is the whole of what B6 was about.
+#[test]
+fn text_outside_utf8_round_trips() {
+    let text = "!named = !{!0}\n!0 = !DIFile(filename: \"\\00\\80\\FF\", directory: \"/dir\")\n";
+    let module = llvm_ir_parse::parse_module(text).expect("upstream accepts this");
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("filename: \"\\00\\80\\FF\""),
+        "the bytes were mangled: {printed}"
+    );
+    let again = llvm_ir_parse::parse_module(&printed).expect("our own output parses");
+    assert_eq!(llvm_ir_print::print_module(&again), printed);
 }

@@ -291,17 +291,20 @@ Still not covered: debug info, which is T1's `llvm-debuginfo`, and the
 funclet-based personality (catchswitch, catchpad, cleanuppad), which is
 Windows and deferred with the rest of that target.
 
-**B6. [todo] Text is bytes, not UTF-8.**
-Quoted strings and metadata names are `String` throughout, and LLVM's are
-byte strings: `!DIFile(filename: "\FF")` and `!\FFfoo` are both modules
-llvm-as reads and we refuse. It is two files in the suites and it would be
-every module on a system with a non-UTF-8 path, so the count understates
-it. The fix is `Vec<u8>` in `Token::Quoted`, `MdField::Str`,
-`Name::Named`, `NamedMetadata::name` and `MdAttachment::kind`, with
-`kind == "prof"` becoming a helper; eleven comparison sites. Deliberately
-not done in a loop iteration: it is a model change across three crates and
-deserves its own pass.
-Acceptance: those two files agree, and nothing else moves.
+**B6. [done] Metadata text is bytes, not UTF-8.** *(2026-07-27)*
+`llvm_ir::ByteString` is a `Vec<u8>` that compares equal to a `&str`, so
+`attachment.kind == "prof"` still reads the way it did. `Token::Quoted`,
+`Token::MetadataString` and `Token::MetadataName` carry bytes; the fields
+that hold text from outside the compiler are `ByteString`
+(`MdField::Str`, `Metadata::String`, `MdOperand::String`,
+`NamedMetadata::name`, `MdAttachment::kind`); everything else validates
+UTF-8 at the parser with an error that says so.
+The line is drawn where the bytes come from: debug info carries file
+paths, and a path is not text on every system. Symbol names, section
+names, attribute keys and values, summary strings and block labels are
+still `String`, and refusing a non-UTF-8 one is now a loud parse error
+rather than a lexer accident. `docs/dialect-notes.md` records that.
+Assembler 400 to 402, differential 116 to 117.
 
 **B5. [todo] Vendor `rustc_codegen_llvm` into `crates/rustc-codegen-llvmrs`.**
 Needs a pinned nightly with `rustc-dev` and a `rust-toolchain.toml` (PLAN §6.1).

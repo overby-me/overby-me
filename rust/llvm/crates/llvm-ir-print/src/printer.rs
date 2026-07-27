@@ -452,9 +452,9 @@ impl Printer<'_> {
 
 /// A metadata name prints with `\\xx` for anything the bare grammar has no
 /// room for, rather than being quoted the way a value's name is.
-pub(crate) fn metadata_name(name: &str) -> String {
+pub(crate) fn metadata_name(name: &llvm_ir::ByteString) -> String {
     let mut out = String::new();
-    for byte in name.bytes() {
+    for byte in name.as_bytes().iter().copied() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$' | b'-') {
             out.push(byte as char);
         } else {

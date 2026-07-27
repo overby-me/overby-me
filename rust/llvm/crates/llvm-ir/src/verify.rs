@@ -199,7 +199,7 @@ impl Verifier<'_> {
             for operand in &operands {
                 self.metadata_exists(*operand, &format!("!{name}"));
             }
-            match name.as_str() {
+            match name.as_str().unwrap_or_default() {
                 "llvm.module.flags" => {
                     for operand in &operands {
                         self.module_flag(*operand);
@@ -209,7 +209,7 @@ impl Verifier<'_> {
                 // upstream tests that say so.
                 "llvm.ident" | "llvm.commandline" => {
                     for operand in &operands {
-                        self.string_node(&name, *operand);
+                        self.string_node(&name.to_lossy(), *operand);
                     }
                 }
                 _ => {}
@@ -470,7 +470,7 @@ impl Verifier<'_> {
             [MdOperand::Value { ty, .. }]
                 if matches!(self.module.ctx.type_kind(*ty), TypeKind::Pointer { .. })
         );
-        match attachment.kind.as_str() {
+        match attachment.kind.as_str().unwrap_or_default() {
             "associated" if !pointer_valued => {
                 self.report(format!(
                     "@{name}: !associated takes one pointer-typed value"
@@ -832,7 +832,7 @@ impl Verifier<'_> {
         );
         for attachment in instruction.metadata.clone() {
             let kind = attachment.kind.clone();
-            match kind.as_str() {
+            match kind.as_str().unwrap_or_default() {
                 "alias.scope" | "noalias" => self.scope_list(&attachment.node, &where_),
                 "fpmath" => {
                     let float = self

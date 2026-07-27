@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 
 use llvm_ir::Value;
 
-use crate::{Printer, escape_string, metadata_name};
+use crate::{Printer, escape_bytes, metadata_name};
 use llvm_ir::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 
 impl Printer<'_> {
@@ -23,7 +23,7 @@ impl Printer<'_> {
     pub(crate) fn metadata_definition(&mut self, node: &Metadata) {
         match node {
             Metadata::String(text) => {
-                let _ = write!(self.out, "!\"{}\"", escape_string(text));
+                let _ = write!(self.out, "!\"{}\"", escape_bytes(text.as_bytes()));
             }
             Metadata::Tuple { distinct, operands } => {
                 if *distinct {
@@ -76,7 +76,7 @@ impl Printer<'_> {
             MdOperand::Null => self.push("null"),
             MdOperand::Ref(id) => self.metadata_reference(*id),
             MdOperand::String(text) => {
-                let _ = write!(self.out, "!\"{}\"", escape_string(text));
+                let _ = write!(self.out, "!\"{}\"", escape_bytes(text.as_bytes()));
             }
             MdOperand::Value { ty, value } => {
                 self.ty(*ty);
@@ -124,7 +124,7 @@ impl Printer<'_> {
                 let _ = write!(self.out, "{value}");
             }
             MdField::Str(text) => {
-                let _ = write!(self.out, "\"{}\"", escape_string(text));
+                let _ = write!(self.out, "\"{}\"", escape_bytes(text.as_bytes()));
             }
             MdField::Ref(id) => self.metadata_reference(*id),
             MdField::Null => self.push("null"),

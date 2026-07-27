@@ -163,16 +163,22 @@ text alone, and reproducing it means modelling ThinLTO rather than its
 syntax. So the corpus cannot pin this one and a dedicated round-trip test
 holds the property that is ours: what we print is what was written.
 
-## Assumed to be UTF-8
+## Bytes where the bytes come from outside
 
-**Quoted strings and metadata names are Rust `String`s, and LLVM's are
-bytes.** `!DIFile(filename: "\00\01\80\FF")` is a module `llvm-as` reads
-and writes back unchanged, and we refuse it with a lexer error. So is
-`!\FFfoo` as a named-metadata name. The escapes themselves are handled:
-`!\23pragma` parses and prints back, and `!\xfoo` keeps its backslash and
-prints as `!\5Cxfoo`, because `\x` is not an escape. What is missing is
-only the bytes outside UTF-8, and the fix is a model change rather than a
-lexer one. B6 in [CLAUDE.md](../CLAUDE.md) says what it costs.
+**Metadata text is bytes; the rest is UTF-8.**
+`!DIFile(filename: "\00\01\80\FF")` and `!\FFfoo` are modules `llvm-as`
+reads, and they round-trip here now: `llvm_ir::ByteString` holds them, and
+it compares equal to a `&str` so that `attachment.kind == "prof"` still
+reads the way it did.
+
+The line is drawn deliberately rather than by what the tests happened to
+cover. Debug info carries file paths, and a path is not text on every
+system, so `MdField::Str`, `Metadata::String`, `MdOperand::String`,
+`NamedMetadata::name` and `MdAttachment::kind` are bytes. Symbol names,
+section names, attribute keys and values, summary strings and block labels
+are still `String`: those are identifiers the compiler chose, and a
+non-UTF-8 one is now a parse error that says so rather than a lexer
+accident. If a real module ever carries one, the error names the place.
 
 ## Refused although upstream reads it
 
