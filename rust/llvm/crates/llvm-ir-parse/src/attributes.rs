@@ -373,6 +373,12 @@ pub(crate) fn apply_legacy_memory(attributes: &mut Vec<Attribute>, legacy: Legac
 /// zero-extends its bit pattern; `s0x` reads it as two's complement in the
 /// narrowest width that holds its digits, so its top set bit is the sign and
 /// `s0x1` is -1. Measured, not guessed.
+/// The same two forms where a plain count is wanted rather than a typed
+/// constant: an array's length, for one.
+pub(crate) fn wide_hex_u64(word: &str) -> Option<u64> {
+    wide_hex(word, 64)?.to_u64()
+}
+
 fn wide_hex(word: &str, bits: u32) -> Option<ApInt> {
     let (signed, digits) = match word.as_bytes() {
         [b'u', b'0', b'x', ..] => (false, &word[3..]),

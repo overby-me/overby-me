@@ -182,6 +182,15 @@ impl Parser {
         )
     }
 
+    /// What a struct may hold, which is everything an array may hold and
+    /// `x86_amx` besides. An intrinsic returning two tiles returns them in a
+    /// struct, and upstream reads `{ x86_amx, x86_amx }` while refusing
+    /// `[2 x x86_amx]`.
+    pub(crate) fn is_valid_struct_field(&self, ty: TypeId) -> bool {
+        self.is_valid_aggregate_element(ty)
+            || matches!(self.module.ctx.type_kind(ty), TypeKind::X86Amx)
+    }
+
     /// What a vector may hold, which is narrower still: only the types a
     /// lane can be.
     pub(crate) fn is_valid_vector_element(&self, ty: TypeId) -> bool {

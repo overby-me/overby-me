@@ -549,7 +549,11 @@ impl<'a> Lexer<'a> {
                     let (Some(high), Some(low)) =
                         ((high as char).to_digit(16), (low as char).to_digit(16))
                     else {
-                        return Err(self.error("escape needs two hexadecimal digits"));
+                        // `"c:\temp"` holds a backslash and a `t`, not an
+                        // escape: upstream keeps a backslash that begins no
+                        // escape and prints it back as `\5C`.
+                        out.push(b'\\');
+                        continue;
                     };
                     self.bump();
                     self.bump();

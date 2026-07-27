@@ -140,9 +140,9 @@ in {
     # Ten thousand pass tests, none of them written with a parser in mind,
     # and fourteen hundred analysis tests that are older on average and use
     # the implicit numbering more.
-    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10166;
+    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10174;
     llvm-tree-analysis = pkgs: treeCheck pkgs "Analysis" 1391;
-    llvm-tree-codegen = pkgs: treeCheck pkgs "CodeGen" 22162;
+    llvm-tree-codegen = pkgs: treeCheck pkgs "CodeGen" 22177;
   };
 
   packages.rust-llvm = {lib, ...}:

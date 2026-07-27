@@ -8,6 +8,7 @@
 use crate::lexer::Token;
 use crate::md_schema;
 use crate::{FunctionState, ParseError, Parser};
+use llvm_ir::TypeId;
 use llvm_ir::function::Function;
 use llvm_ir::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use llvm_ir::value::MdId;
@@ -17,7 +18,10 @@ use llvm_ir::value::MdId;
 type ValueContext<'a> = Option<(&'a mut Function, &'a mut FunctionState)>;
 
 impl Parser {
-    pub(crate) fn parse_metadata_definition(&mut self) -> Result<Metadata, ParseError> {
+    pub(crate) fn parse_metadata_definition(
+        &mut self,
+        context: ValueContext<'_>,
+    ) -> Result<Metadata, ParseError> {
         let distinct = self.eat_word("distinct");
         match self.peek().clone() {
             // `!0 = !"text"` looks reasonable and upstream rejects it: a
@@ -52,7 +56,7 @@ impl Parser {
                     self.index -= 1;
                     return self.error("expected metadata type");
                 };
-                let args = self.parse_specialized_args()?;
+                let args = self.parse_specialized_args(context)?;
                 self.check_specialized(schema, &tag, distinct, &args)?;
                 Ok(Metadata::Specialized {
                     distinct,
@@ -191,7 +195,10 @@ impl Parser {
         }
     }
 
-    fn parse_specialized_args(&mut self) -> Result<SpecializedArgs, ParseError> {
+    fn parse_specialized_args(
+        &mut self,
+        mut context: ValueContext<'_>,
+    ) -> Result<SpecializedArgs, ParseError> {
         self.require(Token::LeftParen)?;
         if self.eat(&Token::RightParen) {
             return Ok(SpecializedArgs::Positional(Vec::new()));
@@ -204,7 +211,7 @@ impl Parser {
                     self.index -= 1;
                     return self.error("expected a field name in a specialized node");
                 };
-                let value = self.parse_metadata_field()?;
+                let value = self.parse_metadata_field(reborrow(&mut context))?;
                 fields.push((key, value));
                 if !self.eat(&Token::Comma) {
                     break;
@@ -215,7 +222,7 @@ impl Parser {
         } else {
             let mut fields = Vec::new();
             loop {
-                fields.push(self.parse_metadata_field()?);
+                fields.push(self.parse_metadata_field(reborrow(&mut context))?);
                 if !self.eat(&Token::Comma) {
                     break;
                 }
@@ -225,7 +232,21 @@ impl Parser {
         }
     }
 
-    fn parse_metadata_field(&mut self) -> Result<MdField, ParseError> {
+    /// A value inside a metadata node: a constant, or an SSA value when a
+    /// function is being read. `DIArgList` is the node that holds the latter,
+    /// which is why the context is threaded this far down.
+    fn parse_metadata_value(
+        &mut self,
+        ty: TypeId,
+        context: ValueContext<'_>,
+    ) -> Result<llvm_ir::Value, ParseError> {
+        match context {
+            Some((function, state)) => self.parse_value(function, state, ty),
+            None => Ok(llvm_ir::Value::Constant(self.parse_constant(ty)?)),
+        }
+    }
+
+    fn parse_metadata_field(&mut self, context: ValueContext<'_>) -> Result<MdField, ParseError> {
         match self.peek().clone() {
             Token::Integer { negative, digits } => {
                 self.advance();
@@ -259,7 +280,7 @@ impl Parser {
                 Ok(MdField::Inline(Box::new(Metadata::String(text.into()))))
             }
             Token::MetadataName(_) | Token::Exclaim => {
-                let node = self.parse_metadata_definition()?;
+                let node = self.parse_metadata_definition(context)?;
                 Ok(MdField::Inline(Box::new(node)))
             }
             // `operands: {!0, !3}` writes the tuple with braces and no `!`.
@@ -292,10 +313,9 @@ impl Parser {
                 // A type keyword here means a typed value, as in a DIArgList.
                 if self.looks_like_a_type() {
                     let ty = self.parse_type()?;
-                    let constant = self.parse_constant(ty)?;
                     return Ok(MdField::Value {
                         ty,
-                        value: llvm_ir::Value::Constant(constant),
+                        value: self.parse_metadata_value(ty, context)?,
                     });
                 }
                 let mut words = vec![word];
@@ -307,11 +327,8 @@ impl Parser {
             }
             Token::IntType(_) => {
                 let ty = self.parse_type()?;
-                let constant = self.parse_constant(ty)?;
-                Ok(MdField::Value {
-                    ty,
-                    value: llvm_ir::Value::Constant(constant),
-                })
+                let value = self.parse_metadata_value(ty, context)?;
+                Ok(MdField::Value { ty, value })
             }
             other => self.error(format!(
                 "expected a metadata field, found {}",
@@ -346,7 +363,7 @@ impl Parser {
                 self.advance();
                 Ok(MdOperand::String(text.into()))
             }
-            Token::MetadataName(_) | Token::Exclaim => match self.parse_metadata_ref()? {
+            Token::MetadataName(_) | Token::Exclaim => match self.parse_metadata_ref(context)? {
                 MdRef::Id(id) => Ok(MdOperand::Ref(id)),
                 MdRef::Inline(node) => Ok(MdOperand::Inline(node)),
             },
@@ -380,7 +397,7 @@ impl Parser {
             self.advance();
             attachments.push(MdAttachment {
                 kind: kind.into(),
-                node: self.parse_metadata_ref()?,
+                node: self.parse_metadata_ref(None)?,
             });
         }
         Ok(attachments)
@@ -403,12 +420,12 @@ impl Parser {
         )
     }
 
-    fn parse_metadata_ref(&mut self) -> Result<MdRef, ParseError> {
+    fn parse_metadata_ref(&mut self, context: ValueContext<'_>) -> Result<MdRef, ParseError> {
         if let Token::MetadataNumber(number) = self.peek().clone() {
             self.advance();
             return Ok(MdRef::Id(MdId(number)));
         }
-        let node = self.parse_metadata_definition()?;
+        let node = self.parse_metadata_definition(context)?;
         // `DIExpression` and `DIArgList` are written at every use and never
         // numbered. Everything else upstream hoists out and numbers, so a
         // node written in place here becomes one written once and referred
@@ -442,7 +459,7 @@ impl Parser {
             self.advance();
             attachments.push(MdAttachment {
                 kind: kind.into(),
-                node: self.parse_metadata_ref()?,
+                node: self.parse_metadata_ref(None)?,
             });
         }
         Ok(attachments)
@@ -470,4 +487,12 @@ fn prints_in_place(node: &Metadata) -> bool {
         node,
         Metadata::Specialized { tag, .. } if tag == "DIExpression" || tag == "DIArgList"
     )
+}
+
+/// Hands a borrowed context down one level. `Option<(&mut _, &mut _)>` is not
+/// `Copy`, so each level has to reborrow rather than move.
+fn reborrow<'a>(context: &'a mut ValueContext<'_>) -> ValueContext<'a> {
+    context
+        .as_mut()
+        .map(|(function, state)| (&mut **function, &mut **state))
 }

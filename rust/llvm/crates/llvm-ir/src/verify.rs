@@ -98,6 +98,42 @@ impl Verifier<'_> {
     // ----------------------------------------------------------- module rules
 
     fn module_level(&mut self) {
+        // A module says where its debug info lives one way or the other: in
+        // records attached to blocks, or in calls to the `llvm.dbg.*`
+        // intrinsics. Upstream reads both spellings and refuses a module
+        // holding one of each, because the two do not compose.
+        let mut has_records = false;
+        let mut has_intrinsics = false;
+        for function in &self.module.functions {
+            for (_, block) in function.blocks() {
+                for inst in &block.instructions {
+                    let Some(instruction) = function.try_instruction(*inst) else {
+                        continue;
+                    };
+                    match &instruction.kind {
+                        InstKind::DebugRecord { .. } => has_records = true,
+                        InstKind::Call(call) => {
+                            if let Value::Constant(id) = call.callee
+                                && let Constant::Global {
+                                    target: GlobalRef::Function(callee),
+                                    ..
+                                } = self.module.ctx.constant(id)
+                                && let Name::Named(name) = &self.module.function(*callee).name
+                                && name.starts_with("llvm.dbg.")
+                            {
+                                has_intrinsics = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if has_records && has_intrinsics {
+            self.report(
+                "the module writes debug info as records in one place and as intrinsic calls in another",
+            );
+        }
         // A blockaddress names a label in a function that may not have been
         // read yet when the constant is built, so the check waits until the
         // whole module is here. Only named labels are checked: matching `%3`

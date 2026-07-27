@@ -568,7 +568,12 @@ impl Parser {
                 "dbg_declare" | "dbg_value" => Some(4),
                 "dbg_assign" => Some(7),
                 "dbg_label" => Some(2),
-                _ => None,
+                // There are four kinds of debug record and no more, so an
+                // unrecognised `#dbg_` name is a misspelling rather than a
+                // record this parser has not met yet.
+                other => {
+                    return self.error(format!("#{other} is not a debug record"));
+                }
             };
             if let Some(wanted) = wanted {
                 if operands.len() != wanted {

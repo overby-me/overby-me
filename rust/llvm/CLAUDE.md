@@ -617,6 +617,26 @@ of which upstream prints with a doubled space, its own spelling of
 `avr_intrcc` and `avr_signalcc` ending in one. And `hybrid_patchable`, which
 llvm-as reads and llvm-dis cannot read back: it writes an attribute kind its
 own reader rejects, so that one is pinned on the exit code alone.
+A forty-ninth pass took four more of CodeGen's classes and the three rules
+they uncovered. Transforms 10,166 to 10,174.
+`[u0xedcba x i8]` writes a length the way a wide integer literal is written.
+A backslash that begins no escape keeps itself in a string constant, so
+`c"c:\temp"` holds a backslash and a `t`, which is the rule metadata names
+already had. `x86_amx` may sit in a struct and in no other aggregate,
+because an intrinsic returning two tiles returns them in one. And a
+`DIArgList` holds SSA values, which meant threading the function being
+parsed down through the metadata node parser, since that is the one place
+inside metadata where a `%name` can appear.
+Accepting the last of those cost three Assembler files before it paid for
+them. A module writes its debug info as records or as calls to the
+`llvm.dbg.*` intrinsics and upstream refuses one holding both, and there are
+four kinds of debug record, so `#dbg_invalid` is a misspelling rather than a
+kind this parser has not met.
+One divergence is recorded rather than closed: upstream rewrites a
+`call void @llvm.dbg.value(...)` into a `#dbg_value(...)` record as it
+reads, and this does not. The module parses either way, which is what the
+tree ratchets measure, but the printed text differs for a module written in
+the older spelling.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

@@ -92,6 +92,11 @@ impl Parser {
                 self.error::<()>(format!("{digits} does not fit"))
                     .unwrap_err()
             }),
+            // `[u0xedcba x i8]` writes a length the way a wide integer
+            // literal is written, which upstream reads here too.
+            Token::Word(word) if crate::attributes::wide_hex_u64(&word).is_some() => {
+                Ok(crate::attributes::wide_hex_u64(&word).unwrap_or(0))
+            }
             other => {
                 self.index -= 1;
                 self.error(format!("expected a number, found {}", other.describe()))

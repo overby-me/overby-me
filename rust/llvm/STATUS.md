@@ -90,9 +90,9 @@ reading a module upstream reads is right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/Transforms` | 10,166 | 10,305 | `llvm-tree-transforms` |
+| `llvm/test/Transforms` | 10,174 | 10,305 | `llvm-tree-transforms` |
 | `llvm/test/Analysis` | 1,391 | 1,403 | `llvm-tree-analysis` |
-| `llvm/test/CodeGen` | 22,162 | 22,785 | `llvm-tree-codegen` |
+| `llvm/test/CodeGen` | 22,177 | 22,785 | `llvm-tree-codegen` |
 
 What CodeGen still refuses is mostly not a gap: 179 of its 644 write typed
 pointers, which is the deliberate divergence of PLAN 1.2, and 410 more call

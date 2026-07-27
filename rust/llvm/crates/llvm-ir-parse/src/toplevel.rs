@@ -139,7 +139,7 @@ impl Parser {
                 Token::MetadataNumber(number) => {
                     self.advance();
                     self.require(Token::Equals)?;
-                    let node = self.parse_metadata_definition()?;
+                    let node = self.parse_metadata_definition(None)?;
                     self.module.set_metadata(MdId(number), node);
                 }
                 other => {
@@ -192,7 +192,7 @@ impl Parser {
                 break;
             }
             let field = self.parse_type()?;
-            if !self.is_valid_aggregate_element(field) {
+            if !self.is_valid_struct_field(field) {
                 return self.error("invalid structure element type");
             }
             fields.push(field);

@@ -61,6 +61,10 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "declare void @llvm.dbg.value(metadata, metadata, metadata)\n\ndefine void @f(i32 %a) !dbg !5 {\nentry:\n    #dbg_value(i32 %a, !4, !DIExpression(), !8)\n  call void @llvm.dbg.value(metadata i32 %a, metadata !4, metadata !DIExpression()), !dbg !8\n  ret void\n}\n\n!llvm.module.flags = !{!0}\n!llvm.dbg.cu = !{!1}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!1 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!2 = !DIFile(filename: \"a.c\", directory: \"/\")\n!4 = !DILocalVariable(name: \"v\", scope: !5, file: !2, line: 1)\n!5 = distinct !DISubprogram(name: \"f\", scope: !2, file: !2, line: 1, type: !6, spFlags: DISPFlagDefinition, unit: !1)\n!6 = !DISubroutineType(types: !7)\n!7 = !{null}\n!8 = !DILocation(line: 1, column: 1, scope: !5)\n",
+        "records in one place and as intrinsic calls in another",
+    ),
+    (
         "define void @f(ptr %p) naked {\nentry:\n  %g = getelementptr i8, ptr %p, i64 1\n  unreachable\n}\n",
         "a naked function reads an argument it was never given",
     ),
@@ -816,6 +820,18 @@ const BROKEN: &[(&str, &str)] = &[
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
     (
+        "@g = global [2 x x86_amx] zeroinitializer\n",
+        "invalid array element type",
+    ),
+    (
+        "@g = global <2 x x86_amx> zeroinitializer\n",
+        "invalid vector element type",
+    ),
+    (
+        "define void @f(i32 %a) !dbg !5 {\nentry:\n    #dbg_invalid(i32 %a, !4, !DIExpression(), !8)\n  ret void\n}\n",
+        "#dbg_invalid is not a debug record",
+    ),
+    (
         "define float @f() {\nentry:\n  ret float 0x7FF0000000000001\n}\n",
         "floating point constant invalid for type",
     ),
@@ -1022,6 +1038,14 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // An array length written the way a wide integer literal is written.
+    "define void @f() {\nentry:\n  %a = alloca [u0xedcba x i8]\n  ret void\n}\n",
+    // A backslash that begins no escape keeps itself, as it does in a
+    // metadata name: this string holds a backslash and a `t`.
+    "@s = constant [7 x i8] c\"c:\\temp\"\n",
+    // An intrinsic returning two tiles returns them in a struct, which is
+    // the one aggregate `x86_amx` may sit in.
+    "declare { x86_amx, x86_amx } @g(i16, i16)\n",
     // A label may hold a hyphen where a keyword may not: the same run of
     // bytes is one label here and a type and a negative number below.
     "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %a-b, label %c-d\n\na-b:\n  ret void\n\nc-d:\n  ret void\n}\n",
@@ -1084,6 +1108,9 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // A module writes its debug info as records or as intrinsic calls, and
+    // this one keeps to records.
+    "define void @f(i32 %a) !dbg !5 {\nentry:\n    #dbg_value(!DIArgList(i32 %a, i64 0), !4, !DIExpression(), !8)\n  ret void\n}\n\n!llvm.module.flags = !{!0}\n!llvm.dbg.cu = !{!1}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!1 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!2 = !DIFile(filename: \"a.c\", directory: \"/\")\n!4 = !DILocalVariable(name: \"v\", scope: !5, file: !2, line: 1)\n!5 = distinct !DISubprogram(name: \"f\", scope: !2, file: !2, line: 1, type: !6, spFlags: DISPFlagDefinition, unit: !1)\n!6 = !DISubroutineType(types: !7)\n!7 = !{null}\n!8 = !DILocation(line: 1, column: 1, scope: !5)\n",
     // A naked function may take arguments; what it may not do is read them.
     "define void @f(ptr %p) naked {\nentry:\n  unreachable\n}\n",
     // An intrinsic LangRef documents needs no declaration: the call says what
