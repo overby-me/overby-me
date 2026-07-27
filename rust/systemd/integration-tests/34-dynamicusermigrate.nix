@@ -9,13 +9,6 @@
   # and the conversion back, including the closing unit-parsing section with
   # nested and escaped-colon directory names.
   #
-  # test_check_writable is NOT passing, and an earlier claim here that it was is
-  # RETRACTED. It went green in exactly one VM run and does not reproduce: a
-  # later run of a tree with no change to any libsystemd file fails it again.
-  # One green run on an assertion this environment-sensitive proves nothing.
-  # Whatever else is wrong has not been found; the ProtectSystem=strict fix
-  # below was necessary but is not sufficient.
-  #
   # TWO CORRECTIONS, both mine, recorded so the next reader does not repeat
   # either. The failure is that the service sees ZERO writable directories,
   # which is what this file originally said.
@@ -66,13 +59,12 @@
   # but not sufficient: it corrected WHICH paths get restored read-write, but
   # not the duplicated tree they are applied to.
   #
-  # The actual defect was in ProtectSystem=strict, which DynamicUser=yes
-  # implies. rust-systemd restored /dev, /proc, /sys, /run, /tmp, /var/tmp and
-  # /var/log to read-write after remounting / read-only. Upstream's
-  # protect_system_strict_table (src/core/namespace.c:255) restores only /proc,
-  # /sys and /dev, plus /home, /run/user and /root, which ProtectHome= then
-  # re-protects. The extra four meant a strict service could write across the
-  # whole runtime and log trees, so `find` reported far more than 8.
+  # A SEPARATE ProtectSystem=strict fix also landed and stays, though it was
+  # NOT the cause here: rust restored /dev, /proc, /sys, /run, /tmp, /var/tmp
+  # and /var/log to read-write, where upstream's protect_system_strict_table
+  # (src/core/namespace.c:255) restores only /proc, /sys and /dev plus /home,
+  # /run/user and /root, which ProtectHome= then re-protects. The extra four let
+  # any strict service write across the runtime and log trees.
   #
   # REMAINING FAILURE: test_check_idmapped_mounts, and it is a MISSING FEATURE
   # rather than a defect. Three real bugs were fixed out of this phase first,

@@ -25,21 +25,6 @@
   #      redistributed, and sizes were aligned to the sector rather than to
   #      upstream's 4096-byte grain.
   #
-  # testcase_basic steps 1 and 2 now match upstream byte for byte, including
-  # every UUID, label, attribute and sector offset.
-  #
-  # NOW PASSING IN THE VM: testcase_basic steps 1 through 4, i.e. the empty
-  # image, the four-partition layout, the six-partition --copy-from= table
-  # (every start, size, label, UUID and attribute byte for byte), and
-  # --defer-partitions=home,root leaving swap alone at its original offset and
-  # slot. Ten repart defects were fixed getting here; see the git log.
-  #
-  # FOUR of those ten were options PARSED INTO THE ARGUMENT STRUCT, given unit
-  # tests proving the parsing worked, and then never consulted anywhere in the
-  # logic: --include-partitions=, --exclude-partitions=, CopyBlocks= and
-  # --defer-partitions=. A passing parse test is not evidence a flag is
-  # honoured; the rest of the crate is worth auditing the same way.
-  #
   # NOW PASSING IN THE VM: testcase_basic steps 1 through 4 and most of 5, i.e.
   # the empty image, the four-partition layout, the six-partition --copy-from=
   # table, --defer-partitions=, the deferred refill (sizes, offsets, labels,
