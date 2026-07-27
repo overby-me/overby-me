@@ -127,6 +127,8 @@ Landed since the ledger was written (each regression-tested before push):
 | `20b75d20` | repart honours `--include-partitions=`, rejects over-long `Label=`, defaults `GrowFileSystem=` on |
 | `560ca74a` | repart redistributes space a capped partition cannot use; 4096-byte grain |
 | `ef9c52bb` | udev unquotes imported properties; **67-INTEGRITY green with no override** |
+| `0692de1d` | a udev rule program gets a deadline; udev.conf was never parsed at all |
+| `b2a4b17b` | `ProtectSystem=strict` stops opening `/run` and `/var/log`; 34's `test_check_writable` green |
 
 Both fake passes are gone. Several of these are user-facing bugs well beyond the
 tests that exposed them: `systemctl start --wait` hung on every oneshot,
@@ -160,10 +162,19 @@ VM run. Diagnostics must write to stderr.
 
 ### Open, with evidence recorded in the test wrappers
 
-- **34-DYNAMICUSERMIGRATE** clears all four `test_directory` phases. Remaining:
-  exec directories end up read-only under `ProtectSystem=strict`. Three
-  approaches tried and reverted, all recorded; instrument
-  `/proc/self/mountinfo` before a fourth.
+- **34-DYNAMICUSERMIGRATE** clears all four `test_directory` phases and
+  `test_check_writable`. Remaining: `test_check_idmapped_mounts`, which the
+  kernel here is new enough to run and which has not been investigated.
+
+  Its recorded rationale was **inverted**, not merely stale, and that is the
+  lesson worth keeping. It said the exec directories ended up read-only and the
+  service "sees 0" writable directories; instrumenting the mount table showed
+  all of them already writable. The service asserts `find / -type d -writable`
+  returns exactly 8, so it failed because *too much* was writable. Three
+  approaches had been tried and reverted trying to make writable something that
+  already was. The defect was in `ProtectSystem=strict` restoring `/run`,
+  `/tmp`, `/var/tmp` and `/var/log` to read-write, which upstream's
+  `protect_system_strict_table` does not.
 - **55-OOMD** line 12 needs three things. Two are done (credentials, reload-time
   generators). The third: `init.scope` is not a unit in rust-systemd, only a
   cgroup path constant, so `[Scope]` resource control never reaches PID 1's
@@ -175,6 +186,11 @@ VM run. Diagnostics must write to stderr.
   `DM_UDEV_PRIMARY_SOURCE_FLAG='1'` never matched `10-dm.rules`, which disabled
   `13-dm-disk.rules` and left every dm device carrying a filesystem without its
   `/dev/disk/by-uuid/` symlink.
+- **17-udev-failed-event** is left honestly RED with no override, and its
+  wrapper carries the diagnosis. A `PROGRAM=` now gets a deadline, which fixed a
+  real wedge, but it did not green the subtest; the wrapper records the next
+  measurement to make. The second half needs udev workers to be processes rather
+  than threads, which is architectural.
 - **58-REPART** got six real defects fixed against it and now matches upstream
   byte for byte through `testcase_basic` steps 1 and 2, every UUID, label,
   attribute and offset included. It is masked again at the next step, which
