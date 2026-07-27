@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 400 of 483 with 21 wrongly refused, Verifier 212 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 400 of 483 with 21 wrongly refused, Verifier 226 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -231,6 +231,14 @@ escape that is not one keeps its backslash (`!\xfoo` prints `!\5Cxfoo`),
 a metadata attachment follows the same comma an index list uses, the
 summary index writes a space before a colon and lets a word qualify the
 value after it, and a block label can be named `"2"` or `-3`.
+A fourteenth pass was fourteen verifier rules that need no intrinsic
+table: an invoke's unwind edge lands on a pad, a gc barrier needs a
+collector named on the function, `alwaysinline` contradicts `noinline`,
+`signext` and its siblings mean nothing off an integer, `!fpmath` needs a
+floating-point result, `!invariant.group` is only for loads and stores, a
+`dllexport` symbol has to be visible, and four more quoted attributes
+whose value upstream reads (`warn-stack-size`, `sign-return-address`, its
+key, and `alloc-variant-zeroed`).
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

@@ -323,6 +323,46 @@ const BROKEN: &[(&str, &str)] = &[
         "has invalid indices",
     ),
     (
+        "declare i32 @v()\n\ndefine i32 @f() {\ne:\n  %r = invoke i32 @v()\n          to label %n unwind label %n\n\nn:\n  ret i32 0\n}\n",
+        "does not begin with a pad",
+    ),
+    (
+        "declare void @llvm.gcroot(ptr, ptr)\n\ndefine void @f() {\nentry:\n  %a = alloca ptr, align 8\n  call void @llvm.gcroot(ptr %a, ptr null)\n  ret void\n}\n",
+        "a gc barrier is used in a function that names no collector",
+    ),
+    (
+        "define void @f() alwaysinline noinline {\nentry:\n  ret void\n}\n",
+        "alwaysinline and noinline are incompatible",
+    ),
+    (
+        "declare void @foo(ptr signext %p)\n",
+        "signext on parameter 0, which is not an integer",
+    ),
+    (
+        "define float @f(float %x) {\nentry:\n  %s = fadd float %x, %x\n  %i = add i32 1, 1, !fpmath !0\n  ret float %s\n}\n\n!0 = !{float 2.500000e+00}\n",
+        "fpmath requires a floating-point result",
+    ),
+    (
+        "define void @f() {\nentry:\n  %a = alloca i32, align 4, !invariant.group !0\n  ret void\n}\n\n!0 = !{}\n",
+        "invariant.group is only for loads and stores",
+    ),
+    (
+        "declare hidden dllexport i32 @f()\n",
+        "a dllexport symbol must have default or protected visibility",
+    ),
+    (
+        "define void @f() \"warn-stack-size\"=\"-1\" {\nentry:\n  ret void\n}\n",
+        "'warn-stack-size' takes an unsigned integer: -1",
+    ),
+    (
+        "define void @f() \"sign-return-address\"=\"non-leaf-or-something\" {\nentry:\n  ret void\n}\n",
+        "invalid value for 'sign-return-address' attribute",
+    ),
+    (
+        "declare ptr @a(i64) \"alloc-variant-zeroed\"=\"\"\n",
+        "'alloc-variant-zeroed' must not be empty",
+    ),
+    (
         "declare void @llvm.localescape(...)\n\ndefine internal void @f() {\nentry:\n  %a = alloca i8, align 1\n  call void (...) @llvm.localescape(ptr %a)\n  call void (...) @llvm.localescape(ptr %a)\n  ret void\n}\n",
         "2 calls to llvm.localescape in one function",
     ),

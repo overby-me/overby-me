@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use crate::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr, TypeAttr};
 use crate::constant::{CastOp, ConstExpr, ConstId, Constant};
 use crate::function::Function;
-use crate::global::{GlobalQualifiers, Linkage, Visibility};
+use crate::global::{DllStorageClass, GlobalQualifiers, Linkage, Visibility};
 use crate::instruction::{
     AtomicOrdering, BinOp, CallingConv, InstKind, IntFlags, NamedCallingConv, TailKind,
 };
@@ -566,6 +566,14 @@ impl Verifier<'_> {
                 "@{name}: symbol with local linkage must have default visibility"
             ));
         }
+        // An exported symbol has to be visible to be exported.
+        if qualifiers.dll_storage == Some(DllStorageClass::Export)
+            && qualifiers.visibility == Some(Visibility::Hidden)
+        {
+            self.report(format!(
+                "@{name}: a dllexport symbol must have default or protected visibility"
+            ));
+        }
     }
 
     /// A module flag is `!{i32 behaviour, !"key", value}`.
@@ -686,6 +694,50 @@ impl Verifier<'_> {
             self.basic_block(function, *block_id);
         }
         self.dominance(function);
+        // An invoke's unwind edge lands on a pad. Nothing else can receive
+        // the exception, so nothing else may start that block.
+        for block_id in &blocks {
+            for inst in function.block(*block_id).instructions.clone() {
+                let Some(instruction) = function.try_instruction(inst) else {
+                    continue;
+                };
+                let InstKind::Invoke { unwind, .. } = instruction.kind else {
+                    continue;
+                };
+                let lands_on_a_pad = function
+                    .block(unwind)
+                    .instructions
+                    .first()
+                    .and_then(|first| function.try_instruction(*first))
+                    .is_some_and(|first| {
+                        matches!(
+                            first.kind,
+                            InstKind::LandingPad { .. }
+                                | InstKind::CatchSwitch { .. }
+                                | InstKind::CleanupPad { .. }
+                        )
+                    });
+                if !lands_on_a_pad {
+                    self.report(format!(
+                        "the unwind destination of an invoke in {} does not begin with a pad",
+                        describe_block(function, *block_id)
+                    ));
+                }
+            }
+        }
+        // A collector has to be named before its barriers mean anything.
+        if function.gc.is_none() {
+            let uses_gc = blocks.iter().any(|block| {
+                function.block(*block).instructions.iter().any(|inst| {
+                    ["llvm.gcroot", "llvm.gcread", "llvm.gcwrite"]
+                        .iter()
+                        .any(|name| self.calls_intrinsic(function, *inst, name))
+                })
+            });
+            if uses_gc {
+                self.report("a gc barrier is used in a function that names no collector");
+            }
+        }
         // A frame's escaped locals are described once, because the recover
         // side indexes into that one list.
         let escapes = blocks
@@ -782,6 +834,27 @@ impl Verifier<'_> {
             let kind = attachment.kind.clone();
             match kind.as_str() {
                 "alias.scope" | "noalias" => self.scope_list(&attachment.node, &where_),
+                "fpmath" => {
+                    let float = self
+                        .value_type(function, Value::Instruction(id))
+                        .is_some_and(|ty| {
+                            matches!(
+                                self.module.ctx.type_kind(self.innermost_element(ty)),
+                                TypeKind::Float(_)
+                            )
+                        });
+                    self.check(
+                        float,
+                        format!("{where_}: fpmath requires a floating-point result"),
+                    );
+                }
+                "invariant.group" => self.check(
+                    matches!(
+                        instruction.kind,
+                        InstKind::Load { .. } | InstKind::Store { .. }
+                    ),
+                    format!("{where_}: invariant.group is only for loads and stores"),
+                ),
                 "llvm.access.group" => self.access_group(&attachment.node, &where_),
                 "align" => self.check(
                     is_load && is_pointer,
@@ -1785,6 +1858,18 @@ impl Verifier<'_> {
         let pointer = matches!(self.module.ctx.type_kind(ty), TypeKind::Pointer { .. });
         for attribute in &attrs.attributes {
             let wants_a_pointer = match attribute {
+                Attribute::Enum(EnumAttr::SignExt | EnumAttr::ZeroExt | EnumAttr::NoExt) => {
+                    if !matches!(
+                        self.module.ctx.type_kind(self.innermost_element(ty)),
+                        TypeKind::Integer(_)
+                    ) {
+                        self.report(format!(
+                            "{} on {where_}, which is not an integer",
+                            describe_attribute(attribute)
+                        ));
+                    }
+                    false
+                }
                 Attribute::Enum(kind) => matches!(
                     kind,
                     EnumAttr::AllocPtr
@@ -1870,6 +1955,25 @@ impl Verifier<'_> {
                 attributes.extend(contents.iter().cloned());
             }
         }
+        let has = |wanted: EnumAttr| {
+            attributes
+                .iter()
+                .any(|a| matches!(a, Attribute::Enum(kind) if *kind == wanted))
+        };
+        // Pairs that ask for opposite things.
+        for (first, second) in [
+            (EnumAttr::AlwaysInline, EnumAttr::NoInline),
+            (EnumAttr::AlwaysInline, EnumAttr::OptNone),
+            (EnumAttr::ReadNone, EnumAttr::ReadOnly),
+        ] {
+            if has(first) && has(second) {
+                self.report(format!(
+                    "{} and {} are incompatible",
+                    first.keyword(),
+                    second.keyword()
+                ));
+            }
+        }
         for attribute in &attributes {
             match attribute {
                 Attribute::Enum(EnumAttr::JumpTable) if !unnamed => {
@@ -1912,10 +2016,19 @@ impl Verifier<'_> {
             "denormal-fp-math" | "denormal-fp-math-f32" if !is_a_denormal_mode(value) => {
                 self.report(format!("invalid value for '{key}': {value}"));
             }
-            "patchable-function-entry" | "patchable-function-prefix"
+            "patchable-function-entry" | "patchable-function-prefix" | "warn-stack-size"
                 if value.parse::<u64>().is_err() =>
             {
                 self.report(format!("'{key}' takes an unsigned integer: {value}"));
+            }
+            "sign-return-address" if !matches!(value, "none" | "non-leaf" | "all") => {
+                self.report(format!("invalid value for '{key}' attribute: {value}"));
+            }
+            "sign-return-address-key" if !matches!(value, "a_key" | "b_key") => {
+                self.report(format!("invalid value for '{key}' attribute: {value}"));
+            }
+            "alloc-variant-zeroed" if value.is_empty() => {
+                self.report("'alloc-variant-zeroed' must not be empty");
             }
             _ => {}
         }
