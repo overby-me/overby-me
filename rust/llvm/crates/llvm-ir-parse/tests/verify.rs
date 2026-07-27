@@ -526,6 +526,14 @@ const BROKEN: &[(&str, &str)] = &[
         "%s = type { %s }\n@g = global %s zeroinitializer\n",
         "has an invalid type for a global variable",
     ),
+    (
+        "define void @f(ptr %p, i32 %v) {\nentry:\n  %r = cmpxchg ptr %p, i32 %v, ptr null seq_cst seq_cst, align 4\n  ret void\n}\n",
+        "operand of the wrong type",
+    ),
+    (
+        "declare void @f3() uwtable(unsync)\n",
+        "uwtable names unsync, which is not a kind of unwind table",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -670,6 +678,7 @@ const REJECTED: &[(&str, &str)] = &[
         "invalid vector element type",
     ),
     ("%s = type { void }\n", "invalid structure element type"),
+    ("@i2 = common global i8388609 0, align 4\n", "is too wide"),
     (
         "define void @f(i8* %p) {\nentry:\n  ret void\n}\n",
         "opaque",

@@ -1527,8 +1527,14 @@ impl Verifier<'_> {
                 }
             }
             InstKind::CmpXchg {
-                success, failure, ..
+                success,
+                failure,
+                compare_type,
+                new,
+                ..
             } => {
+                let (compare_type, new) = (*compare_type, *new);
+                self.type_is(function, compare_type, new, &where_);
                 let (success, failure) = (*success, *failure);
                 // Both orderings have to be at least monotonic, and a failure
                 // ordering cannot release anything, because there is nothing
@@ -2990,6 +2996,14 @@ impl Verifier<'_> {
                 }
                 // `allockind("alloc,zeroed")` says which of the three things
                 // this function does, and it does exactly one of them.
+                Attribute::Structured {
+                    kind: crate::attribute::StructuredAttr::UwTable,
+                    arguments,
+                } if !matches!(arguments.trim(), "" | "async" | "sync") => {
+                    self.report(format!(
+                        "uwtable names {arguments}, which is not a kind of unwind table"
+                    ));
+                }
                 Attribute::Structured {
                     kind: crate::attribute::StructuredAttr::AllocKind,
                     arguments,

@@ -671,6 +671,11 @@ impl<'a> Lexer<'a> {
             let bits: u32 = bits
                 .parse()
                 .map_err(|_| self.error(format!("integer type '{word}' is too wide")))?;
+            // An integer is at most 2^23 bits wide, which is what an APInt's
+            // bit count fits and what upstream refuses past.
+            if bits > 1 << 23 {
+                return Err(self.error(format!("integer type '{word}' is too wide")));
+            }
             return Ok(Token::IntType(bits));
         }
         Ok(Token::Word(word))
