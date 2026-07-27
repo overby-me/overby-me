@@ -1756,6 +1756,25 @@ impl Verifier<'_> {
                         self.report(format!("{where_} carries {count} {tag} operand bundles"));
                     }
                 }
+                for attribute in &call.fn_attrs.attributes {
+                    // Not the type-valued ones: `preallocated(T)` is a
+                    // call-site function attribute naming the setup it pairs
+                    // with, and upstream reads it.
+                    if matches!(
+                        attribute,
+                        Attribute::Int {
+                            kind: IntAttr::Align
+                                | IntAttr::Dereferenceable
+                                | IntAttr::DereferenceableOrNull,
+                            ..
+                        }
+                    ) {
+                        self.report(format!(
+                            "{where_} carries {}, which describes an argument rather than a call",
+                            describe_attribute(attribute)
+                        ));
+                    }
+                }
                 // `speculatable` promises something about a function, not
                 // about one call to it.
                 if call.fn_attrs.has(EnumAttr::Speculatable) {

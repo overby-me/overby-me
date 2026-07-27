@@ -197,7 +197,13 @@ impl DataLayout {
             'S' => self.stack_natural_align_bits = Some(number(&rest, "stack alignment")?),
             'P' => self.program_address_space = number(&rest, "program address space")?,
             'G' => self.global_address_space = number(&rest, "global address space")?,
-            'A' => self.alloca_address_space = number(&rest, "alloca address space")?,
+            'A' => {
+                let space = number(&rest, "alloca address space")?;
+                if space >= 1 << 24 {
+                    return Err(fail("alloca address space does not fit 24 bits"));
+                }
+                self.alloca_address_space = space;
+            }
             'm' => {
                 if fields.len() != 2 || !fields[0].is_empty() {
                     return Err(fail("mangling takes one field after a colon"));

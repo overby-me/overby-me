@@ -470,7 +470,7 @@ const BROKEN: &[(&str, &str)] = &[
         "casts between different vector shapes",
     ),
     (
-        "define void @f() {\nentry:\n  %y = alloca i32, addrspace(16777216), align 4\n  ret void\n}\n",
+        "define void @f() {\nentry:\n  %y = alloca i32, align 4, addrspace(16777216)\n  ret void\n}\n",
         "which is too large",
     ),
     (
@@ -494,6 +494,10 @@ const BROKEN: &[(&str, &str)] = &[
     (
         "define void @f() builtin {\nentry:\n  ret void\n}\n",
         "builtin describes a call site rather than a function",
+    ),
+    (
+        "declare void @f()\n\ndefine void @g() {\nentry:\n  call void @f() align 8\n  ret void\n}\n",
+        "describes an argument rather than a call",
     ),
     // An intrinsic is the compiler's, not the module's.
     (
@@ -642,6 +646,10 @@ const REJECTED: &[(&str, &str)] = &[
     (
         "define void @f(i8* %p) {\nentry:\n  ret void\n}\n",
         "opaque",
+    ),
+    (
+        "target datalayout = \"A16777216\"\n",
+        "does not fit 24 bits",
     ),
     // Each operand of a signed pointer says something specific.
     (
@@ -869,6 +877,9 @@ const VERIFIES: &[&str] = &[
     // Whether a target extension type can be a global is the target's
     // business, and upstream reads this one.
     "@g = global target(\"spirv.DeviceEvent\") zeroinitializer\n",
+    // The address space follows the alignment, which is where the grammar
+    // puts it.
+    "define void @f() {\nentry:\n  %y = alloca i32, align 4, addrspace(3)\n  ret void\n}\n",
     // The floating-point atomics are the ones a target does lane by lane.
     "define void @f(ptr %p, <2 x half> %v) {\nentry:\n  %r = atomicrmw fadd ptr %p, <2 x half> %v seq_cst, align 4\n  ret void\n}\n",
     // An elementtype says what the pointer reaches through.

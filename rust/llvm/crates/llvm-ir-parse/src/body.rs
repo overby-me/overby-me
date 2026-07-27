@@ -819,6 +819,15 @@ impl Parser {
                         align = Some(self.parse_align()?);
                     } else if self.peek_word() == Some("addrspace") {
                         address_space = self.parse_optional_address_space()?;
+                        // The address space is the last clause the grammar
+                        // has, so anything after it is an error rather than
+                        // another clause.
+                        if self.peek() == &Token::Comma
+                            && !matches!(self.peek_at(1), Token::MetadataName(_))
+                        {
+                            return self.error("an alloca writes nothing after its address space");
+                        }
+                        break;
                     } else if matches!(self.peek(), Token::MetadataName(_)) {
                         self.index -= 1;
                         break;
