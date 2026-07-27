@@ -72,10 +72,32 @@ skipped, so the denominator is the whole suite.
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse 18 modules llvm-as reads**, which is the failure that
 matters: parse gaps, led now by intrinsics used without a declaration
-(five files), which needs a table of intrinsic base names. That count is
+(five files), which needs more than a table of intrinsic names. That count is
 a ceiling that may only fall. We
-**read 174 modules llvm-as refuses**, which is a missing verifier rule
+**read 120 modules llvm-as refuses**, which is a missing verifier rule
 each, and agreement is a floor that may only rise.
+
+Most of what is left on the second count is one thing: upstream knows what
+each intrinsic means and we know only what LangRef's `declare` lines say
+it takes. Both halves of that were built and measured.
+`corpus/intrinsic-names.nu` harvests the 419 base names LangRef documents;
+auto-declaring an undeclared intrinsic on that basis fixes three of the
+modules we refuse and costs eight new wrong acceptances, because the parse
+error it removes was standing in for the signature check, so it is a
+script and not a table. `corpus/intrinsic-signatures.nu` harvests the
+signatures from the same lines, 314 intrinsics, recording a position only
+where its type is the same in every documented instantiation.
+
+That table moves neither ratchet and is in the tree anyway. What it
+catches is a module that declares an intrinsic *consistently* wrongly, so
+the call matches its own declaration and only LangRef knows better;
+upstream's suites contain no such module and a compiler reading real IR
+will meet one. What it cannot reach is the rest of the gap, because those
+rules are prose rather than types: `llvm.bswap` taking an even number of
+bytes, `masked_load`'s alignment being a power of two,
+`get_active_lane_mask` returning `i1`. Checking the argument *count* was
+tried and reverted, since upstream auto-upgrades the older spelling of an
+intrinsic and demanding LangRef's arity cost two files.
 
 Two bounds rather than one, because agreement alone can be gamed. Refusing
 a module for a rule that does not exist scores as agreement whenever
