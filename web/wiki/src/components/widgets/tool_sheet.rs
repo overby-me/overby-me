@@ -10,16 +10,20 @@ use super::focus::{active_html_element, close_modal, trap_tab_focus};
 /// the sheet unmounts (e.g. navigating to a view with no tools).
 pub static TOOLS_DOCKED: GlobalSignal<bool> = Signal::global(|| false);
 
-/// A copy-link tools-sheet action. [`ToolSheet`] renders this itself as the
-/// first row of every sheet, so copy-link is available on all content and always
-/// sits at the top; call sites pass only their own actions. Copies a shareable
-/// link to the current page, keeping Unicode (æøå) literal (`decodeURI`) rather
-/// than percent-encoded — modern browsers handle it fine.
+/// A copy-link segment of the sheet's quick-action group. [`ToolSheet`] renders
+/// this itself as the group's first segment, so copy-link is available on all
+/// content and always sits at the top; call sites pass only their own segments.
+/// Copies a shareable link to the current page, keeping Unicode (æøå) literal
+/// (`decodeURI`) rather than percent-encoded — modern browsers handle it fine.
 #[component]
 pub fn CopyLinkAction() -> Element {
+    let label = crate::i18n::t("common.copyLink");
     rsx! {
         button {
-            class: "sheet-action",
+            class: "sheet-quick-action",
+            r#type: "button",
+            title: "{label}",
+            aria_label: "{label}",
             onclick: move |_| {
                 if let Some(win) = web_sys::window() {
                     if let Ok(href) = win.location().href() {
@@ -33,7 +37,33 @@ pub fn CopyLinkAction() -> Element {
                 }
             },
             span { class: "material-icons", "link" }
-            "{crate::i18n::t(\"common.copyLink\")}"
+        }
+    }
+}
+
+/// One labelled group of action rows inside a [`ToolSheet`].
+///
+/// A sheet that lists everything a node can do reaches ten identical rows on a
+/// group (and is permanently on screen once the sheet docks on extra-large
+/// windows). Grouping gives the eye a category to land on first: the rows are
+/// unchanged, but they arrive in twos and threes under a quiet subheader.
+/// `danger` sets the destructive group apart, below a rule and error-tinted.
+///
+/// Gate the group on the same condition as its rows: an empty group would still
+/// draw its subheader.
+#[component]
+pub fn SheetGroup(
+    #[props(default)] title: String,
+    #[props(default)] danger: bool,
+    children: Element,
+) -> Element {
+    rsx! {
+        div {
+            class: if danger { "sheet-group sheet-group-danger" } else { "sheet-group" },
+            if !title.is_empty() {
+                div { class: "sheet-group-title", "{title}" }
+            }
+            {children}
         }
     }
 }
@@ -46,9 +76,13 @@ pub fn CopyLinkAction() -> Element {
 pub fn ExportAction(node_id: String, name: String) -> Element {
     let session = crate::session::use_session();
     let mut exporting = use_signal(|| false);
+    let label = crate::i18n::t("folder.export");
     rsx! {
         button {
-            class: "sheet-action",
+            class: "sheet-quick-action",
+            r#type: "button",
+            title: "{label}",
+            aria_label: "{label}",
             disabled: *exporting.read(),
             onclick: move |_| {
                 if *exporting.read() {
@@ -69,7 +103,6 @@ pub fn ExportAction(node_id: String, name: String) -> Element {
             } else {
                 span { class: "material-icons", "download" }
             }
-            "{crate::i18n::t(\"folder.export\")}"
         }
     }
 }
@@ -83,11 +116,21 @@ pub fn ExportAction(node_id: String, name: String) -> Element {
 ///   sheet on medium/large) opened from a bottom-right FAB — never an in-header
 ///   button on the content card.
 ///
-/// Pass the action rows (`.sheet-action`) as `children`. [`CopyLinkAction`] is
-/// rendered by the sheet itself, ahead of them, so copy-link is the top row of
-/// every tools sheet rather than wherever each call site happened to place it.
+/// Pass the action rows as `children`, grouped in [`SheetGroup`]s.
+///
+/// `quick` holds the always-available, icon-legible actions (export, share,
+/// download) as segments of one M3 Expressive button group pinned at the top of
+/// the sheet: three such rows cost three lines of a list that was already too
+/// long, while as connected segments they cost one and anchor the sheet.
+/// [`CopyLinkAction`] is the group's first segment, rendered by the sheet itself,
+/// so copy-link leads every sheet rather than sitting wherever each call site
+/// happened to place it.
 #[component]
-pub fn ToolSheet(title: String, children: Element) -> Element {
+pub fn ToolSheet(
+    title: String,
+    #[props(default)] quick: Option<Element>,
+    children: Element,
+) -> Element {
     let mut open = use_signal(|| false);
     // Remember the trigger so focus returns to it when the sheet closes (a11y).
     let mut return_focus = use_signal(|| None::<web_sys::HtmlElement>);
@@ -113,7 +156,12 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
                     h3 { class: "title-medium", "{title}" }
                 }
                 div { class: "tool-sheet-body",
-                    CopyLinkAction {}
+                    div { class: "sheet-quick-group",
+                        CopyLinkAction {}
+                        if let Some(quick) = quick.clone() {
+                            {quick}
+                        }
+                    }
                     {children}
                 }
             }
@@ -182,7 +230,12 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
                 class: "tool-sheet-body",
                 // Dismiss the sheet when an action inside it is chosen.
                 onclick: move |_| close_modal(open, return_focus),
-                CopyLinkAction {}
+                div { class: "sheet-quick-group",
+                    CopyLinkAction {}
+                    if let Some(quick) = quick.clone() {
+                        {quick}
+                    }
+                }
                 {children}
             }
         }

@@ -167,8 +167,14 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                         if can_manage {
                             super::widgets::ToolSheet {
                                 title: t("common.tools"),
+                                // Pinned quick group: copy link (the sheet's own
+                                // first segment) and the roster CSV export.
+                                quick: rsx! {
                                 button {
-                                    class: "sheet-action",
+                                    class: "sheet-quick-action",
+                                    r#type: "button",
+                                    title: "{t(\"member.export\")}",
+                                    aria_label: "{t(\"member.export\")}",
                                     onclick: {
                                         let fname = name.clone();
                                         let export_id = node_id.clone();
@@ -199,8 +205,8 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                         }
                                     },
                                     span { class: "material-icons", "download" }
-                                    "{t(\"member.export\")}"
                                 }
+                                },
                             }
                         }
                     }

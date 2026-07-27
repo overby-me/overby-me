@@ -161,15 +161,19 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             // delete-confirm dialog.
             super::widgets::ToolSheet {
                 title: t("common.tools"),
-                // Copy link is the sheet's own first row (see ToolSheet).
-                // Export this document (and any nested content) to an .odt file.
-                super::widgets::ExportAction { node_id: node_id.clone(), name: name.clone() }
-                // Share this page to the signed-in user's linked Bluesky account.
-                // Only shown once a Bluesky account is actually linked.
-                if is_auth && bsky_linked {
-                    button {
-                        class: "sheet-action",
-                        onclick: {
+                // Pinned quick group (copy link is the sheet's own first segment):
+                // export this document and anything nested to .odt, and share the
+                // page to the signed-in user's linked Bluesky account. The share
+                // segment only appears once an account is actually linked.
+                quick: rsx! {
+                    super::widgets::ExportAction { node_id: node_id.clone(), name: name.clone() }
+                    if is_auth && bsky_linked {
+                        button {
+                            class: "sheet-quick-action",
+                            r#type: "button",
+                            title: "{t(\"content.shareBluesky\")}",
+                            aria_label: "{t(\"content.shareBluesky\")}",
+                            onclick: {
                             let share_name = name.clone();
                             move |_| {
                                 let token = session.read().access_token.clone();
@@ -192,14 +196,15 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                     }
                                 });
                             }
-                        },
-                        {icon_el("app/social")}
-                        "{t(\"content.shareBluesky\")}"
+                            },
+                            {icon_el("app/social")}
+                        }
                     }
-                }
-                // Owner: put this node on the context's projector (Screen view), so
-                // the chair can walk the agenda and project the current item.
+                },
+                // Owner: what the chair puts in front of the room — this node on
+                // the context's projector (Screen view), and its comments beside it.
                 if can_manage {
+                    super::widgets::SheetGroup { title: t("common.toolsMeeting"),
                     button {
                         class: "sheet-action",
                         onclick: {
@@ -253,35 +258,45 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                             "{t(\"content.showCommentsScreen\")}"
                         }
                     }
-                }
-                if is_ctx_owner && reorderable_children && !segments.is_empty() {
-                    Link {
-                        to: Route::PathPage {
-                            segments: segments.clone(),
-                            app: Some("sort".to_string()),
-                        },
-                        class: "sheet-action",
-                        {icon_el("app/sort")}
-                        "{t(\"mime.sort\")}"
                     }
                 }
-                if can_edit && !segments.is_empty() {
-                    Link {
-                        to: Route::PathPage {
-                            segments: segments.clone(),
-                            app: Some("editor".to_string()),
-                        },
-                        class: "sheet-action",
-                        {icon_el("app/editor")}
-                        "{t(\"mime.editor\")}"
+                // The other views of this same node. These are navigations, not
+                // actions, so they read as a group of their own. Gated on exactly
+                // what its rows are gated on: an empty group still draws a header.
+                if !segments.is_empty() && (can_edit || (is_ctx_owner && reorderable_children)) {
+                    super::widgets::SheetGroup { title: t("common.toolsOpen"),
+                        if is_ctx_owner && reorderable_children {
+                            Link {
+                                to: Route::PathPage {
+                                    segments: segments.clone(),
+                                    app: Some("sort".to_string()),
+                                },
+                                class: "sheet-action",
+                                {icon_el("app/sort")}
+                                "{t(\"mime.sort\")}"
+                            }
+                        }
+                        if can_edit {
+                            Link {
+                                to: Route::PathPage {
+                                    segments: segments.clone(),
+                                    app: Some("editor".to_string()),
+                                },
+                                class: "sheet-action",
+                                {icon_el("app/editor")}
+                                "{t(\"mime.editor\")}"
+                            }
+                        }
                     }
                 }
                 if can_manage && !segments.is_empty() {
-                    button {
-                        class: "sheet-action danger",
-                        onclick: move |_| confirm_open.set(true),
-                        span { class: "material-icons", "delete" }
-                        "{t(\"common.delete\")}"
+                    super::widgets::SheetGroup { danger: true,
+                        button {
+                            class: "sheet-action danger",
+                            onclick: move |_| confirm_open.set(true),
+                            span { class: "material-icons", "delete" }
+                            "{t(\"common.delete\")}"
+                        }
                     }
                 }
             }

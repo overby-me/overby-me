@@ -143,24 +143,30 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         if !file_url.is_empty() || (can_manage && !segments.is_empty()) {
                             super::widgets::ToolSheet {
                                 title: t("common.tools"),
-                                // Copy link is the sheet's own first row (see ToolSheet).
-                                if !file_url.is_empty() {
-                                    a {
-                                        href: "{file_url}",
-                                        target: "_blank",
-                                        download: "{name}",
-                                        "referrerpolicy": "no-referrer",
-                                        class: "sheet-action",
-                                        span { class: "material-icons", "download" }
-                                        "{t(\"common.download\")}"
+                                // Pinned quick group: copy link (the sheet's own
+                                // first segment) and downloading the file itself.
+                                quick: rsx! {
+                                    if !file_url.is_empty() {
+                                        a {
+                                            href: "{file_url}",
+                                            target: "_blank",
+                                            download: "{name}",
+                                            "referrerpolicy": "no-referrer",
+                                            class: "sheet-quick-action",
+                                            title: "{t(\"common.download\")}",
+                                            aria_label: "{t(\"common.download\")}",
+                                            span { class: "material-icons", "download" }
+                                        }
                                     }
-                                }
+                                },
                                 if can_manage && !segments.is_empty() {
-                                    button {
-                                        class: "sheet-action danger",
-                                        onclick: move |_| confirm_open.set(true),
-                                        span { class: "material-icons", "delete" }
-                                        "{t(\"common.delete\")}"
+                                    super::widgets::SheetGroup { danger: true,
+                                        button {
+                                            class: "sheet-action danger",
+                                            onclick: move |_| confirm_open.set(true),
+                                            span { class: "material-icons", "delete" }
+                                            "{t(\"common.delete\")}"
+                                        }
                                     }
                                 }
                             }

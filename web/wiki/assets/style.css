@@ -3126,6 +3126,92 @@ select:focus {
 	padding: var(--md-sys-spacing-3);
 	overflow-y: auto;
 }
+/* M3 Expressive button group: the always-available actions (copy link, export,
+   share, download) as connected segments of one pill instead of three full rows
+   of an already long list. Outer corners are round, the seam between segments is
+   square, and a press squishes the segment and morphs it to fully round. */
+.sheet-quick-group {
+	display: flex;
+	gap: var(--md-sys-spacing-0-5);
+	margin-bottom: var(--md-sys-spacing-2);
+}
+.sheet-quick-action {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 48px;
+	padding: 0;
+	border: none;
+	cursor: pointer;
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+	text-decoration: none;
+	border-radius: var(--md-sys-shape-corner-small);
+	transition:
+		transform var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-spring-spatial-default),
+		border-radius var(--md-sys-motion-duration-short3)
+			var(--md-sys-motion-spring-spatial-default),
+		background-color var(--md-sys-motion-duration-short4)
+			var(--md-sys-motion-easing-standard);
+}
+.sheet-quick-group > .sheet-quick-action:first-child {
+	border-start-start-radius: var(--md-sys-shape-corner-full);
+	border-end-start-radius: var(--md-sys-shape-corner-full);
+}
+.sheet-quick-group > .sheet-quick-action:last-child {
+	border-start-end-radius: var(--md-sys-shape-corner-full);
+	border-end-end-radius: var(--md-sys-shape-corner-full);
+}
+.sheet-quick-action .material-icons {
+	color: var(--md-on-secondary-container);
+}
+.sheet-quick-action:hover {
+	background: color-mix(
+		in srgb,
+		var(--md-on-secondary-container) 10%,
+		var(--md-secondary-container)
+	);
+}
+.sheet-quick-action:active {
+	transform: scale(0.94);
+	border-radius: var(--md-sys-shape-corner-full);
+}
+.sheet-quick-action:focus-visible {
+	outline: 3px solid var(--md-primary);
+	outline-offset: 2px;
+}
+.sheet-quick-action:disabled {
+	opacity: var(--md-sys-state-disabled-content-opacity);
+	cursor: default;
+}
+
+/* A labelled group of action rows. The subheader is quiet: it sorts the list, it
+   is not competing with the actions themselves. */
+.sheet-group {
+	display: flex;
+	flex-direction: column;
+	gap: var(--md-sys-spacing-1);
+}
+.sheet-group + .sheet-group {
+	margin-top: var(--md-sys-spacing-2);
+}
+.sheet-group-title {
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4) var(--md-sys-spacing-0-5);
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-label-large-size);
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+/* The destructive group sits below a rule, apart from everything reversible. */
+.sheet-group-danger {
+	margin-top: var(--md-sys-spacing-3);
+	padding-top: var(--md-sys-spacing-2);
+	border-top: 1px solid var(--md-outline-variant);
+}
+
 /* A single action row inside a sheet: full-width icon + label. */
 .sheet-action {
 	display: flex;

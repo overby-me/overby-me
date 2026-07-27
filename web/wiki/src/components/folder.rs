@@ -233,15 +233,18 @@ pub fn FolderApp(
                 if !projector {
                     super::widgets::ToolSheet {
                         title: t("common.tools"),
-                        // Copy link is the sheet's own first row (see ToolSheet).
-                        // Export the folder and everything nested under it to an .odt,
-                        // aligned with the document export (unconditional).
-                        super::widgets::ExportAction { node_id: node.id.0.clone(), name: name.to_string() }
-                        // Share this page to the signed-in user's linked Bluesky account.
-                        if is_auth && bsky_linked {
-                            button {
-                                class: "sheet-action",
-                                onclick: {
+                        // Pinned quick group (copy link is the sheet's own first
+                        // segment): export the folder and everything nested under it
+                        // to .odt, and share the page to a linked Bluesky account.
+                        quick: rsx! {
+                            super::widgets::ExportAction { node_id: node.id.0.clone(), name: name.to_string() }
+                            if is_auth && bsky_linked {
+                                button {
+                                    class: "sheet-quick-action",
+                                    r#type: "button",
+                                    title: "{t(\"content.shareBluesky\")}",
+                                    aria_label: "{t(\"content.shareBluesky\")}",
+                                    onclick: {
                                     let share_name = name.to_string();
                                     move |_| {
                                         let token = session.read().access_token.clone();
@@ -264,12 +267,14 @@ pub fn FolderApp(
                                         });
                                     }
                                 },
-                                {icon_el("app/social")}
-                                "{t(\"content.shareBluesky\")}"
+                                    {icon_el("app/social")}
+                                }
                             }
-                        }
-                        // Owner: project this container onto the context's Screen.
+                        },
+                        // Owner: what the chair puts in front of the room — this
+                        // container on the Screen, and its comments beside it.
                         if can_manage {
+                            super::widgets::SheetGroup { title: t("common.toolsMeeting"),
                             button {
                                 class: "sheet-action",
                                 onclick: {
@@ -323,33 +328,42 @@ pub fn FolderApp(
                                     "{t(\"content.showCommentsScreen\")}"
                                 }
                             }
-                        }
-                        // Owner: edit this container's own rich-text description.
-                        if can_edit && !parent_path.is_empty() {
-                            Link {
-                                to: Route::PathPage {
-                                    segments: parent_path.clone(),
-                                    app: Some("editor".to_string()),
-                                },
-                                class: "sheet-action",
-                                {icon_el("app/editor")}
-                                "{t(\"mime.editor\")}"
                             }
                         }
-                        // Reorder children (the sort app), for owners with >1 child.
-                        if is_context_owner && count > 1 && !parent_path.is_empty() {
-                            Link {
-                                to: Route::PathPage {
-                                    segments: parent_path.clone(),
-                                    app: Some("sort".to_string()),
-                                },
-                                class: "sheet-action",
-                                {icon_el("app/sort")}
-                                "{t(\"mime.sort\")}"
+                        // The other views of this container: its own rich-text
+                        // description, and reordering its children. Navigations, not
+                        // actions, so they group apart. Gated on exactly what its
+                        // rows are: an empty group still draws a header.
+                        if !parent_path.is_empty() && (can_edit || (is_context_owner && count > 1)) {
+                            super::widgets::SheetGroup { title: t("common.toolsOpen"),
+                                if can_edit {
+                                    Link {
+                                        to: Route::PathPage {
+                                            segments: parent_path.clone(),
+                                            app: Some("editor".to_string()),
+                                        },
+                                        class: "sheet-action",
+                                        {icon_el("app/editor")}
+                                        "{t(\"mime.editor\")}"
+                                    }
+                                }
+                                if is_context_owner && count > 1 {
+                                    Link {
+                                        to: Route::PathPage {
+                                            segments: parent_path.clone(),
+                                            app: Some("sort".to_string()),
+                                        },
+                                        class: "sheet-action",
+                                        {icon_el("app/sort")}
+                                        "{t(\"mime.sort\")}"
+                                    }
+                                }
                             }
                         }
-                        // Lock / unlock adding children (the attachable flag).
+                        // Owner housekeeping on the container itself: lock adding
+                        // children, and paste a clipboard selection into it.
                         if is_context_owner {
+                            super::widgets::SheetGroup { title: t("common.toolsManage"),
                             button {
                                 class: "sheet-action",
                                 onclick: {
@@ -390,10 +404,9 @@ pub fn FolderApp(
                                     "{t(\"folder.unlock\")}"
                                 }
                             }
-                        }
-                        // Paste the clipboard selection here (deep-copy), for owners
-                        // when something is selected.
-                        if is_context_owner && !SELECTED.read().is_empty() {
+                            // Paste the clipboard selection here (deep-copy), when
+                            // something is actually selected.
+                            if !SELECTED.read().is_empty() {
                             button {
                                 class: "sheet-action",
                                 onclick: {
@@ -428,14 +441,18 @@ pub fn FolderApp(
                                 span { class: "material-icons", "content_paste" }
                                 "{t(\"folder.paste\")} ({SELECTED.read().len()})"
                             }
+                            }
+                            }
                         }
                         // Owner: delete this container (with a confirm dialog).
                         if can_manage && !parent_path.is_empty() {
-                            button {
-                                class: "sheet-action danger",
-                                onclick: move |_| confirm_open.set(true),
-                                span { class: "material-icons", "delete" }
-                                "{t(\"common.delete\")}"
+                            super::widgets::SheetGroup { danger: true,
+                                button {
+                                    class: "sheet-action danger",
+                                    onclick: move |_| confirm_open.set(true),
+                                    span { class: "material-icons", "delete" }
+                                    "{t(\"common.delete\")}"
+                                }
                             }
                         }
                     }
