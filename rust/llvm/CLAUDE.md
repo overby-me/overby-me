@@ -979,6 +979,26 @@ naming a tuple is refused too, so the field wants a *type* node rather
 than merely a node, and which kinds each field accepts is a larger
 measurement than this one. Recorded rather than started.
 Verifier 299 to 311.
+A sixty-ninth pass left the Verifier's pool, which is down to seventeen
+and all of it blocked, and went back to the Assembler suite. Four rules,
+four files.
+A symbol's name reaches the object file, where it ends at the first NUL,
+so a name holding one names something else. Local names, labels and
+global names all refuse one; a section name does not, that being a string
+rather than a name.
+An attribute written before the return type says something about the
+result, and most attributes say nothing about a result. Which ones do was
+measured by writing each of the ninety-nine keywords in that position
+against three return types: seven bare ones, `inreg`, `noalias`, `noext`,
+`nonnull`, `noundef`, `signext` and `zeroext`, and five that take an
+argument. That sweep found a false positive of ours as well: `signext`
+and `zeroext` say how a narrow integer fills a register, which nothing
+but an integer is narrow in, and `noext` says not to widen it, which
+upstream lets anything be told.
+And a caller cannot pass a struct whose body this module has never seen,
+there being no knowing how much of it to copy. A return type may be one,
+the caller having only to name the place it goes.
+Assembler 449 to 453, refusals still five.
 One rule was probed and left. A `DILocation` inside a plain metadata node
 is refused when an instruction attachment reaches it, except under
 `llvm.loop`, whose whole subtree is exempt, and except from a named list.

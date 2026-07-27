@@ -61,6 +61,18 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "%t = type opaque\n\ndefine void @f(%t %a) {\nentry:\n  ret void\n}\n",
+        "parameter 0 has a type no caller can pass",
+    ),
+    (
+        "define mustprogress void @f(i8 %a) {\nentry:\n  ret void\n}\n",
+        "does not apply to return values",
+    ),
+    (
+        "define nounwind ptr @f() {\nentry:\n  ret ptr null\n}\n",
+        "does not apply to return values",
+    ),
+    (
         "!t = !{!1}\n!1 = !DIDerivedType(tag: DW_TAG_pointer_type, size: 32, baseType: !\"bad\")\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!9 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",
         "invalid baseType, expected a node",
     ),
@@ -1074,6 +1086,10 @@ const REJECTED: &[(&str, &str)] = &[
         "not a power of two",
     ),
     (
+        "@\"\0\" = global i32 0\n",
+        "NUL character is not allowed in names",
+    ),
+    (
         "define void @f(ptr align 8589934592 %p) {\nentry:\n  ret void\n}\n",
         "huge alignment values are unsupported",
     ),
@@ -1364,6 +1380,15 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // An opaque struct where only its name is needed, and the attributes
+    // that do describe a result.
+    "%t = type opaque\n\ndeclare %t @f()\n",
+    "%t = type opaque\n\ndeclare void @f(ptr)\n",
+    "define noalias ptr @f() {\nentry:\n  ret ptr null\n}\n",
+    "define range(i8 0, 8) i8 @f() {\nentry:\n  ret i8 0\n}\n",
+    "define void @f(i8 %a) mustprogress {\nentry:\n  ret void\n}\n",
+    // `noext` says not to widen, which anything can be told.
+    "declare void @f(ptr noext)\n",
     // The fields that do take a metadata string, which is a list rather than
     // a rule: corpus/md-string-fields.nu measured which.
     "!t = !{!1}\n!1 = !DIDerivedType(tag: DW_TAG_member, baseType: !9, extraData: !\"ok\")\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!9 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",

@@ -10,7 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr, TypeAttr};
+use crate::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr, StructuredAttr, TypeAttr};
 use crate::constant::{CastOp, ConstExpr, ConstId, Constant};
 use crate::function::Function;
 use crate::global::{DllStorageClass, GlobalQualifiers, Linkage, RuntimePreemption, Visibility};
@@ -884,6 +884,48 @@ impl Verifier<'_> {
         }
     }
 
+    /// The attributes that say something about a result, as against the ones
+    /// that say something about the function or about a place a caller put an
+    /// argument. `define nounwind i8 @f()` writes a promise about the whole
+    /// function where a promise about its result belongs.
+    fn attributes_apply_to_a_result(&mut self, attrs: &AttributeSet) {
+        for attribute in &attrs.attributes {
+            let applies = match attribute {
+                Attribute::Enum(kind) => matches!(
+                    kind,
+                    EnumAttr::InReg
+                        | EnumAttr::NoAlias
+                        | EnumAttr::NoExt
+                        | EnumAttr::NonNull
+                        | EnumAttr::NoUndef
+                        | EnumAttr::SignExt
+                        | EnumAttr::ZeroExt
+                ),
+                Attribute::Int { kind, .. } => matches!(
+                    kind,
+                    IntAttr::Align
+                        | IntAttr::AlignStack
+                        | IntAttr::Dereferenceable
+                        | IntAttr::DereferenceableOrNull
+                ),
+                Attribute::Range { .. } => true,
+                Attribute::Structured { kind, .. } => {
+                    matches!(kind, StructuredAttr::NoFpClass)
+                }
+                // A quoted attribute is carried rather than read, and upstream
+                // carries one here.
+                Attribute::String { .. } => true,
+                Attribute::Type { .. } => false,
+            };
+            if !applies {
+                self.report(format!(
+                    "{} does not apply to return values",
+                    describe_attribute(attribute)
+                ));
+            }
+        }
+    }
+
     fn named_metadata_roots(&self) -> Vec<MdId> {
         self.module
             .named_metadata
@@ -1456,12 +1498,19 @@ impl Verifier<'_> {
             }
         }
         // A parameter holds a value the caller passes, and a label is a
-        // place in this function rather than a value at all.
+        // place in this function rather than a value at all. Nor can a caller
+        // pass a struct whose body this module has never seen: there is no
+        // knowing how much of it to copy. A return type may be one, the
+        // caller having only to name the place it goes.
         for (index, param) in function.params.iter().enumerate() {
-            if matches!(
-                self.module.ctx.type_kind(param.ty),
-                TypeKind::Label | TypeKind::Function { .. }
-            ) {
+            let opaque = matches!(self.module.ctx.type_kind(param.ty),
+                TypeKind::NamedStruct(id) if self.module.ctx.struct_def(*id).fields.is_none());
+            if opaque
+                || matches!(
+                    self.module.ctx.type_kind(param.ty),
+                    TypeKind::Label | TypeKind::Function { .. }
+                )
+            {
                 self.report(format!("parameter {index} has a type no caller can pass"));
             }
         }
@@ -1489,6 +1538,7 @@ impl Verifier<'_> {
                 ));
             }
         }
+        self.attributes_apply_to_a_result(&function.return_attrs);
         for (index, param) in function.params.iter().enumerate() {
             self.attribute_set(&param.attrs, param.ty, &format!("parameter {index}"));
             for kind in [
@@ -3789,7 +3839,11 @@ impl Verifier<'_> {
         let pointer = matches!(self.module.ctx.type_kind(ty), TypeKind::Pointer { .. });
         for attribute in &attrs.attributes {
             let wants_a_pointer = match attribute {
-                Attribute::Enum(EnumAttr::SignExt | EnumAttr::ZeroExt | EnumAttr::NoExt) => {
+                // `signext` and `zeroext` say how a narrow integer is widened
+                // to fill a register, which nothing but an integer is narrow
+                // in. `noext` says not to widen it and upstream reads one
+                // anywhere, having nothing to do either way.
+                Attribute::Enum(EnumAttr::SignExt | EnumAttr::ZeroExt) => {
                     if !matches!(
                         self.module.ctx.type_kind(self.innermost_element(ty)),
                         TypeKind::Integer(_)

@@ -351,6 +351,9 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     let text = String::from_utf8(bytes)
                         .map_err(|_| self.error("a label has to be valid UTF-8"))?;
+                    if text.contains('\0') {
+                        return Err(self.error("NUL character is not allowed in names"));
+                    }
                     Token::Label(text)
                 } else {
                     Token::Quoted(bytes)
@@ -432,7 +435,15 @@ impl<'a> Lexer<'a> {
         numbered: impl Fn(u32) -> Token,
     ) -> Result<Token, LexError> {
         match self.peek() {
-            Some(b'"') => Ok(named(self.quoted_string()?)),
+            Some(b'"') => {
+                let name = self.quoted_string()?;
+                // A symbol's name reaches the object file, where it ends at
+                // the first NUL, so a name holding one names something else.
+                if name.contains('\0') {
+                    return Err(self.error("NUL character is not allowed in names"));
+                }
+                Ok(named(name))
+            }
             Some(b) if b.is_ascii_digit() => {
                 let value = self.number()?;
                 if self.peek() == Some(b':') {
