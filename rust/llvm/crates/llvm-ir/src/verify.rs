@@ -2165,9 +2165,44 @@ impl Verifier<'_> {
                         self.report(format!("{where_} names {word}, which is not one of them"));
                     }
                 }
+                // How many parameters the callee declares, which is where
+                // the variadic part of the argument list starts.
+                //
+                // A statepoint is the exception, its variadic part being the
+                // wrapped call's own arguments rather than arguments of its
+                // own, so an `sret` there names a place the wrapped callee
+                // did declare. Upstream reads its own statepoint.ll.
+                let forwards_its_arguments = match call.callee {
+                    Value::Constant(id) => self
+                        .mentions_an_intrinsic(id)
+                        .is_some_and(|name| name.starts_with("llvm.experimental.gc.statepoint")),
+                    _ => false,
+                };
+                let declared = match self.module.ctx.type_kind(call.function_type) {
+                    _ if forwards_its_arguments => call.args.len(),
+                    TypeKind::Function { params, .. } => params.len(),
+                    _ => call.args.len(),
+                };
                 for (position, arg) in call.args.iter().enumerate() {
                     let attrs = arg.attrs.clone();
                     self.attribute_set(&attrs, arg.ty, &format!("argument {position} of {where_}"));
+                    // An argument past the declared parameters is one the
+                    // callee has no name for, so nothing can be said about
+                    // where it goes or what it comes back as.
+                    if position >= declared {
+                        if has_type_attribute(&attrs, TypeAttr::StructRet) {
+                            self.report(format!(
+                                "{where_} marks a variadic argument sret, which names a place the \
+                                 callee did not declare"
+                            ));
+                        }
+                        if has_enum_attribute(&attrs, EnumAttr::Returned) {
+                            self.report(format!(
+                                "{where_} marks a variadic argument returned, which promises \
+                                 something the callee did not declare"
+                            ));
+                        }
+                    }
                     // The inalloca argument is the one the callee finds on
                     // the stack, so it is the one pushed last.
                     if has_type_attribute(&attrs, TypeAttr::InAlloca)

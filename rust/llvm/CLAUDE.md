@@ -822,6 +822,22 @@ rewriting `DIExpression` opcodes. Each needs the shape of the *older* debug
 info to be modelled, which is a dialect this tier does not read, and the
 files that want it are twenty-four of the four print suites' 165. Recorded
 rather than started.
+A sixty-third pass went at the Verifier suite's remaining forty, the modules
+we accept that llvm-as refuses, and took the one that needed no table: an
+argument past the callee's declared parameters is one the callee has no name
+for, so `sret` may not name a place there and `returned` may not promise
+something about it. A statepoint is the exception, its variadic part being
+the wrapped call's own arguments, which upstream's statepoint.ll relies on
+and which cost a file before it was noticed. Verifier 288 to 289.
+Three more were probed and left. A load of `target("foo")` is refused where
+a load of `target("spirv.Event")` is read, and `<2 x target("spirv.Image")>`
+is refused where `<2 x target("llvm.test.vectorelement")>` is read: both need
+a table of which target extension types exist and what they may be used for,
+which is the same blocker as the target intrinsics. The comment in
+`is_valid_vector_element` was right to allow them, and a blanket rule would
+have refused a file upstream reads.
+`inalloca` on a variadic argument segfaults llvm-as, so there is no verdict
+to derive from it. Recorded rather than guessed at.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

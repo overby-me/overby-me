@@ -61,6 +61,14 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "declare void @g(...)\n\ndefine void @f(ptr %p) {\nentry:\n  call void (...) @g(ptr sret(i32) %p)\n  ret void\n}\n",
+        "marks a variadic argument sret",
+    ),
+    (
+        "declare void @g(ptr, ...)\n\ndefine void @f(ptr %p) {\nentry:\n  call void (ptr, ...) @g(ptr %p, ptr returned %p)\n  ret void\n}\n",
+        "marks a variadic argument returned",
+    ),
+    (
         "define void @f(ptr %p) naked {\nentry:\n  %g = getelementptr i8, ptr %p, i64 1\n  unreachable\n}\n",
         "a naked function reads an argument it was never given",
     ),
@@ -1172,6 +1180,10 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // The same attributes on a parameter the callee did declare, variadic
+    // signature or not.
+    "declare void @g(ptr sret(i32), ...)\n\ndefine void @f(ptr %p) {\nentry:\n  call void (ptr, ...) @g(ptr sret(i32) %p)\n  ret void\n}\n",
+    "declare void @g(ptr)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @g(ptr sret(i32) %p)\n  ret void\n}\n",
     // A module writes its debug info as records or as intrinsic calls, and
     // this one keeps to records.
     "define void @f(i32 %a) !dbg !5 {\nentry:\n    #dbg_value(!DIArgList(i32 %a, i64 0), !4, !DIExpression(), !8)\n  ret void\n}\n\n!llvm.module.flags = !{!0}\n!llvm.dbg.cu = !{!1}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!1 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!2 = !DIFile(filename: \"a.c\", directory: \"/\")\n!4 = !DILocalVariable(name: \"v\", scope: !5, file: !2, line: 1)\n!5 = distinct !DISubprogram(name: \"f\", scope: !2, file: !2, line: 1, type: !6, spFlags: DISPFlagDefinition, unit: !1)\n!6 = !DISubroutineType(types: !7)\n!7 = !{null}\n!8 = !DILocation(line: 1, column: 1, scope: !5)\n",
