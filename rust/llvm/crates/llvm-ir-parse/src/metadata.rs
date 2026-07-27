@@ -330,6 +330,14 @@ impl Parser {
                 let value = self.parse_metadata_value(ty, context)?;
                 Ok(MdField::Value { ty, value })
             }
+            // An array or vector type opens a field as well: a
+            // `DIDerivedType` may carry `extraData: [4 x i32] [i32 23, ...]`.
+            // A brace cannot, `{...}` there being the tuple form above.
+            Token::LeftBracket | Token::Less => {
+                let ty = self.parse_type()?;
+                let value = self.parse_metadata_value(ty, context)?;
+                Ok(MdField::Value { ty, value })
+            }
             other => self.error(format!(
                 "expected a metadata field, found {}",
                 other.describe()
@@ -338,12 +346,15 @@ impl Parser {
     }
 
     fn looks_like_a_type(&self) -> bool {
-        matches!(self.peek(), Token::IntType(_))
-            || matches!(self.peek(), Token::Word(word) if matches!(
-                word.as_str(),
-                "void" | "half" | "bfloat" | "float" | "double" | "fp128" | "x86_fp80"
-                    | "ppc_fp128" | "ptr" | "label" | "metadata" | "token"
-            ))
+        matches!(
+            self.peek(),
+            // An array or vector type opens a field too.
+            Token::IntType(_) | Token::LeftBracket | Token::Less
+        ) || matches!(self.peek(), Token::Word(word) if matches!(
+            word.as_str(),
+            "void" | "half" | "bfloat" | "float" | "double" | "fp128" | "x86_fp80"
+                | "ppc_fp128" | "ptr" | "label" | "metadata" | "token"
+        ))
     }
 
     pub(crate) fn parse_metadata_operand(
@@ -482,7 +493,7 @@ fn is_a_definition(fields: &[(String, MdField)]) -> bool {
 
 /// `DIExpression` and `DIArgList` print at every use rather than once, so
 /// they stay where they are written.
-fn prints_in_place(node: &Metadata) -> bool {
+pub(crate) fn prints_in_place(node: &Metadata) -> bool {
     matches!(
         node,
         Metadata::Specialized { tag, .. } if tag == "DIExpression" || tag == "DIArgList"

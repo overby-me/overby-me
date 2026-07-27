@@ -77,27 +77,41 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 453 | 483 | 12 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 454 | 483 | 11 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 288 | 328 | 1 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 
 Those two suites are written to exercise a parser, which makes them a good
-oracle and a poor sample. `llvm/test/Transforms` is the opposite: ten thousand
-modules written to exercise passes, in whatever syntax was convenient at the
-time. The bound there is one-sided, because there is nothing to trade against:
-reading a module upstream reads is right in every case.
+oracle and a poor sample. The rest of `llvm/test` is the opposite: thirty-six
+thousand modules written to exercise passes, backends, linkers and debuggers,
+in whatever syntax was convenient at the time. Each bound is one-sided,
+because there is nothing to trade against: reading a module upstream reads is
+right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/Transforms` | 10,174 | 10,305 | `llvm-tree-transforms` |
+| `llvm/test/CodeGen` | 22,180 | 22,785 | `llvm-tree-codegen` |
+| `llvm/test/Transforms` | 10,177 | 10,305 | `llvm-tree-transforms` |
 | `llvm/test/Analysis` | 1,391 | 1,403 | `llvm-tree-analysis` |
-| `llvm/test/CodeGen` | 22,177 | 22,785 | `llvm-tree-codegen` |
+| `llvm/test/DebugInfo` | 1,096 | 1,101 | `llvm-tree-debuginfo` |
+| `llvm/test/Instrumentation` | 499 | 508 | `llvm-tree-instrumentation` |
+| `llvm/test/Linker` | 334 | 338 | `llvm-tree-linker` |
+| `llvm/test/ThinLTO` | 251 | 260 | `llvm-tree-thinlto` |
+| `llvm/test/Other` | 160 | 160 | `llvm-tree-other` |
+| `llvm/test/MC` | 159 | 160 | `llvm-tree-mc` |
+| `llvm/test/Bitcode` | 152 | 232 | `llvm-tree-bitcode` |
+| `llvm/test/Feature` | 79 | 82 | `llvm-tree-feature` |
 
-What CodeGen still refuses is mostly not a gap: 179 of its 644 write typed
-pointers, which is the deliberate divergence of PLAN 1.2, and 410 more call
-a target intrinsic no LangRef line names, which is the gap the intrinsic
-name table is honest about having.
+That is 36,478 of the 37,334 modules llvm-as reads across eleven trees, and
+what is left is mostly not a gap. Two decisions account for most of it. Typed
+pointers are refused on purpose (PLAN 1.2), which costs 179 files in CodeGen
+and 78 of Bitcode's 81, that tree existing to test reading older bitcode; it
+is the one place where the divergence dominates rather than decorates. A
+target intrinsic no LangRef line names cannot be auto-declared, which costs
+410 more in CodeGen, and the intrinsic name table is honest about why.
+
+`Other` is the only tree read whole.
 
 The first sweep read 2,781 of the first 2,992 and the gaps it showed were not
 the ones the suites show. Four fixes closed 110 of them: the attribute

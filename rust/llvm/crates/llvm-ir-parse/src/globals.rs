@@ -87,7 +87,13 @@ impl Parser {
         };
 
         let value_type = self.parse_type()?;
-        let initializer = if external
+        // `extern_weak` is a linkage rather than the `external` keyword, and
+        // it declares just as `external` does: a global carrying it has no
+        // initializer, so whatever follows belongs to the next item.
+        let declared = external
+            || qualifiers.linkage == Some(llvm_ir::global::Linkage::ExternWeak)
+            || qualifiers.linkage == Some(llvm_ir::global::Linkage::External);
+        let initializer = if declared
             || matches!(
                 self.peek(),
                 Token::Comma | Token::Eof | Token::Word(_) | Token::GlobalName(_)
@@ -180,6 +186,9 @@ impl Parser {
 
     pub(crate) fn starts_a_constant(&self) -> bool {
         match self.peek() {
+            // `u0x...` and `s0x...` are integer literals the lexer hands over
+            // as words, being letters before digits.
+            Token::Word(word) if crate::attributes::wide_hex_u64(word).is_some() => true,
             Token::Word(word) => matches!(
                 word.as_str(),
                 "zeroinitializer"

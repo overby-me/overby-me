@@ -120,10 +120,28 @@ impl Parser {
                         if !operands.is_empty() {
                             self.require(Token::Comma)?;
                         }
-                        match self.advance() {
-                            Token::MetadataNumber(number) => operands.push(MdId(number)),
+                        // A named list holds references, and the two kinds
+                        // that are written at every use rather than numbered
+                        // may be written here in place. An ordinary node may
+                        // not: upstream refuses `!named = !{!{i32 1}}`.
+                        match self.peek().clone() {
+                            Token::MetadataNumber(number) => {
+                                self.advance();
+                                operands.push(MdId(number));
+                            }
+                            Token::Exclaim | Token::MetadataName(_) => {
+                                let node = self.parse_metadata_definition(None)?;
+                                if !crate::metadata::prints_in_place(&node) {
+                                    return self.error(
+                                        "a named metadata list holds references, not nodes",
+                                    );
+                                }
+                                let id = MdId(self.next_inline_metadata);
+                                self.next_inline_metadata += 1;
+                                self.module.set_metadata(id, node);
+                                operands.push(id);
+                            }
                             other => {
-                                self.index -= 1;
                                 return self.error(format!(
                                     "expected a metadata reference, found {}",
                                     other.describe()

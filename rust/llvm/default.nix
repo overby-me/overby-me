@@ -129,7 +129,7 @@ in {
     # Conformance against upstream's own suites, measured rather than claimed:
     # every file in the suite, scored against what real llvm-as does with it.
     # See STATUS.md for what the remaining disagreements are.
-    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 453 12;
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 454 11;
     llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 288 1;
 
     # Not whether we accept the same files, but whether we print the same
@@ -140,9 +140,21 @@ in {
     # Ten thousand pass tests, none of them written with a parser in mind,
     # and fourteen hundred analysis tests that are older on average and use
     # the implicit numbering more.
-    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10174;
+    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10177;
     llvm-tree-analysis = pkgs: treeCheck pkgs "Analysis" 1391;
-    llvm-tree-codegen = pkgs: treeCheck pkgs "CodeGen" 22177;
+    llvm-tree-codegen = pkgs: treeCheck pkgs "CodeGen" 22180;
+    llvm-tree-debuginfo = pkgs: treeCheck pkgs "DebugInfo" 1096;
+    llvm-tree-instrumentation = pkgs: treeCheck pkgs "Instrumentation" 499;
+    llvm-tree-linker = pkgs: treeCheck pkgs "Linker" 334;
+    llvm-tree-thinlto = pkgs: treeCheck pkgs "ThinLTO" 251;
+    llvm-tree-other = pkgs: treeCheck pkgs "Other" 160;
+    llvm-tree-mc = pkgs: treeCheck pkgs "MC" 159;
+    llvm-tree-feature = pkgs: treeCheck pkgs "Feature" 79;
+
+    # The one tree where the typed-pointer divergence dominates: it exists to
+    # test reading older bitcode, so three quarters of what we refuse there is
+    # that one decision rather than a gap.
+    llvm-tree-bitcode = pkgs: treeCheck pkgs "Bitcode" 152;
   };
 
   packages.rust-llvm = {lib, ...}:

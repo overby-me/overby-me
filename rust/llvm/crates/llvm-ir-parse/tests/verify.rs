@@ -816,6 +816,10 @@ const BROKEN: &[(&str, &str)] = &[
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
     (
+        "!named = !{!{i32 1}}\n",
+        "a named metadata list holds references, not nodes",
+    ),
+    (
         "declare void @llvm.dbg.value(metadata, metadata, metadata)\n\ndefine void @f(i32 %a) !dbg !5 {\nentry:\n    #dbg_value(i32 %a, !4, !DIExpression(), !8)\n  call void @llvm.dbg.value(metadata i32 %a, metadata !4, metadata !DIExpression()), !dbg !8\n  ret void\n}\n\n!llvm.module.flags = !{!0}\n!llvm.dbg.cu = !{!1}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!1 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!2 = !DIFile(filename: \"a.c\", directory: \"/\")\n!4 = !DILocalVariable(name: \"v\", scope: !5, file: !2, line: 1)\n!5 = distinct !DISubprogram(name: \"f\", scope: !2, file: !2, line: 1, type: !6, spFlags: DISPFlagDefinition, unit: !1)\n!6 = !DISubroutineType(types: !7)\n!7 = !{null}\n!8 = !DILocation(line: 1, column: 1, scope: !5)\n",
         "records in one place and as intrinsic calls in another",
     ),
@@ -1038,6 +1042,17 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // `extern_weak` is a linkage rather than the `external` keyword, and it
+    // declares just as `external` does, so the next global is the next
+    // global rather than this one's initializer.
+    "@a = extern_weak global [0 x i8]\n@b = extern_weak global i32\n@c = global i32 7\n",
+    // A wide hexadecimal literal is a constant like any other.
+    "@g = global i64 u0x00001\n",
+    // A named list may hold one of the two node kinds that are written at
+    // every use rather than numbered.
+    "!named = !{!DIExpression(DW_OP_constu, 48)}\n",
+    // A metadata field may be an aggregate constant.
+    "!named = !{!0}\n!0 = !DIDerivedType(tag: DW_TAG_member, name: \"v\", baseType: !1, size: 128, extraData: [4 x i32] [i32 23, i32 23, i32 97, i32 108])\n!1 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",
     // An array length written the way a wide integer literal is written.
     "define void @f() {\nentry:\n  %a = alloca [u0xedcba x i8]\n  ret void\n}\n",
     // A backslash that begins no escape keeps itself, as it does in a

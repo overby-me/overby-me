@@ -643,6 +643,24 @@ parser, where it now has to live: once every call is a record, there is
 nothing left to tell the two apart by, so the two spellings are counted as
 they are read. Verifier 287 to 288, with the modules we refuse that llvm-as
 reads down to one.
+A fifty-first pass swept the eight trees nobody had measured: DebugInfo,
+Instrumentation, Linker, ThinLTO, Bitcode, Other, MC and Feature. Seven of
+them were already above 97 per cent, which is what the last four passes were
+worth. The eighth was Bitcode at 65, and that is not a gap: 78 of its 81
+refusals write typed pointers, the tree existing to test reading older
+bitcode. It is now a ratchet of its own, so the cost of that decision has a
+number that moves when the decision does.
+Six real gaps came out of the other seven, and one of them was worth two
+files on its own. `extern_weak` is a linkage rather than the `external`
+keyword, and it declares just as `external` does, so a global carrying it has
+no initializer; reading one anyway swallowed the next global and reported the
+error a line late. A wide hexadecimal literal is a constant like any other. A
+named metadata list may hold one of the two node kinds written at every use
+rather than numbered, and may not hold any other node written in place. And a
+metadata field may be an aggregate constant, `extraData: [4 x i32] [...]`.
+Assembler 453 to 454 with refusals 12 to 11, Transforms to 10,177, CodeGen to
+22,180, and eleven trees now have a bound: 36,478 of the 37,334 modules
+llvm-as reads.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five
