@@ -125,6 +125,13 @@ fn refresh_toolbar(
 
 /// Whether a node type carries authors (members). Contexts and a few vote types
 /// do not, matching the React editor.
+/// Whether the editor offers a `data.image` picker for this node. Content nodes
+/// carry a cover image; a candidate carries its photo in the very same field, and
+/// adding one now lands here, so the photo is set where its text is written.
+fn node_takes_cover_image(mime_id: Option<&str>) -> bool {
+    node_takes_authors(mime_id) || matches!(mime_id, Some("vote/candidate"))
+}
+
 fn node_takes_authors(mime_id: Option<&str>) -> bool {
     // wiki/file is excluded too: FileApp never displays author chips, so collecting
     // authors on files only created hidden member rows (an inconsistency with how
@@ -279,6 +286,19 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     // Authors (members): content nodes carry a list of authors that the editor
     // maintains; contexts and a few vote types do not.
     let takes_authors = node_takes_authors(node.mime_id.as_deref());
+    let takes_cover_image = node_takes_cover_image(node.mime_id.as_deref());
+    // A candidate's `data.image` is its photo, not a cover, so it says so.
+    let is_candidate = node.mime_id.as_deref() == Some("vote/candidate");
+    let image_label = if is_candidate {
+        t("vote.candidatePhoto")
+    } else {
+        t("content.coverImage")
+    };
+    let image_cta = if is_candidate {
+        t("vote.uploadPhoto")
+    } else {
+        t("content.uploadImage")
+    };
     let mut authors = use_signal(|| {
         node.members
             .iter()
@@ -327,10 +347,19 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
             .map(|t| t.0.chars().take(10).collect::<String>())
             .unwrap_or_default()
     });
-    // The existing cover thumbnail, resolved once on mount (a fresh upload shows a
-    // filename confirmation instead, since this hook does not re-fetch).
+    // The existing cover thumbnail, resolved once on mount.
     let existing_image_url =
         super::loader::use_file_object_url(initial_image.clone().unwrap_or_default());
+    // A fresh upload is not covered by that hook (it does not re-fetch), so preview
+    // it from its tokenised file URL instead of only naming the file.
+    let uploaded_image_url = if image_name.read().is_empty() {
+        None
+    } else {
+        image_id.read().clone().map(|fid| {
+            let token = session.read().access_token.clone().unwrap_or_default();
+            crate::backend_api::file_url(&fid, &token)
+        })
+    };
 
     // Toolbar active state (reflects the caret).
     let st_bold = use_signal(|| false);
@@ -716,10 +745,12 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     AuthorField { authors }
                 }
 
-                // Content metadata: an optional cover image, and (owners) the date.
-                if takes_authors {
+                // The `data.image` picker: a cover for content, the photo for a
+                // candidate (whose add dialog no longer asks for one, since adding
+                // a candidate lands here).
+                if takes_cover_image {
                     div { class: "mt-2 mb-2",
-                        div { class: "file-upload-label", "{t(\"content.coverImage\")}" }
+                        div { class: "file-upload-label", "{image_label}" }
                         label { class: "file-upload",
                             input {
                                 r#type: "file",
@@ -728,20 +759,30 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                 onchange: on_pick_image,
                             }
                             span { class: "material-icons", "image" }
-                            span { class: "file-upload-text", "{t(\"content.uploadImage\")}" }
+                            span { class: "file-upload-text", "{image_cta}" }
                         }
                         if *image_uploading.read() {
                             div {
                                 class: "stack stack-h mt-1",
                                 div { class: "spinner spinner-sm" }
-                                span { class: "body-small text-muted",
-                                    "{t(\"content.uploadImage\")}\u{2026}"
-                                }
+                                span { class: "body-small text-muted", "{image_cta}\u{2026}" }
                             }
                         } else if !image_name.read().is_empty() {
                             div {
                                 class: "file-upload-done",
-                                span { class: "material-icons", "check_circle" }
+                                // The image itself is the confirmation; the check mark
+                                // stands in only if there is no id to build a URL from.
+                                if let Some(src) = uploaded_image_url.clone() {
+                                    img {
+                                        class: "upload-thumb",
+                                        src: "{src}",
+                                        alt: "{image_name}",
+                                        // The src carries the nhost ?token=; keep it out of the Referer.
+                                        referrerpolicy: "no-referrer",
+                                    }
+                                } else {
+                                    span { class: "material-icons", "check_circle" }
+                                }
                                 span { class: "file-upload-name", "{image_name}" }
                                 button {
                                     class: "btn btn-text",
@@ -764,9 +805,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                         alt: t("content.imageAlt"),
                                     }
                                 }
-                                span { class: "flex-grow body-small text-muted",
-                                    "{t(\"content.coverImage\")}"
-                                }
+                                span { class: "flex-grow body-small text-muted", "{image_label}" }
                                 button {
                                     class: "btn btn-text",
                                     onclick: move |_| {
@@ -779,18 +818,20 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                             }
                         }
                     }
-                    if is_owner {
-                        div { class: "text-field mb-2",
-                            label { "{t(\"content.date\")}" }
-                            input {
-                                r#type: "date",
-                                value: "{created_date}",
-                                oninput: move |e| {
-                                    created_date.set(e.value());
-                                    dirty.set(true);
-                                    set_editor_dirty(true);
-                                },
-                            }
+                }
+
+                // The node's date, for context owners on content nodes only.
+                if takes_authors && is_owner {
+                    div { class: "text-field mb-2",
+                        label { "{t(\"content.date\")}" }
+                        input {
+                            r#type: "date",
+                            value: "{created_date}",
+                            oninput: move |e| {
+                                created_date.set(e.value());
+                                dirty.set(true);
+                                set_editor_dirty(true);
+                            },
                         }
                     }
                 }

@@ -13,12 +13,12 @@ use crate::components::loader::{icon_el, visible_sorted};
 use super::*;
 
 /// A candidate shown optimistically the instant it is added, before the insert is
-/// confirmed. Reconciled by `key` against the fetched candidates.
+/// confirmed. Reconciled by `key` against the fetched candidates. It carries no
+/// photo: one is attached later, in the editor that adding a candidate opens.
 #[derive(Clone, PartialEq)]
 struct PendingCandidate {
     key: String,
     name: String,
-    photo_id: Option<String>,
 }
 
 /// PositionApp — a `vote/position` (candidate election): the position text (with
@@ -205,31 +205,14 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                         }
                     }
                     // Optimistic candidate cards (muted), dropped once confirmed.
+                    // Always the placeholder: a photo is added afterwards, in the
+                    // editor, so a just-added candidate never has one yet.
                     for p in pending_cand_shown.iter() {
-                        {
-                            let photo = p.photo_id.as_ref().map(|fid| {
-                                crate::backend_api::file_url(
-                                    fid,
-                                    &token.clone().unwrap_or_default(),
-                                )
-                            });
-                            rsx! {
-                                div { key: "{p.key}", class: "m3-carousel-item is-pending",
-                                    if let Some(src) = photo {
-                                        img {
-                                            class: "m3-carousel-img",
-                                            src: "{src}",
-                                            alt: "{p.name}",
-                                            referrerpolicy: "no-referrer",
-                                        }
-                                    } else {
-                                        div { class: "m3-carousel-placeholder",
-                                            {icon_el("vote/candidate")}
-                                        }
-                                    }
-                                    div { class: "m3-carousel-label", "{p.name}" }
-                                }
+                        div { key: "{p.key}", class: "m3-carousel-item is-pending",
+                            div { class: "m3-carousel-placeholder",
+                                {icon_el("vote/candidate")}
                             }
+                            div { class: "m3-carousel-label", "{p.name}" }
                         }
                     }
                     }
@@ -383,49 +366,6 @@ fn AddCandidateButton(
     let nav = use_navigator();
     let mut open = use_signal(|| false);
     let mut name = use_signal(String::new);
-    let mut photo_id = use_signal(|| Option::<String>::None);
-    // The uploaded file's name, shown in the picker's done row (as the editor and
-    // feedback pickers do) and the flag for "a photo is attached".
-    let mut photo_name = use_signal(String::new);
-    let mut uploading = use_signal(|| false);
-
-    // Upload the chosen photo immediately; the Add button attaches its id.
-    let on_pick = move |evt: FormEvent| {
-        let Some(fd) = evt.files().into_iter().next() else {
-            return;
-        };
-        let fname = fd.name();
-        let ctype = fd.content_type().unwrap_or_default();
-        let token = session.read().access_token.clone();
-        uploading.set(true);
-        photo_id.set(None);
-        photo_name.set(String::new());
-        spawn(async move {
-            match fd.read_bytes().await {
-                Ok(bytes) => {
-                    match crate::nhost::upload_file(
-                        token.as_deref(),
-                        bytes.to_vec(),
-                        &fname,
-                        &ctype,
-                    )
-                    .await
-                    {
-                        Ok(up) => {
-                            photo_id.set(Some(up.id));
-                            photo_name.set(fname);
-                        }
-                        Err(e) => crate::snackbar::show_snackbar(&format!(
-                            "{}: {e}",
-                            t("error.somethingWentWrong")
-                        )),
-                    }
-                }
-                Err(_) => crate::snackbar::show_snackbar(&t("error.somethingWentWrong")),
-            }
-            uploading.set(false);
-        });
-    };
 
     let submit = {
         let parent_id = parent_id.clone();
@@ -433,14 +373,13 @@ fn AddCandidateButton(
         let path = path.clone();
         move |_| {
             let cname = name.read().trim().to_string();
-            if cname.is_empty() || *uploading.read() {
+            if cname.is_empty() {
                 return;
             }
             let token = session.read().access_token.clone();
             let parent_id = parent_id.clone();
             let context_id = context_id.clone();
             let path = path.clone();
-            let img = photo_id.read().clone();
             let key = format!(
                 "{}-{}",
                 crate::components::loader::slugify(&cname),
@@ -451,21 +390,18 @@ fn AddCandidateButton(
             pending.write().push(PendingCandidate {
                 key: key.clone(),
                 name: cname.clone(),
-                photo_id: img.clone(),
             });
             open.set(false);
             name.set(String::new());
-            photo_id.set(None);
-            photo_name.set(String::new());
             spawn(async move {
-                let data = img.map(|fid| model::Jsonb(serde_json::json!({ "image": fid })));
                 let input = model::NodesInsertInput {
                     name: Some(cname),
                     key: Some(key.clone()),
                     mime_id: Some("vote/candidate".to_string()),
                     parent_id: Some(model::Uuid(parent_id)),
                     context_id: context_id.map(model::Uuid),
-                    data,
+                    // The photo is set in the editor this lands in (`data.image`).
+                    data: None,
                     mutable: Some(true),
                     index: None,
                 };
@@ -491,13 +427,6 @@ fn AddCandidateButton(
         }
     };
 
-    // Thumbnail of the photo just uploaded, from the same tokenised file URL the
-    // candidate carousel renders. Only resolvable once the upload returned an id.
-    let photo_preview = photo_id.read().clone().map(|fid| {
-        let token = session.read().access_token.clone().unwrap_or_default();
-        crate::backend_api::file_url(&fid, &token)
-    });
-
     rsx! {
         button {
             class: "btn-icon add-action state-layer",
@@ -519,11 +448,13 @@ fn AddCandidateButton(
                 }
                 button {
                     class: "btn btn-primary",
-                    disabled: name.read().trim().is_empty() || *uploading.read(),
+                    disabled: name.read().trim().is_empty(),
                     onclick: submit,
                     "{t(\"common.add\")}"
                 }
             },
+            // Only the name: the photo (and the text) are set in the editor this
+            // opens, so a candidate is never half-created behind a failed upload.
             div { class: "text-field",
                 label { "{t(\"member.name\")}" }
                 input {
@@ -531,53 +462,6 @@ fn AddCandidateButton(
                     maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
                     value: "{name}",
                     oninput: move |e| name.set(e.value()),
-                }
-            }
-            // Photo picker: the dashed drop-zone the editor, feedback and folder
-            // pickers use, so it matches the rest of the Material UI instead of
-            // dropping the browser's native file input into a text field.
-            div { class: "mt-2",
-                div { class: "file-upload-label", "{t(\"vote.candidatePhoto\")}" }
-                label { class: "file-upload",
-                    input {
-                        r#type: "file",
-                        accept: "image/*",
-                        class: "file-upload-input",
-                        onchange: on_pick,
-                    }
-                    span { class: "material-icons", "image" }
-                    span { class: "file-upload-text", "{t(\"vote.uploadPhoto\")}" }
-                }
-                if *uploading.read() {
-                    div { class: "stack stack-h mt-1",
-                        div { class: "spinner spinner-sm" }
-                        span { class: "body-small text-muted", "{t(\"vote.uploadPhoto\")}\u{2026}" }
-                    }
-                } else if !photo_name.read().is_empty() {
-                    div { class: "file-upload-done",
-                        // The uploaded photo itself is the confirmation; fall back to
-                        // the check mark only if there is no id to build a URL from.
-                        if let Some(src) = photo_preview.clone() {
-                            img {
-                                class: "upload-thumb",
-                                src: "{src}",
-                                alt: "{photo_name}",
-                                // The src carries the nhost ?token=; keep it out of the Referer.
-                                referrerpolicy: "no-referrer",
-                            }
-                        } else {
-                            span { class: "material-icons", "check_circle" }
-                        }
-                        span { class: "file-upload-name", "{photo_name}" }
-                        button {
-                            class: "btn btn-text",
-                            onclick: move |_| {
-                                photo_id.set(None);
-                                photo_name.set(String::new());
-                            },
-                            "{t(\"content.removeImage\")}"
-                        }
-                    }
                 }
             }
         }
