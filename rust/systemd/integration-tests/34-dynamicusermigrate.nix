@@ -7,7 +7,14 @@
   # PASSING: all four test_directory phases (StateDirectory, RuntimeDirectory,
   # CacheDirectory, LogsDirectory), each through DynamicUser=0, DynamicUser=1
   # and the conversion back, including the closing unit-parsing section with
-  # nested and escaped-colon directory names; and test_check_writable.
+  # nested and escaped-colon directory names.
+  #
+  # test_check_writable is NOT passing, and an earlier claim here that it was is
+  # RETRACTED. It went green in exactly one VM run and does not reproduce: a
+  # later run of a tree with no change to any libsystemd file fails it again.
+  # One green run on an assertion this environment-sensitive proves nothing.
+  # Whatever else is wrong has not been found; the ProtectSystem=strict fix
+  # below was necessary but is not sufficient.
   #
   # A CORRECTION WORTH READING BEFORE TOUCHING THIS TEST. Earlier revisions of
   # this file recorded test_check_writable as failing because the exec

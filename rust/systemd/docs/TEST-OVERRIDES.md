@@ -128,7 +128,7 @@ Landed since the ledger was written (each regression-tested before push):
 | `560ca74a` | repart redistributes space a capped partition cannot use; 4096-byte grain |
 | `ef9c52bb` | udev unquotes imported properties; **67-INTEGRITY green with no override** |
 | `0692de1d` | a udev rule program gets a deadline; udev.conf was never parsed at all |
-| `b2a4b17b` | `ProtectSystem=strict` stops opening `/run` and `/var/log`; 34's `test_check_writable` green |
+| `b2a4b17b` | `ProtectSystem=strict` stops opening `/run` and `/var/log` (a real sandbox hole; it did NOT reliably green 34's `test_check_writable`, see below) |
 | `6004be66` | `systemd-repart --copy-from=`; `CopyBlocks=` had been parsed and discarded |
 | `45c404c3` | repart derives labels from the type designator, numbering repeats |
 | `e7c7c8a9` | repart settles space claims sequentially, keeping grain remainders |
@@ -173,9 +173,20 @@ VM run. Diagnostics must write to stderr.
 
 ### Open, with evidence recorded in the test wrappers
 
-- **34-DYNAMICUSERMIGRATE** clears all four `test_directory` phases and
-  `test_check_writable`. Remaining: `test_check_idmapped_mounts`, which the
-  kernel here is new enough to run and which has not been investigated.
+- **34-DYNAMICUSERMIGRATE** clears all four `test_directory` phases.
+  `test_check_writable` is NOT fixed, and the claim that it was is retracted: it
+  passed in exactly one VM run and does not reproduce on a tree that is
+  code-identical in every libsystemd file. Treat one green run on an exact-count
+  assertion as no evidence at all.
+
+  The `ProtectSystem=strict` change behind that claim is still correct on its
+  own merits, and stays: rust restored `/run`, `/tmp`, `/var/tmp` and
+  `/var/log` to read-write where upstream's `protect_system_strict_table`
+  restores only `/proc`, `/sys` and `/dev`, which let any strict service write
+  across the runtime and log trees. It simply does not make this assertion pass
+  reliably, so something else is also wrong.
+
+  `test_check_idmapped_mounts` sits behind it and has its own genuine bug.
 
   Its recorded rationale was **inverted**, not merely stale, and that is the
   lesson worth keeping. It said the exec directories ended up read-only and the
