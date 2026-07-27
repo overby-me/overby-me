@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 413 of 483 with 14 wrongly refused, Verifier 282 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 413 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -325,6 +325,15 @@ type with a size and a size below four gigabytes.
 A fifth was tried and reverted: whether a target extension type can be a
 global is the target's business rather than the IR's, and upstream reads
 `target("spirv.DeviceEvent")` while refusing `target("opaque")`.
+A twenty-sixth added two more: `allocsize` names two different parameters,
+and a matrix's two dimensions multiply out to the lanes of the vector
+holding it.
+Auto-declaring undeclared intrinsics was measured a second time now that
+the prose rules exist, and it has moved from three refusals fixed for
+eight wrong acceptances to three for six. Still reverted, and worth
+re-measuring again as the verifier grows: the trade improves with it, and
+rustc declares its intrinsics anyway, so the practical benefit is close to
+nothing.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

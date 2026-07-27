@@ -448,6 +448,22 @@ impl Verifier<'_> {
                     ));
                 }
             }
+            // A matrix is held in a flat vector, so its two dimensions
+            // multiply out to the number of lanes there are.
+            "llvm.matrix.transpose" => {
+                if let Some((_, lanes, false)) =
+                    TypeKind::as_vector(self.module.ctx.type_kind(result))
+                    && let (Some(rows), Some(columns)) = (
+                        constant_u64(self, values.get(1)),
+                        constant_u64(self, values.get(2)),
+                    )
+                    && rows.saturating_mul(columns) != lanes
+                {
+                    self.report(format!(
+                        "{where_} transposes a {rows} by {columns} matrix held in {lanes} lanes"
+                    ));
+                }
+            }
             // A deoptimising call does not come back, so the only thing that
             // may follow it is the return it stands in for.
             "llvm.experimental.deoptimize" if !returns_next => {
@@ -2770,6 +2786,11 @@ impl Verifier<'_> {
                             ));
                         }
                     }
+                    // The two are the element count and the element size, so
+                    // naming one parameter twice says nothing.
+                    if *second == Some(*first) {
+                        self.report(format!("allocsize names parameter {first} twice"));
+                    }
                 }
                 // `allockind("alloc,zeroed")` says which of the three things
                 // this function does, and it does exactly one of them.
@@ -3303,6 +3324,18 @@ fn specialized_tag(node: &Metadata) -> Option<&str> {
         Metadata::Specialized { tag, .. } => Some(tag.as_str()),
         _ => None,
     }
+}
+
+fn constant_u64(verifier: &Verifier<'_>, value: Option<&Value>) -> Option<u64> {
+    let Some(Value::Constant(id)) = value else {
+        return None;
+    };
+    verifier
+        .module
+        .ctx
+        .constant(*id)
+        .as_integer()
+        .and_then(ApInt::to_u64)
 }
 
 fn attachment_ids(attachments: &[MdAttachment]) -> Vec<MdId> {

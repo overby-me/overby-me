@@ -439,6 +439,14 @@ const BROKEN: &[(&str, &str)] = &[
         "define void @f(ptr byval([2147483648 x i16]) %p) {\nentry:\n  ret void\n}\n",
         "is too large",
     ),
+    (
+        "declare ptr @a(i32, i32) allocsize(0, 0)\n",
+        "allocsize names parameter 0 twice",
+    ),
+    (
+        "declare <4 x float> @llvm.matrix.transpose.v4f32(<4 x float>, i32, i32)\n\ndefine void @f(<4 x float> %m) {\nentry:\n  %r = call <4 x float> @llvm.matrix.transpose.v4f32(<4 x float> %m, i32 3, i32 2)\n  ret void\n}\n",
+        "transposes a 3 by 2 matrix held in 4 lanes",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
