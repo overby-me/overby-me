@@ -18,7 +18,7 @@ Audited 2026-07-26 against nixpkgs systemd v258
 | **Full skip** | **15** | Script replaced by `exit 77`. Nothing runs. |
 | **Fake pass** | **0** | Script replaced by `touch /testok`. Nothing runs and it reports success. |
 | **Mid-test skip** | **1** | Runs partway, then `touch /skipped; exit 0`. |
-| **Partial mask** | **12** | Assertions deleted from a real upstream script. |
+| **Partial mask** | **11** | Assertions deleted from a real upstream script. |
 | **Substitute** | **9** | Upstream subtest replaced by a hand-written one. |
 
 37 tests carry a real override.
@@ -315,7 +315,7 @@ find what the hand-written one does not cover.
 | 26-SYSTEMCTL | Interactive `systemctl edit` (the `EDITOR=... script -ec` lines) is blocked by a separate live bug: util-linux `script(1)` hangs under rust-systemd as PID 1 (parent-side termios/poll setup). The `override.conf` `cmp` assertions go with it |
 | 07-PID1 protect-control-groups | `testcase_delegate_subgroup_pam` needs unprivileged PAM session management |
 | 18-FAILUREACTION | The deleted phases exercise `SuccessAction=reboot` and `FailureAction=exit`. `allowReboot` and `useBootLoader` now exist in `testsuite.nix` (09-REBOOT uses them), so the reboot phase is reachable. `FailureAction=exit` kills PID 1 and still needs driver work |
-| 23-UNIT-FILE ExecStopPost | Deleted `Type=dbus` and `Type=notify` sections. Both service types work now; re-run and see |
+| 23-UNIT-FILE ExecStopPost | Deletions REMOVED; now honestly red. `ExecStopPost=` is never run when a start fails on a deferred path (start timeout, dbus-name timeout, exec confirmation failure, failing forking parent) — `activate.rs deferred_start_fail_cleanup()` skips it. Fixing it in place DEADLOCKS PID 1 (that function holds the RuntimeInfo read guard + the state write guard, and `run_poststop` waits on a helper underneath both), so it needs the invariant-I1 lock decoupling |
 | 23-UNIT-FILE type-exec | Deleted the `busctl` block for issue #20933 |
 | 07-PID1 issue-30412 | `socat` is backgrounded and killed after 2s instead of running in the foreground, so the test no longer proves the socket fd is dropped when `ExecStart` fails with 203. That is exactly what issue #30412 is about |
 | 34-DYNAMICUSERMIGRATE | All four `test_directory` phases (State/Runtime/Cache/Logs) now pass in full, including both `DynamicUser=` directions. Remaining: `test_check_writable`, which needs nested exec directories (`quux/pief`, `aaa/bbb`, `xxx/yyy:aaa/111`), and then idmapped mounts on kernels >= 5.12. The wedge that blocked this was NOT a race or lock starvation: `systemctl start --wait` polled for `Stopped`, while a completed `Type=oneshot` deliberately stays `Started` to avoid boot activation-graph races, so `--wait` on any oneshot could never return |
