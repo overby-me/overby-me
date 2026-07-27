@@ -3114,6 +3114,28 @@ fn run(argv: &[String]) -> Result<i32, String> {
         file.set_len(file_size)
             .map_err(|e| format!("Cannot set file size: {e}"))?;
         drop(file);
+    } else if is_file
+        && let Some(requested) = args.size.as_deref()
+        && requested != "auto"
+    {
+        // --size= applies to an image that already exists too, not only to one
+        // being created: upstream resizes the backing file whenever the option
+        // is given. Growing only, since shrinking a partitioned image would
+        // cut into whatever sits at the end of it.
+        let wanted = parse_size(requested)?;
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(&device_path)
+            .map_err(|e| format!("Cannot open {device_path} to resize: {e}"))?;
+        let current = file
+            .metadata()
+            .map_err(|e| format!("Cannot stat {device_path}: {e}"))?
+            .len();
+        if wanted > current {
+            file.set_len(wanted)
+                .map_err(|e| format!("Cannot grow {device_path}: {e}"))?;
+        }
+        drop(file);
     }
 
     // Open the device/image
@@ -3138,10 +3160,19 @@ fn run(argv: &[String]) -> Result<i32, String> {
     {
         let parts = read_gpt_partitions(&mut file, hdr, sector_size)
             .map_err(|e| format!("Cannot read partitions: {e}"))?;
+        // The usable area ends where the CURRENT disk ends, not where it did
+        // when the label was written. After --size= grows an image the backup
+        // header moves to the new end, and the space in between becomes usable;
+        // keeping the old value would hide it from the allocator and nothing
+        // would grow into it.
+        let disk_size_sectors = file_size / sector_size;
+        let entries_sectors = (MAX_GPT_ENTRIES as u64 * GPT_ENTRY_SIZE).div_ceil(sector_size);
+        let last_usable = (disk_size_sectors.saturating_sub(entries_sectors + 2))
+            .max(hdr.last_usable_lba.min(disk_size_sectors));
         (
             hdr.disk_guid.clone(),
             hdr.first_usable_lba,
-            hdr.last_usable_lba,
+            last_usable,
             parts,
         )
     } else {
@@ -4011,6 +4042,53 @@ mod tests {
         let none = [SpanClaim { weight: 0, min: 0, max: 100 }];
         assert_eq!(grow_claims(&none, 500, 1), vec![0]);
         assert_eq!(grow_claims(&[], 500, 4096), Vec::<u64>::new());
+    }
+
+    /// --size= grows an image that already exists, not only one being created.
+    /// TEST-58-REPART re-runs repart with --size=2G over its 1G image and
+    /// expects the usable area to reach LBA 4194270.
+    #[test]
+    fn test_full_size_grows_existing_image() {
+        const SEED: &str = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+        fs::write(
+            defs_dir.join("home.conf"),
+            "[Partition]\nType=home\nLabel=home-first\n",
+        )
+        .unwrap();
+
+        let img = tmp.path().join("zzz");
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=1G",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "create failed: {r:?}");
+        assert_eq!(fs::metadata(&img).unwrap().len(), 1024 * 1024 * 1024);
+
+        let mut f = fs::File::open(&img).unwrap();
+        let before = read_gpt_header(&mut f, 512).unwrap().unwrap();
+        assert_eq!(before.last_usable_lba, 2097118);
+        drop(f);
+
+        let r = run(&args(&[
+            "--size=2G",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "grow failed: {r:?}");
+
+        assert_eq!(fs::metadata(&img).unwrap().len(), 2 * 1024 * 1024 * 1024);
+        let mut f = fs::File::open(&img).unwrap();
+        let after = read_gpt_header(&mut f, 512).unwrap().unwrap();
+        assert_eq!(after.last_usable_lba, 4194270, "usable area follows the grow");
     }
 
     /// Refilling deferred partitions onto a disk that already holds swap: the
