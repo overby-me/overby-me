@@ -33,12 +33,32 @@
   # and a find with upstream's exact prune list, run inside the service, prints
   # nothing at all.
   #
-  # SO THE OPEN QUESTION IS WHY THE DYNAMIC USER CANNOT WRITE ITS OWN STATE
-  # DIRECTORIES. They are created 61220:61220 mode 755, so the leaf modes are
-  # not the problem; suspect traversal, i.e. whether /var/lib/private itself is
-  # reachable by that uid inside the service's namespace. MEASURE IT, do not
-  # assert it: print `id`, `stat` of /var/lib/private and of one leaf, and
-  # whether the user can list them, from inside the failing service.
+  # ROOT CAUSE FOUND, measured in a single process inside the failing service.
+  # It is not ownership and not traversal: the service runs as uid 61220,
+  # /var/lib/private is 755 root:root, /var/lib/private/waldo is 755
+  # 61220:61220, and both `touch` and `test -w` on it SUCCEED. Yet the same
+  # process's `find -type d -writable` returns nothing.
+  #
+  # /proc/self/mountinfo explains it. THE ROOT FILESYSTEM IS MOUNTED TWICE,
+  # stacked, with contradictory flags:
+  #     603 602 253:0 / /  ro,relatime - ext4 /dev/vda
+  #     626 603 253:0 / /  rw,relatime - ext4 /dev/vda
+  # and the subtree below is duplicated with it (627-660 repeat 604-621, and
+  # 690-700 repeat 679-689). The exec-directory binds hang off the READ-ONLY
+  # root at 603, while the read-write root at 626 shadows it, so resolving the
+  # same path can reach either. `touch` succeeds through one view and
+  # access(W_OK), which is what `find -writable` calls, fails through the other.
+  #
+  # The duplicate root comes from remount_read_only("/") in exec_helper.rs,
+  # which does `mount --bind / /` (MS_BIND|MS_REC) and only then remounts
+  # read-only. That bind is what creates the second root mount. Upstream does
+  # not stack a second root: fix the read-only remount so it applies to the
+  # existing root rather than to a fresh bind of it, and check afterwards that
+  # /proc/self/mountinfo inside a strict service lists `/` exactly once.
+  #
+  # This also explains why the earlier ProtectSystem=strict fix was necessary
+  # but not sufficient: it corrected WHICH paths get restored read-write, but
+  # not the duplicated tree they are applied to.
   #
   # The actual defect was in ProtectSystem=strict, which DynamicUser=yes
   # implies. rust-systemd restored /dev, /proc, /sys, /run, /tmp, /var/tmp and
@@ -91,25 +111,6 @@
   # STILL TO MEASURE: `sysctl user.max_user_namespaces` inside the VM, which
   # returns EPERM to root as well when it is 0.
   #
-  # TEMPORARY diagnostic: print what the service's own find actually sees, so
-  # the extra writable directories are identified rather than guessed at. The
-  # same prune list as upstream is used so the output is comparable with the
-  # expected set of 8.
-  #
-  # No `%` anywhere: this text ends up inside an ExecStart=, where `%` is
-  # systemd's specifier prefix, and a `sed "s%^%PREFIX %"` there came back as
-  # "unterminated `s' command". Bracket the output with markers instead of
-  # prefixing each line. Prepending onto the assertion's own line avoids having
-  # to reproduce its bash line-continuations.
-  #
-  # The `|| true` is load-bearing: the script runs under `set -e` and
-  # `set -o pipefail`, and find exits non-zero when it meets an unreadable
-  # directory, which killed the script before it printed anything. The test's
-  # own find escapes that only because it sits inside a process substitution.
-  patchScript = ''
-    sed -i 's@^\(.*== "8".*\)$@    echo WRITABLE-DIAG-BEGIN >\&2; { find / \\( -path /var/tmp -o -path /tmp -o -path /proc -o -path /dev/mqueue -o -path /dev/shm -o -path /sys/fs/bpf -o -path /dev/.lxc -o -path /sys/devices/system/cpu \\) -prune -o -type d -writable -print 2>/dev/null | sort -u >\&2; } || true; echo WRITABLE-DIAG-END >\&2; \1@' TEST-34-DYNAMICUSERMIGRATE.sh
-  '';
-
   # TOOLING NOTES:
   #   - PID 1's `log::` macros do NOT reach the console, only
   #     `crate::entrypoints::service_manager::kmsg()` does. Instrumentation
