@@ -309,8 +309,12 @@ const EN_JSON: &str = r#"{
         "exporting": "Generating export…",
         "copy": "Copy",
         "paste": "Paste here",
-        "lock": "Lock (block adding content)",
-        "unlock": "Unlock (allow adding content)"
+        "lockContent": "Lock (block adding content)",
+        "unlockContent": "Unlock (allow adding content)",
+        "lockCandidates": "Lock (block adding candidates)",
+        "unlockCandidates": "Unlock (allow adding candidates)",
+        "lockAmendments": "Lock (block adding amendments)",
+        "unlockAmendments": "Unlock (allow adding amendments)"
     },
     "node": {
         "documentUnavailable": "The document is not available",
@@ -777,8 +781,12 @@ const DA_JSON: &str = r#"{
         "exporting": "Genererer eksport\u2026",
         "copy": "Kopier",
         "paste": "Inds\u00e6t her",
-        "lock": "L\u00e5s (bloker tilf\u00f8jelse)",
-        "unlock": "L\u00e5s op (tillad tilf\u00f8jelse)"
+        "lockContent": "L\u00e5s (bloker tilf\u00f8jelse af indhold)",
+        "unlockContent": "L\u00e5s op (tillad tilf\u00f8jelse af indhold)",
+        "lockCandidates": "L\u00e5s (bloker tilf\u00f8jelse af kandidater)",
+        "unlockCandidates": "L\u00e5s op (tillad tilf\u00f8jelse af kandidater)",
+        "lockAmendments": "L\u00e5s (bloker tilf\u00f8jelse af \u00e6ndringsforslag)",
+        "unlockAmendments": "L\u00e5s op (tillad tilf\u00f8jelse af \u00e6ndringsforslag)"
     },
     "node": {
         "documentUnavailable": "Dokumentet er ikke tilg\u00e6ngeligt",

@@ -407,9 +407,9 @@ pub fn FolderApp(
                                     if attachable { "lock_open" } else { "lock" }
                                 }
                                 if attachable {
-                                    "{t(\"folder.lock\")}"
+                                    "{t(\"folder.lockContent\")}"
                                 } else {
-                                    "{t(\"folder.unlock\")}"
+                                    "{t(\"folder.unlockContent\")}"
                                 }
                             }
                             // Paste the clipboard selection here (deep-copy), when

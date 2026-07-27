@@ -502,7 +502,10 @@ pub(super) fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Elem
     let context_id = node.context_id.clone().map(|c| c.0);
 
     // Proposing an amendment is a member action; the backend enforces who may.
-    if !is_auth {
+    // `attachable` is the owner's lock on adding children, which ContentApp's
+    // tools sheet toggles for a motion the same way FolderApp does for a folder:
+    // once amendments are closed, the affordance goes with them.
+    if !is_auth || !node.attachable {
         return rsx! {};
     }
 

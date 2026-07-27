@@ -65,11 +65,21 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     // badge the node's row carries in a list.
     let is_mutable = node.mutable;
 
-    // A position takes member-inserted candidatures, the only such pair in the
-    // context permission template besides a folder's motions, so its owner needs
-    // the same way to close them: the `attachable` lock a folder already has.
-    // Nothing else ContentApp renders accepts member-inserted children.
-    let lockable = node.mime_id.as_deref() == Some("vote/position");
+    // What members may add under this node, per the context permission template:
+    // candidatures under a position, amendments under a motion or an amendment.
+    // Its owner closes them with the same `attachable` lock a folder uses for its
+    // content, and the row says which of the three it is rather than "content"
+    // for all of them. `None` means nothing member-inserted lives here, and then
+    // there is no lock row at all.
+    let lock_labels: Option<(String, String)> = match node.mime_id.as_deref() {
+        Some("vote/position") => Some((t("folder.lockCandidates"), t("folder.unlockCandidates"))),
+        Some("vote/policy") | Some("vote/change") => {
+            Some((t("folder.lockAmendments"), t("folder.unlockAmendments")))
+        }
+        _ => None,
+    };
+    let lockable = lock_labels.is_some();
+    let (lock_text, unlock_text) = lock_labels.unwrap_or_default();
     // Optimistic lock/unlock: flip now, reconcile against the refetched node,
     // revert on error (the same shape FolderApp uses).
     let mut attachable_opt = use_signal(|| None::<bool>);
@@ -334,8 +344,8 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                 "{t(\"mime.editor\")}"
                             }
                         }
-                        // Close (or reopen) candidature, the position's equivalent
-                        // of a folder locking its motions.
+                        // Close (or reopen) what members may add here, the same
+                        // lock a folder has over its content.
                         if lockable && is_ctx_owner {
                             button {
                                 class: "sheet-action",
@@ -373,9 +383,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                     if attachable { "lock_open" } else { "lock" }
                                 }
                                 if attachable {
-                                    "{t(\"folder.lock\")}"
+                                    "{lock_text}"
                                 } else {
-                                    "{t(\"folder.unlock\")}"
+                                    "{unlock_text}"
                                 }
                             }
                         }
