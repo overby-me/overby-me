@@ -44,7 +44,15 @@ pub fn show_snackbar(text: &str) {
     }
 
     // Auto-dismiss this specific message after 3 seconds.
-    spawn(async move {
+    //
+    // On the ROOT scope, never the caller's. `spawn` attaches the task to the
+    // component that called it and Dioxus drops it the moment that component
+    // unmounts, but a snackbar is usually raised by an action that unmounts its
+    // own caller: a dialog closing, a delete, a navigation. The timer was then
+    // cancelled before it fired and the message stayed on screen for the rest of
+    // the session, taking its text with it (`preventDuplicate` below then
+    // silently swallowed every later message with the same text).
+    dioxus::core::spawn_forever(async move {
         gloo_timers::future::TimeoutFuture::new(3000).await;
         SNACKBAR.write().retain(|m| m.id != id);
     });
