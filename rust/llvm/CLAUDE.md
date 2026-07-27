@@ -290,6 +290,18 @@ lists, global and instruction attachments) and checks only what it finds.
 Two more rules were tried and measured away in the same pass: `llvm.loop`
 metadata may hold a `DILocation` after all, and the parameter attributes
 on a variadic argument are legal in more shapes than the one test showed.
+A twenty-second pass added three rules a call owes about itself: a
+`callbr` has one `!` constraint for each label it can jump to, an indirect
+inline-asm constraint reaches through an operand that carries
+`elementtype`, and a rounding mode or exception behaviour written as
+metadata is one of the six or three there are.
+It also answered the intrinsic-table question with a measurement instead
+of a guess. `corpus/intrinsic-names.nu` harvests the 419 base names
+LangRef documents; auto-declaring on that basis fixes three refusals and
+costs eight wrong acceptances, because the parse error it removes was
+standing in for the signature check. So the names are kept as a script and
+not as a table, and the next attempt should harvest signatures from the
+same `declare` lines rather than names alone.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

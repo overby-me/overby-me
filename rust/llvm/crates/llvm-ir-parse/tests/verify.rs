@@ -367,6 +367,18 @@ const BROKEN: &[(&str, &str)] = &[
         "!named = !{!0}\n!0 = !DICompositeType(tag: DW_TAG_structure_type, name: \"A\", size: 1, flags: DIFlagTypePassByReference | DIFlagTypePassByValue)\n",
         "passed both by reference and by value",
     ),
+    (
+        "define void @f() {\nentry:\n  callbr void asm sideeffect \"\", \"!i\"()\n          to label %a [label %b, label %c]\n\na:\n  ret void\n\nb:\n  ret void\n\nc:\n  ret void\n}\n",
+        "has 1 label constraints for 2 indirect labels",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  call void asm \"\", \"=*rm\"(ptr %p)\n  ret void\n}\n",
+        "to an indirect constraint without elementtype",
+    ),
+    (
+        "declare half @llvm.fptrunc.round(float, metadata)\n\ndefine void @f(float %a) {\nentry:\n  %r = call half @llvm.fptrunc.round(float %a, metadata !\"round.nonsense\")\n  ret void\n}\n",
+        "round.nonsense, which is not one of them",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",

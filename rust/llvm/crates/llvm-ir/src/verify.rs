@@ -1378,6 +1378,42 @@ impl Verifier<'_> {
                 } else {
                     self.report(format!("{where_} has a callee type that is not a function"));
                 }
+                for arg in &call.args {
+                    let Value::Constant(id) = arg.value else {
+                        continue;
+                    };
+                    let Constant::Metadata { operand, .. } = self.module.ctx.constant(id).clone()
+                    else {
+                        continue;
+                    };
+                    let MdOperand::String(text) = *operand else {
+                        continue;
+                    };
+                    let Some(word) = text.as_str() else {
+                        continue;
+                    };
+                    let known = match word.split_once('.') {
+                        Some(("round", _)) => matches!(
+                            word,
+                            "round.dynamic"
+                                | "round.tonearest"
+                                | "round.downward"
+                                | "round.upward"
+                                | "round.towardzero"
+                                | "round.tonearestaway"
+                        ),
+                        Some(("fpexcept", _)) => {
+                            matches!(
+                                word,
+                                "fpexcept.ignore" | "fpexcept.maytrap" | "fpexcept.strict"
+                            )
+                        }
+                        _ => true,
+                    };
+                    if !known {
+                        self.report(format!("{where_} names {word}, which is not one of them"));
+                    }
+                }
                 for (position, arg) in call.args.iter().enumerate() {
                     let attrs = arg.attrs.clone();
                     self.attribute_set(&attrs, arg.ty, &format!("argument {position} of {where_}"));
@@ -1395,6 +1431,46 @@ impl Verifier<'_> {
                     self.report(format!(
                         "{where_} is a musttail call whose convention differs from its caller's"
                     ));
+                }
+                // What the constraint string promises, the call has to
+                // provide: one `!` for each label it can jump to, and an
+                // `elementtype` on every operand an indirect constraint
+                // reaches through.
+                if let Value::Constant(id) = call.callee
+                    && let Constant::InlineAsm(asm) = self.module.ctx.constant(id).clone()
+                {
+                    let entries: Vec<&str> = asm.constraints.split(',').collect();
+                    let labels = entries
+                        .iter()
+                        .filter(|entry| entry.starts_with('!'))
+                        .count();
+                    if let InstKind::CallBr { indirect, .. } = &instruction.kind
+                        && labels != indirect.len()
+                    {
+                        self.report(format!(
+                            "{where_} has {labels} label constraints for {} indirect labels",
+                            indirect.len()
+                        ));
+                    }
+                    // An input constraint consumes an argument; an output one
+                    // that is not `=*` does not, so walk them together.
+                    let mut argument = 0;
+                    for entry in entries {
+                        let indirect_operand = entry.contains('*');
+                        let consumes = indirect_operand || !entry.starts_with('=');
+                        if !consumes {
+                            continue;
+                        }
+                        if let Some(arg) = call.args.get(argument)
+                            && indirect_operand
+                            && !has_type_attribute(&arg.attrs, TypeAttr::ElementType)
+                        {
+                            self.report(format!(
+                                "{where_} passes argument {argument} to an indirect constraint without elementtype"
+                            ));
+                        }
+                        argument += 1;
+                    }
                 }
                 // Some bundle tags say one thing about the call, so a second
                 // one of the same tag has nothing left to say.
@@ -1475,6 +1551,43 @@ impl Verifier<'_> {
                             matches,
                             format!("{where_} calls an intrinsic with an incompatible signature"),
                         );
+                    }
+                    for arg in &call.args {
+                        let Value::Constant(id) = arg.value else {
+                            continue;
+                        };
+                        let Constant::Metadata { operand, .. } =
+                            self.module.ctx.constant(id).clone()
+                        else {
+                            continue;
+                        };
+                        let MdOperand::String(text) = *operand else {
+                            continue;
+                        };
+                        let Some(word) = text.as_str() else {
+                            continue;
+                        };
+                        let known = match word.split_once('.') {
+                            Some(("round", _)) => matches!(
+                                word,
+                                "round.dynamic"
+                                    | "round.tonearest"
+                                    | "round.downward"
+                                    | "round.upward"
+                                    | "round.towardzero"
+                                    | "round.tonearestaway"
+                            ),
+                            Some(("fpexcept", _)) => {
+                                matches!(
+                                    word,
+                                    "fpexcept.ignore" | "fpexcept.maytrap" | "fpexcept.strict"
+                                )
+                            }
+                            _ => true,
+                        };
+                        if !known {
+                            self.report(format!("{where_} names {word}, which is not one of them"));
+                        }
                     }
                     for (position, arg) in call.args.iter().enumerate() {
                         // A constant expression counts: upstream folds one
