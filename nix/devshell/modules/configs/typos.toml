@@ -80,6 +80,11 @@ CAF = "CAF"
 preemptable = "preemptable"
 Preemptable = "Preemptable"
 olt = "olt"
+
+# SEH = Structured Exception Handling, which names a family of LLVM
+# intrinsics (`llvm.seh.scope.begin` and friends), not a misspelt "she".
+seh = "seh"
+SEH = "SEH"
 Olt = "Olt"
 
 [default.extend-identifiers]

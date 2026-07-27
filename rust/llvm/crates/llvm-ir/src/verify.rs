@@ -17,6 +17,7 @@ use crate::global::{DllStorageClass, GlobalQualifiers, Linkage, Visibility};
 use crate::instruction::{
     AtomicOrdering, BinOp, CallingConv, InstKind, IntFlags, NamedCallingConv, TailKind,
 };
+use crate::intrinsic_table::Parameter;
 use crate::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use crate::module::Module;
 use crate::summary::SummaryValue;
@@ -1533,6 +1534,39 @@ impl Verifier<'_> {
                         .iter()
                         .map(|param| param.attrs.has(EnumAttr::ImmArg))
                         .collect();
+                    // LangRef documents what each intrinsic takes, and the
+                    // positions whose type is the same in every documented
+                    // instantiation are the ones a call has to get right.
+                    if is_intrinsic
+                        && let Name::Named(intrinsic) = callee.name.clone()
+                        && let Some(documented) = crate::intrinsic_table::signature(&intrinsic)
+                    {
+                        // Not the argument count: upstream auto-upgrades the
+                        // older spelling of an intrinsic, so a call with
+                        // fewer arguments than LangRef documents is a module
+                        // llvm-as reads and rewrites. Only the positions that
+                        // are there get checked.
+                        let arguments: Vec<TypeId> = call.args.iter().map(|arg| arg.ty).collect();
+                        for (position, (wanted, actual)) in
+                            documented.iter().zip(arguments.iter()).enumerate()
+                        {
+                            let kind = self.module.ctx.type_kind(*actual);
+                            let fits = match wanted {
+                                Parameter::Any => true,
+                                Parameter::Int(bits) => {
+                                    matches!(kind, TypeKind::Integer(width) if width == bits)
+                                }
+                                Parameter::Pointer => matches!(kind, TypeKind::Pointer { .. }),
+                                Parameter::Metadata => matches!(kind, TypeKind::Metadata),
+                                Parameter::Float => matches!(kind, TypeKind::Float(_)),
+                            };
+                            if !fits {
+                                self.report(format!(
+                                    "{where_} passes the wrong type in argument {position} of an intrinsic"
+                                ));
+                            }
+                        }
+                    }
                     if is_intrinsic {
                         let (result, params, is_var_arg) =
                             match self.module.ctx.type_kind(call.function_type) {

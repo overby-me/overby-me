@@ -295,13 +295,21 @@ A twenty-second pass added three rules a call owes about itself: a
 inline-asm constraint reaches through an operand that carries
 `elementtype`, and a rounding mode or exception behaviour written as
 metadata is one of the six or three there are.
-It also answered the intrinsic-table question with a measurement instead
-of a guess. `corpus/intrinsic-names.nu` harvests the 419 base names
+It also answered the intrinsic-table question with measurements instead of
+a guess, twice. `corpus/intrinsic-names.nu` harvests the 419 base names
 LangRef documents; auto-declaring on that basis fixes three refusals and
-costs eight wrong acceptances, because the parse error it removes was
-standing in for the signature check. So the names are kept as a script and
-not as a table, and the next attempt should harvest signatures from the
-same `declare` lines rather than names alone.
+costs eight wrong acceptances, so the names are a script and not a table.
+`corpus/intrinsic-signatures.nu` then harvested the signatures from the
+same `declare` lines, 314 of them, recording a position only where its
+type is the same in every documented instantiation. That table is in
+`crates/llvm-ir/src/intrinsic_table.rs` and moves neither ratchet: what it
+catches is a module that declares an intrinsic consistently wrongly, which
+upstream's suites do not contain and real IR will. Checking the argument
+count was tried and reverted, because upstream auto-upgrades the older
+spelling of an intrinsic.
+The rest of the intrinsic gap is not signatures at all. `llvm.bswap`
+taking an even number of bytes and `masked_load`'s alignment being a power
+of two are prose in LangRef, and a table of types cannot state them.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

@@ -36,6 +36,7 @@ pub mod context;
 pub mod function;
 pub mod global;
 pub mod instruction;
+pub mod intrinsic_table;
 mod keyword;
 pub mod layout;
 pub mod metadata;

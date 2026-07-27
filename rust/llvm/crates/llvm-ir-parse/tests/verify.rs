@@ -379,6 +379,13 @@ const BROKEN: &[(&str, &str)] = &[
         "declare half @llvm.fptrunc.round(float, metadata)\n\ndefine void @f(float %a) {\nentry:\n  %r = call half @llvm.fptrunc.round(float %a, metadata !\"round.nonsense\")\n  ret void\n}\n",
         "round.nonsense, which is not one of them",
     ),
+    // A module can declare an intrinsic consistently wrongly, and then the
+    // declaration it is checked against is wrong too. LangRef is the only
+    // thing left that knows llvm.cttz's second argument is i1.
+    (
+        "declare i32 @llvm.cttz.i32(i32, i32)\n\ndefine void @f(i32 %x) {\nentry:\n  %r = call i32 @llvm.cttz.i32(i32 %x, i32 0)\n  ret void\n}\n",
+        "wrong type in argument 1 of an intrinsic",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -750,6 +757,9 @@ const VERIFIES: &[&str] = &[
     "/* a comment */\n@g = external global i32\n",
     "!named = !{!1}\n!0 = !{}\n!1 = !GenericDINode(tag: 3, header: \"h\", operands: {!0, !0})\n",
     "!named = !{!0}\n!0 = !DIEnumerator(name: \"D\", value: 2722258935367507707706996859454145691648, isUnsigned: true)\n",
+    // The older spelling of an intrinsic has fewer arguments than LangRef
+    // documents, and upstream upgrades it rather than refusing it.
+    "declare i64 @llvm.objectsize.i64.p0(ptr, i1)\n\ndefine void @f(ptr %p) {\nentry:\n  %r = call i64 @llvm.objectsize.i64.p0(ptr %p, i1 false)\n  ret void\n}\n",
     // Two conventions we had never heard of.
     "define amdgpu_ps float @f(i32 %x) {\nentry:\n  ret float 0.000000e+00\n}\n",
     "define riscv_vls_cc(32) void @g() {\nentry:\n  ret void\n}\n",
