@@ -61,6 +61,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     // owner may delete; editing also requires the node to still be mutable.
     let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
     let can_edit = can_manage && node.mutable;
+    // Still mutable means not yet submitted: the header avatar carries the same
+    // badge the node's row carries in a list.
+    let is_mutable = node.mutable;
     // A context owner may reorder this node's children (candidates in an election,
     // amendments on a motion, questions), when there is more than one to arrange.
     // Restores the old per-list "sort" affordance the port had dropped, in one
@@ -125,7 +128,11 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     // is click-through so the image underneath still receives it.
                     super::widgets::ZoomableImage { src: url.clone(), alt: t("content.imageAlt") }
                     div { class: "content-hero-veil",
-                        div { class: "avatar content-hero-avatar", {icon_el("wiki/document")} }
+                        // The same not-submitted mark the list avatars carry, so a
+                        // document's own page says what its row in the list said.
+                        super::loader::AvatarBadged { mutable: is_mutable,
+                            div { class: "avatar content-hero-avatar", {icon_el("wiki/document")} }
+                        }
                         div { class: "content-hero-meta",
                             h3 { class: "content-hero-title", "{name}" }
                             if let Some(iso) = created.as_ref() {
@@ -141,7 +148,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                 }
             } else {
                 div { class: "card-header",
-                    div { class: "avatar", {icon_el("wiki/document")} }
+                    super::loader::AvatarBadged { mutable: is_mutable,
+                        div { class: "avatar", {icon_el("wiki/document")} }
+                    }
                     div {
                         h3 { class: "title-medium", "{name}" }
                         if let Some(iso) = created.as_ref() {

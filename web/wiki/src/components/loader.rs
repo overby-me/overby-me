@@ -775,8 +775,21 @@ pub fn NodeAvatar(
         "avatar"
     };
     rsx! {
-        div { class: "avatar-badged",
+        AvatarBadged { mutable,
             div { class: "{cls}", {inner} }
+        }
+    }
+}
+
+/// Wraps any avatar in the "not submitted yet" mark a mutable node carries: the
+/// small `lock_open` badge on its corner. Kept as its own component so a list
+/// avatar ([`NodeAvatar`]) and a page's header avatar wear the same mark from one
+/// definition, instead of each place restating what the badge looks like.
+#[component]
+pub fn AvatarBadged(mutable: bool, children: Element) -> Element {
+    rsx! {
+        div { class: "avatar-badged",
+            {children}
             if mutable {
                 span { class: "avatar-badge", title: "{t(\"layout.notSubmitted\")}",
                     span { class: "material-icons", "lock_open" }
