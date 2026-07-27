@@ -163,10 +163,23 @@
   # gets an empty value, i.e. the host cannot find the file the service created.
   # The service wrote /var/lib/sampleservice/testfile successfully.
   # StateDirectory=testidmapped:sampleservice means the second name is an ALIAS
-  # of the first, so both must resolve to one directory; if rust creates them as
-  # two independent directories the write simply lands somewhere the assertion
-  # does not look. Check how StateDirectory= handles the "A:B" alias form before
-  # assuming anything about mounts.
+  # of the first, so both must resolve to one directory.
+  #
+  # RULED OUT, measured: the bind source is NOT the empty tmpfs that
+  # TemporaryFileSystem= lays over /var/lib. statfs()ing each source at bind
+  # time against TMPFS_MAGIC reports nothing, so the binds take the real
+  # filesystem and a service's writes should reach the host. That was the
+  # obvious explanation for "write succeeds, host sees nothing" and it is wrong.
+  #
+  # STILL UNEXPLAINED, and worth stating plainly rather than guessing a twelfth
+  # time: the service creates /var/lib/sampleservice/testfile successfully, its
+  # own in-namespace assertion passes, the bind source is real, and yet the host
+  # cannot stat /var/lib/private/testidmapped/testfile. The next measurement
+  # should establish WHERE the file actually landed — e.g. have PID 1 walk the
+  # real state directory after the service exits, or compare st_dev/st_ino of
+  # the source before the bind with the file's after — rather than proposing
+  # another mechanism. Every mechanism proposed for this test so far has died;
+  # the two that ever held up came from measuring.
   #
   # THREE WRONG GUESSES were made before that, all about kernel rules, each
   # costing a VM run: that an already-attached mount could be idmapped (it

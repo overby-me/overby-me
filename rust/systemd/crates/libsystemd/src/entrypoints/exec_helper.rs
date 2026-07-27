@@ -4399,6 +4399,21 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
                 }
                 continue;
             }
+            // Is the SOURCE the real directory, or an empty one on the tmpfs
+            // that TemporaryFileSystem= laid over /var/lib? If the latter, the
+            // bind propagates nothing back to the host and a service's writes
+            // vanish with no error. TMPFS_MAGIC is 0x01021994.
+            {
+                let mut sfs: libc::statfs = unsafe { std::mem::zeroed() };
+                if let Ok(c_src) = std::ffi::CString::new(source.as_str())
+                    && unsafe { libc::statfs(c_src.as_ptr(), &mut sfs) } == 0
+                    && sfs.f_type as u64 == 0x0102_1994
+                {
+                    crate::entrypoints::service_manager::kmsg(&format!(
+                        "IDMAP src-on-tmpfs {source} (writes will not reach the host)"
+                    ));
+                }
+            }
             match idmapped_bind(source, dest, userns.as_fd()) {
                 Ok(()) => {
                     idmapped.insert(source.as_str());
