@@ -3426,15 +3426,27 @@ fn copy_partition_blocks(
             continue;
         }
         let def = &defs[m.definition_index];
-        let (Some(src), true) = (def.copy_blocks.as_deref(), def.copy_blocks_size > 0) else {
+        let Some(src) = def.copy_blocks.as_deref() else {
             continue;
         };
 
         let mut source = fs::File::open(src)?;
+        // --copy-from= pins a byte range within the source, since it lifts one
+        // partition out of a whole image. A plain CopyBlocks= names a file
+        // whose entire contents go into the partition.
+        let length = if def.copy_blocks_size > 0 {
+            def.copy_blocks_size
+        } else {
+            source.metadata()?.len()
+        };
+        if length == 0 {
+            continue;
+        }
+
         source.seek(SeekFrom::Start(def.copy_blocks_offset))?;
         target.seek(SeekFrom::Start(m.start_lba * sector_size))?;
 
-        let mut left = def.copy_blocks_size;
+        let mut left = std::cmp::min(length, m.allocated_size);
         let mut buf = vec![0u8; CHUNK];
         while left > 0 {
             let want = std::cmp::min(left as usize, CHUNK);
@@ -4106,6 +4118,54 @@ mod tests {
         let none = [SpanClaim { weight: 0, min: 0, max: 100 }];
         assert_eq!(grow_claims(&none, 500, 1), vec![0]);
         assert_eq!(grow_claims(&[], 500, 4096), Vec::<u64>::new());
+    }
+
+    /// CopyBlocks= in a definition file copies the WHOLE named file into the
+    /// partition. TEST-58-REPART writes 40M of random bytes and then cmp's them
+    /// against the image at the partition's offset.
+    #[test]
+    fn test_full_copy_blocks_from_definition() {
+        const SEED: &str = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+
+        // A recognisable payload, larger than one copy chunk would be if the
+        // loop were mis-bounded.
+        let payload: Vec<u8> = (0..(3 * 1024 * 1024u32)).map(|i| (i % 251) as u8).collect();
+        let src = tmp.path().join("block-copy");
+        fs::write(&src, &payload).unwrap();
+
+        fs::write(
+            defs_dir.join("extra.conf"),
+            format!(
+                "[Partition]\nType=linux-generic\nLabel=block-copy\nCopyBlocks={}\n",
+                src.display()
+            ),
+        )
+        .unwrap();
+
+        let img = tmp.path().join("zzz");
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=64M",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "run failed: {r:?}");
+
+        let mut f = fs::File::open(&img).unwrap();
+        let hdr = read_gpt_header(&mut f, 512).unwrap().unwrap();
+        let parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
+        assert_eq!(parts.len(), 1);
+
+        // The payload must sit at the partition's offset, byte for byte.
+        let mut got = vec![0u8; payload.len()];
+        f.seek(SeekFrom::Start(parts[0].first_lba * 512)).unwrap();
+        f.read_exact(&mut got).unwrap();
+        assert!(got == payload, "CopyBlocks= contents did not reach the image");
     }
 
     /// --size= grows an image that already exists, not only one being created.

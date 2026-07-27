@@ -73,15 +73,4 @@
   extraUnits = [
     "systemd-repart.service"
   ];
-  patchScript = ''
-    {
-      echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: an existing partition still competes for size in the area after it' >/skipped"
-      echo "exit 77"
-    } > TEST-58-REPART.sh
-    chmod +x TEST-58-REPART.sh
-  '';
-  # Skips rather than passes: growth competes with new partitions for a free area
-  # See ../docs/TEST-OVERRIDES.md.
-  expectedSkip = true;
 }
