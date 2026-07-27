@@ -6,6 +6,7 @@
 //! in the grammar; the parser reads it back as a field name.
 
 use crate::lexer::Token;
+use crate::md_schema;
 use crate::{FunctionState, ParseError, Parser};
 use llvm_ir::function::Function;
 use llvm_ir::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
@@ -44,7 +45,12 @@ impl Parser {
             }
             Token::MetadataName(tag) => {
                 self.advance();
+                let Some(schema) = md_schema::node(&tag) else {
+                    self.index -= 1;
+                    return self.error("expected metadata type");
+                };
                 let args = self.parse_specialized_args()?;
+                self.check_specialized(schema, &tag, distinct, &args)?;
                 Ok(Metadata::Specialized {
                     distinct,
                     tag,
@@ -55,6 +61,130 @@ impl Parser {
                 "expected a metadata node, found {}",
                 other.describe()
             )),
+        }
+    }
+
+    /// Checks a specialized node against its grammar: field names, repeats,
+    /// required fields, null and empty values, numeric ranges, and whether
+    /// the node has to be `distinct`.
+    fn check_specialized(
+        &mut self,
+        schema: &'static md_schema::Node,
+        tag: &str,
+        distinct: bool,
+        args: &SpecializedArgs,
+    ) -> Result<(), ParseError> {
+        let fields = match args {
+            SpecializedArgs::Named(fields) => fields.as_slice(),
+            SpecializedArgs::Positional(elements) => {
+                if !schema.positional {
+                    // The only positional form a keyed node has is the empty
+                    // one, and then every required field is missing.
+                    return self.check_required(schema, &[]);
+                }
+                for element in elements {
+                    if let MdField::Unsigned(value) = element
+                        && *value > u64::MAX as u128
+                    {
+                        return self.error(format!("element too large, limit is {}", u64::MAX));
+                    }
+                }
+                return Ok(());
+            }
+        };
+
+        let mut seen: Vec<&str> = Vec::new();
+        for (name, value) in fields {
+            let Some(spec) = schema.fields.iter().find(|spec| spec.name == name) else {
+                return self.error(format!("invalid field '{name}'"));
+            };
+            if seen.contains(&spec.name) {
+                return self.error(format!("field '{name}' cannot be specified more than once"));
+            }
+            seen.push(spec.name);
+            self.check_field(spec, value)?;
+        }
+
+        match schema.distinct {
+            md_schema::Distinct::Optional => {}
+            md_schema::Distinct::Always if !distinct => {
+                return self.error(format!("missing 'distinct', required for !{tag}"));
+            }
+            md_schema::Distinct::WhenDefinition if !distinct && is_a_definition(fields) => {
+                return self.error(format!(
+                    "missing 'distinct', required for !{tag} that is a Definition"
+                ));
+            }
+            _ => {}
+        }
+
+        self.check_required(schema, &seen)
+    }
+
+    fn check_required(
+        &mut self,
+        schema: &'static md_schema::Node,
+        seen: &[&str],
+    ) -> Result<(), ParseError> {
+        for spec in schema.fields {
+            if spec.required && !seen.contains(&spec.name) {
+                return self.error(format!("missing required field '{}'", spec.name));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_field(
+        &mut self,
+        spec: &'static md_schema::Field,
+        value: &MdField,
+    ) -> Result<(), ParseError> {
+        let name = spec.name;
+        if spec.non_null && matches!(value, MdField::Null) {
+            return self.error(format!("'{name}' cannot be null"));
+        }
+        if spec.non_empty && matches!(value, MdField::Str(text) if text.is_empty()) {
+            return self.error(format!("'{name}' cannot be empty"));
+        }
+        match (spec.shape, value) {
+            (md_schema::Shape::Any, _) => Ok(()),
+            (md_schema::Shape::Unsigned(limit), MdField::Unsigned(written)) => {
+                if *written > u128::from(limit) {
+                    return self.error(format!("value for '{name}' too large, limit is {limit}"));
+                }
+                Ok(())
+            }
+            (md_schema::Shape::Unsigned(_), MdField::Signed(_)) => {
+                self.error("expected unsigned integer")
+            }
+            (md_schema::Shape::Enumerator(limit, _), MdField::Unsigned(written)) => {
+                if *written > u128::from(limit) {
+                    return self.error(format!("value for '{name}' too large, limit is {limit}"));
+                }
+                Ok(())
+            }
+            (md_schema::Shape::Enumerator(_, what), MdField::Str(_) | MdField::Signed(_)) => {
+                self.error(format!("expected {what}"))
+            }
+            (md_schema::Shape::SmallEnumerator(limit), MdField::Unsigned(written)) => {
+                if *written > u128::from(limit) {
+                    return self.error(format!("value for '{name}' too large"));
+                }
+                Ok(())
+            }
+            (md_schema::Shape::Bounded(_, max), MdField::Unsigned(written)) => {
+                if *written > max as u128 {
+                    return self.error(format!("value for '{name}' too large, limit is {max}"));
+                }
+                Ok(())
+            }
+            (md_schema::Shape::Bounded(min, _), MdField::Signed(written)) => {
+                if *written < min {
+                    return self.error(format!("value for '{name}' too small, limit is {min}"));
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 
@@ -274,4 +404,18 @@ impl Parser {
         }
         Ok(attachments)
     }
+}
+
+/// Whether a `!DISubprogram`'s fields say it describes a definition, which is
+/// written either as `isDefinition: true` or as a `DISPFlagDefinition` bit.
+fn is_a_definition(fields: &[(String, MdField)]) -> bool {
+    fields
+        .iter()
+        .any(|(name, value)| match (name.as_str(), value) {
+            ("isDefinition", MdField::Bool(set)) => *set,
+            ("spFlags", MdField::Words(words)) => {
+                words.iter().any(|word| word == "DISPFlagDefinition")
+            }
+            _ => false,
+        })
 }

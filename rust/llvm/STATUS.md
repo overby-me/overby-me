@@ -67,7 +67,7 @@ skipped and counted separately rather than scored.
 
 | Suite | Agreed | Considered | Skipped | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 180 | 304 | 179 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 225 | 304 | 179 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 125 | 252 | 76 | `llvm-upstream-verifier` |
 
 A third check asks a different question: not whether we accept the same

@@ -21,6 +21,7 @@ mod body;
 mod constants;
 mod globals;
 mod lexer;
+mod md_schema;
 mod metadata;
 mod parser;
 mod toplevel;

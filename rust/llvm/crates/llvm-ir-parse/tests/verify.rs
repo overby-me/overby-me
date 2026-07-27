@@ -237,6 +237,60 @@ const REJECTED: &[(&str, &str)] = &[
         "define void @f(i8* %p) {\nentry:\n  ret void\n}\n",
         "opaque",
     ),
+    // The grammar of specialized metadata nodes, which upstream enforces in
+    // its parser rather than its verifier.
+    (
+        "!named = !{!0}\n!0 = !Invalid(field: 0)\n",
+        "expected metadata type",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DILocation(bad: 0)\n",
+        "invalid field 'bad'",
+    ),
+    (
+        "!named = !{!0, !1}\n!0 = !{}\n!1 = !DILocation(line: 3, scope: !0, line: 3)\n",
+        "field 'line' cannot be specified more than once",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DILocation()\n",
+        "missing required field 'scope'",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DILocation(scope: null)\n",
+        "'scope' cannot be null",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DIGlobalVariable(name: \"\")\n",
+        "'name' cannot be empty",
+    ),
+    (
+        "!named = !{!0, !1}\n!0 = !{}\n!1 = !DILocation(column: 65536, scope: !0)\n",
+        "value for 'column' too large, limit is 65535",
+    ),
+    (
+        "!named = !{!0, !1}\n!0 = !{}\n!1 = !DILocalVariable(scope: !0, arg: -1)\n",
+        "expected unsigned integer",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DISubrange(count: -2)\n",
+        "value for 'count' too small, limit is -1",
+    ),
+    (
+        "!named = !{!0}\n!0 = !GenericDINode(tag: \"string\")\n",
+        "expected DWARF tag",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DIExpression(18446744073709551616)\n",
+        "element too large, limit is 18446744073709551615",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DICompileUnit(language: DW_LANG_C99, file: !DIFile(filename: \"f\", directory: \"d\"))\n",
+        "missing 'distinct', required for !DICompileUnit",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DISubprogram(isDefinition: true)\n",
+        "missing 'distinct', required for !DISubprogram that is a Definition",
+    ),
 ];
 
 #[test]
@@ -328,6 +382,11 @@ const ACCEPTED: &[&str] = &[
     "declare void @g()\n\ndefine void @f() {\nentry:\n  call addrspace(0) void @g()\n  ret void\n}\n",
     // A metadata integer that does not fit 64 bits.
     "!named = !{!0}\n!0 = !DIEnumerator(name: \"x\", value: 170141183460469231731687303715884105727)\n",
+    // The debug-info limits are inclusive, and the values just inside them
+    // matter as much as the ones just outside.
+    "!named = !{!0, !1}\n!0 = !{}\n!1 = !DILocation(line: 4294967295, column: 65535, scope: !0)\n",
+    "!named = !{!0}\n!0 = !DISubrange(count: -1, lowerBound: -9223372036854775808)\n",
+    "!named = !{!0}\n!0 = !GenericDINode(tag: 65535)\n",
 ];
 
 #[test]

@@ -114,7 +114,7 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 180, 70 to 125)*
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 225, 70 to 125)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -138,9 +138,18 @@ space written before a call's type, and metadata integers past 64 bits.
 Fixing the layout parser exposed eleven files whose real rule was that a
 bitcast may not change an address space or a size, which now applies to
 constant expressions as well as instructions.
-Still open, largest first: module summary index syntax (`^0 = ...`, nine
-files), intrinsics used without a declaration, attribute combination rules,
-and `ptrauth` and `splat` constants.
+A fifth pass was one thing: the grammar of specialized metadata nodes, in
+`crates/llvm-ir-parse/src/md_schema.rs`. Field names, repeated fields,
+required fields, fields that may not be null or empty, numeric ranges and
+the two nodes that have to be `distinct` are all upstream *parse* errors,
+and modelling debug info syntactically had made every one of them silently
+fine. That alone was 45 files, with nothing on the accept side lost.
+Still open, largest first: attribute rules and intrinsic signatures on the
+Verifier side (the whole remaining gap there), module summary index syntax
+(`^0 = ...`, nine files), intrinsics used without a declaration, the DWARF
+vocabulary itself (`DW_TAG_badtag` and friends, three files, which needs a
+list of every valid enumerator that no readable specification in the tree
+provides), and `ptrauth` and `splat` constants.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

@@ -111,7 +111,7 @@ in {
     # Conformance against upstream's own suites, measured rather than claimed.
     # Both numbers are low and both are honest: see STATUS.md for what the
     # remaining disagreements are.
-    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 180;
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 225;
     llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 125;
 
     # Not whether we accept the same files, but whether we print the same

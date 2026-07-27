@@ -123,3 +123,20 @@ up in the same commit. Two passes so far have taken the Assembler suite from
 rules the parser was missing and then the semantic ones that come in
 clusters: which types can be stored, which may only cross an intrinsic
 boundary, and what shape the globals upstream reserves have to have.
+
+## Checked syntactically rather than semantically
+
+**Specialized metadata nodes have a grammar and we enforce it.** Debug info
+is modelled syntactically here, which was in danger of meaning that
+`!DILocation(bad: 0, line: 1, line: 2)` parsed happily. Upstream treats the
+shape of these nodes as a parser matter rather than a verifier one, so
+`crates/llvm-ir-parse/src/md_schema.rs` carries a table: which field names
+each node kind has, which are required, which may not be null or empty,
+which have a numeric range, and which nodes have to be written `distinct`.
+
+What that table deliberately does not carry is the DWARF vocabulary. A
+`tag:` field holding `DW_TAG_badtag` is an error upstream and is accepted
+here, because rejecting it needs a list of every valid `DW_TAG_*`,
+`DW_LANG_*` and `DIFlag*`, and no specification we are allowed to read
+enumerates them. Guessing the list would reject valid input, which is the
+worse of the two failures.
