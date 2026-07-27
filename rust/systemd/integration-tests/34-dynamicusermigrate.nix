@@ -98,6 +98,29 @@
   # exec dirs fail, and two of them (/var/lib/testidmapped and
   # /var/lib/sampleservice) are aliases of the same underlying directory.
   #
+  # RULED OUT BY READING THE CODE, 2026-07-27, so nobody re-tests these:
+  #   - "the idmap is attempted from inside the service's user namespace, so
+  #     ns_capable(sb->s_user_ns, CAP_SYS_ADMIN) fails". NO: setup_mount_namespace()
+  #     is called at exec_helper.rs:2557/2565, BEFORE the setns/unshare block at
+  #     2745, so idmapped_bind() runs while still in the initial user namespace.
+  #     That also matches the measured user:[4026531837].
+  #   - "the userns fd passed to mount_setattr is the INITIAL namespace, which
+  #     the kernel rejects with EPERM by design". NO: create_mapped_userns()
+  #     checks the forked child's unshare(CLONE_NEWUSER) actually succeeded
+  #     before writing uid_map/gid_map and opening /proc/<pid>/ns/user, so the
+  #     fd is a genuine child namespace.
+  #
+  # STILL UNTESTED, and the one the earlier notes flagged: whether the same
+  # underlying directory is idmapped twice. /var/lib/testidmapped and
+  # /var/lib/sampleservice are aliases of one directory, so a second
+  # open_tree(OPEN_TREE_CLONE) could clone a mount the first pass already
+  # idmapped and moved into place, which is_idmapped_mnt() refuses with EPERM.
+  # Against that: the earlier run reported ALL THREE exec dirs failing, and this
+  # hypothesis predicts the first one succeeding. THE MEASUREMENT THAT SETTLES
+  # IT is to log, per bind, the source path and the exact errno, rather than a
+  # single aggregate "it failed" - that distinguishes "first succeeds, rest
+  # EPERM" from "all EPERM" and is worth one VM run.
+  #
   # THREE WRONG GUESSES were made before that, all about kernel rules, each
   # costing a VM run: that an already-attached mount could be idmapped (it
   # cannot, it must be detached, EINVAL); that open_tree on a bare directory
