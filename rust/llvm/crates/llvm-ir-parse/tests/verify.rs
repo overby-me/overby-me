@@ -538,6 +538,10 @@ const BROKEN: &[(&str, &str)] = &[
         "define void @0() comdat {\nentry:\n  ret void\n}\n",
         "has no name to key a comdat on",
     ),
+    (
+        "declare void @f(i32 immarg %x)\n",
+        "immarg on parameter 0 of a function that is not an intrinsic",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -683,6 +687,10 @@ const REJECTED: &[(&str, &str)] = &[
     ),
     ("%s = type { void }\n", "invalid structure element type"),
     ("@i2 = common global i8388609 0, align 4\n", "is too wide"),
+    (
+        "define void @f() {\nentry:\n  %x = add i32 0, 1\n  %x = add i32 0, 1\n  ret void\n}\n",
+        "redefinition of '%x'",
+    ),
     (
         "define void @f(target(\"type\", i32, 0, void) %x) {\nentry:\n  ret void\n}\n",
         "writes its types before its integers",

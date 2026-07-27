@@ -27,7 +27,7 @@ mod parser;
 mod toplevel;
 mod types;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use lexer::{Lexer, Position, Spanned};
 use llvm_ir::Module;
@@ -87,6 +87,10 @@ pub(crate) struct Parser {
 #[derive(Default)]
 pub(crate) struct FunctionState {
     pub(crate) named_values: HashMap<String, InstId>,
+    /// The names that have been defined rather than only referred to, so a
+    /// second definition is a redefinition rather than a forward reference
+    /// arriving.
+    pub(crate) defined_values: HashSet<String>,
     pub(crate) numbered_values: HashMap<u32, InstId>,
     pub(crate) named_blocks: HashMap<String, BlockId>,
     pub(crate) numbered_blocks: HashMap<u32, BlockId>,

@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 444 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 445 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -376,6 +376,14 @@ integers, and a debug record has a fixed shape. The last of those needed
 a correction the measurement caught: `#dbg_assign` carries two values, the
 one assigned and the address it was assigned to, so checking that
 everything after the first is metadata refused a file upstream reads.
+A thirty-third pass: a name is defined once in a function body, and
+`immarg` says an argument is written as a literal, which only an intrinsic
+can require of its caller.
+One rule was attempted and abandoned rather than measured: a named type
+that nothing defines. `Context::named_struct` makes a forward reference
+and a genuine `type opaque` the same thing on purpose, so there is nothing
+to tell them apart with, and the rule needs a model change rather than a
+check.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

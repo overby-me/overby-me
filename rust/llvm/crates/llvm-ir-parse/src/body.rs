@@ -465,6 +465,9 @@ impl Parser {
             Token::LocalName(name) if self.peek_at(1) == &Token::Equals => {
                 self.advance();
                 self.advance();
+                if !state.defined_values.insert(name.clone()) {
+                    return self.error(format!("redefinition of '%{name}'"));
+                }
                 reserved = Some(match state.named_values.get(&name) {
                     Some(id) => *id,
                     None => {

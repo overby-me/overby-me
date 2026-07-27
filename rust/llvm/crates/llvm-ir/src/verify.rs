@@ -1038,6 +1038,11 @@ impl Verifier<'_> {
         }
         for (index, param) in function.params.iter().enumerate() {
             self.attribute_set(&param.attrs, param.ty, &format!("parameter {index}"));
+            if param.attrs.has(EnumAttr::ImmArg) && !intrinsic {
+                self.report(format!(
+                    "immarg on parameter {index} of a function that is not an intrinsic"
+                ));
+            }
             if param.attrs.has(EnumAttr::SafeStack) {
                 self.report(format!(
                     "safestack on parameter {index}, which it does not describe"
