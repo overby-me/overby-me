@@ -26,6 +26,7 @@ impl Parser {
         let calling_conv = self.parse_calling_conv()?;
         let return_attrs = self.parse_attribute_set(false)?;
         let return_type = self.parse_type_atom()?;
+        let return_type = self.parse_pointer_suffix(return_type)?;
 
         let name = match self.advance() {
             Token::GlobalName(name) => Name::Named(name),

@@ -58,8 +58,13 @@ monorepo (§8), the way rust/gcc already does for rust/nixpkgs.
   not its internal architecture (§4.3).
 - **Not** every target. Order: x86_64-linux → aarch64-linux → aarch64-darwin →
   riscv64/wasm32/i686. Windows (COFF/SEH) is deferred until there is demand.
-- **Not** typed pointers, legacy PM, or pre-opaque-pointer IR. We pin to modern
-  IR semantics (opaque `ptr` only) and refuse older dialects.
+- **Not** legacy PM or pre-opaque-pointer *semantics*. We pin to modern IR
+  semantics: opaque `ptr` only, and the model never holds a typed pointer.
+  The older *spelling* is read, because upstream reads it: `llvm-as` in LLVM
+  21 folds `i8*` to `ptr` as it parses, and nothing downstream of either
+  parser can tell the two apart. Refusing the spelling was measured at 293
+  files across the test trees, three quarters of `llvm/test/Bitcode` among
+  them, and bought nothing: it is a fold, not a dialect.
 
 ## 2. Investigation: landscape and integration options
 

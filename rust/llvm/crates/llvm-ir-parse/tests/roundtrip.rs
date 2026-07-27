@@ -185,6 +185,33 @@ fn what_upstream_drops_is_dropped() {
     }
 }
 
+/// The older pointer spellings, which upstream folds to `ptr` as it reads.
+const POINTERS: &[(&str, &str)] = &[
+    ("@g = global i8* null\n", "@g = global ptr null\n"),
+    ("@g = global i8** null\n", "@g = global ptr null\n"),
+    (
+        "@g = global i8 addrspace(3)* null\n",
+        "@g = global ptr addrspace(3) null\n",
+    ),
+    ("@g = global void (i32)* null\n", "@g = global ptr null\n"),
+    ("declare i8* @f()\n", "declare ptr @f()\n"),
+    ("declare void @f(i32*)\n", "declare void @f(ptr)\n"),
+];
+
+#[test]
+fn typed_pointers_fold_to_opaque_ones() {
+    for (written, expected) in POINTERS {
+        let module = llvm_ir_parse::parse_module(written)
+            .unwrap_or_else(|error| panic!("{written} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert_eq!(
+            printed.trim_start_matches('\n'),
+            *expected,
+            "\nfrom: {written}"
+        );
+    }
+}
+
 const FOLDED: &[(&str, &str)] = &[
     (
         "@g = global <4 x i16> <i16 -1, i16 -1, i16 -1, i16 -1>\n",

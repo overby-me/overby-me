@@ -77,8 +77,8 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 447 | 483 | 8 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 288 | 328 | 1 | `llvm-upstream-verifier` |
+| `llvm/test/Assembler` | 449 | 483 | 5 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 288 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 
@@ -91,27 +91,25 @@ right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/CodeGen` | 22,187 | 22,785 | `llvm-tree-codegen` |
-| `llvm/test/Transforms` | 10,207 | 10,305 | `llvm-tree-transforms` |
-| `llvm/test/Analysis` | 1,393 | 1,403 | `llvm-tree-analysis` |
-| `llvm/test/DebugInfo` | 1,096 | 1,101 | `llvm-tree-debuginfo` |
-| `llvm/test/Instrumentation` | 499 | 508 | `llvm-tree-instrumentation` |
-| `llvm/test/Linker` | 334 | 338 | `llvm-tree-linker` |
-| `llvm/test/ThinLTO` | 259 | 260 | `llvm-tree-thinlto` |
+| `llvm/test/CodeGen` | 22,369 | 22,785 | `llvm-tree-codegen` |
+| `llvm/test/Transforms` | 10,223 | 10,305 | `llvm-tree-transforms` |
+| `llvm/test/Analysis` | 1,394 | 1,403 | `llvm-tree-analysis` |
+| `llvm/test/DebugInfo` | 1,101 | 1,101 | `llvm-tree-debuginfo` |
+| `llvm/test/Instrumentation` | 505 | 508 | `llvm-tree-instrumentation` |
+| `llvm/test/Linker` | 338 | 338 | `llvm-tree-linker` |
+| `llvm/test/ThinLTO` | 260 | 260 | `llvm-tree-thinlto` |
 | `llvm/test/Other` | 160 | 160 | `llvm-tree-other` |
-| `llvm/test/MC` | 159 | 160 | `llvm-tree-mc` |
-| `llvm/test/Bitcode` | 153 | 232 | `llvm-tree-bitcode` |
-| `llvm/test/Feature` | 79 | 82 | `llvm-tree-feature` |
+| `llvm/test/MC` | 160 | 160 | `llvm-tree-mc` |
+| `llvm/test/Bitcode` | 229 | 232 | `llvm-tree-bitcode` |
+| `llvm/test/Feature` | 82 | 82 | `llvm-tree-feature` |
 
-That is 36,526 of the 37,334 modules llvm-as reads across eleven trees, and
-what is left is mostly not a gap. Two decisions account for most of it. Typed
-pointers are refused on purpose (PLAN 1.2), which costs 179 files in CodeGen
-and 78 of Bitcode's 81, that tree existing to test reading older bitcode; it
-is the one place where the divergence dominates rather than decorates. A
-target intrinsic no LangRef line names cannot be auto-declared, which costs
-410 more in CodeGen, and the intrinsic name table is honest about why.
+That is 36,821 of the 37,334 modules llvm-as reads across eleven trees.
+What is left is dominated by one thing: a target intrinsic no LangRef line
+names cannot be auto-declared, which is most of what CodeGen still refuses.
+The intrinsic name table is honest about why, and the number moves only if
+a specification of that set becomes readable.
 
-`Other` is the only tree read whole.
+Six trees are read whole: DebugInfo, Linker, ThinLTO, Other, MC and Feature.
 
 The first sweep read 2,781 of the first 2,992 and the gaps it showed were not
 the ones the suites show. Four fixes closed 110 of them: the attribute
@@ -178,10 +176,11 @@ what happened when five such rules came out at once: Verifier agreement
 fell 215 to 212 while the modules we wrongly refuse fell 53 to 45. Without
 the second bound the ratchet would have argued for keeping the bugs.
 
-Five of the 18 are permanent by design: two are use-list order directives,
-which this tier does not model, and three are typed-pointer IR, rejected
-here on purpose (PLAN §1.2) although `llvm-as` still reads `i8*` and folds
-it to `ptr`.
+The typed-pointer spelling used to be refused here on purpose and is now
+read the way upstream reads it, by folding `i8*` to `ptr` at parse time. The
+model never holds a typed pointer either way; what changed is that a module
+written in the older spelling is a module rather than an error, which is
+what `llvm-as` says it is.
 
 The oracle is `llvm-as`'s exit code, not its output. Those differ: some
 verifier checks print a diagnostic and still return zero, so `set1.ll`
@@ -202,7 +201,7 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against `llvm-as | llvm-dis`, and **128 of 216** are identical. Two
+against `llvm-as | llvm-dis`, and **129 of 216** are identical. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against

@@ -16,12 +16,56 @@ impl Parser {
 
     /// A function type is written as a result type followed by a parameter
     /// list, so any type can grow one.
+    /// The `*` half of the suffix and nothing else.
+    ///
+    /// A return type is read without the parenthesised half, `void (i32)`
+    /// being a signature rather than a function type there, but `i8*` is
+    /// still the older spelling of `ptr` and folds the same way.
+    pub(crate) fn parse_pointer_suffix(&mut self, base: TypeId) -> Result<TypeId, ParseError> {
+        let mut current = base;
+        loop {
+            let space = if self.peek_word() == Some("addrspace") && self.peek_at(4) == &Token::Star
+            {
+                self.parse_optional_address_space()?
+            } else {
+                None
+            };
+            if self.peek() == &Token::Star {
+                self.advance();
+                current = self.module.ctx.pointer_type(space.unwrap_or(0));
+                continue;
+            }
+            if space.is_some() {
+                return self.error("an address space here belongs to a pointer");
+            }
+            return Ok(current);
+        }
+    }
+
     pub(crate) fn parse_type_suffix(&mut self, base: TypeId) -> Result<TypeId, ParseError> {
         let mut current = base;
         loop {
+            // `i8*` and `i8 addrspace(3)*` are the older spellings of `ptr`
+            // and `ptr addrspace(3)`. Upstream folds them as it reads, the
+            // pointee having no meaning since opaque pointers, so this reads
+            // them the same way and the model never holds a typed pointer.
+            // That is a spelling this accepts, not a dialect it supports:
+            // nothing downstream can tell `i8*` from `ptr`, which is exactly
+            // what upstream arranges too.
+            let space = if self.peek_word() == Some("addrspace") && self.peek_at(4) == &Token::Star
+            {
+                self.parse_optional_address_space()?
+            } else {
+                None
+            };
             if self.peek() == &Token::Star {
-                return self
-                    .error("typed pointers are not accepted; this dialect uses opaque 'ptr' only");
+                self.advance();
+                current = self.module.ctx.pointer_type(space.unwrap_or(0));
+                continue;
+            }
+            if let Some(space) = space {
+                let _ = space;
+                return self.error("an address space here belongs to a pointer");
             }
             if self.peek() != &Token::LeftParen {
                 return Ok(current);

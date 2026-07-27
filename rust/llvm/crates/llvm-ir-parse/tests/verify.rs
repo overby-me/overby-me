@@ -918,10 +918,6 @@ const REJECTED: &[(&str, &str)] = &[
         "takes metadata where it expects it",
     ),
     (
-        "define void @f(i8* %p) {\nentry:\n  ret void\n}\n",
-        "opaque",
-    ),
-    (
         "target datalayout = \"A16777216\"\n",
         "does not fit 24 bits",
     ),
@@ -1062,6 +1058,9 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // `i8*` is the older spelling of `ptr`, which upstream folds as it reads.
+    // Nothing downstream can tell the two apart, here or there.
+    "define void @f(i8* %p) {\nentry:\n  ret void\n}\n",
     // A use-list order directive sits among the instructions and after the
     // globals, and says what order a value's uses were in. `llvm-dis` prints
     // none of them unless asked to, so reading one and keeping nothing is

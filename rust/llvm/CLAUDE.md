@@ -688,6 +688,21 @@ and `@b = alias i32, ptr @a`. That one moved the differential ratchet 123 to
 128. The other is not closable: upstream's predecessor comments follow the
 use list, so a module whose directives permute it lists its predecessors in
 that permuted order, and reproducing that needs the same chains.
+A fifty-third pass reversed a scope decision, having measured what it cost.
+PLAN 1.2 said typed pointers were refused; 293 files across the test trees
+wrote them, three quarters of `llvm/test/Bitcode` among them, and refusing
+them bought nothing. `i8*` is not a dialect, it is a spelling: `llvm-as` in
+LLVM 21 folds it to `ptr` as it parses, and nothing downstream of either
+parser can tell the two apart. So this folds it too, in `parse_type_suffix`
+and in the pointer-only variant a return type needs, and the model still
+never holds a typed pointer. The plan now says what it always meant: not
+pre-opaque-pointer *semantics*.
+Six trees are read whole now: DebugInfo, Linker, ThinLTO, Other, MC and
+Feature. Bitcode goes 153 to 229 of 232, Transforms to 10,223, CodeGen to
+22,369, Analysis to 1,394, Instrumentation to 505. Assembler 447 to 449 with
+refusals 8 to 5, Verifier refusals 1 to nought, and the differential 128 to
+129. Across the eleven trees that is 36,821 of the 37,334 modules llvm-as
+reads, up from 36,526.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five
