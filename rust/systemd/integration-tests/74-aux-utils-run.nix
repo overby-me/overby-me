@@ -34,10 +34,20 @@
   #      The field is no_env_expand now and the CLI flag reaches exec_helper by
   #      the same route as a hand-written `:`, rather than a parallel path.
   #
+  #   5. a stopped transient unit kept its runtime fragment, so
+  #      `(! systemctl cat "$UNIT")` failed. The fragment under
+  #      /run/systemd/transient is removed on stop now. Only the fragment: the
+  #      unit is still left in the table, so a full GC that unloads it is
+  #      missing. Doing that from the stop handler would mean taking a write
+  #      lock while it holds the RuntimeInfo read guard, the shape that
+  #      deadlocked PID 1 earlier (invariant I1).
+  #
   # The script also clears --property=LimitCORE last-wins with PrivateTmp=yes,
-  # --uid=testuser, --gid=testuser and --expand-environment=no. It now stops at
-  # a `systemctl cat` issued after `systemctl stop` on a transient unit.
-  # Remaining upstream flags beyond that: --json=, --quiet, --job-mode=,
-  # --via-shell, --shell, --pty, --machine=, --bind, --mask, --empower,
-  # --recursive-errors=, --system, --user=.
+  # --uid=testuser, --gid=testuser and --expand-environment=no.
+  #
+  # CURRENT STOP, and a real wall rather than a small gap: the "Transient
+  # service (user daemon)" section needs `--user --machine=testuser@`, i.e.
+  # both the per-user service manager and machined. Everything after it uses
+  # --json=, --quiet, --job-mode=, --via-shell, --shell, --pty, --machine=,
+  # --bind, --mask, --empower, --recursive-errors=, --system and --user=.
 }

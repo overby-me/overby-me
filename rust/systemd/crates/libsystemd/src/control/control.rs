@@ -10327,6 +10327,22 @@ pub fn execute_command(
                         }
                         return Err(format!("Job for {} canceled.", id.name,));
                     }
+
+                    // A transient unit does not outlive its stop: upstream
+                    // removes the runtime fragment so `systemctl cat` fails
+                    // afterwards, which TEST-74-AUX-UTILS.run asserts with
+                    // `(! systemctl cat "$UNIT")`. Only the fragment is removed
+                    // here; the unit is left in the table, so a full GC that
+                    // also unloads it is still missing. Doing that from here
+                    // would mean taking a write lock while this arm holds the
+                    // RuntimeInfo read guard, which is the shape that deadlocked
+                    // PID 1 once already (docs/ARCHITECTURE.md invariant I1).
+                    if let Some(unit) = run_info.unit_table.get(id)
+                        && let Some(path) = unit.common.unit.fragment_path.as_ref()
+                        && path.starts_with("/run/systemd/transient")
+                    {
+                        let _ = std::fs::remove_file(path);
+                    }
                 } // end for id in &ids_to_stop
             }
         }
