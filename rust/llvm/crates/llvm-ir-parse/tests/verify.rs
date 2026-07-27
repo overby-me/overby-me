@@ -61,6 +61,22 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "!t = !{!1}\n!1 = !DIDerivedType(tag: DW_TAG_pointer_type, size: 32, baseType: !\"bad\")\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!9 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",
+        "invalid baseType, expected a node",
+    ),
+    (
+        "!t = !{!1}\n!1 = !DISubroutineType(types: !\"bad\")\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!9 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",
+        "invalid types, expected a node",
+    ),
+    (
+        "!named = !{!1}\n!llvm.module.flags = !{!0}\n!llvm.dbg.cu = !{}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!1 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!2 = !DIFile(filename: \"t.c\", directory: \"/\")\n",
+        "DICompileUnit not listed in llvm.dbg.cu",
+    ),
+    (
+        "!named = !{!3}\n!3 = !{!1}\n!llvm.module.flags = !{!0}\n!llvm.dbg.cu = !{}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!1 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!2 = !DIFile(filename: \"t.c\", directory: \"/\")\n",
+        "DICompileUnit not listed in llvm.dbg.cu",
+    ),
+    (
         "declare void @llvm.donothing(...)\n\ndefine void @f() {\nentry:\n  call void (...) @llvm.donothing(i64 0)\n  ret void\n}\n",
         "through a variadic signature, which it does not have",
     ),
@@ -1348,6 +1364,15 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // The fields that do take a metadata string, which is a list rather than
+    // a rule: corpus/md-string-fields.nu measured which.
+    "!t = !{!1}\n!1 = !DIDerivedType(tag: DW_TAG_member, baseType: !9, extraData: !\"ok\")\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!9 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",
+    "!t = !{!1}\n!1 = !DITemplateValueParameter(name: \"V\", type: !9, value: !\"ok\")\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!9 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",
+    "!t = !{!1}\n!1 = !DIModule(scope: !\"ok\", name: \"M\")\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!9 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",
+    // A compile unit that is listed, and one a named list never reaches:
+    // an attachment leading to a unit is not what the rule asks about.
+    "!named = !{!1}\n!llvm.module.flags = !{!0}\n!llvm.dbg.cu = !{!1}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!1 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!2 = !DIFile(filename: \"t.c\", directory: \"/\")\n",
+    "!llvm.module.flags = !{!0}\n!llvm.dbg.cu = !{}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!1 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!2 = !DIFile(filename: \"t.c\", directory: \"/\")\n",
     // The two intrinsics LangRef does declare variadically.
     "declare void @llvm.localescape(...)\n\ndefine void @f() {\nentry:\n  %a = alloca i32\n  call void (...) @llvm.localescape(ptr %a)\n  ret void\n}\n",
     "declare void @llvm.donothing()\n\ndefine void @f() {\nentry:\n  call void @llvm.donothing()\n  ret void\n}\n",

@@ -952,7 +952,33 @@ them. The other half of that file's rule, an intrinsic that is variadic
 called through a fixed type, needs to know that
 `llvm.experimental.stackmap` is variadic, and LangRef does not document
 it at all.
-Verifier 299 to 309.
+A sixty-eighth pass re-measured a rule the twentieth had measured away,
+and the twentieth was wrong. "Every DICompileUnit is listed in
+llvm.dbg.cu" is real; what the first measurement missed is the
+reachability the twenty-first pass went on to discover, and the reach
+here is narrower than the debug-info rules use. A unit a *named list*
+leads to has to be listed. A unit only an attachment leads to does not,
+so a `DISubprogram` written into a `!named` list takes its `unit:` with
+it while the same subprogram hung off a function does not. Both halves
+were probed, and the DebugInfo tree, 1,101 files that are all debug
+info, is unmoved. Verifier 309 to 310.
+A second rule came from the same file's neighbour, and it needed a fifth
+derivation script. A field holds text, or a number, or a node; `!"text"`
+is none of those, being a reference to a metadata string, which is what a
+module writes when it names a type it has not described. Upstream refuses
+one nearly everywhere. Where it does not is a list with no shape, so
+`corpus/md-string-fields.nu` writes every field of every node kind as
+`!"probe"` and reports which survive: sixteen, and only one of them was
+the one I would have guessed. `DIModule`'s scope takes a string and
+`DISubprogram`'s does not.
+The script had to learn to treat a crash as no verdict rather than as a
+refusal, `DIGlobalVariableExpression`'s expr being a fifth thing that
+segfaults llvm-as.
+What is still not derived is the rest of that test's rule: a `baseType`
+naming a tuple is refused too, so the field wants a *type* node rather
+than merely a node, and which kinds each field accepts is a larger
+measurement than this one. Recorded rather than started.
+Verifier 299 to 311.
 One rule was probed and left. A `DILocation` inside a plain metadata node
 is refused when an instruction attachment reaches it, except under
 `llvm.loop`, whose whole subtree is exempt, and except from a named list.

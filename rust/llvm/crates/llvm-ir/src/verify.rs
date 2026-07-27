@@ -103,6 +103,7 @@ impl Verifier<'_> {
 
     fn module_level(&mut self) {
         self.reserved_globals_are_unread();
+        self.compile_units_are_listed();
         // A blockaddress names a label in a function that may not have been
         // read yet when the constant is built, so the check waits until the
         // whole module is here. Only named labels are checked: matching `%3`
@@ -883,15 +884,57 @@ impl Verifier<'_> {
         }
     }
 
-    /// Every metadata node a named list, a global or an instruction reaches,
-    /// directly or through another node.
-    fn reachable_metadata(&self) -> Vec<MdId> {
-        let mut roots: Vec<MdId> = self
-            .module
+    fn named_metadata_roots(&self) -> Vec<MdId> {
+        self.module
             .named_metadata
             .iter()
             .flat_map(|named| named.operands.clone())
+            .collect()
+    }
+
+    /// A compile unit describes a whole translation unit, and what a consumer
+    /// reads to find them is `llvm.dbg.cu`. One a named list mentions and that
+    /// list does not is a unit nothing will be told about.
+    ///
+    /// The reach is narrower than the debug-info rules': a unit an attachment
+    /// leads to is not asked, only one a named list leads to. So a
+    /// `DISubprogram` written into a `!named` list takes its `unit:` with it,
+    /// while the same subprogram hung off a function does not.
+    fn compile_units_are_listed(&mut self) {
+        let listed: Vec<MdId> = self
+            .module
+            .named_metadata
+            .iter()
+            .filter(|named| named.name == "llvm.dbg.cu")
+            .flat_map(|named| named.operands.clone())
             .collect();
+
+        let mut seen: HashSet<MdId> = HashSet::new();
+        let mut pending = self.named_metadata_roots();
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(node) = self.module.metadata_node(id) else {
+                continue;
+            };
+            if let Metadata::Specialized { tag, .. } = node
+                && tag == "DICompileUnit"
+                && !listed.contains(&id)
+            {
+                self.report(format!(
+                    "!{}: DICompileUnit not listed in llvm.dbg.cu",
+                    id.0
+                ));
+            }
+            pending.extend(self.node_references(id));
+        }
+    }
+
+    /// Every metadata node a named list, a global or an instruction reaches,
+    /// directly or through another node.
+    fn reachable_metadata(&self) -> Vec<MdId> {
+        let mut roots: Vec<MdId> = self.named_metadata_roots();
         for global in &self.module.globals {
             roots.extend(attachment_ids(&global.metadata));
         }
@@ -913,32 +956,41 @@ impl Verifier<'_> {
                 continue;
             }
             order.push(id);
-            let Some(node) = self.module.metadata_node(id) else {
-                continue;
-            };
-            match node {
-                Metadata::Tuple { operands, .. } => {
-                    roots.extend(operands.iter().filter_map(|operand| match operand {
-                        MdOperand::Ref(id) => Some(*id),
-                        _ => None,
-                    }));
-                }
-                Metadata::Specialized { args, .. } => {
-                    let fields: Vec<&MdField> = match args {
-                        SpecializedArgs::Named(fields) => {
-                            fields.iter().map(|(_, value)| value).collect()
-                        }
-                        SpecializedArgs::Positional(values) => values.iter().collect(),
-                    };
-                    roots.extend(fields.iter().filter_map(|field| match field {
-                        MdField::Ref(id) => Some(*id),
-                        _ => None,
-                    }));
-                }
-                Metadata::String(_) => {}
-            }
+            roots.extend(self.node_references(id));
         }
         order
+    }
+
+    /// The nodes one node names, whether it is a tuple or a specialized node.
+    fn node_references(&self, id: MdId) -> Vec<MdId> {
+        let Some(node) = self.module.metadata_node(id) else {
+            return Vec::new();
+        };
+        match node {
+            Metadata::Tuple { operands, .. } => operands
+                .iter()
+                .filter_map(|operand| match operand {
+                    MdOperand::Ref(id) => Some(*id),
+                    _ => None,
+                })
+                .collect(),
+            Metadata::Specialized { args, .. } => {
+                let fields: Vec<&MdField> = match args {
+                    SpecializedArgs::Named(fields) => {
+                        fields.iter().map(|(_, value)| value).collect()
+                    }
+                    SpecializedArgs::Positional(values) => values.iter().collect(),
+                };
+                fields
+                    .iter()
+                    .filter_map(|field| match field {
+                        MdField::Ref(id) => Some(*id),
+                        _ => None,
+                    })
+                    .collect()
+            }
+            Metadata::String(_) => Vec::new(),
+        }
     }
 
     /// A `gv` entry that names a symbol has to name one this module has.
@@ -3600,6 +3652,27 @@ impl Verifier<'_> {
         let SpecializedArgs::Named(fields) = args else {
             return;
         };
+        // A field holds text, or a number, or a node. `!"text"` is none of
+        // those: it is a reference to a metadata string, which is what a
+        // module writes when it names a type it has not described. Upstream
+        // refuses one nearly everywhere, and where it does not is a list with
+        // no shape, so `corpus/md-string-fields.nu` measured it.
+        for (name, value) in fields {
+            let holds_a_string = match value {
+                MdField::Ref(id) => {
+                    matches!(self.module.metadata_node(*id), Some(Metadata::String(_)))
+                }
+                MdField::Inline(node) => matches!(**node, Metadata::String(_)),
+                _ => false,
+            };
+            if holds_a_string
+                && STRING_VALUED
+                    .binary_search(&(tag.as_str(), name.as_str()))
+                    .is_err()
+            {
+                self.report(format!("!{tag}: invalid {name}, expected a node"));
+            }
+        }
         if tag == "DISubrange" || tag == "DIGenericSubrange" {
             // A subrange is described from one end or the other, never both.
             if field_of(fields, "count").is_some() && field_of(fields, "upperBound").is_some() {
@@ -4841,3 +4914,26 @@ fn attachment_ids(attachments: &[MdAttachment]) -> Vec<MdId> {
         })
         .collect()
 }
+
+/// The fields that may hold a metadata string rather than a node. Sorted, so
+/// the lookup can be a binary search. Generated by
+/// `corpus/md-string-fields.nu`, which explains why this is a list rather
+/// than a rule.
+static STRING_VALUED: &[(&str, &str)] = &[
+    ("DICompositeType", "annotations"),
+    ("DICompositeType", "offset"),
+    ("DIDerivedType", "annotations"),
+    ("DIDerivedType", "extraData"),
+    ("DIDerivedType", "offset"),
+    ("DIImportedEntity", "elements"),
+    ("DIImportedEntity", "file"),
+    ("DILexicalBlock", "file"),
+    ("DILocalVariable", "annotations"),
+    ("DIModule", "file"),
+    ("DIModule", "scope"),
+    ("DIStringType", "size"),
+    ("DIStringType", "stringLength"),
+    ("DIStringType", "stringLengthExpression"),
+    ("DIStringType", "stringLocationExpression"),
+    ("DITemplateValueParameter", "value"),
+];
