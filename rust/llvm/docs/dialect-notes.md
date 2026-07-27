@@ -44,6 +44,11 @@ parentheses is uninterpreted.
 remains is `getelementptr`, the surviving casts, `extractelement`,
 `insertelement` and `shufflevector`.
 
+**A numbered metadata string.** `!0 = !"text"` is refused, because upstream
+refuses it: a string is an operand and a node definition is a tuple or a
+specialized node. Accepting it would let us print something `llvm-as` will
+not read back, which the builder smoke test caught.
+
 **Use-list order directives.** `uselistorder` is an error. Re-emit without
 `-preserve-ll-uselistorder`.
 

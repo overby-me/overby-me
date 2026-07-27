@@ -41,7 +41,7 @@ and each row names the check that backs it.
 | Metadata uniquing and renumbering on output | done | `llvm-opt-differential`, `llvm-roundtrip` |
 | Verifier: placement rules for `!range`, `!align`, `!nonnull`, `!prof`, scope lists | done | `llvm-upstream-verifier` |
 | `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
-| Builder API: types inferred, alignments filled in | done for the common instructions | `llvm-builder-smoke` |
+| Builder API: types inferred, alignments filled in | done for the common instructions, unwinding, attributes and metadata | `llvm-builder-smoke` |
 
 ## The round trip
 

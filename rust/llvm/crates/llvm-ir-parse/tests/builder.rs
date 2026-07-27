@@ -8,9 +8,12 @@
 //! parser is the third opinion that makes the agreement mean something.
 
 use llvm_ir::Module;
+use llvm_ir::attribute::{Attribute, EnumAttr};
 use llvm_ir::builder::Builder;
 use llvm_ir::instruction::{BinOp, IntFlags, IntPredicate};
+use llvm_ir::metadata::MdOperand;
 use llvm_ir::value::GlobalRef;
+use llvm_ir::value::Value;
 use llvm_support::{DataLayout, Triple};
 
 const X86_64_LINUX: &str =
@@ -129,6 +132,125 @@ exit:                                             ; preds = %header
   ret i32 %result
 }
 "#;
+
+/// The unwinding shape, the attributes and the metadata attachments the
+/// backend fork will need on top of straight-line code.
+fn build_unwinding() -> Module {
+    let mut module = Module::new();
+    module.module_id = Some("builder-unwind".to_string());
+    module.source_filename = Some("builder-unwind".to_string());
+
+    let i32 = module.ctx.int_type(32);
+    let void = module.ctx.void_type();
+    let pointer = module.ctx.pointer_type(0);
+    let exception = module.ctx.struct_type(vec![pointer, i32], false);
+
+    let personality = module.declare_function("rust_eh_personality", i32, Vec::new(), true);
+    let may_throw = module.declare_function("may_throw", i32, Vec::new(), false);
+    let guarded = module.declare_function("guarded", i32, vec![pointer], false);
+
+    module.add_function_attribute(guarded, Attribute::Enum(EnumAttr::NonLazyBind));
+    module.add_return_attribute(guarded, Attribute::Enum(EnumAttr::NoUndef));
+    module.add_param_attribute(guarded, 0, Attribute::Enum(EnumAttr::NoAlias));
+    module.set_personality(guarded, personality);
+
+    let flag = module.md_ints(32, &[1]);
+    let key_string = module.md_string("frame-pointer");
+    let key = module.md_tuple(vec![key_string], false);
+    let behaviour = module.ctx.const_int_of(32, 8);
+    let level = module.ctx.const_int_of(32, 2);
+    let flags = module.md_tuple(
+        vec![
+            MdOperand::Value {
+                ty: i32,
+                value: Value::Constant(behaviour),
+            },
+            MdOperand::String("PIC Level".to_string()),
+            MdOperand::Value {
+                ty: i32,
+                value: Value::Constant(level),
+            },
+        ],
+        false,
+    );
+    module.add_named_metadata("llvm.module.flags", vec![flags]);
+    module.add_named_metadata("custom.list", vec![flag, key]);
+
+    let mut builder = Builder::new(&mut module, guarded);
+    let entry = builder.append_block(Some("entry"));
+    let normal = builder.append_block(Some("normal"));
+    let cleanup = builder.append_block(Some("cleanup"));
+
+    builder.position_at_end(entry);
+    let result = builder.invoke(may_throw, Vec::new(), normal, cleanup);
+    builder.name(result, "call");
+
+    builder.position_at_end(normal);
+    let range = builder.module().md_ints(32, &[0, 8]);
+    let pointer_argument = builder.argument(0);
+    let loaded = builder.load(i32, pointer_argument);
+    builder.name(loaded, "loaded");
+    builder.attach(loaded, "range", range);
+    let sum = builder.binary(BinOp::Add, result, loaded);
+    builder.name(sum, "sum");
+    builder.ret(Some(sum));
+
+    builder.position_at_end(cleanup);
+    let pad = builder.landing_pad(exception, true, Vec::new());
+    builder.name(pad, "pad");
+    builder.resume(pad);
+
+    let _ = void;
+    module
+}
+
+/// As with `EXPECTED`, this exact text was accepted by real `llvm-as` and
+/// printed back unchanged by `llvm-dis`.
+const EXPECTED_UNWINDING: &str = r#"; ModuleID = 'builder-unwind'
+source_filename = "builder-unwind"
+
+declare i32 @rust_eh_personality(...)
+
+declare i32 @may_throw()
+
+; Function Attrs: nonlazybind
+define noundef i32 @guarded(ptr noalias %0) #0 personality ptr @rust_eh_personality {
+entry:
+  %call = invoke i32 @may_throw()
+          to label %normal unwind label %cleanup
+
+normal:                                           ; preds = %entry
+  %loaded = load i32, ptr %0, align 4, !range !3
+  %sum = add i32 %call, %loaded
+  ret i32 %sum
+
+cleanup:                                          ; preds = %entry
+  %pad = landingpad { ptr, i32 }
+          cleanup
+  resume { ptr, i32 } %pad
+}
+
+attributes #0 = { nonlazybind }
+
+!llvm.module.flags = !{!0}
+!custom.list = !{!1, !2}
+
+!0 = !{i32 8, !"PIC Level", i32 2}
+!1 = !{i32 1}
+!2 = !{!"frame-pointer"}
+!3 = !{i32 0, i32 8}
+"#;
+
+#[test]
+fn the_unwinding_shape_builds_and_verifies() {
+    let module = build_unwinding();
+    let errors = llvm_ir::verify_module(&module);
+    assert!(errors.is_empty(), "{errors:#?}");
+    let printed = llvm_ir_print::print_module(&module);
+    assert_eq!(printed, EXPECTED_UNWINDING, "\n--- printed ---\n{printed}");
+    let parsed = llvm_ir_parse::parse_module(&printed).expect("our own output parses");
+    assert_eq!(llvm_ir_print::print_module(&parsed), printed);
+}
 
 #[test]
 fn a_built_module_prints_what_was_expected() {

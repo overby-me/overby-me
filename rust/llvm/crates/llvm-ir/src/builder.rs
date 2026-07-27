@@ -27,16 +27,18 @@
 //! builder.ret(Some(doubled));
 //! ```
 
+use crate::attribute::Attribute;
 use crate::constant::{CastOp, ConstId, Constant, GepFlags};
 use crate::function::{BasicBlock, Function, Param};
 use crate::global::{GlobalQualifiers, GlobalVariable, Linkage, UnnamedAddr};
 use crate::instruction::{
     AtomicOrdering, BinOp, CallArg, CallData, FastMathFlags, InstKind, Instruction, IntFlags,
-    IntPredicate, SyncScope,
+    IntPredicate, LandingPadClause, SyncScope,
 };
+use crate::metadata::{MdAttachment, MdOperand, MdRef, Metadata, NamedMetadata};
 use crate::module::Module;
 use crate::types::{TypeId, TypeKind};
-use crate::value::{BlockId, FunctionId, GlobalRef, GlobalVarId, InstId, Name, Value};
+use crate::value::{BlockId, FunctionId, GlobalRef, GlobalVarId, InstId, MdId, Name, Value};
 use llvm_support::ApInt;
 
 impl Module {
@@ -100,6 +102,65 @@ impl Module {
         let ty = self.ctx.array_type(byte, bytes.len() as u64);
         let constant = self.ctx.intern_constant(Constant::String { ty, bytes });
         (ty, constant)
+    }
+
+    /// Attributes on a function, its return value, and its parameters. The
+    /// backend sets these constantly: `docs/surface-inventory.md` counts 52
+    /// call sites across 23 attribute entry points.
+    pub fn add_function_attribute(&mut self, id: FunctionId, attribute: Attribute) {
+        self.function_mut(id).attrs.push(attribute);
+    }
+
+    pub fn add_return_attribute(&mut self, id: FunctionId, attribute: Attribute) {
+        self.function_mut(id).return_attrs.push(attribute);
+    }
+
+    pub fn add_param_attribute(&mut self, id: FunctionId, index: usize, attribute: Attribute) {
+        self.function_mut(id).params[index].attrs.push(attribute);
+    }
+
+    /// The personality routine a function's landing pads dispatch through.
+    pub fn set_personality(&mut self, id: FunctionId, personality: FunctionId) {
+        let ty = self.ctx.pointer_type(0);
+        let value = self.ctx.intern_constant(Constant::Global {
+            ty,
+            target: GlobalRef::Function(personality),
+        });
+        self.function_mut(id).personality = Some((ty, value));
+    }
+
+    /// A metadata string.
+    ///
+    /// This is an operand rather than a node: upstream has no syntax for a
+    /// numbered string, so `!0 = !"text"` does not parse and a string only
+    /// ever appears inside a node.
+    pub fn md_string(&mut self, text: &str) -> MdOperand {
+        MdOperand::String(text.to_string())
+    }
+
+    pub fn md_tuple(&mut self, operands: Vec<MdOperand>, distinct: bool) -> MdId {
+        self.add_metadata(Metadata::Tuple { distinct, operands })
+    }
+
+    /// A tuple of typed integers, which is the shape of `!range` and of most
+    /// module flags.
+    pub fn md_ints(&mut self, bits: u32, values: &[i128]) -> MdId {
+        let ty = self.ctx.int_type(bits);
+        let operands = values
+            .iter()
+            .map(|value| MdOperand::Value {
+                ty,
+                value: Value::Constant(self.ctx.const_int_of(bits, *value)),
+            })
+            .collect();
+        self.md_tuple(operands, false)
+    }
+
+    pub fn add_named_metadata(&mut self, name: &str, operands: Vec<MdId>) {
+        self.named_metadata.push(NamedMetadata {
+            name: name.to_string(),
+            operands,
+        });
     }
 
     /// The function type of a declared function, which a call needs and
@@ -393,6 +454,13 @@ impl<'m> Builder<'m> {
     }
 
     pub fn call(&mut self, callee: FunctionId, args: Vec<Value>) -> Value {
+        let (result, call) = self.call_data(callee, args);
+        self.append(result, InstKind::Call(Box::new(call)))
+    }
+
+    /// Everything `call` and `invoke` share: the callee's signature, the
+    /// argument types, and the defaults for the rest.
+    fn call_data(&mut self, callee: FunctionId, args: Vec<Value>) -> (TypeId, CallData) {
         let function_type = self.module.function_type_of(callee);
         let result = self.module.function(callee).return_type;
         let callee_value = self.global_ref(GlobalRef::Function(callee));
@@ -404,9 +472,9 @@ impl<'m> Builder<'m> {
                 value,
             })
             .collect();
-        self.append(
+        (
             result,
-            InstKind::Call(Box::new(CallData {
+            CallData {
                 tail: crate::instruction::TailKind::None,
                 fast_math: FastMathFlags::default(),
                 calling_conv: crate::instruction::CallingConv::C,
@@ -417,7 +485,7 @@ impl<'m> Builder<'m> {
                 args,
                 fn_attrs: crate::attribute::AttributeSet::default(),
                 bundles: Vec::new(),
-            })),
+            },
         )
     }
 
@@ -486,6 +554,129 @@ impl<'m> Builder<'m> {
                 if_false,
             },
         );
+    }
+
+    /// A call that can unwind, which is what every call in a function with
+    /// destructors becomes.
+    pub fn invoke(
+        &mut self,
+        callee: FunctionId,
+        args: Vec<Value>,
+        normal: BlockId,
+        unwind: BlockId,
+    ) -> Value {
+        let (result, call) = self.call_data(callee, args);
+        self.append(
+            result,
+            InstKind::Invoke {
+                call: Box::new(call),
+                normal,
+                unwind,
+            },
+        )
+    }
+
+    /// The landing pad an unwind edge arrives at. The type is the exception
+    /// pair the personality routine hands back, `{ ptr, i32 }` for Rust.
+    pub fn landing_pad(
+        &mut self,
+        ty: TypeId,
+        cleanup: bool,
+        clauses: Vec<LandingPadClause>,
+    ) -> Value {
+        self.append(ty, InstKind::LandingPad { cleanup, clauses })
+    }
+
+    pub fn resume(&mut self, value: Value) {
+        let ty = self.type_of(value);
+        let void = self.module.ctx.void_type();
+        self.append(void, InstKind::Resume { ty, value });
+    }
+
+    pub fn switch(&mut self, value: Value, default: BlockId, cases: Vec<(Value, BlockId)>) {
+        let value_type = self.type_of(value);
+        let void = self.module.ctx.void_type();
+        self.append(
+            void,
+            InstKind::Switch {
+                value_type,
+                value,
+                default,
+                cases,
+            },
+        );
+    }
+
+    pub fn extract_value(&mut self, aggregate: Value, indices: Vec<u32>) -> Value {
+        let aggregate_type = self.type_of(aggregate);
+        let ty = self.element_at(aggregate_type, &indices);
+        self.append(
+            ty,
+            InstKind::ExtractValue {
+                aggregate_type,
+                aggregate,
+                indices,
+            },
+        )
+    }
+
+    pub fn insert_value(&mut self, aggregate: Value, element: Value, indices: Vec<u32>) -> Value {
+        let aggregate_type = self.type_of(aggregate);
+        let element_type = self.type_of(element);
+        self.append(
+            aggregate_type,
+            InstKind::InsertValue {
+                aggregate_type,
+                aggregate,
+                element_type,
+                element,
+                indices,
+            },
+        )
+    }
+
+    pub fn freeze(&mut self, operand: Value) -> Value {
+        let operand_type = self.type_of(operand);
+        self.append(
+            operand_type,
+            InstKind::Freeze {
+                operand_type,
+                operand,
+            },
+        )
+    }
+
+    /// Attaches metadata to the instruction a value came from, which is how
+    /// `!dbg`, `!range` and `!noalias` reach the IR.
+    pub fn attach(&mut self, value: Value, kind: &str, node: MdId) {
+        let Value::Instruction(id) = value else {
+            return;
+        };
+        self.module
+            .function_mut(self.function)
+            .instruction_mut(id)
+            .metadata
+            .push(MdAttachment {
+                kind: kind.to_string(),
+                node: MdRef::Id(node),
+            });
+    }
+
+    /// The type reached by walking an aggregate's index list.
+    fn element_at(&mut self, aggregate: TypeId, indices: &[u32]) -> TypeId {
+        let mut current = aggregate;
+        for index in indices {
+            current = match self.module.ctx.type_kind(current).clone() {
+                TypeKind::Struct { fields, .. } => fields[*index as usize],
+                TypeKind::NamedStruct(id) => {
+                    let fields = self.module.ctx.struct_def(id).fields.clone();
+                    fields.expect("an opaque struct has no elements")[*index as usize]
+                }
+                TypeKind::Array { element, .. } => element,
+                _ => current,
+            };
+        }
+        current
     }
 
     pub fn unreachable(&mut self) {

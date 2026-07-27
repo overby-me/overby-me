@@ -156,8 +156,18 @@ accumulates its result, then checks three things: it verifies, it prints the
 text upstream prints for that module (hand-written, and confirmed by feeding
 it to real llvm-as and llvm-dis), and parsing our own output back gives a
 module that prints identically.
-Not yet covered, and wanted by B5: invoke and the funclet terminators,
-attribute construction, metadata attachment, and debug info.
+**B4a. [done] The rest of what B5 needs from the builder.** *(2026-07-27)*
+invoke, landingpad, resume, switch, extractvalue, insertvalue, freeze;
+attributes on a function, its return and its parameters; the personality
+routine; metadata nodes, named metadata and instruction attachments.
+`llvm-builder-smoke` now builds an unwinding function with all of it, and
+that text was confirmed against real llvm-as and llvm-dis too.
+It found a printer bug on the way: `!0 = !"text"` is not legal upstream,
+because a string is an operand and never a numbered node. The parser used
+to accept it, so we could emit something llvm-as would refuse.
+Still not covered: debug info, which is T1's `llvm-debuginfo`, and the
+funclet-based personality (catchswitch, catchpad, cleanuppad), which is
+Windows and deferred with the rest of that target.
 
 **B5. [todo] Vendor `rustc_codegen_llvm` into `crates/rustc-codegen-llvmrs`.**
 Needs a pinned nightly with `rustc-dev` and a `rust-toolchain.toml` (PLAN §6.1).

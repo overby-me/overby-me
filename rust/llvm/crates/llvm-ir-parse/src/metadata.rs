@@ -19,12 +19,12 @@ impl Parser {
     pub(crate) fn parse_metadata_definition(&mut self) -> Result<Metadata, ParseError> {
         let distinct = self.eat_word("distinct");
         match self.peek().clone() {
-            Token::MetadataString(text) => {
-                self.advance();
-                if distinct {
-                    return self.error("a metadata string cannot be distinct");
-                }
-                Ok(Metadata::String(text))
+            // `!0 = !"text"` looks reasonable and upstream rejects it: a
+            // string is an operand, and a node definition is a tuple or a
+            // specialized node. Accepting it would let us print something
+            // llvm-as will not read back.
+            Token::MetadataString(_) => {
+                self.error("a metadata definition must be a node, not a string")
             }
             Token::Exclaim => {
                 self.advance();
