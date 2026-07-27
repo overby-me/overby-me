@@ -1553,17 +1553,39 @@ impl Parser {
 
         self.require(Token::LeftParen)?;
         let mut args = Vec::new();
+        let mut forwards = false;
         while !self.eat(&Token::RightParen) {
             if !args.is_empty() {
                 self.require(Token::Comma)?;
             }
+            // `f(%a, ...)` hands the caller's own variable arguments
+            // straight through, which only a `musttail` call does and only a
+            // function that has some can do.
             if self.eat(&Token::Ellipsis) {
+                forwards = true;
+                if tail != TailKind::MustTail {
+                    return self
+                        .error("unexpected ellipsis in argument list for non-musttail call");
+                }
+                if !function.is_var_arg {
+                    return self.error(
+                        "unexpected ellipsis in argument list for musttail call in non-varargs \
+                         function",
+                    );
+                }
                 continue;
             }
             let ty = self.parse_type()?;
             let attrs = self.parse_attribute_set(false)?;
             let value = self.parse_value(function, state, ty)?;
             args.push(CallArg { ty, attrs, value });
+        }
+        // The other direction: a musttail call hands the frame over whole, so
+        // a caller that has variable arguments has to hand those over too.
+        if tail == TailKind::MustTail && function.is_var_arg && !forwards {
+            return self.error(
+                "expected '...' at end of argument list for musttail call in varargs function",
+            );
         }
 
         // The declaration upstream builds takes its shape from the first

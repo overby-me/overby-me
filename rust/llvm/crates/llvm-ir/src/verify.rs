@@ -24,7 +24,7 @@ use crate::summary::SummaryValue;
 use crate::types::{StructId, TypeKind};
 use crate::value::{AliasId, BlockId, GlobalRef, GlobalVarId, InstId, MdId, Name, Value};
 use crate::{FunctionId, TypeId};
-use llvm_support::{ApInt, DataLayout};
+use llvm_support::ApInt;
 
 /// The largest alignment upstream's encoding holds, in bytes. The parser caps
 /// a written one; this is for the alignments a type asks for by its size.
@@ -868,6 +868,36 @@ impl Verifier<'_> {
                 self.report(format!(
                     "@{name} aliases something this module does not define"
                 ));
+            }
+            // A bare reference to a symbol has the symbol's own pointer
+            // type, address space and all. Crossing address spaces is what
+            // `addrspacecast` is for, so an expression aliasee is not asked.
+            let bare = match self.module.ctx.constant(aliasee) {
+                Constant::Global { target, ty } => Some((*target, *ty)),
+                _ => None,
+            };
+            if let Some((target, ty)) = bare
+                && let Some(written) = self.module.ctx.type_kind(ty).pointer_address_space()
+            {
+                let actual = match target {
+                    GlobalRef::Function(id) => self
+                        .module
+                        .function(id)
+                        .qualifiers
+                        .address_space
+                        .unwrap_or(0),
+                    GlobalRef::Variable(id) => self.module.globals[id.0 as usize]
+                        .qualifiers
+                        .address_space
+                        .unwrap_or(0),
+                    _ => written,
+                };
+                if written != actual {
+                    self.report(format!(
+                        "@{name} names a symbol in address space {actual} through a pointer to \
+                         address space {written}"
+                    ));
+                }
             }
         }
     }
@@ -2815,20 +2845,24 @@ impl Verifier<'_> {
                     // A call may write the space it goes through, and then
                     // that is what the callee has to be in. Written or not,
                     // the two have to agree; unwritten it is the program's.
+                    // A module that writes no layout gets the default one,
+                    // whose program space is zero, so there is always a
+                    // space to compare against.
                     let wanted = match call.address_space {
-                        Some(written) => Some(written),
+                        Some(written) => written,
                         None => self
                             .module
                             .data_layout
-                            .as_ref()
-                            .map(DataLayout::program_address_space),
+                            .clone()
+                            .unwrap_or_default()
+                            .program_address_space(),
                     };
-                    if let Some(wanted) = wanted
-                        && space != wanted
                     {
-                        self.report(format!(
-                            "{where_} calls through address space {space} rather than {wanted}"
-                        ));
+                        if space != wanted {
+                            self.report(format!(
+                                "{where_} calls through address space {space} rather than {wanted}"
+                            ));
+                        }
                     }
                 }
                 let direct = matches!(call.callee, Value::Constant(id)

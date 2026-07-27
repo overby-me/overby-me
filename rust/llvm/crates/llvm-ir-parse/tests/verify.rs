@@ -61,6 +61,14 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "define i8 @f(ptr addrspace(42) %p) {\nentry:\n  %r = call i8 %p(i32 0)\n  ret i8 %r\n}\n",
+        "calls through address space 42 rather than 0",
+    ),
+    (
+        "@a = alias void (), ptr addrspace(1) @f\n\ndefine void @f() {\nentry:\n  ret void\n}\n",
+        "names a symbol in address space 0 through a pointer to address space 1",
+    ),
+    (
         "%t = type opaque\n\ndefine void @f(%t %a) {\nentry:\n  ret void\n}\n",
         "parameter 0 has a type no caller can pass",
     ),
@@ -1090,6 +1098,26 @@ const REJECTED: &[(&str, &str)] = &[
         "NUL character is not allowed in names",
     ),
     (
+        "declare ptr @f(ptr, ...)\n\ndefine ptr @g(ptr %this) {\n  %rv = musttail call ptr (ptr, ...) @f(ptr %this, ...)\n  ret ptr %rv\n}\n",
+        "musttail call in non-varargs function",
+    ),
+    (
+        "define void @f(ptr* %a) {\nentry:\n  ret void\n}\n",
+        "ptr* is invalid - use ptr instead",
+    ),
+    (
+        "@g = global ptr* null\n",
+        "ptr* is invalid - use ptr instead",
+    ),
+    (
+        "declare ptr @f(ptr, ...)\n\ndefine ptr @g(ptr %this, ...) {\n  %rv = call ptr (ptr, ...) @f(ptr %this, ...)\n  ret ptr %rv\n}\n",
+        "ellipsis in argument list for non-musttail call",
+    ),
+    (
+        "declare ptr @f(ptr, ...)\n\ndefine ptr @g(ptr %this, ...) {\n  %rv = musttail call ptr (ptr, ...) @f(ptr %this)\n  ret ptr %rv\n}\n",
+        "expected '...' at end of argument list for musttail call in varargs function",
+    ),
+    (
         "define void @f(ptr align 8589934592 %p) {\nentry:\n  ret void\n}\n",
         "huge alignment values are unsupported",
     ),
@@ -1380,6 +1408,15 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // A call that writes the space it goes through, and one that goes
+    // through the program's own.
+    "define i8 @f(ptr addrspace(42) %p) {\nentry:\n  %r = call addrspace(42) i8 %p(i32 0)\n  ret i8 %r\n}\n",
+    "define i8 @f(ptr %p) {\nentry:\n  %r = call i8 %p(i32 0)\n  ret i8 %r\n}\n",
+    // Crossing address spaces is what addrspacecast is for, and a musttail
+    // call that hands its variable arguments over.
+    "@i = global i32 0\n@ia = alias ptr, addrspacecast (ptr @i to ptr addrspace(3))\n",
+    "declare ptr @f(ptr, ...)\n\ndefine ptr @g(ptr %this, ...) {\n  %rv = musttail call ptr (ptr, ...) @f(ptr %this, ...)\n  ret ptr %rv\n}\n",
+    "declare ptr @f(ptr)\n\ndefine ptr @g(ptr %this) {\n  %rv = musttail call ptr @f(ptr %this)\n  ret ptr %rv\n}\n",
     // An opaque struct where only its name is needed, and the attributes
     // that do describe a result.
     "%t = type opaque\n\ndeclare %t @f()\n",

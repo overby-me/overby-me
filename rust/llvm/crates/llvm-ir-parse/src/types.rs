@@ -60,6 +60,14 @@ impl Parser {
                 None
             };
             if self.peek() == &Token::Star {
+                // The older spelling is read; writing it around the newer one
+                // is not. `ptr*` is a module that has both dialects in it at
+                // once, and upstream says which to use.
+                if matches!(self.module.ctx.type_kind(current), TypeKind::Pointer { .. })
+                    && current == base
+                {
+                    return self.error("ptr* is invalid - use ptr instead");
+                }
                 self.advance();
                 current = self.module.ctx.pointer_type(space.unwrap_or(0));
                 continue;
@@ -88,6 +96,14 @@ impl Parser {
                 None
             };
             if self.peek() == &Token::Star {
+                // The older spelling is read; writing it around the newer one
+                // is not. `ptr*` has both dialects in it at once, and
+                // upstream says which to use.
+                if matches!(self.module.ctx.type_kind(current), TypeKind::Pointer { .. })
+                    && current == base
+                {
+                    return self.error("ptr* is invalid - use ptr instead");
+                }
                 self.advance();
                 current = self.module.ctx.pointer_type(space.unwrap_or(0));
                 continue;

@@ -999,6 +999,33 @@ And a caller cannot pass a struct whose body this module has never seen,
 there being no knowing how much of it to copy. A return type may be one,
 the caller having only to name the place it goes.
 Assembler 449 to 453, refusals still five.
+A seventieth pass took four more from the same suite, and the second bound
+earned its keep again. A `musttail` call hands the frame over whole, so a
+caller with variable arguments hands those over too: `f(%a, ...)` in an
+argument list needs `musttail` and needs the caller to have some, and a
+`musttail` call in a varargs function needs the ellipsis at the end. Both
+directions, four files with the alias rule.
+That alias rule was wrong on its first shape and the ceiling said so, 5 to
+7, naming `addrspacecast-alias.ll` and `associated-metadata.ll`. What is
+refused is a *bare* reference to a symbol written with an address space
+the symbol does not have, because a bare reference has the symbol's own
+pointer type. Crossing address spaces is what `addrspacecast` is for, and
+an aliasee that is one is not asked.
+Assembler 453 to 457.
+A seventy-first pass took two more, one of them a rule that existed and
+never fired. A call through a value goes through the program's address
+space unless it says otherwise, and that check only ran when the module
+wrote a data layout; a module that writes none gets the default one,
+whose program space is nought, so there is always a space to compare
+against. Three files.
+And `ptr*` has both dialects in it at once: the older spelling is read,
+and writing it around the newer one is not, which upstream says in as
+many words. `i8**` is still fine, the inner `*` being what makes the
+pointer the outer one points to.
+Assembler 457 to 461. What is left in that suite is eleven use-list order
+negative tests that need the def-use chains PLAN 4.2 is waiting on, the
+DWARF vocabulary (three files), the target extension type table and the
+per-intrinsic `immarg` positions.
 One rule was probed and left. A `DILocation` inside a plain metadata node
 is refused when an instruction attachment reaches it, except under
 `llvm.loop`, whose whole subtree is exempt, and except from a named list.
