@@ -174,6 +174,21 @@ fn link_segments(text: &str) -> Vec<(String, Option<String>)> {
     segs
 }
 
+/// Whether a Slate block carries any non-blank text. Used when a block is split
+/// around an image: an image-only paragraph has no text of its own, so it is
+/// dropped rather than left as an empty paragraph above the image.
+#[cfg(any(target_arch = "wasm32", test))]
+fn block_has_text(block: &serde_json::Value) -> bool {
+    let Some(kids) = block.get("children").and_then(|c| c.as_array()) else {
+        return false;
+    };
+    kids.iter()
+        .any(|k| match k.get("text").and_then(|t| t.as_str()) {
+            Some(t) => !t.trim().is_empty(),
+            None => block_has_text(k),
+        })
+}
+
 #[cfg(target_arch = "wasm32")]
 mod dom {
     use super::*;
@@ -453,6 +468,52 @@ mod dom {
         object(pairs)
     }
 
+    /// One image block per `<img>` inside `el`, in document order.
+    fn image_blocks(el: &Element) -> Vec<Value> {
+        let Ok(imgs) = el.query_selector_all("img") else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for i in 0..imgs.length() {
+            let Some(node) = imgs.get(i) else { continue };
+            if let Some(img) = node.dyn_ref::<Element>() {
+                out.push(block_from_element(img));
+            }
+        }
+        out
+    }
+
+    /// One block element becomes one or more Slate blocks.
+    ///
+    /// `image` is block-level in this model: both the renderer and
+    /// `slate_to_html` treat it as its own block, and there is no inline image
+    /// leaf. But `execCommand("insertImage")` inserts the `<img>` INSIDE the
+    /// caret's block, and the inline walk only accumulates text leaves, so a
+    /// freshly inserted image was silently dropped on save (it stayed on screen
+    /// because the editor DOM still held it, and only vanished once the document
+    /// was re-rendered from the stored content). A block holding images is
+    /// therefore split: its own text first, then each image, in document order.
+    fn push_blocks_from_element(el: &Element, out: &mut Vec<Value>) {
+        let tag = el.tag_name().to_uppercase();
+        // A top-level <img> is already a block, and a list keeps its own
+        // recursion: hoisting an image out of a list item would move it past the
+        // whole list.
+        if matches!(tag.as_str(), "IMG" | "UL" | "OL") {
+            out.push(block_from_element(el));
+            return;
+        }
+        let images = image_blocks(el);
+        if images.is_empty() {
+            out.push(block_from_element(el));
+            return;
+        }
+        let text_block = block_from_element(el);
+        if block_has_text(&text_block) {
+            out.push(text_block);
+        }
+        out.extend(images);
+    }
+
     /// Serialize the `contenteditable` element's DOM into a Slate content array.
     pub fn dom_to_slate(container: &Element) -> Value {
         let mut blocks: Vec<Value> = Vec::new();
@@ -479,11 +540,17 @@ mod dom {
                     let tag = el.tag_name().to_uppercase();
                     if is_block_tag(&tag) {
                         flush(&mut pending, &mut blocks);
-                        blocks.push(block_from_element(el));
+                        push_blocks_from_element(el, &mut blocks);
                     } else {
                         // Loose inline element at the top level: fold into a
-                        // paragraph.
+                        // paragraph, hoisting any image out of it for the same
+                        // reason (an <img> inside a <b> or <a> is not a leaf).
                         collect_node(&node, &Marks::default(), &mut pending, i + 1 == len);
+                        let images = image_blocks(el);
+                        if !images.is_empty() {
+                            flush(&mut pending, &mut blocks);
+                            blocks.extend(images);
+                        }
                     }
                 }
                 Node::TEXT_NODE => {
@@ -855,6 +922,37 @@ mod tests {
         assert!(!is_email("a@b.c1")); // non-alpha TLD
         assert!(!is_email("spa ce@x.com")); // space in local
         assert!(!is_email("a@ b.com")); // space in domain host
+    }
+
+    /// A block split around an inserted image keeps a paragraph only when that
+    /// paragraph says something: an image-only block (what `insertImage` leaves
+    /// behind, often with the browser's bogus trailing `<br>`) must not persist as
+    /// an empty paragraph above every image.
+    #[test]
+    fn block_has_text_ignores_blank_and_nested_leaves() {
+        let blank = serde_json::json!({
+            "type": "paragraph",
+            "children": [{"text": ""}, {"text": "   "}],
+        });
+        assert!(!block_has_text(&blank));
+
+        let spoken = serde_json::json!({
+            "type": "paragraph",
+            "children": [{"text": ""}, {"text": "caption"}],
+        });
+        assert!(block_has_text(&spoken));
+
+        // Text nested in an inline element (a link leaf inside the block) counts.
+        let nested = serde_json::json!({
+            "type": "paragraph",
+            "children": [{"type": "link", "children": [{"text": "see this"}]}],
+        });
+        assert!(block_has_text(&nested));
+
+        // No children at all (a void block) is not text.
+        assert!(!block_has_text(
+            &serde_json::json!({"type": "image", "url": "x"})
+        ));
     }
 
     #[test]
