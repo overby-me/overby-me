@@ -675,7 +675,14 @@ impl Parser {
 
         match opcode.as_str() {
             "ret" => {
-                if self.eat_word("void") {
+                // `ret void` returns nothing and `ret void ()* null` returns
+                // a pointer to a function, so the word alone does not settle
+                // it: what follows does.
+                let returns_nothing = self.peek_word() == Some("void")
+                    && !matches!(self.peek_at(1), Token::LeftParen | Token::Star)
+                    && self.peek_at(1) != &Token::Word("addrspace".to_string());
+                if returns_nothing {
+                    self.advance();
                     return Ok((void, InstKind::Ret(None)));
                 }
                 let (ty, value) = self.parse_typed_value(function, state)?;

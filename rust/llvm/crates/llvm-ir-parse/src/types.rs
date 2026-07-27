@@ -21,9 +21,38 @@ impl Parser {
     /// A return type is read without the parenthesised half, `void (i32)`
     /// being a signature rather than a function type there, but `i8*` is
     /// still the older spelling of `ptr` and folds the same way.
+    /// Whether the parenthesised group starting here is followed by a `*`,
+    /// which is what makes it a function type rather than a parameter list.
+    fn star_follows_group(&self) -> bool {
+        let mut depth = 0i32;
+        let mut ahead = 0;
+        loop {
+            match self.peek_at(ahead) {
+                Token::LeftParen => depth += 1,
+                Token::RightParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self.peek_at(ahead + 1) == &Token::Star;
+                    }
+                }
+                Token::Eof => return false,
+                _ => {}
+            }
+            ahead += 1;
+        }
+    }
+
     pub(crate) fn parse_pointer_suffix(&mut self, base: TypeId) -> Result<TypeId, ParseError> {
         let mut current = base;
         loop {
+            // `define void ()* @f()` returns a pointer to a function. The
+            // parenthesised half is a parameter list here unless a `*`
+            // follows it, which is the only thing that tells the two apart,
+            // so the group is measured before it is read.
+            if self.peek() == &Token::LeftParen && self.star_follows_group() {
+                current = self.parse_type_suffix(current)?;
+                continue;
+            }
             let space = if self.peek_word() == Some("addrspace") && self.peek_at(4) == &Token::Star
             {
                 self.parse_optional_address_space()?

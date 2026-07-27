@@ -241,6 +241,8 @@ define_keyword_enum! {
         PtxKernel => "ptx_kernel",
         PtxDevice => "ptx_device",
         RiscvVectorCc => "riscv_vector_cc",
+        Hhvm => "hhvmcc",
+        HhvmC => "hhvm_ccc",
         Msp430Intr => "msp430_intrcc",
         IntelOclBi => "intel_ocl_bicc",
         M68kRtd => "m68k_rtdcc",

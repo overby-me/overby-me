@@ -1058,6 +1058,13 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // A pointer to a function, in the older spelling, where a return type
+    // and where an operand type. `ret void` still returns nothing: what
+    // follows the word is what settles it.
+    "define void ()* @f() {\nentry:\n  ret void ()* null\n}\n",
+    "define void @g() {\nentry:\n  ret void\n}\n",
+    // Two calling conventions the Bitcode tree uses.
+    "declare hhvmcc void @a()\n\ndeclare hhvm_ccc void @b()\n",
     // `i8*` is the older spelling of `ptr`, which upstream folds as it reads.
     // Nothing downstream can tell the two apart, here or there.
     "define void @f(i8* %p) {\nentry:\n  ret void\n}\n",

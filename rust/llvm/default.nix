@@ -159,7 +159,7 @@ in {
 
     # The tree that exists to test reading older bitcode, and so the one the
     # typed-pointer spelling dominated: 152 of 232 before it was folded.
-    llvm-tree-bitcode = pkgs: treeCheck pkgs "Bitcode" 229;
+    llvm-tree-bitcode = pkgs: treeCheck pkgs "Bitcode" 232;
   };
 
   packages.rust-llvm = {lib, ...}:

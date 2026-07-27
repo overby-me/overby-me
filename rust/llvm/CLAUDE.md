@@ -701,8 +701,24 @@ Six trees are read whole now: DebugInfo, Linker, ThinLTO, Other, MC and
 Feature. Bitcode goes 153 to 229 of 232, Transforms to 10,223, CodeGen to
 22,369, Analysis to 1,394, Instrumentation to 505. Assembler 447 to 449 with
 refusals 8 to 5, Verifier refusals 1 to nought, and the differential 128 to
-129. Across the eleven trees that is 36,821 of the 37,334 modules llvm-as
+129. Across the eleven trees that is 36,824 of the 37,334 modules llvm-as
 reads, up from 36,526.
+A fifty-fourth pass finished what the fold started. `void ()*` is a pointer
+to a function, and three places had to learn it: a return type reads the
+parenthesised half only when a `*` follows it, which is the only thing that
+tells a function type from a parameter list, and `ret void` returns nothing
+only when nothing follows the word. Two more calling conventions, `hhvmcc`
+and `hhvm_ccc`. Bitcode is read whole now, 232 of 232, and seven trees are.
+The other recorded decision was measured and left alone. A target intrinsic
+no LangRef line names cannot be auto-declared, which is 94 files outside
+CodeGen and most of what CodeGen still refuses. Harvesting the names from
+`declare` lines across `llvm/test` would cover 56 of the 68 distinct names
+those 94 files call, which is a derivation from what upstream's tests happen
+to declare rather than from what exists. The set that does exist is in
+`llvm/include/llvm/IR/Intrinsics*.td`, which is neither C++ nor under
+`llvm/lib`, and whether reading it is within the clean-room claim of PLAN 12
+is the user's call rather than this loop's. The number is recorded either
+way.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

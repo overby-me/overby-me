@@ -100,16 +100,17 @@ right in every case.
 | `llvm/test/ThinLTO` | 260 | 260 | `llvm-tree-thinlto` |
 | `llvm/test/Other` | 160 | 160 | `llvm-tree-other` |
 | `llvm/test/MC` | 160 | 160 | `llvm-tree-mc` |
-| `llvm/test/Bitcode` | 229 | 232 | `llvm-tree-bitcode` |
+| `llvm/test/Bitcode` | 232 | 232 | `llvm-tree-bitcode` |
 | `llvm/test/Feature` | 82 | 82 | `llvm-tree-feature` |
 
-That is 36,821 of the 37,334 modules llvm-as reads across eleven trees.
+That is 36,824 of the 37,334 modules llvm-as reads across eleven trees.
 What is left is dominated by one thing: a target intrinsic no LangRef line
 names cannot be auto-declared, which is most of what CodeGen still refuses.
 The intrinsic name table is honest about why, and the number moves only if
 a specification of that set becomes readable.
 
-Six trees are read whole: DebugInfo, Linker, ThinLTO, Other, MC and Feature.
+Seven trees are read whole: Bitcode, DebugInfo, Linker, ThinLTO, Other, MC
+and Feature.
 
 The first sweep read 2,781 of the first 2,992 and the gaps it showed were not
 the ones the suites show. Four fixes closed 110 of them: the attribute
