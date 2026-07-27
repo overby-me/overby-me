@@ -3688,22 +3688,22 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
         "strict" => {
             // Make the entire root filesystem read-only (recursively).
             remount_read_only("/", config);
-            // Re-mount API filesystems and writable paths back to read-write.
-            // The recursive read-only remount above affects ALL submounts,
-            // so we must explicitly restore writability for paths that
-            // services need. This matches systemd's behavior where
-            // ProtectSystem=strict keeps /dev, /proc, /sys, /run, /tmp
-            // writable (they are API/runtime filesystems).
-            for rw_path in &[
-                "/dev", "/proc", "/sys", "/run", "/tmp", "/var/tmp", "/var/log",
-            ] {
+            // Restore write access to exactly what upstream's
+            // protect_system_strict_table restores and no more: the API
+            // filesystems, plus the home-ish paths that ProtectHome= then
+            // re-protects on its own further down.
+            //
+            // /run, /tmp, /var/tmp and /var/log are deliberately NOT here.
+            // Restoring them left a strict service able to write all over the
+            // runtime and log trees, which is the opposite of what the setting
+            // promises; a service that needs one of those gets it back through
+            // RuntimeDirectory=/LogsDirectory= or ReadWritePaths=, both of
+            // which are applied after this.
+            for rw_path in &["/proc", "/sys", "/dev", "/home", "/run/user", "/root"] {
                 if Path::new(rw_path).exists() {
                     bind_mount_readwrite(rw_path, config);
                 }
             }
-            // Also restore writability for the NixOS store — it's already
-            // read-only by nature but bind-mounting it avoids EROFS errors
-            // when services try to follow symlinks through it.
         }
         _ => {} // "no" or unrecognized
     }
@@ -4299,6 +4299,7 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
     }
 
     log::trace!("mount_ns: ALL STEPS COMPLETE");
+
 }
 
 /// Bind-mount a path on top of itself with MS_RDONLY.
