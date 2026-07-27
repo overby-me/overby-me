@@ -791,6 +791,20 @@ points through, and the printer had `ptr` spelled out as a literal in the
 three places one appears, a load, a store and a `cmpxchg`. Address space
 zero prints the same either way, which is why nothing noticed until a module
 used another one. 146 to 147.
+A sixty-first pass: a metadata field written with the value it would have
+had anyway is not written back, and two nodes that differ only in one are the
+same node once it is gone, so a `!named` list holding both comes back naming
+one twice. 147 to 149.
+Which fields behave that way has no shape. `DIEnumerator`'s
+`isUnsigned: false` goes and `DICompileUnit`'s `splitDebugInlining: false`
+stays; `DIDerivedType`'s `offset: 0` goes and `DISubrange`'s `lowerBound: 0`
+stays, that one being a metadata operand where a bare number is a constant
+rather than an absence. So `corpus/md-field-defaults.nu` writes each field at
+its default and reports whether it survives, and the table is that script's
+output. It is an allow-list rather than a rule with exceptions, which is the
+second thing the corpus taught this pass: the rule-with-exceptions version
+dropped `isOptimized: false` from every rustc compile unit, and the probe set
+had no `DICompileUnit` in it to catch that.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

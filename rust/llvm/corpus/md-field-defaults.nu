@@ -1,0 +1,98 @@
+#!/usr/bin/env nu
+# Derives which specialized-metadata fields upstream drops at their default.
+#
+#   nu md-field-defaults.nu [upstream-opt]
+#
+# A field written with the value it would have had anyway is not written back:
+# `!DIBasicType(tag: DW_TAG_base_type, name: "n")` comes back without the tag,
+# and `!DIBasicType(name: "n", align: 0)` without the align. That matters for
+# more than tidiness, because two nodes that differ only in such a field are
+# the same node once it is gone, and upstream uniques them: a `!named` list
+# holding both comes back naming one twice.
+#
+# Which fields do this is not a rule with a shape. `!DIEnumerator`'s
+# `isUnsigned: false` goes and `!DIGlobalVariable`'s `isLocal: false` stays;
+# `!DIDerivedType`'s `offset: 0` goes and `!DISubrange`'s `lowerBound: 0`
+# stays, that one being a metadata operand where a bare number is a constant
+# rather than an absence. So it is measured, one field at a time, by writing
+# the field at its default and seeing whether it survives.
+#
+# What comes out is the list of `(node, field)` pairs that drop. Everything
+# not listed is written as given.
+
+# The nodes to probe, each with the fields it needs to be legal at all and the
+# optional fields to test. A field is tested by adding it at `default` to the
+# legal skeleton.
+const PROBES = [
+  [node, skeleton, fields];
+
+  ["DICompileUnit" 'language: DW_LANG_C99, file: !10, producer: "p", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug' [[field, default]; [splitDebugFilename '""'] [dwoId '0'] [splitDebugInlining 'false'] [debugInfoForProfiling 'false'] [rangesBaseAddress 'false'] [sysroot '""'] [sdk '""']]]
+  ["DIBasicType" 'name: "n"' [[field, default]; [tag 'DW_TAG_base_type'] [size '0'] [align '0'] [encoding '0'] [flags '0'] [num_extra_inhabitants '0']]]
+  ["DIDerivedType" 'tag: DW_TAG_member, baseType: null' [[field, default]; [name '""'] [line '0'] [size '0'] [align '0'] [offset '0'] [flags '0'] [dwarfAddressSpace '0']]]
+  ["DICompositeType" 'tag: DW_TAG_structure_type' [[field, default]; [name '""'] [line '0'] [size '0'] [align '0'] [offset '0'] [flags '0'] [runtimeLang '0'] [identifier '""']]]
+  ["DISubroutineType" 'types: null' [[field, default]; [flags '0'] [cc '0']]]
+  ["DIFile" 'filename: "f", directory: "d"' [[field, default]; [source '""']]]
+  ["DISubprogram" 'name: "n", scope: null, type: null' [[field, default]; [linkageName '""'] [line '0'] [scopeLine '0'] [flags '0'] [virtualIndex '0'] [thisAdjustment '0']]]
+  ["DILexicalBlock" 'scope: !9' [[field, default]; [line '0'] [column '0']]]
+  ["DILocation" 'line: 1, scope: !9' [[field, default]; [column '0'] [isImplicitCode 'false']]]
+  ["DILocalVariable" 'name: "v", scope: !9' [[field, default]; [line '0'] [arg '0'] [flags '0'] [align '0']]]
+  ["DIGlobalVariable" 'name: "g", scope: null, isLocal: false, isDefinition: false' [[field, default]; [linkageName '""'] [line '0'] [align '0']]]
+  ["DIEnumerator" 'name: "e", value: 1' [[field, default]; [isUnsigned 'false']]]
+  ["DINamespace" 'name: "n", scope: null' [[field, default]; [exportSymbols 'false']]]
+  ["DIModule" 'scope: null, name: "M"' [[field, default]; [configMacros '""'] [includePath '""'] [apinotes '""'] [line '0'] [isDecl 'false']]]
+  ["DISubrange" 'count: 1' [[field, default]; [lowerBound '0'] [upperBound '0'] [stride '0']]]
+  ["DITemplateTypeParameter" 'name: "T", type: null' [[field, default]; [defaulted 'false']]]
+  ["DITemplateValueParameter" 'name: "V", type: null, value: null' [[field, default]; [defaulted 'false']]]
+  ["DIObjCProperty" 'name: "p"' [[field, default]; [line '0'] [setter '""'] [getter '""'] [attributes '0']]]
+  ["DIImportedEntity" 'tag: DW_TAG_imported_module, scope: null' [[field, default]; [name '""'] [line '0']]]
+  ["DILabel" 'scope: !9, name: "l", file: null, line: 1' [[field, default]; [column '0']]]
+  ["DIMacro" 'type: DW_MACINFO_define, name: "m"' [[field, default]; [line '0'] [value '""']]]
+  ["DIMacroFile" 'file: null' [[field, default]; [line '0']]]
+]
+
+# A module holding one node, plus the scope a function-local node needs.
+def probe-text [node: string, body: string]: nothing -> string {
+  # A few kinds have to be written `distinct`, and a compile unit has to be
+  # listed in `llvm.dbg.cu` besides.
+  let distinct = if $node in ["DICompileUnit" "DISubprogram" "DILexicalBlock" "DIGlobalVariable"] { "distinct " } else { "" }
+  let units = if $node == "DICompileUnit" { '!llvm.dbg.cu = !{!12, !0}' } else { '!llvm.dbg.cu = !{!12}' }
+  ([
+    '!named = !{!0}'
+    $"!0 = ($distinct)!($node)\(($body)\)"
+    '!9 = distinct !DISubprogram(name: "s", scope: !10, file: !10, line: 1, type: !11, spFlags: DISPFlagDefinition, unit: !12)'
+    '!10 = !DIFile(filename: "a", directory: "d")'
+    '!11 = !DISubroutineType(types: !13)'
+    '!12 = distinct !DICompileUnit(language: DW_LANG_C99, file: !10, producer: "p", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)'
+    '!13 = !{null}'
+    $units
+    '!llvm.module.flags = !{!14}'
+    '!14 = !{i32 2, !"Debug Info Version", i32 3}'
+  ] | str join "\n")
+}
+
+def main [upstream_opt: path = "opt"] {
+  let work = (mktemp -d)
+  let source = ([$work "probe.ll"] | path join)
+  mut dropped = []
+  for probe in $PROBES {
+    for entry in $probe.fields {
+      let body = $"($probe.skeleton), ($entry.field): ($entry.default)"
+      probe-text $probe.node $body | save -f $source
+      let printed = (do { ^$upstream_opt -S $source -o - } | complete)
+      if $printed.exit_code != 0 {
+        print $"($probe.node).($entry.field): upstream refused the probe"
+        continue
+      }
+      let line = ($printed.stdout | lines | where ($it | str starts-with "!0 = ") | first)
+      let kept = ($line | str contains $"($entry.field):")
+      if not $kept {
+        $dropped = ($dropped | append $"($probe.node).($entry.field)")
+      }
+      print $"($probe.node).($entry.field): (if $kept { 'kept' } else { 'DROPPED' })"
+    }
+  }
+  rm -rf $work
+  print ""
+  print "dropped at their default:"
+  print ($dropped | str join "\n")
+}

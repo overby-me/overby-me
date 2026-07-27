@@ -264,6 +264,71 @@ fn only_the_types_the_module_reaches_are_written() {
 /// attributes are written in upstream's order the same way a function's are.
 /// A pointer operand is written with the address space it points through
 /// rather than a bare `ptr`.
+/// A metadata field written with the value it would have had anyway is not
+/// written back, which also uniques two nodes that differ only in one.
+const METADATA_DEFAULTS: &[(&str, &str)] = &[
+    (
+        "!DIBasicType(tag: DW_TAG_base_type, name: \"n\", size: 8, align: 0)",
+        "!DIBasicType(name: \"n\", size: 8)",
+    ),
+    (
+        "!DIBasicType(tag: DW_TAG_unspecified_type, name: \"n\")",
+        "!DIBasicType(tag: DW_TAG_unspecified_type, name: \"n\")",
+    ),
+    (
+        "!DIDerivedType(tag: DW_TAG_member, baseType: null, size: 0, offset: 0)",
+        "!DIDerivedType(tag: DW_TAG_member, baseType: null)",
+    ),
+    (
+        "!DIEnumerator(name: \"e\", value: 1, isUnsigned: false)",
+        "!DIEnumerator(name: \"e\", value: 1)",
+    ),
+    // A metadata operand keeps a written zero: it is a constant there, not
+    // an absence.
+    (
+        "!DISubrange(count: 3, lowerBound: 0)",
+        "!DISubrange(count: 3, lowerBound: 0)",
+    ),
+    (
+        "!DIEnumerator(name: \"e\", value: 0)",
+        "!DIEnumerator(name: \"e\", value: 0)",
+    ),
+    // A required field stays whatever it holds.
+    (
+        "!DIFile(filename: \"f\", directory: \"\")",
+        "!DIFile(filename: \"f\", directory: \"\")",
+    ),
+];
+
+#[test]
+fn a_metadata_field_at_its_default_is_not_written() {
+    for (written, expected) in METADATA_DEFAULTS {
+        let text = format!("!named = !{{!0}}\n!0 = {written}\n");
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("{text} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        let line = printed
+            .split("!0 = ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no node\n{printed}"));
+        let line = line.split('\n').next().unwrap_or_default();
+        assert_eq!(line, *expected, "\nfrom: {written}");
+    }
+}
+
+/// Two nodes that differ only in a defaulted field are one node.
+#[test]
+fn dropping_a_default_uniques_two_nodes() {
+    let text = "!named = !{!0, !1}\n!0 = !DIBasicType(name: \"n\")\n!1 = !DIBasicType(name: \"n\", align: 0)\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("!named = !{!0, !0}"),
+        "the two should have uniqued\n--- printed ---\n{printed}"
+    );
+}
+
 const POINTER_OPERANDS: &[&str] = &[
     "  %v = load i32, ptr addrspace(42) @in, align 4",
     "  store i32 1, ptr addrspace(42) @in, align 4",
