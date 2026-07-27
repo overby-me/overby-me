@@ -65,9 +65,13 @@ impl Printer<'_> {
 
     pub(crate) fn instruction(&mut self, function: &Function, id: llvm_ir::InstId) {
         let instruction = function.instruction(id).clone();
-        self.push("  ");
-        let produces_value = !matches!(self.module.ctx.type_kind(instruction.ty), TypeKind::Void)
-            && !matches!(instruction.kind, InstKind::DebugRecord { .. });
+        // A debug record is indented past the instructions it sits between,
+        // the way upstream writes it: it is a record attached to the block
+        // rather than an instruction in it.
+        let debug_record = matches!(instruction.kind, InstKind::DebugRecord { .. });
+        self.push(if debug_record { "    " } else { "  " });
+        let produces_value =
+            !matches!(self.module.ctx.type_kind(instruction.ty), TypeKind::Void) && !debug_record;
         if produces_value {
             match &instruction.name {
                 Some(name) => {

@@ -10,7 +10,7 @@ target triple = "x86_64-unknown-linux-gnu"
 @alloc_aec0388915b72a4f610ad656c35be884 = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_e17502e153481471943c37e20438384b, [16 x i8] c"O\00\00\00\00\00\00\00'\0F\00\00\17\00\00\00" }>, align 8
 @_ZN6unwind4FLAG17he8c62a6779c6712eE = global [1 x i8] zeroinitializer, align 1
 @alloc_ecad43a203292ffac6e1f13204f48c54 = private unnamed_addr constant [68 x i8] c"/home/overby.me/Work/overby.me/rust/llvm/corpus/rustc/src/unwind.rs\00", align 1
-@alloc_33172796e9901f96b6eb397d8ff95a69 = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_ecad43a203292ffac6e1f13204f48c54, [16 x i8] c"C\00\00\00\00\00\00\00%\00\00\00\05\00\00\00" }>, align 8
+@alloc_2bf3b7bcf230530e2ed6093fedbbcbe5 = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_ecad43a203292ffac6e1f13204f48c54, [16 x i8] c"C\00\00\00\00\00\00\00(\00\00\00\05\00\00\00" }>, align 8
 
 ; Function Attrs: nonlazybind uwtable
 define void @"_ZN4core3ptr34drop_in_place$LT$unwind..Guard$GT$17hec65ff26918a7594E"(ptr align 1 %_1) unnamed_addr #0 {
@@ -87,7 +87,7 @@ bb1:                                              ; preds = %start
   ret i32 %_0
 
 panic:                                            ; preds = %start
-  invoke void @_RNvNtCs4uthzyWeO2a_4core9panicking18panic_bounds_check(i64 %i, i64 %xs.1, ptr align 8 @alloc_33172796e9901f96b6eb397d8ff95a69) #8
+  invoke void @_RNvNtCs4uthzyWeO2a_4core9panicking18panic_bounds_check(i64 %i, i64 %xs.1, ptr align 8 @alloc_2bf3b7bcf230530e2ed6093fedbbcbe5) #8
           to label %unreachable unwind label %cleanup
 
 bb3:                                              ; preds = %cleanup

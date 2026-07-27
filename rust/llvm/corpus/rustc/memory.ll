@@ -16,8 +16,8 @@ target triple = "x86_64-unknown-linux-gnu"
 @alloc_63f80bcd8c70ad91c779026710e70f7d = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_ce9bcd0b8e6f4a04e9569d41e1aa2a9b, [16 x i8] c"C\00\00\00\00\00\00\00.\00\00\00\05\00\00\00" }>, align 8
 @alloc_a91c9996004d941559f81d13c0926edc = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_ce9bcd0b8e6f4a04e9569d41e1aa2a9b, [16 x i8] c"C\00\00\00\00\00\00\00;\00\00\00$\00\00\00" }>, align 8
 @alloc_6b9cbf0f2808c7a8970daa6d90ba16e8 = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_ce9bcd0b8e6f4a04e9569d41e1aa2a9b, [16 x i8] c"C\00\00\00\00\00\00\00<\00\00\00\09\00\00\00" }>, align 8
-@alloc_e0e915d29b4478e0a9f487b5b09b6193 = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_ce9bcd0b8e6f4a04e9569d41e1aa2a9b, [16 x i8] c"C\00\00\00\00\00\00\00I\00\00\00\11\00\00\00" }>, align 8
-@alloc_d28222791111fff21b4714ede0db398d = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_ce9bcd0b8e6f4a04e9569d41e1aa2a9b, [16 x i8] c"C\00\00\00\00\00\00\00J\00\00\00\09\00\00\00" }>, align 8
+@alloc_c481e64023a296d31603aee7a63de78a = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_ce9bcd0b8e6f4a04e9569d41e1aa2a9b, [16 x i8] c"C\00\00\00\00\00\00\00M\00\00\00\11\00\00\00" }>, align 8
+@alloc_2c66a06554dbe5d8c54d9fd79679c158 = private unnamed_addr constant <{ ptr, [16 x i8] }> <{ ptr @alloc_ce9bcd0b8e6f4a04e9569d41e1aa2a9b, [16 x i8] c"C\00\00\00\00\00\00\00N\00\00\00\09\00\00\00" }>, align 8
 
 ; Function Attrs: cold nounwind nonlazybind uwtable
 define internal void @_ZN4core10intrinsics9cold_path17h2506609ce7083b0aE() unnamed_addr #0 {
@@ -344,9 +344,9 @@ start:
 ; Function Attrs: nounwind nonlazybind uwtable
 define i32 @volatile_touch(ptr %p) unnamed_addr #2 {
 start:
-  %v = call i32 @_ZN4core3ptr13read_volatile17h79f166680c81e669E(ptr %p, ptr align 8 @alloc_e0e915d29b4478e0a9f487b5b09b6193) #8
+  %v = call i32 @_ZN4core3ptr13read_volatile17h79f166680c81e669E(ptr %p, ptr align 8 @alloc_c481e64023a296d31603aee7a63de78a) #8
   %_0.i = add i32 %v, 1
-  call void @_ZN4core3ptr14write_volatile17hba9a9bfd4f554b5cE(ptr %p, i32 %_0.i, ptr align 8 @alloc_d28222791111fff21b4714ede0db398d) #8
+  call void @_ZN4core3ptr14write_volatile17hba9a9bfd4f554b5cE(ptr %p, i32 %_0.i, ptr align 8 @alloc_2c66a06554dbe5d8c54d9fd79679c158) #8
   ret i32 %v
 }
 

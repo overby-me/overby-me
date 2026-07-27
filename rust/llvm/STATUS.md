@@ -46,16 +46,27 @@ and each row names the check that backs it.
 ## The round trip
 
 Every file in `corpus/` is canonical `llvm-dis` output, and parsing one and
-printing it back reproduces it byte for byte. As of 2026-07-27 that is 9
-files and roughly 3,600 lines: 6 generated from real `rustc --emit=llvm-ir`
-(arithmetic, control flow, memory, atomics, calls, unwinding) and 3
-hand-written to pin syntax rustc never emits (module structure, one of every
-instruction, one of every constant and type form).
+printing it back reproduces it byte for byte. As of 2026-07-27 that is 14
+files and roughly 4,200 lines: 11 generated from real `rustc --emit=llvm-ir`
+(arithmetic, control flow, memory, atomics, calls, unwinding, debug info,
+optimised code, statics, enums, inline assembly) and 3 hand-written to pin
+syntax rustc never emits (module structure, one of every instruction, one of
+every constant and type form).
 
 This is a stronger property than "the parser accepted it". It says we agree
 with upstream about slot numbering, predecessor order, blank lines, label
 padding, which defaults print as nothing, and the several places where the
 same attribute is spelled differently depending on where it sits.
+
+The debug-info seed is the one that took work. Every other seed is built with
+`-Cdebuginfo=0`, and switching it on found three printer bugs at once: a
+local named in a `#dbg_declare` printed as `%<badref>` because the metadata
+printer could resolve slots and not names, a debug record is indented four
+spaces rather than two, and a specialized node's references are numbered in
+the order it stores them rather than the order it prints them. The last of
+those is `corpus/md-operand-order.nu`, which measures the storage order one
+node kind at a time; eight of the eighteen kinds it probes differ from their
+printed order, all of them by holding `file` before `scope`.
 
 ## Conformance against upstream's suites
 

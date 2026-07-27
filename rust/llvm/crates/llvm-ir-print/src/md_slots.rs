@@ -252,8 +252,8 @@ fn references(node: &Metadata) -> Vec<MdId> {
                 }
             }
         }
-        Metadata::Specialized { args, .. } => {
-            for field in fields_of(args) {
+        Metadata::Specialized { tag, args, .. } => {
+            for field in fields_in_numbering_order(tag, args) {
                 if let MdField::Ref(id) = field {
                     out.push(*id);
                 }
@@ -275,8 +275,8 @@ fn inline_nodes(node: &Metadata) -> Vec<Metadata> {
                 }
             }
         }
-        Metadata::Specialized { args, .. } => {
-            for field in fields_of(args) {
+        Metadata::Specialized { tag, args, .. } => {
+            for field in fields_in_numbering_order(tag, args) {
                 if let MdField::Inline(inline) = field {
                     out.push((**inline).clone());
                 }
@@ -291,6 +291,88 @@ fn fields_of(args: &SpecializedArgs) -> Vec<&MdField> {
         SpecializedArgs::Named(fields) => fields.iter().map(|(_, field)| field).collect(),
         SpecializedArgs::Positional(fields) => fields.iter().collect(),
     }
+}
+
+/// The fields of `tag` in the order upstream numbers what they reference,
+/// where that differs from the order they are written in.
+///
+/// A specialized node holds its operands in a fixed order that the printer
+/// does not follow: `DISubprogram` writes `scope` before `file` and stores
+/// `file` first, so a subprogram whose file and scope are both new gives the
+/// file the lower number. Numbering in written order would swap the two, and
+/// every node after them, which is why this table exists.
+///
+/// Derived by asking `llvm-as | llvm-dis`, one probe per kind, each field
+/// pointing at a node distinguishable by name. Kinds that are not here number
+/// in written order, which was measured too and is what most of them do.
+fn numbering_order(tag: &str) -> Option<&'static [&'static str]> {
+    Some(match tag {
+        "DISubprogram" => &[
+            "file",
+            "scope",
+            "name",
+            "linkageName",
+            "type",
+            "unit",
+            "declaration",
+            "retainedNodes",
+            "containingType",
+            "templateParams",
+            "thrownTypes",
+            "annotations",
+            "targetFuncName",
+        ],
+        "DICompositeType" => &[
+            "file",
+            "scope",
+            "name",
+            "baseType",
+            "elements",
+            "vtableHolder",
+            "templateParams",
+            "discriminator",
+            "dataLocation",
+            "associated",
+            "allocated",
+            "rank",
+            "annotations",
+            "specification",
+        ],
+        "DIDerivedType" => &[
+            "file",
+            "scope",
+            "name",
+            "baseType",
+            "extraData",
+            "annotations",
+        ],
+        "DILexicalBlock" | "DILexicalBlockFile" | "DIModule" => &["file", "scope"],
+        _ => return None,
+    })
+}
+
+/// The fields of a specialized node in the order upstream numbers them: the
+/// ones [`numbering_order`] names, in its order, then everything else as
+/// written.
+fn fields_in_numbering_order<'a>(tag: &str, args: &'a SpecializedArgs) -> Vec<&'a MdField> {
+    let SpecializedArgs::Named(fields) = args else {
+        return fields_of(args);
+    };
+    let Some(order) = numbering_order(tag) else {
+        return fields_of(args);
+    };
+    let mut sorted: Vec<(usize, &MdField)> = fields
+        .iter()
+        .map(|(name, field)| {
+            let rank = order
+                .iter()
+                .position(|known| known == name)
+                .unwrap_or(order.len());
+            (rank, field)
+        })
+        .collect();
+    sorted.sort_by_key(|(rank, _)| *rank);
+    sorted.into_iter().map(|(_, field)| field).collect()
 }
 
 /// The metadata a call passes as an argument, which upstream numbers before

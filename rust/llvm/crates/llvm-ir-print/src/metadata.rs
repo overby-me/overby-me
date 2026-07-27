@@ -94,16 +94,22 @@ impl Printer<'_> {
         match value {
             Value::Constant(id) => self.constant(id),
             Value::Instruction(id) => {
-                let text = match self.slots.instruction(id) {
-                    Some(slot) => format!("%{slot}"),
-                    None => "%<badref>".to_string(),
+                let text = match self.slots.instruction_name(id) {
+                    Some(name) => format!("%{name}"),
+                    None => match self.slots.instruction(id) {
+                        Some(slot) => format!("%{slot}"),
+                        None => "%<badref>".to_string(),
+                    },
                 };
                 self.push(&text);
             }
             Value::Argument(index) => {
-                let text = match self.slots.argument(index) {
-                    Some(slot) => format!("%{slot}"),
-                    None => "%<badref>".to_string(),
+                let text = match self.slots.argument_name(index) {
+                    Some(name) => format!("%{name}"),
+                    None => match self.slots.argument(index) {
+                        Some(slot) => format!("%{slot}"),
+                        None => "%<badref>".to_string(),
+                    },
                 };
                 self.push(&text);
             }

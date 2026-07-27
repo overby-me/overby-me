@@ -462,6 +462,31 @@ end, so `<i32 0, i32 4>` across two two-lane vectors picks nothing. A lane
 that does not matter is written `undef` or `poison` rather than as an
 out-of-range index, and a scalable mask is not checked because its length
 is not known here.
+A forty-third pass left the verifier alone and went at the corpus, which
+had been six rustc seeds all built with `-Cdebuginfo=0`. Five more seeds:
+debug info, optimised code, statics, enums, and inline assembly. Ten of the
+eleven round-tripped on the first try. The eleventh, debug info, found three
+printer bugs.
+A local named in a `#dbg_declare` printed as `%<badref>`, because the
+metadata printer could resolve a slot and not a name, and every local in a
+debug record has a name. A debug record is indented four spaces rather than
+two. And a specialized node's references are numbered in the order the node
+stores them rather than the order it prints them: `DISubprogram` writes
+`scope` before `file` and stores `file` first, so a subprogram whose file and
+scope are both new gives the file the lower number, and numbering in written
+order swapped those two and everything after them.
+That last one is not in LangRef, which documents syntax rather than layout,
+and this project does not read upstream's C++, so it was measured:
+`corpus/md-operand-order.nu` builds one probe per node kind with every
+reference field pointing at a node named after the field, and reads the
+numbering back. Eight of the eighteen kinds differ from their printed order,
+all by holding `file` before `scope`, and the table those eight became lives
+in `crates/llvm-ir-print/src/md_slots.rs`.
+The optimised seed needed `no_mangle` on every function: at `-Copt-level=2`
+and above a plain `pub fn` in a library crate is internalised and then
+deleted, and the first version of that seed came out holding nothing at all.
+It needs one codegen unit for the same reason, `--emit=llvm-ir -o` writing a
+single module while rustc splits an optimised crate across sixteen.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five
