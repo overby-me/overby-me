@@ -330,13 +330,18 @@ pub fn FolderApp(
                             }
                             }
                         }
-                        // The other views of this container: its own rich-text
-                        // description, and reordering its children. Navigations, not
-                        // actions, so they group apart. Gated on exactly what its
-                        // rows are: an empty group still draws a header.
-                        if !parent_path.is_empty() && (can_edit || (is_context_owner && count > 1)) {
-                            super::widgets::SheetGroup { title: t("common.toolsOpen"),
-                                if can_edit {
+                        // Every way of changing this container: its own rich-text
+                        // description, the order of its children, whether children
+                        // may be added at all, and pasting a selection into it.
+                        // Editing and sorting happen to be routes to another view
+                        // rather than actions in place, but that is a fact about the
+                        // code, not about the choice being made here.
+                        //
+                        // Gated on the disjunction of its rows: an empty group would
+                        // still draw its header.
+                        if is_context_owner || (can_edit && !parent_path.is_empty()) {
+                            super::widgets::SheetGroup { title: t("common.toolsManage"),
+                                if can_edit && !parent_path.is_empty() {
                                     Link {
                                         to: Route::PathPage {
                                             segments: parent_path.clone(),
@@ -347,7 +352,7 @@ pub fn FolderApp(
                                         "{t(\"mime.editor\")}"
                                     }
                                 }
-                                if is_context_owner && count > 1 {
+                                if is_context_owner && count > 1 && !parent_path.is_empty() {
                                     Link {
                                         to: Route::PathPage {
                                             segments: parent_path.clone(),
@@ -358,12 +363,7 @@ pub fn FolderApp(
                                         "{t(\"mime.sort\")}"
                                     }
                                 }
-                            }
-                        }
-                        // Owner housekeeping on the container itself: lock adding
-                        // children, and paste a clipboard selection into it.
-                        if is_context_owner {
-                            super::widgets::SheetGroup { title: t("common.toolsManage"),
+                                if is_context_owner {
                             button {
                                 class: "sheet-action",
                                 onclick: {
@@ -440,6 +440,7 @@ pub fn FolderApp(
                                 },
                                 span { class: "material-icons", "content_paste" }
                                 "{t(\"folder.paste\")} ({SELECTED.read().len()})"
+                            }
                             }
                             }
                             }

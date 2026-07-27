@@ -260,11 +260,15 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     }
                     }
                 }
-                // The other views of this same node. These are navigations, not
-                // actions, so they read as a group of their own. Gated on exactly
-                // what its rows are gated on: an empty group still draws a header.
+                // Every way of changing this node: its text, and the order of its
+                // children. Both happen to be routes to another view rather than
+                // actions in place, but that is a fact about the code, not about
+                // the choice being made here.
+                //
+                // Gated on the disjunction of its rows: an empty group would still
+                // draw its header.
                 if !segments.is_empty() && (can_edit || (is_ctx_owner && reorderable_children)) {
-                    super::widgets::SheetGroup { title: t("common.toolsOpen"),
+                    super::widgets::SheetGroup { title: t("common.toolsManage"),
                         if is_ctx_owner && reorderable_children {
                             Link {
                                 to: Route::PathPage {
