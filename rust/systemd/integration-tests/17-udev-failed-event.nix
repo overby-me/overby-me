@@ -41,10 +41,20 @@
   # The same run also reported `udevadm settle: timeout reached` after 15s, so
   # the event was still in flight. The test writes event_timeout=10 into
   # /run/udev/udev.conf.d/ and then runs `systemctl reload systemd-udevd.service`,
-  # so the next thing to check is whether that reload actually reaches
-  # refresh_udev_config(): if the deadline never gets re-read, the `sleep 60`
-  # PROGRAM blocks its worker for the full 60s and `PROGRAM!=` is never
-  # evaluated at all, which would explain both observations at once.
+  # so the deadline looks like it is not being applied.
+  #
+  # THE RELOAD PATH IS NOT THE PROBLEM, verified by reading rather than
+  # guessing: `udevadm control --reload` sends RELOAD over the control socket
+  # (udevadm/src/main.rs), udevd's handle_control_command sets
+  # *rules_reload_needed, and handle_client is called from the MAIN LOOP with
+  # `&mut rules_reload_needed`, the same local the reload branch tests before
+  # calling refresh_udev_config(). Socket, flag and consumer are all the same
+  # object, so a reload does re-read udev.conf.d.
+  #
+  # NEXT MEASUREMENT: kmsg the EVENT_TIMEOUT value at the point
+  # run_program_capture spawns, and see whether the worker actually sees 10 or
+  # still 180. That distinguishes "the config was never re-read" from "it was
+  # re-read but the deadline is not reaching the spawn", and it is one line.
   #
   # So the timeout half is NOT simply the missing deadline. Measured after the change: `udevadm trigger --action add /dev/null`
   # reports "triggered 1 device(s)" and `udevadm monitor --udev --property
