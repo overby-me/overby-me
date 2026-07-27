@@ -279,12 +279,17 @@ a caller copies onto the stack.
 A twentieth pass found one rule and unlearned two. A type is passed by
 reference or by value and not both. Against that, "a composite type's
 elements may not contain a null" and "every DICompileUnit is listed in
-llvm.dbg.cu" both looked right, print a diagnostic from llvm-as, and are
-not rules: llvm-as returns zero for `set1.ll` and for `llvm.loop.cu.ll`.
-Some verifier checks warn without failing, so the oracle reads the exit
-code and never the message. A rule was deleted on that evidence earlier,
-restored here on the message, and deleted again on the exit code; the
-second deletion is the one with a test behind it.
+llvm.dbg.cu" both looked right, print a diagnostic from llvm-as, and were
+measured as wrong. Some verifier checks warn without failing, so the
+oracle reads the exit code and never the message.
+The twenty-first pass found what the first two were missing. The elements
+rule is real; what was wrong was applying it to a node nothing reaches.
+Upstream verifies the debug info it can reach, and `set1.ll` leans on
+exactly that, so `verify.rs` now walks metadata from its roots (named
+lists, global and instruction attachments) and checks only what it finds.
+Two more rules were tried and measured away in the same pass: `llvm.loop`
+metadata may hold a `DILocation` after all, and the parameter attributes
+on a variadic argument are legal in more shapes than the one test showed.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

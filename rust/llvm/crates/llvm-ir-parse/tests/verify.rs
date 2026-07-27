@@ -703,10 +703,9 @@ const VERIFIES: &[&str] = &[
     // A struct may hold scalable vectors when it holds nothing else, which
     // an alloca of one is the way to say.
     "%t = type { <vscale x 1 x i32>, <vscale x 1 x i32> }\n\ndefine void @f() {\nentry:\n  %a = alloca %t, align 8\n  ret void\n}\n",
-    // A composite type's elements may contain a null entry: upstream's own
-    // set1.ll does, and llvm-as reads it and returns zero. Checked twice
-    // now, the second time against the exit code rather than the message.
-    "!named = !{!0, !1}\n!0 = !{null}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"C\", size: 64, elements: !0)\n",
+    // A null among a composite type's elements is an error where the node
+    // is reached and not where it is not, which is what set1.ll leans on.
+    "!named = !{!2}\n!0 = !{null}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"C\", size: 64, elements: !0)\n!2 = !{}\n",
     // An array's shape fields belong on an array.
     "!named = !{!0}\n!0 = !DICompositeType(tag: DW_TAG_array_type, name: \"A\", size: 64, rank: !DIExpression(DW_OP_deref))\n",
     // An alias writes an expression aliasee with no type in front, because

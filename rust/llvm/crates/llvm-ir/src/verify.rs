@@ -116,8 +116,13 @@ impl Verifier<'_> {
                 self.gep_vector_widths(base_type, &indices, "a getelementptr expression");
             }
         }
-        for index in 0..self.module.metadata.len() {
-            if let Some(node) = self.module.metadata[index].clone() {
+        // Upstream verifies the debug info it can reach, and a node nothing
+        // names is not reached. `set1.ll` leans on that: it has a composite
+        // type with a null among its elements, which is an error where it is
+        // seen and not an error where it is not.
+        let reachable = self.reachable_metadata();
+        for id in reachable {
+            if let Some(node) = self.module.metadata_node(id).cloned() {
                 self.debug_info_node(&node);
             }
         }
@@ -399,6 +404,64 @@ impl Verifier<'_> {
             },
             _ => None,
         }
+    }
+
+    /// Every metadata node a named list, a global or an instruction reaches,
+    /// directly or through another node.
+    fn reachable_metadata(&self) -> Vec<MdId> {
+        let mut roots: Vec<MdId> = self
+            .module
+            .named_metadata
+            .iter()
+            .flat_map(|named| named.operands.clone())
+            .collect();
+        for global in &self.module.globals {
+            roots.extend(attachment_ids(&global.metadata));
+        }
+        for function in &self.module.functions {
+            roots.extend(attachment_ids(&function.metadata));
+            for (_, block) in function.blocks() {
+                for inst in &block.instructions {
+                    if let Some(instruction) = function.try_instruction(*inst) {
+                        roots.extend(attachment_ids(&instruction.metadata));
+                    }
+                }
+            }
+        }
+
+        let mut seen: HashSet<MdId> = HashSet::new();
+        let mut order = Vec::new();
+        while let Some(id) = roots.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            order.push(id);
+            let Some(node) = self.module.metadata_node(id) else {
+                continue;
+            };
+            match node {
+                Metadata::Tuple { operands, .. } => {
+                    roots.extend(operands.iter().filter_map(|operand| match operand {
+                        MdOperand::Ref(id) => Some(*id),
+                        _ => None,
+                    }));
+                }
+                Metadata::Specialized { args, .. } => {
+                    let fields: Vec<&MdField> = match args {
+                        SpecializedArgs::Named(fields) => {
+                            fields.iter().map(|(_, value)| value).collect()
+                        }
+                        SpecializedArgs::Positional(values) => values.iter().collect(),
+                    };
+                    roots.extend(fields.iter().filter_map(|field| match field {
+                        MdField::Ref(id) => Some(*id),
+                        _ => None,
+                    }));
+                }
+                Metadata::String(_) => {}
+            }
+        }
+        order
     }
 
     /// A `gv` entry that names a symbol has to name one this module has.
@@ -2046,6 +2109,16 @@ impl Verifier<'_> {
                     self.report(format!("{shape} appears on a type that is not an array"));
                 }
             }
+            // A null among the elements names no member.
+            if let Some(field) = field_of(fields, "elements")
+                && let Some(node) = self.field_node(field)
+                && let Some(operands) = node.as_tuple()
+                && operands
+                    .iter()
+                    .any(|operand| matches!(operand, MdOperand::Null))
+            {
+                self.report("the elements of a composite type contain a null entry");
+            }
             // A type is passed by reference or by value, not both.
             if let Some(MdField::Words(words)) = field_of(fields, "flags") {
                 let by_reference = words.iter().any(|word| word == "DIFlagTypePassByReference");
@@ -2851,4 +2924,14 @@ fn specialized_tag(node: &Metadata) -> Option<&str> {
         Metadata::Specialized { tag, .. } => Some(tag.as_str()),
         _ => None,
     }
+}
+
+fn attachment_ids(attachments: &[MdAttachment]) -> Vec<MdId> {
+    attachments
+        .iter()
+        .filter_map(|attachment| match attachment.node {
+            MdRef::Id(id) => Some(id),
+            MdRef::Inline(_) => None,
+        })
+        .collect()
 }
