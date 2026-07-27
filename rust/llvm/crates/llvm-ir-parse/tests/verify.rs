@@ -386,6 +386,23 @@ const BROKEN: &[(&str, &str)] = &[
         "declare i32 @llvm.cttz.i32(i32, i32)\n\ndefine void @f(i32 %x) {\nentry:\n  %r = call i32 @llvm.cttz.i32(i32 %x, i32 0)\n  ret void\n}\n",
         "wrong type in argument 1 of an intrinsic",
     ),
+    // The rules LangRef states in prose rather than in a declare line.
+    (
+        "declare i24 @llvm.bswap.i24(i24)\n\ndefine void @f(i24 %x) {\nentry:\n  %r = call i24 @llvm.bswap.i24(i24 %x)\n  ret void\n}\n",
+        "not a whole number of byte pairs",
+    ),
+    (
+        "declare <4 x i32> @llvm.masked.load.v4i32.p0(ptr, i32, <4 x i1>, <4 x i32>)\n\ndefine void @f(ptr %p, <4 x i1> %m, <4 x i32> %v) {\nentry:\n  %r = call <4 x i32> @llvm.masked.load.v4i32.p0(ptr %p, i32 3, <4 x i1> %m, <4 x i32> %v)\n  ret void\n}\n",
+        "an alignment of 3, which is not a power of two",
+    ),
+    (
+        "declare <4 x i32> @llvm.get.active.lane.mask.v4i32.i32(i32, i32)\n\ndefine void @f(i32 %a, i32 %b) {\nentry:\n  %r = call <4 x i32> @llvm.get.active.lane.mask.v4i32.i32(i32 %a, i32 %b)\n  ret void\n}\n",
+        "produces a mask that is not made of i1",
+    ),
+    (
+        "declare i32 @llvm.ptrmask.i32.i32(i32, i32)\n\ndefine void @f(i32 %p, i32 %m) {\nentry:\n  %r = call i32 @llvm.ptrmask.i32.i32(i32 %p, i32 %m)\n  ret void\n}\n",
+        "masks something that is not a pointer",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",

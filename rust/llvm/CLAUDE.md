@@ -307,9 +307,12 @@ catches is a module that declares an intrinsic consistently wrongly, which
 upstream's suites do not contain and real IR will. Checking the argument
 count was tried and reverted, because upstream auto-upgrades the older
 spelling of an intrinsic.
-The rest of the intrinsic gap is not signatures at all. `llvm.bswap`
-taking an even number of bytes and `masked_load`'s alignment being a power
-of two are prose in LangRef, and a table of types cannot state them.
+The rest of the intrinsic gap is not signatures at all, and a
+twenty-third pass started writing it out by hand instead: `llvm.bswap`
+swaps a whole number of byte pairs, a masked access takes an alignment
+that is one, `get_active_lane_mask` produces a mask of `i1`, and
+`llvm.ptrmask` masks a pointer. Four rules, five files, and the table
+earned its place after all by knowing how to find a base name.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

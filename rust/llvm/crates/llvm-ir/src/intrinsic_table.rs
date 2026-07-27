@@ -18,6 +18,54 @@ pub enum Parameter {
     Float,
 }
 
+/// The name with its mangling suffix removed, as far as the table knows one:
+/// `llvm.bswap.v4i32` is `llvm.bswap`.
+pub fn base_name(name: &str) -> &str {
+    let mut candidate = name;
+    loop {
+        if SIGNATURES
+            .binary_search_by_key(&candidate, |(name, _)| *name)
+            .is_ok()
+        {
+            return candidate;
+        }
+        match candidate.rsplit_once('.') {
+            Some((rest, _)) if rest.matches('.').count() >= 1 => candidate = rest,
+            // Not documented under any prefix, so fall back to the shape of
+            // a mangling suffix. `llvm.ptrmask.p0.i64` is `llvm.ptrmask`
+            // whether or not LangRef writes a `declare` line for it.
+            _ => return strip_mangling(name),
+        }
+    }
+}
+
+/// Drops trailing components that look like the types a call mangles into
+/// an intrinsic's name.
+fn strip_mangling(name: &str) -> &str {
+    let mangled = |part: &str| {
+        let rest = part
+            .strip_prefix("nxv")
+            .or_else(|| part.strip_prefix('v'))
+            .or_else(|| part.strip_prefix('p'))
+            .or_else(|| part.strip_prefix('i'))
+            .or_else(|| part.strip_prefix('f'))
+            .or_else(|| part.strip_prefix('a'));
+        matches!(part, "isVoid" | "ppcf128")
+            || rest.is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+    };
+    let mut end = name.len();
+    while name[..end].matches('.').count() > 1 {
+        let Some(dot) = name[..end].rfind('.') else {
+            break;
+        };
+        if !mangled(&name[dot + 1..end]) {
+            break;
+        }
+        end = dot;
+    }
+    &name[..end]
+}
+
 /// The signature LangRef documents for a base name, or `None` when it
 /// documents none or documents inconsistent arities.
 pub fn signature(name: &str) -> Option<&'static [Parameter]> {

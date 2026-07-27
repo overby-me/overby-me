@@ -277,6 +277,80 @@ impl Verifier<'_> {
         }
     }
 
+    /// The rules LangRef states in prose, keyed on the base name.
+    fn intrinsic_rule(
+        &mut self,
+        name: &str,
+        result: TypeId,
+        arguments: &[TypeId],
+        values: &[Value],
+        where_: &str,
+    ) {
+        let base = crate::intrinsic_table::base_name(name);
+        let element = |verifier: &Self, ty: TypeId| verifier.innermost_element(ty);
+        match base {
+            // A byte swap has bytes to swap in pairs.
+            "llvm.bswap" => {
+                if let TypeKind::Integer(bits) = *self.module.ctx.type_kind(element(self, result))
+                    && bits % 16 != 0
+                {
+                    self.report(format!(
+                        "{where_} swaps {bits} bits, which is not a whole number of byte pairs"
+                    ));
+                }
+            }
+            // The alignment operand of a masked access is an alignment.
+            "llvm.masked.load"
+            | "llvm.masked.store"
+            | "llvm.masked.gather"
+            | "llvm.masked.scatter" => {
+                // The alignment follows the pointer, and a store writes its
+                // value before the pointer.
+                let position =
+                    usize::from(matches!(base, "llvm.masked.store" | "llvm.masked.scatter")) + 1;
+                if let Some(Value::Constant(id)) = values.get(position)
+                    && let Some(alignment) = self
+                        .module
+                        .ctx
+                        .constant(*id)
+                        .as_integer()
+                        .and_then(ApInt::to_u64)
+                    && (alignment == 0 || !alignment.is_power_of_two())
+                {
+                    self.report(format!(
+                        "{where_} passes an alignment of {alignment}, which is not a power of two"
+                    ));
+                }
+            }
+            // The mask it produces is one bit per lane.
+            "llvm.get.active.lane.mask"
+                if !matches!(
+                    self.module.ctx.type_kind(element(self, result)),
+                    TypeKind::Integer(1)
+                ) =>
+            {
+                self.report(format!("{where_} produces a mask that is not made of i1"));
+            }
+            // It masks a pointer, so it takes one and returns one.
+            "llvm.ptrmask" => {
+                let pointer = |verifier: &Self, ty: TypeId| {
+                    matches!(
+                        verifier
+                            .module
+                            .ctx
+                            .type_kind(verifier.innermost_element(ty)),
+                        TypeKind::Pointer { .. }
+                    )
+                };
+                if !pointer(self, result) || arguments.first().is_none_or(|ty| !pointer(self, *ty))
+                {
+                    self.report(format!("{where_} masks something that is not a pointer"));
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Whether an instruction is a call to the named intrinsic.
     fn calls_intrinsic(&self, function: &Function, id: InstId, wanted: &str) -> bool {
         let InstKind::Call(call) = &function.instruction(id).kind else {
@@ -1566,6 +1640,11 @@ impl Verifier<'_> {
                                 ));
                             }
                         }
+                    }
+                    if is_intrinsic && let Name::Named(intrinsic) = callee.name.clone() {
+                        let arguments: Vec<TypeId> = call.args.iter().map(|a| a.ty).collect();
+                        let values: Vec<Value> = call.args.iter().map(|a| a.value).collect();
+                        self.intrinsic_rule(&intrinsic, ty, &arguments, &values, &where_);
                     }
                     if is_intrinsic {
                         let (result, params, is_var_arg) =
