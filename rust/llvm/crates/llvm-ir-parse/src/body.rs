@@ -251,6 +251,24 @@ impl Parser {
                     let Some(block) = current else {
                         return self.error("an instruction outside any block");
                     };
+                    // A terminator ends its block. An instruction after one,
+                    // with no label between, opens a fresh anonymous block:
+                    // upstream's parser does this, which is why five invokes
+                    // written in a row parse as five blocks.
+                    let block = if function
+                        .block(block)
+                        .terminator()
+                        .and_then(|last| function.try_instruction(last))
+                        .is_some_and(|last| last.kind.is_terminator())
+                    {
+                        let fresh = function.reserve_block();
+                        function.place_block(fresh);
+                        state.next_number += 1;
+                        current = Some(fresh);
+                        fresh
+                    } else {
+                        block
+                    };
                     let id = self.parse_instruction(function, state)?;
                     function.block_mut(block).instructions.push(id);
                 }

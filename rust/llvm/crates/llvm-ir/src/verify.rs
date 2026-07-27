@@ -335,12 +335,6 @@ impl Verifier<'_> {
         for attachment in function.metadata.clone() {
             self.attachment_resolves(&attachment.node, "the function");
         }
-        for group in &function.attrs.groups {
-            let group = *group;
-            if self.module.attribute_group(group).is_none() {
-                self.report(format!("refers to undefined attribute group #{group}"));
-            }
-        }
 
         let profiles = function
             .metadata
@@ -638,7 +632,13 @@ impl Verifier<'_> {
                 // Unreachable from parsed text, where an unwritten alignment
                 // is filled in from the data layout, but a module built by
                 // hand can still omit one.
-                self.check(align.is_some(), format!("{where_} has no alignment"));
+                // Only for a type whose alignment could have been computed;
+                // a target extension type has no layout here and upstream
+                // still accepts a load of one.
+                self.check(
+                    align.is_some() || self.module.default_align(loaded_type, false).is_none(),
+                    format!("{where_} has no alignment"),
+                );
             }
             InstKind::Store {
                 value_type, value, ..

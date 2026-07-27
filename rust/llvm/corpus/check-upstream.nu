@@ -21,6 +21,12 @@ def expectation [text: string]: nothing -> string {
   if ($runs | is-empty) {
     return "skip"
   }
+  # lit skips a test whose REQUIRES line the build does not satisfy, and the
+  # ones here want an assertions-enabled LLVM. Scoring them would measure the
+  # oracle's build configuration rather than our agreement with it.
+  if ($text | lines | any {|line| $line | str contains "REQUIRES:"}) {
+    return "skip"
+  }
   # Tools and modes this tier does not have. A test that needs one of them
   # says nothing about whether we read the module correctly.
   let unsupported = [

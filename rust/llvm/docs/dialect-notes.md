@@ -82,6 +82,24 @@ but invisible from outside: nothing between parsing and printing needs
 uniqued metadata yet, and keeping the parsed numbering makes a parse error
 easier to trace back to the text that caused it.
 
+## Looser than it looks
+
+Three places where upstream accepts what a reading of LangRef would refuse,
+and we follow it because a compatibility project follows the implementation:
+
+- **An attribute group nothing defines is an empty set.** `define void @f()
+  #0` with no `attributes #0` parses, and prints with no attributes at all.
+- **A call need not match the signature its callee was declared with.**
+  Opaque pointers put the signature at the call site, so `call void @g()`
+  against `declare void @g(i32)` is accepted, and so is a call whose result
+  type differs from the declaration's.
+- **An instruction after a terminator opens a new anonymous block.** Five
+  `invoke`s written one after another with no labels between them are five
+  blocks, not one block with five terminators.
+
+Each of these was a verifier rule here first, found by the upstream suites
+rejecting IR that upstream accepts.
+
 ## Known gaps, measured
 
 `llvm-upstream-assembler` and `llvm-upstream-verifier` run upstream's own

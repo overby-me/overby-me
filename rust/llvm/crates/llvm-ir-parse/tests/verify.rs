@@ -65,10 +65,6 @@ const BROKEN: &[(&str, &str)] = &[
         "does not end in a terminator",
     ),
     (
-        "define void @f() {\nentry:\n  ret void\n  ret void\n}\n",
-        "terminator (ret) before its end",
-    ),
-    (
         "define i32 @f(i32 %a) {\nentry:\n  br label %next\nnext:\n  %x = add i32 %a, 1\n  %p = phi i32 [ 0, %entry ]\n  ret i32 %x\n}\n",
         "phi after a non-phi",
     ),
@@ -115,14 +111,6 @@ const BROKEN: &[(&str, &str)] = &[
     (
         "define void @f() {\nentry:\n  ret void, !dbg !9\n}\n",
         "undefined metadata !9",
-    ),
-    (
-        "define void @f() #7 {\nentry:\n  ret void\n}\n",
-        "undefined attribute group #7",
-    ),
-    (
-        "declare void @g(i32)\n\ndefine void @f() {\nentry:\n  call void @g()\n  ret void\n}\n",
-        "does not match the signature of the function it calls",
     ),
     (
         "define i32 @f(i1 %c) {\nentry:\n  br i1 %c, label %a, label %b\na:\n  %x = add i32 1, 2\n  br label %b\nb:\n  ret i32 %x\n}\n",
@@ -287,4 +275,18 @@ exit:                                             ; preds = %header
     let module = llvm_ir_parse::parse_module(text).expect("this module is well formed");
     let errors = llvm_ir::verify_module(&module);
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn an_instruction_after_a_terminator_opens_a_new_block() {
+    // Upstream's parser does this rather than rejecting it, which is why five
+    // invokes written in a row are five blocks. Checked against real llvm-as,
+    // which prints exactly this.
+    let text = "define void @f() {\nentry:\n  ret void\n  ret void\n}\n";
+    let module = llvm_ir_parse::parse_module(text).expect("upstream accepts this");
+    assert!(llvm_ir::verify_module(&module).is_empty());
+    assert_eq!(
+        llvm_ir_print::print_module(&module),
+        "\ndefine void @f() {\nentry:\n  ret void\n\n0:                                                ; No predecessors!\n  ret void\n}\n"
+    );
 }

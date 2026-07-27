@@ -114,7 +114,7 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 175, 70 to 117)*
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 175, 70 to 121)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -122,6 +122,14 @@ metadata values that are not node references, metadata attachments written
 in place, non-struct type aliases, sized-type rules for alloca and globals,
 token and x86_amx being intrinsic-only, and the shapes of `llvm.used` and
 `llvm.global_ctors`.
+A third pass went the other way, at false positives rather than gaps: four
+rules rejected IR upstream accepts, which is worse than being permissive.
+An undefined attribute group is an empty set, not an error; a call need not
+match the signature its callee was declared with, because opaque pointers
+put the signature at the call site; a load of a type with no computable
+layout still has no alignment to report; and an instruction after a
+terminator opens a new anonymous block rather than being a second
+terminator.
 Still open, largest first: attribute combination rules, intrinsic
 signatures, module summary index syntax (`^0 = ...`), target-specific
 calling conventions, and metadata integers wider than 64 bits.
