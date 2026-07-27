@@ -146,11 +146,18 @@ against rustc 1.95.0 from `nixpkgs#rustc.src`. Reproducible with
 The useful shape: two thirds of the surface is the tier that already exists,
 and the areas that are almost all `LLVMRust*` shims are the later tiers.
 
-**B4. [todo] IR builder API sufficient for the fork's call sites.**
-Whatever B3 says the fork needs, phrased as safe Rust rather than as an FFI
-mirror.
-Acceptance: `llvm-builder-smoke`, a check that builds hello-world-shaped IR
-programmatically and verifies plus prints it.
+**B4. [done] IR builder API sufficient for the fork's call sites.** *(2026-07-27)*
+`llvm_ir::builder::Builder`, phrased as safe Rust rather than as an FFI
+mirror. It works out each instruction's result type from its operands and
+fills in the alignment upstream would have computed, so built IR verifies and
+prints exactly like parsed IR.
+`llvm-builder-smoke` builds a loop that calls a declared function and
+accumulates its result, then checks three things: it verifies, it prints the
+text upstream prints for that module (hand-written, and confirmed by feeding
+it to real llvm-as and llvm-dis), and parsing our own output back gives a
+module that prints identically.
+Not yet covered, and wanted by B5: invoke and the funclet terminators,
+attribute construction, metadata attachment, and debug info.
 
 **B5. [todo] Vendor `rustc_codegen_llvm` into `crates/rustc-codegen-llvmrs`.**
 Needs a pinned nightly with `rustc-dev` and a `rust-toolchain.toml` (PLAN §6.1).

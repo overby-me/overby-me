@@ -94,6 +94,13 @@ in {
         nu corpus/check-opt.nu "$CARGO_TARGET_DIR/debug/opt" corpus
       '';
 
+    # IR built through the builder API rather than parsed: it has to verify,
+    # and it has to print the text upstream prints for the same module.
+    llvm-builder-smoke = pkgs:
+      cargoCheck pkgs "builder-smoke" ''
+        cargo test -p llvm-ir-parse --test builder --offline --locked -- --nocapture
+      '';
+
     # The verifier accepts everything real llvm-as accepted, and rejects a
     # table of deliberately broken modules with the message each rule owns.
     llvm-verify-corpus = pkgs:

@@ -7,8 +7,9 @@ use crate::context::Context;
 use crate::function::Function;
 use crate::global::{Alias, Comdat, GlobalVariable, IFunc};
 use crate::metadata::{Metadata, NamedMetadata};
+use crate::types::TypeId;
 use crate::value::{AliasId, FunctionId, GlobalRef, GlobalVarId, IFuncId, MdId, Name};
-use llvm_support::{DataLayout, Triple};
+use llvm_support::{Align, DataLayout, Triple};
 
 /// A translation unit: everything one `.ll` file holds, plus the context its
 /// types and constants are interned in.
@@ -165,6 +166,22 @@ impl Module {
         let id = self.next_metadata_id();
         self.metadata.push(Some(node));
         id
+    }
+
+    /// The alignment an unwritten `align` clause means for this type.
+    ///
+    /// Upstream does not leave the field empty: it computes one from the data
+    /// layout and prints it, so `load i32` and `load i32, align 4` are the
+    /// same instruction. An `alloca` takes the preferred alignment and the
+    /// memory operations take the ABI one. `None` when the type has no size,
+    /// which the verifier reports separately.
+    pub fn default_align(&self, ty: TypeId, preferred: bool) -> Option<Align> {
+        let layout = self.data_layout.clone().unwrap_or_default();
+        if preferred {
+            crate::layout::preferred_align(&self.ctx, &layout, ty).ok()
+        } else {
+            crate::layout::abi_align(&self.ctx, &layout, ty).ok()
+        }
     }
 
     pub fn attribute_group(&self, number: u32) -> Option<&[Attribute]> {

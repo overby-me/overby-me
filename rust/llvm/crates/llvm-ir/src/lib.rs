@@ -30,6 +30,7 @@
 //! ```
 
 pub mod attribute;
+pub mod builder;
 pub mod constant;
 pub mod context;
 pub mod function;
@@ -43,6 +44,7 @@ pub mod types;
 pub mod value;
 pub mod verify;
 
+pub use builder::Builder;
 pub use context::Context;
 pub use module::Module;
 pub use types::{StructId, TypeId, TypeKind};

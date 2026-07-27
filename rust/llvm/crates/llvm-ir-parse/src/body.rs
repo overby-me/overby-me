@@ -12,7 +12,6 @@ use llvm_ir::instruction::{
 use llvm_ir::types::TypeKind;
 use llvm_ir::value::{BlockId, InstId, Name};
 use llvm_ir::{TypeId, Value};
-use llvm_support::Align;
 
 impl Parser {
     // ------------------------------------------------------------- functions
@@ -766,7 +765,7 @@ impl Parser {
                     }
                 }
                 let ptr = self.module.ctx.pointer_type(address_space.unwrap_or(0));
-                let align = align.or_else(|| self.default_align(allocated_type, true));
+                let align = align.or_else(|| self.module.default_align(allocated_type, true));
                 Ok((
                     ptr,
                     InstKind::Alloca {
@@ -799,7 +798,7 @@ impl Parser {
                         break;
                     }
                 }
-                let align = align.or_else(|| self.default_align(loaded_type, false));
+                let align = align.or_else(|| self.module.default_align(loaded_type, false));
                 Ok((
                     loaded_type,
                     InstKind::Load {
@@ -832,7 +831,7 @@ impl Parser {
                         break;
                     }
                 }
-                let align = align.or_else(|| self.default_align(value_type, false));
+                let align = align.or_else(|| self.module.default_align(value_type, false));
                 Ok((
                     void,
                     InstKind::Store {
@@ -870,7 +869,7 @@ impl Parser {
                         break;
                     }
                 }
-                let align = align.or_else(|| self.default_align(compare_type, false));
+                let align = align.or_else(|| self.module.default_align(compare_type, false));
                 let bool_type = self.module.ctx.int_type(1);
                 let ty = self
                     .module
@@ -913,7 +912,7 @@ impl Parser {
                         break;
                     }
                 }
-                let align = align.or_else(|| self.default_align(value_type, false));
+                let align = align.or_else(|| self.module.default_align(value_type, false));
                 Ok((
                     value_type,
                     InstKind::AtomicRmw {
@@ -1196,22 +1195,6 @@ impl Parser {
             }
             other => self.error(format!("unknown instruction '{other}'")),
         }
-    }
-
-    /// The alignment an unwritten `align` clause means.
-    ///
-    /// Upstream does not leave the field empty: it computes one from the data
-    /// layout and prints it, so a `load i32` and a `load i32, align 4` are the
-    /// same instruction. An `alloca` takes the preferred alignment and the
-    /// memory operations take the ABI one.
-    fn default_align(&self, ty: TypeId, preferred: bool) -> Option<Align> {
-        let layout = self.module.data_layout.clone().unwrap_or_default();
-        let computed = if preferred {
-            llvm_ir::layout::preferred_align(&self.module.ctx, &layout, ty)
-        } else {
-            llvm_ir::layout::abi_align(&self.module.ctx, &layout, ty)
-        };
-        computed.ok()
     }
 
     /// A funclet operand: `none` or a local value.

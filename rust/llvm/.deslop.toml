@@ -64,6 +64,14 @@ disabled_rules = [
   "unsafe_without_safety_comment",
   "rust_unsafe_raw_pointer_cast",
 
+  # The `expect` calls in this project are invariant assertions in a compiler
+  # data structure, not error handling: an arena slot that was removed, a slot
+  # number the tracker must have assigned, a builder used with no insertion
+  # point. Each is a caller bug rather than a runtime condition, and upstream
+  # asserts on the same things. Real error paths return Result and carry a
+  # source location. Same call rust/fe-c makes for its runtime.
+  "expect_in_non_test_code",
+
   # `opt` reads a whole module into memory before parsing it, because that is
   # what parsing a module means, and it sets fields of its options struct in
   # the loop over argv, which is not a hot path by any definition.
