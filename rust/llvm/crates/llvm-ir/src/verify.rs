@@ -657,6 +657,14 @@ impl Verifier<'_> {
         if profiles > 1 {
             self.report("a function may have only one !prof attachment");
         }
+        let kcfi = function
+            .metadata
+            .iter()
+            .filter(|attachment| attachment.kind == "kcfi_type")
+            .count();
+        if kcfi > 1 {
+            self.report("a function may have only one !kcfi_type attachment");
+        }
 
         // token and x86_amx have no representation a caller could pass, so
         // only an intrinsic may name them in its signature.
@@ -728,6 +736,22 @@ impl Verifier<'_> {
                         describe_block(function, *block_id)
                     ));
                 }
+            }
+        }
+        // `va_start` walks the arguments past the declared ones, and a
+        // function without a `...` has none.
+        if !function.is_var_arg {
+            let starts = blocks.iter().any(|block| {
+                function
+                    .block(*block)
+                    .instructions
+                    .iter()
+                    .any(|inst| self.calls_intrinsic(function, *inst, "llvm.va_start"))
+            });
+            if starts {
+                self.report(
+                    "llvm.va_start is called in a function that takes no variable arguments",
+                );
             }
         }
         // A collector has to be named before its barriers mean anything.
@@ -852,6 +876,43 @@ impl Verifier<'_> {
                         float,
                         format!("{where_}: fpmath requires a floating-point result"),
                     );
+                }
+                // A memory-model annotation belongs on something that
+                // touches memory.
+                "mmra" => self.check(
+                    matches!(
+                        instruction.kind,
+                        InstKind::Load { .. }
+                            | InstKind::Store { .. }
+                            | InstKind::AtomicRmw { .. }
+                            | InstKind::CmpXchg { .. }
+                            | InstKind::Fence { .. }
+                            | InstKind::Call(_)
+                            | InstKind::Invoke { .. }
+                    ),
+                    format!("{where_}: mmra is attached to an instruction that takes none"),
+                ),
+                "annotation" | "memprof" => {
+                    let empty = self
+                        .resolve(&attachment.node)
+                        .and_then(|node| node.as_tuple().map(<[MdOperand]>::to_vec))
+                        .is_some_and(|operands| operands.is_empty());
+                    self.check(
+                        !empty,
+                        format!("{where_}: {kind} needs at least one operand"),
+                    );
+                }
+                "noalias.addrspace" => {
+                    let ranges = self
+                        .resolve(&attachment.node)
+                        .and_then(|node| node.as_tuple().map(<[MdOperand]>::to_vec));
+                    if let Some(operands) = ranges
+                        && (operands.is_empty() || operands.len() % 2 != 0)
+                    {
+                        self.report(format!(
+                            "{where_}: noalias.addrspace takes ranges of two values"
+                        ));
+                    }
                 }
                 "invariant.group" => self.check(
                     matches!(
@@ -1211,6 +1272,29 @@ impl Verifier<'_> {
                 for (position, arg) in call.args.iter().enumerate() {
                     let attrs = arg.attrs.clone();
                     self.attribute_set(&attrs, arg.ty, &format!("argument {position} of {where_}"));
+                    // The inalloca argument is the one the callee finds on
+                    // the stack, so it is the one pushed last.
+                    if has_type_attribute(&attrs, TypeAttr::InAlloca)
+                        && position + 1 != call.args.len()
+                    {
+                        self.report(format!(
+                            "{where_} has inalloca on an argument that is not the last"
+                        ));
+                    }
+                }
+                // `speculatable` promises something about a function, not
+                // about one call to it.
+                if call.fn_attrs.has(EnumAttr::Speculatable) {
+                    self.report(format!(
+                        "{where_} carries speculatable, which a call site may not"
+                    ));
+                }
+                // An indirect call has no declaration to name an opaque type
+                // in, so it may not produce one.
+                let direct = matches!(call.callee, Value::Constant(id)
+                    if matches!(self.module.ctx.constant(id).as_global(), Some(GlobalRef::Function(_))));
+                if !direct && let Some(what) = self.opaque_value_type(ty) {
+                    self.report(format!("{where_} returns a {what} from an indirect call"));
                 }
                 let return_attrs = call.return_attrs.clone();
                 self.attribute_set(&return_attrs, ty, &format!("the result of {where_}"));

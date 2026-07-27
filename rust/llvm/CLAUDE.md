@@ -257,6 +257,14 @@ rather than reasoning: a test of my own invention claimed
 `@g = external global %opaque` does. Alongside them, an alignment is a
 power of two wherever it is written, which needed the call site's own
 argument attributes to be checked at all.
+A seventeenth pass was what a call site and an attachment owe on their
+own: `!mmra` belongs on something that touches memory, `!annotation` and
+`!memprof` need an operand, `!noalias.addrspace` takes ranges of two, a
+function carries one `!kcfi_type`, `llvm.va_start` needs a variable
+argument list to start, `inalloca` marks the argument pushed last,
+`speculatable` promises something about a function rather than one call to
+it, and an indirect call has no declaration to name a token in so it may
+not produce one.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

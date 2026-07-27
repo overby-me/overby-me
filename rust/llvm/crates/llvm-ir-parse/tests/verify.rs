@@ -299,6 +299,30 @@ const BROKEN: &[(&str, &str)] = &[
         "%X = type opaque\n\ndefine void @f() {\nentry:\n  %a = alloca %X, align 8\n  ret void\n}\n",
         "has an invalid type for alloca",
     ),
+    (
+        "define i32 @f(i32 %x) {\nentry:\n  %a = add i32 %x, 42, !mmra !0\n  ret i32 %a\n}\n\n!0 = !{}\n",
+        "mmra is attached to an instruction that takes none",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  store i32 0, ptr %p, align 4, !annotation !0\n  ret void\n}\n\n!0 = !{}\n",
+        "annotation needs at least one operand",
+    ),
+    (
+        "declare void @llvm.va_start(ptr)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @llvm.va_start(ptr %p)\n  ret void\n}\n",
+        "llvm.va_start is called in a function that takes no variable arguments",
+    ),
+    (
+        "declare void @g(ptr, i32)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @g(ptr inalloca(i32) %p, i32 3)\n  ret void\n}\n",
+        "inalloca on an argument that is not the last",
+    ),
+    (
+        "define void @f(ptr %fn) {\nentry:\n  %r = call token %fn()\n  ret void\n}\n",
+        "returns a token from an indirect call",
+    ),
+    (
+        "declare void @g()\n\ndefine void @f() {\nentry:\n  call void @g() speculatable\n  ret void\n}\n",
+        "carries speculatable, which a call site may not",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
