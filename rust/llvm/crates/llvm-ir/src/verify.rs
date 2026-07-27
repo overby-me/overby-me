@@ -22,7 +22,7 @@ use crate::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, Special
 use crate::module::Module;
 use crate::summary::SummaryValue;
 use crate::types::{StructId, TypeKind};
-use crate::value::{BlockId, GlobalRef, InstId, MdId, Name, Value};
+use crate::value::{AliasId, BlockId, GlobalRef, InstId, MdId, Name, Value};
 use crate::{FunctionId, TypeId};
 use llvm_support::{ApInt, DataLayout};
 
@@ -617,6 +617,21 @@ impl Verifier<'_> {
     /// and neither is an `available_externally` body, which the linker is
     /// entitled to drop.
     fn alias_targets(&mut self) {
+        for index in 0..self.module.aliases.len() {
+            // Following the chain has to end somewhere, and an alias that
+            // reaches itself never does.
+            let mut seen = vec![AliasId(index as u32)];
+            let mut current = self.module.aliases[index].aliasee;
+            while let Some(GlobalRef::Alias(next)) = self.resolve_symbol(current) {
+                if seen.contains(&next) {
+                    let name = describe(&self.module.aliases[index].name);
+                    self.report(format!("@{name} aliases its way back to itself"));
+                    break;
+                }
+                seen.push(next);
+                current = self.module.aliases[next.0 as usize].aliasee;
+            }
+        }
         for index in 0..self.module.aliases.len() {
             let alias = &self.module.aliases[index];
             let (name, aliasee) = (describe(&alias.name), alias.aliasee);
@@ -1824,6 +1839,11 @@ impl Verifier<'_> {
                             "{where_} has inalloca on an argument that is not the last"
                         ));
                     }
+                }
+                if call.tail == TailKind::MustTail && ty != function.return_type {
+                    self.report(format!(
+                        "{where_} is a musttail call that returns something its caller does not"
+                    ));
                 }
                 if call.tail == TailKind::MustTail && call.calling_conv != function.calling_conv {
                     self.report(format!(

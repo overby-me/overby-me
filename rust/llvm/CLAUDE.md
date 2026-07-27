@@ -403,6 +403,12 @@ elements and stops at pointers, which is what keeps a linked list legal.
 A thirty-sixth pass: `immarg` says the argument is written as a literal in
 the call, so it cannot also carry an attribute that puts it somewhere,
 and a vector reduction folds down to one of the vector's own lanes.
+A thirty-seventh pass added two rules that move neither ratchet, because
+upstream's suites do not contain either case: a `musttail` call hands its
+frame over, so its caller returns what it returns, and an alias chain ends
+at a symbol rather than coming back round to itself. Both were found by
+writing the case and asking llvm-as, which is now part of how a rule gets
+proposed rather than only how it gets checked.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

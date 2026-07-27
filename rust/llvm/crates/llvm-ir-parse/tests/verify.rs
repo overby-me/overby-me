@@ -570,6 +570,16 @@ const BROKEN: &[(&str, &str)] = &[
         "declare float @llvm.vector.reduce.fadd.f32.v2f64(double, <2 x double>)\n\ndefine void @f(double %a, <2 x double> %v) {\nentry:\n  %r = call float @llvm.vector.reduce.fadd.f32.v2f64(double %a, <2 x double> %v)\n  ret void\n}\n",
         "reduces to a type the vector does not hold",
     ),
+    // Neither of these appears in upstream's suites; both were found by
+    // writing the case and asking llvm-as.
+    (
+        "declare i32 @f()\n\ndefine i64 @g() {\nentry:\n  %r = musttail call i32 @f()\n  ret i64 0\n}\n",
+        "musttail call that returns something its caller does not",
+    ),
+    (
+        "@g = global i32 0\n@a = alias i32, ptr @a\n",
+        "aliases its way back to itself",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
