@@ -98,6 +98,36 @@ impl Verifier<'_> {
     // ----------------------------------------------------------- module rules
 
     fn module_level(&mut self) {
+        // A blockaddress names a label in a function that may not have been
+        // read yet when the constant is built, so the check waits until the
+        // whole module is here. Only named labels are checked: matching `%3`
+        // needs the slot numbers, which the printer works out and this does
+        // not have.
+        for index in 0..self.module.ctx.constant_count() {
+            let Constant::BlockAddress {
+                function, block, ..
+            } = self.module.ctx.constant(ConstId(index as u32)).clone()
+            else {
+                continue;
+            };
+            let Name::Named(label) = &block else { continue };
+            let GlobalRef::Function(id) = function else {
+                continue;
+            };
+            let target = self.module.function(id);
+            if target.block_order.is_empty() {
+                continue;
+            }
+            let defined = target.block_order.iter().any(|candidate| {
+                target.block(*candidate).name.as_ref() == Some(&Name::Named(label.clone()))
+            });
+            if !defined {
+                let name = describe(&target.name);
+                self.report(format!(
+                    "a blockaddress names %{label}, which @{name} does not define"
+                ));
+            }
+        }
         for index in 0..self.module.ctx.struct_count() {
             let id = StructId(index as u32);
             if self.module.ctx.struct_def(id).fields.is_none() {
@@ -1153,6 +1183,72 @@ impl Verifier<'_> {
         let blocks: Vec<BlockId> = function.block_order.clone();
         for block_id in &blocks {
             self.basic_block(function, *block_id);
+        }
+        // Catching an exception needs a personality routine to decide what
+        // was thrown, and a landing pad needs an edge that lands on it.
+        let unwind_targets: HashSet<BlockId> = blocks
+            .iter()
+            .flat_map(|block| function.block(*block).instructions.clone())
+            .filter_map(|inst| function.try_instruction(inst))
+            .filter_map(|instruction| match instruction.kind {
+                InstKind::Invoke { unwind, .. } => Some(unwind),
+                _ => None,
+            })
+            .collect();
+        for block_id in &blocks {
+            for inst in function.block(*block_id).instructions.clone() {
+                let Some(instruction) = function.try_instruction(inst) else {
+                    continue;
+                };
+                let pad = matches!(
+                    instruction.kind,
+                    InstKind::LandingPad { .. }
+                        | InstKind::CatchPad { .. }
+                        | InstKind::CleanupPad { .. }
+                        | InstKind::CatchSwitch { .. }
+                );
+                if pad && Some(*block_id) == function.block_order.first().copied() {
+                    self.report(format!(
+                        "{} opens the entry block, which is reached without unwinding",
+                        instruction.kind.opcode()
+                    ));
+                }
+                // A catchswitch names the blocks a throw may land in, and
+                // landing in one means running its catchpad.
+                if let InstKind::CatchSwitch { handlers, .. } = &instruction.kind {
+                    for handler in handlers {
+                        let opens_with_a_catchpad = function
+                            .block(*handler)
+                            .instructions
+                            .iter()
+                            .filter_map(|inst| function.try_instruction(*inst))
+                            .any(|first| matches!(first.kind, InstKind::CatchPad { .. }));
+                        if !opens_with_a_catchpad {
+                            self.report(format!(
+                                "a catchswitch in {} hands to {}, which has no catchpad",
+                                describe_block(function, *block_id),
+                                describe_block(function, *handler)
+                            ));
+                        }
+                    }
+                }
+                let catching = pad || matches!(instruction.kind, InstKind::Resume { .. });
+                if catching && function.personality.is_none() {
+                    self.report(format!(
+                        "{} in {} needs a personality routine on its function",
+                        instruction.kind.opcode(),
+                        describe_block(function, *block_id)
+                    ));
+                }
+                if matches!(instruction.kind, InstKind::LandingPad { .. })
+                    && !unwind_targets.contains(block_id)
+                {
+                    self.report(format!(
+                        "a landingpad in {} sits in a block nothing unwinds to",
+                        describe_block(function, *block_id)
+                    ));
+                }
+            }
         }
         // Every block a terminator names is one this function writes. It
         // needs the slot-numbered blocks to resolve, which is why it could

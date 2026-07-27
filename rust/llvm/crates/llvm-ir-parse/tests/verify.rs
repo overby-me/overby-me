@@ -61,6 +61,34 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "define void @f() personality ptr null {\nentry:\n  %c = catchswitch within none [ label %h ] unwind to caller\n\nh:\n  %p = catchpad within %c []\n  catchret from %p to label %e\n\ne:\n  ret void\n}\n",
+        "catchswitch opens the entry block",
+    ),
+    (
+        "define void @f() personality ptr null {\nentry:\n  br label %s\n\ns:\n  %c = catchswitch within none [ label %h ] unwind to caller\n\nh:\n  ret void\n}\n",
+        "hands to %h, which has no catchpad",
+    ),
+    (
+        "define void @f() {\nentry:\n  ret void\n\nb:\n  %p = cleanuppad within none []\n  cleanupret from %p unwind to caller\n}\n",
+        "cleanuppad in %b needs a personality routine",
+    ),
+    (
+        "@b = global ptr blockaddress(@f, %missing)\n\ndefine void @f() {\nentry:\n  ret void\n}\n",
+        "a blockaddress names %missing, which @f does not define",
+    ),
+    (
+        "define void @f() {\nentry:\n  %a = landingpad { ptr, i32 } cleanup\n  ret void\n}\n",
+        "landingpad in %entry needs a personality routine",
+    ),
+    (
+        "define void @f() {\nentry:\n  resume { ptr, i32 } undef\n}\n",
+        "resume in %entry needs a personality routine",
+    ),
+    (
+        "define void @f() personality ptr null {\nentry:\n  %a = landingpad { ptr, i32 } cleanup\n  ret void\n}\n",
+        "a landingpad in %entry sits in a block nothing unwinds to",
+    ),
+    (
         "define void @f() {\nentry:\n  %x = add i32 1, 2\n}\n",
         "does not end in a terminator",
     ),
@@ -948,6 +976,15 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // The shape the funclet rules are the negative of: an invoke unwinding to
+    // a catchswitch, whose handler opens with a catchpad.
+    "declare void @g()\n\ndefine void @f() personality ptr null {\nentry:\n  invoke void @g() to label %n unwind label %s\n\nn:\n  ret void\n\ns:\n  %c = catchswitch within none [ label %h ] unwind to caller\n\nh:\n  %p = catchpad within %c []\n  catchret from %p to label %n\n}\n",
+    // A blockaddress may name a label in a function the module has not read
+    // yet, so the check has to wait for the whole module.
+    "@b = global ptr blockaddress(@f, %b)\n\ndefine void @f() {\nentry:\n  ret void\n\nb:\n  ret void\n}\n",
+    // The shape those three rules are the negative of: an invoke's unwind
+    // destination, a landingpad in it, and a personality to read the result.
+    "declare void @g()\n\ndefine void @f() personality ptr null {\nentry:\n  invoke void @g() to label %n unwind label %u\n\nn:\n  ret void\n\nu:\n  %p = landingpad { ptr, i32 } cleanup\n  resume { ptr, i32 } %p\n}\n",
     // A resolver reached through a cast is still a function.
     "define ptr @resolver() {\nentry:\n  ret ptr null\n}\n\n@f = ifunc void (), ptr addrspacecast (ptr @resolver to ptr)\n",
     // `!absolute_symbol` may carry more than one range.

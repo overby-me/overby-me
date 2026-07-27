@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 453 of 483 with 13 wrongly refused, Verifier 284 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 453 of 483 with 13 wrongly refused, Verifier 285 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -427,6 +427,19 @@ slot. Fixing that fixed `%0` in a phi as well, which had been noticed and
 left twice. An unnamed block now takes its slot through `block_by_name`,
 which reuses the placeholder a forward reference already made instead of
 shadowing it, and the rule went back in.
+A forty-first pass took the unwinding rules, all five from probing. A
+landing pad needs a personality routine to sort the exception and an edge
+that lands on it, so a `landingpad` in a block no invoke unwinds to is
+unreachable by construction; the same routine is what a `resume`, a
+`catchpad` and a `cleanuppad` need. No pad opens the entry block, because
+the entry block is reached by calling the function rather than by
+unwinding into it, and a `catchswitch` hands to blocks that open with a
+`catchpad`, that being what catching means.
+With them, a `blockaddress` names a label its function defines. That check
+waits for the whole module, because the function may not have been read
+when the constant is built, and it looks at named labels only: matching
+`%3` needs the slot numbers, which the printer works out and the verifier
+does not have.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five
