@@ -1746,6 +1746,62 @@ fn find_free_regions(
     free
 }
 
+/// A contiguous gap, and the existing partition it follows.
+///
+/// The partition matters: upstream reduces the space an area offers to NEW
+/// partitions by the padding the preceding partition is owed, so a gap that is
+/// entirely a neighbour's PaddingMinBytes= is not free at all.
+#[derive(Clone, Copy, Debug)]
+struct FreeArea {
+    start_lba: u64,
+    end_lba: u64,
+    /// Index into `existing` of the partition this gap follows.
+    after: Option<usize>,
+}
+
+impl FreeArea {
+    fn sectors(&self) -> u64 {
+        self.end_lba - self.start_lba + 1
+    }
+}
+
+/// Split the usable range into gaps, remembering which partition each follows.
+fn find_free_areas(
+    existing: &[GptPartition],
+    first_usable_lba: u64,
+    last_usable_lba: u64,
+) -> Vec<FreeArea> {
+    let mut order: Vec<usize> = (0..existing.len()).collect();
+    order.sort_by_key(|&i| existing[i].first_lba);
+
+    let mut areas = Vec::new();
+    let mut cursor = first_usable_lba;
+    let mut previous: Option<usize> = None;
+
+    for &i in &order {
+        let p = &existing[i];
+        if cursor < p.first_lba {
+            areas.push(FreeArea {
+                start_lba: cursor,
+                end_lba: p.first_lba - 1,
+                after: previous,
+            });
+        }
+        cursor = p.last_lba + 1;
+        previous = Some(i);
+    }
+
+    if cursor <= last_usable_lba {
+        areas.push(FreeArea {
+            start_lba: cursor,
+            end_lba: last_usable_lba,
+            after: previous,
+        });
+    }
+
+    areas
+}
+
 /// Allocate space for new/grown partitions using weight-based distribution.
 fn allocate_space(
     defs: &[PartitionDefinition],
@@ -1870,34 +1926,102 @@ fn allocate_space(
     // down to the grain.
     let grain = std::cmp::max(4096, sector_size);
 
-    // Claims are settled against the WHOLE free area, since grow_claims charges
-    // each settled claim's own minimum out of the span as it goes. Each request
-    // contributes the partition and then its padding, in that order, which is
-    // the order upstream walks them in.
-    let mut claims: Vec<SpanClaim> = Vec::with_capacity(requests.len() * 2);
-    for req in &requests {
+    // Space is allocated PER FREE AREA, not across their sum. A partition has
+    // to live in one contiguous gap, so sizing it against the total lets it be
+    // sized larger than any gap can hold and placement then fails outright.
+    let areas = find_free_areas(existing, first_usable_lba, last_usable_lba);
+
+    // An area offers new partitions less than its full size when the partition
+    // it follows is owed padding: that padding is not free space. A disk whose
+    // only partition asks for PaddingMinBytes=92M leaves the whole trailing gap
+    // spoken for, so nothing new belongs there.
+    let area_available: Vec<u64> = areas
+        .iter()
+        .map(|a| {
+            let owed = a
+                .after
+                .and_then(|idx| {
+                    matched
+                        .iter()
+                        .find(|m| {
+                            m.existing.as_ref().map(|e| e.slot_index)
+                                == Some(existing[idx].slot_index)
+                        })
+                        .map(|m| defs[m.definition_index].padding_min)
+                })
+                .unwrap_or(0);
+            (a.sectors() * sector_size).saturating_sub(owed)
+        })
+        .collect();
+
+    // First fit over the areas sorted smallest first, budgeting each
+    // partition's minimum as it is placed, mirroring context_allocate_partitions.
+    // An existing partition is not placed: it grows in place, into the gap that
+    // follows it if there is one.
+    let mut smallest_first: Vec<usize> = (0..areas.len()).collect();
+    smallest_first.sort_by_key(|&i| area_available[i]);
+
+    let mut budget = area_available.clone();
+    let mut assignment: Vec<Option<usize>> = vec![None; requests.len()];
+
+    for (ri, req) in requests.iter().enumerate() {
         let m = &matched[req.matched_idx];
-        let (min, max) = match &m.existing {
-            // An existing partition never shrinks, and may grow by at most
-            // max_bytes beyond what it already occupies.
-            Some(existing) if !m.is_new => {
-                let current = existing.size_bytes(sector_size);
-                (current, current.saturating_add(req.max_bytes))
-            }
-            _ => (req.min_bytes, req.max_bytes),
-        };
-        claims.push(SpanClaim {
-            weight: req.weight as u64,
-            min,
-            max,
-        });
-        claims.push(SpanClaim {
-            weight: req.padding_weight as u64,
-            min: req.padding_min,
-            max: req.padding_max,
-        });
+        if !m.is_new {
+            assignment[ri] = m.existing.as_ref().and_then(|e| {
+                areas
+                    .iter()
+                    .position(|a| a.after.map(|idx| existing[idx].slot_index) == Some(e.slot_index))
+            });
+            continue;
+        }
+
+        let needed = req.min_bytes.saturating_add(req.padding_min);
+        if let Some(&ai) = smallest_first.iter().find(|&&i| budget[i] >= needed) {
+            assignment[ri] = Some(ai);
+            budget[ai] -= needed;
+        }
     }
-    let sizes = grow_claims(&claims, total_free_bytes, grain);
+
+    let mut sizes = vec![0u64; requests.len() * 2];
+    for ai in 0..areas.len() {
+        let members: Vec<usize> = (0..requests.len())
+            .filter(|&ri| assignment[ri] == Some(ai))
+            .collect();
+        if members.is_empty() {
+            continue;
+        }
+
+        let mut claims: Vec<SpanClaim> = Vec::with_capacity(members.len() * 2);
+        for &ri in &members {
+            let req = &requests[ri];
+            let m = &matched[req.matched_idx];
+            let (min, max) = match &m.existing {
+                // An existing partition never shrinks, and may grow by at most
+                // max_bytes beyond what it already occupies.
+                Some(existing_part) if !m.is_new => {
+                    let current = existing_part.size_bytes(sector_size);
+                    (current, current.saturating_add(req.max_bytes))
+                }
+                _ => (req.min_bytes, req.max_bytes),
+            };
+            claims.push(SpanClaim {
+                weight: req.weight as u64,
+                min,
+                max,
+            });
+            claims.push(SpanClaim {
+                weight: req.padding_weight as u64,
+                min: req.padding_min,
+                max: req.padding_max,
+            });
+        }
+
+        let grown = grow_claims(&claims, area_available[ai], grain);
+        for (k, &ri) in members.iter().enumerate() {
+            sizes[ri * 2] = grown[k * 2];
+            sizes[ri * 2 + 1] = grown[k * 2 + 1];
+        }
+    }
 
     // Upstream numbers partition UUIDs per type, in definition order: the first
     // partition of a type hashes the bare type UUID and later ones append their
@@ -3881,6 +4005,77 @@ mod tests {
         let none = [SpanClaim { weight: 0, min: 0, max: 100 }];
         assert_eq!(grow_claims(&none, 500, 1), vec![0]);
         assert_eq!(grow_claims(&[], 500, 4096), Vec::<u64>::new());
+    }
+
+    /// Refilling deferred partitions onto a disk that already holds swap: the
+    /// three new partitions must fit the gap BEFORE swap, not be sized against
+    /// the sum of all free space. The trailing gap is swap's PaddingMinBytes=,
+    /// so it offers nothing. This is the step TEST-58-REPART failed with
+    /// "no free region of 319.6M available".
+    #[test]
+    fn test_full_allocates_per_free_area() {
+        const SEED: &str = "750b6cd5c4ae4012a15e7be3c29e6a47";
+        let tmp = TempDir::new().unwrap();
+        let defs_dir = tmp.path().join("defs");
+        fs::create_dir(&defs_dir).unwrap();
+        fs::write(
+            defs_dir.join("home.conf"),
+            "[Partition]\nType=home\nLabel=home-first\nFormat=vfat\n",
+        )
+        .unwrap();
+        for name in ["root.conf", "root2.conf"] {
+            fs::write(defs_dir.join(name), "[Partition]\nType=root\nFormat=vfat\n").unwrap();
+        }
+        fs::write(
+            defs_dir.join("swap.conf"),
+            "[Partition]\nType=swap\nSizeMaxBytes=64M\nPaddingMinBytes=92M\n",
+        )
+        .unwrap();
+
+        let img = tmp.path().join("zzz");
+        // First lay down swap alone, deferring the rest.
+        let r = run(&args(&[
+            "--empty=create",
+            "--size=1G",
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            "--defer-partitions=home,root",
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "deferred run failed: {r:?}");
+
+        // Now fill the deferred partitions in.
+        let r = run(&args(&[
+            "--dry-run=no",
+            &format!("--seed={SEED}"),
+            &format!("--definitions={}", defs_dir.display()),
+            img.to_str().unwrap(),
+        ]));
+        assert!(r.is_ok(), "refill run failed: {r:?}");
+
+        let mut f = fs::File::open(&img).unwrap();
+        let hdr = read_gpt_header(&mut f, 512).unwrap().expect("no GPT header");
+        let mut parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
+        parts.sort_by_key(|p| p.first_lba);
+
+        let expected: [(u64, u64, &str); 4] = [
+            (2048, 591856, "home-first"),
+            (593904, 591856, "root-x86-64"),
+            (1185760, 591864, "root-x86-64-2"),
+            (1777624, 131072, "swap"),
+        ];
+        assert_eq!(parts.len(), 4);
+        for (i, (start, size, label)) in expected.iter().enumerate() {
+            assert_eq!(parts[i].first_lba, *start, "partition {} start", i + 1);
+            assert_eq!(
+                parts[i].last_lba - parts[i].first_lba + 1,
+                *size,
+                "partition {} size",
+                i + 1
+            );
+            assert_eq!(parts[i].name, *label, "partition {} label", i + 1);
+        }
     }
 
     /// --defer-partitions= leaves the named types out of the table while they
