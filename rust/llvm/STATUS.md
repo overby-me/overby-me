@@ -59,16 +59,32 @@ same attribute is spelled differently depending on where it sits.
 
 ## Conformance against upstream's suites
 
-Measured, not claimed. Each upstream test says in its own RUN lines whether
-`llvm-as` should accept or reject it, so agreement counts both halves: a file
-we accept that upstream accepts, and a file we reject that upstream rejects.
-Files whose RUN lines need a tool or a pass this tier does not have are
-skipped and counted separately rather than scored.
+Measured, not claimed. Every `.ll` file in the suite is run through our
+`opt -S -passes=verify` and through real `llvm-as`, and the two agree when
+they reach the same verdict about whether the file is a module. Nothing is
+skipped, so the denominator is the whole suite.
 
-| Suite | Agreed | Considered | Skipped | Check |
-| --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 226 | 304 | 179 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 181 | 252 | 76 | `llvm-upstream-verifier` |
+| Suite | Agreed | Files | Check |
+| --- | --- | --- | --- |
+| `llvm/test/Assembler` | 373 | 483 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 215 | 328 | `llvm-upstream-verifier` |
+
+The two halves of the gap are not equally bad. We **refuse 53 modules
+llvm-as reads**, which is the failure that matters: mostly parse gaps, led
+by the module summary index syntax (`^0 = ...`, ten files) and intrinsics
+used without a declaration. We **read 170 modules llvm-as refuses**, which
+is a missing verifier rule each. Two of the 53 are permanent by design:
+typed-pointer IR is rejected here on purpose (PLAN §1.2).
+
+An earlier version of this measurement read each test's RUN lines to decide
+what upstream would do with it. That was wrong often enough to matter: a
+test that pipes `llvm-as`'s stderr into FileCheck is expecting a
+diagnostic, and `Verifier` has 286 of those against the 74 that spell it
+`not llvm-as`. Scoring those as "upstream accepts this" turned our own
+wrong acceptances into agreement, and skipping a third of each suite hid
+the rest. Asking the tool is both simpler and true. The numbers before the
+change were 226 of 304 considered and 181 of 252 considered; they are not
+comparable to these.
 
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
@@ -79,11 +95,10 @@ ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against
 files that carry them.
 
-The first measurement was 146 and 70. Both numbers are still low and both are
-the point: the gap is a to-do list, and
-`docs/dialect-notes.md` groups the recurring reasons. The ratchets are in
-`default.nix` and only ever move up. The suites earned their place on the
-first run by finding a parser hang that the corpus never triggered.
+The gap is a to-do list, and `docs/dialect-notes.md` groups the recurring
+reasons. The ratchets are in `default.nix` and only ever move up. The suites
+earned their place on the first run by finding a parser hang that the corpus
+never triggered.
 
 ## How large the job is
 

@@ -1,94 +1,64 @@
 #!/usr/bin/env nu
-# Runs an upstream LLVM test suite through our `opt` and reports how much of
-# it we agree with.
+# Runs an upstream LLVM test suite through our `opt` and through real
+# `llvm-as`, and reports how often the two agree about whether a file is a
+# module at all.
 #
-#   nu check-upstream.nu <path-to-opt> <suite-directory> <ratchet>
+#   nu check-upstream.nu <path-to-opt> <path-to-llvm-as> <suite-directory> <ratchet>
 #
-# Each test says what it expects in its own RUN lines: a suite file whose RUN
-# line invokes `not llvm-as` or `not opt` is a module upstream rejects, and
-# everything else is one upstream accepts. We agree with a file when our
-# accept-or-reject verdict matches, so both halves of the suite count. A file
-# whose RUN lines need a tool or a flag we do not have is skipped and counted
-# separately rather than being scored as agreement.
+# The oracle is llvm-as's own verdict, not the test's RUN lines. Reading the
+# RUN lines was the first attempt and it was wrong often enough to matter: a
+# test that pipes llvm-as's stderr into FileCheck is expecting a diagnostic,
+# and there are 286 of those in `Verifier` alone against the 74 that spell it
+# `not llvm-as`. Scoring those as "upstream accepts this" made our own wrong
+# acceptances look like agreement. Asking the tool is both simpler and true.
+#
+# Nothing is skipped. Every `.ll` file in the suite is a module llvm-as either
+# reads or refuses, so every file has an answer to agree or disagree with.
 #
 # The ratchet is the number of files we have to agree with. It only ever goes
 # up: a change that drops it fails the check, and a change that raises it is
 # expected to record the new number in the same commit.
 
-# What a test's RUN lines say should happen.
-def expectation [text: string]: nothing -> string {
-  let runs = ($text | lines | where ($it | str contains "RUN:"))
-  if ($runs | is-empty) {
-    return "skip"
-  }
-  # lit skips a test whose REQUIRES line the build does not satisfy, and the
-  # ones here want an assertions-enabled LLVM. Scoring them would measure the
-  # oracle's build configuration rather than our agreement with it.
-  if ($text | lines | any {|line| $line | str contains "REQUIRES:"}) {
-    return "skip"
-  }
-  # Tools and modes this tier does not have. A test that needs one of them
-  # says nothing about whether we read the module correctly.
-  let unsupported = [
-    "llvm-bcanalyzer" "llc " "llvm-link" "llvm-extract" "llvm-lto" "opt -passes"
-    "--passes=" "-passes=" "split-file" "llvm-dwarfdump" "verify-uselistorder"
-    "llvm-diff" "llvm-objdump" "%python" "sed " "grep " "count " "FileCheck --check-prefix"
-  ]
-  for pattern in $unsupported {
-    if ($runs | any {|line| $line | str contains $pattern}) {
-      return "skip"
-    }
-  }
-  if ($runs | any {|line| ($line | str contains "not llvm-as") or ($line | str contains "not opt")}) {
-    "reject"
-  } else if ($runs | any {|line| ($line | str contains "llvm-as") or ($line | str contains "llvm-dis")}) {
-    "accept"
-  } else {
-    "skip"
-  }
-}
-
-def main [opt: path, suite: path, ratchet: int] {
+def main [opt: path, llvm_as: path, suite: path, ratchet: int] {
   let files = (glob ([$suite "*.ll"] | path join) | sort)
   if ($files | is-empty) {
     error make {msg: $"no .ll files in ($suite)"}
   }
 
   mut agreed = 0
-  mut skipped = 0
-  mut disagreements = []
+  mut we_accept = []
+  mut we_reject = []
   for file in $files {
-    let text = (open --raw $file)
-    let want = (expectation $text)
-    if $want == "skip" {
-      $skipped = $skipped + 1
-      continue
-    }
-    let result = (do { ^$opt -S -passes=verify $file -o /dev/null } | complete)
-    let accepted = $result.exit_code == 0
-    let matched = if $want == "accept" { $accepted } else { not $accepted }
-    if $matched {
+    let upstream = (do { ^$llvm_as $file -o /dev/null } | complete)
+    let ours = (do { ^$opt -S -passes=verify $file -o /dev/null } | complete)
+    let accepted = $ours.exit_code == 0
+    if ($upstream.exit_code == 0) == $accepted {
       $agreed = $agreed + 1
+    } else if $accepted {
+      $we_accept = ($we_accept | append ($file | path basename))
     } else {
-      let reason = if $accepted {
-        "we accept a module upstream rejects"
-      } else {
-        ($result.stderr | lines | first 1 | str join "" | str trim)
-      }
-      $disagreements = ($disagreements | append $"($file | path basename): ($reason)")
+      let reason = ($ours.stderr | lines | last 1 | str join "" | str trim)
+      $we_reject = ($we_reject | append $"($file | path basename): ($reason)")
     }
   }
 
-  let considered = $agreed + ($disagreements | length)
   print $"suite:    ($suite | path basename)"
-  print $"agreed:   ($agreed) of ($considered) considered; ($skipped) skipped; ($files | length) total"
+  print $"agreed:   ($agreed) of ($files | length)"
   print $"ratchet:  ($ratchet)"
-  if ($disagreements | is-not-empty) {
+  if ($we_reject | is-not-empty) {
     print ""
-    print "disagreements:"
-    print ($disagreements | first 40 | str join "\n")
-    if (($disagreements | length) > 40) {
-      print $"... and (($disagreements | length) - 40) more"
+    print $"we refuse ($we_reject | length) modules llvm-as reads:"
+    print ($we_reject | first 40 | str join "\n")
+    if (($we_reject | length) > 40) {
+      print $"... and (($we_reject | length) - 40) more"
+    }
+  }
+  if ($we_accept | is-not-empty) {
+    print ""
+    print $"we read ($we_accept | length) modules llvm-as refuses:"
+    print ($we_accept | first 40 | str join " ")
+    if (($we_accept | length) > 40) {
+      print $"... and (($we_accept | length) - 40) more"
     }
   }
 

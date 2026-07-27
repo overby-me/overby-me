@@ -63,11 +63,15 @@
     });
 
   upstreamCheck = pkgs: suite: ratchet:
-    cargoCheck pkgs "upstream-${lib.toLower suite}" ''
+    (cargoCheck pkgs "upstream-${lib.toLower suite}" ''
       cargo build -p llvm-tools --offline --locked
       nu corpus/check-upstream.nu "$CARGO_TARGET_DIR/debug/opt" \
+        "${lib.getExe' pkgs.llvm "llvm-as"}" \
         "${pkgs.llvm.src}/llvm/test/${suite}" ${toString ratchet}
-    '';
+    '')
+    .overrideAttrs (previous: {
+      nativeBuildInputs = previous.nativeBuildInputs ++ [pkgs.llvm];
+    });
 in {
   checks = {
     llvm-fmt = pkgs:
@@ -108,11 +112,11 @@ in {
         cargo test -p llvm-ir-parse --test verify --offline --locked -- --nocapture
       '';
 
-    # Conformance against upstream's own suites, measured rather than claimed.
-    # Both numbers are low and both are honest: see STATUS.md for what the
-    # remaining disagreements are.
-    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 226;
-    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 181;
+    # Conformance against upstream's own suites, measured rather than claimed:
+    # every file in the suite, scored against what real llvm-as does with it.
+    # See STATUS.md for what the remaining disagreements are.
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 373;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 215;
 
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this

@@ -108,13 +108,17 @@ unimplemented pass and bitcode output are both errors that say so.
 ### T0.2, conformance and the rustc seam
 
 **B1. [done] Upstream `llvm/test/Assembler` and `llvm/test/Verifier` as an oracle.** *(2026-07-27)*
-From `pkgs.llvm.src`, not vendored. Each test's own RUN lines say whether
-upstream accepts or rejects it, so both halves count. Baseline: 146 of 306
-considered Assembler files, 70 of 254 Verifier files. It already found a
-parser hang.
+From `pkgs.llvm.src`, not vendored. The oracle is real `llvm-as`'s verdict
+on each file, so every `.ll` in the suite counts and nothing is skipped.
+It already found a parser hang.
+The first version read each test's RUN lines instead, and that was wrong
+often enough to matter: a test piping llvm-as's stderr into FileCheck is
+expecting a diagnostic, and `Verifier` has 286 of those against 74 that
+spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
+Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 226, 70 to 181)*
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 373 of 483 Assembler, 215 of 328 Verifier, on the llvm-as oracle)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
