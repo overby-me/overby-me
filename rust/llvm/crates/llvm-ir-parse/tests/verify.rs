@@ -550,6 +550,18 @@ const BROKEN: &[(&str, &str)] = &[
         "define void @f() {\nentry:\n  ret void, !bar !1\n}\n\n!0 = !{}\n!1 = !{metadata !0}\n",
         "holds metadata wrapped in a value",
     ),
+    (
+        "%myTy = type { %myTy }\n",
+        "%myTy contains itself, so it has no size",
+    ),
+    (
+        "$v = comdat any\n$v = comdat any\n",
+        "$v is declared more than once",
+    ),
+    (
+        "define void @f(i8 mustprogress %a) {\nentry:\n  ret void\n}\n",
+        "mustprogress on parameter 0, which describes a function",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -944,6 +956,9 @@ const VERIFIES: &[&str] = &[
     // The address space follows the alignment, which is where the grammar
     // puts it.
     "define void @f() {\nentry:\n  %y = alloca i32, align 4, addrspace(3)\n  ret void\n}\n",
+    // A pointer to a type does not make the type contain itself, which is
+    // what makes a linked list legal.
+    "%node = type { i32, ptr }\n@head = global %node zeroinitializer\n",
     // The floating-point atomics are the ones a target does lane by lane.
     "define void @f(ptr %p, <2 x half> %v) {\nentry:\n  %r = atomicrmw fadd ptr %p, <2 x half> %v seq_cst, align 4\n  ret void\n}\n",
     // An elementtype says what the pointer reaches through.

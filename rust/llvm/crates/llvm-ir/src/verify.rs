@@ -21,7 +21,7 @@ use crate::intrinsic_table::Parameter;
 use crate::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use crate::module::Module;
 use crate::summary::SummaryValue;
-use crate::types::TypeKind;
+use crate::types::{StructId, TypeKind};
 use crate::value::{BlockId, GlobalRef, InstId, MdId, Name, Value};
 use crate::{FunctionId, TypeId};
 use llvm_support::ApInt;
@@ -98,6 +98,33 @@ impl Verifier<'_> {
     // ----------------------------------------------------------- module rules
 
     fn module_level(&mut self) {
+        for index in 0..self.module.ctx.struct_count() {
+            let id = StructId(index as u32);
+            if self.module.ctx.struct_def(id).fields.is_none() {
+                continue;
+            }
+            let fields = self
+                .module
+                .ctx
+                .struct_def(id)
+                .fields
+                .clone()
+                .unwrap_or_default();
+            if fields
+                .iter()
+                .any(|field| self.reaches_struct(*field, id, &mut Vec::new()))
+            {
+                let name = self.module.ctx.struct_def(id).name.clone();
+                self.report(format!("%{name} contains itself, so it has no size"));
+            }
+        }
+        let mut comdats: HashSet<String> = HashSet::new();
+        for index in 0..self.module.comdats.len() {
+            let name = self.module.comdats[index].name.clone();
+            if !comdats.insert(name.clone()) {
+                self.report(format!("${name} is declared more than once"));
+            }
+        }
         self.summary_index();
         self.alias_targets();
         // Constant expressions are interned rather than owned by whatever
@@ -1038,6 +1065,23 @@ impl Verifier<'_> {
         }
         for (index, param) in function.params.iter().enumerate() {
             self.attribute_set(&param.attrs, param.ty, &format!("parameter {index}"));
+            for kind in [
+                EnumAttr::MustProgress,
+                EnumAttr::NoUnwind,
+                EnumAttr::WillReturn,
+                EnumAttr::NoInline,
+                EnumAttr::AlwaysInline,
+                EnumAttr::OptNone,
+                EnumAttr::Cold,
+                EnumAttr::Hot,
+            ] {
+                if param.attrs.has(kind) {
+                    self.report(format!(
+                        "{} on parameter {index}, which describes a function",
+                        kind.keyword()
+                    ));
+                }
+            }
             if param.attrs.has(EnumAttr::ImmArg) && !intrinsic {
                 self.report(format!(
                     "immarg on parameter {index} of a function that is not an intrinsic"
@@ -2560,6 +2604,37 @@ impl Verifier<'_> {
             TypeKind::Array { element, .. } => self.has_a_fixed_size_within(*element, trail),
             _ => true,
         }
+    }
+
+    /// Whether a type reaches itself by value, through struct fields and
+    /// array elements. A pointer to it does not count, which is what makes a
+    /// linked list legal and `%t = type { %t }` not.
+    fn reaches_struct(&self, ty: TypeId, wanted: StructId, trail: &mut Vec<TypeId>) -> bool {
+        if trail.contains(&ty) {
+            return false;
+        }
+        trail.push(ty);
+        let fields: Vec<TypeId> = match self.module.ctx.type_kind(ty) {
+            TypeKind::NamedStruct(id) if *id == wanted => {
+                trail.pop();
+                return true;
+            }
+            TypeKind::Struct { fields, .. } => fields.clone(),
+            TypeKind::NamedStruct(id) => self
+                .module
+                .ctx
+                .struct_def(*id)
+                .fields
+                .clone()
+                .unwrap_or_default(),
+            TypeKind::Array { element, .. } => vec![*element],
+            _ => Vec::new(),
+        };
+        let found = fields
+            .iter()
+            .any(|field| self.reaches_struct(*field, wanted, trail));
+        trail.pop();
+        found
     }
 
     /// A struct holds scalable vectors only when it holds nothing else.

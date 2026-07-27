@@ -122,6 +122,12 @@ impl Context {
     ///
     /// A forward reference and a genuine `type opaque` are the same thing
     /// until a body arrives, which is what makes recursive types expressible.
+    /// How many identified structs the module has, so a caller can walk
+    /// them all.
+    pub fn struct_count(&self) -> usize {
+        self.structs.len()
+    }
+
     pub fn named_struct(&mut self, name: &str) -> StructId {
         if let Some(id) = self.struct_ids.get(name) {
             return *id;
