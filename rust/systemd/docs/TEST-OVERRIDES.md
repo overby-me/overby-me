@@ -124,6 +124,9 @@ Landed since the ledger was written (each regression-tested before push):
 | `35a1bd4e` | repart writes the empty image it is asked for; fresh GPT reports `first-lba 2048` |
 | `bf1b465e` | `--empty=create` implies `--dry-run=no`, so the image reaches disk |
 | `3cc24e09` | udev resolves symlink collisions by `link_priority` instead of last-writer-wins |
+| `20b75d20` | repart honours `--include-partitions=`, rejects over-long `Label=`, defaults `GrowFileSystem=` on |
+| `560ca74a` | repart redistributes space a capped partition cannot use; 4096-byte grain |
+| `ef9c52bb` | udev unquotes imported properties; **67-INTEGRITY green with no override** |
 
 Both fake passes are gone. Several of these are user-facing bugs well beyond the
 tests that exposed them: `systemctl start --wait` hung on every oneshot,
@@ -165,10 +168,18 @@ VM run. Diagnostics must write to stderr.
   generators). The third: `init.scope` is not a unit in rust-systemd, only a
   cgroup path constant, so `[Scope]` resource control never reaches PID 1's
   cgroup. That also underpins `systemctl show`/`set-property init.scope`.
-- **58-REPART** and **67-INTEGRITY** are both unmasked and running for real.
-  Each had three genuine defects fixed against it; whether either now reaches
-  the end of its suite is still being measured, and later cases are not
-  expected to pass yet.
+- **67-INTEGRITY** is GREEN with its override removed: all ten `test_one` cases
+  pass. The two defects behind it were both in udev, not in
+  `crates/integritysetup`, and both are user-facing well beyond this test.
+  Imported properties kept their quotes, so `dmsetup udevflags` emitting
+  `DM_UDEV_PRIMARY_SOURCE_FLAG='1'` never matched `10-dm.rules`, which disabled
+  `13-dm-disk.rules` and left every dm device carrying a filesystem without its
+  `/dev/disk/by-uuid/` symlink.
+- **58-REPART** got six real defects fixed against it and now matches upstream
+  byte for byte through `testcase_basic` steps 1 and 2, every UUID, label,
+  attribute and offset included. It is masked again at the next step, which
+  needs `--copy-from=`: copying partitions and their contents between images is
+  a feature rust-systemd does not have, not a defect.
 
 ## Work tiers
 
