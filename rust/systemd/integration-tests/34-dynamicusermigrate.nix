@@ -33,7 +33,14 @@
   # and a find with upstream's exact prune list, run inside the service, prints
   # nothing at all.
   #
-  # ROOT CAUSE FOUND, measured in a single process inside the failing service.
+  # test_check_writable now PASSES, verified on two independent VM runs (the
+  # derivation hashes differ, so neither was served from cache), alongside
+  # 01-basic, 44-log-namespace and 26-systemctl to check the ProtectSystem=
+  # path it touches. The measurement inside the service reads:
+  #     root-mount-lines: 1
+  #     writable-dirs: the eight /var/lib/private entries and nothing else
+  #
+  # ROOT CAUSE, measured in a single process inside the failing service.
   # It is not ownership and not traversal: the service runs as uid 61220,
   # /var/lib/private is 755 root:root, /var/lib/private/waldo is 755
   # 61220:61220, and both `touch` and `test -w` on it SUCCEED. Yet the same
@@ -49,12 +56,11 @@
   # same path can reach either. `touch` succeeds through one view and
   # access(W_OK), which is what `find -writable` calls, fails through the other.
   #
-  # The duplicate root comes from remount_read_only("/") in exec_helper.rs,
-  # which does `mount --bind / /` (MS_BIND|MS_REC) and only then remounts
-  # read-only. That bind is what creates the second root mount. Upstream does
-  # not stack a second root: fix the read-only remount so it applies to the
-  # existing root rather than to a fresh bind of it, and check afterwards that
-  # /proc/self/mountinfo inside a strict service lists `/` exactly once.
+  # The duplicate root came from remount_read_only() binding every path onto
+  # itself before remounting read-only. For a path that is ALREADY a mount
+  # point that stacks a second mount over the first. FIXED by skipping the bind
+  # when /proc/self/mountinfo already lists the path; the bind stays for paths
+  # like /usr that may not be separate mounts.
   #
   # This also explains why the earlier ProtectSystem=strict fix was necessary
   # but not sufficient: it corrected WHICH paths get restored read-write, but
@@ -68,7 +74,12 @@
   # re-protects. The extra four meant a strict service could write across the
   # whole runtime and log trees, so `find` reported far more than 8.
   #
-  # REMAINING FAILURE: test_check_idmapped_mounts. The kernel here is new
+  # REMAINING FAILURE: test_check_idmapped_mounts. Worth re-measuring rather
+  # than assuming: man 2 unshare refuses CLONE_NEWUSER when the caller's root
+  # does not match its mount namespace root, which is exactly what the doubly
+  # mounted root produced, so the duplicate-root bug may have caused this too.
+  #
+  # ORIGINAL NOTE ON test_check_idmapped_mounts. The kernel here is new
   # enough (6.18 >= 5.12) that upstream's version gate lets it run. The service
   # uses MountAPIVFS=yes, DynamicUser=yes, PrivateUsers=yes and
   # TemporaryFileSystem=/run /var/opt /var/lib /vol, and logged three failures:

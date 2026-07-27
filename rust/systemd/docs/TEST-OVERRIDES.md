@@ -188,12 +188,24 @@ VM run. Diagnostics must write to stderr.
 
   `test_check_idmapped_mounts` sits behind it and has its own genuine bug.
 
-  Its recorded rationale said the service sees zero writable directories, and
-  that is correct: the service's own trace ends `+ [[ 0 == 8 ]]`. I overturned
-  that once on the strength of an instrument that called `access(W_OK)` as
-  **root** before the service drops to its dynamic uid, and concluded the
-  opposite. Root sees a writable filesystem whatever the modes are. Measure as
-  the principal the assertion is about.
+  `test_check_writable` now passes, on two independent runs.
+
+  The cause was `remount_read_only()` binding every path onto itself before
+  remounting read-only. For a path already a mount point that stacks a second
+  mount, and for `/` it left the root mounted twice with contradictory flags
+  plus a duplicated subtree: `touch` resolved through the writable view and
+  `access(W_OK)`, which `find -writable` calls, through the read-only one. The
+  bind is now skipped when `/proc/self/mountinfo` already lists the path.
+
+  Three wrong causes were asserted before that one, and the reasons are worth
+  keeping. The recorded rationale said the service sees zero writable
+  directories, which was right; I overturned it on an instrument that called
+  `access(W_OK)` as **root**, before the service drops to its dynamic uid, so it
+  measured a principal the assertion was never about. Then traversal was
+  suspected, but the service could `touch` the directory fine. What settled it
+  was putting the `find`, the write probe and `/proc/self/mountinfo` in ONE
+  process: stitching conclusions across separate runs is what produced every
+  wrong answer.
 
 - **55-OOMD** line 12 needs three things. Two are done (credentials, reload-time
   generators). The third: `init.scope` is not a unit in rust-systemd, only a

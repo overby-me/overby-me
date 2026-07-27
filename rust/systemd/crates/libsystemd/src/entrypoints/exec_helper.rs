@@ -4303,6 +4303,20 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
 }
 
 /// Bind-mount a path on top of itself with MS_RDONLY.
+/// Whether `path` is itself a mount point, per /proc/self/mountinfo.
+///
+/// Field 5 of each line is the mount point. Comparing against it avoids
+/// stacking a redundant bind over a mount that is already there.
+fn is_mount_point(path: &str) -> bool {
+    let Ok(mountinfo) = std::fs::read_to_string("/proc/self/mountinfo") else {
+        return false;
+    };
+    mountinfo
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(4))
+        .any(|mp| mp == path)
+}
+
 fn remount_read_only(path: &str, _config: &ExecHelperConfig) {
     let c_path = match std::ffi::CString::new(path) {
         Ok(c) => c,
@@ -4311,23 +4325,33 @@ fn remount_read_only(path: &str, _config: &ExecHelperConfig) {
     if !Path::new(path).exists() {
         return;
     }
-    // First bind-mount the path on itself
-    let ret = unsafe {
-        libc::mount(
-            c_path.as_ptr(),
-            c_path.as_ptr(),
-            std::ptr::null(),
-            libc::MS_BIND | libc::MS_REC,
-            std::ptr::null(),
-        )
-    };
-    if ret != 0 {
-        log::warn!(
-            "Failed to bind-mount {} for read-only: {}",
-            path,
-            std::io::Error::last_os_error()
-        );
-        return;
+    // Bind the path onto itself ONLY when it is not already a mount point.
+    //
+    // A path that is already a mount can be remounted read-only directly. Doing
+    // the bind anyway stacks a SECOND mount over the first, and for `/` that
+    // leaves the root mounted twice with contradictory flags: the original
+    // read-only, the duplicate read-write, plus a duplicated subtree. Paths
+    // then resolve through whichever the kernel picks, so a directory can be
+    // writable to `touch` and not to access(W_OK), which is what
+    // TEST-34-DYNAMICUSERMIGRATE's `find -type d -writable` calls.
+    if !is_mount_point(path) {
+        let ret = unsafe {
+            libc::mount(
+                c_path.as_ptr(),
+                c_path.as_ptr(),
+                std::ptr::null(),
+                libc::MS_BIND | libc::MS_REC,
+                std::ptr::null(),
+            )
+        };
+        if ret != 0 {
+            log::warn!(
+                "Failed to bind-mount {} for read-only: {}",
+                path,
+                std::io::Error::last_os_error()
+            );
+            return;
+        }
     }
     // Then remount it read-only
     let ret = unsafe {
