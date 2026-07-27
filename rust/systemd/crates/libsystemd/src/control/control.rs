@@ -10243,6 +10243,11 @@ pub fn execute_command(
                 a_is_socket.cmp(&b_is_socket)
             });
 
+            // Transient units unloaded after the read guard is released: taking a
+            // write lock while it is held is the shape that deadlocked PID 1
+            // (docs/ARCHITECTURE.md invariant I1).
+            let mut transient_stopped: Vec<crate::units::UnitId> = Vec::new();
+            {
             let run_info = &*run_info.read_poisoned();
             for unit_name in &actual_names {
                 // Collect unit IDs to stop. For glob patterns, collect all
@@ -10342,8 +10347,24 @@ pub fn execute_command(
                         && path.starts_with("/run/systemd/transient")
                     {
                         let _ = std::fs::remove_file(path);
+                        transient_stopped.push(id.clone());
                     }
                 } // end for id in &ids_to_stop
+            }
+            } // read guard released here
+
+            // Now that no read guard is held, drop the stopped transient units
+            // from the table so they stop showing up in list-units and are not
+            // re-resolved by later dependency walks. Dependency-aware removal
+            // scrubs them from other units' dep lists; the raw remove is the
+            // same fallback mount_monitor uses.
+            if !transient_stopped.is_empty() {
+                let mut ri = run_info.write_poisoned();
+                for id in transient_stopped {
+                    if crate::units::remove_unit_with_dependencies(id.clone(), &mut ri).is_err() {
+                        ri.unit_table.remove(&id);
+                    }
+                }
             }
         }
         Command::StopNoBlock(unit_names) => {

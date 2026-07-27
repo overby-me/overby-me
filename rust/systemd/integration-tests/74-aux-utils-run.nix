@@ -34,13 +34,12 @@
   #      The field is no_env_expand now and the CLI flag reaches exec_helper by
   #      the same route as a hand-written `:`, rather than a parallel path.
   #
-  #   5. a stopped transient unit kept its runtime fragment, so
-  #      `(! systemctl cat "$UNIT")` failed. The fragment under
-  #      /run/systemd/transient is removed on stop now. Only the fragment: the
-  #      unit is still left in the table, so a full GC that unloads it is
-  #      missing. Doing that from the stop handler would mean taking a write
-  #      lock while it holds the RuntimeInfo read guard, the shape that
-  #      deadlocked PID 1 earlier (invariant I1).
+  #   5. a stopped transient unit was never collected, so
+  #      `(! systemctl cat "$UNIT")` failed. Its /run/systemd/transient fragment
+  #      is removed on stop and the unit is unloaded from the table. The unload
+  #      happens AFTER the stop handler's RuntimeInfo read guard is released,
+  #      since taking a write lock underneath it is the shape that deadlocked
+  #      PID 1 earlier (invariant I1).
   #
   # The script also clears --property=LimitCORE last-wins with PrivateTmp=yes,
   # --uid=testuser, --gid=testuser and --expand-environment=no.
