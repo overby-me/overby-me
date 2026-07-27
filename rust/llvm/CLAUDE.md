@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 452 of 483 with 14 wrongly refused, Verifier 285 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 453 of 483 with 13 wrongly refused, Verifier 284 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -419,13 +419,14 @@ and a fence with an ordering that names no direction orders nothing.
 A fortieth pass: a `select` picks lane by lane so its condition has as
 many lanes as what it picks between, an alloca counts its elements once,
 and a block is written once.
-A fourth rule was written, measured and reverted: every block a terminator
-names should be one the function defines, and enabling it refused three
-files upstream reads. The rule is right and it surfaced an older bug
-instead: a numbered block reference like `%1` creates a new block rather
-than resolving to the unnamed one that already has that slot. It is the
-same defect as `%0` in a phi, and both wait on the parser tracking slot
-numbers the way the printer does.
+A fourth rule was written, measured, reverted, and then earned: every
+block a terminator names is one the function defines. Enabling it refused
+three files upstream reads, because a numbered block reference like `%1`
+created a new block rather than resolving to the unnamed one holding that
+slot. Fixing that fixed `%0` in a phi as well, which had been noticed and
+left twice. An unnamed block now takes its slot through `block_by_name`,
+which reuses the placeholder a forward reference already made instead of
+shadowing it, and the rule went back in.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

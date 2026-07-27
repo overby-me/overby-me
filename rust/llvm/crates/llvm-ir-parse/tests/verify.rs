@@ -600,6 +600,10 @@ const BROKEN: &[(&str, &str)] = &[
         "define void @f(<4 x i1> %c, <2 x i32> %a, <2 x i32> %b) {\nentry:\n  %r = select <4 x i1> %c, <2 x i32> %a, <2 x i32> %b\n  ret void\n}\n",
         "picks with a condition of another width",
     ),
+    (
+        "define i32 @f() {\nentry:\n  br label %missing\n}\n",
+        "names a block this function does not define",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -1012,6 +1016,11 @@ const VERIFIES: &[&str] = &[
     // A load acquires and a store releases, which are the directions each
     // can order in.
     "define void @f(ptr %p) {\nentry:\n  %r = load atomic i32, ptr %p acquire, align 4\n  store atomic i32 0, ptr %p release, align 4\n  ret void\n}\n",
+    // An unnamed block takes a slot from the same counter unnamed values
+    // use, and `%N` names it by that number whether the reference comes
+    // before the block or after it.
+    "define i32 @a() {\n  br label %BB1\n\nBB1:\n  %r = phi i32 [ 1, %0 ]\n  ret i32 %r\n}\n",
+    "define i32 @f() {\n  br label %10\n\n10:\n  br label %11\n\n  ret i32 0\n}\n",
     // A pointer to a type does not make the type contain itself, which is
     // what makes a linked list legal.
     "%node = type { i32, ptr }\n@head = global %node zeroinitializer\n",

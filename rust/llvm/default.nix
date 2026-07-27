@@ -115,13 +115,13 @@ in {
     # Conformance against upstream's own suites, measured rather than claimed:
     # every file in the suite, scored against what real llvm-as does with it.
     # See STATUS.md for what the remaining disagreements are.
-    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 452 14;
-    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 285 4;
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 453 13;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 284 4;
 
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this
     # pins it against inputs nobody wrote for us.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 120;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 122;
   };
 
   packages.rust-llvm = {lib, ...}:

@@ -1154,6 +1154,24 @@ impl Verifier<'_> {
         for block_id in &blocks {
             self.basic_block(function, *block_id);
         }
+        // Every block a terminator names is one this function writes. It
+        // needs the slot-numbered blocks to resolve, which is why it could
+        // not be turned on before they did.
+        for block_id in &blocks {
+            for inst in function.block(*block_id).instructions.clone() {
+                let Some(instruction) = function.try_instruction(inst) else {
+                    continue;
+                };
+                for target in instruction.kind.successors() {
+                    if !function.block_order.contains(&target) {
+                        self.report(format!(
+                            "a terminator in {} names a block this function does not define",
+                            describe_block(function, *block_id)
+                        ));
+                    }
+                }
+            }
+        }
         self.dominance(function);
         // An invoke's unwind edge lands on a pad. Nothing else can receive
         // the exception, so nothing else may start that block.

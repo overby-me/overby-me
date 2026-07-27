@@ -240,7 +240,12 @@ impl Parser {
         let mut current = match self.peek().clone() {
             _ if self.starts_a_block_label() => None,
             _ => {
-                let id = function.reserve_block();
+                // The block takes a slot from the same counter unnamed values
+                // use, and `%N` elsewhere in the body names it by that
+                // number. Going through `block_by_name` reuses the placeholder
+                // a forward reference already made rather than shadowing it.
+                let slot = state.next_number;
+                let id = self.block_by_name(function, state, &Name::Number(slot))?;
                 function.place_block(id);
                 state.next_number += 1;
                 Some(id)
@@ -308,7 +313,8 @@ impl Parser {
                         .and_then(|last| function.try_instruction(last))
                         .is_some_and(|last| last.kind.is_terminator())
                     {
-                        let fresh = function.reserve_block();
+                        let slot = state.next_number;
+                        let fresh = self.block_by_name(function, state, &Name::Number(slot))?;
                         function.place_block(fresh);
                         state.next_number += 1;
                         current = Some(fresh);

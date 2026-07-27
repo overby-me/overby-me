@@ -66,15 +66,15 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 452 | 483 | 14 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 285 | 328 | 4 | `llvm-upstream-verifier` |
+| `llvm/test/Assembler` | 453 | 483 | 13 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 284 | 328 | 4 | `llvm-upstream-verifier` |
 
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse 18 modules llvm-as reads**, which is the failure that
 matters: parse gaps, led now by intrinsics used without a declaration
 (five files), which needs more than a table of intrinsic names. That count is
 a ceiling that may only fall. We
-**read 56 modules llvm-as refuses**, which is a missing verifier rule
+**read 57 modules llvm-as refuses**, which is a missing verifier rule
 each, and agreement is a floor that may only rise.
 
 Most of what is left on the second count is one thing: upstream knows what
@@ -137,7 +137,7 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against `llvm-as | llvm-dis`, and **120 of 215** are identical. Two
+against `llvm-as | llvm-dis`, and **122 of 216** are identical. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against
