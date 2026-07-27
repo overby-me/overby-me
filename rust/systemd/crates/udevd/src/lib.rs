@@ -1703,7 +1703,34 @@ fn match_program(token: &RuleToken, event: &UEvent, program_result: &mut String)
         child_cmd.env(k, v);
     }
 
-    let result = child_cmd.output();
+    // PROGRAM= gets the same deadline as IMPORT{program}=. Without one a rule
+    // like `PROGRAM!="/usr/bin/sleep 60"` blocks its worker for the full sixty
+    // seconds, which is what TEST-17-UDEV.failed-event sets event_timeout=10 to
+    // cut short. The wait runs on a helper thread so the child's stdout is
+    // drained meanwhile; polling without reading would let a chatty program
+    // fill the pipe and block.
+    let result = match child_cmd.spawn() {
+        Err(e) => Err(e),
+        Ok(child) => {
+            let pid = child.id() as libc::pid_t;
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(child.wait_with_output());
+            });
+            let timeout =
+                std::time::Duration::from_secs(EVENT_TIMEOUT.load(Ordering::Relaxed));
+            match rx.recv_timeout(timeout) {
+                Ok(r) => r,
+                Err(_) => {
+                    log::debug!("PROGRAM '{cmd}' timed out after {timeout:?}, killing it");
+                    // SAFETY: pid names a child of this process that the
+                    // waiting thread has not yet reported, so it is unreaped.
+                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                    Err(std::io::Error::from(std::io::ErrorKind::TimedOut))
+                }
+            }
+        }
+    };
 
     match result {
         Ok(output) => {
