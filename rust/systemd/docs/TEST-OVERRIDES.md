@@ -129,6 +129,7 @@ Landed since the ledger was written (each regression-tested before push):
 | `ef9c52bb` | udev unquotes imported properties; **67-INTEGRITY green with no override** |
 | `0692de1d` | a udev rule program gets a deadline; udev.conf was never parsed at all |
 | `b2a4b17b` | `ProtectSystem=strict` stops opening `/run` and `/var/log`; 34's `test_check_writable` green |
+| `6004be66` | `systemd-repart --copy-from=`; `CopyBlocks=` had been parsed and discarded |
 
 Both fake passes are gone. Several of these are user-facing bugs well beyond the
 tests that exposed them: `systemctl start --wait` hung on every oneshot,

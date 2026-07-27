@@ -688,16 +688,24 @@ impl PartitionDefinition {
         f
     }
 
+    /// The label a partition carries when its definition sets none: the type
+    /// UUID's designator, exactly as upstream's partition_acquire_label uses
+    /// it, falling back to "linux" for a type it does not know.
+    ///
+    /// The designator is used verbatim, dashes and all: upstream writes
+    /// "root-x86-64", not "root x86 64", and it derives the name from the type
+    /// UUID rather than from whatever spelling Type= used in the file.
+    fn derived_label(&self) -> String {
+        type_uuid_to_identifier(&self.type_uuid.to_lowercase())
+            .unwrap_or("linux")
+            .to_string()
+    }
+
     /// Derive a label from the partition type if none is set.
     fn effective_label(&self) -> String {
-        if let Some(ref l) = self.label {
-            l.clone()
-        } else if let Some(ref id) = self.type_id {
-            id.replace('-', " ")
-        } else if let Some(name) = type_uuid_to_identifier(&self.type_uuid) {
-            name.replace('-', " ")
-        } else {
-            "Linux".to_string()
+        match self.label {
+            Some(ref l) => l.clone(),
+            None => self.derived_label(),
         }
     }
 }
@@ -1540,6 +1548,22 @@ struct MatchedPartition {
     slot_index: u32,
 }
 
+/// Pick a label for a partition whose definition sets none, mirroring
+/// upstream's partition_acquire_label: the type's designator, with -2, -3 and
+/// so on appended when an earlier partition already carries that name.
+///
+/// Only a derived label is numbered. An explicit Label= is used as written,
+/// even when it repeats.
+fn unique_derived_label(base: &str, earlier: &[MatchedPartition]) -> String {
+    let mut candidate = base.to_string();
+    let mut k = 1;
+    while earlier.iter().any(|m| m.assigned_label == candidate) {
+        k += 1;
+        candidate = format!("{base}-{k}");
+    }
+    candidate
+}
+
 /// Match existing partitions to definition files by GPT type UUID.
 fn match_partitions(
     defs: &[PartitionDefinition],
@@ -1571,17 +1595,23 @@ fn match_partitions(
             && let Some(&part) = group.get(*counter)
         {
             // Matched to existing partition
+            // An existing partition keeps the name already on disk; only a
+            // nameless one gets a derived, de-duplicated label.
+            let existing_label = if !part.name.is_empty() {
+                part.name.clone()
+            } else {
+                match def.label {
+                    Some(ref l) => l.clone(),
+                    None => unique_derived_label(&def.derived_label(), &matched),
+                }
+            };
             matched.push(MatchedPartition {
                 definition_index: i,
                 existing: Some(part.clone()),
                 allocated_size: 0,
                 padding_size: 0,
                 assigned_uuid: part.unique_guid.clone(),
-                assigned_label: if part.name.is_empty() {
-                    def.effective_label()
-                } else {
-                    part.name.clone()
-                },
+                assigned_label: existing_label,
                 is_new: false,
                 is_grown: false,
                 start_lba: part.first_lba,
@@ -1593,13 +1623,17 @@ fn match_partitions(
         }
 
         // No existing match — this is a new partition
+        let new_label = match def.label {
+            Some(ref l) => l.clone(),
+            None => unique_derived_label(&def.derived_label(), &matched),
+        };
         matched.push(MatchedPartition {
             definition_index: i,
             existing: None,
             allocated_size: 0,
             padding_size: 0,
             assigned_uuid: String::new(),
-            assigned_label: def.effective_label(),
+            assigned_label: new_label,
             is_new: true,
             is_grown: false,
             start_lba: 0,
@@ -3831,12 +3865,11 @@ mod tests {
 
         // The three source partitions appear twice, in order, with their
         // labels and UUIDs duplicated verbatim rather than re-derived.
-        // The explicit Label= survives; the rest are compared copy-to-copy,
-        // since the DEFAULT label for a type is derived separately and does not
-        // yet match upstream (this gets "root" where upstream has
-        // "root-x86-64" and "root-x86-64-2").
-        assert_eq!(parts[0].name, "home-first");
+        // The explicit Label= survives and the derived ones match upstream,
+        // including the numbering of the repeated root type.
+        let labels = ["home-first", "root-x86-64", "root-x86-64-2"];
         for i in 0..3 {
+            assert_eq!(parts[i].name, labels[i], "partition {} label", i + 1);
             assert_eq!(parts[i].name, parts[i + 3].name, "labels differ between copies");
             assert_eq!(parts[i].unique_guid, parts[i + 3].unique_guid);
             assert_eq!(parts[i].type_guid, parts[i + 3].type_guid);
@@ -3862,15 +3895,13 @@ mod tests {
             );
         }
 
-        // NOTE: two upstream divergences remain, neither of them --copy-from's.
+        // NOTE: one upstream divergence remains, and it is not --copy-from's.
         // The absolute sizes differ from upstream, which gets
         // 33432/33440/33440 sectors where this gets 33432 three times. That is
         // the source image's own three-way split, not anything --copy-from
         // does: the allocator aligns each partition's byte share down to the
         // grain independently and drops the remainder, where upstream hands the
-        // leftover grains back out. And the default label for a type is "root"
-        // here where upstream derives "root-x86-64", numbering repeats "-2".
-        // Both belong with the allocator and the label derivation.
+        // leftover grains back out. That belongs with the allocator.
     }
 
     /// TEST-58-REPART passes --include-partitions=home,swap over definitions
@@ -4618,13 +4649,17 @@ Weight=333
         assert_eq!(def.effective_label(), "MyLabel");
     }
 
+    /// The label comes from the TYPE UUID's designator, not from whatever
+    /// spelling Type= used, and the designator is used verbatim: upstream
+    /// writes "root-x86-64", never "root x86 64".
     #[test]
-    fn test_effective_label_from_type_id() {
+    fn test_effective_label_from_type_uuid_not_type_id() {
         let def = PartitionDefinition {
-            type_id: Some("root-x86-64".into()),
+            type_id: Some("root".into()),
+            type_uuid: "4f68bce3-e8cd-4db1-96e7-fbcaf984b709".into(),
             ..Default::default()
         };
-        assert_eq!(def.effective_label(), "root x86 64");
+        assert_eq!(def.effective_label(), "root-x86-64");
     }
 
     #[test]
@@ -4639,7 +4674,7 @@ Weight=333
     #[test]
     fn test_effective_label_fallback() {
         let def = PartitionDefinition::default();
-        assert_eq!(def.effective_label(), "Linux");
+        assert_eq!(def.effective_label(), "linux");
     }
 
     // -----------------------------------------------------------------------
@@ -6733,7 +6768,35 @@ Weight=333
             type_id: None,
             ..Default::default()
         };
-        assert_eq!(def.effective_label(), "Linux");
+        assert_eq!(def.effective_label(), "linux");
+    }
+
+    /// A repeated type is numbered from the second occurrence, as upstream's
+    /// partition_acquire_label does, while an explicit Label= is left alone.
+    #[test]
+    fn test_unique_derived_label_numbering() {
+        let mk = |label: &str| MatchedPartition {
+            definition_index: 0,
+            existing: None,
+            allocated_size: 0,
+            padding_size: 0,
+            assigned_uuid: String::new(),
+            assigned_label: label.to_string(),
+            is_new: true,
+            is_grown: false,
+            start_lba: 0,
+            end_lba: 0,
+            slot_index: 0,
+        };
+
+        assert_eq!(unique_derived_label("root-x86-64", &[]), "root-x86-64");
+        let one = [mk("root-x86-64")];
+        assert_eq!(unique_derived_label("root-x86-64", &one), "root-x86-64-2");
+        let two = [mk("root-x86-64"), mk("root-x86-64-2")];
+        assert_eq!(unique_derived_label("root-x86-64", &two), "root-x86-64-3");
+        // An unrelated neighbour does not push the numbering along.
+        let other = [mk("home-first")];
+        assert_eq!(unique_derived_label("root-x86-64", &other), "root-x86-64");
     }
 
     // -----------------------------------------------------------------------
