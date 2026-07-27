@@ -212,6 +212,48 @@ fn typed_pointers_fold_to_opaque_ones() {
     }
 }
 
+/// Which identified structs get written back. Upstream prints the ones its
+/// type finder reaches from the module and drops the rest, and the order is
+/// the order the walk meets them rather than the order they were written.
+const TYPES: &[(&str, &str)] = &[
+    ("%Ty = type opaque\n", ""),
+    ("%Ty = type { i32 }\n", ""),
+    (
+        "%Ty = type { i32 }\n@g = global %Ty zeroinitializer\n",
+        "%Ty = type { i32 }\n\n@g = global %Ty zeroinitializer\n",
+    ),
+    // `%B` is what the global led to, so `%B` is written first.
+    (
+        "%A = type { i32 }\n%B = type { %A }\n@g = global %B zeroinitializer\n",
+        "%B = type { %A }\n%A = type { i32 }\n\n@g = global %B zeroinitializer\n",
+    ),
+    // A chain nothing reaches goes whole.
+    ("%A = type { i32 }\n%B = type { %A }\n", ""),
+    // An alloca names a type its result does not, and so does an attribute.
+    (
+        "%Ty = type { i32 }\n\ndefine void @f() {\nentry:\n  %a = alloca %Ty, align 8\n  ret void\n}\n",
+        "%Ty = type { i32 }\n\ndefine void @f() {\nentry:\n  %a = alloca %Ty, align 8\n  ret void\n}\n",
+    ),
+    (
+        "%Ty = type { i32 }\n\ndeclare void @f(ptr sret(%Ty))\n",
+        "%Ty = type { i32 }\n\ndeclare void @f(ptr sret(%Ty))\n",
+    ),
+];
+
+#[test]
+fn only_the_types_the_module_reaches_are_written() {
+    for (written, expected) in TYPES {
+        let module = llvm_ir_parse::parse_module(written)
+            .unwrap_or_else(|error| panic!("{written} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert_eq!(
+            printed.trim_start_matches('\n'),
+            *expected,
+            "\nfrom: {written}"
+        );
+    }
+}
+
 const FOLDED: &[(&str, &str)] = &[
     (
         "@g = global <4 x i16> <i16 -1, i16 -1, i16 -1, i16 -1>\n",

@@ -1425,7 +1425,9 @@ impl Verifier<'_> {
                     .iter()
                     .filter_map(|inst| function.try_instruction(*inst))
                     .any(|instruction| {
-                        operand_values(&instruction.kind)
+                        instruction
+                            .kind
+                            .operand_values()
                             .iter()
                             .any(|value| matches!(value, Value::Argument(_)))
                     })
@@ -3790,145 +3792,13 @@ fn predecessor_edges(function: &Function, target: BlockId) -> Vec<BlockId> {
 /// Every value an instruction reads, flattened.
 /// The instructions an instruction reads, which is what dominance needs.
 fn operands(kind: &InstKind) -> Vec<InstId> {
-    operand_values(kind)
+    kind.operand_values()
         .into_iter()
         .filter_map(|value| match value {
             Value::Instruction(id) => Some(id),
             _ => None,
         })
         .collect()
-}
-
-fn operand_values(kind: &InstKind) -> Vec<Value> {
-    let mut out = Vec::new();
-    let mut push = |value: &Value| out.push(*value);
-    match kind {
-        InstKind::Ret(Some((_, value)))
-        | InstKind::Resume { value, .. }
-        | InstKind::FNeg { operand: value, .. }
-        | InstKind::Cast { operand: value, .. }
-        | InstKind::Freeze { operand: value, .. }
-        | InstKind::CondBr {
-            condition: value, ..
-        }
-        | InstKind::Switch { value, .. }
-        | InstKind::IndirectBr { address: value, .. }
-        | InstKind::CatchRet { pad: value, .. }
-        | InstKind::CleanupRet { pad: value, .. }
-        | InstKind::CatchSwitch { parent: value, .. }
-        | InstKind::VaArg { list: value, .. } => push(value),
-        InstKind::Binary { lhs, rhs, .. }
-        | InstKind::ICmp { lhs, rhs, .. }
-        | InstKind::FCmp { lhs, rhs, .. } => {
-            push(lhs);
-            push(rhs);
-        }
-        InstKind::Load { pointer, .. } => push(pointer),
-        InstKind::Store { value, pointer, .. } => {
-            push(value);
-            push(pointer);
-        }
-        InstKind::Alloca { count, .. } => {
-            if let Some((_, value)) = count {
-                push(value);
-            }
-        }
-        InstKind::CmpXchg {
-            pointer,
-            compare,
-            new,
-            ..
-        } => {
-            push(pointer);
-            push(compare);
-            push(new);
-        }
-        InstKind::AtomicRmw { pointer, value, .. } => {
-            push(pointer);
-            push(value);
-        }
-        InstKind::GetElementPtr {
-            pointer, indices, ..
-        } => {
-            push(pointer);
-            for (_, index) in indices {
-                push(index);
-            }
-        }
-        InstKind::ExtractElement { vector, index, .. } => {
-            push(vector);
-            push(index);
-        }
-        InstKind::InsertElement {
-            vector,
-            element,
-            index,
-            ..
-        } => {
-            push(vector);
-            push(element);
-            push(index);
-        }
-        InstKind::ShuffleVector {
-            first,
-            second,
-            mask,
-            ..
-        } => {
-            push(first);
-            push(second);
-            push(mask);
-        }
-        InstKind::ExtractValue { aggregate, .. } => push(aggregate),
-        InstKind::InsertValue {
-            aggregate, element, ..
-        } => {
-            push(aggregate);
-            push(element);
-        }
-        InstKind::Select {
-            condition,
-            if_true,
-            if_false,
-            ..
-        } => {
-            push(condition);
-            push(if_true);
-            push(if_false);
-        }
-        InstKind::Call(call) | InstKind::Invoke { call, .. } | InstKind::CallBr { call, .. } => {
-            push(&call.callee);
-            for arg in &call.args {
-                push(&arg.value);
-            }
-            for bundle in &call.bundles {
-                for (_, value) in &bundle.args {
-                    push(value);
-                }
-            }
-        }
-        InstKind::CatchPad { parent, args } | InstKind::CleanupPad { parent, args } => {
-            push(parent);
-            for (_, value) in args {
-                push(value);
-            }
-        }
-        InstKind::LandingPad { clauses, .. } => {
-            for clause in clauses {
-                match clause {
-                    crate::instruction::LandingPadClause::Catch { value, .. }
-                    | crate::instruction::LandingPadClause::Filter { value, .. } => push(value),
-                }
-            }
-        }
-        InstKind::Phi { .. }
-        | InstKind::Ret(None)
-        | InstKind::Br { .. }
-        | InstKind::Fence { .. }
-        | InstKind::Unreachable
-        | InstKind::DebugRecord { .. } => {}
-    }
-    out
 }
 
 /// Immediate dominators, by the iterative algorithm over reverse postorder.

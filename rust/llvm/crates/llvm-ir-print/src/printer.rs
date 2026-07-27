@@ -233,9 +233,11 @@ impl<'m> Printer<'m> {
         }
     }
 
-    /// `%name = type { ... }` for every identified struct, in creation order.
+    /// `%name = type { ... }` for the identified structs the module still
+    /// reaches, in the order the walk meets them. A name nothing refers to is
+    /// not written, which is what upstream's type finder decides.
     pub(crate) fn type_identities(&mut self) {
-        let ids: Vec<StructId> = self.module.ctx.named_structs().map(|(id, _)| id).collect();
+        let ids: Vec<StructId> = crate::type_finder::reachable_named_structs(self.module);
         if ids.is_empty() {
             return;
         }

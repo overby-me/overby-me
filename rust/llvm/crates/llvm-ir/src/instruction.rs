@@ -654,6 +654,194 @@ impl InstKind {
         }
     }
 
+    /// Every type this instruction names in its own text, which is what a
+    /// type finder needs: an `alloca %Ty` produces a pointer and mentions
+    /// `%Ty` only here.
+    pub fn named_types(&self) -> Vec<TypeId> {
+        let mut out = Vec::new();
+        match self {
+            InstKind::Alloca { allocated_type, .. } => out.push(*allocated_type),
+            InstKind::Load { loaded_type, .. } => out.push(*loaded_type),
+            InstKind::Store { value_type, .. } => out.push(*value_type),
+            InstKind::CmpXchg { compare_type, .. } => out.push(*compare_type),
+            InstKind::AtomicRmw { value_type, .. } => out.push(*value_type),
+            InstKind::GetElementPtr {
+                source_type,
+                pointer_type,
+                ..
+            } => {
+                out.push(*source_type);
+                out.push(*pointer_type);
+            }
+            InstKind::ExtractValue { aggregate_type, .. } => out.push(*aggregate_type),
+            InstKind::InsertValue {
+                aggregate_type,
+                element_type,
+                ..
+            } => {
+                out.push(*aggregate_type);
+                out.push(*element_type);
+            }
+            InstKind::ExtractElement { vector_type, .. } => out.push(*vector_type),
+            InstKind::InsertElement {
+                vector_type,
+                element_type,
+                ..
+            } => {
+                out.push(*vector_type);
+                out.push(*element_type);
+            }
+            InstKind::ShuffleVector {
+                vector_type,
+                mask_type,
+                ..
+            } => {
+                out.push(*vector_type);
+                out.push(*mask_type);
+            }
+            InstKind::Select { condition_type, .. } => out.push(*condition_type),
+            InstKind::Ret(Some((ty, _))) | InstKind::Resume { ty, .. } => out.push(*ty),
+            InstKind::VaArg { list_type, .. } => out.push(*list_type),
+            _ => {}
+        }
+        out
+    }
+
+    /// Every value this instruction reads, in the order it writes them.
+    pub fn operand_values(&self) -> Vec<Value> {
+        let mut out = Vec::new();
+        let mut push = |value: &Value| out.push(*value);
+        match self {
+            InstKind::Ret(Some((_, value)))
+            | InstKind::Resume { value, .. }
+            | InstKind::FNeg { operand: value, .. }
+            | InstKind::Cast { operand: value, .. }
+            | InstKind::Freeze { operand: value, .. }
+            | InstKind::CondBr {
+                condition: value, ..
+            }
+            | InstKind::Switch { value, .. }
+            | InstKind::IndirectBr { address: value, .. }
+            | InstKind::CatchRet { pad: value, .. }
+            | InstKind::CleanupRet { pad: value, .. }
+            | InstKind::CatchSwitch { parent: value, .. }
+            | InstKind::VaArg { list: value, .. } => push(value),
+            InstKind::Binary { lhs, rhs, .. }
+            | InstKind::ICmp { lhs, rhs, .. }
+            | InstKind::FCmp { lhs, rhs, .. } => {
+                push(lhs);
+                push(rhs);
+            }
+            InstKind::Load { pointer, .. } => push(pointer),
+            InstKind::Store { value, pointer, .. } => {
+                push(value);
+                push(pointer);
+            }
+            InstKind::Alloca { count, .. } => {
+                if let Some((_, value)) = count {
+                    push(value);
+                }
+            }
+            InstKind::CmpXchg {
+                pointer,
+                compare,
+                new,
+                ..
+            } => {
+                push(pointer);
+                push(compare);
+                push(new);
+            }
+            InstKind::AtomicRmw { pointer, value, .. } => {
+                push(pointer);
+                push(value);
+            }
+            InstKind::GetElementPtr {
+                pointer, indices, ..
+            } => {
+                push(pointer);
+                for (_, index) in indices {
+                    push(index);
+                }
+            }
+            InstKind::ExtractElement { vector, index, .. } => {
+                push(vector);
+                push(index);
+            }
+            InstKind::InsertElement {
+                vector,
+                element,
+                index,
+                ..
+            } => {
+                push(vector);
+                push(element);
+                push(index);
+            }
+            InstKind::ShuffleVector {
+                first,
+                second,
+                mask,
+                ..
+            } => {
+                push(first);
+                push(second);
+                push(mask);
+            }
+            InstKind::ExtractValue { aggregate, .. } => push(aggregate),
+            InstKind::InsertValue {
+                aggregate, element, ..
+            } => {
+                push(aggregate);
+                push(element);
+            }
+            InstKind::Select {
+                condition,
+                if_true,
+                if_false,
+                ..
+            } => {
+                push(condition);
+                push(if_true);
+                push(if_false);
+            }
+            InstKind::Call(call)
+            | InstKind::Invoke { call, .. }
+            | InstKind::CallBr { call, .. } => {
+                push(&call.callee);
+                for arg in &call.args {
+                    push(&arg.value);
+                }
+                for bundle in &call.bundles {
+                    for (_, value) in &bundle.args {
+                        push(value);
+                    }
+                }
+            }
+            InstKind::CatchPad { parent, args } | InstKind::CleanupPad { parent, args } => {
+                push(parent);
+                for (_, value) in args {
+                    push(value);
+                }
+            }
+            InstKind::LandingPad { clauses, .. } => {
+                for clause in clauses {
+                    match clause {
+                        crate::instruction::LandingPadClause::Catch { value, .. }
+                        | crate::instruction::LandingPadClause::Filter { value, .. } => push(value),
+                    }
+                }
+            }
+            InstKind::Phi { .. }
+            | InstKind::Ret(None)
+            | InstKind::Br { .. }
+            | InstKind::Fence { .. }
+            | InstKind::Unreachable
+            | InstKind::DebugRecord { .. } => {}
+        }
+        out
+    }
+
     /// The blocks this instruction can transfer control to.
     pub fn successors(&self) -> Vec<BlockId> {
         match self {

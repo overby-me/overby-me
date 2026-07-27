@@ -291,6 +291,39 @@ pub enum ConstExpr {
 }
 
 impl ConstExpr {
+    /// The constants and types this expression names, which is what a type
+    /// finder walks.
+    pub fn parts(&self) -> (Vec<ConstId>, Vec<TypeId>) {
+        match self {
+            ConstExpr::Binary { lhs, rhs, ty, .. } => (vec![*lhs, *rhs], vec![*ty]),
+            ConstExpr::Cast { operand, ty, .. } => (vec![*operand], vec![*ty]),
+            ConstExpr::GetElementPtr {
+                source_type,
+                base,
+                indices,
+                ty,
+                ..
+            } => {
+                let mut operands = vec![*base];
+                operands.extend(indices.iter().copied());
+                (operands, vec![*source_type, *ty])
+            }
+            ConstExpr::ExtractElement { vector, index, ty } => (vec![*vector, *index], vec![*ty]),
+            ConstExpr::InsertElement {
+                vector,
+                element,
+                index,
+                ty,
+            } => (vec![*vector, *element, *index], vec![*ty]),
+            ConstExpr::ShuffleVector {
+                first,
+                second,
+                mask,
+                ty,
+            } => (vec![*first, *second, *mask], vec![*ty]),
+        }
+    }
+
     pub fn ty(&self) -> TypeId {
         match self {
             ConstExpr::Binary { ty, .. }

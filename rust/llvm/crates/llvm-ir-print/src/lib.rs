@@ -18,6 +18,7 @@ mod metadata;
 mod printer;
 mod slots;
 mod symbols;
+mod type_finder;
 
 use llvm_ir::constant::ConstId;
 use llvm_ir::function::Function;

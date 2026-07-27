@@ -56,6 +56,7 @@
     (cargoCheck pkgs "differential-${lib.toLower suite}" ''
       cargo build -p llvm-tools --offline --locked
       nu corpus/check-differential.nu "$CARGO_TARGET_DIR/debug/opt" \
+        "${lib.getExe' pkgs.llvm "opt"}" \
         "${pkgs.llvm.src}/llvm/test/${suite}" ${toString ratchet}
     '')
     .overrideAttrs (previous: {
@@ -141,7 +142,11 @@ in {
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this
     # pins it against inputs nobody wrote for us.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 129;
+    # Against upstream's own `opt -S`, which is the same transformation this
+    # performs. Measuring against `llvm-as | llvm-dis` instead counted the
+    # bitcode reader's compatibility upgrades as print differences, which is
+    # what thirteen of them were.
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 137;
 
     # Ten thousand pass tests, none of them written with a parser in mind,
     # and fourteen hundred analysis tests that are older on average and use

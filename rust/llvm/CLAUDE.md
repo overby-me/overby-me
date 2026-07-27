@@ -719,6 +719,25 @@ to declare rather than from what exists. The set that does exist is in
 `llvm/lib`, and whether reading it is within the clean-room claim of PLAN 12
 is the user's call rather than this loop's. The number is recorded either
 way.
+A fifty-fifth pass went at the differential, which was the weakest number,
+and found the oracle was measuring the wrong transformation. It compared our
+`opt -S` against `llvm-as | llvm-dis`, which is not the same thing: writing
+bitcode and reading it back applies the compatibility upgrades the bitcode
+reader owes older files. The clearest case is the data layout, which the
+bitcode reader rewrites for the target the triple names and the textual
+reader leaves alone: `target datalayout = "e"` with an x86 triple comes back
+as `"e-i128:128"` through bitcode and as `"e"` through `opt -S`, which is
+what we print. Thirteen of the differences were that and nothing else. The
+check now runs upstream's own `opt -S`, which is the transformation this
+performs, and the ratchet counts 137 of 223 where the old one counted 129 of
+216.
+The largest real class was the identified structs. Upstream prints the ones
+its type finder reaches from the module and drops the rest, and the order is
+the order the walk meets them rather than the order they were written, so a
+module defining `%A` then `%B = type { %A }` and using only `%B` prints `%B`
+first. The walk is in `crates/llvm-ir-print/src/type_finder.rs`, and it has
+to reach through attributes as well as operands: the corpus caught that, an
+`sret(%pair)` being the only place that struct is named.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

@@ -8,7 +8,17 @@
 # came out of upstream's printer in the first place. This runs the comparison
 # the other way round, over inputs nobody wrote for us: hand-written upstream
 # tests full of syntax the corpus never contains. A file counts as matching
-# when our `opt -S` output equals `llvm-as | llvm-dis` output line for line.
+# when our `opt -S` output equals upstream's `opt -S` output line for line.
+#
+# Upstream's `opt -S` and not `llvm-as | llvm-dis`, because the latter is a
+# different transformation: writing bitcode and reading it back applies the
+# compatibility upgrades the bitcode reader owes older files, and those are
+# not things a text-to-text printer does. The clearest case is the data
+# layout, which the bitcode reader rewrites for the target the triple names
+# and the textual reader leaves alone: `target datalayout = "e"` with an
+# x86 triple comes back as `"e-i128:128"` through bitcode and as `"e"`
+# through `opt -S`, which is what we print. Thirteen files differed for that
+# reason alone and none of them was a disagreement about printing.
 #
 # Two path-derived lines are dropped from both sides before comparing. We keep
 # the ModuleID the input carried and upstream regenerates it from whichever
@@ -27,7 +37,7 @@ def canonical [text: string]: nothing -> string {
   | str join "\n"
 }
 
-def main [opt: path, suite: path, ratchet: int] {
+def main [opt: path, upstream_opt: path, suite: path, ratchet: int] {
   let files = (glob ([$suite "*.ll"] | path join) | sort)
   if ($files | is-empty) {
     error make {msg: $"no .ll files in ($suite)"}
@@ -38,14 +48,9 @@ def main [opt: path, suite: path, ratchet: int] {
   mut considered = 0
   mut differences = []
   for file in $files {
-    let bitcode = ([$work "m.bc"] | path join)
-    let theirs = (do { ^llvm-as $file -o $bitcode } | complete)
-    if $theirs.exit_code != 0 {
-      # Upstream rejects it, so there is nothing to compare against.
-      continue
-    }
-    let printed = (do { ^llvm-dis $bitcode -o - } | complete)
+    let printed = (do { ^$upstream_opt -S $file -o - } | complete)
     if $printed.exit_code != 0 {
+      # Upstream rejects it, so there is nothing to compare against.
       continue
     }
     let ours = (do { ^$opt -S -passes=verify $file -o - } | complete)
