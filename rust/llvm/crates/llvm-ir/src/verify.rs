@@ -532,6 +532,16 @@ impl Verifier<'_> {
                         "@{name} has the wrong initialiser for an intrinsic global"
                     ));
                 }
+                // The point of the list is to keep symbols alive, and a null
+                // keeps nothing alive.
+                if let Some(id) = initializer
+                    && let Constant::Array { elements, .. } = self.module.ctx.constant(id).clone()
+                    && elements
+                        .iter()
+                        .any(|element| self.resolve_symbol(*element).is_none())
+                {
+                    self.report(format!("@{name} has a member that names no symbol"));
+                }
             }
             "llvm.global_ctors" | "llvm.global_dtors" => {
                 let element = match self.module.ctx.type_kind(value_type) {
@@ -668,6 +678,18 @@ impl Verifier<'_> {
         }
         if profiles > 1 {
             self.report("a function may have only one !prof attachment");
+        }
+        for attachment in function.metadata.clone() {
+            if attachment.kind != "prof" {
+                continue;
+            }
+            let named = self
+                .resolve(&attachment.node)
+                .and_then(|node| node.as_tuple().map(<[MdOperand]>::to_vec))
+                .is_some_and(|operands| matches!(operands.first(), Some(MdOperand::String(_))));
+            if !named {
+                self.report("a !prof attachment on a function starts with the annotation's name");
+            }
         }
         let kcfi = function
             .metadata
@@ -1305,6 +1327,11 @@ impl Verifier<'_> {
                             "{where_} has inalloca on an argument that is not the last"
                         ));
                     }
+                }
+                if call.tail == TailKind::MustTail && call.calling_conv != function.calling_conv {
+                    self.report(format!(
+                        "{where_} is a musttail call whose convention differs from its caller's"
+                    ));
                 }
                 // Some bundle tags say one thing about the call, so a second
                 // one of the same tag has nothing left to say.
@@ -2128,6 +2155,41 @@ impl Verifier<'_> {
                 ),
                 _ => false,
             };
+            // A byval argument is copied onto the stack, and a copy of four
+            // gigabytes is not something a caller does.
+            if let Attribute::Type {
+                kind: TypeAttr::ByVal,
+                ty: pointee,
+            } = attribute
+                && let Some(layout) = &self.module.data_layout
+                && let Ok(size) =
+                    crate::layout::alloc_size_bytes(&self.module.ctx, layout, *pointee)
+                && size >= 1 << 32
+            {
+                self.report(format!("a byval of {size} bytes on {where_} is too large"));
+            }
+            // `initializes((0, 4), (8, 12))` lists ranges that each run
+            // forwards and do not overlap.
+            if let Attribute::Structured {
+                kind: crate::attribute::StructuredAttr::Initializes,
+                arguments,
+            } = attribute
+            {
+                let bounds: Vec<i64> = arguments
+                    .split(|c: char| !c.is_ascii_digit() && c != '-')
+                    .filter(|word| !word.is_empty())
+                    .filter_map(|word| word.parse().ok())
+                    .collect();
+                let ordered = bounds
+                    .chunks(2)
+                    .all(|range| matches!(range, [low, high] if low < high))
+                    && bounds.windows(2).all(|pair| pair[0] <= pair[1]);
+                if !ordered {
+                    self.report(format!(
+                        "the initializes ranges on {where_} are unordered or overlapping"
+                    ));
+                }
+            }
             if wants_a_pointer && !pointer {
                 self.report(format!(
                     "{} on {where_}, which is not a pointer",

@@ -347,6 +347,22 @@ const BROKEN: &[(&str, &str)] = &[
         "declare ptr @a(i32) allockind(\"aligned\")\n",
         "allockind names none or several of alloc, realloc and free",
     ),
+    (
+        "@a = global i8 42\n@llvm.used = appending global [2 x ptr] [ptr @a, ptr null], section \"llvm.metadata\"\n",
+        "has a member that names no symbol",
+    ),
+    (
+        "define i32 @f() !prof !0 {\nentry:\n  ret i32 0\n}\n\n!0 = !{i32 123, i32 3}\n",
+        "starts with the annotation's name",
+    ),
+    (
+        "declare x86_stdcallcc void @g()\n\ndefine void @f() {\nentry:\n  musttail call x86_stdcallcc void @g()\n  ret void\n}\n",
+        "musttail call whose convention differs from its caller's",
+    ),
+    (
+        "target datalayout = \"e-p:64:64\"\ndefine void @f(ptr byval([2147483648 x i16]) %p) {\nentry:\n  ret void\n}\n",
+        "is too large",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",

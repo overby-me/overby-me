@@ -271,6 +271,11 @@ have to exist, `allockind` names exactly one of alloc, realloc and free,
 an atomic store moves something the target can move in one instruction, an
 ifunc has a linkage the loader can resolve, and seven more quoted
 attributes take a word for true or false.
+A nineteenth pass: every member of `llvm.used` names a symbol, because
+keeping a null alive keeps nothing alive; a function's `!prof` node starts
+with the annotation's name; a `musttail` call hands its frame over, so the
+conventions have to agree; and a byval of four gigabytes is not something
+a caller copies onto the stack.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;
