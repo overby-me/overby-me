@@ -2002,15 +2002,21 @@ fn allocate_space(
         for &ri in &members {
             let req = &requests[ri];
             let m = &matched[req.matched_idx];
-            // An existing partition's claim is on GROWTH only. It already
-            // occupies its own space; what it competes for is the gap that
-            // follows, and its final size is what it has plus what it wins
-            // there. Claiming its current size instead would cap it at the size
-            // of that gap.
+            // An existing partition claims its TOTAL size, with its current
+            // size as the floor since it never shrinks. That works because the
+            // span below covers the gap PLUS the partition's own extent, so a
+            // partition too big to fit its weighted share of the two settles at
+            // its current size and hands the rest of the gap to whoever else
+            // wants it.
             let (min, max) = if m.is_new {
                 (req.min_bytes, req.max_bytes)
             } else {
-                (0, req.max_bytes)
+                let current = m
+                    .existing
+                    .as_ref()
+                    .map(|e| e.size_bytes(sector_size))
+                    .unwrap_or(0);
+                (current, defs[m.definition_index].size_max.max(current))
             };
             claims.push(SpanClaim {
                 weight: req.weight as u64,
@@ -2024,7 +2030,25 @@ fn allocate_space(
             });
         }
 
-        let grown = grow_claims(&claims, area_available[ai], grain);
+        // The span covers this gap AND the extent of the partition it follows,
+        // when that partition is competing here. Upstream folds the two
+        // together (context_grow_partitions_on_free_area) so an existing
+        // partition's claim can be expressed as a total size rather than as
+        // growth; sizing it against the bare gap would cap it at the gap.
+        let preceding_extent = areas[ai]
+            .after
+            .filter(|&idx| {
+                members.iter().any(|&ri| {
+                    let m = &matched[requests[ri].matched_idx];
+                    !m.is_new
+                        && m.existing.as_ref().map(|e| e.slot_index)
+                            == Some(existing[idx].slot_index)
+                })
+            })
+            .map(|idx| align_up(existing[idx].size_bytes(sector_size), grain))
+            .unwrap_or(0);
+
+        let grown = grow_claims(&claims, area_available[ai] + preceding_extent, grain);
         for (k, &ri) in members.iter().enumerate() {
             sizes[ri * 2] = grown[k * 2];
             sizes[ri * 2 + 1] = grown[k * 2 + 1];
@@ -2055,10 +2079,10 @@ fn allocate_space(
         if !m.is_new
             && let Some(existing) = &m.existing
         {
-            // Growth of existing partition
+            // The claim result is the partition's TOTAL size, not its growth.
             let current_size = existing.size_bytes(sector_size);
-            m.allocated_size = current_size + sizes[req_idx * 2];
-            m.is_grown = sizes[req_idx * 2] > 0;
+            m.allocated_size = sizes[req_idx * 2].max(current_size);
+            m.is_grown = m.allocated_size > current_size;
         } else {
             // New partition. grow_claims already clamped to the definition's
             // bounds and aligned to the grain.
@@ -3997,6 +4021,45 @@ mod tests {
         assert_eq!(sizes[3], padding, "padding takes exactly its minimum");
         assert_eq!(sizes[0] / 512, 1775576, "home absorbs the surplus");
         assert_eq!(2048 + sizes[0] / 512, 1777624, "swap starts where home ends");
+    }
+
+    /// The span for a free area covers the gap AND the extent of the partition
+    /// it follows, which is what lets an existing partition claim a TOTAL size
+    /// there. TEST-58-REPART steps 4 and 5 pin both halves of the rule.
+    #[test]
+    fn test_grow_claims_span_includes_preceding_partition() {
+        const GRAIN: u64 = 4096;
+
+        // Step 4: a 2G disk, the existing partition holds 188416 sectors, the
+        // rest of the disk is free, and nothing else competes. It grows to fill.
+        let gap = (4194270u64 - 2097112 + 1) * 512;
+        let current = 188416u64 * 512;
+        let claims = [SpanClaim { weight: 1000, min: current, max: u64::MAX }];
+        let sizes = grow_claims(&claims, gap + align_up(current, GRAIN), GRAIN);
+        assert_eq!(sizes[0] / 512, 2285568, "existing partition grows to fill");
+
+        // Step 5: the disk grows again and a NEW partition appears after it.
+        // The existing partition is already larger than its weighted share of
+        // the combined span, so it settles at its current size and the newcomer
+        // takes the whole gap.
+        let gap = (6291422u64 - 4194264 + 1) * 512;
+        let current = 2285568u64 * 512;
+        let claims = [
+            SpanClaim { weight: 1000, min: current, max: u64::MAX },
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+        ];
+        let sizes = grow_claims(&claims, gap + align_up(current, GRAIN), GRAIN);
+        assert_eq!(sizes[0] / 512, 2285568, "existing partition stays put");
+        assert_eq!(sizes[1] / 512, 2097152, "new partition takes the whole gap");
+
+        // Sizing against the bare gap instead shortchanges the newcomer, which
+        // is the defect this rule fixes.
+        let bare = grow_claims(&claims, gap, GRAIN);
+        assert!(
+            bare[1] / 512 < 2097152,
+            "bare gap should not have satisfied the newcomer, got {}",
+            bare[1] / 512
+        );
     }
 
     /// Three equal claims on the 50 MiB source image TEST-58-REPART builds:

@@ -52,33 +52,24 @@
   # --defer-partitions=. A passing parse test is not evidence a flag is
   # honoured; the rest of the crate is worth auditing the same way.
   #
-  # CURRENT FAILURE, at the 3G resize in step 5. Everything matches except the
-  # newly added partition:
-  #     expected  zzz6 : start=4194264, size=2097152
-  #     actual    zzz6 : start=4194264, size=1048576
-  # Exactly half. rust splits the newly available area between the new
-  # partition and further GROWTH of the existing zzz5 that precedes it, both
-  # weighted 1000. Upstream gives the whole area to the new partition and
-  # leaves zzz5 at the size it reached in step 4.
+  # THE FREE-AREA SPAN RULE, now implemented, recorded because it took two
+  # wrong readings to find. The span a free area offers is NOT just the gap:
+  #     span = gap + round_up(preceding partition's extent, grain)
+  # (repart.c context_grow_partitions_on_free_area). Folding the preceding
+  # partition's own extent in is what lets an EXISTING partition state its
+  # claim as a TOTAL size rather than as growth. A partition already larger
+  # than its weighted share of that combined span trips the overcharge phase,
+  # settles at its current size, and hands the rest of the gap on.
   #
-  # ESTABLISHED, and the lead to follow. Upstream registers a free area on the
-  # partition it follows as that partition's PADDING area, not as growth space
-  # (repart.c: `after->padding_area = a`), and context_grow_partitions_phase
-  # considers a partition for an area when `allocated_to_area == a ||
-  # padding_area == a`. So the preceding partition competes there for its
-  # PADDING, whose weight is 0 unless PaddingWeight= says otherwise, while a new
-  # partition assigned to the area competes for its SIZE. That accounts for
-  # step 5 exactly.
-  #
-  # WHAT IT DOES NOT YET ACCOUNT FOR, so do not implement on this reading
-  # alone: step 4 has no new partition and zzz5 DOES grow into the space, from
-  # 188416 to 2285568 sectors. If the trailing area were only ever zzz5's
-  # padding area, a padding weight of 0 would leave it unchanged. Find where
-  # upstream sets allocated_to_area for an EXISTING partition, or what else lets
-  # it grow, before changing rust's claim construction. Note rust currently
-  # models an existing partition as claiming GROWTH ONLY, (0, max_bytes), with
-  # its final size being current plus what it wins; that is what makes step 4
-  # pass and step 5 fail.
+  # That single rule accounts for both steps, which no earlier reading did:
+  #   - step 4, a 2G disk with only the existing partition competing: it grows
+  #     from 188416 to 2285568 sectors, filling the gap.
+  #   - step 5, a 3G disk with a new partition as well: the existing one is
+  #     already bigger than half the combined span, so it stays at 2285568 and
+  #     the newcomer takes the whole 2097152-sector gap.
+  # Sizing against the bare gap gave the newcomer half, and modelling the
+  # existing partition as claiming growth only made step 4 pass while step 5
+  # still failed. Both are checked in crates/repart unit tests.
   extraUnits = [
     "systemd-repart.service"
   ];
