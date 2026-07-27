@@ -22,13 +22,14 @@ struct PendingCandidate {
 }
 
 /// PositionApp — a `vote/position` (candidate election): the position text (with
-/// its edit/delete affordances), a candidate photo gallery, the numbered
-/// questions list (add + owner delete), and any polls. Mirrors React PositionApp
-/// (ContentApp + CandidateList + QuestionList + PollList).
+/// its edit/delete affordances), a candidate photo gallery, and any polls.
+///
+/// React's PositionApp also carried a QuestionList; this one does not. Existing
+/// `vote/question` nodes still render on their own (loader's TextNode arm), they
+/// are simply no longer listed or created here.
 #[component]
 pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let session = use_session();
-    let is_auth = session.read().is_authenticated();
     let token = session.read().access_token.clone();
     let is_ctx_owner = node.is_context_owner.unwrap_or(false);
     let children = visible_sorted(&node.children);
@@ -38,10 +39,6 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         .iter()
         .filter(|c| c.mime_id.as_deref() == Some("vote/candidate"))
         .collect();
-    let questions: Vec<_> = children
-        .iter()
-        .filter(|c| c.mime_id.as_deref() == Some("vote/question"))
-        .collect();
     let polls: Vec<_> = children
         .iter()
         .filter(|c| c.mime_id.as_deref() == Some("vote/poll"))
@@ -49,9 +46,6 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
 
     let node_id = node.id.0.clone();
     let context_id = node.context_id.clone().map(|c| c.0);
-    let mut q_text = use_signal(String::new);
-    // Optimistic questions: (key, text) rows shown at once, reconciled by key.
-    let mut pending_q = use_signal(Vec::<(String, String)>::new);
     // Optimistic candidates (owned here; AddCandidateButton pushes into it), shown in
     // the carousel at once and reconciled by key against the fetched candidates.
     let pending_cand = use_signal(Vec::<PendingCandidate>::new);
@@ -61,14 +55,6 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
         &pending_cand.read(),
         |p| p.key.as_str(),
         &cand_keys,
-    );
-    // Drop optimistic questions once the real node (same key) has come back.
-    let q_keys: std::collections::HashSet<String> =
-        questions.iter().map(|q| q.key.clone()).collect();
-    let pending_q_shown = crate::components::optimistic::reconcile_by_key(
-        &pending_q.read(),
-        |p| p.0.as_str(),
-        &q_keys,
     );
 
     // Anyone who is part of this group/event (a member) may add a candidature —
@@ -90,50 +76,6 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     // adding children, which ContentApp's tools sheet toggles for a position the
     // same way FolderApp's does for a folder's motions.
     let can_add_candidate = (*can_add_candidate_res.read()).unwrap_or(false) && node.attachable;
-
-    // Add a question (a `vote/question` child carrying `data.text`), mirroring
-    // React AddQuestionButton. The node is immutable; its name records the author.
-    let add_question = {
-        let node_id = node_id.clone();
-        let context_id = context_id.clone();
-        move |_| {
-            let text = q_text.read().trim().to_string();
-            if text.is_empty() {
-                return;
-            }
-            let token = session.read().access_token.clone();
-            let node_id = node_id.clone();
-            let context_id = context_id.clone();
-            let author = session.read().user.as_ref().map(|u| u.display_name.clone());
-            let key = format!("q{}", js_sys::Date::now() as u64);
-            // Optimistic: show the question now (a muted pending row) and clear the
-            // input; reconciled by key, restored on error.
-            pending_q.write().push((key.clone(), text.clone()));
-            q_text.set(String::new());
-            spawn(async move {
-                let input = model::NodesInsertInput {
-                    name: author,
-                    key: Some(key.clone()),
-                    mime_id: Some("vote/question".to_string()),
-                    parent_id: Some(model::Uuid(node_id)),
-                    context_id: context_id.map(model::Uuid),
-                    data: Some(model::Jsonb(serde_json::json!({ "text": text }))),
-                    mutable: Some(false),
-                    index: None,
-                };
-                match graphql::insert_node(token.as_deref(), input).await {
-                    Ok(_) => crate::session::bump_data_version(),
-                    Err(e) => {
-                        // Roll back the optimistic row and restore the typed text.
-                        pending_q.write().retain(|p| p.0 != key);
-                        q_text.set(text);
-                        log::error!("add question failed: {e}");
-                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
-                    }
-                }
-            });
-        }
-    };
 
     rsx! {
         // Position text + edit / delete. The comment thread renders at the very
@@ -216,89 +158,6 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                             div { class: "m3-carousel-label", "{p.name}" }
                         }
                     }
-                    }
-                }
-            }
-        }
-
-        // Questions (numbered), with add + owner/author delete.
-        div { class: "card mt-1",
-            div { class: "card-header",
-                div { class: "avatar small", {icon_el("vote/question")} }
-                h3 { class: "title-medium", "{t(\"vote.questions\")}" }
-            }
-            if questions.is_empty() && pending_q_shown.is_empty() {
-                div { class: "card-content",
-                    p { class: "body-medium", class: "text-muted", "{t(\"vote.noQuestions\")}" }
-                }
-            } else {
-                div { class: "list",
-                    for (n , q) in questions.iter().enumerate() {
-                        {
-                            let text = q
-                                .data
-                                .as_ref()
-                                .and_then(|d| d.0.get("text"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            // Treat an owner with a blank display name as free-text
-                            // (no identity), so the shown name and the linked profile
-                            // never diverge; a real free-text author has no owner.
-                            let owner = q.owner.as_ref().filter(|o| !o.display_name.is_empty());
-                            let author = owner
-                                .map(|o| o.display_name.clone())
-                                .unwrap_or_else(|| q.name.clone());
-                            let author_id = owner.map(|o| o.id.0.clone());
-                            let author_avatar =
-                                owner.map(|o| o.avatar_url.clone()).unwrap_or_default();
-                            // Questions are part of the record and carry no delete
-                            // affordance (comments are the deletable discussion type).
-                            rsx! {
-                                div { class: "list-item", key: "{q.id.0}",
-                                    div { class: "avatar small", "{n + 1}" }
-                                    div { class: "list-item-text",
-                                        div { class: "list-item-primary", "{text}" }
-                                        if !author.is_empty() {
-                                            crate::components::loader::UserPopover {
-                                                name: author.clone(),
-                                                avatar_url: author_avatar.clone(),
-                                                user_id: author_id.clone(),
-                                                div { class: "list-item-secondary", "{author}" }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // Optimistic questions (muted "sending" rows), dropped on confirm.
-                    for (i , p) in pending_q_shown.iter().enumerate() {
-                        div { key: "{p.0}", class: "list-item is-pending",
-                            div { class: "avatar small", "{questions.len() + i + 1}" }
-                            div { class: "list-item-text",
-                                div { class: "list-item-primary", "{p.1}" }
-                                div { class: "list-item-secondary", "{t(\"vote.sending\")}" }
-                            }
-                        }
-                    }
-                }
-            }
-            if is_auth {
-                div { class: "card-content",
-                    div { class: "text-field",
-                        label { "{t(\"vote.question\")}" }
-                        input {
-                            r#type: "text",
-                            value: "{q_text}",
-                            oninput: move |e| q_text.set(e.value()),
-                        }
-                    }
-                    button {
-                        class: "btn btn-primary mt-1",
-                        disabled: q_text.read().trim().is_empty(),
-                        onclick: add_question,
-                        "{t(\"common.add\")}"
                     }
                 }
             }
