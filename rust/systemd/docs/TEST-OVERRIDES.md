@@ -130,6 +130,9 @@ Landed since the ledger was written (each regression-tested before push):
 | `0692de1d` | a udev rule program gets a deadline; udev.conf was never parsed at all |
 | `b2a4b17b` | `ProtectSystem=strict` stops opening `/run` and `/var/log`; 34's `test_check_writable` green |
 | `6004be66` | `systemd-repart --copy-from=`; `CopyBlocks=` had been parsed and discarded |
+| `45c404c3` | repart derives partition labels from the type designator, numbering repeats |
+| `e7c7c8a9` | repart settles space claims sequentially, keeping grain remainders |
+| `c4d604db` | repart honours `--defer-partitions=` |
 
 Both fake passes are gone. Several of these are user-facing bugs well beyond the
 tests that exposed them: `systemctl start --wait` hung on every oneshot,
@@ -192,11 +195,20 @@ VM run. Diagnostics must write to stderr.
   real wedge, but it did not green the subtest; the wrapper records the next
   measurement to make. The second half needs udev workers to be processes rather
   than threads, which is architectural.
-- **58-REPART** got six real defects fixed against it and now matches upstream
-  byte for byte through `testcase_basic` steps 1 and 2, every UUID, label,
-  attribute and offset included. It is masked again at the next step, which
-  needs `--copy-from=`: copying partitions and their contents between images is
-  a feature rust-systemd does not have, not a defect.
+- **58-REPART** got TEN real defects fixed against it and now matches upstream
+  byte for byte through `testcase_basic` steps 1 to 4, including the whole
+  six-partition `--copy-from=` table and `--defer-partitions=`. It is masked
+  again one step further on, where the deferred partitions are filled in: rust
+  distributes space across the SUM of all free space, so it sizes three
+  partitions at 319.6M each when the only contiguous gap holds 288M each.
+  Upstream allocates per free area instead. That is an allocator change, not a
+  tweak.
+
+  Four of the ten defects were options parsed into the argument struct, unit
+  tested for parsing, and then never consulted: `--include-partitions=`,
+  `--exclude-partitions=`, `CopyBlocks=` and `--defer-partitions=`. A passing
+  parse test is not evidence a flag is honoured, and the rest of the crate is
+  worth auditing the same way.
 
 ## Work tiers
 
