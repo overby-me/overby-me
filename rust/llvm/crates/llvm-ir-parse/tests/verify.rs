@@ -306,6 +306,36 @@ const BROKEN: &[(&str, &str)] = &[
         "declare void @llvm.localescape(...)\n\ndefine internal void @f() {\nentry:\n  %a = alloca i8, align 1\n  call void (...) @llvm.localescape(ptr %a)\n  call void (...) @llvm.localescape(ptr %a)\n  ret void\n}\n",
         "2 calls to llvm.localescape in one function",
     ),
+    // A subrange is described from one end or the other, never both.
+    (
+        "!named = !{!0}\n!0 = !DISubrange(count: 20, lowerBound: 1, upperBound: 10)\n",
+        "!DISubrange has both a count and an upperBound",
+    ),
+    (
+        "!named = !{!0, !1}\n!0 = !DISubrange(lowerBound: !1, upperBound: 1)\n!1 = !DIBasicType(name: \"n\", size: 64)\n",
+        "!DISubrange has a lowerBound that is neither a constant, a variable nor an expression",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DIGenericSubrange(lowerBound: !DIExpression(DW_OP_deref))\n",
+        "!DIGenericSubrange has no stride",
+    ),
+    // Four fields describe an array's shape and one picks a variant's arm.
+    (
+        "!named = !{!0}\n!0 = !DICompositeType(tag: DW_TAG_structure_type, name: \"A\", size: 64, rank: !DIExpression(DW_OP_deref))\n",
+        "rank appears on a type that is not an array",
+    ),
+    (
+        "!named = !{!0, !1}\n!0 = !DICompositeType(tag: DW_TAG_structure_type, name: \"A\", size: 64, discriminator: !1)\n!1 = !DIBasicType(name: \"u64\", size: 64)\n",
+        "a discriminator appears on a type that is not a variant part",
+    ),
+    (
+        "!named = !{!0, !1}\n!0 = !DIBasicType(name: \"int\", size: 32)\n!1 = !DICompositeType(tag: DW_TAG_structure_type, name: \"T\", size: 32, templateParams: !0)\n",
+        "the template parameters of a composite type are not a tuple",
+    ),
+    (
+        "!named = !{!0, !1, !2}\n!0 = !DIBasicType(name: \"int\", size: 32)\n!1 = !{!0}\n!2 = !DICompositeType(tag: DW_TAG_structure_type, name: \"T\", size: 32, templateParams: !1)\n",
+        "a template parameter is not a template parameter node",
+    ),
 ];
 
 /// Input the parser itself has to refuse, with the message it owes.
@@ -502,6 +532,11 @@ const VERIFIES: &[&str] = &[
     // An immarg argument may be a constant expression, because upstream folds
     // one before the verifier sees it.
     "declare void @llvm.t.immarg.i32(i32 immarg)\n\ndefine void @f() {\nentry:\n  call void @llvm.t.immarg.i32(i32 add (i32 2, i32 3))\n  ret void\n}\n",
+    // A composite type's elements may contain a null entry: upstream's own
+    // set1.ll does exactly that and llvm-as reads it.
+    "!named = !{!0, !1}\n!0 = !{null}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"C\", size: 64, elements: !0)\n",
+    // An array's shape fields belong on an array.
+    "!named = !{!0}\n!0 = !DICompositeType(tag: DW_TAG_array_type, name: \"A\", size: 64, rank: !DIExpression(DW_OP_deref))\n",
 ];
 
 #[test]

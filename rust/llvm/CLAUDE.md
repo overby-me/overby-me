@@ -114,7 +114,7 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 226, 70 to 169)*
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 226, 70 to 181)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -172,6 +172,15 @@ and `llvm.localescape` is called once per function. The signature rule
 came back here in the shape it should always have had: an ordinary call is
 not compared against its callee's declaration, but an intrinsic call is,
 because an intrinsic is selected by its name and mangled suffix together.
+A ninth pass was the debug-info rules that need a node's neighbours rather
+than its own grammar: a subrange is described from one end or the other and
+never both, a bound that is a node has to be a variable or an expression, a
+generic subrange needs a stride, `rank`, `allocated`, `associated` and
+`dataLocation` belong on an array, a discriminator belongs on a variant
+part, and template parameters have to be a tuple of template parameter
+nodes. A tenth rule was written and then deleted: upstream's own `set1.ll`
+has a composite type whose `elements` is `!{null}` and llvm-as reads it, so
+"no null entry" is not the rule it looked like.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

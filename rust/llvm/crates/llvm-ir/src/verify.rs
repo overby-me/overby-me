@@ -226,6 +226,15 @@ impl Verifier<'_> {
     /// The globals whose names upstream reserves, and the shapes it insists
     /// on for them. Getting one wrong is not a style problem: the linker and
     /// the runtime both read these by layout.
+    /// The node a specialized field refers to, whether by number or in place.
+    fn field_node(&self, field: &MdField) -> Option<Metadata> {
+        match field {
+            MdField::Ref(id) => self.module.metadata_node(*id).cloned(),
+            MdField::Inline(node) => Some((**node).clone()),
+            _ => None,
+        }
+    }
+
     /// Whether an instruction is a call to the named intrinsic.
     fn calls_intrinsic(&self, function: &Function, id: InstId, wanted: &str) -> bool {
         let InstKind::Call(call) = &function.instruction(id).kind else {
@@ -1450,6 +1459,78 @@ impl Verifier<'_> {
         let SpecializedArgs::Named(fields) = args else {
             return;
         };
+        if tag == "DISubrange" || tag == "DIGenericSubrange" {
+            // A subrange is described from one end or the other, never both.
+            if field_of(fields, "count").is_some() && field_of(fields, "upperBound").is_some() {
+                self.report(format!("!{tag} has both a count and an upperBound"));
+            }
+            // Where a bound is a node rather than a number, it has to be
+            // something that produces one at run time.
+            for bound in ["lowerBound", "upperBound", "stride", "count"] {
+                let Some(field) = field_of(fields, bound) else {
+                    continue;
+                };
+                if let Some(node) = self.field_node(field)
+                    && !matches!(
+                        specialized_tag(&node),
+                        Some("DIExpression" | "DILocalVariable" | "DIGlobalVariable")
+                    )
+                {
+                    self.report(format!(
+                        "!{tag} has a {bound} that is neither a constant, a variable nor an expression"
+                    ));
+                }
+            }
+        }
+        if tag == "DIGenericSubrange" && field_of(fields, "stride").is_none() {
+            self.report("!DIGenericSubrange has no stride");
+        }
+        if tag == "DICompositeType" {
+            let array = matches!(
+                field_of(fields, "tag"),
+                Some(MdField::Words(words)) if words.iter().any(|w| w == "DW_TAG_array_type")
+            );
+            let variant_part = matches!(
+                field_of(fields, "tag"),
+                Some(MdField::Words(words)) if words.iter().any(|w| w == "DW_TAG_variant_part")
+            );
+            // These four describe an array's shape, and a discriminator picks
+            // between the arms of a variant.
+            for shape in ["rank", "allocated", "associated", "dataLocation"] {
+                if field_of(fields, shape).is_some() && !array {
+                    self.report(format!("{shape} appears on a type that is not an array"));
+                }
+            }
+            if field_of(fields, "discriminator").is_some() && !variant_part {
+                self.report("a discriminator appears on a type that is not a variant part");
+            }
+            if let Some(field) = field_of(fields, "templateParams") {
+                let parameters = match self.field_node(field) {
+                    Some(node) => node.as_tuple().map(<[MdOperand]>::to_vec),
+                    None => None,
+                };
+                let Some(parameters) = parameters else {
+                    self.report("the template parameters of a composite type are not a tuple");
+                    return;
+                };
+                for parameter in parameters {
+                    let node = match &parameter {
+                        MdOperand::Ref(id) => self.module.metadata_node(*id).cloned(),
+                        MdOperand::Inline(node) => Some((**node).clone()),
+                        _ => None,
+                    };
+                    let good = node.as_ref().is_some_and(|node| {
+                        matches!(
+                            specialized_tag(node),
+                            Some("DITemplateTypeParameter" | "DITemplateValueParameter")
+                        )
+                    });
+                    if !good {
+                        self.report("a template parameter is not a template parameter node");
+                    }
+                }
+            }
+        }
         if tag == "DIDerivedType" && field_of(fields, "dwarfAddressSpace").is_some() {
             // The address space says where a pointer points. A typedef or a
             // qualifier has nowhere to put it.
@@ -2076,4 +2157,11 @@ fn is_a_denormal_mode(value: &str) -> bool {
                 "ieee" | "preserve-sign" | "positive-zero" | "dynamic"
             )
         })
+}
+
+fn specialized_tag(node: &Metadata) -> Option<&str> {
+    match node {
+        Metadata::Specialized { tag, .. } => Some(tag.as_str()),
+        _ => None,
+    }
 }
