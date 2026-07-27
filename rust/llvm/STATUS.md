@@ -78,7 +78,7 @@ skipped, so the denominator is the whole suite.
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
 | `llvm/test/Assembler` | 449 | 483 | 5 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 289 | 328 | 0 | `llvm-upstream-verifier` |
+| `llvm/test/Verifier` | 292 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 

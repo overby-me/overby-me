@@ -838,6 +838,11 @@ which is the same blocker as the target intrinsics. The comment in
 have refused a file upstream reads.
 `inalloca` on a variadic argument segfaults llvm-as, so there is no verdict
 to derive from it. Recorded rather than guessed at.
+A sixty-fourth pass took three more from the same pool, all about the shape
+of a node rather than what it means: `SemanticInterposition` answers yes or
+no with a number rather than a word, a `CG Profile` edge names a caller, a
+callee and a count, and a type-based alias tag has three operands or four.
+Verifier 289 to 292.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

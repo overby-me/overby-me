@@ -1110,6 +1110,52 @@ impl Verifier<'_> {
         if !matches!(operands[1], MdOperand::String(_)) {
             self.report(format!("!{}: invalid ID operand in module flag", id.0));
         }
+        // Two flags say something about the shape of their own value.
+        let MdOperand::String(name) = &operands[1] else {
+            return;
+        };
+        match name.as_str().unwrap_or_default() {
+            // A yes-or-no answer, written as a number.
+            "SemanticInterposition" => {
+                let is_integer = matches!(&operands[2], MdOperand::Value {
+                    value: Value::Constant(constant),
+                    ..
+                } if self.module.ctx.constant(*constant).as_integer().is_some());
+                if !is_integer {
+                    self.report(format!(
+                        "!{}: SemanticInterposition is a number rather than a word",
+                        id.0
+                    ));
+                }
+            }
+            // A list of edges, each naming a caller, a callee and a count.
+            "CG Profile" => {
+                let entries = match &operands[2] {
+                    MdOperand::Ref(list) => self
+                        .module
+                        .metadata_node(*list)
+                        .and_then(|node| node.as_tuple().map(<[MdOperand]>::to_vec)),
+                    _ => None,
+                };
+                for entry in entries.unwrap_or_default() {
+                    let MdOperand::Ref(entry) = entry else {
+                        continue;
+                    };
+                    let holds_three = self
+                        .module
+                        .metadata_node(entry)
+                        .and_then(Metadata::as_tuple)
+                        .is_some_and(|edge| edge.len() == 3);
+                    if !holds_three {
+                        self.report(format!(
+                            "!{}: a CG Profile edge names a caller, a callee and a count",
+                            id.0
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// `!llvm.ident` and `!llvm.commandline` hold nodes of exactly one string.
@@ -1553,6 +1599,22 @@ impl Verifier<'_> {
                     false
                 } => {}
                 "alias.scope" | "noalias" => self.scope_list(&attachment.node, &where_),
+                // A type-based alias tag names a base type, an access type
+                // and an offset, and may add a flag saying the access is to
+                // constant memory. Nothing else is a tag.
+                "tbaa" => {
+                    let operands = self
+                        .resolve(&attachment.node)
+                        .and_then(|node| node.as_tuple().map(<[MdOperand]>::to_vec));
+                    if let Some(operands) = operands
+                        && !matches!(operands.len(), 3 | 4)
+                    {
+                        self.report(format!(
+                            "{where_}: a tbaa tag has three operands or four, not {}",
+                            operands.len()
+                        ));
+                    }
+                }
                 "fpmath" => {
                     let float = self
                         .value_type(function, Value::Instruction(id))

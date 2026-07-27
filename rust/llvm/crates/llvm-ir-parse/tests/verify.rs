@@ -61,6 +61,18 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "!llvm.module.flags = !{!0}\n\n!0 = !{i32 1, !\"SemanticInterposition\", !\"yes\"}\n",
+        "SemanticInterposition is a number rather than a word",
+    ),
+    (
+        "!llvm.module.flags = !{!0}\n\n!0 = !{i32 5, !\"CG Profile\", !1}\n!1 = !{!2}\n!2 = !{ptr null, ptr null}\n",
+        "a CG Profile edge names a caller, a callee and a count",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  %v = load i32, ptr %p, !tbaa !0\n  ret void\n}\n\n!0 = !{!1, !1}\n!1 = !{!\"x\"}\n",
+        "a tbaa tag has three operands or four, not 2",
+    ),
+    (
         "declare void @g(...)\n\ndefine void @f(ptr %p) {\nentry:\n  call void (...) @g(ptr sret(i32) %p)\n  ret void\n}\n",
         "marks a variadic argument sret",
     ),
@@ -1180,6 +1192,10 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // The same three in the shapes they are meant to have.
+    "!llvm.module.flags = !{!0}\n\n!0 = !{i32 1, !\"SemanticInterposition\", i32 1}\n",
+    "declare void @a()\n\ndeclare void @b()\n\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 5, !\"CG Profile\", !1}\n!1 = !{!2}\n!2 = !{ptr @a, ptr @b, i64 5}\n",
+    "define void @f(ptr %p) {\nentry:\n  %v = load i32, ptr %p, !tbaa !0\n  ret void\n}\n\n!0 = !{!1, !1, i64 0}\n!1 = !{!\"x\", !2}\n!2 = !{!\"root\"}\n",
     // The same attributes on a parameter the callee did declare, variadic
     // signature or not.
     "declare void @g(ptr sret(i32), ...)\n\ndefine void @f(ptr %p) {\nentry:\n  call void (ptr, ...) @g(ptr sret(i32) %p)\n  ret void\n}\n",
