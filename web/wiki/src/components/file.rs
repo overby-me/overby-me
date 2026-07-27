@@ -143,8 +143,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                         if !file_url.is_empty() || (can_manage && !segments.is_empty()) {
                             super::widgets::ToolSheet {
                                 title: t("common.tools"),
-                                // Copy a shareable link to this file (keeps æøå literal).
-                                super::widgets::CopyLinkAction {}
+                                // Copy link is the sheet's own first row (see ToolSheet).
                                 if !file_url.is_empty() {
                                     a {
                                         href: "{file_url}",

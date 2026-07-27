@@ -233,10 +233,7 @@ pub fn FolderApp(
                 if !projector {
                     super::widgets::ToolSheet {
                         title: t("common.tools"),
-                        // Copy a shareable link to this folder (keeps æøå literal).
-                        // Unconditional, like ContentApp: a read-only action anyone
-                        // may use (a document link was already ungated).
-                        super::widgets::CopyLinkAction {}
+                        // Copy link is the sheet's own first row (see ToolSheet).
                         // Export the folder and everything nested under it to an .odt,
                         // aligned with the document export (unconditional).
                         super::widgets::ExportAction { node_id: node.id.0.clone(), name: name.to_string() }

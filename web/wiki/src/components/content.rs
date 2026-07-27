@@ -162,10 +162,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             // delete-confirm dialog.
             super::widgets::ToolSheet {
                 title: t("common.tools"),
+                // Copy link is the sheet's own first row (see ToolSheet).
                 // Export this document (and any nested content) to an .odt file.
                 super::widgets::ExportAction { node_id: node_id.clone(), name: name.clone() }
-                // Copy a shareable link to this page (keeps æøå literal).
-                super::widgets::CopyLinkAction {}
                 // Share this page to the signed-in user's linked Bluesky account.
                 // Only shown once a Bluesky account is actually linked.
                 if is_auth && bsky_linked {

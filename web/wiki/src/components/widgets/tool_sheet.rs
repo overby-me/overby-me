@@ -10,10 +10,11 @@ use super::focus::{active_html_element, close_modal, trap_tab_focus};
 /// the sheet unmounts (e.g. navigating to a view with no tools).
 pub static TOOLS_DOCKED: GlobalSignal<bool> = Signal::global(|| false);
 
-/// A copy-link tools-sheet action, shared by every content view's [`ToolSheet`]
-/// so copy-link is available on all content. Copies a shareable link to the
-/// current page, keeping Unicode (æøå) literal (`decodeURI`) rather than
-/// percent-encoded — modern browsers handle it fine.
+/// A copy-link tools-sheet action. [`ToolSheet`] renders this itself as the
+/// first row of every sheet, so copy-link is available on all content and always
+/// sits at the top; call sites pass only their own actions. Copies a shareable
+/// link to the current page, keeping Unicode (æøå) literal (`decodeURI`) rather
+/// than percent-encoded — modern browsers handle it fine.
 #[component]
 pub fn CopyLinkAction() -> Element {
     rsx! {
@@ -82,7 +83,9 @@ pub fn ExportAction(node_id: String, name: String) -> Element {
 ///   sheet on medium/large) opened from a bottom-right FAB — never an in-header
 ///   button on the content card.
 ///
-/// Pass the action rows (`.sheet-action`) as `children`.
+/// Pass the action rows (`.sheet-action`) as `children`. [`CopyLinkAction`] is
+/// rendered by the sheet itself, ahead of them, so copy-link is the top row of
+/// every tools sheet rather than wherever each call site happened to place it.
 #[component]
 pub fn ToolSheet(title: String, children: Element) -> Element {
     let mut open = use_signal(|| false);
@@ -109,7 +112,10 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
                     span { class: "tool-sheet-icon material-icons", "bolt" }
                     h3 { class: "title-medium", "{title}" }
                 }
-                div { class: "tool-sheet-body", {children} }
+                div { class: "tool-sheet-body",
+                    CopyLinkAction {}
+                    {children}
+                }
             }
         };
     }
@@ -176,6 +182,7 @@ pub fn ToolSheet(title: String, children: Element) -> Element {
                 class: "tool-sheet-body",
                 // Dismiss the sheet when an action inside it is chosen.
                 onclick: move |_| close_modal(open, return_focus),
+                CopyLinkAction {}
                 {children}
             }
         }

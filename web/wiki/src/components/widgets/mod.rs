@@ -23,7 +23,9 @@ pub use feedback::{EmptyState, ErrorState};
 pub use image::ZoomableImage;
 pub use segmented_button::SegmentedButton;
 pub use table::{DataTable, PaginatedTable};
-pub use tool_sheet::{CopyLinkAction, ExportAction, ToolSheet, TOOLS_DOCKED};
+// CopyLinkAction is deliberately not re-exported: ToolSheet renders it itself as
+// its first row, so no call site places (or misplaces) it.
+pub use tool_sheet::{ExportAction, ToolSheet, TOOLS_DOCKED};
 
 // Modal-accessibility helpers, reused by the layout's AppSwitcher.
 pub(crate) use focus::{active_html_element, close_modal, trap_tab_focus};
