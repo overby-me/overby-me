@@ -1812,12 +1812,19 @@ fn allocate_space(
     existing: &[GptPartition],
     seed: &str,
 ) -> Result<(), String> {
-    // Find the highest existing slot index
-    let max_existing_slot = existing.iter().map(|p| p.slot_index).max().unwrap_or(0);
-    let mut next_slot = if existing.is_empty() {
-        0
-    } else {
-        max_existing_slot + 1
+    // Partition numbers fill the LOWEST free slots, not the ones after the
+    // highest in use. A disk whose only partition sits in slot 4, because the
+    // first three were deferred, gets those three back when they are filled in
+    // rather than being numbered 5, 6 and 7.
+    let mut used_slots: std::collections::HashSet<u32> =
+        existing.iter().map(|p| p.slot_index).collect();
+    let mut next_free_slot = || {
+        let mut candidate = 0u32;
+        while used_slots.contains(&candidate) {
+            candidate += 1;
+        }
+        used_slots.insert(candidate);
+        candidate
     };
 
     // Calculate total available space
@@ -2073,8 +2080,7 @@ fn allocate_space(
                     derive_partition_uuid(seed, &def.type_uuid, type_instance[req.matched_idx]);
             }
 
-            m.slot_index = next_slot;
-            next_slot += 1;
+            m.slot_index = next_free_slot();
         }
 
         // Padding
@@ -4059,14 +4065,16 @@ mod tests {
         let mut parts = read_gpt_partitions(&mut f, &hdr, 512).unwrap();
         parts.sort_by_key(|p| p.first_lba);
 
-        let expected: [(u64, u64, &str); 4] = [
-            (2048, 591856, "home-first"),
-            (593904, 591856, "root-x86-64"),
-            (1185760, 591864, "root-x86-64-2"),
-            (1777624, 131072, "swap"),
+        // Slots too: the deferred partitions get 1, 2 and 3 back rather than
+        // being numbered after swap, which holds slot 4.
+        let expected: [(u64, u64, &str, u32); 4] = [
+            (2048, 591856, "home-first", 0),
+            (593904, 591856, "root-x86-64", 1),
+            (1185760, 591864, "root-x86-64-2", 2),
+            (1777624, 131072, "swap", 3),
         ];
         assert_eq!(parts.len(), 4);
-        for (i, (start, size, label)) in expected.iter().enumerate() {
+        for (i, (start, size, label, slot)) in expected.iter().enumerate() {
             assert_eq!(parts[i].first_lba, *start, "partition {} start", i + 1);
             assert_eq!(
                 parts[i].last_lba - parts[i].first_lba + 1,
@@ -4075,6 +4083,7 @@ mod tests {
                 i + 1
             );
             assert_eq!(parts[i].name, *label, "partition {} label", i + 1);
+            assert_eq!(parts[i].slot_index, *slot, "partition {} slot", i + 1);
         }
     }
 

@@ -77,15 +77,4 @@
   extraUnits = [
     "systemd-repart.service"
   ];
-  patchScript = ''
-    {
-      echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: repart allocates across total free space, not per contiguous free area' >/skipped"
-      echo "exit 77"
-    } > TEST-58-REPART.sh
-    chmod +x TEST-58-REPART.sh
-  '';
-  # Skips rather than passes: space is allocated across total free space
-  # See ../docs/TEST-OVERRIDES.md.
-  expectedSkip = true;
 }
