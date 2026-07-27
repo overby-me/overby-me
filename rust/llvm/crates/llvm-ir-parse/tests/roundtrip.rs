@@ -262,6 +262,31 @@ fn only_the_types_the_module_reaches_are_written() {
 /// aggregate, which with the default `a:0:64` is eight even for `{ i8 }`.
 /// `nocapture` is the older spelling of `captures(none)`, and a parameter's
 /// attributes are written in upstream's order the same way a function's are.
+/// A pointer operand is written with the address space it points through
+/// rather than a bare `ptr`.
+const POINTER_OPERANDS: &[&str] = &[
+    "  %v = load i32, ptr addrspace(42) @in, align 4",
+    "  store i32 1, ptr addrspace(42) @in, align 4",
+    "  %c = cmpxchg ptr addrspace(42) @in, i32 0, i32 1 monotonic monotonic, align 4",
+    // Address space zero is the same either way, which is why this went
+    // unnoticed until a module used another one.
+    "  %w = load i32, ptr @zero, align 4",
+];
+
+#[test]
+fn a_pointer_operand_says_which_space_it_points_through() {
+    let text = "@in = external addrspace(42) global i32\n@zero = external global i32\n\ndefine void @f() {\nentry:\n  %v = load i32, ptr addrspace(42) @in, align 4\n  store i32 1, ptr addrspace(42) @in, align 4\n  %c = cmpxchg ptr addrspace(42) @in, i32 0, i32 1 monotonic monotonic, align 4\n  %w = load i32, ptr @zero, align 4\n  ret void\n}\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    for expected in POINTER_OPERANDS {
+        assert!(
+            printed.lines().any(|line| line == *expected),
+            "expected {expected:?}\n--- printed ---\n{printed}"
+        );
+    }
+}
+
 const PARAMETERS: &[(&str, &str)] = &[
     ("ptr nocapture", "ptr captures(none)"),
     ("ptr nocapture readonly", "ptr readonly captures(none)"),

@@ -50,6 +50,24 @@ impl Printer<'_> {
         }
     }
 
+    /// A pointer operand, written with the address space it points through
+    /// rather than a bare `ptr`. Most are address space zero and print the
+    /// same either way, but a load through `ptr addrspace(42)` says so.
+    pub(crate) fn pointer_operand(&mut self, function: &Function, value: Value) {
+        let ty = match value {
+            Value::Constant(id) => Some(self.module.ctx.constant(id).ty()),
+            Value::Instruction(id) => function.try_instruction(id).map(|inst| inst.ty),
+            Value::Argument(index) => function.params.get(index as usize).map(|param| param.ty),
+            Value::Block(_) | Value::Metadata(_) => None,
+        };
+        match ty {
+            Some(ty) => self.ty(ty),
+            None => self.push("ptr"),
+        }
+        self.push(" ");
+        self.value(function, value);
+    }
+
     pub(crate) fn typed_value(&mut self, function: &Function, ty: TypeId, value: Value) {
         self.ty(ty);
         self.push(" ");
@@ -331,8 +349,8 @@ impl Printer<'_> {
                     self.push("volatile ");
                 }
                 self.ty(*loaded_type);
-                self.push(", ptr ");
-                self.value(function, *pointer);
+                self.push(", ");
+                self.pointer_operand(function, *pointer);
                 if let Some((scope, ordering)) = atomic {
                     self.sync_scope(scope);
                     let _ = write!(self.out, " {}", ordering.keyword());
@@ -355,8 +373,8 @@ impl Printer<'_> {
                     self.push("volatile ");
                 }
                 self.typed_value(function, *value_type, *value);
-                self.push(", ptr ");
-                self.value(function, *pointer);
+                self.push(", ");
+                self.pointer_operand(function, *pointer);
                 if let Some((scope, ordering)) = atomic {
                     self.sync_scope(scope);
                     let _ = write!(self.out, " {}", ordering.keyword());
@@ -387,8 +405,7 @@ impl Printer<'_> {
                 if *volatile {
                     self.push("volatile ");
                 }
-                self.push("ptr ");
-                self.value(function, *pointer);
+                self.pointer_operand(function, *pointer);
                 self.push(", ");
                 self.typed_value(function, *compare_type, *compare);
                 self.push(", ");

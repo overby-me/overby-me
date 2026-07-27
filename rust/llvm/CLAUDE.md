@@ -786,6 +786,11 @@ A fifty-ninth pass took `nocapture`, which is the older spelling of
 they become `memory(...)`. Reading one and printing the other showed that a
 parameter's attributes are written in upstream's order too, not only a
 function's set, so the same comparison now sorts both. Assembler 144 to 146.
+A sixtieth pass: a pointer operand is written with the address space it
+points through, and the printer had `ptr` spelled out as a literal in the
+three places one appears, a load, a store and a `cmpxchg`. Address space
+zero prints the same either way, which is why nothing noticed until a module
+used another one. 146 to 147.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five
