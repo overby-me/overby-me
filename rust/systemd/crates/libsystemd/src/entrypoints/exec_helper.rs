@@ -2712,8 +2712,31 @@ pub fn run_exec_helper() {
         // the process has no mapping yet and getuid()/getgid() return 65534.
         let uid = unsafe { libc::getuid() };
         let gid = unsafe { libc::getgid() };
-        let ret = unsafe { libc::unshare(libc::CLONE_NEWUSER) };
-        if ret != 0 {
+        // If the exec directories were id-mapped through a namespace, JOIN that
+        // one rather than creating a second: the translation only lines up if
+        // the service ends up in the very namespace the mapping was made
+        // against. Its maps are already written, so nothing more to do.
+        let joined = match IDMAP_USERNS.get() {
+            Some(fd) => {
+                use std::os::fd::AsRawFd;
+                let ret = unsafe { libc::setns(fd.as_raw_fd(), libc::CLONE_NEWUSER) };
+                if ret != 0 {
+                    log::warn!(
+                        "Failed to join the id-mapping user namespace: {}",
+                        std::io::Error::last_os_error()
+                    );
+                    false
+                } else {
+                    true
+                }
+            }
+            None => false,
+        };
+
+        let ret = if joined { 0 } else { unsafe { libc::unshare(libc::CLONE_NEWUSER) } };
+        if joined {
+            // Maps were written by whoever created the namespace.
+        } else if ret != 0 {
             log::warn!(
                 "Failed to create user namespace for PrivateUsers=: {}",
                 std::io::Error::last_os_error()
@@ -3648,6 +3671,21 @@ pub fn run_exec_helper() {
 /// Set up a mount namespace with the requested isolation directives.
 /// Called before privilege drop. Requires root or CAP_SYS_ADMIN.
 fn setup_mount_namespace(config: &ExecHelperConfig) {
+    // Mint the namespace the exec directories will be id-mapped through, before
+    // any of them are bound. Only needed when the service both runs under its
+    // own user namespace and has directories owned by an id that namespace does
+    // not map.
+    if config.private_users
+        && !config.privileged_prefix
+        && config.private_users_mode != "identity"
+        && config.private_users_mode != "full"
+        && !config.exec_dir_binds.is_empty()
+        && IDMAP_USERNS.get().is_none()
+        && let Some(fd) = create_mapped_userns(config.user, config.group)
+    {
+        let _ = IDMAP_USERNS.set(fd);
+    }
+
     log::trace!("mount_ns: unshare(CLONE_NEWNS)...");
     // Create a new mount namespace
     let ret = unsafe { libc::unshare(libc::CLONE_NEWNS) };
@@ -4305,6 +4343,20 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
         }
     }
 
+    // Now that the exec directories are bound, translate their ownership
+    // through the service's own user namespace: they are owned by its OUTSIDE
+    // uid, which that namespace does not map, so without this they appear as
+    // nobody and the service cannot write its own state directories.
+    // (was: Exec directories are owned by the service's outside uid, which its own
+    if let Some(userns) = IDMAP_USERNS.get() {
+        use std::os::fd::AsFd;
+        for (source, dest) in &config.exec_dir_binds {
+            if let Err(e) = idmapped_bind(source, dest, userns.as_fd()) {
+                log::warn!("Failed to id-map exec directory {dest}: {e}");
+            }
+        }
+    }
+
     // Step 4: apply the deferred `ro` on TemporaryFileSystem= entries, now that
     // the binds have created their mount points inside them.  Deliberately not
     // MS_REC: the exec directories bound in above keep their own writability,
@@ -4336,6 +4388,255 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
 }
 
 /// Bind-mount a path on top of itself with MS_RDONLY.
+/// The user namespace the exec directories are id-mapped through, and which
+/// PrivateUsers= then joins so the service's view matches the translation.
+static IDMAP_USERNS: std::sync::OnceLock<std::os::fd::OwnedFd> = std::sync::OnceLock::new();
+
+// ── id-mapped mounts ──────────────────────────────────────────────────────
+//
+// A DynamicUser= service under PrivateUsers= runs as in-namespace uid 0, which
+// maps to its allocated uid outside. Its state directories are owned by that
+// OUTSIDE uid, which has no mapping inside, so they show up as `nobody` and are
+// unwritable. Upstream attaches them with an id-mapped mount so the ownership
+// is translated; that is what mount_setattr(MOUNT_ATTR_IDMAP) does, given a
+// file descriptor for the namespace to translate through.
+
+const MOUNT_ATTR_IDMAP: u64 = 0x0010_0000;
+const AT_RECURSIVE: libc::c_int = 0x8000;
+
+#[repr(C)]
+#[derive(Default)]
+struct MountAttr {
+    attr_set: u64,
+    attr_clr: u64,
+    propagation: u64,
+    userns_fd: u64,
+}
+
+/// Mint a user namespace whose uid/gid maps match the ones the service will
+/// run under, and return an fd for it.
+///
+/// The namespace has to be created in a child: a process can only write its own
+/// maps once, and we need this namespace to outlive the writing while the
+/// caller stays where it is. The child unshares and waits; the parent writes
+/// the child's maps from outside, which is also the only way to write them
+/// without the child holding privileges it does not have.
+fn create_mapped_userns(uid: u32, gid: u32) -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+
+    let mut ready = [-1i32; 2];
+    let mut done = [-1i32; 2];
+    if unsafe { libc::pipe(ready.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    if unsafe { libc::pipe(done.as_mut_ptr()) } != 0 {
+        unsafe {
+            libc::close(ready[0]);
+            libc::close(ready[1]);
+        }
+        return None;
+    }
+
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        unsafe {
+            libc::close(ready[0]);
+            libc::close(ready[1]);
+            libc::close(done[0]);
+            libc::close(done[1]);
+        }
+        return None;
+    }
+
+    if pid == 0 {
+        // Child: unshare, tell the parent, then wait for it to write the maps.
+        unsafe {
+            libc::close(ready[0]);
+            libc::close(done[1]);
+        }
+        let ok = unsafe { libc::unshare(libc::CLONE_NEWUSER) } == 0;
+        let byte = [u8::from(ok)];
+        unsafe {
+            libc::write(ready[1], byte.as_ptr().cast(), 1);
+            let mut buf = [0u8; 1];
+            libc::read(done[0], buf.as_mut_ptr().cast(), 1);
+            libc::_exit(0);
+        }
+    }
+
+    // Parent.
+    unsafe {
+        libc::close(ready[1]);
+        libc::close(done[0]);
+    }
+
+    let mut buf = [0u8; 1];
+    let got = unsafe { libc::read(ready[0], buf.as_mut_ptr().cast(), 1) };
+    let unshared = got == 1 && buf[0] == 1;
+
+    let ns_fd = if unshared {
+        // Deny setgroups before gid_map, as the kernel requires.
+        let _ = std::fs::write(format!("/proc/{pid}/setgroups"), "deny\n");
+        let uid_ok = std::fs::write(format!("/proc/{pid}/uid_map"), format!("0 {uid} 1\n")).is_ok();
+        let gid_ok = std::fs::write(format!("/proc/{pid}/gid_map"), format!("0 {gid} 1\n")).is_ok();
+        if uid_ok && gid_ok {
+            let path = format!("/proc/{pid}/ns/user");
+            match std::ffi::CString::new(path) {
+                Ok(c) => {
+                    let fd = unsafe { libc::open(c.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+                    if fd >= 0 {
+                        Some(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) })
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Release the child and reap it.
+    unsafe {
+        let byte = [1u8];
+        libc::write(done[1], byte.as_ptr().cast(), 1);
+        libc::close(done[1]);
+        libc::close(ready[0]);
+        let mut status = 0;
+        libc::waitpid(pid, &mut status, 0);
+    }
+
+    ns_fd
+}
+
+/// Bind `source` onto `dest` with its ownership translated through `userns_fd`.
+///
+/// The idmap can only be set while the mount is DETACHED: the kernel rejects
+/// MOUNT_ATTR_IDMAP on a mount that is already attached, which is why this
+/// cannot be a plain bind followed by mount_setattr. The sequence is therefore
+/// open_tree(OPEN_TREE_CLONE) to get a detached copy, mount_setattr on that,
+/// and move_mount to put it in place.
+fn idmapped_bind(source: &str, dest: &str, userns_fd: std::os::fd::BorrowedFd<'_>) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    const OPEN_TREE_CLONE: libc::c_uint = 1;
+    const AT_EMPTY_PATH: libc::c_int = 0x1000;
+    const MOVE_MOUNT_F_EMPTY_PATH: libc::c_uint = 0x0000_0004;
+
+    let c_src = std::ffi::CString::new(source)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let c_dest = std::ffi::CString::new(dest)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+
+    // open_tree(OPEN_TREE_CLONE) on a path that is not itself a mount point
+    // clones the mount CONTAINING it, which here is the whole root filesystem;
+    // idmapping that is refused. Bind the directory onto itself first so the
+    // clone has a mount of its own to copy.
+    if !is_mount_point(source) {
+        let ret = unsafe {
+            libc::mount(
+                c_src.as_ptr(),
+                c_src.as_ptr(),
+                std::ptr::null(),
+                libc::MS_BIND,
+                std::ptr::null(),
+            )
+        };
+        if ret != 0 {
+            return Err(std::io::Error::other(format!(
+                "self-bind: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+    }
+
+    // A shared mount cannot be idmapped. Whatever propagation this inherited
+    // from its parent, make this one private before cloning it.
+    let ret = unsafe {
+        libc::mount(
+            std::ptr::null(),
+            c_src.as_ptr(),
+            std::ptr::null(),
+            libc::MS_PRIVATE,
+            std::ptr::null(),
+        )
+    };
+    if ret != 0 {
+        return Err(std::io::Error::other(format!(
+            "make-private: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+
+    let tree = unsafe {
+        libc::syscall(
+            libc::SYS_open_tree,
+            libc::AT_FDCWD,
+            c_src.as_ptr(),
+            OPEN_TREE_CLONE | (libc::O_CLOEXEC as libc::c_uint),
+        )
+    };
+    if tree < 0 {
+        return Err(std::io::Error::other(format!(
+            "open_tree: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    let tree = tree as libc::c_int;
+    // Owned from here on.
+    let close_tree = |fd: libc::c_int| unsafe {
+        libc::close(fd);
+    };
+
+    let attr = MountAttr {
+        attr_set: MOUNT_ATTR_IDMAP,
+        userns_fd: userns_fd.as_raw_fd() as u64,
+        ..Default::default()
+    };
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_mount_setattr,
+            tree,
+            c"".as_ptr(),
+            AT_EMPTY_PATH | AT_RECURSIVE,
+            &attr as *const MountAttr,
+            std::mem::size_of::<MountAttr>(),
+        )
+    };
+    if ret != 0 {
+        let e = std::io::Error::other(format!(
+            "mount_setattr: {}",
+            std::io::Error::last_os_error()
+        ));
+        close_tree(tree);
+        return Err(e);
+    }
+
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_move_mount,
+            tree,
+            c"".as_ptr(),
+            libc::AT_FDCWD,
+            c_dest.as_ptr(),
+            MOVE_MOUNT_F_EMPTY_PATH,
+        )
+    };
+    let result = if ret != 0 {
+        Err(std::io::Error::other(format!(
+            "move_mount: {}",
+            std::io::Error::last_os_error()
+        )))
+    } else {
+        Ok(())
+    };
+    close_tree(tree);
+    result
+}
+
 /// Whether `path` is itself a mount point, per /proc/self/mountinfo.
 ///
 /// Field 5 of each line is the mount point. Comparing against it avoids

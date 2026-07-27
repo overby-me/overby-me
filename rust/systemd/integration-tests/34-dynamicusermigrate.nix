@@ -87,6 +87,30 @@
   #      had remounted / read-only, so the mkdir failed EROFS and the mount
   #      then failed ENOENT.
   #
+  # ID-MAPPED MOUNT GROUNDWORK IS IN, BUT NOT WORKING YET. exec_helper.rs now
+  # has create_mapped_userns() and idmapped_bind(). Established by labelling
+  # each syscall separately, which should have been done first:
+  #     open_tree(OPEN_TREE_CLONE)  -> succeeds, detached mount created
+  #     mount_setattr(MOUNT_ATTR_IDMAP) -> EPERM
+  #     move_mount                  -> not reached
+  # So the sequence is right and the attribute itself is refused. The kernel's
+  # can_idmap_mount() denies with EPERM when the caller lacks CAP_SYS_ADMIN in
+  # the SUPERBLOCK's user namespace (s_user_ns), and with EINVAL when the
+  # filesystem lacks FS_ALLOW_IDMAP; this is EPERM, so look at the capability
+  # side first, and check what the exec helper's effective capabilities are at
+  # that point rather than assuming they are full.
+  #
+  # THREE WRONG GUESSES were made before that, all about kernel rules, each
+  # costing a VM run: that an already-attached mount could be idmapped (it
+  # cannot, it must be detached, EINVAL); that open_tree on a bare directory
+  # clones that directory (it clones the CONTAINING mount, so a self-bind is
+  # needed first); and that shared propagation was the blocker (making it
+  # MS_PRIVATE changed nothing). Label your syscalls before theorising.
+  #
+  # The groundwork is SAFE to leave in place: the plain bind still happens in
+  # Step 3 and the idmap is an overlay attempted afterwards, so a failure only
+  # logs. test_check_writable still passes with it in.
+  #
   # What is left needs ID-MAPPED MOUNTS:
   #     touch: cannot touch '/var/lib/sampleservice/testfile': Permission denied
   # The service runs as in-namespace uid 0, which maps to outside uid 61220,
