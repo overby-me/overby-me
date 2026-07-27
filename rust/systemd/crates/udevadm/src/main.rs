@@ -647,6 +647,15 @@ fn cmd_info(
         if dev.starts_with("/dev/") {
             if let Some(sp) = devname_to_syspath(dev) {
                 syspaths.push(sp);
+            } else if let Ok(canon) = std::fs::canonicalize(dev)
+                && canon.starts_with("/dev/")
+                && let Some(sp) = devname_to_syspath(&canon.to_string_lossy())
+            {
+                // A symlink under /dev names a device just as well as the node
+                // it points at: /dev/mapper/<name>, /dev/disk/by-uuid/<uuid>
+                // and friends are all accepted by upstream, which resolves
+                // them before the lookup.
+                syspaths.push(sp);
             }
         } else if let Some(sp) = device_id_to_syspath(dev) {
             syspaths.push(sp);
