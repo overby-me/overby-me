@@ -562,6 +562,14 @@ const BROKEN: &[(&str, &str)] = &[
         "define void @f(i8 mustprogress %a) {\nentry:\n  ret void\n}\n",
         "mustprogress on parameter 0, which describes a function",
     ),
+    (
+        "declare void @llvm.f(ptr byval(i32) immarg %p)\n",
+        "alongside an attribute that places it",
+    ),
+    (
+        "declare float @llvm.vector.reduce.fadd.f32.v2f64(double, <2 x double>)\n\ndefine void @f(double %a, <2 x double> %v) {\nentry:\n  %r = call float @llvm.vector.reduce.fadd.f32.v2f64(double %a, <2 x double> %v)\n  ret void\n}\n",
+        "reduces to a type the vector does not hold",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",

@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 450 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 452 of 483 with 14 wrongly refused, Verifier 285 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -400,6 +400,9 @@ upstream says so where the type is defined rather than where it is used,
 which is two files; a comdat is declared once; and a function attribute on
 a parameter describes nothing. The recursion check walks fields and array
 elements and stops at pointers, which is what keeps a linked list legal.
+A thirty-sixth pass: `immarg` says the argument is written as a literal in
+the call, so it cannot also carry an attribute that puts it somewhere,
+and a vector reduction folds down to one of the vector's own lanes.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

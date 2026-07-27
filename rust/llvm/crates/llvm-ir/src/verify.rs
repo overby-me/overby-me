@@ -325,6 +325,19 @@ impl Verifier<'_> {
         let base = crate::intrinsic_table::base_name(name);
         let element = |verifier: &Self, ty: TypeId| verifier.innermost_element(ty);
         match base {
+            // A reduction folds a vector down to one of its own lanes, so
+            // what it produces is what the vector holds.
+            _ if base.starts_with("llvm.vector.reduce.") => {
+                if let Some(vector) = arguments.last()
+                    && let Some((element, _, _)) =
+                        TypeKind::as_vector(self.module.ctx.type_kind(*vector))
+                    && element != result
+                {
+                    self.report(format!(
+                        "{where_} reduces to a type the vector does not hold"
+                    ));
+                }
+            }
             // A byte swap has bytes to swap in pairs.
             "llvm.bswap" => {
                 if let TypeKind::Integer(bits) = *self.module.ctx.type_kind(element(self, result))
@@ -1079,6 +1092,28 @@ impl Verifier<'_> {
                     self.report(format!(
                         "{} on parameter {index}, which describes a function",
                         kind.keyword()
+                    ));
+                }
+            }
+            if param.attrs.has(EnumAttr::ImmArg) {
+                let placed = param.attrs.has(EnumAttr::InReg)
+                    || param.attrs.has(EnumAttr::Nest)
+                    || param.attrs.attributes.iter().any(|attribute| {
+                        matches!(
+                            attribute,
+                            Attribute::Type {
+                                kind: TypeAttr::ByVal
+                                    | TypeAttr::ByRef
+                                    | TypeAttr::InAlloca
+                                    | TypeAttr::Preallocated
+                                    | TypeAttr::StructRet,
+                                ..
+                            }
+                        )
+                    });
+                if placed {
+                    self.report(format!(
+                        "immarg on parameter {index} alongside an attribute that places it"
                     ));
                 }
             }
