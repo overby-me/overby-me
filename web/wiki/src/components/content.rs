@@ -116,6 +116,13 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     // band crops it hard. Candidate heroes get the taller frame; documents keep
     // the wide cover proportions.
     let portrait_hero = node.mime_id.as_deref() == Some("vote/candidate");
+    // The header avatar takes the node's OWN icon. ContentApp is not only the
+    // document view: candidates, positions, policies and changes all render
+    // through it, and every one of them was wearing the document icon.
+    let header_icon = super::loader::node_icon_el(
+        node.mime_id.as_deref().unwrap_or("wiki/document"),
+        data.as_ref(),
+    );
 
     rsx! {
         div { class: "card",
@@ -131,7 +138,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         // The same not-submitted mark the list avatars carry, so a
                         // document's own page says what its row in the list said.
                         super::loader::AvatarBadged { mutable: is_mutable,
-                            div { class: "avatar content-hero-avatar", {icon_el("wiki/document")} }
+                            div { class: "avatar content-hero-avatar", {header_icon.clone()} }
                         }
                         div { class: "content-hero-meta",
                             h3 { class: "content-hero-title", "{name}" }
@@ -149,7 +156,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             } else {
                 div { class: "card-header",
                     super::loader::AvatarBadged { mutable: is_mutable,
-                        div { class: "avatar", {icon_el("wiki/document")} }
+                        div { class: "avatar", {header_icon.clone()} }
                     }
                     div {
                         h3 { class: "title-medium", "{name}" }
