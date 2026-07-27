@@ -68,7 +68,7 @@ skipped and counted separately rather than scored.
 | Suite | Agreed | Considered | Skipped | Check |
 | --- | --- | --- | --- | --- |
 | `llvm/test/Assembler` | 226 | 304 | 179 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 155 | 252 | 76 | `llvm-upstream-verifier` |
+| `llvm/test/Verifier` | 161 | 252 | 76 | `llvm-upstream-verifier` |
 
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we

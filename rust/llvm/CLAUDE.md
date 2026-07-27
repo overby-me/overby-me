@@ -114,7 +114,7 @@ considered Assembler files, 70 of 254 Verifier files. It already found a
 parser hang.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 226, 70 to 155)*
+**B1a. [partial] Raise the two ratchets.** *(2026-07-27: 146 to 226, 70 to 161)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -154,9 +154,17 @@ quoted attributes whose value upstream reads rather than carries
 debug-info rule came with them, worth nine files on its own: a DWARF
 address space says where a pointer points, so a typedef or a qualifier
 cannot carry one.
+A seventh pass took the symbol rules: a comdat needs a definition to pick
+and a name the linker can see, an ifunc resolver has to name a function
+through any number of casts but not through arithmetic, and `!associated`
+and `!absolute_symbol` have shapes. Both of the last two were too strict
+on the first try and cost an Assembler file each, which is why
+`what_upstream_verifies_verifies` now exists: a table of modules that must
+verify clean, next to the table of modules that must not.
 Still open, largest first: intrinsic signatures (the largest Verifier
 cluster left), module summary index syntax (`^0 = ...`, nine files),
-intrinsics used without a declaration, comdat and ifunc rules, the DWARF
+intrinsics used without a declaration, uses of `llvm.used` and friends
+(which needs def-use chains we do not build yet), the DWARF
 vocabulary itself (`DW_TAG_badtag` and friends, three files, which needs a
 list of every valid enumerator that no readable specification in the tree
 provides), and `ptrauth` and `splat` constants.

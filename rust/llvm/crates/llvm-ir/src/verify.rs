@@ -11,11 +11,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr, TypeAttr};
-use crate::constant::{CastOp, ConstId, Constant};
+use crate::constant::{CastOp, ConstExpr, ConstId, Constant};
 use crate::function::Function;
 use crate::global::{GlobalQualifiers, Linkage, Visibility};
 use crate::instruction::{AtomicOrdering, BinOp, InstKind, IntFlags};
-use crate::metadata::{MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
+use crate::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use crate::module::Module;
 use crate::types::TypeKind;
 use crate::value::{BlockId, GlobalRef, InstId, MdId, Name, Value};
@@ -145,6 +145,26 @@ impl Verifier<'_> {
             }
             for attachment in global.metadata.clone() {
                 self.attachment_resolves(&attachment.node, &format!("@{name}"));
+                self.global_attachment(&name, &attachment);
+            }
+            let global = &self.module.globals[index];
+            let (declaration, private) = (
+                global.initializer.is_none()
+                    || global.qualifiers.linkage == Some(Linkage::AvailableExternally),
+                global.qualifiers.linkage == Some(Linkage::Private),
+            );
+            if global.comdat.is_some() {
+                self.comdat_member(&name, declaration, private);
+            }
+        }
+        for index in 0..self.module.ifuncs.len() {
+            let ifunc = &self.module.ifuncs[index];
+            let (name, resolver) = (describe(&ifunc.name), ifunc.resolver);
+            // The resolver is called at load time, so it has to name a
+            // function. A cast or an alias in the way is fine, because the
+            // linker sees through both; arithmetic is not.
+            if !self.names_a_symbol(resolver) {
+                self.report(format!("@{name} must have a function as its resolver"));
             }
         }
 
@@ -200,6 +220,64 @@ impl Verifier<'_> {
     /// The globals whose names upstream reserves, and the shapes it insists
     /// on for them. Getting one wrong is not a style problem: the linker and
     /// the runtime both read these by layout.
+    /// Whether a constant names a symbol, through any number of casts.
+    fn names_a_symbol(&self, id: ConstId) -> bool {
+        match self.module.ctx.constant(id) {
+            Constant::Global { .. } => true,
+            Constant::Expression(expr) => match **expr {
+                ConstExpr::Cast { operand, .. } => self.names_a_symbol(operand),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// A comdat groups definitions that the linker picks one of, which needs
+    /// a definition to pick and a name the linker can see.
+    fn comdat_member(&mut self, name: &str, declaration: bool, private: bool) {
+        if declaration {
+            self.report(format!(
+                "@{name} is a declaration and may not be in a comdat"
+            ));
+        }
+        if private {
+            self.report(format!(
+                "@{name} has private linkage and may not be in a comdat"
+            ));
+        }
+    }
+
+    /// The metadata kinds a global carries whose shape upstream checks.
+    fn global_attachment(&mut self, name: &str, attachment: &MdAttachment) {
+        let Some(node) = self.resolve(&attachment.node) else {
+            return;
+        };
+        let Some(operands) = node.as_tuple() else {
+            return;
+        };
+        // `!associated` names another symbol this one is kept alive by, and
+        // `!absolute_symbol` gives the ranges the linker may place it in. One
+        // range is two values, and there may be several.
+        let pointer_valued = matches!(
+            operands,
+            [MdOperand::Value { ty, .. }]
+                if matches!(self.module.ctx.type_kind(*ty), TypeKind::Pointer { .. })
+        );
+        match attachment.kind.as_str() {
+            "associated" if !pointer_valued => {
+                self.report(format!(
+                    "@{name}: !associated takes one pointer-typed value"
+                ));
+            }
+            "absolute_symbol" if operands.is_empty() || operands.len() % 2 != 0 => {
+                self.report(format!(
+                    "@{name}: !absolute_symbol takes ranges of two values"
+                ));
+            }
+            _ => {}
+        }
+    }
+
     fn intrinsic_global(&mut self, name: &str, value_type: TypeId, initializer: Option<ConstId>) {
         match name {
             "llvm.used" | "llvm.compiler.used" | "llvm.compiler_used" => {

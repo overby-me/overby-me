@@ -260,6 +260,27 @@ const BROKEN: &[(&str, &str)] = &[
         "!named = !{!1}\n!0 = !DIBasicType(name: \"n\")\n!1 = !DIDerivedType(tag: DW_TAG_typedef, baseType: !0, dwarfAddressSpace: 1)\n",
         "DWARF address space only applies to pointer or reference types",
     ),
+    // A comdat needs a definition to pick and a name the linker can see.
+    (
+        "$v = comdat any\n@v = available_externally global i32 0, comdat\n",
+        "@v is a declaration and may not be in a comdat",
+    ),
+    (
+        "$v = comdat any\n@v = private global i32 0, comdat($v)\n",
+        "@v has private linkage and may not be in a comdat",
+    ),
+    (
+        "define ptr @resolver() {\nentry:\n  ret ptr null\n}\n\n@f = ifunc void (), ptr getelementptr (i8, ptr @resolver, i32 4)\n",
+        "@f must have a function as its resolver",
+    ),
+    (
+        "@a = external global i32\n@g = external global i32, !associated !0\n!0 = !{i32 1}\n",
+        "!associated takes one pointer-typed value",
+    ),
+    (
+        "@g = external global i32, !absolute_symbol !0\n!0 = !{}\n",
+        "!absolute_symbol takes ranges of two values",
+    ),
 ];
 
 /// Input the parser itself has to refuse, with the message it owes.
@@ -442,6 +463,25 @@ const ACCEPTED: &[&str] = &[
     // `nofpclass` reaches through arrays as well as vectors.
     "define void @f([8 x [4 x float]] nofpclass(nan) %x) {\nentry:\n  ret void\n}\n",
 ];
+
+/// Modules that verify clean, which is the half of the verifier a table of
+/// broken input cannot check. Each was a false positive first.
+const VERIFIES: &[&str] = &[
+    // A resolver reached through a cast is still a function.
+    "define ptr @resolver() {\nentry:\n  ret ptr null\n}\n\n@f = ifunc void (), ptr addrspacecast (ptr @resolver to ptr)\n",
+    // `!absolute_symbol` may carry more than one range.
+    "@g = external global i32, !absolute_symbol !0\n!0 = !{i64 1, i64 2, i64 4, i64 8}\n",
+];
+
+#[test]
+fn what_upstream_verifies_verifies() {
+    for text in VERIFIES {
+        let module = llvm_ir_parse::parse_module(text)
+            .unwrap_or_else(|error| panic!("upstream accepts this: {error}\n{text}"));
+        let errors = llvm_ir::verify_module(&module);
+        assert!(errors.is_empty(), "{errors:#?}\nfor:\n{text}");
+    }
+}
 
 #[test]
 fn what_upstream_accepts_parses() {
