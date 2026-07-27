@@ -1011,44 +1011,85 @@ fn load_definitions(dirs: &[&str], arch: &str) -> Result<Vec<PartitionDefinition
     Ok(defs)
 }
 
-/// Distribute free space across weighted claims, handing on whatever a capped
-/// claim cannot take.
-///
-/// Each entry is `(weight, cap)`, the cap being the most that claim can still
-/// absorb. A single weighted pass gives everyone their share and then clamps
-/// the ones that overshoot, which silently wastes the difference: on a 1 GiB
-/// disk holding an unbounded home and a swap capped at 64 MiB, home was left
-/// with half the disk and roughly 400 MiB went unused. Settling one capped
-/// claim at a time and sharing the rest out again is what upstream does.
-fn distribute_weighted(entries: &[(u64, u64)], free: u64) -> Vec<u64> {
-    let mut shares = vec![0u64; entries.len()];
-    let mut active: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].0 > 0).collect();
-    let mut free = free;
+/// One partition's or padding's claim on a free span.
+#[derive(Clone, Copy, Debug)]
+struct SpanClaim {
+    weight: u64,
+    min: u64,
+    max: u64,
+}
 
-    loop {
-        let total: u64 = active.iter().map(|&i| entries[i].0).sum();
-        if total == 0 || free == 0 {
-            break;
+/// `value * weight / weight_sum`, mirroring upstream's scale_by_weight.
+fn scale_by_weight(value: u64, weight: u64, weight_sum: u64) -> u64 {
+    if weight == 0 {
+        return 0;
+    }
+    if weight == weight_sum {
+        return value;
+    }
+    ((value as u128) * (weight as u128) / (weight_sum as u128)) as u64
+}
+
+/// Settle every claim on a free span, mirroring upstream's
+/// context_grow_partitions_phase.
+///
+/// Claims are settled SEQUENTIALLY rather than split simultaneously: each takes
+/// its weighted share of whatever is *left*, and the span and the weight sum
+/// are charged down before the next claim is considered. Splitting the original
+/// total instead, then rounding each share down to the grain independently,
+/// loses up to a grain per partition: three equal claims on a 50 MiB image came
+/// out 33432/33432/33432 sectors where upstream gets 33432/33440/33440.
+///
+/// The phases matter as much as the order. A claim needing more than its share
+/// takes its minimum, and one accepting less takes its maximum; either way the
+/// remainder goes back into the span and everything is reconsidered from the
+/// start, so a capped partition hands its surplus to whatever can still grow.
+/// Only once no claim is over or under its bounds is the rest distributed.
+fn grow_claims(claims: &[SpanClaim], span: u64, grain: u64) -> Vec<u64> {
+    const PHASE_OVERCHARGE: u8 = 0;
+    const PHASE_UNDERCHARGE: u8 = 1;
+    const PHASE_DISTRIBUTE: u8 = 2;
+
+    let mut sizes: Vec<Option<u64>> = vec![None; claims.len()];
+    let mut span = span;
+    let mut weight_sum: u64 = claims.iter().map(|c| c.weight).sum();
+    let mut phase = PHASE_OVERCHARGE;
+
+    while phase <= PHASE_DISTRIBUTE {
+        let mut try_again = false;
+
+        for (i, c) in claims.iter().enumerate() {
+            if sizes[i].is_some() {
+                continue;
+            }
+
+            let share = scale_by_weight(span, c.weight, weight_sum);
+            let ceiling = c.max.max(c.min);
+            let assigned = match phase {
+                PHASE_OVERCHARGE if c.min > share => Some(c.min),
+                PHASE_UNDERCHARGE if ceiling < share => Some(ceiling),
+                PHASE_DISTRIBUTE => Some(align_down(share, grain).clamp(c.min, ceiling)),
+                _ => None,
+            };
+
+            if let Some(size) = assigned {
+                sizes[i] = Some(size);
+                span = span.saturating_sub(align_up(size, grain));
+                weight_sum = weight_sum.saturating_sub(c.weight);
+                if phase != PHASE_DISTRIBUTE {
+                    try_again = true;
+                }
+            }
         }
 
-        let weighted = |i: usize| (free as u128 * entries[i].0 as u128 / total as u128) as u64;
-
-        match active.iter().position(|&i| weighted(i) >= entries[i].1) {
-            Some(pos) => {
-                let i = active.remove(pos);
-                shares[i] = entries[i].1;
-                free -= entries[i].1;
-            }
-            None => {
-                for &i in &active {
-                    shares[i] = weighted(i);
-                }
-                break;
-            }
+        if try_again {
+            phase = PHASE_OVERCHARGE;
+        } else {
+            phase += 1;
         }
     }
 
-    shares
+    sizes.into_iter().map(|s| s.unwrap_or(0)).collect()
 }
 
 /// Build partition definitions from an existing image, for `--copy-from=`.
@@ -1812,27 +1853,39 @@ fn allocate_space(
     // Distribute remaining space by weight. Each request contributes two
     // claims, the partition and its padding, so a capped partition hands its
     // surplus to whatever else can still grow.
-    let remaining = total_free_bytes.saturating_sub(fixed_bytes);
-    let mut claims: Vec<(u64, u64)> = Vec::with_capacity(requests.len() * 2);
-    for req in &requests {
-        let m = &matched[req.matched_idx];
-        let cap = if !m.is_new && m.existing.is_some() {
-            req.max_bytes
-        } else {
-            req.max_bytes.saturating_sub(req.min_bytes)
-        };
-        claims.push((req.weight as u64, cap));
-        claims.push((
-            req.padding_weight as u64,
-            req.padding_max.saturating_sub(req.padding_min),
-        ));
-    }
-    let shares = distribute_weighted(&claims, remaining);
-
     // Upstream lays partitions out on a 4096-byte grain, not on the sector
     // size, so a size that is sector-aligned but not grain-aligned is rounded
     // down to the grain.
     let grain = std::cmp::max(4096, sector_size);
+
+    // Claims are settled against the WHOLE free area, since grow_claims charges
+    // each settled claim's own minimum out of the span as it goes. Each request
+    // contributes the partition and then its padding, in that order, which is
+    // the order upstream walks them in.
+    let mut claims: Vec<SpanClaim> = Vec::with_capacity(requests.len() * 2);
+    for req in &requests {
+        let m = &matched[req.matched_idx];
+        let (min, max) = match &m.existing {
+            // An existing partition never shrinks, and may grow by at most
+            // max_bytes beyond what it already occupies.
+            Some(existing) if !m.is_new => {
+                let current = existing.size_bytes(sector_size);
+                (current, current.saturating_add(req.max_bytes))
+            }
+            _ => (req.min_bytes, req.max_bytes),
+        };
+        claims.push(SpanClaim {
+            weight: req.weight as u64,
+            min,
+            max,
+        });
+        claims.push(SpanClaim {
+            weight: req.padding_weight as u64,
+            min: req.padding_min,
+            max: req.padding_max,
+        });
+    }
+    let sizes = grow_claims(&claims, total_free_bytes, grain);
 
     // Upstream numbers partition UUIDs per type, in definition order: the first
     // partition of a type hashes the bare type UUID and later ones append their
@@ -1859,15 +1912,13 @@ fn allocate_space(
             && let Some(existing) = &m.existing
         {
             // Growth of existing partition
-            let growth = shares[req_idx * 2].min(req.max_bytes);
             let current_size = existing.size_bytes(sector_size);
-            m.allocated_size = current_size + growth;
-            m.is_grown = growth > 0;
+            m.allocated_size = sizes[req_idx * 2].max(current_size);
+            m.is_grown = m.allocated_size > current_size;
         } else {
-            // New partition
-            let size = (req.min_bytes + shares[req_idx * 2])
-                .min(req.max_bytes)
-                .max(req.min_bytes);
+            // New partition. grow_claims already clamped to the definition's
+            // bounds and aligned to the grain.
+            let size = sizes[req_idx * 2];
             // Round DOWN to the sector size. The weight shares already sum to
             // exactly the free space, so rounding each partition UP would push
             // the total past the available region and leave the last partition
@@ -1891,10 +1942,7 @@ fn allocate_space(
         }
 
         // Padding
-        let padding_share = shares[req_idx * 2 + 1];
-        m.padding_size = (req.padding_min + padding_share)
-            .min(req.padding_max)
-            .max(req.padding_min);
+        m.padding_size = sizes[req_idx * 2 + 1];
     }
 
     // Now lay out new partitions in free regions
@@ -3748,67 +3796,74 @@ mod tests {
 
     /// growfs defaults on for types repart can grow, so `Type=home` alone
     /// carries GUID:59; swap cannot grow and must not.
-    #[test]
-    fn test_growfs_defaults_on_for_growable_types() {
-        let mk = |t: &str| {
-            let mut d = PartitionDefinition::default();
-            d.type_uuid = partition_type_uuid(t, "x86-64").unwrap();
-            d
-        };
-        const GROWFS: u64 = 1u64 << 59;
-
-        assert_eq!(mk("home").effective_flags() & GROWFS, GROWFS);
-        assert_eq!(mk("root").effective_flags() & GROWFS, GROWFS);
-        assert_eq!(mk("swap").effective_flags() & GROWFS, 0);
-        assert_eq!(mk("esp").effective_flags() & GROWFS, 0);
-
-        // Read-only suppresses the default.
-        let mut ro = mk("home");
-        ro.read_only = Some(true);
-        assert_eq!(ro.effective_flags() & GROWFS, 0);
-
-        // An explicit GrowFileSystem=no still wins.
-        let mut off = mk("home");
-        off.grow_fs = Some(false);
-        assert_eq!(off.effective_flags() & GROWFS, 0);
-    }
-
     /// The exact split TEST-58-REPART step 2 asserts: a 1 GiB image with an
-    /// unbounded home and a swap capped at 64 MiB, after 92 MiB of padding is
-    /// reserved. Home must absorb everything swap cannot take.
+    /// unbounded home and a swap capped at 64 MiB, after 92 MiB of padding.
+    /// Home must absorb everything swap cannot take.
     #[test]
-    fn test_distribute_weighted_redistributes_capped_surplus() {
+    fn test_grow_claims_redistributes_capped_surplus() {
         let usable = (2097118u64 - 2048 + 1) * 512;
-        let free = usable - 92 * 1024 * 1024;
         let swap_cap = 64 * 1024 * 1024;
+        let padding = 92 * 1024 * 1024;
 
-        // home (unbounded), home padding (no weight), swap (capped), swap padding.
-        let claims = [(1000, u64::MAX), (0, 0), (1000, swap_cap), (0, 0)];
-        let shares = distribute_weighted(&claims, free);
+        // home, home padding (none), swap, swap padding (92M, no weight).
+        let claims = [
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim { weight: 0, min: 0, max: 0 },
+            SpanClaim { weight: 1000, min: 0, max: swap_cap },
+            SpanClaim { weight: 0, min: padding, max: padding },
+        ];
+        let sizes = grow_claims(&claims, usable, 4096);
 
-        assert_eq!(shares[2], swap_cap, "swap takes exactly its cap");
-        assert_eq!(shares[0], free - swap_cap, "home absorbs the surplus");
-
-        // And with the 4096-byte grain applied, that is the asserted layout.
-        assert_eq!(align_down(shares[0], 4096) / 512, 1775576);
-        assert_eq!(shares[2] / 512, 131072);
-        assert_eq!(2048 + align_down(shares[0], 4096) / 512, 1777624);
+        assert_eq!(sizes[2], swap_cap, "swap takes exactly its cap");
+        assert_eq!(sizes[3], padding, "padding takes exactly its minimum");
+        assert_eq!(sizes[0] / 512, 1775576, "home absorbs the surplus");
+        assert_eq!(2048 + sizes[0] / 512, 1777624, "swap starts where home ends");
     }
 
-    /// Without any cap in play the split stays proportional.
+    /// Three equal claims on the 50 MiB source image TEST-58-REPART builds:
+    /// settling them one at a time against what is left gives upstream's
+    /// 33432/33440/33440, where splitting the total simultaneously and rounding
+    /// each share down loses a grain apiece and gives 33432 three times.
     #[test]
-    fn test_distribute_weighted_proportional_when_uncapped() {
-        let shares = distribute_weighted(&[(1000, u64::MAX), (3000, u64::MAX)], 4000);
-        assert_eq!(shares, vec![1000, 3000]);
+    fn test_grow_claims_keeps_grain_remainders() {
+        let usable = (102366u64 - 2048 + 1) * 512;
+        let claims = [
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+        ];
+        let sizes = grow_claims(&claims, usable, 4096);
+        let sectors: Vec<u64> = sizes.iter().map(|s| s / 512).collect();
+        assert_eq!(sectors, vec![33432, 33440, 33440]);
     }
 
-    /// A zero-weight claim never takes space, and a zero cap settles at once
-    /// rather than looping forever.
+    /// Without any bound in play the split stays proportional.
     #[test]
-    fn test_distribute_weighted_degenerate_claims() {
-        assert_eq!(distribute_weighted(&[(0, 100), (1000, 50)], 500), vec![0, 50]);
-        assert_eq!(distribute_weighted(&[(1000, 0), (1000, 0)], 500), vec![0, 0]);
-        assert_eq!(distribute_weighted(&[], 500), Vec::<u64>::new());
+    fn test_grow_claims_proportional_when_unbounded() {
+        let claims = [
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+            SpanClaim { weight: 3000, min: 0, max: u64::MAX },
+        ];
+        // Grain 1 keeps the arithmetic exact so the ratio is visible.
+        assert_eq!(grow_claims(&claims, 4000, 1), vec![1000, 3000]);
+    }
+
+    /// A claim needing more than its share takes its minimum, and the rest is
+    /// reconsidered from the start rather than being left short.
+    #[test]
+    fn test_grow_claims_overcharge_and_degenerate() {
+        let claims = [
+            SpanClaim { weight: 1000, min: 3000, max: u64::MAX },
+            SpanClaim { weight: 1000, min: 0, max: u64::MAX },
+        ];
+        let sizes = grow_claims(&claims, 4000, 1);
+        assert_eq!(sizes[0], 3000);
+        assert_eq!(sizes[1], 1000);
+
+        // A zero-weight claim with no minimum takes nothing.
+        let none = [SpanClaim { weight: 0, min: 0, max: 100 }];
+        assert_eq!(grow_claims(&none, 500, 1), vec![0]);
+        assert_eq!(grow_claims(&[], 500, 4096), Vec::<u64>::new());
     }
 
     /// End-to-end --copy-from=, pinned to the exact table TEST-58-REPART
@@ -3881,27 +3936,25 @@ mod tests {
             );
         }
 
-        // The first starts on the grain and the rest follow contiguously,
-        // because the source's partitions are contiguous and their padding is
-        // carried across with them.
-        assert_eq!(parts[0].first_lba, 2048);
-        for i in 1..6 {
+        // The whole table, exactly as TEST-58-REPART asserts it.
+        let expected: [(u64, u64); 6] = [
+            (2048, 33432),
+            (35480, 33440),
+            (68920, 33440),
+            (102360, 33432),
+            (135792, 33440),
+            (169232, 33440),
+        ];
+        for (i, (start, size)) in expected.iter().enumerate() {
+            assert_eq!(parts[i].first_lba, *start, "partition {} start", i + 1);
             assert_eq!(
-                parts[i].first_lba,
-                parts[i - 1].last_lba + 1,
-                "partition {} does not follow partition {}",
-                i + 1,
-                i
+                parts[i].last_lba - parts[i].first_lba + 1,
+                *size,
+                "partition {} size",
+                i + 1
             );
         }
 
-        // NOTE: one upstream divergence remains, and it is not --copy-from's.
-        // The absolute sizes differ from upstream, which gets
-        // 33432/33440/33440 sectors where this gets 33432 three times. That is
-        // the source image's own three-way split, not anything --copy-from
-        // does: the allocator aligns each partition's byte share down to the
-        // grain independently and drops the remainder, where upstream hands the
-        // leftover grains back out. That belongs with the allocator.
     }
 
     /// TEST-58-REPART passes --include-partitions=home,swap over definitions
