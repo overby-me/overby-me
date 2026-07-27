@@ -768,22 +768,24 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                 span { class: "body-small text-muted", "{image_cta}\u{2026}" }
                             }
                         } else if !image_name.read().is_empty() {
+                            // A fresh upload: the picture itself, click-to-zoom, with
+                            // its file name written over the base of it.
                             div {
-                                class: "file-upload-done",
-                                // The image itself is the confirmation; the check mark
-                                // stands in only if there is no id to build a URL from.
                                 if let Some(src) = uploaded_image_url.clone() {
-                                    img {
-                                        class: "upload-thumb",
-                                        src: "{src}",
-                                        alt: "{image_name}",
-                                        // The src carries the nhost ?token=; keep it out of the Referer.
-                                        referrerpolicy: "no-referrer",
+                                    div { class: "upload-preview",
+                                        super::widgets::ZoomableImage {
+                                            src,
+                                            alt: image_name.read().clone(),
+                                        }
+                                        div { class: "upload-preview-name", "{image_name}" }
                                     }
                                 } else {
-                                    span { class: "material-icons", "check_circle" }
+                                    // No id to build a URL from: name it, as before.
+                                    div { class: "file-upload-done",
+                                        span { class: "material-icons", "check_circle" }
+                                        span { class: "file-upload-name", "{image_name}" }
+                                    }
                                 }
-                                span { class: "file-upload-name", "{image_name}" }
                                 button {
                                     class: "btn btn-text",
                                     onclick: move |_| {
@@ -796,16 +798,17 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                 }
                             }
                         } else if image_id.read().is_some() {
+                            // The stored image, same preview. There is no file name to
+                            // write on it: only the id was ever persisted.
                             div {
-                                class: "stack stack-h mt-1",
                                 if let Some(url) = existing_image_url.clone() {
-                                    img {
-                                        class: "upload-thumb",
-                                        src: "{url}",
-                                        alt: t("content.imageAlt"),
+                                    div { class: "upload-preview",
+                                        super::widgets::ZoomableImage {
+                                            src: url,
+                                            alt: image_label.clone(),
+                                        }
                                     }
                                 }
-                                span { class: "flex-grow body-small text-muted", "{image_label}" }
                                 button {
                                     class: "btn btn-text",
                                     onclick: move |_| {

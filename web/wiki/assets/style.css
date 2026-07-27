@@ -2255,14 +2255,46 @@ a.folder-item:focus-visible {
 	white-space: nowrap;
 }
 
-/* The already-uploaded cover image shown in an upload row: a square crop on the
-   small corner, leading the "cover image" label. */
-.upload-thumb {
-	width: 56px;
-	height: 56px;
-	flex-shrink: 0;
-	object-fit: cover;
-	border-radius: var(--md-sys-shape-corner-small);
+/* The uploaded image shown under a picker: big enough to actually judge the
+   picture, with its file name over a legibility scrim across the base (the same
+   treatment the content hero and the carousel give a title). The wrapper
+   shrink-wraps the image, so the scrim always ends where the picture does. */
+.upload-preview {
+	position: relative;
+	/* Block, so the remove action below never flows up beside it; fit-content, so
+	   the box (and its scrim) shrink-wraps the picture rather than the column. */
+	display: block;
+	width: fit-content;
+	margin-top: var(--md-sys-spacing-2);
+	max-width: min(100%, 28rem);
+	border-radius: var(--md-sys-shape-corner-large);
+	overflow: hidden;
+	line-height: 0;
+}
+/* Bigger than the contained-thumbnail default, and square-cornered since the
+   wrapper above is what clips now. */
+.upload-preview .zoomable {
+	max-width: 100%;
+	max-height: 20rem;
+	border-radius: 0;
+}
+.upload-preview-name {
+	position: absolute;
+	inset-inline: 0;
+	bottom: 0;
+	padding: var(--md-sys-spacing-6) var(--md-sys-spacing-3) var(--md-sys-spacing-2);
+	background: linear-gradient(
+		transparent,
+		color-mix(in srgb, var(--md-sys-color-scrim) 76%, transparent)
+	);
+	color: #fff;
+	font-size: var(--md-sys-typescale-body-small-size);
+	line-height: var(--md-sys-typescale-body-small-line);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	/* Click-through, so the whole preview opens the zoom lightbox. */
+	pointer-events: none;
 }
 
 /* Native <select> styled to match the text inputs (shadcn-ish), with a custom
