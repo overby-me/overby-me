@@ -752,6 +752,21 @@ metadata upgrade that fills in a `DICompileUnit`'s file and a
 `DISubprogram`'s scope, the intrinsic name upgrades that add a mangling
 suffix, and the per-intrinsic attributes that come with the table LangRef
 does not document.
+A fifty-seventh pass widened the print measurement past the Assembler suite,
+to Feature, Linker and Other, and closed the largest class the wider sample
+showed: the order upstream writes an attribute set in.
+It is three runs. The plain keywords first, then the ones that take an
+argument, then the quoted ones by key. Neither of the first two is
+alphabetical. The plain ones go in the order LLVM declares them, which is
+why `nounwind` comes before `nonlazybind`; sorting them alphabetically
+looked right, passed every probe I had written, and broke all eleven rustc
+corpus files at once. `EnumAttr` is declared in that order already, so
+sorting on the variant reproduces it. The second run's order was measured by
+handing all six to `opt -S` at once, and `uwtable` sorts there whether or
+not it carries a kind, the bare spelling being the same attribute carrying
+its default. That last one the corpus caught too.
+Assembler 142 to 143, Feature 48 to 53, Other 121 to 126, Linker unchanged
+at 167. All four are ratchets now.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

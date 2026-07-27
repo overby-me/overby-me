@@ -255,6 +255,46 @@ fn only_the_types_the_module_reaches_are_written() {
 }
 
 /// What else upstream folds or leaves out as it reads and prints.
+/// The order upstream writes an attribute set in, which is not the order the
+/// text used and not alphabetical either.
+const ATTRIBUTE_ORDER: &[(&str, &str)] = &[
+    // The plain keywords go in the order LLVM declares them, which is why
+    // `nounwind` comes before `nonlazybind` and `optsize` before `ssp`.
+    ("uwtable optsize ssp", "{ optsize ssp uwtable }"),
+    ("nonlazybind nounwind cold", "{ cold nounwind nonlazybind }"),
+    // Then the ones that take an argument, in upstream's own order, with
+    // `uwtable` among them whether or not it carries a kind.
+    (
+        "nounwind memory(none) alwaysinline",
+        "{ alwaysinline nounwind memory(none) }",
+    ),
+    (
+        "nonlazybind memory(argmem: read) uwtable nofree",
+        "{ nofree nonlazybind memory(argmem: read) uwtable }",
+    ),
+    // Then the quoted ones, by key.
+    (
+        "\"zed\"=\"1\" \"abc\"=\"2\" nounwind",
+        "{ nounwind \"abc\"=\"2\" \"zed\"=\"1\" }",
+    ),
+];
+
+#[test]
+fn an_attribute_set_is_written_in_upstreams_order() {
+    for (written, expected) in ATTRIBUTE_ORDER {
+        let text = format!("define void @f(i32 %n) {written} {{\nentry:\n  ret void\n}}\n");
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("{text} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        let group = printed
+            .split("attributes #0 = ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no attribute group\n{printed}"));
+        let group = group.split('\n').next().unwrap_or_default();
+        assert_eq!(group, *expected, "\nfrom: {written}");
+    }
+}
+
 const PRINTED: &[(&str, &str)] = &[
     // A struct with no fields is all zero; an array with no elements is
     // poison. Neither is a guess a reader would make.
