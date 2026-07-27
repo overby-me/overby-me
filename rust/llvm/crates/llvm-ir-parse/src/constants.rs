@@ -226,6 +226,73 @@ impl Parser {
         let Some(word) = self.peek_word() else {
             return Ok(None);
         };
+        if word == "splat" {
+            self.advance();
+            self.require(Token::LeftParen)?;
+            let (_, element) = self.parse_typed_constant()?;
+            self.require(Token::RightParen)?;
+            return Ok(Some(
+                self.module
+                    .ctx
+                    .intern_constant(Constant::Splat { ty, element }),
+            ));
+        }
+        if word == "ptrauth" {
+            self.advance();
+            self.require(Token::LeftParen)?;
+            let (_, pointer) = self.parse_typed_constant()?;
+            self.require(Token::Comma)?;
+            let (_, key) = self.parse_typed_constant()?;
+            let discriminator = if self.eat(&Token::Comma) {
+                Some(self.parse_typed_constant()?.1)
+            } else {
+                None
+            };
+            let address_discriminator = if self.eat(&Token::Comma) {
+                Some(self.parse_typed_constant()?.1)
+            } else {
+                None
+            };
+            self.require(Token::RightParen)?;
+            // Each operand of a signed pointer says something specific, and
+            // upstream checks all four where it reads them.
+            let is_pointer = |parser: &Self, id: ConstId| {
+                matches!(
+                    parser
+                        .module
+                        .ctx
+                        .type_kind(parser.module.ctx.constant(id).ty()),
+                    llvm_ir::TypeKind::Pointer { .. }
+                )
+            };
+            let is_int = |parser: &Self, id: ConstId, bits: u32| {
+                matches!(parser.module.ctx.constant(id), Constant::Integer { ty, .. }
+                    if matches!(parser.module.ctx.type_kind(*ty), llvm_ir::TypeKind::Integer(width) if *width == bits))
+            };
+            if !is_pointer(self, pointer) {
+                return self.error("a ptrauth base pointer has to be a pointer");
+            }
+            if !is_int(self, key, 32) {
+                return self.error("a ptrauth key has to be an i32 constant");
+            }
+            if let Some(id) = discriminator
+                && !is_int(self, id, 64)
+            {
+                return self.error("a ptrauth integer discriminator has to be an i64 constant");
+            }
+            if let Some(id) = address_discriminator
+                && !is_pointer(self, id)
+            {
+                return self.error("a ptrauth address discriminator has to be a pointer");
+            }
+            return Ok(Some(self.module.ctx.intern_constant(Constant::PtrAuth {
+                ty,
+                pointer,
+                key,
+                discriminator,
+                address_discriminator,
+            })));
+        }
         let constant = match word {
             "zeroinitializer" => Constant::ZeroInitializer(ty),
             "undef" => Constant::Undef(ty),

@@ -77,6 +77,28 @@ impl Printer<'_> {
                 let text = format!("c\"{}\"", escape_bytes(&bytes));
                 self.push(&text);
             }
+            Constant::Splat { element, .. } => {
+                self.push("splat (");
+                self.constant_with_type(element);
+                self.push(")");
+            }
+            Constant::PtrAuth {
+                pointer,
+                key,
+                discriminator,
+                address_discriminator,
+                ..
+            } => {
+                self.push("ptrauth (");
+                self.constant_with_type(pointer);
+                self.push(", ");
+                self.constant_with_type(key);
+                for extra in [discriminator, address_discriminator].into_iter().flatten() {
+                    self.push(", ");
+                    self.constant_with_type(extra);
+                }
+                self.push(")");
+            }
             Constant::Vector { elements, .. } => {
                 self.push("<");
                 for (index, element) in elements.iter().enumerate() {

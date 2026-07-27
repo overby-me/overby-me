@@ -425,6 +425,16 @@ const REJECTED: &[(&str, &str)] = &[
         "define void @f(i8* %p) {\nentry:\n  ret void\n}\n",
         "opaque",
     ),
+    // Each operand of a signed pointer says something specific.
+    (
+        "@a = global ptr ptrauth (i32 42, i32 0)\n",
+        "a ptrauth base pointer has to be a pointer",
+    ),
+    (
+        "@var = external global i32\n@a = global ptr ptrauth (ptr @var, i32 2, ptr null)\n",
+        "a ptrauth integer discriminator has to be an i64 constant",
+    ),
+    ("/* never closed\n", "unterminated comment"),
     // The grammar of specialized metadata nodes, which upstream enforces in
     // its parser rather than its verifier.
     (
@@ -627,6 +637,14 @@ const VERIFIES: &[&str] = &[
     "!named = !{!0}\n!0 = !DIFile(filename: \"\\00\\01\\02\\80\\81\\82\\FD\\FE\\FF\", directory: \"/dir\")\n",
     "!\\FFfoo = !{!0}\n!0 = !{}\n",
     "!named = !{!0}\n!0 = !{!\"\\FF\"}\n",
+    // A vector written as one value, a signed pointer, a comment in the
+    // other spelling, a brace-delimited operand list, and an enumerator
+    // wider than 128 bits.
+    "@g = constant <5 x i32> splat (i32 7)\n",
+    "@var = external global i32\n@disc = external global i32\n@a = global ptr ptrauth (ptr @var, i32 2, i64 1234, ptr @disc)\n",
+    "/* a comment */\n@g = external global i32\n",
+    "!named = !{!1}\n!0 = !{}\n!1 = !GenericDINode(tag: 3, header: \"h\", operands: {!0, !0})\n",
+    "!named = !{!0}\n!0 = !DIEnumerator(name: \"D\", value: 2722258935367507707706996859454145691648, isUnsigned: true)\n",
     // Two conventions we had never heard of.
     "define amdgpu_ps float @f(i32 %x) {\nentry:\n  ret float 0.000000e+00\n}\n",
     "define riscv_vls_cc(32) void @g() {\nentry:\n  ret void\n}\n",

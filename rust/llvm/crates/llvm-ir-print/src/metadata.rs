@@ -117,6 +117,12 @@ impl Printer<'_> {
             MdField::Unsigned(value) => {
                 let _ = write!(self.out, "{value}");
             }
+            MdField::BigInt { negative, digits } => {
+                if *negative {
+                    self.push("-");
+                }
+                self.push(digits);
+            }
             MdField::Signed(value) => {
                 let _ = write!(self.out, "{value}");
             }

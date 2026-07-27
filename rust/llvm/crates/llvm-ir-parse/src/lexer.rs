@@ -237,11 +237,27 @@ impl<'a> Lexer<'a> {
         Ok((tokens, self.module_id))
     }
 
-    fn skip_trivia(&mut self) {
+    fn skip_trivia(&mut self) -> Result<(), LexError> {
         loop {
             match self.peek() {
                 Some(b' ' | b'\t' | b'\r' | b'\n') => {
                     self.bump();
+                }
+                // `/* ... */`, which upstream reads and prints nothing back
+                // for. It nests no further than one level, and an unclosed
+                // one runs to the end of the file, as upstream's does.
+                Some(b'/') if self.peek_at(1) == Some(b'*') => {
+                    self.bump();
+                    self.bump();
+                    loop {
+                        let Some(byte) = self.bump() else {
+                            return Err(self.error("unterminated comment"));
+                        };
+                        if byte == b'*' && self.peek() == Some(b'/') {
+                            self.bump();
+                            break;
+                        }
+                    }
                 }
                 Some(b';') => {
                     let comment_start = self.offset;
@@ -261,13 +277,13 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 }
-                _ => return,
+                _ => return Ok(()),
             }
         }
     }
 
     fn next_token(&mut self) -> Result<Spanned, LexError> {
-        self.skip_trivia();
+        self.skip_trivia()?;
         let position = self.position();
         let Some(byte) = self.peek() else {
             return Ok(Spanned {

@@ -205,6 +205,8 @@ impl Parser {
                     | "extractelement"
                     | "insertelement"
                     | "shufflevector"
+                    | "splat"
+                    | "ptrauth"
                     | "add"
                     | "sub"
                     | "xor"

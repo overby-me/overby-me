@@ -239,6 +239,14 @@ floating-point result, `!invariant.group` is only for loads and stores, a
 `dllexport` symbol has to be visible, and four more quoted attributes
 whose value upstream reads (`warn-stack-size`, `sign-return-address`, its
 key, and `alloc-variant-zeroed`).
+A fifteenth pass took five more parse features: `splat (i32 7)`, the
+`ptrauth` constant, `/* */` comments, a brace-delimited operand list in a
+metadata field, and an enumerator wider than 128 bits, which is kept as
+written the way a data layout string is rather than being read.
+As before, accepting the syntax exposed the rules behind it: an
+unterminated block comment is an error rather than a run to the end of
+the file, and each of a signed pointer's four operands says something
+specific about its own type.
 Still open, largest first: per-intrinsic signatures (`bswap` on an odd
 number of bytes, `masked_load` alignment, `get_active_lane_mask` element
 type), which is the last big Verifier cluster and does need the table;

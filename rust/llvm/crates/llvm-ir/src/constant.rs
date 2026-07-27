@@ -147,6 +147,21 @@ pub enum Constant {
         ty: TypeId,
         elements: Vec<ConstId>,
     },
+    /// `splat (i32 7)`, a vector every lane of which holds one value.
+    Splat {
+        ty: TypeId,
+        element: ConstId,
+    },
+    /// `ptrauth (ptr @f, i32 0, i64 1234, ptr @disc)`: a pointer signed with
+    /// a key, a discriminator and an address discriminator, the last two of
+    /// which are optional.
+    PtrAuth {
+        ty: TypeId,
+        pointer: ConstId,
+        key: ConstId,
+        discriminator: Option<ConstId>,
+        address_discriminator: Option<ConstId>,
+    },
     /// A reference to something spelled with a leading `@`. The type is always
     /// a pointer, in the global's own address space.
     Global {
@@ -196,6 +211,8 @@ impl Constant {
             | Constant::Array { ty, .. }
             | Constant::String { ty, .. }
             | Constant::Vector { ty, .. }
+            | Constant::Splat { ty, .. }
+            | Constant::PtrAuth { ty, .. }
             | Constant::Global { ty, .. }
             | Constant::BlockAddress { ty, .. }
             | Constant::DsoLocalEquivalent { ty, .. }

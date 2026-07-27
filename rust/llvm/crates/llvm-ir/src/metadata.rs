@@ -40,6 +40,13 @@ pub enum MdField {
     /// and routinely exceeds 64 bits.
     Unsigned(u128),
     Signed(i128),
+    /// A number too wide for 128 bits, kept as written. `DIEnumerator` values
+    /// are arbitrary-precision, and this dialect prints them back rather than
+    /// reading them, the way it does with a data layout string.
+    BigInt {
+        negative: bool,
+        digits: String,
+    },
     Bool(bool),
     /// A quoted string field, such as a name or a filename. Bytes rather
     /// than characters, because a filename need not be UTF-8.

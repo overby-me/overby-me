@@ -229,18 +229,21 @@ impl Parser {
         match self.peek().clone() {
             Token::Integer { negative, digits } => {
                 self.advance();
+                // A `DIEnumerator` value is arbitrary-precision, so anything
+                // wider than 128 bits is kept as written rather than refused.
+                let Ok(magnitude) = digits.parse::<u128>() else {
+                    return Ok(MdField::BigInt { negative, digits });
+                };
                 if negative {
-                    let value: i128 = digits.parse().map_err(|_| {
-                        self.error::<()>(format!("{digits} does not fit"))
-                            .unwrap_err()
-                    })?;
-                    Ok(MdField::Signed(-value))
+                    // `-170141183460469231731687303715884105728` is i128::MIN,
+                    // whose magnitude does not fit i128. Negate through u128.
+                    match i128::try_from(magnitude) {
+                        Ok(value) => Ok(MdField::Signed(-value)),
+                        Err(_) if magnitude == 1u128 << 127 => Ok(MdField::Signed(i128::MIN)),
+                        Err(_) => Ok(MdField::BigInt { negative, digits }),
+                    }
                 } else {
-                    let value: u128 = digits.parse().map_err(|_| {
-                        self.error::<()>(format!("{digits} does not fit"))
-                            .unwrap_err()
-                    })?;
-                    Ok(MdField::Unsigned(value))
+                    Ok(MdField::Unsigned(magnitude))
                 }
             }
             Token::Quoted(text) => {
@@ -258,6 +261,24 @@ impl Parser {
             Token::MetadataName(_) | Token::Exclaim => {
                 let node = self.parse_metadata_definition()?;
                 Ok(MdField::Inline(Box::new(node)))
+            }
+            // `operands: {!0, !3}` writes the tuple with braces and no `!`.
+            Token::LeftBrace => {
+                self.advance();
+                let mut operands = Vec::new();
+                while !self.eat(&Token::RightBrace) {
+                    if !operands.is_empty() {
+                        self.require(Token::Comma)?;
+                    }
+                    if self.eat(&Token::RightBrace) {
+                        break;
+                    }
+                    operands.push(self.parse_metadata_operand(None)?);
+                }
+                Ok(MdField::Inline(Box::new(Metadata::Tuple {
+                    distinct: false,
+                    operands,
+                })))
             }
             Token::Word(word) => {
                 if word == "null" {
