@@ -780,6 +780,12 @@ in, the `DISubprogram` whose scope does, and the attribute group that goes
 with the declaration the upgrade drops. Six more want a data layout upstream
 supplies from the triple when the module writes none, which is target
 knowledge this tier does not have.
+A fifty-ninth pass took `nocapture`, which is the older spelling of
+`captures(none)` and the only parameter attribute that upgrades that way:
+`readonly` and `writeonly` keep their spelling there, where on a function
+they become `memory(...)`. Reading one and printing the other showed that a
+parameter's attributes are written in upstream's order too, not only a
+function's set, so the same comparison now sorts both. Assembler 144 to 146.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

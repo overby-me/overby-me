@@ -493,8 +493,12 @@ pub(crate) fn align_text(align: Option<Align>) -> String {
 /// `in_group` picks between the two spellings upstream uses for the same
 /// attribute: `align 8` in a parameter list, `align=8` inside an attribute
 /// group. Getting this wrong is invisible until a round trip fails.
+/// A run of attributes as they appear on a parameter or a return value,
+/// which upstream writes in its own order the way it does a function's set.
 pub(crate) fn attribute_list(module: &Module, set: &AttributeSet, in_group: bool) -> String {
-    set.attributes
+    let mut attributes = set.attributes.clone();
+    attributes.sort_by(compare_attributes);
+    attributes
         .iter()
         .map(|attribute| attribute_text(module, attribute, in_group))
         .collect::<Vec<_>>()

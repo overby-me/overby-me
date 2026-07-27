@@ -199,6 +199,17 @@ impl Parser {
         }
 
         if let Some(kind) = EnumAttr::from_keyword(&word) {
+            // `nocapture` is the older spelling of `captures(none)`, and
+            // upstream reads one and prints the other. It is the only
+            // parameter attribute that upgrades this way: `readonly`,
+            // `writeonly` and the rest keep their spelling here, where on a
+            // function they do not.
+            if kind == EnumAttr::NoCapture {
+                return Ok(Attribute::Structured {
+                    kind: StructuredAttr::Captures,
+                    arguments: "none".to_string(),
+                });
+            }
             return Ok(Attribute::Enum(kind));
         }
 

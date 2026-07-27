@@ -260,6 +260,37 @@ fn only_the_types_the_module_reaches_are_written() {
 /// The alignment an alloca gets when it writes none. A struct takes the
 /// larger of what its fields need and what the layout prefers for an
 /// aggregate, which with the default `a:0:64` is eight even for `{ i8 }`.
+/// `nocapture` is the older spelling of `captures(none)`, and a parameter's
+/// attributes are written in upstream's order the same way a function's are.
+const PARAMETERS: &[(&str, &str)] = &[
+    ("ptr nocapture", "ptr captures(none)"),
+    ("ptr nocapture readonly", "ptr readonly captures(none)"),
+    ("ptr readonly nocapture", "ptr readonly captures(none)"),
+    (
+        "ptr noalias nocapture nonnull",
+        "ptr noalias nonnull captures(none)",
+    ),
+    ("ptr align 8 noalias", "ptr noalias align 8"),
+    // The other three access keywords keep their spelling on a parameter,
+    // where on a function they become `memory(...)`.
+    ("ptr readonly", "ptr readonly"),
+    ("ptr writeonly", "ptr writeonly"),
+];
+
+#[test]
+fn a_parameters_attributes_are_written_in_upstreams_order() {
+    for (written, expected) in PARAMETERS {
+        let text = format!("declare void @f({written})\n");
+        let module = llvm_ir_parse::parse_module(&text)
+            .unwrap_or_else(|error| panic!("{text} did not parse: {error}"));
+        let printed = llvm_ir_print::print_module(&module);
+        assert!(
+            printed.contains(&format!("declare void @f({expected})")),
+            "expected {expected:?}\n--- printed ---\n{printed}"
+        );
+    }
+}
+
 const ALLOCA_ALIGN: &[(&str, &str, &str)] = &[
     ("e", "{ i32, i32 }", "align 8"),
     ("e", "{ i8 }", "align 8"),
