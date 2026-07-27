@@ -292,7 +292,7 @@ Remove the override, run, record. Ordered by expected payoff.
 | 46-HOMED | full skip | needs `extraUnits`. Note: the suite is 1,060 lines and leans on `userdbctl`, which has no rust crate, so expect the baseline to stop early |
 | 55-OOMD | full skip | needs `extraUnits` + oomd binary |
 | 67-INTEGRITY | full skip | needs `extraUnits` (`integritysetup.target`) + binary |
-| 26-SYSTEMCTL | `edit --global` hunk deleted | flag implemented |
+| 26-SYSTEMCTL | `edit --global` mask ALREADY REMOVED (2026-07-27); only the interactive EDITOR hunks remain, blocked by util-linux `script(1)` hanging under rust PID 1 | done |
 | 65-ANALYZE | substitute, 1167 upstream lines -> 154 | `verify`/`security` were de-weakened since; the substitute's skip list is stale |
 | 80-NOTIFYACCESS | substitute, 175 -> 86 | comment blames `systemd-run --wait`, `busctl`, `Type=notify-reload`, all of which now work |
 | 07-PID1 private-pids | substitute, 176 -> 24 | biggest single coverage loss in the 07 family |

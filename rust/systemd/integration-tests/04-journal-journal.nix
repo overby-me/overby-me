@@ -5,53 +5,44 @@
   };
   testTimeout = 600;
   patchScript = ''
-    # (De-weakened: the systemd-run --user + journalctl --user-unit skip was
-    # removed to baseline the current-user user-manager + journalctl --user-unit
-    # path, which the user manager should now support.)
-
-    # Skip journalctl -b <script> test (executable_is_script test).
-    # In the NixOS VM the test script runs via the backdoor (virtconsole),
-    # not as a systemd service, so there are no journal entries with _EXE
-    # matching the script's interpreter.
+    # executable_is_script: ENVIRONMENT-ONLY. The test script runs via the VM's
+    # backdoor (virtconsole) rather than as a systemd service, so no journal
+    # entry carries an _EXE matching the interpreter. Nothing about journald is
+    # being hidden here.
     sed -i '/journalctl -b "\$(readlink -f/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
 
-    # FDSTORE hunk: the full FDSTORE=1 store/recover mechanism IS implemented
-    # (fd_store.rs, notification_handler store, start_service re-pass, journald
-    # main.rs store+recover) and journald's unit sets FileDescriptorStoreMax=4224
-    # (testsuite.nix:242), yet the store is rejected at max_fds==0
-    # (notification_handler.rs:468) -- so that 4224 is NOT reaching journald's
-    # parsed service config (drop-in/override load or parse gap). Diagnose with
-    # `systemctl show systemd-journald.service -p FileDescriptorStoreMax` in the
-    # VM; if 0, fix the journald unit/drop-in loading of FileDescriptorStoreMax.
-    # FDSTORE hunk. DIAGNOSED (FDPROBE, 2026-07-22): the store side works --
-    # journald's config max=4224 (drop-in loaded) and journald stores each stream
-    # on accept via FDSTORE=1 (main.rs:2487). But the FIRST check (line 204,
-    # after `systemctl restart systemd-journald`, NOT the SIGKILL) fails: journald
-    # never accepted+stored forever-print-hola's RUNTIME stream (44 FDPROBEs at
-    # boot 10-14s, NONE at ~156s when forever-print-hola started). So its stdout
-    # is not being routed to journald's stream socket (/run/systemd/journal/stdout)
-    # at runtime the way boot services are. Next: read forever-print-hola.service
-    # StandardOutput + trace rust-systemd's runtime stdout-to-journald stream
-    # connection for non-boot services. Deep; re-skipped.
-    # FDSTORE hunk (DEEP, deferred). Diagnosed: the store side works for BOOT
-    # streams (44 FDSTORE=1 reach PID1's notification handler, journald config
-    # max=4224) but journald never sends FDSTORE=1 for forever-print-hola's
-    # RUNTIME stream, so it is lost on `systemctl restart systemd-journald` (test
-    # line 202). journald's stream-setup path (main.rs:2460-2487) apparently does
-    # not run/store for the runtime stream. NOTE: journald cannot write /dev/kmsg
-    # (sandboxed), so probes must use a journal-visible mechanism, not kmsg. Next
-    # (fresh session): probe the exec_helper open_journal_stream_nonblock
-    # connection side (PID1/child CAN write kmsg) to see if forever-print-hola's
-    # stdout actually connects, then trace journald's accept->store for it.
+    # FDSTORE hunk: deep, deferred, and diagnosed as far as it has been taken.
+    # (Three overlapping notes from successive sessions were collapsed into this
+    # one; earlier drafts said less, not more.)
+    #
+    # The store mechanism IS implemented (fd_store.rs, the notification-handler
+    # store, start_service's re-pass, journald's store+recover) and journald's
+    # unit does set FileDescriptorStoreMax=4224. For BOOT streams it works: 44
+    # FDSTORE=1 messages reach PID 1's notification handler at 10-14s.
+    #
+    # What fails is the FIRST check (test line ~204, after `systemctl restart
+    # systemd-journald`, NOT the SIGKILL): journald never accepted and stored
+    # forever-print-hola's RUNTIME stream, so it is lost across the restart. No
+    # FDSTORE probe fires at ~156s when that service starts. So a non-boot
+    # service's stdout is not being routed to journald's stream socket
+    # (/run/systemd/journal/stdout) the way boot services' are.
+    #
+    # Next step for whoever picks this up: probe the connection side in
+    # exec_helper's open_journal_stream_nonblock (PID 1 and its children CAN
+    # write /dev/kmsg) to see whether forever-print-hola's stdout connects at
+    # all, then trace journald's accept->store for it. journald itself is
+    # sandboxed away from /dev/kmsg, so probes inside journald must use a
+    # journal-visible mechanism instead.
     sed -i '/^systemctl start forever-print-hola/s/.*/echo SKIP # forever-print-hola/' TEST-04-JOURNAL.journal.sh
     sed -i '/^systemctl stop forever-print-hola/s/.*/echo SKIP # stop forever-print-hola/' TEST-04-JOURNAL.journal.sh
     sed -i '/^systemctl kill --signal=SIGKILL systemd-journald/s/.*/echo SKIP # SIGKILL journald/' TEST-04-JOURNAL.journal.sh
     sed -i '/^\[\[ ! -f "\/tmp\/i-lose-my-logs" \]\]/s/.*/echo SKIP # i-lose-my-logs check/' TEST-04-JOURNAL.journal.sh
     sed -i '/^rm -f \/tmp\/i-lose-my-logs/s/.*/echo SKIP # rm i-lose-my-logs/' TEST-04-JOURNAL.journal.sh
 
-    # Skip journalctl --follow tests (require running journald with working
-    # stream reconnection)
-    sed -i '/^journalctl --follow/s/.*/echo SKIP # journalctl --follow/' TEST-04-JOURNAL.journal.sh
-
+    # The `journalctl --follow` mask is REMOVED as of 2026-07-27. It claimed to
+    # "require running journald with working stream reconnection", which is a
+    # different claim from the FDSTORE one above and had never been re-checked
+    # against the current tree. Running it is the cheapest way to find out
+    # whether it still holds.
   '';
 }
