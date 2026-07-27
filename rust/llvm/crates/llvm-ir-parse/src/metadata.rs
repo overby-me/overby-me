@@ -346,10 +346,10 @@ impl Parser {
                 self.advance();
                 Ok(MdOperand::String(text.into()))
             }
-            Token::MetadataName(_) | Token::Exclaim => {
-                let node = self.parse_metadata_definition()?;
-                Ok(MdOperand::Inline(Box::new(node)))
-            }
+            Token::MetadataName(_) | Token::Exclaim => match self.parse_metadata_ref()? {
+                MdRef::Id(id) => Ok(MdOperand::Ref(id)),
+                MdRef::Inline(node) => Ok(MdOperand::Inline(node)),
+            },
             _ => {
                 let ty = self.parse_type()?;
                 match context {
@@ -408,7 +408,18 @@ impl Parser {
             self.advance();
             return Ok(MdRef::Id(MdId(number)));
         }
-        Ok(MdRef::Inline(Box::new(self.parse_metadata_definition()?)))
+        let node = self.parse_metadata_definition()?;
+        // `DIExpression` and `DIArgList` are written at every use and never
+        // numbered. Everything else upstream hoists out and numbers, so a
+        // node written in place here becomes one written once and referred
+        // to, which is what gets printed back.
+        if prints_in_place(&node) {
+            return Ok(MdRef::Inline(Box::new(node)));
+        }
+        let id = MdId(self.next_inline_metadata);
+        self.next_inline_metadata += 1;
+        self.module.set_metadata(id, node);
+        Ok(MdRef::Id(id))
     }
 
     /// `, !dbg !7` attachments, which is how they appear on instructions and
@@ -450,4 +461,13 @@ fn is_a_definition(fields: &[(String, MdField)]) -> bool {
             }
             _ => false,
         })
+}
+
+/// `DIExpression` and `DIArgList` print at every use rather than once, so
+/// they stay where they are written.
+fn prints_in_place(node: &Metadata) -> bool {
+    matches!(
+        node,
+        Metadata::Specialized { tag, .. } if tag == "DIExpression" || tag == "DIArgList"
+    )
 }

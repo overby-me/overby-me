@@ -563,6 +563,24 @@ gate takes either table. The tree went to 10,146.
 That cost one file and paid for it: a naked function has no prologue, so
 nothing put its arguments anywhere the body could read them, and reading one
 is an error. Taking one and leaving it alone is not.
+A forty-sixth pass took four more of the tree's parse gaps, and one of them
+turned out to be a printer gap underneath. Tree 10,146 to 10,162.
+A global's `align` with no comma before it is an attribute rather than the
+alignment clause, which is what tells the two apart and what upstream prints
+as `#0 = { align=4 }`. A NaN narrows to a `float` when the mantissa bits
+that fall off the bottom are zero, which is why `0x7FF1000000000000` is a
+float and `0x7FF0000000000001` is not; comparing bit patterns the way a
+finite value is compared refused every NaN. Widening one back for printing
+had the same shape of bug in reverse: the machine's own conversion quietens
+a signalling NaN, and the payload is what says which NaN it was.
+The fourth was a function attachment written in place, `!prof !{...}`, and
+accepting it showed the printer keeping it there. Upstream has no inline
+node at all except `DIExpression` and `DIArgList`: every other node is
+numbered once and referred to, whether it was written inside an attachment
+or inside another node. So the parser hoists them now, at parse time, into
+numbers past every number the text writes. That fixed the global case from
+the pass before as well, which had the same divergence and had not been
+noticed because only the parse was measured.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

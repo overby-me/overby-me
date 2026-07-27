@@ -816,6 +816,10 @@ const BROKEN: &[(&str, &str)] = &[
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
     (
+        "define float @f() {\nentry:\n  ret float 0x7FF0000000000001\n}\n",
+        "floating point constant invalid for type",
+    ),
+    (
         "define void @f() {\nentry:\n  call void @llvm.not.a.real.intrinsic()\n  ret void\n}\n",
         "reference to undefined symbol @llvm.not.a.real.intrinsic",
     ),
@@ -1018,6 +1022,13 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // A global's `align` with no comma before it is an attribute rather than
+    // the alignment clause, which is how upstream tells the two apart.
+    "@g = external global i32 align 4\n",
+    // A function attachment may be written in place.
+    "define void @f() !prof !{!\"function_entry_count\", i64 0} {\nentry:\n  ret void\n}\n",
+    // A NaN narrows to a float when the payload bits that fall off are zero.
+    "define float @f() {\nentry:\n  ret float 0x7FF1000000000000\n}\n",
     // A phi may carry an attachment, and the comma before it looks exactly
     // like the comma before another edge.
     "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %a, label %b\n\na:\n  br label %b\n\nb:\n  %p = phi i32 [ 0, %entry ], [ 1, %a ], !dbg !0\n  ret void\n}\n\n!0 = !DILocation(line: 1, column: 1, scope: !1)\n!1 = distinct !DISubprogram(name: \"f\", scope: !2, file: !2, line: 1, type: !3, spFlags: DISPFlagDefinition, unit: !4)\n!2 = !DIFile(filename: \"a.c\", directory: \"/\")\n!3 = !DISubroutineType(types: !5)\n!4 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!5 = !{null}\n",

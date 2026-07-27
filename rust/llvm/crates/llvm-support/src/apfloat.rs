@@ -231,6 +231,15 @@ impl ApFloat {
     /// lost. LLVM performs exactly this check when a literal written for one
     /// type has to land in another.
     pub fn from_f64_exact(semantics: FloatSemantics, value: f64) -> Option<Self> {
+        // A NaN narrows by dropping the low mantissa bits, and loses nothing
+        // when they are already zero. Comparing bit patterns the way a finite
+        // value is compared would refuse every NaN, because narrowing and
+        // widening a NaN does not reproduce the payload it started with.
+        if value.is_nan()
+            && let Some(narrowed) = narrow_nan(semantics, value)
+        {
+            return Some(narrowed);
+        }
         match semantics {
             FloatSemantics::Double => Some(Self::from_f64(value)),
             FloatSemantics::Single => {
@@ -351,6 +360,12 @@ impl ApFloat {
                 format!("0xM{:016X}{:016X}", self.word(0), self.word(1))
             }
             FloatSemantics::Single | FloatSemantics::Double => {
+                // Widening through the machine's own conversion quietens a
+                // signalling NaN, and the printed payload is what says which
+                // NaN it was, so a NaN widens by shifting its bits instead.
+                if let Some(widened) = widen_nan(self) {
+                    return format!("0x{}", ApInt::from_u64(64, widened).to_hex_upper());
+                }
                 let as_double = self.to_f64().expect("single and double widen to f64");
                 if self.is_finite()
                     && let Some(decimal) = exact_decimal_form(as_double)
@@ -532,6 +547,45 @@ fn narrow_ieee(value: f64, exponent_bits: u32, mantissa_bits: u32) -> Option<u64
         return None;
     }
     Some((sign << (exponent_bits + mantissa_bits)) | (full >> total_drop))
+}
+
+/// A `double` NaN written into a narrower format, when its payload survives.
+///
+/// The sign and the exponent carry over whole, and the mantissa keeps its top
+/// bits, so the payload is preserved exactly when the bits that fall off the
+/// bottom are zero. That is what lets `0x7FF1000000000000` be written as a
+/// `float` and `0x7FF0000000000001` not be.
+fn narrow_nan(semantics: FloatSemantics, value: f64) -> Option<ApFloat> {
+    let mantissa_bits = match semantics {
+        FloatSemantics::Single => 23,
+        FloatSemantics::Half => 10,
+        FloatSemantics::BFloat => 7,
+        _ => return None,
+    };
+    let bits = value.to_bits();
+    let dropped = 52 - mantissa_bits;
+    if bits & ((1u64 << dropped) - 1) != 0 {
+        return None;
+    }
+    let sign = (bits >> 63) & 1;
+    let mantissa = (bits & ((1u64 << 52) - 1)) >> dropped;
+    let exponent_bits = semantics.bit_width() - 1 - mantissa_bits;
+    let exponent = (1u64 << exponent_bits) - 1;
+    let raw = (sign << (semantics.bit_width() - 1)) | (exponent << mantissa_bits) | mantissa;
+    Some(ApFloat::from_raw_u64(semantics, raw))
+}
+
+/// A `float` NaN as the `double` bit pattern that reads back as it, which is
+/// how upstream prints one. `double` needs no widening and everything else
+/// prints its own bits.
+fn widen_nan(value: &ApFloat) -> Option<u64> {
+    if value.semantics() != FloatSemantics::Single || !value.is_nan() {
+        return None;
+    }
+    let raw = value.bits().to_u64()?;
+    let sign = (raw >> 31) & 1;
+    let mantissa = (raw & ((1 << 23) - 1)) << 29;
+    Some((sign << 63) | (0x7ffu64 << 52) | mantissa)
 }
 
 #[cfg(test)]

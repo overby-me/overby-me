@@ -146,21 +146,12 @@ impl Parser {
                 return self.error("unexpected clause after a global");
             }
         }
-        // `@g = global i32 7 "key" = "value" #0`: a global's own attributes
-        // come last, with no comma, and can be either strings or groups.
-        loop {
-            match self.peek().clone() {
-                Token::AttributeGroup(number) => {
-                    self.advance();
-                    global.attrs.groups.push(number);
-                }
-                Token::Quoted(_) => {
-                    let attribute = self.parse_attribute(false)?;
-                    global.attrs.push(attribute);
-                }
-                _ => break,
-            }
-        }
+        // `@g = global i32 7 "key" = "value" align 4 #0`: a global's own
+        // attributes come last, with no comma before them, which is what
+        // tells an `align` attribute from the `align` clause above.
+        let attrs = self.parse_attribute_set(false)?;
+        global.attrs.attributes.extend(attrs.attributes);
+        global.attrs.groups.extend(attrs.groups);
         self.module.add_global(global);
         Ok(())
     }

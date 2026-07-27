@@ -151,10 +151,16 @@ impl Parser {
                     let attrs = self.parse_attribute_set(false)?;
                     function.attrs.attributes.extend(attrs.attributes);
                 }
-                // `!dbg !0` is an attachment; `!name = !{...}` on the next
+                // `!dbg !0` is an attachment, and so is `!prof !{...}` with
+                // its node written in place; `!name = !{...}` on the next
                 // line is the start of the next top-level item and this
                 // function is over.
-                Token::MetadataName(_) if matches!(self.peek_at(1), Token::MetadataNumber(_)) => {
+                Token::MetadataName(_)
+                    if matches!(
+                        self.peek_at(1),
+                        Token::MetadataNumber(_) | Token::MetadataName(_) | Token::Exclaim
+                    ) =>
+                {
                     let attachments = self.parse_metadata_attachments()?;
                     function.metadata.extend(attachments);
                 }

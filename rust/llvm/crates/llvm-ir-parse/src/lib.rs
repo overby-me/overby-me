@@ -69,7 +69,17 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         symbols: HashMap::new(),
         implied_intrinsics: Vec::new(),
         implied_signatures: HashMap::new(),
+        next_inline_metadata: 0,
     };
+    parser.next_inline_metadata = parser
+        .tokens
+        .iter()
+        .filter_map(|spanned| match spanned.token {
+            lexer::Token::MetadataNumber(number) => Some(number + 1),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
     parser.module.module_id = module_id;
     parser.prescan_symbols()?;
     parser.parse_top_level()?;
@@ -89,6 +99,11 @@ pub(crate) struct Parser {
     pub(crate) implied_intrinsics: Vec<Name>,
     /// What the first call to each of them says its signature is.
     pub(crate) implied_signatures: HashMap<Name, (TypeId, Vec<TypeId>)>,
+    /// The next number to give a node written in place. Upstream has no such
+    /// thing: it numbers every node and refers to it, so a node written
+    /// inside another is hoisted out and numbered. Starting past every
+    /// number the text writes keeps the two from colliding.
+    pub(crate) next_inline_metadata: u32,
 }
 
 /// Everything the parser has to remember while inside one function body.
