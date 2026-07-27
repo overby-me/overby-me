@@ -616,7 +616,7 @@ fn start_service_with_filedescriptors(
             || exec
                 .prefixes
                 .contains(&CommandlinePrefix::DoubleExclamation),
-        clean_environment: exec.prefixes.contains(&CommandlinePrefix::Colon),
+        no_env_expand: exec.prefixes.contains(&CommandlinePrefix::Colon),
         login_shell: exec.prefixes.contains(&CommandlinePrefix::Pipe),
         env: {
             let default_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";

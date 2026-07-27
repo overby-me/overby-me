@@ -410,12 +410,15 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub privileged_prefix: bool,
 
-    /// When true, the command has the ':' prefix: use a clean environment
-    /// with only the minimal set of variables (PATH, NOTIFY_SOCKET,
-    /// LISTEN_FDS/LISTEN_FDNAMES/LISTEN_PID if applicable) instead of the
-    /// service's configured Environment=/EnvironmentFile=/PassEnvironment=.
+    /// When true, the command has the ':' prefix: environment variable
+    /// SUBSTITUTION is not applied to the command line.
+    ///
+    /// systemd.service(5) says `:` means only that substitution is skipped; it
+    /// says nothing about which variables the process receives. This was
+    /// previously implemented as "use a clean environment", which also
+    /// discarded the service's own Environment=/EnvironmentFile=.
     #[serde(default)]
-    pub clean_environment: bool,
+    pub no_env_expand: bool,
 
     /// When true, the command has the '|' prefix: run the command via the
     /// user's login shell. The original command and arguments are passed
@@ -3400,37 +3403,11 @@ pub fn run_exec_helper() {
         }
     }
 
-    // setup environment vars
-    // When the ':' prefix is used, start with a clean environment — only
-    // the minimal internal variables (PATH, NOTIFY_SOCKET, LISTEN_*) are
-    // kept. All other configured Environment=/EnvironmentFile=/PassEnvironment=
-    // variables are discarded.
-    if config.clean_environment {
-        // Clear all inherited environment variables first
-        for (key, _) in std::env::vars() {
-            // TODO: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::remove_var(&key) };
-        }
-        // Only set the essential internal variables from the config
-        for (k, v) in &config.env {
-            // Keep only PATH, NOTIFY_SOCKET, LISTEN_FDS, LISTEN_FDNAMES,
-            // CREDENTIALS_DIRECTORY, STATE_DIRECTORY, RUNTIME_DIRECTORY,
-            // LOGS_DIRECTORY, CACHE_DIRECTORY, CONFIGURATION_DIRECTORY,
-            // and any *_DIRECTORY vars we set above.
-            match k.as_str() {
-                "PATH" | "NOTIFY_SOCKET" | "LISTEN_FDS" | "LISTEN_FDNAMES" => {
-                    unsafe { std::env::set_var(k, v) };
-                }
-                _ => {
-                    log::trace!("':' prefix: skipping env var {k}");
-                }
-            }
-        }
-    } else {
-        for (k, v) in &config.env {
-            // TODO: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::set_var(k, v) };
-        }
+    // setup environment vars. The ':' prefix does NOT affect these: it only
+    // suppresses substitution into the command line further down.
+    for (k, v) in &config.env {
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(k, v) };
     }
 
     // Only set LISTEN_PID when LISTEN_FDS is present in the environment.
@@ -3659,8 +3636,10 @@ pub fn run_exec_helper() {
     // STATE_DIRECTORY, EnvironmentFile= vars, etc.). $$ becomes literal $.
     // This must happen AFTER all env vars are set (config.env, directory vars,
     // credentials, etc.) so that expansion sees the complete environment.
-    effective_args = expand_env_argv(&effective_args);
-    effective_cmd = PathBuf::from(expand_env_str(&effective_cmd.to_string_lossy()));
+    if !config.no_env_expand {
+        effective_args = expand_env_argv(&effective_args);
+        effective_cmd = PathBuf::from(expand_env_str(&effective_cmd.to_string_lossy()));
+    }
 
     let (cmd, args) = prepare_exec_args(
         &effective_cmd,
