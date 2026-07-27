@@ -26,6 +26,34 @@
   # notion of a worker dying by signal to report. This half needs a worker
   # process model, not a small fix.
   #
+  # THE TIMEOUT HALF NOW PASSES. run_test_timeout completes and the script goes
+  # on to run_test_killed, and PROGRAM_RESULT=KILLED appears on the monitor as
+  # upstream expects.
+  #
+  # It took two fixes and one wrong turn. First, udev.conf and its drop-ins were
+  # never parsed at all, so event_timeout= was accepted on the command line only
+  # to be discarded; they are read now, with /usr/lib, /run and /etc layered in
+  # that order and refreshed on every reload. Second, and this is the part that
+  # actually mattered here, the spawn deadline that fix added reached only
+  # IMPORT{program}=: match_program() has its OWN spawn path and never calls
+  # run_program_capture, so PROGRAM= still had no deadline and
+  # `PROGRAM!="/usr/bin/sleep 60"` blocked its worker for the full sixty
+  # seconds. Both paths now wait against the deadline on a helper thread that
+  # drains the child's stdout, and kill on expiry.
+  #
+  # THE WRONG TURN, worth remembering: a diagnostic was put in
+  # run_program_capture and its silence was read as "PROGRAM rules never
+  # execute". The probe was simply in a function PROGRAM= does not use. When two
+  # functions do the same job, fixing one and instrumenting one is how you get a
+  # confident wrong answer.
+  #
+  # run_test_killed sends SIGABRT to a process named `udev-worker` and expects
+  # UDEV_WORKER_FAILED=1, UDEV_WORKER_SIGNAL=6 and UDEV_WORKER_SIGNAL_NAME=ABRT
+  # on the monitor. rust-systemd runs workers as THREADS, named
+  # `udev-worker:<devpath>`, so there is no process for pkill to signal and no
+  # notion of a worker dying by signal to report. This half needs a worker
+  # process model, not a small fix.
+  #
   # The spawn deadline is now implemented: udev.conf and its drop-ins are read
   # for event_timeout=, and a PROGRAM= that outlives it is killed and counts as
   # a non-match instead of blocking forever. That was worth doing on its own,
