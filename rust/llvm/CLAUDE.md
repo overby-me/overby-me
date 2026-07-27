@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 445 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 446 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -384,6 +384,12 @@ that nothing defines. `Context::named_struct` makes a forward reference
 and a genuine `type opaque` the same thing on purpose, so there is nothing
 to tell them apart with, and the rule needs a model change rather than a
 check.
+A thirty-fourth pass: an indirect call goes through a pointer in the
+program's address space, and a metadata node does not hold metadata
+wrapped in a value. The first was written for every call at first, which
+refused `ifunc-program-addrspace.ll`, because a named symbol carries its
+own address space and only a call through a value has to match the
+program's.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

@@ -1217,6 +1217,13 @@ impl Verifier<'_> {
         for attachment in instruction.metadata.clone() {
             let kind = attachment.kind.clone();
             match kind.as_str().unwrap_or_default() {
+                _ if {
+                    let node = self.resolve(&attachment.node);
+                    if let Some(node) = node {
+                        self.metadata_shape(&node, &where_);
+                    }
+                    false
+                } => {}
                 "alias.scope" | "noalias" => self.scope_list(&attachment.node, &where_),
                 "fpmath" => {
                     let float = self
@@ -1824,6 +1831,22 @@ impl Verifier<'_> {
                 }
                 // An indirect call has no declaration to name an opaque type
                 // in, so it may not produce one.
+                // Only a genuinely indirect call: a named symbol carries its
+                // own address space, and upstream reads a call to an ifunc in
+                // address space zero from a program space that is not.
+                let names_a_symbol = matches!(call.callee, Value::Constant(id)
+                    if self.module.ctx.constant(id).as_global().is_some());
+                if !names_a_symbol
+                    && let Some(layout) = &self.module.data_layout
+                    && let Some(space) = self
+                        .value_type(function, call.callee)
+                        .and_then(|ty| self.module.ctx.type_kind(ty).pointer_address_space())
+                    && space != layout.program_address_space()
+                {
+                    self.report(format!(
+                        "{where_} calls through address space {space} rather than the program's"
+                    ));
+                }
                 let direct = matches!(call.callee, Value::Constant(id)
                     if matches!(self.module.ctx.constant(id).as_global(), Some(GlobalRef::Function(_))));
                 if !direct && let Some(what) = self.opaque_value_type(ty) {
@@ -2645,6 +2668,18 @@ impl Verifier<'_> {
     /// The debug-info rules that are the verifier's rather than the
     /// parser's: the grammar is checked when the node is read, and this is
     /// what needs the node's neighbours to make sense of.
+    fn metadata_shape(&mut self, node: &Metadata, what: &str) {
+        let Metadata::Tuple { operands, .. } = node else {
+            return;
+        };
+        if operands.iter().any(|operand| {
+            matches!(operand, MdOperand::Value { ty, .. }
+                if matches!(self.module.ctx.type_kind(*ty), TypeKind::Metadata))
+        }) {
+            self.report(format!("{what} holds metadata wrapped in a value"));
+        }
+    }
+
     fn debug_info_node(&mut self, node: &Metadata) {
         let Metadata::Specialized { tag, args, .. } = node else {
             return;
