@@ -295,6 +295,7 @@ impl Verifier<'_> {
                     for operand in &operands {
                         self.module_flag(*operand);
                     }
+                    self.pauth_abi_is_named_whole(&operands);
                 }
                 // Both of these are lists of one-string nodes, and both have
                 // upstream tests that say so.
@@ -1776,13 +1777,15 @@ impl Verifier<'_> {
                     let operands = self
                         .resolve(&attachment.node)
                         .and_then(|node| node.as_tuple().map(<[MdOperand]>::to_vec));
-                    if let Some(operands) = operands
-                        && !matches!(operands.len(), 3 | 4)
-                    {
-                        self.report(format!(
-                            "{where_}: a tbaa tag has three operands or four, not {}",
-                            operands.len()
-                        ));
+                    if let Some(operands) = operands {
+                        if !matches!(operands.len(), 3 | 4) {
+                            self.report(format!(
+                                "{where_}: a tbaa tag has three operands or four, not {}",
+                                operands.len()
+                            ));
+                        } else {
+                            self.tbaa_types(&operands, &where_);
+                        }
                     }
                 }
                 "fpmath" => {
@@ -2200,6 +2203,14 @@ impl Verifier<'_> {
                 );
                 self.gep_vector_widths(pointer_type, &indices, &where_);
                 self.walk_indices(source_type, &indices, &where_);
+                // A struct holding a scalable vector has no offset for
+                // whatever follows it, so there is no arithmetic to do on one
+                // even when the index picks the first field.
+                if self.holds_a_scalable_vector(source_type, &mut Vec::new()) {
+                    self.report(format!(
+                        "{where_} cannot target a structure that contains a scalable vector"
+                    ));
+                }
             }
             InstKind::Fence { ordering, .. } => {
                 self.check(
@@ -2439,6 +2450,22 @@ impl Verifier<'_> {
                 for (position, arg) in call.args.iter().enumerate() {
                     let attrs = arg.attrs.clone();
                     self.attribute_set(&attrs, arg.ty, &format!("argument {position} of {where_}"));
+                    // `inalloca` says the argument was pushed onto the stack
+                    // where the callee expects to find it, which is what
+                    // `alloca inalloca` does and what an ordinary alloca does
+                    // not. A value that is not an alloca at all says nothing
+                    // about where it came from, so nothing is asked of it.
+                    if has_type_attribute(&attrs, TypeAttr::InAlloca)
+                        && let Value::Instruction(id) = arg.value
+                        && let Some(instruction) = function.try_instruction(id)
+                        && let InstKind::Alloca { inalloca, .. } = instruction.kind
+                        && !inalloca
+                    {
+                        self.report(format!(
+                            "{where_} passes argument {position} inalloca from an alloca that is \
+                             not one"
+                        ));
+                    }
                     // An argument past the declared parameters is one the
                     // callee has no name for, so nothing can be said about
                     // where it goes or what it comes back as.
@@ -2552,6 +2579,79 @@ impl Verifier<'_> {
                         self.report(format!("{where_} carries {count} {tag} operand bundles"));
                     }
                 }
+                // What `llvm.assume` is told is written as a bundle whose tag
+                // is the attribute being asserted, so the tag has to name one.
+                // Two tags are its own rather than an attribute's: `ignore`
+                // stands for an assertion that was dropped, and
+                // `separate_storage` names two allocations that do not
+                // overlap.
+                let asserts = self
+                    .resolve_symbol_of(call.callee)
+                    .and_then(|target| match target {
+                        GlobalRef::Function(id) => match &self.module.function(id).name {
+                            Name::Named(name) => Some(name.clone()),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .is_some_and(|name| name == "llvm.assume");
+                if asserts {
+                    for bundle in call.bundles.clone() {
+                        self.assume_bundle(&bundle, &where_);
+                    }
+                }
+                let intrinsic = match call.callee {
+                    Value::Constant(id) => self.mentions_an_intrinsic(id),
+                    _ => None,
+                };
+                if let Some(name) = intrinsic {
+                    // A tile is a register the hardware fills, so there is no
+                    // constant of that type for a caller to hand over: a call
+                    // takes one another call produced.
+                    for (position, arg) in call.args.iter().enumerate() {
+                        if matches!(self.module.ctx.type_kind(arg.ty), TypeKind::X86Amx)
+                            && matches!(arg.value, Value::Constant(_))
+                        {
+                            self.report(format!(
+                                "{where_}: argument {position} is a constant x86_amx"
+                            ));
+                        }
+                    }
+                    // An intrinsic is selected by its name, so its argument
+                    // list is the one the name owns rather than one a caller
+                    // chooses. Calling one through a variadic type says the
+                    // caller chose, which is only true of the few intrinsics
+                    // that are variadic. LangRef declares those with `...`,
+                    // and `corpus/intrinsic-signatures.nu` drops exactly
+                    // those, so having a signature at all is the evidence.
+                    if crate::intrinsic::table::signature(&name).is_some()
+                        && matches!(
+                            self.module.ctx.type_kind(call.function_type),
+                            TypeKind::Function {
+                                is_var_arg: true,
+                                ..
+                            }
+                        )
+                    {
+                        self.report(format!(
+                            "{where_} calls @{name} through a variadic signature, which it does \
+                             not have"
+                        ));
+                    }
+                    // Relocating a pointer, or reading what a call returned,
+                    // is asking about one safepoint, and a statepoint is what
+                    // makes one. `token none` marks no point at all.
+                    let asks_about_a_safepoint = name.starts_with("llvm.experimental.gc.relocate")
+                        || name.starts_with("llvm.experimental.gc.result");
+                    if asks_about_a_safepoint
+                        && let Some(first) = call.args.first()
+                        && !self.comes_from_a_statepoint(function, first.value)
+                    {
+                        self.report(format!(
+                            "{where_} is incorrectly tied to the statepoint it names"
+                        ));
+                    }
+                }
                 for attribute in &call.fn_attrs.attributes {
                     // Not the type-valued ones: `preallocated(T)` is a
                     // call-site function attribute naming the setup it pairs
@@ -2571,12 +2671,32 @@ impl Verifier<'_> {
                         ));
                     }
                 }
-                // `speculatable` promises something about a function, not
-                // about one call to it.
-                if call.fn_attrs.has(EnumAttr::Speculatable) {
-                    self.report(format!(
-                        "{where_} carries speculatable, which a call site may not"
-                    ));
+                // `speculatable` promises the call can be moved to somewhere
+                // it might not have run, and that is a promise the callee
+                // makes about itself. A call site may repeat it and only
+                // repeat it: an indirect call has no declaration to have made
+                // it, and an alias is a name rather than a body.
+                if self
+                    .resolved_attributes(&call.fn_attrs)
+                    .iter()
+                    .any(|a| matches!(a, Attribute::Enum(EnumAttr::Speculatable)))
+                {
+                    let promised = self
+                        .resolve_symbol_of(call.callee)
+                        .and_then(|target| match target {
+                            GlobalRef::Function(id) => Some(self.module.function(id).attrs.clone()),
+                            _ => None,
+                        })
+                        .is_some_and(|attrs| {
+                            self.resolved_attributes(&attrs)
+                                .iter()
+                                .any(|a| matches!(a, Attribute::Enum(EnumAttr::Speculatable)))
+                        });
+                    if !promised {
+                        self.report(format!(
+                            "{where_} carries speculatable, which its callee does not"
+                        ));
+                    }
                 }
                 // An indirect call has no declaration to name an opaque type
                 // in, so it may not produce one.
@@ -3751,21 +3871,54 @@ impl Verifier<'_> {
         }
     }
 
-    /// Rules about a function attribute's own value, which have nothing to do
-    /// with the type it is attached to.
-    fn function_attributes(&mut self, function: &Function) {
-        let unnamed = function.qualifiers.unnamed_addr.is_some();
-        let mut attributes: Vec<Attribute> = function.attrs.attributes.clone();
-        for group in &function.attrs.groups {
+    /// An attribute set with the groups it names folded in, `#0` standing for
+    /// whatever `attributes #0 = { ... }` holds. A group nothing defines is an
+    /// empty set rather than an error.
+    fn resolved_attributes(&self, set: &AttributeSet) -> Vec<Attribute> {
+        let mut attributes = set.attributes.clone();
+        for group in &set.groups {
             if let Some(contents) = self.module.attribute_group(*group) {
                 attributes.extend(contents.iter().cloned());
             }
         }
+        attributes
+    }
+
+    /// The symbol a value names, reaching through the casts a constant
+    /// expression may wrap it in.
+    fn resolve_symbol_of(&self, value: Value) -> Option<GlobalRef> {
+        match value {
+            Value::Constant(id) => self.resolve_symbol(id),
+            _ => None,
+        }
+    }
+
+    /// Rules about a function attribute's own value, which have nothing to do
+    /// with the type it is attached to.
+    fn function_attributes(&mut self, function: &Function) {
+        let unnamed = function.qualifiers.unnamed_addr.is_some();
+        let attributes = self.resolved_attributes(&function.attrs);
         let has = |wanted: EnumAttr| {
             attributes
                 .iter()
                 .any(|a| matches!(a, Attribute::Enum(kind) if *kind == wanted))
         };
+        let variants: Vec<String> = attributes
+            .iter()
+            .filter_map(|a| match a {
+                Attribute::String { key, value } if key == "vector-function-abi-variant" => {
+                    value.clone()
+                }
+                _ => None,
+            })
+            .collect();
+        for variant in variants {
+            for name in variant.split(',') {
+                if !self.vfabi_variant(name, function.params.len()) {
+                    self.report(format!("invalid name for a VFABI variant: {name}"));
+                }
+            }
+        }
         // Pairs that ask for opposite things.
         for (first, second) in [
             (EnumAttr::AlwaysInline, EnumAttr::NoInline),
@@ -4020,6 +4173,341 @@ impl Verifier<'_> {
                 "{where_} moves {bits} bits, which is not a size an atomic comes in"
             ));
         }
+    }
+
+    /// Whether a token was made by a statepoint, which is what makes a
+    /// safepoint there is anything to ask about. A statepoint written as an
+    /// `invoke` makes one on both of its edges, so the `landingpad` the
+    /// unwind edge opens with carries the same token.
+    ///
+    /// `poison` and `undef` are neither yes nor no: they stand for any value,
+    /// so there is nothing to be wrong about. Nor is an argument of the
+    /// enclosing function: `llvm-as` crashes on one, and a crash is not a
+    /// verdict to copy.
+    fn comes_from_a_statepoint(&self, function: &Function, value: Value) -> bool {
+        match value {
+            Value::Instruction(id) => match function.try_instruction(id) {
+                Some(instruction) => match &instruction.kind {
+                    InstKind::Call(call) | InstKind::Invoke { call, .. } => {
+                        self.calls_a_statepoint(call)
+                    }
+                    InstKind::LandingPad { .. } => self.unwinds_from_a_statepoint(function, id),
+                    _ => false,
+                },
+                None => true,
+            },
+            Value::Constant(id) => !matches!(self.module.ctx.constant(id), Constant::NoneToken(_)),
+            _ => true,
+        }
+    }
+
+    fn calls_a_statepoint(&self, call: &crate::instruction::CallData) -> bool {
+        match call.callee {
+            Value::Constant(id) => self
+                .mentions_an_intrinsic(id)
+                .is_some_and(|name| name.starts_with("llvm.experimental.gc.statepoint")),
+            _ => false,
+        }
+    }
+
+    /// Whether the block a `landingpad` opens is one a statepoint invoke
+    /// unwinds to.
+    fn unwinds_from_a_statepoint(&self, function: &Function, pad: InstId) -> bool {
+        let Some(landing) = function
+            .blocks()
+            .find(|(id, _)| function.block_instructions(*id).any(|(at, _)| at == pad))
+            .map(|(id, _)| id)
+        else {
+            return false;
+        };
+        function.blocks().any(|(id, _)| {
+            function.block_instructions(id).any(|(_, instruction)| {
+                matches!(&instruction.kind, InstKind::Invoke { call, unwind, .. }
+                    if *unwind == landing && self.calls_a_statepoint(call))
+            })
+        })
+    }
+
+    /// Whether a name is a well-formed vector variant of this function.
+    fn vfabi_variant(&self, name: &str, params: usize) -> bool {
+        let Some(rest) = name.strip_prefix("_ZGV") else {
+            return false;
+        };
+        let rest = match rest.strip_prefix("_LLVM_") {
+            Some(rest) => rest,
+            None => match rest.char_indices().nth(1) {
+                Some((at, _)) => &rest[at..],
+                None => return false,
+            },
+        };
+        let mut chars = rest.chars().peekable();
+        if !matches!(chars.next(), Some('M' | 'N')) {
+            return false;
+        }
+        let mut lanes = String::new();
+        while chars.peek().is_some_and(char::is_ascii_digit) {
+            lanes.push(chars.next().unwrap_or_default());
+        }
+        if lanes.parse::<u64>().unwrap_or(0) == 0 {
+            return false;
+        }
+
+        let mut described = 0usize;
+        loop {
+            match chars.next() {
+                Some('_') => break,
+                Some('v' | 'u') => {}
+                // A linear parameter walks by a stride: a constant, one held
+                // in another parameter (`s` and its position), or a negative
+                // one (`n`).
+                Some('l' | 'R' | 'L' | 'U') => match chars.peek() {
+                    Some('n') => {
+                        chars.next();
+                        while chars.peek().is_some_and(char::is_ascii_digit) {
+                            chars.next();
+                        }
+                    }
+                    Some('s') => {
+                        chars.next();
+                        if !chars.peek().is_some_and(char::is_ascii_digit) {
+                            return false;
+                        }
+                        while chars.peek().is_some_and(char::is_ascii_digit) {
+                            chars.next();
+                        }
+                    }
+                    _ => {
+                        while chars.peek().is_some_and(char::is_ascii_digit) {
+                            chars.next();
+                        }
+                    }
+                },
+                _ => return false,
+            }
+            // Any of them may say what the pointed-at memory is aligned to.
+            if chars.peek() == Some(&'a') {
+                chars.next();
+                let mut alignment = String::new();
+                while chars.peek().is_some_and(char::is_ascii_digit) {
+                    alignment.push(chars.next().unwrap_or_default());
+                }
+                match alignment.parse::<u64>() {
+                    Ok(bytes) if bytes.is_power_of_two() => {}
+                    _ => return false,
+                }
+            }
+            described += 1;
+        }
+        // One per parameter, and at least one either way: a variant of a
+        // function that takes nothing has nothing to widen.
+        if described == 0 || described != params {
+            return false;
+        }
+
+        // What is left is the scalar name, and the variant's name in brackets
+        // after it. Both have to be there to name anything.
+        let names: String = chars.collect();
+        let scalar = names.split('(').next().unwrap_or_default();
+        if scalar.is_empty() {
+            return false;
+        }
+        match names.split_once('(') {
+            None => true,
+            Some((_, variant)) => variant
+                .rfind(')')
+                .is_some_and(|close| !variant[..close].is_empty()),
+        }
+    }
+
+    /// The two types a `!tbaa` tag names. Both are type nodes, and a type
+    /// node reaches a root by way of its parent: `!{!"int", !{!"omnipotent
+    /// char", !{!"root"}, i64 0}, i64 0}` is three deep. A chain that comes
+    /// back round to itself reaches no root, so it describes nothing.
+    ///
+    /// The access type is the narrower of the two. A base may be a struct
+    /// type node, which lists its fields and their offsets, but an access is
+    /// what was actually read or written and so is a scalar.
+    fn tbaa_types(&mut self, operands: &[MdOperand], where_: &str) {
+        let base = self.tbaa_reaches_a_root(&operands[0], &mut Vec::new());
+        if !base {
+            self.report(format!("{where_}: base type node reaches no root"));
+        }
+        if !self.tbaa_is_scalar(&operands[1])
+            || !self.tbaa_scalar_chain(&operands[1], &mut Vec::new())
+        {
+            self.report(format!(
+                "{where_}: access type node must be a valid scalar type"
+            ));
+        }
+    }
+
+    /// An access type and everything it refines: scalars up to a root, with
+    /// no struct in between, an access being one value rather than a place.
+    fn tbaa_scalar_chain(&self, operand: &MdOperand, trail: &mut Vec<MdId>) -> bool {
+        let MdOperand::Ref(id) = operand else {
+            return false;
+        };
+        if trail.contains(id) {
+            return false;
+        }
+        trail.push(*id);
+        let answer = match self
+            .module
+            .metadata_node(*id)
+            .and_then(|node| node.as_tuple().map(<[MdOperand]>::to_vec))
+        {
+            Some(fields) if fields.len() == 1 => matches!(fields[0], MdOperand::String(_)),
+            Some(fields) if matches!(fields.len(), 2 | 3) => {
+                matches!(fields[0], MdOperand::String(_))
+                    && self.tbaa_scalar_chain(&fields[1], trail)
+            }
+            _ => false,
+        };
+        trail.pop();
+        answer
+    }
+
+    /// Whether a type node is one at all, and whether following its parent
+    /// ends. A node with one operand is a root; one with two or three is a
+    /// scalar and has a parent; anything longer is a struct and each of its
+    /// fields is a type node in turn.
+    fn tbaa_reaches_a_root(&self, operand: &MdOperand, trail: &mut Vec<MdId>) -> bool {
+        let MdOperand::Ref(id) = operand else {
+            return false;
+        };
+        if trail.contains(id) {
+            return false;
+        }
+        trail.push(*id);
+        let answer = match self
+            .module
+            .metadata_node(*id)
+            .and_then(|node| node.as_tuple().map(<[MdOperand]>::to_vec))
+        {
+            None => false,
+            Some(fields) => match fields.len() {
+                0 => false,
+                1 => matches!(fields[0], MdOperand::String(_)),
+                2 | 3 => {
+                    matches!(fields[0], MdOperand::String(_))
+                        && self.tbaa_reaches_a_root(&fields[1], trail)
+                }
+                _ => {
+                    matches!(fields[0], MdOperand::String(_))
+                        && fields
+                            .iter()
+                            .skip(1)
+                            .step_by(2)
+                            .all(|field| self.tbaa_reaches_a_root(field, trail))
+                }
+            },
+        };
+        trail.pop();
+        answer
+    }
+
+    /// A scalar type node: a name and the parent it refines, with the offset
+    /// into that parent optional.
+    fn tbaa_is_scalar(&self, operand: &MdOperand) -> bool {
+        let MdOperand::Ref(id) = operand else {
+            return false;
+        };
+        self.module
+            .metadata_node(*id)
+            .and_then(|node| node.as_tuple().map(<[MdOperand]>::to_vec))
+            .is_some_and(|fields| matches!(fields.len(), 2 | 3))
+    }
+
+    /// Which pointer-authentication ABI an AArch64 ELF object was built for
+    /// is a platform and a version together, and a note holding one of the
+    /// two says nothing a linker can act on. So a module writes both flags or
+    /// neither.
+    fn pauth_abi_is_named_whole(&mut self, flags: &[MdId]) {
+        let named = |wanted: &str| {
+            flags.iter().any(|id| {
+                self.module
+                    .metadata_node(*id)
+                    .and_then(|node| node.as_tuple())
+                    .and_then(|operands| operands.get(1).cloned())
+                    .is_some_and(|operand| match operand {
+                        MdOperand::String(text) => text.as_str() == Some(wanted),
+                        _ => false,
+                    })
+            })
+        };
+        if named("aarch64-elf-pauthabi-platform") != named("aarch64-elf-pauthabi-version") {
+            self.report(
+                "either both or no 'aarch64-elf-pauthabi-platform' and \
+                 'aarch64-elf-pauthabi-version' module flags must be present",
+            );
+        }
+    }
+
+    /// One bundle on a call to `llvm.assume`.
+    fn assume_bundle(&mut self, bundle: &crate::instruction::OperandBundle, where_: &str) {
+        let tag = bundle.tag.as_str();
+        if matches!(tag, "ignore" | "separate_storage") {
+            // Two allocations, and there is nothing to say about one.
+            if tag == "separate_storage" && bundle.args.len() != 2 {
+                self.report(format!(
+                    "{where_}: a separate_storage assumption names two allocations"
+                ));
+            }
+            return;
+        }
+        if !crate::attribute::names_an_attribute(tag) {
+            self.report(format!(
+                "{where_}: tags must be valid attribute names, and {tag} is not one"
+            ));
+            return;
+        }
+        // The one whose arguments upstream reads: the pointer being asserted
+        // about and how many bytes behind it are there.
+        if tag == "dereferenceable" {
+            if bundle.args.len() != 2 {
+                self.report(format!(
+                    "{where_}: dereferenceable assumptions should have 2 arguments"
+                ));
+                return;
+            }
+            let (first, second) = (bundle.args[0].0, bundle.args[1].0);
+            if !matches!(self.module.ctx.type_kind(first), TypeKind::Pointer { .. }) {
+                self.report(format!("{where_}: first argument should be a pointer"));
+            }
+            if !matches!(self.module.ctx.type_kind(second), TypeKind::Integer(_)) {
+                self.report(format!("{where_}: second argument should be an integer"));
+            }
+        }
+    }
+
+    /// Whether a struct holds a scalable vector, directly or through another
+    /// struct. An array is not looked through: the question is whether this
+    /// type is a struct with no fixed field offsets, and an array of such
+    /// structs is one upstream indexes happily.
+    fn holds_a_scalable_vector(&self, ty: TypeId, trail: &mut Vec<TypeId>) -> bool {
+        if trail.contains(&ty) {
+            return false;
+        }
+        trail.push(ty);
+        let fields = match self.module.ctx.type_kind(ty).clone() {
+            TypeKind::Struct { fields, .. } => fields,
+            TypeKind::NamedStruct(id) => self
+                .module
+                .ctx
+                .struct_def(id)
+                .fields
+                .clone()
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let answer = fields.iter().any(|field| {
+            matches!(
+                self.module.ctx.type_kind(*field),
+                TypeKind::Vector { scalable: true, .. }
+            ) || self.holds_a_scalable_vector(*field, trail)
+        });
+        trail.pop();
+        answer
     }
 
     /// Whether anything inside a type asks to be aligned past what the

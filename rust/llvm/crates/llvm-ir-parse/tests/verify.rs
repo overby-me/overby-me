@@ -61,6 +61,98 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "declare void @llvm.donothing(...)\n\ndefine void @f() {\nentry:\n  call void (...) @llvm.donothing(i64 0)\n  ret void\n}\n",
+        "through a variadic signature, which it does not have",
+    ),
+    (
+        "@buf = global [1024 x i8] zeroinitializer, align 16\n\ndeclare void @llvm.x86.tilestored64.internal(i16, i16, ptr, i64, x86_amx)\n\ndefine void @f(i16 %r, i16 %c) {\nentry:\n  call void @llvm.x86.tilestored64.internal(i16 %r, i16 %c, ptr @buf, i64 64, x86_amx undef)\n  ret void\n}\n",
+        "is a constant x86_amx",
+    ),
+    (
+        "declare ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token, i32, i32)\n\ndefine i32 @f() gc \"statepoint-example\" {\nentry:\n  %r = call ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token none, i32 0, i32 0)\n  ret i32 0\n}\n",
+        "incorrectly tied to the statepoint",
+    ),
+    (
+        "declare token @other()\n\ndeclare ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token, i32, i32)\n\ndefine i32 @f() gc \"statepoint-example\" {\nentry:\n  %t = call token @other()\n  %r = call ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %t, i32 0, i32 0)\n  ret i32 0\n}\n",
+        "incorrectly tied to the statepoint",
+    ),
+    (
+        "declare i64 @foo() #0\n\ndefine void @f() {\nentry:\n  ret void\n}\n\nattributes #0 = { \"vector-function-abi-variant\"=\"_ZGV_LLVM_M4v_foo(vector_foo)\" }\n",
+        "invalid name for a VFABI variant",
+    ),
+    (
+        "declare i64 @foo(i64) #0\n\ndefine void @f() {\nentry:\n  ret void\n}\n\nattributes #0 = { \"vector-function-abi-variant\"=\"_ZGVnQ2v_foo(vf)\" }\n",
+        "invalid name for a VFABI variant",
+    ),
+    (
+        "declare i64 @foo(i64) #0\n\ndefine void @f() {\nentry:\n  ret void\n}\n\nattributes #0 = { \"vector-function-abi-variant\"=\"_ZGVnN0v_foo(vf)\" }\n",
+        "invalid name for a VFABI variant",
+    ),
+    (
+        "declare i64 @foo(i64) #0\n\ndefine void @f() {\nentry:\n  ret void\n}\n\nattributes #0 = { \"vector-function-abi-variant\"=\"_ZGVnN2ls_foo(vf)\" }\n",
+        "invalid name for a VFABI variant",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  store i32 42, ptr %p, align 4, !tbaa !0\n  ret void\n}\n\n!0 = !{!1, !1, i64 0}\n!1 = !{!\"n\", !1, i64 0}\n",
+        "access type node must be a valid scalar type",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  store i32 42, ptr %p, align 4, !tbaa !0\n  ret void\n}\n\n!0 = !{!1, !1, i64 0}\n!1 = !{!\"s\", !2, i64 0, !2, i64 4}\n!2 = !{!\"n\", !3, i64 0}\n!3 = !{!\"root\"}\n",
+        "access type node must be a valid scalar type",
+    ),
+    (
+        "define void @f(ptr %p) {\nentry:\n  store i32 42, ptr %p, align 4, !tbaa !0\n  ret void\n}\n\n!0 = !{!1, !2, i64 0}\n!1 = !{!\"a\", !1, i64 0}\n!2 = !{!\"n\", !3, i64 0}\n!3 = !{!\"root\"}\n",
+        "base type node reaches no root",
+    ),
+    (
+        "!llvm.module.flags = !{!0}\n\n!0 = !{i32 1, !\"aarch64-elf-pauthabi-platform\", i32 2}\n",
+        "either both or no 'aarch64-elf-pauthabi-platform'",
+    ),
+    (
+        "!llvm.module.flags = !{!0}\n\n!0 = !{i32 1, !\"aarch64-elf-pauthabi-version\", i32 3}\n",
+        "either both or no 'aarch64-elf-pauthabi-platform'",
+    ),
+    (
+        "declare void @llvm.assume(i1)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @llvm.assume(i1 true) [\"adazdazd\"()]\n  ret void\n}\n",
+        "tags must be valid attribute names",
+    ),
+    (
+        "declare void @llvm.assume(i1)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @llvm.assume(i1 true) [\"dereferenceable\"(ptr %p)]\n  ret void\n}\n",
+        "dereferenceable assumptions should have 2 arguments",
+    ),
+    (
+        "declare void @llvm.assume(i1)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @llvm.assume(i1 true) [\"dereferenceable\"(ptr %p, float 1.500000e+00)]\n  ret void\n}\n",
+        "second argument should be an integer",
+    ),
+    (
+        "declare void @llvm.assume(i1)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @llvm.assume(i1 true) [\"separate_storage\"(ptr %p)]\n  ret void\n}\n",
+        "a separate_storage assumption names two allocations",
+    ),
+    (
+        "declare void @g(ptr inalloca(i64))\n\ndefine void @f() {\nentry:\n  %a = alloca i64\n  call void @g(ptr inalloca(i64) %a)\n  ret void\n}\n",
+        "inalloca from an alloca that is not one",
+    ),
+    (
+        "%s = type { <vscale x 1 x double>, <vscale x 1 x double> }\n\ndefine void @f(ptr %a) {\nentry:\n  %p = getelementptr %s, ptr %a, i32 0\n  ret void\n}\n",
+        "cannot target a structure that contains a scalable vector",
+    ),
+    (
+        "%i = type { <vscale x 1 x double> }\n%s = type { %i }\n\ndefine void @f(ptr %a) {\nentry:\n  %p = getelementptr %s, ptr %a, i32 0\n  ret void\n}\n",
+        "cannot target a structure that contains a scalable vector",
+    ),
+    (
+        "declare i32 @g()\n\ndefine i32 @f() {\nentry:\n  %r = call i32 @g() speculatable\n  ret i32 %r\n}\n",
+        "carries speculatable, which its callee does not",
+    ),
+    (
+        "declare i32 @g()\n\ndefine i32 @f() {\nentry:\n  %r = call i32 @g() #0\n  ret i32 %r\n}\n\nattributes #0 = { speculatable }\n",
+        "carries speculatable, which its callee does not",
+    ),
+    (
+        "define i32 @f(ptr %p) {\nentry:\n  %r = call i32 %p() speculatable\n  ret i32 %r\n}\n",
+        "carries speculatable, which its callee does not",
+    ),
+    (
         "declare void @g(<2147483649 x i16>)\n\ndefine void @f(<2147483649 x i16> %v) {\nentry:\n  call void @g(<2147483649 x i16> %v)\n  ret void\n}\n",
         "passes a type it cannot align",
     ),
@@ -477,7 +569,7 @@ const BROKEN: &[(&str, &str)] = &[
     ),
     (
         "declare void @g()\n\ndefine void @f() {\nentry:\n  call void @g() speculatable\n  ret void\n}\n",
-        "carries speculatable, which a call site may not",
+        "carries speculatable, which its callee does not",
     ),
     (
         "define void @f(ptr %fn) {\nentry:\n  call void %fn() [ \"kcfi\"(i32 42), \"kcfi\"(i32 42) ]\n  ret void\n}\n",
@@ -1256,6 +1348,59 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // The two intrinsics LangRef does declare variadically.
+    "declare void @llvm.localescape(...)\n\ndefine void @f() {\nentry:\n  %a = alloca i32\n  call void (...) @llvm.localescape(ptr %a)\n  ret void\n}\n",
+    "declare void @llvm.donothing()\n\ndefine void @f() {\nentry:\n  call void @llvm.donothing()\n  ret void\n}\n",
+    // The two tokens that are not `none`: `poison` stands for any value, and
+    // a landingpad on a statepoint invoke's unwind edge carries the same
+    // token the normal edge does.
+    "declare i32 @llvm.experimental.gc.result.i32(token)\n\ndefine i32 @f() gc \"statepoint-example\" {\nentry:\n  %r = call i32 @llvm.experimental.gc.result.i32(token poison)\n  ret i32 %r\n}\n",
+    "declare void @h()\n\ndeclare i32 @P(...)\n\ndeclare token @llvm.experimental.gc.statepoint.p0(i64, i32, ptr, i32, i32, ...)\n\ndeclare ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token, i32, i32)\n\ndefine void @f(ptr addrspace(1) %p) gc \"statepoint-example\" personality ptr @P {\nentry:\n  %t = invoke token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype(void ()) @h, i32 0, i32 0, i32 0, i32 0) [ \"gc-live\"(ptr addrspace(1) %p) ]\n          to label %ok unwind label %bad\n\nok:\n  ret void\n\nbad:\n  %lp = landingpad token\n          cleanup\n  %r = call ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %lp, i32 0, i32 0)\n  ret void\n}\n",
+    // A tile another call produced, and a relocation tied to the statepoint
+    // that made the safepoint it asks about.
+    "@buf = global [1024 x i8] zeroinitializer, align 16\n\ndeclare void @llvm.x86.tilestored64.internal(i16, i16, ptr, i64, x86_amx)\n\ndeclare x86_amx @llvm.x86.tilezero.internal(i16, i16)\n\ndefine void @f(i16 %r, i16 %c) {\nentry:\n  %t = call x86_amx @llvm.x86.tilezero.internal(i16 %r, i16 %c)\n  call void @llvm.x86.tilestored64.internal(i16 %r, i16 %c, ptr @buf, i64 64, x86_amx %t)\n  ret void\n}\n",
+    "declare void @h()\n\ndeclare token @llvm.experimental.gc.statepoint.p0(i64, i32, ptr, i32, i32, ...)\n\ndeclare ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token, i32, i32)\n\ndefine i32 @f(ptr addrspace(1) %p) gc \"statepoint-example\" {\nentry:\n  %t = call token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 0, i32 0, ptr elementtype(void ()) @h, i32 0, i32 0, i32 0, i32 0) [ \"gc-live\"(ptr addrspace(1) %p) ]\n  %r = call ptr addrspace(1) @llvm.experimental.gc.relocate.p1(token %t, i32 0, i32 0)\n  ret i32 0\n}\n",
+    // A well-formed variant name in each of its two isa spellings, and the
+    // linear parameter forms: a constant stride, a negative one, and one
+    // held in another parameter.
+    "declare i64 @foo(i64) #0\n\ndefine void @f() {\nentry:\n  ret void\n}\n\nattributes #0 = { \"vector-function-abi-variant\"=\"_ZGVnN2v_foo(vf)\" }\n",
+    "declare i64 @foo(i64) #0\n\ndefine void @f() {\nentry:\n  ret void\n}\n\nattributes #0 = { \"vector-function-abi-variant\"=\"_ZGV_LLVM_M4v_foo(vf)\" }\n",
+    "declare i64 @foo(i64) #0\n\ndefine void @f() {\nentry:\n  ret void\n}\n\nattributes #0 = { \"vector-function-abi-variant\"=\"_ZGVnN2l2a8_foo(vf)\" }\n",
+    "declare i64 @foo(i64, i64) #0\n\ndefine void @f() {\nentry:\n  ret void\n}\n\nattributes #0 = { \"vector-function-abi-variant\"=\"_ZGVnN2ln2v_foo(vf)\" }\n",
+    "declare i64 @foo(i64, i64) #0\n\ndefine void @f() {\nentry:\n  ret void\n}\n\nattributes #0 = { \"vector-function-abi-variant\"=\"_ZGVnN2ls0v_foo(vf)\" }\n",
+    // A tbaa chain that reaches a root, a struct base with a scalar access,
+    // and a base chain that goes through a struct: only the access chain is
+    // scalars all the way up.
+    "define void @f(ptr %p) {\nentry:\n  store i32 42, ptr %p, align 4, !tbaa !0\n  ret void\n}\n\n!0 = !{!1, !1, i64 0}\n!1 = !{!\"a\", !2, i64 0}\n!2 = !{!\"b\", !3, i64 0}\n!3 = !{!\"root\"}\n",
+    "define void @f(ptr %p) {\nentry:\n  store i32 42, ptr %p, align 4, !tbaa !0\n  ret void\n}\n\n!0 = !{!1, !2, i64 0}\n!1 = !{!\"s\", !2, i64 0, !2, i64 4}\n!2 = !{!\"n\", !3, i64 0}\n!3 = !{!\"root\"}\n",
+    "define void @f(ptr %p) {\nentry:\n  store i32 42, ptr %p, align 4, !tbaa !0\n  ret void\n}\n\n!0 = !{!1, !3, i64 0}\n!1 = !{!\"outer\", !2, i64 0}\n!2 = !{!\"inner\", !3, i64 0, !3, i64 4}\n!3 = !{!\"n\", !4, i64 0}\n!4 = !{!\"root\"}\n",
+    // Both pauthabi flags together, and neither.
+    "!llvm.module.flags = !{!0, !1}\n\n!0 = !{i32 1, !\"aarch64-elf-pauthabi-platform\", i32 2}\n!1 = !{i32 1, !\"aarch64-elf-pauthabi-version\", i32 3}\n",
+    "!llvm.module.flags = !{!0}\n\n!0 = !{i32 1, !\"something-else\", i32 2}\n",
+    // The assume tags that are attribute names, the two that are not, and the
+    // same unknown tag on a call that is not an assumption at all.
+    "declare void @llvm.assume(i1)\n\ndefine void @f(ptr %p, i32 %n) {\nentry:\n  call void @llvm.assume(i1 true) [\"dereferenceable\"(ptr %p, i32 %n)]\n  ret void\n}\n",
+    "declare void @llvm.assume(i1)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @llvm.assume(i1 true) [\"nonnull\"(ptr %p)]\n  ret void\n}\n",
+    "declare void @llvm.assume(i1)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @llvm.assume(i1 true) [\"align\"(ptr %p, i32 8, i32 4)]\n  ret void\n}\n",
+    "declare void @llvm.assume(i1)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @llvm.assume(i1 true) [\"ignore\"()]\n  ret void\n}\n",
+    "declare void @llvm.assume(i1)\n\ndefine void @f(ptr %p) {\nentry:\n  call void @llvm.assume(i1 true) [\"separate_storage\"(ptr %p, ptr %p)]\n  ret void\n}\n",
+    "declare void @g()\n\ndefine void @f() {\nentry:\n  call void @g() [\"adazdazd\"()]\n  ret void\n}\n",
+    // The alloca that was pushed where the callee looks for it, one of a
+    // type that does not match (which is not what the rule is about), and a
+    // value that is not an alloca at all.
+    "declare void @g(ptr inalloca(i64))\n\ndefine void @f() {\nentry:\n  %a = alloca inalloca i64\n  call void @g(ptr inalloca(i64) %a)\n  ret void\n}\n",
+    "declare void @g(ptr inalloca(i64))\n\ndefine void @f() {\nentry:\n  %a = alloca inalloca [2 x i32]\n  call void @g(ptr inalloca(i64) %a)\n  ret void\n}\n",
+    "declare void @g(ptr inalloca(i64))\n\ndefine void @f(ptr %p) {\nentry:\n  call void @g(ptr inalloca(i64) %p)\n  ret void\n}\n",
+    // A gep on an array of such structs, and on a scalable vector itself:
+    // the rule is about a struct with no fixed field offsets, not about
+    // scalable vectors as such.
+    "%s = type { <vscale x 1 x double> }\n\ndefine void @f(ptr %a) {\nentry:\n  %p = getelementptr [2 x %s], ptr %a, i32 0\n  ret void\n}\n",
+    "define void @f(ptr %a) {\nentry:\n  %p = getelementptr <vscale x 1 x double>, ptr %a, i32 0\n  ret void\n}\n",
+    // A call site repeating a promise its callee makes, written both ways,
+    // and a callee that makes it being called without it.
+    "declare i32 @g() speculatable\n\ndefine i32 @f() {\nentry:\n  %r = call i32 @g() speculatable\n  ret i32 %r\n}\n",
+    "declare i32 @g() #0\n\ndefine i32 @f() {\nentry:\n  %r = call i32 @g() #0\n  ret i32 %r\n}\n\nattributes #0 = { speculatable }\n",
+    "declare i32 @g() speculatable\n\ndefine i32 @f() {\nentry:\n  %r = call i32 @g()\n  ret i32 %r\n}\n",
     // A vector wanting exactly the largest alignment there is, the same type
     // in a signature nothing calls, and one crossing a call that is lowered
     // rather than placed.

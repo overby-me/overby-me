@@ -875,6 +875,92 @@ called. Both boundaries were found by halving the interval against
 llvm-as rather than by reasoning about the layout, which is what caught
 that `<4294967296 x i8>` and `<2147483649 x i16>` fail for two different
 reasons. Verifier 296 to 299.
+A sixty-seventh pass took two more and unlearned a rule on the way. A
+struct holding a scalable vector has no offset for whatever follows it,
+so a `getelementptr` cannot target one even when the index picks the
+first field; an array of such structs it indexes happily, the question
+being whether this type has fixed field offsets rather than whether a
+scalable vector is anywhere nearby.
+The rule it unlearned was `speculatable` at a call site, which had been
+written as "a call site may not carry it" and is not: a call site may
+repeat a promise its callee makes, and only repeat it, so an indirect
+call and a call through an alias are the refusals rather than every call.
+The suites do not cover the accepting half, which is why the ceiling
+never showed it; a probe did. Resolving the attribute groups a call site
+names came with it, `#0` on a call having reached no rule until now.
+A third rule came with them, and it is not the one its test's message
+names: `inalloca` says the argument was pushed onto the stack where the
+callee expects to find it, which is what `alloca inalloca` does. The
+types need not match at all, so "mismatched alloca" is about the marking
+rather than the type, and a value that is not an alloca says nothing
+about where it came from and is asked nothing.
+Two more came with them, both about what a name has to be. Which
+pointer-authentication ABI an AArch64 ELF object was built for is a
+platform and a version together, so a module writes both flags or
+neither. And what `llvm.assume` is told is written as a bundle whose tag
+is the attribute being asserted, so the tag has to name one: `adazdazd`
+is not an attribute, `frame-pointer` is a quoted key rather than an
+attribute name, and `Nonnull` is not `nonnull`. Two tags are the
+assumption's own rather than an attribute's, `ignore` for one that was
+dropped and `separate_storage` for two allocations that do not overlap,
+and only the second of those has a shape. `dereferenceable` is the one
+whose arguments upstream reads: a pointer and how many bytes are behind
+it, exactly two.
+The last of the pass was the type-based alias graph, which needed
+probing to find the shape rather than reading. A type node reaches a root
+by way of its parent, so a chain that comes back round to itself
+describes nothing, and both of a tag's two types are walked for that. The
+access type is the narrower of the two: a base may hold a struct type
+node anywhere, because a base says where in an object the access lands,
+while an access says what was read and what was read is one value, so its
+chain is scalars all the way up. That asymmetry is not in the message the
+test checks and would not have been guessed.
+Last was the mangled name of a vector variant,
+`_ZGV<isa><mask><lanes><parameters>_<scalar>(<vector>)`, which is a
+grammar and was derived one field at a time: the isa is one character or
+the spelling `_LLVM_`, the mask is `M` or `N`, the lanes are a count and
+so not nought, a linear parameter walks by a constant stride or a
+negative one or one held in another parameter, and an alignment suffix is
+a power of two. The one part that has to agree with something outside the
+name is the parameter list, which has one descriptor per parameter the
+scalar function takes and at least one either way. That last clause is
+why the test's own module is refused: `_ZGV_LLVM_M4v_foo` describes one
+parameter and `@foo` takes none, which the message about an invalid name
+does not say.
+Two more, and the second is why the ceiling exists. A tile is a register
+the hardware fills, so there is no constant of type `x86_amx` for a
+caller to hand over. And relocating a pointer, or reading what a call
+returned, is asking about one safepoint, which a statepoint is what
+makes; `token none` marks no point at all.
+The first shape of that second rule refused two modules upstream reads,
+and the ceiling went 0 to 2 and named them. `token poison` and `undef`
+stand for any value, so there is nothing to be wrong about, and a
+statepoint written as an `invoke` makes a safepoint on both its edges, so
+the `landingpad` the unwind edge opens with carries the same token. A
+token that is an argument of the enclosing function is a third case, and
+one with no answer: `llvm-as` segfaults on it. That is the fourth crash
+this suite has produced.
+The last one needed no new table, only noticing what an old one already
+says. An intrinsic is selected by its name, so its argument list is the
+one the name owns rather than one a caller chooses, and calling it
+through a variadic type claims otherwise. Which intrinsics are variadic
+is a fact `corpus/intrinsic-signatures.nu` has been discarding since it
+was written: it drops LangRef's variadic `declare` lines because their
+arity is not fixed, so having a signature in the table at all is the
+evidence that the intrinsic is not variadic. Four are, and LangRef names
+them. The other half of that file's rule, an intrinsic that is variadic
+called through a fixed type, needs to know that
+`llvm.experimental.stackmap` is variadic, and LangRef does not document
+it at all.
+Verifier 299 to 309.
+One rule was probed and left. A `DILocation` inside a plain metadata node
+is refused when an instruction attachment reaches it, except under
+`llvm.loop`, whose whole subtree is exempt, and except from a named list.
+Where the exemption ends is not measurable here: `llvm-as` aborts on a
+`DILocation` inside an `!annotation` node, and a crash is not a verdict.
+That is the second crash this suite has produced, after `inalloca` on a
+variadic argument, and a third came out of the tbaa probing: a struct
+type node with a null field segfaults it.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

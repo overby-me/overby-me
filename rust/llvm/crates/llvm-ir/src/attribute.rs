@@ -225,6 +225,16 @@ impl AttributeSet {
     }
 }
 
+/// Whether a word is the name of an attribute at all, in any of the four
+/// shapes one comes in. A quoted key such as `frame-pointer` is not: it is
+/// carried rather than named.
+pub fn names_an_attribute(word: &str) -> bool {
+    EnumAttr::from_keyword(word).is_some()
+        || IntAttr::from_keyword(word).is_some()
+        || TypeAttr::from_keyword(word).is_some()
+        || StructuredAttr::from_keyword(word).is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
