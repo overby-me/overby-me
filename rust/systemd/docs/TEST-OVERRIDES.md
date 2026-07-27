@@ -136,6 +136,7 @@ Landed since the ledger was written (each regression-tested before push):
 | `8bdeea73` | repart allocates per free area, not across their sum |
 | `0a28d1d8` | a free area's span includes the partition before it, so an existing one can claim a total size |
 | (this) | repart fills the lowest free slots, applies `--size=` to an existing image, and copies `CopyBlocks=` contents from a definition |
+| (this) | `udevadm info` accepts a `/dev` symlink such as `/dev/mapper/<name>` |
 | `45c404c3` | repart derives partition labels from the type designator, numbering repeats |
 | `e7c7c8a9` | repart settles space claims sequentially, keeping grain remainders |
 | `c4d604db` | repart honours `--defer-partitions=` |
