@@ -471,6 +471,13 @@ fn AddCandidateButton(
         }
     };
 
+    // Thumbnail of the photo just uploaded, from the same tokenised file URL the
+    // candidate carousel renders. Only resolvable once the upload returned an id.
+    let photo_preview = photo_id.read().clone().map(|fid| {
+        let token = session.read().access_token.clone().unwrap_or_default();
+        crate::backend_api::file_url(&fid, &token)
+    });
+
     rsx! {
         button {
             class: "btn-icon add-action state-layer",
@@ -528,8 +535,20 @@ fn AddCandidateButton(
                     }
                 } else if !photo_name.read().is_empty() {
                     div { class: "file-upload-done",
-                        span { class: "material-icons", "check_circle" }
-                        span { class: "flex-grow", "{photo_name}" }
+                        // The uploaded photo itself is the confirmation; fall back to
+                        // the check mark only if there is no id to build a URL from.
+                        if let Some(src) = photo_preview.clone() {
+                            img {
+                                class: "upload-thumb",
+                                src: "{src}",
+                                alt: "{photo_name}",
+                                // The src carries the nhost ?token=; keep it out of the Referer.
+                                referrerpolicy: "no-referrer",
+                            }
+                        } else {
+                            span { class: "material-icons", "check_circle" }
+                        }
+                        span { class: "file-upload-name", "{photo_name}" }
                         button {
                             class: "btn btn-text",
                             onclick: move |_| {

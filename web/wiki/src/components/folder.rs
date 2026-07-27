@@ -866,7 +866,7 @@ fn FolderAdd(
                     } else if file_id.read().is_some() {
                         div { class: "file-upload-done",
                             span { class: "material-icons", "check_circle" }
-                            span { "{file_name}" }
+                            span { class: "file-upload-name", "{file_name}" }
                         }
                     }
                 }

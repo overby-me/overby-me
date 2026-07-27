@@ -742,7 +742,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                             div {
                                 class: "file-upload-done",
                                 span { class: "material-icons", "check_circle" }
-                                span { class: "flex-grow", "{image_name}" }
+                                span { class: "file-upload-name", "{image_name}" }
                                 button {
                                     class: "btn btn-text",
                                     onclick: move |_| {

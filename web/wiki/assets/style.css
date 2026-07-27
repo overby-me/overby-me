@@ -2241,6 +2241,18 @@ a.folder-item:focus-visible {
 .file-upload-done .material-icons {
 	font-size: 1.125rem;
 	color: var(--md-secondary);
+	flex-shrink: 0;
+}
+
+/* The uploaded file's name. A flex item cannot shrink below its longest word
+   while its overflow is visible, so a long file name pushed the row (and the
+   dialog around it) sideways; ellipsize it inside the row instead. */
+.file-upload-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* The already-uploaded cover image shown in an upload row: a square crop on the
@@ -2248,6 +2260,7 @@ a.folder-item:focus-visible {
 .upload-thumb {
 	width: 56px;
 	height: 56px;
+	flex-shrink: 0;
 	object-fit: cover;
 	border-radius: var(--md-sys-shape-corner-small);
 }
