@@ -98,28 +98,35 @@
   # exec dirs fail, and two of them (/var/lib/testidmapped and
   # /var/lib/sampleservice) are aliases of the same underlying directory.
   #
-  # RULED OUT BY READING THE CODE, 2026-07-27, so nobody re-tests these:
-  #   - "the idmap is attempted from inside the service's user namespace, so
-  #     ns_capable(sb->s_user_ns, CAP_SYS_ADMIN) fails". NO: setup_mount_namespace()
-  #     is called at exec_helper.rs:2557/2565, BEFORE the setns/unshare block at
-  #     2745, so idmapped_bind() runs while still in the initial user namespace.
-  #     That also matches the measured user:[4026531837].
-  #   - "the userns fd passed to mount_setattr is the INITIAL namespace, which
-  #     the kernel rejects with EPERM by design". NO: create_mapped_userns()
-  #     checks the forked child's unshare(CLONE_NEWUSER) actually succeeded
-  #     before writing uid_map/gid_map and opening /proc/<pid>/ns/user, so the
-  #     fd is a genuine child namespace.
+  # SOLVED, by measuring per-bind instead of guessing a seventh time. The
+  # aggregate "all three exec dirs fail" was a misreading: logging each bind's
+  # source, dest and errno separately showed
+  #     IDMAP ok   src=/var/lib/private/testidmapped dest=/var/lib/private/testidmapped
+  #     IDMAP FAIL src=/var/lib/private/testidmapped dest=/var/lib/private/testidmapped  EPERM
+  #     IDMAP FAIL src=/var/lib/private/testidmapped dest=/var/lib/sampleservice          EPERM
+  #     IDMAP FAIL src=/var/lib/private/testidmapped dest=/var/lib/testidmapped           EPERM
+  # ALL FOUR BINDS SHARE ONE SOURCE, and the first one succeeds. The idmap
+  # belongs to the SOURCE mount, so once it is applied the next
+  # open_tree(OPEN_TREE_CLONE) clones an already-idmapped mount and the kernel
+  # refuses that with EPERM (is_idmapped_mnt). Each source is now idmapped
+  # exactly once and the aliases are plain binds, which inherit the mapping.
   #
-  # STILL UNTESTED, and the one the earlier notes flagged: whether the same
-  # underlying directory is idmapped twice. /var/lib/testidmapped and
-  # /var/lib/sampleservice are aliases of one directory, so a second
-  # open_tree(OPEN_TREE_CLONE) could clone a mount the first pass already
-  # idmapped and moved into place, which is_idmapped_mnt() refuses with EPERM.
-  # Against that: the earlier run reported ALL THREE exec dirs failing, and this
-  # hypothesis predicts the first one succeeding. THE MEASUREMENT THAT SETTLES
-  # IT is to log, per bind, the source path and the exact errno, rather than a
-  # single aggregate "it failed" - that distinguishes "first succeeds, rest
-  # EPERM" from "all EPERM" and is worth one VM run.
+  # Six hypotheses died before this one, all recorded below so they are not
+  # retried. What actually distinguished them was per-bind instrumentation, not
+  # more reasoning about capabilities and namespaces.
+  #
+  # THE FAILURE HAS MOVED, which is what says the diagnosis was right:
+  #     touch: cannot touch '/var/lib/sampleservice/testfile':
+  #         Value too large for defined data type      (EOVERFLOW, was EPERM)
+  # EOVERFLOW means a file's owner has no mapping in the namespace, so it is
+  # presented as (uid_t)-1: the map is attached now but its RANGE is wrong.
+  # rust writes a single entry "0 <uid> 1". Upstream builds this in
+  # make_userns() (src/shared/mount-util.c:1519); the case exec directories
+  # want is REMOUNT_IDMAPPING_HOST_OWNER, which writes
+  # "<source_owner> <uid_shift> 1" — a different direction from rust's. Work
+  # out which way round the kernel applies a mount idmap BEFORE changing it;
+  # that direction is exactly the kind of detail this bug has punished six
+  # times already.
   #
   # THREE WRONG GUESSES were made before that, all about kernel rules, each
   # costing a VM run: that an already-attached mount could be idmapped (it

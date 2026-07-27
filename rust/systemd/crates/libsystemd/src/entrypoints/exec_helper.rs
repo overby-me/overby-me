@@ -4352,9 +4352,50 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
     // (was: Exec directories are owned by the service's outside uid, which its own
     if let Some(userns) = IDMAP_USERNS.get() {
         use std::os::fd::AsFd;
+
+        // Several exec directories share one underlying source: the private
+        // state dir is mapped to itself and then to each visible alias. The
+        // idmap belongs to the SOURCE mount, so it must be applied exactly
+        // once. Applying it again fails, because the second
+        // open_tree(OPEN_TREE_CLONE) clones a mount the first pass already
+        // idmapped and the kernel refuses that with EPERM (is_idmapped_mnt).
+        // Measured: the first bind returns ok and every later one on the same
+        // source returns "mount_setattr: Operation not permitted".
+        let mut idmapped: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for (source, dest) in &config.exec_dir_binds {
-            if let Err(e) = idmapped_bind(source, dest, userns.as_fd()) {
-                log::warn!("Failed to id-map exec directory {dest}: {e}");
+            if idmapped.contains(source.as_str()) {
+                // The source already carries the mapping, so a plain bind of it
+                // inherits it; no second mount_setattr.
+                if source != dest {
+                    let (Ok(c_src), Ok(c_dest)) = (
+                        std::ffi::CString::new(source.as_str()),
+                        std::ffi::CString::new(dest.as_str()),
+                    ) else {
+                        continue;
+                    };
+                    let ret = unsafe {
+                        libc::mount(
+                            c_src.as_ptr(),
+                            c_dest.as_ptr(),
+                            std::ptr::null(),
+                            libc::MS_BIND | libc::MS_REC,
+                            std::ptr::null(),
+                        )
+                    };
+                    if ret != 0 {
+                        log::warn!(
+                            "Failed to bind already-id-mapped {source} onto {dest}: {}",
+                            std::io::Error::last_os_error()
+                        );
+                    }
+                }
+                continue;
+            }
+            match idmapped_bind(source, dest, userns.as_fd()) {
+                Ok(()) => {
+                    idmapped.insert(source.as_str());
+                }
+                Err(e) => log::warn!("Failed to id-map exec directory {dest}: {e}"),
             }
         }
     }
