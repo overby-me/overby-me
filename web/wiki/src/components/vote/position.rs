@@ -432,7 +432,24 @@ fn AddCandidateButton(
             class: "btn-icon add-action state-layer",
             title: "{t(\"vote.addCandidate\")}",
             aria_label: "{t(\"vote.addCandidate\")}",
-            onclick: move |_| open.set(true),
+            onclick: move |_| {
+                // Standing for a position is normally standing yourself, so open
+                // with the signed-in member's display name already filled in. Seeded
+                // here rather than at mount, so a session that resolves late still
+                // prefills, and only when the field is empty, so a name typed and
+                // cancelled survives reopening.
+                let blank = name.read().trim().is_empty();
+                if blank {
+                    let display_name = session
+                        .read()
+                        .user
+                        .as_ref()
+                        .map(|u| u.display_name.clone())
+                        .unwrap_or_default();
+                    name.set(display_name);
+                }
+                open.set(true);
+            },
             span { class: "material-icons", "add" }
         }
         crate::components::widgets::Dialog {
