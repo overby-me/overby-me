@@ -4394,6 +4394,25 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
             match idmapped_bind(source, dest, userns.as_fd()) {
                 Ok(()) => {
                     idmapped.insert(source.as_str());
+                    // What ownership does the mapping actually present? EOVERFLOW
+                    // on a later write means some id has no mapping and shows as
+                    // (uid_t)-1 = 4294967295. Printing the observed st_uid/st_gid
+                    // separates "unmapped" from "mapped to the wrong id", which
+                    // reasoning about map direction has not managed to settle.
+                    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+                    if let Ok(c_dest) = std::ffi::CString::new(dest.as_str())
+                        && unsafe { libc::stat(c_dest.as_ptr(), &mut st) } == 0
+                        && (st.st_uid == u32::MAX || st.st_uid == 65534)
+                    {
+                        // The mapping resolved to an id the viewer cannot
+                        // represent, so every later write gets EOVERFLOW. Worth
+                        // saying loudly, because the symptom otherwise surfaces
+                        // far away as "Value too large for defined data type".
+                        crate::entrypoints::service_manager::kmsg(&format!(
+                            "IDMAP unmapped: {dest} shows st_uid={} st_gid={} (owner should be {})",
+                            st.st_uid, st.st_gid, config.user
+                        ));
+                    }
                 }
                 Err(e) => log::warn!("Failed to id-map exec directory {dest}: {e}"),
             }

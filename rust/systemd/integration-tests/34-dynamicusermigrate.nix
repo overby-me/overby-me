@@ -118,15 +118,26 @@
   # THE FAILURE HAS MOVED, which is what says the diagnosis was right:
   #     touch: cannot touch '/var/lib/sampleservice/testfile':
   #         Value too large for defined data type      (EOVERFLOW, was EPERM)
-  # EOVERFLOW means a file's owner has no mapping in the namespace, so it is
-  # presented as (uid_t)-1: the map is attached now but its RANGE is wrong.
-  # rust writes a single entry "0 <uid> 1". Upstream builds this in
-  # make_userns() (src/shared/mount-util.c:1519); the case exec directories
-  # want is REMOUNT_IDMAPPING_HOST_OWNER, which writes
-  # "<source_owner> <uid_shift> 1" — a different direction from rust's. Work
-  # out which way round the kernel applies a mount idmap BEFORE changing it;
-  # that direction is exactly the kind of detail this bug has punished six
-  # times already.
+  # MEASURED, and it says the map is INVERTED rather than merely too narrow.
+  # stat()ing a mapped destination right after the bind reports
+  #     st_uid=65534 st_gid=65534   for a directory owned on disk by 61221
+  # 65534 is nobody, i.e. the id the mapping produced cannot be represented by
+  # the viewer. So the mapping IS applied (an unapplied one would still show
+  # 61221) and it lands on an unmapped id, which is what makes every later
+  # write fail with EOVERFLOW.
+  #
+  # rust writes "0 <uid> 1" (inside=0, outside=uid). Upstream's make_userns()
+  # (src/shared/mount-util.c:1519) writes "<source_owner> <uid_shift> 1" for
+  # REMOUNT_IDMAPPING_HOST_OWNER, the case exec directories want — inside and
+  # outside the other way round. The two are inverses.
+  #
+  # NOT simply flipped here, because create_mapped_userns() is ALSO the
+  # namespace the service itself joins (exec_helper.rs:2745 deliberately makes
+  # the service enter the very namespace the mapping was made against).
+  # Upstream keeps those two separate: the mount idmap userns is NOT the
+  # process's userns. Flipping the map without separating them changes what
+  # `PrivateUsers=` means for the process at the same time, so the next step is
+  # to give the mount its own userns fd and only then correct the direction.
   #
   # THREE WRONG GUESSES were made before that, all about kernel rules, each
   # costing a VM run: that an already-attached mount could be idmapped (it
