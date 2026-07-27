@@ -3141,10 +3141,28 @@ pub fn run_exec_helper() {
             .iter()
             .map(|gid| nix::unistd::Gid::from_raw(*gid))
             .collect();
+        // Inside a PrivateUsers= namespace the only ids that exist are the ones
+        // the map covers. The default map is "0 <uid> 1", i.e. namespace id 0
+        // IS the service's uid as seen from outside, and no other id is
+        // representable; dropping to the outside uid/gid there fails with
+        // EINVAL. Upstream drops to the in-namespace ids for the same reason.
+        // "identity" and "full" map ids through unchanged, so they drop as
+        // usual.
+        let mapped_identically = matches!(
+            config.private_users_mode.as_str(),
+            "identity" | "full"
+        );
+        let (drop_uid, drop_gid, drop_supp) =
+            if config.private_users && !config.privileged_prefix && !mapped_identically {
+                (0, 0, Vec::new())
+            } else {
+                (config.user, config.group, supp_gids.clone())
+            };
+
         match crate::platform::drop_privileges(
-            nix::unistd::Gid::from_raw(config.group),
-            &supp_gids,
-            nix::unistd::Uid::from_raw(config.user),
+            nix::unistd::Gid::from_raw(drop_gid),
+            &drop_supp,
+            nix::unistd::Uid::from_raw(drop_uid),
         ) {
             Ok(()) => {
                 log::trace!(
@@ -3670,6 +3688,21 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
     }
 
     log::trace!("mount_ns: ProtectSystem={}...", config.protect_system);
+    // Create any missing TemporaryFileSystem= mount points BEFORE anything is
+    // remounted read-only. Upstream mkdir -p's every mount entry's path, so
+    // TemporaryFileSystem=/vol works on a host with no /vol; doing it later
+    // fails with EROFS once ProtectSystem= has made / read-only, and the mount
+    // then fails with ENOENT. Creating them here is safe because we are already
+    // in a private mount namespace, so they never appear on the host.
+    for entry in &config.temporary_file_system {
+        let path = entry.split_once(':').map(|(p, _)| p).unwrap_or(entry);
+        if !path.is_empty() && !Path::new(path).exists() {
+            if let Err(e) = std::fs::create_dir_all(path) {
+                log::warn!("Failed to create TemporaryFileSystem mount point {path}: {e}");
+            }
+        }
+    }
+
     // ── ProtectSystem= ────────────────────────────────────────────────
     match config.protect_system.as_str() {
         "yes" => {

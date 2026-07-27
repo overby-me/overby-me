@@ -74,53 +74,28 @@
   # re-protects. The extra four meant a strict service could write across the
   # whole runtime and log trees, so `find` reported far more than 8.
   #
-  # REMAINING FAILURE: test_check_idmapped_mounts. Worth re-measuring rather
-  # than assuming: man 2 unshare refuses CLONE_NEWUSER when the caller's root
-  # does not match its mount namespace root, which is exactly what the doubly
-  # mounted root produced, so the duplicate-root bug may have caused this too.
+  # REMAINING FAILURE: test_check_idmapped_mounts, and it is a MISSING FEATURE
+  # rather than a defect. Three real bugs were fixed out of this phase first,
+  # and the failure moved each time:
+  #   1. the doubly-mounted root, which also made unshare(CLONE_NEWUSER) return
+  #      EPERM (man 2 unshare refuses it when the caller's root does not match
+  #      its mount namespace root);
+  #   2. the privilege drop targeting the OUTSIDE uid/gid inside a
+  #      PrivateUsers= namespace, where the default map is "0 <uid> 1" and the
+  #      only representable id is 0, giving EINVAL from setgid;
+  #   3. TemporaryFileSystem= mount points being created AFTER ProtectSystem=
+  #      had remounted / read-only, so the mkdir failed EROFS and the mount
+  #      then failed ENOENT.
   #
-  # ORIGINAL NOTE ON test_check_idmapped_mounts. The kernel here is new
-  # enough (6.18 >= 5.12) that upstream's version gate lets it run. The service
-  # uses MountAPIVFS=yes, DynamicUser=yes, PrivateUsers=yes and
-  # TemporaryFileSystem=/run /var/opt /var/lib /vol, and logged three failures:
-  #     Failed to mount tmpfs on /var/opt: No such file or directory
-  #     Failed to mount tmpfs on /vol: No such file or directory
-  #     Failed to create user namespace for PrivateUsers=: Operation not permitted
-  #
-  # The first two look easy and are NOT. Upstream mkdir -p's every mount entry's
-  # path before mounting it (namespace.c:1397 and friends), so
-  # TemporaryFileSystem=/vol works on a host with no /vol. Adding a bare
-  # create_dir_all() before the tmpfs mount in exec_helper.rs REGRESSED
-  # test_check_writable, which had been passing: that mount block is shared with
-  # the private/ tmpfs, so creating missing directories there adds writable
-  # directories and breaks the exact-8 assertion. TRIED AND REVERTED; a fix has
-  # to create the directory only for genuine TemporaryFileSystem= entries, not
-  # for every caller of that block.
-  #
-  # The THIRD is the real blocker and has NOT been diagnosed. Do not guess at
-  # it; two plausible causes have already been narrowed:
-  #   - it is NOT an ordering problem. rust sets up the mount namespace before
-  #     unsharing CLONE_NEWUSER, and upstream does the same whenever it holds
-  #     CAP_SYS_ADMIN (exec-invoke.c: apply_mount_namespace then
-  #     setup_private_users).
-  #   - upstream does FORK before unsharing: setup_private_users_child()
-  #     unshares CLONE_NEWUSER in a child and the parent, still outside the new
-  #     namespace, writes its /proc/<pid>/uid_map and gid_map. rust unshares
-  #     in-process. That difference matters for writing the maps, but the EPERM
-  #     here is on the unshare itself, so it does not explain this.
-  #
-  # THE ORACLE IS NO HELP HERE, already tried:
-  # `c-systemd-test-34-dynamicusermigrate` fails far EARLIER than rust does, at
-  # testservice-34.service in the very first test_directory phase, so upstream
-  # systemd cannot get through this test in this VM at all. That makes the
-  # oracle inconclusive about the PrivateUsers failure rather than evidence that
-  # it is environmental. Note rust-systemd currently gets substantially further
-  # through this test than the C oracle does; the C variant's own early failure
-  # is worth a look on its own, since it suggests the c-systemd harness wiring
-  # is incomplete for this test.
-  #
-  # STILL TO MEASURE: `sysctl user.max_user_namespaces` inside the VM, which
-  # returns EPERM to root as well when it is 0.
+  # What is left needs ID-MAPPED MOUNTS:
+  #     touch: cannot touch '/var/lib/sampleservice/testfile': Permission denied
+  # The service runs as in-namespace uid 0, which maps to outside uid 61220,
+  # while its StateDirectory is owned by outside 61220. That uid is not mapped
+  # inside the namespace, so the directory appears owned by nobody and is
+  # unwritable. Upstream attaches the exec directories with an id-mapped mount
+  # (mount_setattr with MOUNT_ATTR_IDMAP and a userns fd) so the ownership is
+  # translated. rust-systemd has no mount_setattr/MOUNT_ATTR_IDMAP support at
+  # all, and that is what the test is named for.
   #
   # TOOLING NOTES:
   #   - PID 1's `log::` macros do NOT reach the console, only
