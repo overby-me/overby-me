@@ -80,6 +80,27 @@ skipped, so the denominator is the whole suite.
 | `llvm/test/Assembler` | 453 | 483 | 13 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 286 | 328 | 4 | `llvm-upstream-verifier` |
 
+## Conformance against real IR
+
+Those two suites are written to exercise a parser, which makes them a good
+oracle and a poor sample. `llvm/test/Transforms` is the opposite: ten thousand
+modules written to exercise passes, in whatever syntax was convenient at the
+time. The bound there is one-sided, because there is nothing to trade against:
+reading a module upstream reads is right in every case.
+
+| Tree | Read | llvm-as reads | Check |
+| --- | --- | --- | --- |
+| `llvm/test/Transforms` | 9,853 | 10,305 | `llvm-tree-transforms` |
+
+The first sweep read 2,781 of the first 2,992 and the gaps it showed were not
+the ones the suites show. Four fixes closed 110 of them: the attribute
+spellings that predate `memory(...)`, a phi carrying a `!dbg`, an integer
+literal past its type's width (upstream truncates rather than complaining),
+and the `u0x` and `s0x` forms for an integer too wide to write in decimal.
+What is left is led by intrinsics called without a declaration, 84 files in
+that sample, which needs upstream's per-intrinsic attribute table to print
+back and so is recorded rather than done.
+
 The two halves of the gap are not equally bad, so each suite has two
 bounds. We **refuse 18 modules llvm-as reads**, which is the failure that
 matters: parse gaps, led now by intrinsics used without a declaration

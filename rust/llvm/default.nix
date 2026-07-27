@@ -62,6 +62,20 @@
       nativeBuildInputs = previous.nativeBuildInputs ++ [pkgs.llvm];
     });
 
+  # The other bound: not a suite written to exercise the parser, but tens of
+  # thousands of pass tests written to exercise passes, in whatever syntax was
+  # convenient at the time. Every module upstream reads, we read.
+  treeCheck = pkgs: suite: ratchet:
+    (cargoCheck pkgs "tree-${lib.toLower suite}" ''
+      cargo build -p llvm-tools --offline --locked
+      nu corpus/check-tree.nu "$CARGO_TARGET_DIR/debug/opt" \
+        "${lib.getExe' pkgs.llvm "llvm-as"}" \
+        "${pkgs.llvm.src}/llvm/test/${suite}" ${toString ratchet}
+    '')
+    .overrideAttrs (previous: {
+      nativeBuildInputs = previous.nativeBuildInputs ++ [pkgs.llvm];
+    });
+
   upstreamCheck = pkgs: suite: ratchet: refusals:
     (cargoCheck pkgs "upstream-${lib.toLower suite}" ''
       cargo build -p llvm-tools --offline --locked
@@ -122,6 +136,9 @@ in {
     # text. The corpus pins the printer against upstream's own output; this
     # pins it against inputs nobody wrote for us.
     llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 122;
+
+    # Ten thousand pass tests, none of them written with a parser in mind.
+    llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 9853;
   };
 
   packages.rust-llvm = {lib, ...}:

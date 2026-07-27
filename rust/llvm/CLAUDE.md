@@ -487,6 +487,47 @@ and above a plain `pub fn` in a library crate is internalised and then
 deleted, and the first version of that seed came out holding nothing at all.
 It needs one codegen unit for the same reason, `--emit=llvm-ir -o` writing a
 single module while rustc splits an optimised crate across sixteen.
+A forty-fourth pass went somewhere the project had not looked: the rest of
+`llvm/test`. The two suites are written to exercise a parser, which makes
+them a good oracle and a poor sample, and a sweep of three thousand
+`Transforms` tests read 2,781 of the 2,992 that llvm-as reads. The gaps were
+not the ones the suites show.
+Four fixes closed 110 of them. The attribute spellings that predate
+`memory(...)` are read and upgraded the way upstream does: `argmemonly` and
+its two friends say where, `readnone`, `readonly` and `writeonly` say how,
+and a function carrying one of each means the intersection, so
+`argmemonly readonly` is `memory(argmem: read)`. The same three access
+keywords stay as they are on a parameter, which is why only the function and
+call-site positions upgrade. A phi may carry a `!dbg`, and the comma before
+it looks exactly like the comma before another edge. An integer literal past
+its type's width truncates rather than being refused, which is what
+`store i16 65536` relies on and what `i1 2` reads as false. And `u0x` and
+`s0x` write an integer too wide for decimal, the second of them reading its
+digits as two's complement in the narrowest width that holds them, so `s0x1`
+is -1 and `s0x10` is -16.
+Three more parse gaps went with them: `alloca swifterror ptr`, a global
+carrying a metadata node written in place rather than by number, and the
+`!dbg` after a phi's last edge.
+Accepting those exposed three verifier rules that had been unreachable
+behind the parse error, and the Verifier ratchet dropped three before they
+went in. A `llvm.experimental.noalias.scope.decl` declares one scope, being
+the declaration of where one begins. And a `musttail` call in a `tailcc` or
+`swifttailcc` function has no `inreg` anywhere, on the caller's parameters
+or on its own arguments, because those conventions hand the frame over whole
+and an argument in a register is not part of the frame.
+The sweep is now `llvm-tree-transforms`, a third ratchet over all 10,328
+files: 9,853 of the 10,305 that llvm-as reads. It has one bound rather than
+two, because there is nothing to trade against.
+What is left in that tree is led by intrinsics called without a declaration,
+84 files in the sample. Auto-declaring was measured a third time, and the
+answer is still no, for a new reason: upstream materialises the declaration
+with the intrinsic's own attributes and parameter attributes, so
+`@llvm.assume` comes back as `declare void @llvm.assume(i1 noundef) #0` with
+`nocallback nofree nosync nounwind willreturn memory(inaccessiblemem: write)`
+behind it. Reproducing that needs a per-intrinsic attribute table LangRef
+does not document, and without it the module parses and prints back wrong,
+which is worse than refusing it. On the suites the trade is five files
+gained against nine wrongly accepted.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

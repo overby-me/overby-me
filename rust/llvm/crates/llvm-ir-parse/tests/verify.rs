@@ -61,6 +61,14 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "declare void @llvm.experimental.noalias.scope.decl(metadata)\n\ndefine void @f() {\nentry:\n  call void @llvm.experimental.noalias.scope.decl(metadata !0)\n  ret void\n}\n\n!0 = !{!1, !2}\n!1 = !{!1}\n!2 = !{!2}\n",
+        "declares something other than one scope",
+    ),
+    (
+        "declare tailcc void @g(i32)\n\ndefine tailcc void @f(i32 inreg %x) {\nentry:\n  musttail call tailcc void @g(i32 %x)\n  ret void\n}\n",
+        "musttail call in a tail convention, where inreg has nowhere to go",
+    ),
+    (
         "define void @f(ptr %p) {\nentry:\n  %v = load atomic i24, ptr %p monotonic, align 4\n  ret void\n}\n",
         "moves 24 bits, which is not a size an atomic comes in",
     ),
@@ -986,6 +994,18 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // A phi may carry an attachment, and the comma before it looks exactly
+    // like the comma before another edge.
+    "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %a, label %b\n\na:\n  br label %b\n\nb:\n  %p = phi i32 [ 0, %entry ], [ 1, %a ], !dbg !0\n  ret void\n}\n\n!0 = !DILocation(line: 1, column: 1, scope: !1)\n!1 = distinct !DISubprogram(name: \"f\", scope: !2, file: !2, line: 1, type: !3, spFlags: DISPFlagDefinition, unit: !4)\n!2 = !DIFile(filename: \"a.c\", directory: \"/\")\n!3 = !DISubroutineType(types: !5)\n!4 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!5 = !{null}\n",
+    // The slot a call may set, which the target keeps in a register.
+    "define void @f() {\nentry:\n  %a = alloca swifterror ptr, align 8\n  ret void\n}\n",
+    // A global's attachment may be a node written in place.
+    "@g = global i32 0, align 4, !type !{i64 0, !\"a\"}, !type !{i64 4, !\"b\"}\n",
+    // Past its width an integer literal truncates rather than being refused,
+    // which is what upstream does with both of these.
+    "define void @f(ptr %p) {\nentry:\n  store i16 65536, ptr %p, align 2\n  store i1 2, ptr %p, align 1\n  ret void\n}\n",
+    // The two hexadecimal forms for an integer too wide to write in decimal.
+    "define void @f(ptr %p) {\nentry:\n  store i64 u0x1122334455667788, ptr %p, align 8\n  store i64 s0x10, ptr %p, align 8\n  ret void\n}\n",
     // A struct named by number rather than by word.
     "%0 = type { i32, i64 }\n@g = global %0 zeroinitializer, align 8\n",
     // The deprecated sized spelling of the aggregate alignment.
@@ -1016,6 +1036,9 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // One scope is what the declaration of a scope declares, and a tail
+    // convention hands the frame over without anything in a register.
+    "declare void @llvm.experimental.noalias.scope.decl(metadata)\n\ndeclare tailcc void @g(i32)\n\ndefine tailcc void @f(i32 %x) {\nentry:\n  call void @llvm.experimental.noalias.scope.decl(metadata !0)\n  musttail call tailcc void @g(i32 %x)\n  ret void\n}\n\n!0 = !{!1}\n!1 = !{!1}\n",
     // 128 bits is a size an atomic comes in, and so is a vector of floats
     // whose lanes multiply out to one.
     "define void @f(ptr %p) {\nentry:\n  %v = load atomic i128, ptr %p monotonic, align 16\n  %r = atomicrmw fadd ptr %p, <2 x half> undef seq_cst, align 4\n  ret void\n}\n",

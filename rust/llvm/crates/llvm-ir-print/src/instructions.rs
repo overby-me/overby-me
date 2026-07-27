@@ -287,10 +287,14 @@ impl Printer<'_> {
                 align,
                 address_space,
                 inalloca,
+                swifterror,
             } => {
                 self.push("alloca ");
                 if *inalloca {
                     self.push("inalloca ");
+                }
+                if *swifterror {
+                    self.push("swifterror ");
                 }
                 self.ty(*allocated_type);
                 // A count of exactly one is not an array allocation, and

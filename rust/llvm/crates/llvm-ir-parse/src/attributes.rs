@@ -7,6 +7,111 @@ use llvm_ir::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr, StructuredA
 use llvm_ir::types::TypeKind;
 use llvm_support::ApInt;
 
+/// Where a function may touch memory, as the attributes that predate
+/// `memory(...)` said it.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+struct Locations {
+    argmem: bool,
+    inaccessiblemem: bool,
+    other: bool,
+}
+
+impl Locations {
+    const ALL: Locations = Locations {
+        argmem: true,
+        inaccessiblemem: true,
+        other: true,
+    };
+}
+
+/// The legacy spelling of a memory effect, which upstream reads and then
+/// prints as `memory(...)`. `argmemonly` and its two friends say where, and
+/// `readnone`, `readonly` and `writeonly` say how, so a function carrying one
+/// of each means the intersection: `argmemonly readonly` is
+/// `memory(argmem: read)`.
+///
+/// The same three access keywords are ordinary attributes on a parameter,
+/// where they keep their spelling, so only the function and call-site
+/// positions upgrade.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct LegacyMemory {
+    locations: Option<Locations>,
+    access: Option<&'static str>,
+}
+
+impl LegacyMemory {
+    pub(crate) fn take(&mut self, word: &str) -> bool {
+        match word {
+            "argmemonly" => {
+                self.locations = Some(Locations {
+                    argmem: true,
+                    ..Locations::default()
+                });
+            }
+            "inaccessiblememonly" => {
+                self.locations = Some(Locations {
+                    inaccessiblemem: true,
+                    ..Locations::default()
+                });
+            }
+            "inaccessiblemem_or_argmemonly" => {
+                self.locations = Some(Locations {
+                    argmem: true,
+                    inaccessiblemem: true,
+                    ..Locations::default()
+                });
+            }
+            // `readnone` wins over the others, being the strongest claim.
+            "readnone" => self.access = Some("none"),
+            "readonly" if self.access != Some("none") => self.access = Some("read"),
+            "writeonly" if self.access != Some("none") => self.access = Some("write"),
+            "readonly" | "writeonly" => {}
+            _ => return false,
+        }
+        true
+    }
+
+    fn is_empty(self) -> bool {
+        self.locations.is_none() && self.access.is_none()
+    }
+
+    /// What `memory(...)` says the same thing.
+    fn arguments(self) -> String {
+        let access = self.access.unwrap_or("readwrite");
+        if access == "none" {
+            return "none".to_string();
+        }
+        let locations = self.locations.unwrap_or(Locations::ALL);
+        if locations == Locations::ALL {
+            return access.to_string();
+        }
+        let mut parts = Vec::new();
+        if locations.argmem {
+            parts.push(format!("argmem: {access}"));
+        }
+        if locations.inaccessiblemem {
+            parts.push(format!("inaccessiblemem: {access}"));
+        }
+        if locations.other {
+            parts.push(format!("other: {access}"));
+        }
+        parts.join(", ")
+    }
+}
+
+/// Whether a word is one of the six the upgrade reads.
+pub(crate) fn is_legacy_memory(word: &str) -> bool {
+    matches!(
+        word,
+        "argmemonly"
+            | "inaccessiblememonly"
+            | "inaccessiblemem_or_argmemonly"
+            | "readnone"
+            | "readonly"
+            | "writeonly"
+    )
+}
+
 impl Parser {
     // ------------------------------------------------------------ attributes
 
@@ -158,7 +263,23 @@ impl Parser {
         &mut self,
         in_group: bool,
     ) -> Result<AttributeSet, ParseError> {
+        self.parse_attribute_set_where(in_group, false)
+    }
+
+    /// The same, in a position where the pre-`memory(...)` spellings mean
+    /// what `memory(...)` means: a function's own attributes or a call
+    /// site's, and not a parameter's.
+    pub(crate) fn parse_function_attribute_set(&mut self) -> Result<AttributeSet, ParseError> {
+        self.parse_attribute_set_where(false, true)
+    }
+
+    fn parse_attribute_set_where(
+        &mut self,
+        in_group: bool,
+        upgrade_memory: bool,
+    ) -> Result<AttributeSet, ParseError> {
         let mut set = AttributeSet::default();
+        let mut legacy = LegacyMemory::default();
         loop {
             match self.peek().clone() {
                 Token::AttributeGroup(number) => {
@@ -166,6 +287,10 @@ impl Parser {
                     set.groups.push(number);
                 }
                 Token::Quoted(_) => set.attributes.push(self.parse_attribute(in_group)?),
+                Token::Word(word) if upgrade_memory && is_legacy_memory(&word) => {
+                    self.advance();
+                    legacy.take(&word);
+                }
                 Token::Word(word) => {
                     let known = EnumAttr::from_keyword(&word).is_some()
                         || IntAttr::from_keyword(&word).is_some()
@@ -173,13 +298,15 @@ impl Parser {
                         || StructuredAttr::from_keyword(&word).is_some()
                         || word == "range";
                     if !known {
-                        return Ok(set);
+                        break;
                     }
                     set.attributes.push(self.parse_attribute(in_group)?);
                 }
-                _ => return Ok(set),
+                _ => break,
             }
         }
+        apply_legacy_memory(&mut set.attributes, legacy);
+        Ok(set)
     }
 
     pub(crate) fn integer_width(&mut self, ty: TypeId) -> Result<u32, ParseError> {
@@ -207,6 +334,9 @@ impl Parser {
             }
             Token::Word(word) if word == "true" => Ok(ApInt::from_u64(bits, 1)),
             Token::Word(word) if word == "false" => Ok(ApInt::new(bits)),
+            Token::Word(word) if wide_hex(&word, bits).is_some() => {
+                Ok(wide_hex(&word, bits).unwrap_or_else(|| ApInt::new(bits)))
+            }
             other => {
                 self.index -= 1;
                 self.error(format!(
@@ -216,4 +346,51 @@ impl Parser {
             }
         }
     }
+}
+
+/// Replaces whatever the set said about memory with what the legacy
+/// attributes said, which is the order upstream resolves the two in.
+pub(crate) fn apply_legacy_memory(attributes: &mut Vec<Attribute>, legacy: LegacyMemory) {
+    if legacy.is_empty() {
+        return;
+    }
+    attributes.retain(|attribute| {
+        !matches!(
+            attribute,
+            Attribute::Structured {
+                kind: StructuredAttr::Memory,
+                ..
+            }
+        )
+    });
+    attributes.push(Attribute::Structured {
+        kind: StructuredAttr::Memory,
+        arguments: legacy.arguments(),
+    });
+}
+
+/// `u0x...` and `s0x...`, for an integer too wide to write in decimal. `u0x`
+/// zero-extends its bit pattern; `s0x` reads it as two's complement in the
+/// narrowest width that holds its digits, so its top set bit is the sign and
+/// `s0x1` is -1. Measured, not guessed.
+fn wide_hex(word: &str, bits: u32) -> Option<ApInt> {
+    let (signed, digits) = match word.as_bytes() {
+        [b'u', b'0', b'x', ..] => (false, &word[3..]),
+        [b's', b'0', b'x', ..] => (true, &word[3..]),
+        _ => return None,
+    };
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let magnitude = ApInt::parse_magnitude(digits, 16).ok()?;
+    if !signed {
+        return Some(magnitude.zext_or_trunc(bits));
+    }
+    let leading = digits.len() - digits.trim_start_matches('0').len();
+    let top = digits.as_bytes().get(leading).map_or(0, |digit| {
+        let value = u32::from(char::from(*digit).to_digit(16).unwrap_or(0) as u8);
+        32 - value.leading_zeros()
+    });
+    let width = ((digits.len() - leading) as u32).saturating_sub(1) * 4 + top;
+    Some(magnitude.trunc(width.max(1)).sext_or_trunc(bits))
 }

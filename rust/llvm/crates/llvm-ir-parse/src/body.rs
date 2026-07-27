@@ -134,7 +134,7 @@ impl Parser {
                     }
                     _ => {
                         let before = self.index;
-                        let attrs = self.parse_attribute_set(false)?;
+                        let attrs = self.parse_function_attribute_set()?;
                         if self.index == before {
                             break;
                         }
@@ -849,6 +849,7 @@ impl Parser {
             }
             "alloca" => {
                 let inalloca = self.eat_word("inalloca");
+                let swifterror = self.eat_word("swifterror");
                 let allocated_type = self.parse_type()?;
                 let mut count = None;
                 let mut align = None;
@@ -886,6 +887,7 @@ impl Parser {
                         align,
                         address_space,
                         inalloca,
+                        swifterror,
                     },
                 ))
             }
@@ -1207,6 +1209,13 @@ impl Parser {
                     if !incoming.is_empty() && !self.eat(&Token::Comma) {
                         break;
                     }
+                    // The comma before an attachment looks exactly like the
+                    // comma before another edge, so a `!dbg` here ends the
+                    // list rather than starting one.
+                    if !incoming.is_empty() && self.peek() != &Token::LeftBracket {
+                        self.index -= 1;
+                        break;
+                    }
                     self.require(Token::LeftBracket)?;
                     let value = self.parse_value(function, state, ty)?;
                     self.require(Token::Comma)?;
@@ -1409,7 +1418,7 @@ impl Parser {
             args.push(CallArg { ty, attrs, value });
         }
 
-        let fn_attrs = self.parse_attribute_set(false)?;
+        let fn_attrs = self.parse_function_attribute_set()?;
 
         let mut bundles = Vec::new();
         if self.peek() == &Token::LeftBracket {

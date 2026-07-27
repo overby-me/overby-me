@@ -449,6 +449,9 @@ pub enum InstKind {
         align: Option<Align>,
         address_space: Option<u32>,
         inalloca: bool,
+        /// `alloca swifterror ptr`: the slot holds the error a call may set,
+        /// which the target keeps in a register rather than on the stack.
+        swifterror: bool,
     },
     Load {
         loaded_type: TypeId,

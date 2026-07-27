@@ -135,7 +135,10 @@ impl Parser {
             } else if self.eat_word("sanitize_memtag") {
                 global.sanitizer.memtag = true;
             } else if matches!(self.peek(), Token::MetadataName(_))
-                && matches!(self.peek_at(1), Token::MetadataNumber(_))
+                && matches!(
+                    self.peek_at(1),
+                    Token::MetadataNumber(_) | Token::MetadataName(_) | Token::Exclaim
+                )
             {
                 let attachments = self.parse_metadata_attachments()?;
                 global.metadata.extend(attachments);

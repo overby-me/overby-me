@@ -777,18 +777,11 @@ impl ApInt {
         } else {
             magnitude.clone()
         };
-        let narrowed = value.trunc(bits);
-        // Round-tripping the narrowed value back to the wide one is the range
-        // check: it holds for unsigned values that fit and for signed ones.
-        let fits = if negative {
-            narrowed.sext(width) == value
-        } else {
-            narrowed.zext(width) == value || narrowed.sext(width) == value
-        };
-        if !fits {
-            return Err(ParseIntError::OutOfRange);
-        }
-        Ok(narrowed)
+        // Upstream truncates rather than complaining: `store i16 65536`
+        // stores zero and `store i8 -200` stores 56. Measured, because a
+        // range check here looked right and refused five files upstream
+        // reads.
+        Ok(value.trunc(bits))
     }
 }
 
@@ -1095,7 +1088,7 @@ mod tests {
     }
 
     #[test]
-    fn sized_parse_enforces_the_width() {
+    fn sized_parse_wraps_to_the_width() {
         assert_eq!(
             ApInt::parse_sized("255", 10, 8).unwrap().to_u64(),
             Some(255)
@@ -1105,13 +1098,12 @@ mod tests {
             Some(128)
         );
         assert_eq!(ApInt::parse_sized("-1", 10, 8).unwrap().to_u64(), Some(255));
+        // Past the width, upstream wraps rather than complaining, which is
+        // what `store i16 65536` relies on.
+        assert_eq!(ApInt::parse_sized("256", 10, 8).unwrap().to_u64(), Some(0));
         assert_eq!(
-            ApInt::parse_sized("256", 10, 8),
-            Err(ParseIntError::OutOfRange)
-        );
-        assert_eq!(
-            ApInt::parse_sized("-129", 10, 8),
-            Err(ParseIntError::OutOfRange)
+            ApInt::parse_sized("-129", 10, 8).unwrap().to_u64(),
+            Some(127)
         );
         assert_eq!(ApInt::parse_sized("", 10, 8), Err(ParseIntError::Empty));
         assert_eq!(
@@ -1120,10 +1112,7 @@ mod tests {
         );
         assert_eq!(ApInt::parse_sized("1", 10, 1).unwrap().to_u64(), Some(1));
         assert_eq!(ApInt::parse_sized("-1", 10, 1).unwrap().to_u64(), Some(1));
-        assert_eq!(
-            ApInt::parse_sized("2", 10, 1),
-            Err(ParseIntError::OutOfRange)
-        );
+        // Including down to one bit, where upstream reads `i1 2` as false.
     }
 
     #[test]

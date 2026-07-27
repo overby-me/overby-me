@@ -371,6 +371,7 @@ impl<'m> Builder<'m> {
                 align,
                 address_space: None,
                 inalloca: false,
+                swifterror: false,
             },
         )
     }

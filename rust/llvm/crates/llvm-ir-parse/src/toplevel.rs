@@ -1,5 +1,6 @@
 //! The top-level loop: everything a module holds outside a function body.
 
+use crate::attributes::LegacyMemory;
 use crate::lexer::Token;
 use crate::{ParseError, Parser};
 use llvm_ir::TypeId;
@@ -215,10 +216,21 @@ impl Parser {
         };
         self.require(Token::Equals)?;
         self.require(Token::LeftBrace)?;
+        // A group is function attributes by definition, so the spellings
+        // that predate `memory(...)` mean the same here as on a function.
         let mut attributes = Vec::new();
+        let mut legacy = LegacyMemory::default();
         while !self.eat(&Token::RightBrace) {
+            if let Token::Word(word) = self.peek().clone()
+                && crate::attributes::is_legacy_memory(&word)
+            {
+                self.advance();
+                legacy.take(&word);
+                continue;
+            }
             attributes.push(self.parse_attribute(true)?);
         }
+        crate::attributes::apply_legacy_memory(&mut attributes, legacy);
         self.module.attribute_groups.push((number, attributes));
         Ok(())
     }

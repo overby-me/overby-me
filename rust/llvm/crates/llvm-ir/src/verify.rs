@@ -355,6 +355,28 @@ impl Verifier<'_> {
         let base = crate::intrinsic_table::base_name(name);
         let element = |verifier: &Self, ty: TypeId| verifier.innermost_element(ty);
         match base {
+            // The declaration says where one scope begins, so it names one
+            // scope: a list holding a single node, not a string and not two.
+            "llvm.experimental.noalias.scope.decl" => {
+                let single = values.first().and_then(|value| {
+                    let Value::Constant(id) = value else {
+                        return None;
+                    };
+                    let Constant::Metadata { operand, .. } = self.module.ctx.constant(*id).clone()
+                    else {
+                        return None;
+                    };
+                    let node = match *operand {
+                        MdOperand::Ref(id) => self.module.metadata_node(id).cloned(),
+                        MdOperand::Inline(inline) => Some(*inline),
+                        _ => None,
+                    }?;
+                    Some(node.as_tuple().is_some_and(|operands| operands.len() == 1))
+                });
+                if single == Some(false) {
+                    self.report(format!("{where_} declares something other than one scope"));
+                }
+            }
             // A reduction folds a vector down to one of its own lanes, so
             // what it produces is what the vector holds.
             _ if base.starts_with("llvm.vector.reduce.") => {
@@ -2067,6 +2089,30 @@ impl Verifier<'_> {
                     self.report(format!(
                         "{where_} is a musttail call whose convention differs from its caller's"
                     ));
+                }
+                // The tail conventions hand the frame over whole, and an
+                // argument in a register is not part of the frame, so there
+                // is nowhere for it to go. Both ends are checked: the
+                // caller's own parameters and the call's arguments.
+                if call.tail == TailKind::MustTail
+                    && matches!(
+                        function.calling_conv,
+                        CallingConv::Named(NamedCallingConv::Tail | NamedCallingConv::SwiftTail)
+                    )
+                {
+                    let in_register = function
+                        .params
+                        .iter()
+                        .any(|param| has_enum_attribute(&param.attrs, EnumAttr::InReg))
+                        || call
+                            .args
+                            .iter()
+                            .any(|arg| has_enum_attribute(&arg.attrs, EnumAttr::InReg));
+                    if in_register {
+                        self.report(format!(
+                            "{where_} is a musttail call in a tail convention, where inreg has nowhere to go"
+                        ));
+                    }
                 }
                 // What the constraint string promises, the call has to
                 // provide: one `!` for each label it can jump to, and an
@@ -3932,6 +3978,13 @@ fn referenced_metadata(node: &crate::metadata::Metadata) -> Vec<MdId> {
         }
     }
     out
+}
+
+fn has_enum_attribute(attrs: &AttributeSet, wanted: EnumAttr) -> bool {
+    attrs
+        .attributes
+        .iter()
+        .any(|a| matches!(a, Attribute::Enum(kind) if *kind == wanted))
 }
 
 fn has_type_attribute(attrs: &AttributeSet, wanted: TypeAttr) -> bool {
