@@ -1963,6 +1963,27 @@ fn execute_assignment(
     }
 }
 
+/// Strip one matching pair of surrounding quotes from an imported property
+/// value, as upstream's `get_property_from_string` does.
+///
+/// `dmsetup udevflags` prints its flags as `DM_UDEV_PRIMARY_SOURCE_FLAG='1'`,
+/// and 10-dm.rules then compares that property against "1". Keeping the quotes
+/// made every such comparison fail, so the rules concluded the event was not
+/// from the primary source and set DM_UDEV_DISABLE_DISK_RULES_FLAG, which made
+/// 13-dm-disk.rules skip the device: a dm device with a filesystem on it never
+/// got its /dev/disk/by-uuid/ symlink.
+///
+/// Only a matched pair is removed, and never the whitespace around the value,
+/// which IMPORT{program} is expected to preserve.
+fn unquote_property_value(val: &str) -> &str {
+    let b = val.as_bytes();
+    if b.len() >= 2 && (b[0] == b'"' || b[0] == b'\'') && b[b.len() - 1] == b[0] {
+        &val[1..val.len() - 1]
+    } else {
+        val
+    }
+}
+
 /// Handle IMPORT{type}="value" directives.
 fn handle_import(
     import_type: &str,
@@ -1986,7 +2007,7 @@ fn handle_import(
                     }
                     if let Some(eq) = line.find('=') {
                         let key = line[..eq].to_string();
-                        let val = line[eq + 1..].to_string();
+                        let val = unquote_property_value(&line[eq + 1..]).to_string();
                         if !key.is_empty() {
                             event.env.insert(key, val);
                         }
@@ -2004,7 +2025,7 @@ fn handle_import(
                     }
                     if let Some(eq) = line.find('=') {
                         let key = line[..eq].trim().to_string();
-                        let val = line[eq + 1..].trim().trim_matches('"').to_string();
+                        let val = unquote_property_value(line[eq + 1..].trim()).to_string();
                         event.env.insert(key, val);
                     }
                 }
@@ -9028,6 +9049,24 @@ mod tests {
 
         let result2 = expand_substitutions("%c{2+}", &event, "foo bar baz", "", &[]);
         assert_eq!(result2, "bar baz");
+    }
+
+    /// `dmsetup udevflags` quotes its values, and the dm rules compare the
+    /// result against a bare "1".
+    #[test]
+    fn test_unquote_property_value() {
+        assert_eq!(unquote_property_value("'1'"), "1");
+        assert_eq!(unquote_property_value("\"1\""), "1");
+        assert_eq!(unquote_property_value("1"), "1");
+        // Only a matched pair is stripped.
+        assert_eq!(unquote_property_value("'1\""), "'1\"");
+        assert_eq!(unquote_property_value("'"), "'");
+        assert_eq!(unquote_property_value(""), "");
+        // Inner quotes and surrounding whitespace are left alone: IMPORT{program}
+        // must preserve the spaces in `FOO= aaa `.
+        assert_eq!(unquote_property_value(" aaa "), " aaa ");
+        assert_eq!(unquote_property_value("a'b"), "a'b");
+        assert_eq!(unquote_property_value("''"), "");
     }
 
     #[test]
