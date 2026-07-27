@@ -74,8 +74,25 @@
   # the expected size from the test's own assertion before implementing, since
   # this test's expected numbers have caught three wrong models already.
   #
-  # Beyond that, step 6 also needs Format=ext4, Encrypt=yes and CopyFiles=,
-  # none of which have been looked at.
+  # Beyond that, step 6 is BLOCKED on a feature that does not exist. Checked:
+  #   - Format=ext4 works; format_new_partitions already runs mkfs through a
+  #     loop device.
+  #   - CopyFiles= is parse-only. Struct field, default, parser and tests, no
+  #     consumer anywhere. It needs the new filesystem mounted and populated.
+  #   - Encrypt= is parse-only too, and it is the wall: there is no LUKS or
+  #     cryptsetup call anywhere in crates/repart, only a --key-file line in the
+  #     help text. Step 6 wants Encrypt=yes with a real LUKS2 volume.
+  # So 58-REPART cannot reach the end of testcase_basic without LUKS2 support.
+  # --size=auto is worth fixing on its own account, but it will not green this
+  # test, and the later testcases go further still.
+  #
+  # THE PATTERN, worth applying to the whole crate rather than one option at a
+  # time: SIX repart settings are parsed into a struct, unit tested for parsing,
+  # and never consulted anywhere in the logic. --include-partitions=,
+  # --exclude-partitions=, --defer-partitions= and CopyBlocks= were found and
+  # fixed; CopyFiles= and Encrypt= remain. A passing parse test is not evidence
+  # a flag is honoured, and with CopyBlocks= the partition TABLE was byte-exact
+  # while the CONTENTS were never written, so only comparing bytes caught it.
   extraUnits = [
     "systemd-repart.service"
   ];

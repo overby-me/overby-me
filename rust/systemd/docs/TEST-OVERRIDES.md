@@ -208,12 +208,18 @@ VM run. Diagnostics must write to stderr.
   at step 6, where `--size=auto` has to grow an image that is already full and
   rust only honours `auto` while creating one.
 
-  FOUR of the sixteen were options parsed into the argument struct, unit tested
-  for parsing, and then never consulted: `--include-partitions=`,
-  `--exclude-partitions=`, `--defer-partitions=` and `CopyBlocks=`. The last is
-  the sharpest: the partition *table* was byte-for-byte correct while the
-  partition *contents* were never written, so no table assertion could have
-  caught it. Assert the effect, not the table.
+  Step 6 is blocked on a missing feature rather than a defect: `Encrypt=` has no
+  LUKS or cryptsetup implementation at all, and `CopyFiles=` is parse-only, so
+  the rest of `testcase_basic` is out of reach without LUKS2 support.
+
+  SIX repart settings turned out to be parsed into a struct, unit tested for
+  parsing, and then never consulted anywhere in the logic:
+  `--include-partitions=`, `--exclude-partitions=`, `--defer-partitions=` and
+  `CopyBlocks=` (all now fixed), plus `CopyFiles=` and `Encrypt=` (still open).
+  `CopyBlocks=` is the sharpest: the partition *table* was byte-for-byte correct
+  while the partition *contents* were never written, so no table assertion could
+  have caught it. Assert the effect, not the table — and treat a passing parse
+  test as no evidence at all that a flag is honoured.
 
   Four of the ten defects were options parsed into the argument struct, unit
   tested for parsing, and then never consulted: `--include-partitions=`,
