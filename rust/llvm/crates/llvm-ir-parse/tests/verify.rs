@@ -61,6 +61,18 @@ fn the_corpus_verifies() {
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
     (
+        "declare void @g(<2147483649 x i16>)\n\ndefine void @f(<2147483649 x i16> %v) {\nentry:\n  call void @g(<2147483649 x i16> %v)\n  ret void\n}\n",
+        "passes a type it cannot align",
+    ),
+    (
+        "declare <2147483649 x i16> @g()\n\ndefine void @f() {\nentry:\n  %v = call <2147483649 x i16> @g()\n  ret void\n}\n",
+        "returns a type it cannot align",
+    ),
+    (
+        "declare void @g({ <2147483649 x i16> })\n\ndefine void @f({ <2147483649 x i16> } %v) {\nentry:\n  call void @g({ <2147483649 x i16> } %v)\n  ret void\n}\n",
+        "passes a type it cannot align",
+    ),
+    (
         "define x86_intrcc void @f(ptr %p) {\nentry:\n  ret void\n}\n",
         "calling convention parameter requires byval",
     ),
@@ -954,6 +966,22 @@ const REJECTED: &[(&str, &str)] = &[
         "not a power of two",
     ),
     (
+        "define void @f(ptr align 8589934592 %p) {\nentry:\n  ret void\n}\n",
+        "huge alignment values are unsupported",
+    ),
+    (
+        "define void @f() alignstack(4294967296) {\nentry:\n  ret void\n}\n",
+        "huge alignment values are unsupported",
+    ),
+    (
+        "define void @f(<4294967296 x i8> %v) {\nentry:\n  ret void\n}\n",
+        "size too large for vector",
+    ),
+    (
+        "define void @f(<vscale x 4294967296 x i8> %v) {\nentry:\n  ret void\n}\n",
+        "size too large for vector",
+    ),
+    (
         "@g = global [4 x token] zeroinitializer\n",
         "invalid array element type",
     ),
@@ -1228,6 +1256,15 @@ const ACCEPTED: &[&str] = &[
 /// Modules that verify clean, which is the half of the verifier a table of
 /// broken input cannot check. Each was a false positive first.
 const VERIFIES: &[&str] = &[
+    // A vector wanting exactly the largest alignment there is, the same type
+    // in a signature nothing calls, and one crossing a call that is lowered
+    // rather than placed.
+    "declare void @g(<2147483648 x i16>)\n\ndefine void @f(<2147483648 x i16> %v) {\nentry:\n  call void @g(<2147483648 x i16> %v)\n  ret void\n}\n",
+    "define void @f(<2147483649 x i16> %v) {\nentry:\n  ret void\n}\n",
+    "declare <2147483649 x i16> @llvm.fshr.v2147483649i16(<2147483649 x i16>, <2147483649 x i16>, <2147483649 x i16>)\n\ndefine <2147483649 x i16> @f(<2147483649 x i16> %l, <2147483649 x i16> %r, <2147483649 x i16> %a) {\nentry:\n  %b = call <2147483649 x i16> @llvm.fshr.v2147483649i16(<2147483649 x i16> %l, <2147483649 x i16> %r, <2147483649 x i16> %a)\n  ret <2147483649 x i16> %b\n}\n",
+    // The largest alignment each of the two caps allows.
+    "define void @f(ptr align 4294967296 %p) {\nentry:\n  ret void\n}\n",
+    "define void @f() alignstack(2147483648) {\nentry:\n  ret void\n}\n",
     // The interrupt frame passed the way the processor left it, a handler
     // taking no frame at all, and the same first parameter under a convention
     // that says nothing about it.

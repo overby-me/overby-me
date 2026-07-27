@@ -26,6 +26,10 @@ use crate::value::{AliasId, BlockId, GlobalRef, GlobalVarId, InstId, MdId, Name,
 use crate::{FunctionId, TypeId};
 use llvm_support::{ApInt, DataLayout};
 
+/// The largest alignment upstream's encoding holds, in bytes. The parser caps
+/// a written one; this is for the alignments a type asks for by its size.
+const MAXIMUM_ALIGNMENT: u64 = 1 << 32;
+
 /// One thing wrong with a module.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct VerifyError {
@@ -2357,6 +2361,27 @@ impl Verifier<'_> {
                 } else {
                     self.report(format!("{where_} has a callee type that is not a function"));
                 }
+                // What crosses a call boundary is laid out by the target,
+                // and an alignment past what the encoding holds is one the
+                // target cannot ask for. An intrinsic is exempt: it is
+                // lowered rather than called, so nothing has to be placed.
+                let lowered = match call.callee {
+                    Value::Constant(id) => self.mentions_an_intrinsic(id).is_some(),
+                    _ => false,
+                };
+                if !lowered {
+                    let result = self.module.ctx.type_kind(call.function_type).clone();
+                    if let TypeKind::Function { result, .. } = result
+                        && self.wants_an_unrepresentable_alignment(result, &mut Vec::new())
+                    {
+                        self.report(format!("{where_} returns a type it cannot align"));
+                    }
+                    for arg in &call.args {
+                        if self.wants_an_unrepresentable_alignment(arg.ty, &mut Vec::new()) {
+                            self.report(format!("{where_} passes a type it cannot align"));
+                        }
+                    }
+                }
                 for arg in &call.args {
                     let Value::Constant(id) = arg.value else {
                         continue;
@@ -3995,6 +4020,45 @@ impl Verifier<'_> {
                 "{where_} moves {bits} bits, which is not a size an atomic comes in"
             ));
         }
+    }
+
+    /// Whether anything inside a type asks to be aligned past what the
+    /// encoding holds. A vector is the only thing that can: its alignment is
+    /// its own size rounded up to a power of two, so `<2147483649 x i16>` is
+    /// four gigabytes and two, which rounds to eight. An array or a struct
+    /// inherits the answer from what it holds, and a type that reaches itself
+    /// is left to the rule that says so.
+    fn wants_an_unrepresentable_alignment(&self, ty: TypeId, trail: &mut Vec<TypeId>) -> bool {
+        if trail.contains(&ty) {
+            return false;
+        }
+        trail.push(ty);
+        let answer = match self.module.ctx.type_kind(ty).clone() {
+            TypeKind::Vector {
+                scalable: false, ..
+            } => self.size_in_bits(ty).is_some_and(|bits| {
+                bits.checked_next_power_of_two()
+                    .is_none_or(|rounded| rounded.div_ceil(8) > MAXIMUM_ALIGNMENT)
+            }),
+            TypeKind::Array { element, .. } => {
+                self.wants_an_unrepresentable_alignment(element, trail)
+            }
+            TypeKind::Struct { fields, .. } => fields
+                .iter()
+                .any(|field| self.wants_an_unrepresentable_alignment(*field, trail)),
+            TypeKind::NamedStruct(id) => self
+                .module
+                .ctx
+                .struct_def(id)
+                .fields
+                .clone()
+                .unwrap_or_default()
+                .iter()
+                .any(|field| self.wants_an_unrepresentable_alignment(*field, trail)),
+            _ => false,
+        };
+        trail.pop();
+        answer
     }
 
     fn size_in_bits(&self, ty: TypeId) -> Option<u64> {

@@ -860,6 +860,21 @@ what a function does to AArch64's streaming mode and its two matrix state
 registers is one answer per register out of six, not six independent
 claims, while `aarch64_zt0_undef` describes one call rather than the
 function it calls. Verifier 292 to 296.
+A sixty-sixth pass took the alignments, three files and three rules that
+bisecting found rather than reading. An alignment written as an attribute
+is capped the way one written as a clause already was, at two to the
+thirty-second, except `alignstack`, which is capped one bit lower. A
+vector's lane count is held in thirty-two bits, scalable or not.
+And a type crossing a call boundary has to be one the target can place,
+which means an alignment inside the cap: a vector's is its own size
+rounded up to a power of two, so `<2147483649 x i16>` wants eight
+gigabytes and `<2147483648 x i16>` wants four, and an array or a struct
+holding one inherits the answer. That rule holds at the call and not in
+the signature, and an intrinsic is exempt, being lowered rather than
+called. Both boundaries were found by halving the interval against
+llvm-as rather than by reasoning about the layout, which is what caught
+that `<4294967296 x i8>` and `<2147483649 x i16>` fail for two different
+reasons. Verifier 296 to 299.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

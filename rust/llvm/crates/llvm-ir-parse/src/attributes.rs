@@ -1,5 +1,6 @@
 //! Attribute parsing, including the spellings that differ inside a group.
 
+use crate::globals::{MAXIMUM_ALIGNMENT, MAXIMUM_STACK_ALIGNMENT};
 use crate::lexer::Token;
 use crate::{ParseError, Parser};
 use llvm_ir::TypeId;
@@ -115,6 +116,22 @@ pub(crate) fn is_legacy_memory(word: &str) -> bool {
 impl Parser {
     // ------------------------------------------------------------ attributes
 
+    /// An alignment written as an attribute is capped the way one written as
+    /// a clause is, and upstream refuses an oversized one in the parser
+    /// rather than the verifier, so the message points at the literal. The
+    /// stack cap is one bit lower than the rest.
+    fn alignment_fits(&mut self, kind: IntAttr, bytes: u64) -> Result<(), ParseError> {
+        let ceiling = match kind {
+            IntAttr::Align => MAXIMUM_ALIGNMENT,
+            IntAttr::AlignStack => MAXIMUM_STACK_ALIGNMENT,
+            _ => return Ok(()),
+        };
+        if bytes > ceiling {
+            return self.error(format!("huge alignment values are unsupported: {bytes}"));
+        }
+        Ok(())
+    }
+
     /// One attribute. `in_group` selects between the two spellings upstream
     /// uses for the same attribute: `align 8` in a parameter list and
     /// `align=8` inside an attribute group.
@@ -167,6 +184,7 @@ impl Parser {
             if in_group && matches!(kind, IntAttr::Align | IntAttr::AlignStack) {
                 self.require(Token::Equals)?;
                 let first = self.require_unsigned()?;
+                self.alignment_fits(kind, first)?;
                 return Ok(Attribute::Int {
                     kind,
                     first,
@@ -177,6 +195,7 @@ impl Parser {
             // `align(4)` there too, and its own tests use both.
             if !in_group && kind == IntAttr::Align && self.peek() != &Token::LeftParen {
                 let first = self.require_unsigned()?;
+                self.alignment_fits(kind, first)?;
                 return Ok(Attribute::Int {
                     kind,
                     first,
@@ -185,6 +204,7 @@ impl Parser {
             }
             self.require(Token::LeftParen)?;
             let first = self.require_unsigned()?;
+            self.alignment_fits(kind, first)?;
             let second = if self.eat(&Token::Comma) {
                 Some(self.require_unsigned()?)
             } else {

@@ -159,6 +159,12 @@ impl Parser {
                     return self.error("expected 'x' after 'vscale'");
                 }
                 let count = self.require_unsigned()?;
+                // A lane count is held in thirty-two bits, scalable or not,
+                // so `<4294967296 x i8>` names a vector upstream has no way
+                // to write down.
+                if count > u64::from(u32::MAX) {
+                    return self.error("size too large for vector");
+                }
                 if !self.eat_word("x") {
                     return self.error("expected 'x' in a vector type");
                 }

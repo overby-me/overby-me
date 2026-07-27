@@ -12,7 +12,11 @@ use llvm_support::Align;
 
 /// The largest alignment upstream accepts, and the largest that fits its
 /// encoding.
-const MAXIMUM_ALIGNMENT: u64 = 1 << 32;
+pub(crate) const MAXIMUM_ALIGNMENT: u64 = 1 << 32;
+
+/// A stack alignment is capped one bit lower than any other, `alignstack`
+/// being the one that has to survive a frame layout rather than a symbol.
+pub(crate) const MAXIMUM_STACK_ALIGNMENT: u64 = 1 << 31;
 
 impl Parser {
     // --------------------------------------------------------------- globals
