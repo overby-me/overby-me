@@ -137,6 +137,9 @@ Landed since the ledger was written (each regression-tested before push):
 | `0a28d1d8` | a free area's span includes the partition before it, so an existing one can claim a total size |
 | (this) | repart fills the lowest free slots, applies `--size=` to an existing image, and copies `CopyBlocks=` contents from a definition |
 | (this) | `udevadm info` accepts a `/dev` symlink such as `/dev/mapper/<name>` |
+| `3d640d43` | mounts are no longer stacked over an existing mount; `/` was mounted twice with contradictory flags |
+| `b779bc24` | `PrivateUsers=` drops to in-namespace ids; `TemporaryFileSystem=` mount points created before the read-only pass |
+| `9e42a37b` | id-mapped mount groundwork (`open_tree`/`mount_setattr`/`move_mount`), not yet working |
 | `45c404c3` | repart derives partition labels from the type designator, numbering repeats |
 | `e7c7c8a9` | repart settles space claims sequentially, keeping grain remainders |
 | `c4d604db` | repart honours `--defer-partitions=` |
@@ -186,7 +189,27 @@ VM run. Diagnostics must write to stderr.
   across the runtime and log trees. It simply does not make this assertion pass
   reliably, so something else is also wrong.
 
-  `test_check_idmapped_mounts` sits behind it and has its own genuine bug.
+  `test_check_idmapped_mounts` is now the only failing phase, and 34 is left
+  RED ON PURPOSE rather than masked: an `expectedSkip` replaces the whole script
+  with `exit 77`, which would stop exercising the four `test_directory` phases
+  and `test_check_writable` that now pass. A green tick is not worth losing that.
+
+  Three defects fell out of that phase, each visible only once the previous was
+  cleared: the doubly-mounted root (which also caused an
+  `unshare(CLONE_NEWUSER)` EPERM, so one fix closed two bugs); the privilege
+  drop targeting the outside uid/gid inside a `PrivateUsers=` namespace, where
+  the default map `0 <uid> 1` makes id 0 the only representable one; and
+  `TemporaryFileSystem=` mount points being created after `ProtectSystem=` had
+  made `/` read-only, so the mkdir failed EROFS and the mount then failed
+  ENOENT.
+
+  What remains is a feature: id-mapped mounts. The groundwork is in and safe
+  (the plain bind still happens; the idmap is an overlay attempted on top, so a
+  failure only logs), but `mount_setattr(MOUNT_ATTR_IDMAP)` returns EPERM while
+  `open_tree` and the detached mount succeed. Check the exec helper's effective
+  capabilities at that point: the kernel's `can_idmap_mount()` gives EPERM
+  without `CAP_SYS_ADMIN` in the *superblock's* user namespace, and EINVAL when
+  the filesystem lacks `FS_ALLOW_IDMAP`.
 
   `test_check_writable` now passes, on two independent runs.
 
