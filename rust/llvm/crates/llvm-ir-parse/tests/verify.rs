@@ -534,6 +534,10 @@ const BROKEN: &[(&str, &str)] = &[
         "declare void @f3() uwtable(unsync)\n",
         "uwtable names unsync, which is not a kind of unwind table",
     ),
+    (
+        "define void @0() comdat {\nentry:\n  ret void\n}\n",
+        "has no name to key a comdat on",
+    ),
     // An intrinsic is the compiler's, not the module's.
     (
         "define void @llvm.memcpy.p0.p0.i32(ptr %a, ptr %b, i32 %n, i1 %v) {\nentry:\n  ret void\n}\n",
@@ -679,6 +683,14 @@ const REJECTED: &[(&str, &str)] = &[
     ),
     ("%s = type { void }\n", "invalid structure element type"),
     ("@i2 = common global i8388609 0, align 4\n", "is too wide"),
+    (
+        "define void @f(target(\"type\", i32, 0, void) %x) {\nentry:\n  ret void\n}\n",
+        "writes its types before its integers",
+    ),
+    (
+        "define void @f(i32 %a) !dbg !4 {\nentry:\n  #dbg_value(i32 %a, i32 0, !DIExpression(), !9)\n  ret void\n}\n\n!llvm.dbg.cu = !{!0}\n!llvm.module.flags = !{!3}\n!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1)\n!1 = !DIFile(filename: \"a\", directory: \"b\")\n!3 = !{i32 2, !\"Debug Info Version\", i32 3}\n!4 = distinct !DISubprogram(name: \"f\", scope: !1, file: !1, unit: !0)\n!9 = !DILocation(line: 1, column: 1, scope: !4)\n",
+        "takes metadata where it expects it",
+    ),
     (
         "define void @f(i8* %p) {\nentry:\n  ret void\n}\n",
         "opaque",

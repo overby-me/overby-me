@@ -737,6 +737,12 @@ impl Verifier<'_> {
     /// reports it only for a Windows triple, and llvm-as reads the same
     /// module without one.
     fn comdat_member(&mut self, name: &str, declaration: bool) {
+        // The linker matches comdat members by the name of the group, which
+        // defaults to the symbol's own. A symbol with only a number has none
+        // to give.
+        if name.chars().all(|c| c.is_ascii_digit()) {
+            self.report(format!("@{name} has no name to key a comdat on"));
+        }
         if declaration {
             self.report(format!(
                 "@{name} is a declaration and may not be in a comdat"
@@ -1011,6 +1017,10 @@ impl Verifier<'_> {
 
         self.calling_convention(function);
         self.function_attributes(function);
+        if function.comdat.is_some() {
+            let name = describe(&function.name);
+            self.comdat_member(&name, !function.is_definition());
+        }
         self.attribute_set(
             &function.return_attrs,
             function.return_type,

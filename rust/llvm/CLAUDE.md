@@ -118,7 +118,7 @@ spell it `not llvm-as`, so our own wrong acceptances scored as agreement.
 Numbers from before that change are not comparable to numbers after it.
 The ratchets live in `default.nix` and only move up.
 
-**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 438 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
+**B1a. [partial] Raise the ratchets.** *(2026-07-27: Assembler 444 of 483 with 14 wrongly refused, Verifier 284 of 328 with 4)*
 Landed in two passes: duplicate symbols, alignment bounds, aggregate and
 vector element types, linkage against visibility, cmpxchg orderings,
 getelementptr and aggregate index rules, module flag and ident node shapes,
@@ -370,6 +370,12 @@ this suite.
 A thirty-first pass added three: an integer is at most 2^23 bits wide, a
 `cmpxchg` compares and stores the same type, and `uwtable` names one of
 the two kinds of unwind table there are.
+A thirty-second pass: a comdat keys on a name and a symbol with only a
+number has none, a target extension type writes its types before its
+integers, and a debug record has a fixed shape. The last of those needed
+a correction the measurement caught: `#dbg_assign` carries two values, the
+one assigned and the address it was assigned to, so checking that
+everything after the first is metadata refused a file upstream reads.
 Still open, and each entry says what it is waiting on rather than only
 what it is. Which argument of an intrinsic is `immarg` when the
 declaration does not say so (four files): LangRef writes `immarg` in five

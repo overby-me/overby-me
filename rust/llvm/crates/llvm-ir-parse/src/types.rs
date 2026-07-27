@@ -137,11 +137,16 @@ impl Parser {
         let name = self.require_quoted()?;
         let mut types = Vec::new();
         let mut ints = Vec::new();
+        // The type parameters come first and the integer ones after, so a
+        // type following an integer is a parameter list in the wrong order
+        // rather than another type.
         while self.eat(&Token::Comma) {
             if matches!(self.peek(), Token::Integer { .. }) {
                 ints.push(self.require_unsigned()? as u32);
-            } else {
+            } else if ints.is_empty() {
                 types.push(self.parse_type()?);
+            } else {
+                return self.error("a target extension type writes its types before its integers");
             }
         }
         self.require(Token::RightParen)?;

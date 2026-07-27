@@ -534,6 +534,33 @@ impl Parser {
                 }
                 operands.push(self.parse_metadata_operand(Some((function, state)))?);
             }
+            // Each record has a fixed shape: a value, then metadata for
+            // everything else. Upstream reads the `!` as punctuation rather
+            // than as part of an operand, so a value where metadata belongs
+            // is a syntax error there and a shape error here.
+            let wanted = match name.as_str() {
+                "dbg_declare" | "dbg_value" => Some(4),
+                "dbg_assign" => Some(7),
+                "dbg_label" => Some(2),
+                _ => None,
+            };
+            if let Some(wanted) = wanted {
+                if operands.len() != wanted {
+                    return self.error(format!(
+                        "#{name} takes {wanted} operands, not {}",
+                        operands.len()
+                    ));
+                }
+                // `#dbg_assign` carries two values, the assigned one and the
+                // address it was assigned to; everything else is metadata.
+                let values: &[usize] = if name == "dbg_assign" { &[0, 4] } else { &[0] };
+                if operands.iter().enumerate().any(|(position, operand)| {
+                    !values.contains(&position)
+                        && matches!(operand, llvm_ir::metadata::MdOperand::Value { .. })
+                }) {
+                    return self.error(format!("#{name} takes metadata where it expects it"));
+                }
+            }
             let void = self.module.ctx.void_type();
             return Ok((void, InstKind::DebugRecord { name, operands }));
         }
