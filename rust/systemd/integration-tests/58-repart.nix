@@ -61,12 +61,12 @@
   patchScript = ''
     {
       echo "#!/usr/bin/env bash"
-      echo "echo 'rust-systemd: systemd-repart --copy-from= is not implemented' >/skipped"
+      echo "echo 'rust-systemd: repart allocator drops grain remainders and derives default labels differently' >/skipped"
       echo "exit 77"
     } > TEST-58-REPART.sh
     chmod +x TEST-58-REPART.sh
   '';
-  # Skips rather than passes: --copy-from= is unimplemented
+  # Skips rather than passes: partition sizes and default labels still diverge
   # See ../docs/TEST-OVERRIDES.md.
   expectedSkip = true;
 }
