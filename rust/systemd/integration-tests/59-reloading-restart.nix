@@ -9,12 +9,31 @@
   # RestartMode=debug (not implemented).
   #
   # The notify-reload subtest exercises the graceful-SIGTERM stop fix: kill()
-  # now sends SIGTERM to the main process and waits up to TimeoutStopSec before
+  # sends SIGTERM to the main process and waits up to TimeoutStopSec before
   # run_poststop's SIGKILL fallback, matching systemd's
   # ExecStop -> SIGTERM -> TimeoutStopSec -> SIGKILL -> ExecStopPost sequence.
   # Previously run_poststop's kill_all_remaining_processes SIGKILLed the main
   # process immediately, so the `trap leave SIGTERM` handler never ran and the
   # unit exited by signal (ExecMainStatus=9) instead of 109.
+  #
+  # THIS TEST CURRENTLY FAILS, measured 2026-07-28. Everything up to the
+  # notify-reload subtest passes; it dies on the last assertion,
+  #
+  #     test "$(systemctl show -p ExecMainStatus --value notify-reload-test)" = 109
+  #
+  # with ExecMainStatus reading back EMPTY, not 109 and not the old 9. So the
+  # graceful-SIGTERM half really did land -- terminate_gracefully exists at
+  # services.rs:1272 and kill() calls it at 1377 -- but it does not help this
+  # unit. The likely path is the early return at services.rs:1289 ("Graceful
+  # stop: <name> has no live PID, skipping SIGTERM"): a TRANSIENT
+  # Type=notify-reload service appears to lose its main PID before the real
+  # stop, so no SIGTERM is ever sent and `trap leave` never runs. That matches
+  # the earlier diagnosis of this bug, which was deferred as a deep lifecycle
+  # problem after several inconclusive cycles.
+  #
+  # Confirming it needs a kmsg probe on terminate_gracefully's entry (self.pid
+  # and the pid_table entry) -- log:: never reaches the console from PID 1.
+  # Do not restart that investigation without budget for it.
   patchScript = ''
         cat > TEST-59-RELOADING-RESTART.sh << 'TESTEOF'
     #!/usr/bin/env bash
