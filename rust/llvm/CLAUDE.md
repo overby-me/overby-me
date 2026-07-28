@@ -1022,6 +1022,37 @@ And `ptr*` has both dialects in it at once: the older spelling is read,
 and writing it around the newer one is not, which upstream says in as
 many words. `i8**` is still fine, the inner `*` being what makes the
 pointer the outer one points to.
+A seventy-second pass left acceptance and went at the print differentials,
+which are the weakest numbers now: 496 of 655 across four suites. Diffing
+every differing file against upstream's own `opt -S` sorts them into
+classes, and the largest are the ones already recorded as blocked: the
+per-intrinsic attributes an auto-declared intrinsic comes with, the
+debug-info metadata upgrade, and the intrinsic name upgrades. Constant
+folding is the largest closable one and is not started.
+Five smaller ones closed. A declaration's parameters have no bodies to be
+named in, so upstream drops names written there. `default` is what a
+symbol has when nothing says otherwise, so upstream writes the other two
+visibilities and not that one. A scalar's zero has a spelling of its own,
+`0` or `null` or `0.000000e+00`, and only an aggregate keeps the word
+`zeroinitializer`. A splat is how a vector of repeated *data* is written,
+so a vector of the same symbol goes lane by lane, the lanes being
+addresses a linker fills in. And `captures(...)` is a set rather than a
+list: naming a component twice says it once, `address` covers
+`address_is_null` and `provenance` covers `read_provenance`, and upstream
+writes what is left in its own order.
+Feature 54 to 57, Linker 167 to 171.
+A sixth class went with them, the largest closable one: upstream computes
+a constant cast rather than carrying it, so a module that writes one
+prints back the answer. A cast that changes nothing is what it was given;
+`trunc` keeps the low bits; a `bitcast` keeps the bits and changes what
+reads them, either way between an integer and a float; and the two that
+cross between an address and a number agree at the one value both spell
+the same way, `inttoptr 0` being `null` and `ptrtoint null` being nought.
+Every cast but a bitcast works lane by lane, so a cast of a vector of
+literals is a vector of the answers, and the operand may be written out
+lane by lane or folded to a splat or to zero, all three describing the
+same lanes. Feature 57 to 60, Other 126 to 128.
+Assembler is unmoved, what it differs by being the blocked classes.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

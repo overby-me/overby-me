@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use llvm_ir::BlockId;
 use llvm_ir::attribute::Attribute;
 use llvm_ir::function::Function;
-use llvm_ir::global::{Alias, GlobalQualifiers, GlobalVariable, IFunc, Linkage};
+use llvm_ir::global::{Alias, GlobalQualifiers, GlobalVariable, IFunc, Linkage, Visibility};
 
 use crate::slots::FunctionSlots;
 use crate::{
@@ -122,7 +122,11 @@ impl Printer<'_> {
         if let Some(preemption) = qualifiers.preemption {
             let _ = write!(self.out, "{} ", preemption.keyword());
         }
-        if let Some(visibility) = qualifiers.visibility {
+        // `default` is what a symbol has when nothing says otherwise, so
+        // upstream prints the other two and not that one.
+        if let Some(visibility) = qualifiers.visibility
+            && visibility != Visibility::Default
+        {
             let _ = write!(self.out, "{} ", visibility.keyword());
         }
         if let Some(storage) = qualifiers.dll_storage {
@@ -199,10 +203,13 @@ impl Printer<'_> {
                     attribute_list(self.module, &param.attrs, false)
                 );
             }
+            // A declaration's parameters have no bodies to be named in, so
+            // upstream drops the names a module may have written there.
             match &param.name {
-                Some(name) => {
+                Some(name) if function.is_definition() => {
                     let _ = write!(self.out, " %{}", name_text(name));
                 }
+                Some(_) => {}
                 None => {
                     if function.is_definition() {
                         let slot = self

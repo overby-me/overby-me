@@ -174,6 +174,11 @@ impl Parser {
             && self.peek() == &Token::LeftParen
         {
             let arguments = self.collect_parenthesised()?;
+            let arguments = if kind == StructuredAttr::Captures {
+                canonical_captures(&arguments)
+            } else {
+                arguments
+            };
             return Ok(Attribute::Structured { kind, arguments });
         }
 
@@ -430,4 +435,41 @@ fn wide_hex(word: &str, bits: u32) -> Option<ApInt> {
     });
     let width = ((digits.len() - leading) as u32).saturating_sub(1) * 4 + top;
     Some(magnitude.trunc(width.max(1)).sext_or_trunc(bits))
+}
+
+/// What `captures(...)` says is a set rather than a list: naming a component
+/// twice says it once, and the wider of a pair says the narrower too, so
+/// `address` covers `address_is_null` and `provenance` covers
+/// `read_provenance`. Upstream writes the set back in its own order, address
+/// before provenance, so this reduces what was written to that form.
+fn canonical_captures(arguments: &str) -> String {
+    let written: Vec<&str> = arguments
+        .split(',')
+        .map(str::trim)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if written.iter().any(|word| matches!(*word, "none" | "all")) || written.is_empty() {
+        return arguments.to_string();
+    }
+    let mut components = Vec::new();
+    for (wide, narrow) in [
+        ("address", "address_is_null"),
+        ("provenance", "read_provenance"),
+    ] {
+        if written.contains(&wide) {
+            components.push(wide);
+        } else if written.contains(&narrow) {
+            components.push(narrow);
+        }
+    }
+    // A word this does not know is left alone rather than dropped.
+    if written.iter().any(|word| {
+        !matches!(
+            *word,
+            "address" | "address_is_null" | "provenance" | "read_provenance"
+        )
+    }) {
+        return arguments.to_string();
+    }
+    components.join(", ")
 }

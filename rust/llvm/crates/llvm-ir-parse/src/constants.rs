@@ -194,7 +194,15 @@ impl Parser {
                 }
                 _ => {}
             }
-            if is_vector {
+            // A splat is how upstream writes a vector of repeated *data*.
+            // A vector of the same symbol is written out lane by lane, the
+            // lanes being addresses a linker fills in rather than data.
+            if is_vector
+                && matches!(
+                    self.module.ctx.constant(first),
+                    Constant::Integer { .. } | Constant::Float { .. }
+                )
+            {
                 return self
                     .module
                     .ctx
@@ -739,10 +747,118 @@ impl Parser {
         {
             return Ok(*base);
         }
+        if let ConstExpr::Cast { op, operand, ty } = &expr
+            && let Some(folded) = self.folded_cast(*op, *operand, *ty)
+        {
+            return Ok(folded);
+        }
         Ok(self
             .module
             .ctx
             .intern_constant(Constant::Expression(Box::new(expr))))
+    }
+
+    /// What upstream computes rather than carries. A cast of a literal to a
+    /// type the target can express is a literal, and upstream folds one as it
+    /// reads, so a module that writes the cast prints back the answer.
+    fn folded_cast(&mut self, op: CastOp, operand: ConstId, ty: TypeId) -> Option<ConstId> {
+        // A cast that changes nothing is the thing it was given.
+        if self.module.ctx.constant(operand).ty() == ty {
+            return Some(operand);
+        }
+        // Every cast but a bitcast works lane by lane, so a cast of a vector
+        // of literals is a vector of the answers.
+        let target = self.module.ctx.type_kind(ty).clone();
+        if op != CastOp::BitCast
+            && let TypeKind::Vector { element, .. } = target
+        {
+            // The operand may be written out lane by lane, or folded to a
+            // splat or to zero; all three describe the same lanes.
+            let TypeKind::Vector {
+                count,
+                scalable: false,
+                ..
+            } = self.module.ctx.type_kind(ty).clone()
+            else {
+                return None;
+            };
+            let width = usize::try_from(count).ok()?;
+            let lanes = match self.module.ctx.constant(operand).clone() {
+                Constant::Vector { elements, .. } => elements,
+                Constant::Splat { element, .. } => vec![element; width],
+                Constant::ZeroInitializer(source) => {
+                    let TypeKind::Vector {
+                        element: source, ..
+                    } = self.module.ctx.type_kind(source).clone()
+                    else {
+                        return None;
+                    };
+                    let zero = self
+                        .module
+                        .ctx
+                        .intern_constant(Constant::ZeroInitializer(source));
+                    vec![zero; width]
+                }
+                _ => return None,
+            };
+            let mut folded = Vec::with_capacity(lanes.len());
+            for lane in lanes {
+                folded.push(self.folded_cast(op, lane, element)?);
+            }
+            return Some(self.fold_aggregate(ty, &folded, true));
+        }
+        let bits = match &target {
+            TypeKind::Integer(bits) => Some(*bits),
+            TypeKind::Float(semantics) => Some(semantics.bit_width()),
+            _ => None,
+        };
+        match (op, self.module.ctx.constant(operand).clone()) {
+            // Narrowing keeps the low bits, which is what `ApInt` does when
+            // it is asked for fewer of them.
+            (CastOp::Trunc, Constant::Integer { value, .. }) => {
+                let bits = bits?;
+                let narrowed = value.trunc(bits);
+                Some(self.module.ctx.intern_constant(Constant::Integer {
+                    ty,
+                    value: narrowed,
+                }))
+            }
+            // A bitcast keeps the bits and changes what reads them.
+            (CastOp::BitCast, Constant::Integer { value, .. }) => match target {
+                TypeKind::Float(semantics) => {
+                    let float = ApFloat::from_bits(semantics, value);
+                    Some(
+                        self.module
+                            .ctx
+                            .intern_constant(Constant::Float { ty, value: float }),
+                    )
+                }
+                _ => None,
+            },
+            (CastOp::BitCast, Constant::Float { value, .. }) => match target {
+                TypeKind::Integer(_) => Some(self.module.ctx.intern_constant(Constant::Integer {
+                    ty,
+                    value: value.bits().clone(),
+                })),
+                _ => None,
+            },
+            // The two that cross between an address and a number, at the one
+            // value both spell the same way.
+            (CastOp::PtrToInt, Constant::Null(_) | Constant::ZeroInitializer(_)) => {
+                let bits = bits?;
+                Some(self.module.ctx.intern_constant(Constant::Integer {
+                    ty,
+                    value: llvm_support::ApInt::from_u64(bits, 0),
+                }))
+            }
+            (CastOp::IntToPtr, Constant::Integer { value, .. }) if value.is_zero() => {
+                Some(self.module.ctx.intern_constant(Constant::Null(ty)))
+            }
+            (CastOp::IntToPtr, Constant::ZeroInitializer(_)) => {
+                Some(self.module.ctx.intern_constant(Constant::Null(ty)))
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn parse_float(&mut self, semantics: FloatSemantics) -> Result<ApFloat, ParseError> {

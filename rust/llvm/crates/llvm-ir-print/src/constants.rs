@@ -37,7 +37,19 @@ impl Printer<'_> {
             Constant::NoneToken(_) => self.push("none"),
             Constant::Undef(_) => self.push("undef"),
             Constant::Poison(_) => self.push("poison"),
-            Constant::ZeroInitializer(_) => self.push("zeroinitializer"),
+            // A scalar's zero has a spelling of its own; an aggregate's does
+            // not, so only an aggregate keeps the word.
+            Constant::ZeroInitializer(ty) => match self.module.ctx.type_kind(ty) {
+                TypeKind::Integer(1) => self.push("false"),
+                TypeKind::Integer(_) => self.push("0"),
+                TypeKind::Pointer { .. } => self.push("null"),
+                TypeKind::Float(semantics) => {
+                    let zero = llvm_support::ApInt::from_u64(semantics.bit_width(), 0);
+                    let text = llvm_support::ApFloat::from_bits(*semantics, zero).to_llvm_text();
+                    self.push(&text);
+                }
+                _ => self.push("zeroinitializer"),
+            },
             Constant::Struct { ty, fields } => {
                 let packed = matches!(
                     self.module.ctx.type_kind(ty),
