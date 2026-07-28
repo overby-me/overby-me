@@ -987,10 +987,16 @@ html {
 	background: var(--md-surface-container-high);
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-2);
+	/* Clips so the bottom row's touch and hover states cannot square off the
+	   dock's rounded corners. The search dropdown has to escape this (see
+	   `.compact-dock .search-results`). */
 	overflow: hidden;
-	/* Hide-on-scroll slide. A transform is safe here (unlike on .card): the dock
-	   hosts no position:fixed descendants, so it establishes no harmful
-	   containing block. */
+	/* Height of one tier (search, apps). The dropdown above measures the dock by
+	   it, so the three stay in step. */
+	--dock-tier: 56px;
+	/* Hide-on-scroll slide. The transform makes the dock a containing block for
+	   the fixed dropdown while it runs, which only means the dropdown leaves with
+	   the dock it belongs to. */
 	transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
 }
 /* Scrolled away: slide the whole dock (both tiers) below the viewport edge,
@@ -1011,7 +1017,7 @@ html {
 	left: auto;
 	right: auto;
 	bottom: auto;
-	height: 56px;
+	height: var(--dock-tier);
 	background: transparent;
 	padding: 0 var(--md-sys-spacing-2);
 }
@@ -1024,7 +1030,7 @@ html {
 }
 .app-shell[data-size-class="compact"] .compact-dock .nav-bar {
 	position: static;
-	height: 56px;
+	height: var(--dock-tier);
 	background: transparent;
 	/* A hairline splits the two functions without breaking the single surface. */
 	border-top: 1px solid color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
@@ -5509,6 +5515,20 @@ a.list-item:hover {
 	margin-bottom: var(--md-sys-spacing-2);
 	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
 }
+/* On compact the search sits in the bottom dock, which clips (its rounded
+   corners need it), and this dropdown opens ABOVE the search row: absolutely
+   positioned it fell outside the dock's box and was clipped away, so results
+   were rendered and never seen. Fixed positioning leaves the dock's box behind
+   and anchors to the viewport instead, spanning the dock's own inset and sitting
+   one step above its top edge (two tiers + the dock's own bottom offset). */
+.compact-dock .search-results {
+	position: fixed;
+	left: var(--md-sys-spacing-2);
+	right: var(--md-sys-spacing-2);
+	bottom: calc(var(--dock-tier) * 2 + var(--md-sys-spacing-2) * 2);
+	margin-bottom: 0;
+}
+
 /* DESIGN (functional): a clear no-results row in the search dropdown. */
 .search-no-results {
 	display: flex;
