@@ -104,12 +104,11 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
         .unwrap_or("")
         .to_uppercase();
 
-    let file_url = if !file_id.is_empty() {
-        let token = session.read().access_token.clone().unwrap_or_default();
-        crate::backend_api::file_url(file_id, &token)
-    } else {
-        String::new()
-    };
+    // Presigned, not a bare storage URL: this feeds an <iframe>, <video>, <audio>
+    // and a download <a>, none of which can send the Authorization header the
+    // storage service reads. Empty until it resolves, which the branches below
+    // already treat as "no preview yet".
+    let file_url = super::loader::use_presigned_url(file_id.to_string()).unwrap_or_default();
 
     rsx! {
         super::widgets::SupportingPaneLayout {

@@ -27,18 +27,48 @@ pub fn atproto_start_url(handle: &str, token: &str) -> String {
     format!("{BACKEND_URL}/atproto/start?handle={handle}&token={token}")
 }
 
-/// The URL to fetch a stored file's bytes, with the session JWT in the `?token=`
-/// query (the backend accepts it there for both `<img src>` and `fetch`). This
-/// is the ONE place file-blob URLs are built, so the NHost-Storage -> AppView
-/// blob swap at cutover is a one-line change to this function's body rather than
-/// a scavenger hunt across component call sites. It still routes through
-/// `nhost::storage_url()` today; that reference is the exact seam the cutover
-/// repoints (NHost Storage dies, the AppView serves blobs from a different path).
-pub fn file_url(file_id: &str, token: &str) -> String {
-    format!(
-        "{}/files/{file_id}?token={token}",
-        crate::nhost::storage_url()
-    )
+/// The URL of a stored file's bytes, with no credentials in it.
+///
+/// The storage service authenticates by `Authorization` header only — a `?token=`
+/// in the query is decorative, and the URL resolves as an ANONYMOUS request. That
+/// went unnoticed while every file was world-readable; once files are readable
+/// only through the node that references them, such a request is refused.
+///
+/// So this is for FETCHES, which can set the header (see
+/// [`crate::components::loader::use_file_object_url`]). An `<img>` or `<iframe>`
+/// cannot set one and must use [`presigned_file_url`] instead.
+///
+/// This is the ONE place file URLs are built, so the NHost-Storage -> AppView
+/// swap at cutover is a change here rather than a scavenger hunt across call
+/// sites; `nhost::storage_url()` is the exact seam that repoints.
+pub fn file_url(file_id: &str) -> String {
+    format!("{}/files/{file_id}", crate::nhost::storage_url())
+}
+
+/// A time-limited URL for a stored file that carries its own authorization, for
+/// the element `src`s that cannot send a header.
+///
+/// The presign REQUEST is authenticated with the session token; the URL it hands
+/// back is not, and it expires. That is the shape `<img>`, `<iframe>`, `<video>`
+/// and a download `href` need: no header, and no standing public read on the
+/// bucket. Streaming media keeps working too, since the browser fetches it
+/// directly and can issue range requests (a blob URL would have to buffer the
+/// whole file first).
+pub async fn presigned_file_url(file_id: &str, token: &str) -> Option<String> {
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "{}/files/{file_id}/presignedurl",
+            crate::nhost::storage_url()
+        ))
+        .bearer_auth(token)
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    body.get("url")?.as_str().map(str::to_string)
 }
 
 /// The caller's Bluesky (atproto) link status, from the backend `/atproto/status`

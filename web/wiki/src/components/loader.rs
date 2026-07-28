@@ -457,6 +457,36 @@ pub fn user_avatar(avatar_url: &str, fallback: Element) -> Element {
     }
 }
 
+/// A presigned URL for a protected file, for the `src`/`href` attributes that
+/// cannot carry an `Authorization` header: `<iframe>`, `<video>`, `<audio>` and
+/// a download link.
+///
+/// Prefer [`use_file_object_url`] for images, which costs one request instead of
+/// two (presign, then load) — but never for a large or streamed file, since a
+/// blob URL has to buffer the whole thing before anything appears.
+///
+/// Reactive on `file_id` and the token, so a sibling navigation re-presigns
+/// rather than serving the previous node's file. Empty `file_id` yields None.
+pub fn use_presigned_url(file_id: String) -> Option<String> {
+    let session = use_session();
+    let token = session.read().access_token.clone();
+    let mut url = use_signal(|| None::<String>);
+    use_effect(use_reactive!(|(file_id, token)| {
+        url.set(None);
+        if file_id.is_empty() {
+            return;
+        }
+        let Some(token) = token.clone() else { return };
+        spawn(async move {
+            if let Some(signed) = crate::backend_api::presigned_file_url(&file_id, &token).await {
+                url.set(Some(signed));
+            }
+        });
+    }));
+    let current = url.read().clone();
+    current
+}
+
 /// Fetch a protected nhost file with the session token in the `Authorization`
 /// header (never the URL) and expose it as a `blob:` object URL, so the JWT never
 /// enters the DOM as an `src`/`href` attribute. Empty `file_id` yields None;
@@ -481,11 +511,17 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
         }
         let Some(token) = token.clone() else { return };
         spawn(async move {
-            // The file-blob URL is built through the one seam (backend_api), so
-            // the cutover blob-path swap is a one-line change there. The JWT
-            // rides in `?token=` (accepted by the same endpoint the img sites use).
-            let url = crate::backend_api::file_url(&file_id, &token);
-            let Ok(resp) = reqwest::Client::new().get(&url).send().await else {
+            // The file URL is built through the one seam (backend_api), so the
+            // cutover blob-path swap is a change there. The token goes in the
+            // Authorization header, which is the only place the storage service
+            // reads it — as this function's own description always claimed.
+            let url = crate::backend_api::file_url(&file_id);
+            let Ok(resp) = reqwest::Client::new()
+                .get(&url)
+                .bearer_auth(&token)
+                .send()
+                .await
+            else {
                 return;
             };
             if !resp.status().is_success() {

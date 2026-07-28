@@ -12,6 +12,32 @@ use crate::components::loader::{icon_el, visible_sorted};
 
 use super::*;
 
+/// One candidate's photo in the carousel, or the mime placeholder when there is
+/// none (or while it loads).
+///
+/// A component rather than markup inlined in the loop, because fetching the photo
+/// takes a hook and a hook cannot be called per iteration. It goes through
+/// `use_file_object_url`, which sends the session token as a header and hands
+/// back a `blob:` URL: an `<img src>` cannot send that header itself, and the
+/// storage service reads it nowhere else.
+#[component]
+fn CandidatePhoto(file_id: String, name: String) -> Element {
+    let photo = crate::components::loader::use_file_object_url(file_id);
+    rsx! {
+        if let Some(src) = photo {
+            img {
+                class: "m3-carousel-img",
+                src: "{src}",
+                alt: "{name}",
+                loading: "lazy",
+                decoding: "async",
+            }
+        } else {
+            div { class: "m3-carousel-placeholder", {icon_el("vote/candidate")} }
+        }
+    }
+}
+
 /// A candidate shown optimistically the instant it is added, before the insert is
 /// confirmed. Reconciled by `key` against the fetched candidates. It carries no
 /// photo: one is attached later, in the editor that adding a candidate opens.
@@ -30,7 +56,6 @@ struct PendingCandidate {
 #[component]
 pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     let session = use_session();
-    let token = session.read().access_token.clone();
     let is_ctx_owner = node.is_context_owner.unwrap_or(false);
     let children = visible_sorted(&node.children);
     let children = &children;
@@ -110,38 +135,20 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                         {
                             let mut full = path.clone();
                             full.push(cand.key.clone());
-                            let photo = cand
+                            let photo_id = cand
                                 .data
                                 .as_ref()
                                 .and_then(|d| d.0.get("image"))
                                 .and_then(|v| v.as_str())
                                 .filter(|s| !s.is_empty())
-                                .map(|fid| {
-                                    crate::backend_api::file_url(
-                                        fid,
-                                        &token.clone().unwrap_or_default(),
-                                    )
-                                });
+                                .unwrap_or_default()
+                                .to_string();
                             rsx! {
                                 Link {
                                     key: "{cand.id.0}",
                                     to: Route::PathPage { segments: full, app: None },
                                     class: "m3-carousel-item",
-                                    if let Some(src) = photo {
-                                        img {
-                                            class: "m3-carousel-img",
-                                            src: "{src}",
-                                            alt: "{cand.name}",
-                                            loading: "lazy",
-                                            decoding: "async",
-                                            // The src carries the nhost ?token=; keep it out of the Referer.
-                                            referrerpolicy: "no-referrer",
-                                        }
-                                    } else {
-                                        div { class: "m3-carousel-placeholder",
-                                            {icon_el("vote/candidate")}
-                                        }
-                                    }
+                                    CandidatePhoto { file_id: photo_id, name: cand.name.clone() }
                                     div { class: "m3-carousel-label", "{cand.name}" }
                                 }
                             }
