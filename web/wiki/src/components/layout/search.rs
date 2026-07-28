@@ -70,7 +70,30 @@ pub(super) fn SearchBar(
             .map(|n| n.id.0)
     }));
     let has_context = context.read().clone().flatten().is_some();
-    let mut in_context = use_signal(|| false);
+    // Start scoped to the section you are standing in: that is nearly always
+    // what you meant, and the button widens to the whole site in one click.
+    // Outside any group or event there is nothing to scope to, so this reads as
+    // site-wide anyway (`scoped` resolves to None) and the button is not shown.
+    let mut in_context = use_signal(|| true);
+
+    // The bar mounts only when search opens, so the context id above resolves
+    // AFTER the first keystrokes can land — and those would run site-wide while
+    // the button says "in section". Re-issue the query once the id arrives.
+    // Peeked, not read: this must react to the id resolving, not to the toggle
+    // (whose own handler already re-runs the search).
+    let resolved = context.read().clone().flatten();
+    use_effect(use_reactive!(|(resolved)| {
+        let Some(id) = resolved.clone() else { return };
+        if !*in_context.peek() {
+            return;
+        }
+        let value = input.peek().clone();
+        if value.is_empty() {
+            return;
+        }
+        let token = session.peek().access_token.clone();
+        search_run(value, results, seq, token, Some(id));
+    }));
 
     rsx! {
         div { class: "search-box",
