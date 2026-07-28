@@ -786,6 +786,7 @@ fn SpeakList(
                                                                 ),
                                                                 mutable: None,
                                                                 index: None,
+                                                                created_at: None,
                                                             },
                                                         )
                                                         .await

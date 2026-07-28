@@ -257,6 +257,7 @@ impl From<model::NodesInsertInput> for NodesInsertInput {
             data: m.data.map(|j| Jsonb(j.0)),
             mutable: m.mutable,
             index: m.index,
+            created_at: m.created_at.map(|t| Timestamptz(t.0)),
         }
     }
 }
@@ -871,6 +872,11 @@ pub struct NodesInsertInput {
     pub mutable: Option<bool>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub index: Option<i32>,
+    // Only a copy sets this: it carries the original's date so a pasted node
+    // keeps its age instead of surfacing as the newest thing in the folder.
+    // Left unset everywhere else, where the column default (now()) is right.
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<Timestamptz>,
 }
 
 // --- Relations (the context's "active" node, e.g. the live poll) ---
@@ -1168,6 +1174,7 @@ pub async fn create_poll(
             data: Some(model::Jsonb(data)),
             mutable: Some(true),
             index: None,
+            created_at: None,
         },
     )
     .await?
@@ -2174,6 +2181,7 @@ pub async fn create_context(
             data: None,
             mutable: Some(true),
             index: None,
+            created_at: None,
         },
     )
     .await?
@@ -2261,6 +2269,7 @@ pub async fn create_speaker_list(
             data: None,
             mutable: Some(true),
             index: None,
+            created_at: None,
         },
     )
     .await?
@@ -2299,6 +2308,10 @@ pub fn deep_copy_node(
             data: node.data.clone(),
             mutable: Some(node.mutable),
             index: Some(node.index),
+            // Keep the original's date. A copy is the same content in a new
+            // place, not new content: without this it took `now()` and sorted
+            // to the end of the folder as the newest item, dated today.
+            created_at: node.created_at.clone(),
         };
         let new_id = match insert_node(access_token.as_deref(), input).await? {
             Some(inserted) => inserted.id.0,
@@ -2727,6 +2740,7 @@ pub async fn cast_vote(
         data: Some(model::Jsonb(data)),
         mutable: None,
         index: None,
+        created_at: None,
     };
     Ok(insert_node(access_token, input).await?.is_some())
 }
@@ -3310,6 +3324,7 @@ pub async fn insert_comment(
         data: Some(model::Jsonb(serde_json::json!({ "text": text }))),
         mutable: Some(false),
         index: None,
+        created_at: None,
     };
     insert_node(access_token, input)
         .await
@@ -3395,6 +3410,7 @@ pub async fn insert_reaction(
         data: Some(model::Jsonb(serde_json::json!({ "emoji": emoji }))),
         mutable: Some(false),
         index: None,
+        created_at: None,
     };
     insert_node(access_token, input)
         .await
@@ -3464,6 +3480,7 @@ pub async fn insert_feedback(
         data: Some(model::Jsonb(data)),
         mutable: Some(false),
         index: None,
+        created_at: None,
     };
     insert_node(access_token, input).await.map(|_| ())
 }

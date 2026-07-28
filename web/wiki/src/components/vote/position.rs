@@ -276,6 +276,7 @@ fn AddCandidateButton(
                     data: None,
                     mutable: Some(true),
                     index: None,
+                    created_at: None,
                 };
                 match graphql::insert_node(token.as_deref(), input).await {
                     Ok(_) => {
@@ -400,6 +401,7 @@ pub(super) fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Elem
                     data: None,
                     mutable: Some(true),
                     index: None,
+                    created_at: None,
                 };
                 match graphql::insert_node(token.as_deref(), input).await {
                     Ok(_) => {

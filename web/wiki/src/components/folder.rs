@@ -818,6 +818,7 @@ fn FolderAdd(
                     data,
                     mutable: Some(true),
                     index: None,
+                    created_at: None,
                 };
                 match crate::graphql::insert_node(token.as_deref(), input).await {
                     Ok(_) => {

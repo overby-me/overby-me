@@ -327,6 +327,9 @@ pub struct NodesInsertInput {
     pub data: Option<Jsonb>,
     pub mutable: Option<bool>,
     pub index: Option<i32>,
+    /// Set only when copying, to carry the source's date over. Unset elsewhere,
+    /// so the column default (`now()`) applies.
+    pub created_at: Option<Timestamptz>,
 }
 
 /// Fields to update on a node.
