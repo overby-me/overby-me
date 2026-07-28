@@ -1175,6 +1175,12 @@ Assembler 154 to 155, Linker 176 to 177. What is left across the four
 print suites is fifty-four files, forty-one of them the three recorded
 blockers, three the data layout upstream supplies from a triple, two the
 ODR-uniquing ceiling that cannot move at all, and eight one-offs.
+One of those eight closed with the same rule the forty-sixth pass wrote
+and only half applied: upstream has no inline node but the two kinds
+written at every use, and a node written in place inside a *specialized
+field* was still being kept there, so `types: !{}` printed as itself
+rather than as `types: !5` with `!5 = !{}`. The reference case had been
+hoisting since that pass; the field case had not.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

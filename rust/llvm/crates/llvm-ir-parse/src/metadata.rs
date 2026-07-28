@@ -287,7 +287,16 @@ impl Parser {
             }
             Token::MetadataName(_) | Token::Exclaim => {
                 let node = self.parse_metadata_definition(context)?;
-                Ok(MdField::Inline(Box::new(node)))
+                // The same rule a reference follows: everything but the two
+                // kinds written at every use is hoisted out and numbered, so
+                // `types: !{}` becomes `types: !5` with `!5 = !{}`.
+                if prints_in_place(&node) {
+                    return Ok(MdField::Inline(Box::new(node)));
+                }
+                let id = MdId(self.next_inline_metadata);
+                self.next_inline_metadata += 1;
+                self.module.set_metadata(id, node);
+                Ok(MdField::Ref(id))
             }
             // `operands: {!0, !3}` writes the tuple with braces and no `!`.
             Token::LeftBrace => {
