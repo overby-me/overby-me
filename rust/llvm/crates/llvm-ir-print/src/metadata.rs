@@ -73,10 +73,27 @@ impl Printer<'_> {
                                 self.push(", ");
                             }
                             let _ = write!(self.out, "{key}: ");
+                            // `operands:` is written with braces and no `!`,
+                            // being the node's own operands rather than a
+                            // reference to a node that holds them.
+                            if key.as_str() == "operands"
+                                && let MdField::Inline(node) = value
+                                && let Metadata::Tuple { operands, .. } = &**node
+                            {
+                                self.push("{");
+                                for (index, operand) in operands.iter().enumerate() {
+                                    if index > 0 {
+                                        self.push(", ");
+                                    }
+                                    self.metadata_operand(operand);
+                                }
+                                self.push("}");
+                                continue;
+                            }
                             // A field that takes a word takes the number
                             // behind it too, and upstream writes the word
                             // back either way.
-                            match (vocabulary(key), value) {
+                            match (llvm_ir::metadata::vocabulary(key), value) {
                                 (Some(words), MdField::Unsigned(number)) => {
                                     match u64::try_from(*number).ok().and_then(|number| {
                                         llvm_ir::metadata::dwarf::word(words, number)
@@ -252,18 +269,3 @@ static ATTACHMENT_ORDER: &[&str] = &[
     "callsite",
     "mmra",
 ];
-
-/// The vocabulary a field takes, for the fields that take one.
-fn vocabulary(field: &str) -> Option<&'static [(u64, &'static str)]> {
-    match field {
-        "tag" => Some(llvm_ir::metadata::dwarf::TAG),
-        "encoding" => Some(llvm_ir::metadata::dwarf::ENCODING),
-        "language" => Some(llvm_ir::metadata::dwarf::LANGUAGE),
-        "emissionKind" => Some(llvm_ir::metadata::dwarf::EMISSIONKIND),
-        "nameTableKind" => Some(llvm_ir::metadata::dwarf::NAMETABLEKIND),
-        "virtuality" => Some(llvm_ir::metadata::dwarf::VIRTUALITY),
-        "cc" => Some(llvm_ir::metadata::dwarf::CC),
-        "checksumkind" => Some(llvm_ir::metadata::dwarf::CHECKSUMKIND),
-        _ => None,
-    }
-}

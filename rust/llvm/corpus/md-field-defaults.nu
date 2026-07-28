@@ -62,7 +62,7 @@ const PROBES = [
   ["DILexicalBlockFile" 'scope: !9, discriminator: 1' [[field, default]; [file 'null']]]
   ["DICommonBlock" 'scope: !9, declaration: null, name: "c"' [[field, default]; [file 'null'] [line '0']]]
   ["DIGenericSubrange" 'count: !DIExpression()' [[field, default]; [lowerBound 'null'] [upperBound 'null'] [stride 'null']]]
-  ["GenericDINode" 'tag: DW_TAG_member' [[field, default]; [tag '%tag%'] [header '""'] [operands 'null']]]
+  ["GenericDINode" 'tag: DW_TAG_member' [[field, default]; [tag '%tag%'] [header '""'] [operands '{}']]]
   ["DIMacroFile" 'file: null' [[field, default]; [line '0'] [nodes 'null']]]
 ]
 

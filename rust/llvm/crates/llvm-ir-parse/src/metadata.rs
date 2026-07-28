@@ -58,6 +58,7 @@ impl Parser {
                 };
                 let args = self.parse_specialized_args(context)?;
                 self.check_specialized(schema, &tag, distinct, &args)?;
+                let args = read_vocabulary_words(args);
                 let args = drop_defaulted_fields(schema, &tag, args);
                 let args = fill_compile_unit_defaults(&tag, args);
                 let args = upgrade_subprogram_flags(&tag, args);
@@ -160,6 +161,13 @@ impl Parser {
         value: &MdField,
     ) -> Result<(), ParseError> {
         let name = spec.name;
+        // `operands:` holds the node's own operands, written with braces, so
+        // a reference to a node that holds them is not what it takes.
+        if name == "operands"
+            && !matches!(value, MdField::Inline(node) if matches!(**node, Metadata::Tuple { .. }))
+        {
+            return self.error("expected '{' here");
+        }
         if spec.non_null && matches!(value, MdField::Null) {
             return self.error(format!("'{name}' cannot be null"));
         }
@@ -565,7 +573,7 @@ fn drop_defaulted_fields(
                 if required || llvm_ir::metadata::stored_at_zero(tag, name) {
                     return true;
                 }
-                !is_default(default, value)
+                !is_default(name, default, value)
             })
             .collect(),
     )
@@ -578,13 +586,51 @@ fn default_value(tag: &str, name: &str) -> Option<&'static str> {
         .map(|index| DEFAULTED[index].2)
 }
 
-fn is_default(default: &str, value: &MdField) -> bool {
+/// A field that takes a word, holding the number the word stands for, so
+/// that `tag: 3` and `tag: DW_TAG_entry_point` are one node rather than two.
+fn read_vocabulary_words(args: SpecializedArgs) -> SpecializedArgs {
+    let SpecializedArgs::Named(fields) = args else {
+        return args;
+    };
+    SpecializedArgs::Named(
+        fields
+            .into_iter()
+            .map(|(name, value)| {
+                let MdField::Words(words) = &value else {
+                    return (name, value);
+                };
+                // A flag set is several words joined by `|` and stands for no
+                // single number, so only a lone word is read.
+                let [word] = words.as_slice() else {
+                    return (name, value);
+                };
+                match llvm_ir::metadata::number(&name, word) {
+                    Some(number) => (name, MdField::Unsigned(u128::from(number))),
+                    None => (name, value),
+                }
+            })
+            .collect(),
+    )
+}
+
+fn is_default(name: &str, default: &str, value: &MdField) -> bool {
     // The one field whose default is not its type's zero, and the string
     // fields whose default is no text at all.
     match default {
         "true" => return matches!(value, MdField::Bool(true)),
         "empty" => return matches!(value, MdField::Str(text) if text.is_empty()),
+        // An operand list with nothing in it lists nothing, which is the
+        // same as not writing one.
+        "{}" => {
+            return matches!(value, MdField::Inline(node)
+                if matches!(&**node, Metadata::Tuple { operands, .. } if operands.is_empty()));
+        }
         _ => {}
+    }
+    // A word-valued field holds the number the word stands for by the time
+    // this runs, so its default is looked up the same way.
+    if let Some(number) = llvm_ir::metadata::number(name, default) {
+        return matches!(value, MdField::Unsigned(written) if *written == u128::from(number));
     }
     match value {
         MdField::Unsigned(0) | MdField::Signed(0) | MdField::Bool(false) => true,
@@ -592,8 +638,8 @@ fn is_default(default: &str, value: &MdField) -> bool {
         // A field that names a node names none when it is written `null`,
         // which is the same as not writing it.
         MdField::Null => true,
-        // `tag:` is the word-valued field with a default, and the word is the
-        // kind's own: three kinds have one and each has exactly one.
+        // A word the vocabulary does not have is kept as it was written,
+        // and a default spelled the same way still matches it.
         MdField::Words(words) => words == &[default],
         _ => false,
     }
@@ -733,6 +779,7 @@ static DEFAULTED: &[(&str, &str, &str)] = &[
     ),
     ("DITemplateValueParameter", "type", "null"),
     ("GenericDINode", "header", "empty"),
+    ("GenericDINode", "operands", "{}"),
 ];
 
 /// The fields upstream writes whether or not the module did. They are the

@@ -368,6 +368,30 @@ static STORED_AT_ZERO: &[(&str, &str)] = &[
     ("DIStringType", "size"),
 ];
 
+/// The words a field takes, when it takes words. A field the table does not
+/// name holds a number or something else entirely.
+pub fn vocabulary(field: &str) -> Option<&'static [(u64, &'static str)]> {
+    match field {
+        "tag" => Some(dwarf::TAG),
+        "encoding" => Some(dwarf::ENCODING),
+        "language" => Some(dwarf::LANGUAGE),
+        "emissionKind" => Some(dwarf::EMISSIONKIND),
+        "nameTableKind" => Some(dwarf::NAMETABLEKIND),
+        "virtuality" => Some(dwarf::VIRTUALITY),
+        "cc" => Some(dwarf::CC),
+        "checksumkind" => Some(dwarf::CHECKSUMKIND),
+        _ => None,
+    }
+}
+
+/// The number a word stands for, in the vocabulary a field takes.
+pub fn number(field: &str, word: &str) -> Option<u64> {
+    vocabulary(field)?
+        .iter()
+        .find(|(_, name)| *name == word)
+        .map(|(value, _)| *value)
+}
+
 /// Whether a field is one of those: written back only when it is not nought,
 /// and kept in the node either way.
 pub fn stored_at_zero(tag: &str, field: &str) -> bool {

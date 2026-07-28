@@ -1011,6 +1011,12 @@ const BROKEN: &[(&str, &str)] = &[
 
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
+    // `operands:` holds the node's own operands, written with braces, so a
+    // reference to a node that holds them is not what it takes.
+    (
+        "!named = !{!1}\n!0 = !{}\n!1 = !GenericDINode(tag: DW_TAG_entry_point, operands: !0)\n",
+        "expected '{' here",
+    ),
     // A promise about a value survives a change of precision and nothing
     // else: an integer has no NaN for the promise to be about, so upstream
     // reads no fast-math word there and reports the type it wanted.
@@ -1319,6 +1325,8 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // Written with braces it is.
+    "!named = !{!1}\n!0 = !{}\n!1 = !GenericDINode(tag: DW_TAG_entry_point, operands: {!0})\n",
     // The two casts that change nothing but precision take them.
     "define double @f(float %x) {\nentry:\n  %r = fpext nnan ninf float %x to double\n  ret double %r\n}\n",
     "define half @f(float %x) {\nentry:\n  %r = fptrunc reassoc float %x to half\n  ret half %r\n}\n",

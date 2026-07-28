@@ -1413,7 +1413,24 @@ rule an alias aliasee has had since the fifty-second pass.
 Two more were measured and are not ours. `opt -S` drops a ThinLTO summary
 index that `llvm-as | llvm-dis` keeps, which is two files on the wrong
 side of the ceiling for the same reason ODR uniquing is.
-Assembler 171 to 184, Feature 61 to 65, Linker 200 to 201, Other 133 to
+Four more, and the last of them was a spelling the model had kept apart.
+A field that takes a word takes the number behind it, and the two were
+stored differently, so `!GenericDINode(tag: 3)` and the same node written
+`tag: DW_TAG_entry_point` were two nodes here and are one upstream. The
+word is read into its number now, next to where a defaulted field is
+dropped, which is the same reason the field sort moved there in the
+eightieth pass: uniquing compares what is stored. The verifier's two tag
+checks read through the vocabulary rather than matching the word.
+A scalable vector has no lane count to write out, so a splat of a symbol
+is written as the construction that makes one: the value in the first
+lane and a shuffle across the rest. A splat of data stays the shorthand.
+And `operands:` holds the node's own operands, written with braces and no
+leading `!`, which is a print rule and a refusal both: `operands: !0`
+names a node that holds them and upstream wants the braces. An operand
+list with nothing in it lists nothing, so it drops the way any other
+defaulted field does, which the derivation script now records rather than
+reporting the probe as refused.
+Assembler 171 to 186, Feature 61 to 65, Linker 200 to 201, Other 133 to
 135.
 Acceptance: both numbers up again, recorded in the same commit.
 

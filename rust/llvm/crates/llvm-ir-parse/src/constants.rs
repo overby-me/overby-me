@@ -192,6 +192,37 @@ impl Parser {
         widened
     }
 
+    /// A scalable vector every lane of which holds one value, written the
+    /// way upstream writes one: the value put in the first lane and shuffled
+    /// across every other.
+    fn built_splat(&mut self, ty: TypeId, element: ConstId, count: u64) -> ConstId {
+        let poison = self.module.ctx.intern_constant(Constant::Poison(ty));
+        let index = self.module.ctx.const_int_of(64, 0);
+        let inserted = self
+            .module
+            .ctx
+            .intern_constant(Constant::Expression(Box::new(ConstExpr::InsertElement {
+                vector: poison,
+                element,
+                index,
+                ty,
+            })));
+        let i32_type = self.module.ctx.int_type(32);
+        let mask_type = self.module.ctx.vector_type(i32_type, count, true);
+        let mask = self
+            .module
+            .ctx
+            .intern_constant(Constant::ZeroInitializer(mask_type));
+        self.module
+            .ctx
+            .intern_constant(Constant::Expression(Box::new(ConstExpr::ShuffleVector {
+                first: inserted,
+                second: poison,
+                mask,
+                ty,
+            })))
+    }
+
     /// A struct field named lane by lane, as the one field it names. Every
     /// lane picks the same field or the walk has no type at the end of it,
     /// so upstream writes the scalar whatever the module wrote.
@@ -456,18 +487,23 @@ impl Parser {
             // module spelled it. Reading the shorthand and printing the long
             // form is what upstream does with one.
             if let TypeKind::Vector {
-                count,
-                scalable: false,
-                ..
-            } = self.module.ctx.type_kind(ty).clone()
+                count, scalable, ..
+            } = *self.module.ctx.type_kind(ty)
                 && !matches!(
                     self.module.ctx.constant(element),
                     Constant::Integer { .. } | Constant::Float { .. }
                 )
-                && let Ok(width) = usize::try_from(count)
             {
-                let lanes = vec![element; width];
-                return Ok(Some(self.fold_aggregate(ty, &lanes, true)));
+                // A scalable vector has no lane count to write out, so
+                // upstream writes the construction that makes one instead:
+                // put the value in the first lane and shuffle it across.
+                if scalable {
+                    return Ok(Some(self.built_splat(ty, element, count)));
+                }
+                if let Ok(width) = usize::try_from(count) {
+                    let lanes = vec![element; width];
+                    return Ok(Some(self.fold_aggregate(ty, &lanes, true)));
+                }
             }
             return Ok(Some(
                 self.module

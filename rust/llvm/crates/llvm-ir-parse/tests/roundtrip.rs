@@ -371,6 +371,24 @@ fn attachments_are_numbered_in_the_order_they_print() {
     );
 }
 
+/// A tag written as the number its word stands for is the same tag, so two
+/// nodes that spell it differently are one node.
+#[test]
+fn a_tag_is_the_number_its_word_stands_for() {
+    let text = "!named = !{!0, !1, !2}\n!0 = !GenericDINode(tag: 3)\n!1 = !GenericDINode(tag: DW_TAG_entry_point)\n!2 = !GenericDINode(tag: DW_TAG_entry_point, operands: {})\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("!named = !{!0, !0, !0}"),
+        "all three should have uniqued\n--- printed ---\n{printed}"
+    );
+    assert!(
+        printed.contains("!0 = !GenericDINode(tag: DW_TAG_entry_point)"),
+        "the word is what prints\n--- printed ---\n{printed}"
+    );
+}
+
 /// A comdat is a group for symbols to join, so one nothing joins is not
 /// written back and one a symbol joins is.
 #[test]
@@ -531,6 +549,23 @@ fn an_attribute_set_is_written_in_upstreams_order() {
 }
 
 const PRINTED: &[(&str, &str)] = &[
+    // A scalable vector has no lane count to write out, so a splat of a
+    // symbol is written as the construction that makes one.
+    (
+        "@g = external global i32\n\ndefine <vscale x 4 x ptr> @f() {\nentry:\n  ret <vscale x 4 x ptr> splat (ptr @g)\n}\n",
+        "  ret <vscale x 4 x ptr> shufflevector (<vscale x 4 x ptr> insertelement (<vscale x 4 x ptr> poison, ptr @g, i64 0), <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer)",
+    ),
+    // A splat of data stays the shorthand, scalable or not.
+    (
+        "define <vscale x 4 x i32> @f() {\nentry:\n  ret <vscale x 4 x i32> splat (i32 7)\n}\n",
+        "  ret <vscale x 4 x i32> splat (i32 7)",
+    ),
+    // `operands:` holds the node's own operands, written with braces and no
+    // leading `!`.
+    (
+        "!named = !{!1}\n!0 = !{}\n!1 = !GenericDINode(tag: DW_TAG_entry_point, header: \"h\", operands: {!0, !0})\n",
+        "!0 = !GenericDINode(tag: DW_TAG_entry_point, header: \"h\", operands: {!1, !1})",
+    ),
     // A constant expression resolver writes what it produces itself, the way
     // an alias aliasee does.
     (

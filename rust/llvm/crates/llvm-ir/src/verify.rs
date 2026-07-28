@@ -3785,14 +3785,8 @@ impl Verifier<'_> {
             self.report("!DIGenericSubrange has no stride");
         }
         if tag == "DICompositeType" {
-            let array = matches!(
-                field_of(fields, "tag"),
-                Some(MdField::Words(words)) if words.iter().any(|w| w == "DW_TAG_array_type")
-            );
-            let variant_part = matches!(
-                field_of(fields, "tag"),
-                Some(MdField::Words(words)) if words.iter().any(|w| w == "DW_TAG_variant_part")
-            );
+            let array = tag_is(fields, &["DW_TAG_array_type"]);
+            let variant_part = tag_is(fields, &["DW_TAG_variant_part"]);
             // These four describe an array's shape, and a discriminator picks
             // between the arms of a variant.
             for shape in ["rank", "allocated", "associated", "dataLocation"] {
@@ -3851,15 +3845,13 @@ impl Verifier<'_> {
         if tag == "DIDerivedType" && field_of(fields, "dwarfAddressSpace").is_some() {
             // The address space says where a pointer points. A typedef or a
             // qualifier has nowhere to put it.
-            let pointer = matches!(
-                field_of(fields, "tag"),
-                Some(MdField::Words(words))
-                    if words.iter().any(|word| matches!(
-                        word.as_str(),
-                        "DW_TAG_pointer_type"
-                            | "DW_TAG_reference_type"
-                            | "DW_TAG_rvalue_reference_type"
-                    ))
+            let pointer = tag_is(
+                fields,
+                &[
+                    "DW_TAG_pointer_type",
+                    "DW_TAG_reference_type",
+                    "DW_TAG_rvalue_reference_type",
+                ],
             );
             if !pointer {
                 self.report("DWARF address space only applies to pointer or reference types");
@@ -4953,6 +4945,20 @@ fn describe_attribute(attribute: &Attribute) -> String {
         Attribute::Range { .. } => "range".to_string(),
         Attribute::Structured { kind, .. } => kind.keyword().to_string(),
         Attribute::String { key, .. } => format!("\"{key}\""),
+    }
+}
+
+/// Whether a node's tag is one of these, whichever way the module wrote it.
+/// A tag is read into the number its word stands for, so both spellings
+/// arrive here as that number.
+fn tag_is(fields: &[(String, MdField)], wanted: &[&str]) -> bool {
+    match field_of(fields, "tag") {
+        Some(MdField::Unsigned(number)) => wanted.iter().any(|word| {
+            crate::metadata::number("tag", word).is_some_and(|value| u128::from(value) == *number)
+        }),
+        // A word outside the vocabulary is kept as it was written.
+        Some(MdField::Words(words)) => words.iter().any(|word| wanted.contains(&word.as_str())),
+        _ => false,
     }
 }
 
