@@ -628,10 +628,25 @@ fn copy_root_password_from_host(settings: &mut Settings) {
     if settings.root_password.is_some() {
         return;
     }
-    if let Some(hash) = read_root_password_hash("/etc/shadow") {
-        settings.root_password = Some(hash);
+    // Copy the field VERBATIM, including a locked or empty one.
+    // read_root_password_hash() deliberately skips those, which is right when
+    // asking "does root have a usable password", but wrong here: a copy that
+    // silently drops a locked password leaves the account to be filled in with
+    // something else, and the test diffs the copied field against the host's.
+    if let Some(field) = read_root_password_field_raw("/etc/shadow") {
+        settings.root_password = Some(field);
         settings.root_password_hashed = Some(true);
     }
+}
+
+/// The root password field from a shadow file exactly as written, with no
+/// judgement about whether it is a usable hash.
+fn read_root_password_field_raw(path: &str) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    content.lines().find_map(|line| {
+        let fields: Vec<&str> = line.split(':').collect();
+        (fields.len() >= 2 && fields[0] == "root").then(|| fields[1].to_string())
+    })
 }
 
 fn copy_root_shell_from_host(settings: &mut Settings) {
@@ -1562,6 +1577,13 @@ fn run(argv: &[String]) -> Result<(), String> {
 
     if (args.prompt || args.prompt_locale) && settings.locale.is_none() {
         settings.locale = prompt_value("System locale (LANG)", Some("C.UTF-8"));
+    }
+
+    // Upstream asks for LC_MESSAGES straight after LANG, so --prompt-locale
+    // consumes TWO answers, not one. Only asking for LANG left the second line
+    // of input unread and LC_MESSAGES unset.
+    if (args.prompt || args.prompt_locale) && settings.locale_messages.is_none() {
+        settings.locale_messages = prompt_value("System message locale (LC_MESSAGES)", None);
     }
 
     if (args.prompt || args.prompt_keymap) && settings.keymap.is_none() {
