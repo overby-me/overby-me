@@ -350,16 +350,19 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
     // The existing cover thumbnail, resolved once on mount.
     let existing_image_url =
         super::loader::use_file_object_url(initial_image.clone().unwrap_or_default());
-    // A fresh upload is not covered by that hook (it does not re-fetch), so preview
-    // it from its tokenised file URL instead of only naming the file.
-    let uploaded_image_url = if image_name.read().is_empty() {
-        None
-    } else {
-        image_id.read().clone().map(|fid| {
-            let token = session.read().access_token.clone().unwrap_or_default();
-            crate::backend_api::file_url(&fid, &token)
-        })
-    };
+    // Preview of a freshly picked image, built from the bytes already in hand as a
+    // local blob rather than fetched back from storage.
+    //
+    // It paints immediately, with no round trip, and it does not depend on the
+    // uploaded file being readable before it is attached to a node — which it is
+    // not: storage.files is now readable only through the node that references it,
+    // and until this editor saves, nothing references this upload.
+    let mut picked_preview = use_signal(|| None::<String>);
+    use_drop(move || {
+        if let Some(url) = picked_preview.peek().clone() {
+            let _ = web_sys::Url::revoke_object_url(&url);
+        }
+    });
 
     // Toolbar active state (reflects the caret).
     let st_bold = use_signal(|| false);
@@ -645,6 +648,22 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
         spawn(async move {
             match fd.read_bytes().await {
                 Ok(bytes) => {
+                    // Show it before the upload even starts: the bytes are here.
+                    // Bind before writing: a peek() guard held across the write
+                    // would still be alive inside an `if let` body and panic.
+                    let previous = picked_preview.peek().clone();
+                    if let Some(old) = previous {
+                        let _ = web_sys::Url::revoke_object_url(&old);
+                        picked_preview.set(None);
+                    }
+                    let arr = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+                    arr.copy_from(&bytes);
+                    let parts = js_sys::Array::of1(&arr);
+                    if let Ok(blob) = web_sys::Blob::new_with_u8_array_sequence(parts.as_ref()) {
+                        if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
+                            picked_preview.set(Some(url));
+                        }
+                    }
                     match crate::nhost::upload_file(token.as_deref(), bytes.to_vec(), &name, &ctype)
                         .await
                     {
@@ -771,7 +790,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                             // A fresh upload: the picture itself, click-to-zoom, with
                             // its file name written over the base of it.
                             div {
-                                if let Some(src) = uploaded_image_url.clone() {
+                                if let Some(src) = picked_preview.read().clone() {
                                     div { class: "upload-preview",
                                         super::widgets::ZoomableImage {
                                             src,
@@ -791,6 +810,13 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                                     onclick: move |_| {
                                         image_id.set(None);
                                         image_name.set(String::new());
+                                        // Let go of the blob too, or it is held
+                                        // until the editor unmounts.
+                                        let previous = picked_preview.peek().clone();
+                                        if let Some(url) = previous {
+                                            let _ = web_sys::Url::revoke_object_url(&url);
+                                            picked_preview.set(None);
+                                        }
                                         dirty.set(true);
                                         set_editor_dirty(true);
                                     },
