@@ -41,21 +41,31 @@ fn auth_error_message(err: &nhost::NhostError) -> String {
     }
 }
 
-/// Clear the OTHER field's error when it is the shared "wrong email or password"
-/// one.
+/// Whether a failure is about the password rather than the address, so its
+/// message lands under the box it is actually about. Everything else a sign-up
+/// or a reset rejects is about the address.
+fn is_password_error(err: &nhost::NhostError) -> bool {
+    matches!(
+        err.error.as_deref(),
+        Some("password-too-short") | Some("password-in-hibp")
+    )
+}
+
+/// Clear the OTHER field's error when it holds `shared`, the message a PAIRED
+/// failure put on both boxes.
 ///
-/// A rejected sign-in cannot tell which of the pair was wrong, so it marks both
-/// boxes with the same message. Editing either one is an answer to that, so the
-/// twin has to come out of its error state as well: on its own it kept claiming
-/// the credentials were wrong while the user was busy correcting them.
+/// Two failures here blame a pair rather than a field: a rejected sign-in, which
+/// cannot say which of email and password was wrong, and a mismatch, which is
+/// the two password boxes disagreeing. Either way editing one box answers the
+/// complaint, so the twin has to leave its error state too. On its own it went
+/// on claiming the pair was wrong while the user was busy correcting it.
 ///
-/// Matching on the message keeps this to the paired case. A field's own
-/// validation error (missing, invalid, mismatch) is a different string and is
-/// left for that field to clear.
-fn clear_paired_error(mut other: Signal<String>) {
+/// Matching on the message keeps this to the paired case: a field's own
+/// validation error is a different string and stays that field's to clear.
+fn clear_paired_error(mut other: Signal<String>, shared: &str) {
     // Compare first, then write: the read guard would still be alive inside an
     // `if *other.read() == ...` body and the write would panic on the borrow.
-    let is_paired = *other.read() == t("auth.wrongCredentials");
+    let is_paired = *other.read() == shared;
     if is_paired {
         other.set(String::new());
     }
@@ -177,6 +187,9 @@ fn AuthForm(mode: AuthMode) -> Element {
                         return;
                     }
                     if pw2.is_empty() || pw != pw2 {
+                        // The two boxes disagree, so neither is the wrong one:
+                        // both carry it, and editing either clears both.
+                        error_password.set(t("auth.passwordMismatch"));
                         error_password_repeat.set(t("auth.passwordMismatch"));
                         loading.set(false);
                         return;
@@ -185,7 +198,16 @@ fn AuthForm(mode: AuthMode) -> Element {
                         Ok(()) => {
                             nav.push(Route::Unverified {});
                         }
-                        Err(err) => error_email.set(auth_error_message(&err)),
+                        Err(err) => {
+                            // Under the box it is about: a rejected password
+                            // is not a complaint about the address.
+                            let msg = auth_error_message(&err);
+                            if is_password_error(&err) {
+                                error_password.set(msg);
+                            } else {
+                                error_email.set(msg);
+                            }
+                        }
                     }
                 }
                 AuthMode::ResetPassword => {
@@ -199,6 +221,8 @@ fn AuthForm(mode: AuthMode) -> Element {
                         Ok(()) => {
                             nav.push(Route::SetPassword {});
                         }
+                        // This screen is the address alone: it renders no password
+                        // box for a message to land under.
                         Err(err) => error_email.set(auth_error_message(&err)),
                     }
                 }
@@ -211,6 +235,9 @@ fn AuthForm(mode: AuthMode) -> Element {
                         return;
                     }
                     if pw2.is_empty() || pw != pw2 {
+                        // The two boxes disagree, so neither is the wrong one:
+                        // both carry it, and editing either clears both.
+                        error_password.set(t("auth.passwordMismatch"));
                         error_password_repeat.set(t("auth.passwordMismatch"));
                         loading.set(false);
                         return;
@@ -281,7 +308,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                                     error_email.set(String::new());
                                 }
                                 // A wrong sign-in marked the password too.
-                                clear_paired_error(error_password);
+                                clear_paired_error(error_password, &t("auth.wrongCredentials"));
                             },
                         }
                         if !error_email.read().is_empty() {
@@ -334,7 +361,13 @@ fn AuthForm(mode: AuthMode) -> Element {
                                 // ...and the email, unless its error is its own
                                 // (an unverified account keeps its message and
                                 // the resend button that goes with it).
-                                clear_paired_error(error_email);
+                                clear_paired_error(error_email, &t("auth.wrongCredentials"));
+                                // ...and the repeat box, which a mismatch marked
+                                // alongside this one.
+                                clear_paired_error(
+                                    error_password_repeat,
+                                    &t("auth.passwordMismatch"),
+                                );
                             },
                         }
                         if !error_password.read().is_empty() {
@@ -355,6 +388,8 @@ fn AuthForm(mode: AuthMode) -> Element {
                             oninput: move |evt| {
                                 password_repeat.set(evt.value());
                                 error_password_repeat.set(String::new());
+                                // A mismatch marked the first box as well.
+                                clear_paired_error(error_password, &t("auth.passwordMismatch"));
                             },
                         }
                         if !error_password_repeat.read().is_empty() {
