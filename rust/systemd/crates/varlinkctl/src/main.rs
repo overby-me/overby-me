@@ -19,7 +19,26 @@ fn main() -> ExitCode {
     for a in &args[1..] {
         match a.as_str() {
             "--more" | "-m" | "-E" => more = true,
-            "--json=short" | "--json=pretty" | "-J" | "-j" => {} // accepted, no-op formatting hints
+            // Accepted, no-op formatting hints. `--json=off` is upstream's
+            // "human readable" mode, which is what this tool already prints.
+            "--json=short" | "--json=pretty" | "--json=off" | "-J" | "-j" => {}
+            // No pager is implemented, so --no-pager is always already true.
+            "--no-pager" => {}
+            "--help" | "-h" => {
+                print_help();
+                return ExitCode::SUCCESS;
+            }
+            "--version" => {
+                println!("systemd {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
+            // Upstream lists the accepted --json= modes rather than erroring.
+            "--json=help" => {
+                println!("off");
+                println!("pretty");
+                println!("short");
+                return ExitCode::SUCCESS;
+            }
             _ => rest.push(a.clone()),
         }
     }
@@ -29,6 +48,10 @@ fn main() -> ExitCode {
     }
 
     match rest[0].as_str() {
+        "help" => {
+            print_help();
+            ExitCode::SUCCESS
+        }
         "call" => cmd_call(&rest[1..], more),
         "introspect" => cmd_introspect(&rest[1..]),
         "info" => cmd_info(&rest[1..]),
@@ -39,6 +62,28 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Usage text for `varlinkctl --help` and `varlinkctl help`.
+fn print_help() {
+    println!("varlinkctl [OPTIONS...] COMMAND ...");
+    println!();
+    println!("Introspect and invoke Varlink services.");
+    println!();
+    println!("Commands:");
+    println!("  info ADDRESS               Show service information");
+    println!("  list-interfaces ADDRESS    List interfaces the service implements");
+    println!("  list-methods ADDRESS [IFACE]  List methods of an interface");
+    println!("  introspect ADDRESS [IFACE] Show the interface definition");
+    println!("  call ADDRESS METHOD [PARAMS]  Invoke a method");
+    println!("  help                       Show this help");
+    println!();
+    println!("Options:");
+    println!("  -h --help                  Show this help");
+    println!("     --version               Show package version");
+    println!("  -m --more                  Request multiple replies");
+    println!("  -j --json=MODE             JSON output: off, pretty, short, help");
+    println!("     --no-pager              Do not pipe output into a pager");
 }
 
 /// varlinkctl info <target> — print the service's org.varlink.service GetInfo.
@@ -165,6 +210,24 @@ fn cmd_list_interfaces(args: &[String]) -> ExitCode {
     }
 }
 
+/// Resolve an address to a path plus, where the caller was explicit, which
+/// kind of target it is.
+///
+/// Upstream accepts `unix:PATH` for a socket and `exec:PATH` for a server to
+/// spawn, as well as a bare path that is classified by stat(). Without
+/// stripping the prefix the whole string was treated as a path, so
+/// `unix:/run/systemd/journal/io.systemd.journal` was handed to exec and died
+/// with ENOENT.
+fn resolve_target(target: &str) -> (String, Option<bool>) {
+    if let Some(p) = target.strip_prefix("unix:") {
+        (p.to_string(), Some(true))
+    } else if let Some(p) = target.strip_prefix("exec:") {
+        (p.to_string(), Some(false))
+    } else {
+        (target.to_string(), None)
+    }
+}
+
 /// Send a request to a varlink target. The target is either a socket path
 /// (connect to it) or an executable (exec it as a varlink server on fd 3, the
 /// systemd socket-activation convention).
@@ -172,9 +235,13 @@ fn varlink_request(
     target: &str,
     request: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let is_socket = std::fs::metadata(target)
-        .map(|m| m.file_type().is_socket())
-        .unwrap_or(false);
+    let (resolved, forced_socket) = resolve_target(target);
+    let target = resolved.as_str();
+    let is_socket = forced_socket.unwrap_or_else(|| {
+        std::fs::metadata(target)
+            .map(|m| m.file_type().is_socket())
+            .unwrap_or(false)
+    });
 
     if is_socket {
         let stream = UnixStream::connect(target)
@@ -369,9 +436,13 @@ fn cmd_call(args: &[String], more_leading: bool) -> ExitCode {
 /// indefinitely (no read timeout) until the server sends a final reply or we
 /// are terminated.
 fn varlink_call_more(target: &str, request: &serde_json::Value) -> Result<ExitCode, String> {
-    let is_socket = std::fs::metadata(target)
-        .map(|m| m.file_type().is_socket())
-        .unwrap_or(false);
+    let (resolved, forced_socket) = resolve_target(target);
+    let target = resolved.as_str();
+    let is_socket = forced_socket.unwrap_or_else(|| {
+        std::fs::metadata(target)
+            .map(|m| m.file_type().is_socket())
+            .unwrap_or(false)
+    });
 
     if is_socket {
         let stream =
