@@ -83,10 +83,36 @@ pub struct NhostUser {
     pub avatar_url: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct NhostSignInResponse {
-    pub session: Option<AuthSession>,
-    pub error: Option<NhostError>,
+/// The error carried by an auth response, in whichever of the two shapes the
+/// service used.
+///
+/// Hasura Auth reports a failure FLAT: `{"status":409,"error":"email-already-in
+/// -use","message":"Email already in use"}`. Sign-in and sign-up instead read it
+/// as a nested `{"error":{...}}`, so every code they were matching on
+/// (`email-already-in-use`, `unverified-user`) arrived as "unknown" or as a
+/// serde parse failure, and the screen fell back to its catch-all: a wrong
+/// password and an address already registered read the same. The three other
+/// endpoints here already parse the flat form, which is what the service sends.
+///
+/// Both are accepted, so this cannot break whichever one any endpoint returns.
+fn error_from_body(body: &serde_json::Value) -> Option<NhostError> {
+    match body.get("error") {
+        // Nested: {"error": {"status": …, "error": "…", "message": "…"}}
+        Some(nested) if nested.is_object() => serde_json::from_value(nested.clone()).ok(),
+        // Flat: the code sits directly under `error`, its detail alongside.
+        Some(serde_json::Value::String(code)) => Some(NhostError {
+            status: body
+                .get("status")
+                .and_then(|s| s.as_u64())
+                .map(|s| s as u16),
+            error: Some(code.clone()),
+            message: body
+                .get("message")
+                .and_then(|m| m.as_str())
+                .map(str::to_string),
+        }),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -124,17 +150,18 @@ pub async fn sign_in(email: &str, password: &str) -> Result<AuthSession, NhostEr
             message: Some(e.to_string()),
         })?;
 
-    let body: NhostSignInResponse = resp.json().await.map_err(|e| NhostError {
+    let body: serde_json::Value = resp.json().await.map_err(|e| NhostError {
         status: None,
         error: Some("parse_error".to_string()),
         message: Some(e.to_string()),
     })?;
 
-    if let Some(err) = body.error {
+    if let Some(err) = error_from_body(&body) {
         return Err(err);
     }
 
-    body.session.ok_or(NhostError {
+    let session = body.get("session").cloned().unwrap_or_default();
+    serde_json::from_value::<AuthSession>(session).map_err(|_| NhostError {
         status: None,
         error: Some("no_session".to_string()),
         message: Some("No session returned".to_string()),
@@ -166,14 +193,16 @@ pub async fn sign_up(email: &str, password: &str, display_name: &str) -> Result<
         message: Some(e.to_string()),
     })?;
 
-    if let Some(error) = body.get("error") {
-        return Err(
-            serde_json::from_value::<NhostError>(error.clone()).unwrap_or(NhostError {
-                status: None,
-                error: Some("unknown".to_string()),
-                message: Some("Registration failed".to_string()),
-            }),
-        );
+    if let Some(err) = error_from_body(&body) {
+        return Err(err);
+    }
+    // An `error` key in a shape neither reader understands still means failure.
+    if body.get("error").is_some() {
+        return Err(NhostError {
+            status: None,
+            error: Some("unknown".to_string()),
+            message: Some("Registration failed".to_string()),
+        });
     }
 
     Ok(())
@@ -399,4 +428,51 @@ pub async fn upload_file(
         error: Some("no_file".to_string()),
         message: Some("Upload returned no file".to_string()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hasura Auth reports failures flat. Reading them as a nested object left
+    /// sign-in and sign-up unable to see the code they matched on, so an address
+    /// already in use and an unverified account both fell through to the screen's
+    /// catch-all instead of their own message.
+    #[test]
+    fn flat_auth_error_is_read() {
+        let body = serde_json::json!({
+            "status": 409,
+            "message": "Email already in use",
+            "error": "email-already-in-use",
+        });
+        let err = error_from_body(&body).expect("flat error should be read");
+        assert_eq!(err.error.as_deref(), Some("email-already-in-use"));
+        assert_eq!(err.message.as_deref(), Some("Email already in use"));
+        assert_eq!(err.status, Some(409));
+    }
+
+    /// The nested shape the client originally assumed still parses, so accepting
+    /// the flat one cannot regress an endpoint that answers this way.
+    #[test]
+    fn nested_auth_error_is_read() {
+        let body = serde_json::json!({
+            "error": { "status": 401, "message": "Incorrect email or password",
+                       "error": "invalid-email-password" },
+        });
+        let err = error_from_body(&body).expect("nested error should be read");
+        assert_eq!(err.error.as_deref(), Some("invalid-email-password"));
+        assert_eq!(err.status, Some(401));
+    }
+
+    /// A successful sign-in carries a session and no error: it must not be
+    /// mistaken for a failure.
+    #[test]
+    fn success_body_has_no_error() {
+        let body = serde_json::json!({
+            "session": { "accessToken": "t", "refreshToken": "r" },
+            "mfa": null,
+        });
+        assert!(error_from_body(&body).is_none());
+        assert!(error_from_body(&serde_json::json!({ "error": null })).is_none());
+    }
 }
