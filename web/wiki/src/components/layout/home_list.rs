@@ -109,6 +109,12 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
     let invited_groups = invited_by_mime("wiki/group");
     let invited_events = invited_by_mime("wiki/event");
 
+    // The groups a new event may be placed under (see NewContextButton).
+    let group_choices: Vec<model::ContextNodeFields> = match &state {
+        Some(Ok((groups, _, _))) => groups.clone(),
+        _ => Vec::new(),
+    };
+
     // The two section bodies (shared between the drawer's bare list and the home's
     // two-card layout).
     let groups_body = rsx! {
@@ -258,7 +264,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                     h3 { class: "title-large", "{t(\"layout.events\")}" }
                     if can_event {
                         div { class: "flex-grow" }
-                        NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
+                        NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone(), groups: group_choices.clone() }
                     }
                 }
                 div { class: "home-section-body", {events_body} }
@@ -279,7 +285,7 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                     div { class: "avatar small", span { class: "material-icons", "event" } }
                     h4 { class: "title-medium", "{t(\"layout.events\")}" }
                     if can_event {
-                        NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone() }
+                        NewContextButton { mime: "wiki/event".to_string(), root_id: rid.clone(), root_context_id: rctx.clone(), groups: group_choices.clone() }
                     }
                 }
                 {events_body}
@@ -291,10 +297,20 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
 /// A per-list "add group" / "add event" action, rendered in a list header for
 /// the root owner (the caller gates on the root's `inserts`). It opens a name
 /// dialog and drives [`graphql::create_context`], which creates the node under
-/// the root, makes it its own context, and seeds the permission template — so the
-/// new group/event is usable immediately. On success it jumps into it.
+/// the chosen parent, makes it its own context, and seeds the permission
+/// template — so the new group/event is usable immediately. On success it jumps
+/// into it.
+///
+/// An event may be placed inside one of the user's groups instead of at the top
+/// level; `groups` carries the choices (empty for the group button, which always
+/// creates at the top level).
 #[component]
-fn NewContextButton(mime: String, root_id: String, root_context_id: String) -> Element {
+fn NewContextButton(
+    mime: String,
+    root_id: String,
+    root_context_id: String,
+    #[props(default = Vec::new())] groups: Vec<model::ContextNodeFields>,
+) -> Element {
     let session = use_session();
     let nav = use_navigator();
     let is_group = mime == "wiki/group";
@@ -308,51 +324,69 @@ fn NewContextButton(mime: String, root_id: String, root_context_id: String) -> E
     let mut name = use_signal(String::new);
     let mut error = use_signal(String::new);
     let mut busy = use_signal(|| false);
+    // The group to create the event under; empty means the top level (the root).
+    let mut parent = use_signal(String::new);
 
-    let submit = move |_| {
-        let title = name.read().trim().to_string();
-        if title.is_empty() || *busy.read() {
-            return;
-        }
-        let key = crate::components::loader::slugify(&title);
-        let mime = mime.clone();
-        let root_id = root_id.clone();
-        let root_context_id = root_context_id.clone();
-        let token = session.read().access_token.clone();
-        // The creator becomes the new context's first owner member, so the
-        // owner-only surfaces (members, console) show for them right away.
-        let creator = session.read().user.clone();
-        busy.set(true);
-        error.set(String::new());
-        spawn(async move {
-            match graphql::create_context(
-                token.as_deref(),
-                &root_id,
-                &root_context_id,
-                &mime,
-                &title,
-                &key,
-                creator.as_ref(),
-            )
-            .await
-            {
-                Ok(inserted) => {
-                    crate::session::bump_data_version();
-                    busy.set(false);
-                    open.set(false);
-                    name.set(String::new());
-                    nav.push(Route::PathPage {
-                        segments: vec![inserted.key],
-                        app: None,
-                    });
-                }
-                Err(e) => {
-                    busy.set(false);
-                    log::error!("create context failed: {e}");
-                    error.set(t("layout.createFailed"));
-                }
+    let submit = {
+        let groups = groups.clone();
+        move |_| {
+            let title = name.read().trim().to_string();
+            if title.is_empty() || *busy.read() {
+                return;
             }
-        });
+            let key = crate::components::loader::slugify(&title);
+            let mime = mime.clone();
+            // A group is its own context (create_context locks it that way), so the
+            // chosen group serves as both parent and context. An unknown or empty
+            // selection falls back to the root rather than guessing.
+            let chosen = parent.read().clone();
+            let chosen = groups.iter().find(|g| g.id.0 == chosen);
+            let (root_id, root_context_id) = match chosen {
+                Some(g) => (g.id.0.clone(), g.id.0.clone()),
+                None => (root_id.clone(), root_context_id.clone()),
+            };
+            // The new node sits under the group it was placed in, so its path is
+            // prefixed by that group's key — navigating to the bare key would 404.
+            let parent_segments: Vec<String> =
+                chosen.map(|g| vec![g.key.clone()]).unwrap_or_default();
+            let token = session.read().access_token.clone();
+            // The creator becomes the new context's first owner member, so the
+            // owner-only surfaces (members, console) show for them right away.
+            let creator = session.read().user.clone();
+            busy.set(true);
+            error.set(String::new());
+            spawn(async move {
+                match graphql::create_context(
+                    token.as_deref(),
+                    &root_id,
+                    &root_context_id,
+                    &mime,
+                    &title,
+                    &key,
+                    creator.as_ref(),
+                )
+                .await
+                {
+                    Ok(inserted) => {
+                        crate::session::bump_data_version();
+                        busy.set(false);
+                        open.set(false);
+                        name.set(String::new());
+                        let mut segments = parent_segments;
+                        segments.push(inserted.key);
+                        nav.push(Route::PathPage {
+                            segments,
+                            app: None,
+                        });
+                    }
+                    Err(e) => {
+                        busy.set(false);
+                        log::error!("create context failed: {e}");
+                        error.set(t("layout.createFailed"));
+                    }
+                }
+            });
+        }
     };
 
     rsx! {
@@ -388,6 +422,22 @@ fn NewContextButton(mime: String, root_id: String, root_context_id: String) -> E
                     maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
                     value: "{name}",
                     oninput: move |e| name.set(e.value()),
+                }
+            }
+            // Where the event goes. Only for events, and only when there is a
+            // group to choose — otherwise the top level is the only answer and a
+            // one-option select is just noise.
+            if !is_group && !groups.is_empty() {
+                div { class: "text-field mt-2",
+                    label { "{t(\"layout.parentGroup\")}" }
+                    select {
+                        value: "{parent}",
+                        onchange: move |e| parent.set(e.value()),
+                        option { value: "", "{t(\"layout.topLevel\")}" }
+                        for g in groups.iter() {
+                            option { key: "{g.id.0}", value: "{g.id.0}", "{g.name}" }
+                        }
+                    }
                 }
             }
             if !error.read().is_empty() {
