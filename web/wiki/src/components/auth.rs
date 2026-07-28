@@ -13,6 +13,34 @@ enum AuthMode {
     SetPassword,
 }
 
+/// A localized message for an auth failure.
+///
+/// The service answers in English with a machine code beside it. The CODE is
+/// what carries the meaning, so translate that and never show the service's own
+/// sentence: an unmapped one used to reach the screen verbatim, which is how a
+/// Danish user got "Password is too short" under a Danish label.
+///
+/// An unmapped code shows the app's generic failure line and logs the original,
+/// so the wording stays localized and the detail is still recoverable.
+fn auth_error_message(err: &nhost::NhostError) -> String {
+    match err.error.as_deref() {
+        Some("invalid-email") => t("auth.invalidEmail"),
+        Some("email-already-in-use") => t("auth.emailAlreadyInUse"),
+        Some("unverified-user") => t("auth.emailNotVerified"),
+        Some("user-not-found") => t("auth.userNotFound"),
+        Some("invalid-email-password") => t("auth.wrongCredentials"),
+        Some("password-too-short") => t("auth.passwordTooShort"),
+        Some("password-in-hibp") => t("auth.passwordCompromised"),
+        Some("disabled-user") => t("auth.userDisabled"),
+        // A password-reset or verification link that has expired or been used.
+        Some("unauthenticated-user") | Some("invalid-refresh-token") => t("auth.linkExpired"),
+        _ => {
+            log::error!("unmapped auth error: {err:?}");
+            t("error.somethingWentWrong")
+        }
+    }
+}
+
 /// Clear the OTHER field's error when it is the shared "wrong email or password"
 /// one.
 ///
@@ -108,15 +136,24 @@ fn AuthForm(mode: AuthMode) -> Element {
                             crate::session::bump_data_version();
                             nav.push(Route::Home { app: None });
                         }
-                        Err(err) => {
-                            if err.error.as_deref() == Some("unverified-user") {
+                        Err(err) => match err.error.as_deref() {
+                            Some("unverified-user") => {
                                 error_email.set(t("auth.emailNotVerified"));
                                 unverified.set(true);
-                            } else {
+                            }
+                            // Not about the credentials typed, so they say so on
+                            // their own rather than reddening both boxes.
+                            Some("disabled-user") | Some("network_error") | Some("parse_error") => {
+                                error_email.set(auth_error_message(&err));
+                            }
+                            // Anything else a sign-in can fail with is a rejected
+                            // pair, and the service will not say which half was
+                            // wrong, so both boxes carry the same message.
+                            _ => {
                                 error_email.set(t("auth.wrongCredentials"));
                                 error_password.set(t("auth.wrongCredentials"));
                             }
-                        }
+                        },
                     }
                 }
                 AuthMode::Register => {
@@ -148,13 +185,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                         Ok(()) => {
                             nav.push(Route::Unverified {});
                         }
-                        Err(err) => match err.error.as_deref() {
-                            Some("invalid-email") => error_email.set(t("auth.invalidEmail")),
-                            Some("email-already-in-use") => {
-                                error_email.set(t("auth.emailAlreadyInUse"))
-                            }
-                            _ => error_email.set(err.to_string()),
-                        },
+                        Err(err) => error_email.set(auth_error_message(&err)),
                     }
                 }
                 AuthMode::ResetPassword => {
@@ -168,11 +199,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                         Ok(()) => {
                             nav.push(Route::SetPassword {});
                         }
-                        Err(err) => match err.error.as_deref() {
-                            Some("invalid-email") => error_email.set(t("auth.invalidEmail")),
-                            Some("user-not-found") => error_email.set(t("auth.userNotFound")),
-                            _ => error_email.set(err.to_string()),
-                        },
+                        Err(err) => error_email.set(auth_error_message(&err)),
                     }
                 }
                 AuthMode::SetPassword => {
@@ -194,7 +221,7 @@ fn AuthForm(mode: AuthMode) -> Element {
                             nav.push(Route::Home { app: None });
                         }
                         Err(err) => {
-                            error_password.set(err.to_string());
+                            error_password.set(auth_error_message(&err));
                         }
                     }
                 }
