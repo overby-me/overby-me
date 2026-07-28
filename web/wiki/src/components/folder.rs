@@ -120,6 +120,9 @@ pub fn FolderApp(
         .map(|c| c.0.clone())
         .unwrap_or_else(|| node.id.0.clone());
     let mut confirm_open = use_signal(|| false);
+    // Submitting is irreversible (it makes the node immutable), so the sheet row
+    // opens a warning first — the same one ContentApp uses.
+    let mut confirm_submit = use_signal(|| false);
     // Bluesky link status gates the share action (like ContentApp).
     let link_token = access_token.clone();
     let bsky_link = crate::use_data_resource!(|(link_token)| async move {
@@ -228,14 +231,20 @@ pub fn FolderApp(
                     div { class: "content-hero",
                         super::widgets::ZoomableImage { src: url, alt: name.to_string() }
                         div { class: "content-hero-veil",
-                            div { class: "avatar content-hero-avatar", {header_icon.clone()} }
+                            // The same not-submitted mark this folder's own row in
+                            // the parent list carries, so its page agrees with it.
+                            super::loader::AvatarBadged { mutable: node.mutable,
+                                div { class: "avatar content-hero-avatar", {header_icon.clone()} }
+                            }
                             div { class: "content-hero-meta",
                                 h3 { class: "content-hero-title", "{name}" }
                             }
                         }
                     }
                 } else {
-                    div { class: "avatar context-header-icon", {header_icon.clone()} }
+                    super::loader::AvatarBadged { mutable: node.mutable,
+                        div { class: "avatar context-header-icon", {header_icon.clone()} }
+                    }
                     h3 { class: "context-header-title", "{name}" }
                 }
                 // Secondary/admin folder actions live in the M3 tools sheet
@@ -361,6 +370,16 @@ pub fn FolderApp(
                                         class: "sheet-action",
                                         {icon_el("app/editor")}
                                         "{t(\"mime.editor\")}"
+                                    }
+                                    // A folder is created mutable, so it wears the
+                                    // same not-submitted mark its list row does and
+                                    // needs the same way out of it. Same gate as
+                                    // editing, so it disappears once submitted.
+                                    button {
+                                        class: "sheet-action",
+                                        onclick: move |_| confirm_submit.set(true),
+                                        span { class: "material-icons", "publish" }
+                                        "{t(\"content.submit\")}"
                                     }
                                 }
                                 if is_context_owner && count > 1 && !parent_path.is_empty() {
@@ -490,6 +509,59 @@ pub fn FolderApp(
                             }
                         }
                     }
+                }
+            }
+            // Submit confirm, carrying the same warning ContentApp's does: after
+            // this the folder can no longer be edited.
+            if can_edit && !parent_path.is_empty() {
+                super::widgets::Dialog {
+                    open: confirm_submit(),
+                    on_dismiss: move |_| confirm_submit.set(false),
+                    headline: t("content.submit"),
+                    icon: "publish".to_string(),
+                    actions: rsx! {
+                        button {
+                            class: "btn btn-outlined",
+                            onclick: move |_| confirm_submit.set(false),
+                            "{t(\"common.cancel\")}"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            onclick: {
+                                let id = node.id.0.clone();
+                                move |_| {
+                                    confirm_submit.set(false);
+                                    let token = session.read().access_token.clone();
+                                    let id = id.clone();
+                                    spawn(async move {
+                                        match graphql::update_node(
+                                            token.as_deref(),
+                                            &id,
+                                            crate::model::NodesSetInput {
+                                                mutable: Some(false),
+                                                ..Default::default()
+                                            },
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => {
+                                                crate::session::bump_data_version();
+                                                crate::snackbar::show_snackbar(&t("content.submit"));
+                                            }
+                                            Err(e) => {
+                                                log::error!("folder submit failed: {e}");
+                                                crate::snackbar::show_snackbar(&t(
+                                                    "error.somethingWentWrong",
+                                                ));
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            "{t(\"content.submit\")}"
+                        }
+                    },
+                    p { class: "body-medium", "{t(\"content.submitWarning\")}" }
                 }
             }
             // Delete confirm dialog (owner action), mirroring ContentApp.
