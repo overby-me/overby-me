@@ -4362,79 +4362,31 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
         use std::os::fd::AsFd;
 
         // Several exec directories share one underlying source: the private
-        // state dir is mapped to itself and then to each visible alias. The
-        // idmap belongs to the SOURCE mount, so it must be applied exactly
-        // once. Applying it again fails, because the second
-        // open_tree(OPEN_TREE_CLONE) clones a mount the first pass already
-        // idmapped and the kernel refuses that with EPERM (is_idmapped_mnt).
-        // Measured: the first bind returns ok and every later one on the same
-        // source returns "mount_setattr: Operation not permitted".
-        let mut idmapped: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        for (source, dest) in &config.exec_dir_binds {
-            if idmapped.contains(source.as_str()) {
-                // The source already carries the mapping, so a plain bind of it
-                // inherits it; no second mount_setattr.
-                if source != dest {
-                    let (Ok(c_src), Ok(c_dest)) = (
-                        std::ffi::CString::new(source.as_str()),
-                        std::ffi::CString::new(dest.as_str()),
-                    ) else {
-                        continue;
-                    };
-                    let ret = unsafe {
-                        libc::mount(
-                            c_src.as_ptr(),
-                            c_dest.as_ptr(),
-                            std::ptr::null(),
-                            libc::MS_BIND | libc::MS_REC,
-                            std::ptr::null(),
-                        )
-                    };
-                    if ret != 0 {
-                        log::warn!(
-                            "Failed to bind already-id-mapped {source} onto {dest}: {}",
-                            std::io::Error::last_os_error()
-                        );
-                    }
-                }
+        // state dir is mapped to itself and then to each visible alias.
+        //
+        // Each destination needs its OWN id-mapped clone. Binding the aliases
+        // plainly from an already-mapped source does not work: a plain bind
+        // does not carry the idmap, so writes through the alias land with the
+        // service's raw uid (measured: the state file came out owned by 61221
+        // instead of the mapped id) and the mapping is silently bypassed.
+        //
+        // But the idmap belongs to the SOURCE mount, so once the source has
+        // been mapped in place, cloning it again hits is_idmapped_mnt() and
+        // EPERM. The self-mapping (source == dest) is therefore done LAST,
+        // leaving the source unmapped while every alias takes its own clone
+        // from it.
+        let mut ordered: Vec<&(String, String)> = config.exec_dir_binds.iter().collect();
+        ordered.sort_by_key(|(source, dest)| u8::from(source == dest));
+
+        let mut mapped_self: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (source, dest) in ordered {
+            if source == dest && mapped_self.contains(source.as_str()) {
                 continue;
-            }
-            // Is the SOURCE the real directory, or an empty one on the tmpfs
-            // that TemporaryFileSystem= laid over /var/lib? If the latter, the
-            // bind propagates nothing back to the host and a service's writes
-            // vanish with no error. TMPFS_MAGIC is 0x01021994.
-            {
-                let mut sfs: libc::statfs = unsafe { std::mem::zeroed() };
-                if let Ok(c_src) = std::ffi::CString::new(source.as_str())
-                    && unsafe { libc::statfs(c_src.as_ptr(), &mut sfs) } == 0
-                    && sfs.f_type as u64 == 0x0102_1994
-                {
-                    crate::entrypoints::service_manager::kmsg(&format!(
-                        "IDMAP src-on-tmpfs {source} (writes will not reach the host)"
-                    ));
-                }
             }
             match idmapped_bind(source, dest, userns.as_fd()) {
                 Ok(()) => {
-                    idmapped.insert(source.as_str());
-                    // What ownership does the mapping actually present? EOVERFLOW
-                    // on a later write means some id has no mapping and shows as
-                    // (uid_t)-1 = 4294967295. Printing the observed st_uid/st_gid
-                    // separates "unmapped" from "mapped to the wrong id", which
-                    // reasoning about map direction has not managed to settle.
-                    let mut st: libc::stat = unsafe { std::mem::zeroed() };
-                    if let Ok(c_dest) = std::ffi::CString::new(dest.as_str())
-                        && unsafe { libc::stat(c_dest.as_ptr(), &mut st) } == 0
-                        && (st.st_uid == u32::MAX || st.st_uid == 65534)
-                    {
-                        // The mapping resolved to an id the viewer cannot
-                        // represent, so every later write gets EOVERFLOW. Worth
-                        // saying loudly, because the symptom otherwise surfaces
-                        // far away as "Value too large for defined data type".
-                        crate::entrypoints::service_manager::kmsg(&format!(
-                            "IDMAP unmapped: {dest} shows st_uid={} st_gid={} (owner should be {})",
-                            st.st_uid, st.st_gid, config.user
-                        ));
+                    if source == dest {
+                        mapped_self.insert(source.as_str());
                     }
                 }
                 Err(e) => log::warn!("Failed to id-map exec directory {dest}: {e}"),

@@ -195,10 +195,31 @@
   # owner a write through the id-mapped mount produces. An owner the host cannot
   # represent makes stat(1) fail outright and print nothing.
   #
-  # Next step is therefore upstream's arrangement of the mapping, not the mount
-  # plumbing: work out which on-disk id a service write is supposed to land on
-  # such that the host reads it back as exactly 65534, and compare with what
-  # ours produces (read the raw st_uid from PID 1 after the service exits).
+  # MEASURED, from PID 1 in the host namespace after the service exits: the file
+  # is created with on-disk owner uid=61221 gid=61221, i.e. the service's raw id
+  # with NO translation. The file is not missing and never was; the outer
+  # assertion was never even reached, because the SERVICE fails and `set -e`
+  # aborts the script at `systemctl start`.
+  #
+  # THE REMAINING GAP IS NOW FULLY SPECIFIED. Upstream's arrangement has:
+  #   - the HOST reading the file as 65534 (nobody), per the outer assertion
+  #   - the SERVICE reading it as its own uid, per the inner assertion
+  #     `[[ $(awk "NR==2" /proc/self/uid_map) == $(stat -c %u <file>) ]]`
+  # Both together mean a write must land on an on-disk id the host shows as
+  # nobody, which the mount idmap then translates back to the service's uid
+  # inside. Ours writes the raw uid, so the service reads 0 where it expects
+  # 61221 and the inner assertion fails.
+  #
+  # That is systemd's foreign-uid arrangement (see FOREIGN_UID_BASE and
+  # REMOUNT_IDMAPPING_FOREIGN_WITH_HOST_ROOT in src/shared/mount-util.c), not
+  # something the mount plumbing here can produce by itself. Implementing it is
+  # the next piece of work, and it is a feature rather than a fix.
+  #
+  # Also fixed along the way: the aliases used to be plain MS_BIND copies of an
+  # already-mapped source. A plain bind does NOT carry an idmap, so writes
+  # through an alias bypassed the mapping entirely. Each destination now takes
+  # its own id-mapped clone, with the self-mapping done last so the source is
+  # still unmapped when the aliases clone it.
   #
   # TWELVE mechanisms have now been proposed and killed on this test. The only
   # ones that ever survived came from measurement, so do not add a thirteenth
