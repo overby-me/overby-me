@@ -182,12 +182,23 @@
   # succeeds, and its own in-namespace assertion passes — yet the host cannot
   # stat /var/lib/private/testidmapped/testfile afterwards.
   #
-  # Everything measurable from inside exec_helper now agrees. The next
-  # measurement therefore has to STRADDLE the boundary: compare the source
-  # directory's (st_dev, st_ino) as PID 1 sees it in the host mount namespace
-  # with what exec_helper sees after unsharing, which is the one comparison
-  # nothing so far has made. If they differ, the service has been writing into a
-  # correctly-bound directory that simply is not the host's.
+  # THE BOUNDARY COMPARISON IS DONE, and it too comes out clean: stat()ing the
+  # source in the host namespace at creation and again after the unshare gives
+  # dev=64768 ino=2162 BOTH times. The directory inside the namespace is the
+  # same object as the one on the host, so the service's writes do reach it.
+  #
+  # WHICH REFRAMES THE REMAINING FAILURE. The outer assertion is
+  #     [[ $(stat -c "%u" /var/lib/private/testidmapped/testfile) == 65534 ]]
+  # and 65534 is what upstream EXPECTS to see: nobody. Our stat returns empty,
+  # i.e. it FAILS rather than reporting a different owner. So this was never
+  # about the host being unable to find the file — it is about what on-disk
+  # owner a write through the id-mapped mount produces. An owner the host cannot
+  # represent makes stat(1) fail outright and print nothing.
+  #
+  # Next step is therefore upstream's arrangement of the mapping, not the mount
+  # plumbing: work out which on-disk id a service write is supposed to land on
+  # such that the host reads it back as exactly 65534, and compare with what
+  # ours produces (read the raw st_uid from PID 1 after the service exits).
   #
   # TWELVE mechanisms have now been proposed and killed on this test. The only
   # ones that ever survived came from measurement, so do not add a thirteenth
