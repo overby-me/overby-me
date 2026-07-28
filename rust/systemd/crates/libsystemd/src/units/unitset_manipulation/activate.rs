@@ -1390,7 +1390,13 @@ fn deferred_oneshot_exec_drive(
     let pid_table = run_info.read_poisoned().pid_table.clone();
 
     enum Step {
-        Wait(std::process::Child, Option<std::time::Duration>),
+        // Carries the command so the wait can apply the same exit-status rules
+        // as Service::run_cmd, including the `-` ignore-failure prefix.
+        Wait(
+            std::process::Child,
+            Option<std::time::Duration>,
+            crate::units::Commandline,
+        ),
         Forked(Result<Option<crate::services::StartResult>, ServiceErrorReason>),
         Completed,
         SpawnErr(String),
@@ -1449,15 +1455,72 @@ fn deferred_oneshot_exec_drive(
                     .srvc
                     .spawn_helper_child(&cmd, id.clone(), &name, &ri, working_dir.as_ref())
                 {
-                    Ok(child) => Step::Wait(child, timeout),
+                    Ok(child) => Step::Wait(child, timeout, cmd),
                     Err(e) => Step::SpawnErr(format!("{e}")),
                 }
             }
         };
 
         match step {
-            Step::Wait(child, timeout) => {
-                crate::services::wait_for_helper_child(&child, &pid_table, timeout);
+            Step::Wait(mut child, timeout, cmd) => {
+                // A preliminary ExecStart= that fails must abort the rest of the
+                // oneshot, exactly as Service::run_cmd does for the inline path.
+                // Without this the remaining commands ran anyway.
+                let failure: Option<crate::services::RunCmdError> =
+                    match crate::services::wait_for_helper_child(&child, &pid_table, timeout) {
+                        crate::services::WaitResult::InTime(Ok(exitstatus)) => {
+                            if exitstatus.success()
+                                || cmd
+                                    .prefixes
+                                    .contains(&crate::units::CommandlinePrefix::Minus)
+                            {
+                                None
+                            } else {
+                                Some(crate::services::RunCmdError::BadExitCode(
+                                    cmd.to_string(),
+                                    exitstatus,
+                                ))
+                            }
+                        }
+                        crate::services::WaitResult::InTime(Err(e)) => Some(
+                            crate::services::RunCmdError::WaitError(cmd.to_string(), format!("{e}")),
+                        ),
+                        crate::services::WaitResult::TimedOut => {
+                            let _ = child.kill();
+                            Some(crate::services::RunCmdError::Timeout(
+                                cmd.to_string(),
+                                format!("Timeout ({timeout:?}) reached"),
+                            ))
+                        }
+                    };
+                if let Some(e) = failure {
+                    // Clear the relocation breadcrumb so nothing can resume the
+                    // sequence from the failed command.
+                    {
+                        let ri = run_info.read_poisoned();
+                        if let Some(unit) = ri.unit_table.get(&id)
+                            && let Specific::Service(svc) = &unit.specific
+                        {
+                            svc.state.write_poisoned().srvc.current_exec_argv = None;
+                        }
+                    }
+                    let reason = format!("{e}");
+                    errors.lock_poisoned().push(UnitOperationError {
+                        unit_name: name.clone(),
+                        unit_id: id.clone(),
+                        reason: UnitOperationErrorReason::ServiceStartError(
+                            ServiceErrorReason::StartFailed(e),
+                        ),
+                    });
+                    // Reporting the error is not enough: the unit would stay in
+                    // UnitStatus::Starting and be started again from the top,
+                    // re-running the preliminary commands forever. Mark it
+                    // StoppedUnexpected via the same helper the other deferred
+                    // start-failure paths use. Takes &ArcMutRuntimeInfo and does
+                    // its own try_read, so no guard may be held here.
+                    deferred_start_fail_cleanup(&run_info, &id, &name, reason);
+                    return;
+                }
             }
             Step::Forked(Ok(_)) | Step::Completed => {
                 // Main process forked (its completion wait is itself deferred),
