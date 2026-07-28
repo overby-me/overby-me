@@ -210,10 +210,31 @@
   # inside. Ours writes the raw uid, so the service reads 0 where it expects
   # 61221 and the inner assertion fails.
   #
-  # That is systemd's foreign-uid arrangement (see FOREIGN_UID_BASE and
-  # REMOUNT_IDMAPPING_FOREIGN_WITH_HOST_ROOT in src/shared/mount-util.c), not
-  # something the mount plumbing here can produce by itself. Implementing it is
-  # the next piece of work, and it is a feature rather than a fix.
+  # UPSTREAM'S MAP IS KNOWN NOW, and copying it is NOT sufficient. src/core/
+  # namespace.c builds the exec-directory idmap as
+  #     65534 <service uid> 1
+  #     0 0 1                    (when the service uid is not root)
+  # The nobody entry is what makes a write land on disk owned by nobody while
+  # the service reads it back as its own id, which is exactly what the two
+  # assertions demand. Tried, and it made things WORSE rather than better:
+  #
+  #   - with the service still joining that namespace, 65534 and 0 become the
+  #     only ids that exist, so the drop to <uid> cannot succeed and the service
+  #     dies before running its command at all (no `+ touch`, no assertion, just
+  #     "failed to start" with an empty trace);
+  #   - giving the service its own identity-mapped namespace as well did NOT
+  #     restore it. The service still dies with no output, and instrumenting
+  #     both suspects showed the uid_map/gid_map writes SUCCEED and the
+  #     privilege drop SUCCEEDS. So the failure is after the drop and before the
+  #     command produces output, somewhere not yet instrumented.
+  #
+  # REVERTED to the last state where the service actually runs and only the
+  # ownership assertion fails, rather than leaving a tree where it will not
+  # start. Four map shapes have been tried: "0 <uid> 1" (EOVERFLOW),
+  # "<uid> 0 1" (file keeps its raw uid), "65534 <uid> 1" joined, and
+  # "65534 <uid> 1" separated. The next person should instrument the exec path
+  # AFTER drop_privileges — the execve itself and anything between — because
+  # that is the only stretch still dark.
   #
   # Also fixed along the way: the aliases used to be plain MS_BIND copies of an
   # already-mapped source. A plain bind does NOT carry an idmap, so writes
