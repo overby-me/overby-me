@@ -443,13 +443,29 @@ fn wide_hex(word: &str, bits: u32) -> Option<ApInt> {
 /// `read_provenance`. Upstream writes the set back in its own order, address
 /// before provenance, so this reduces what was written to that form.
 fn canonical_captures(arguments: &str) -> String {
+    // `ret:` introduces what the return value captures, and everything after
+    // it belongs to that list rather than to the argument's. So the two
+    // halves are reduced apart, and `captures(ret: none)` is `captures(none)`:
+    // neither captures anything, which is what the shorter spelling says.
+    if let Some((argument, returned)) = arguments.split_once("ret:") {
+        let argument = canonical_captures(argument);
+        let returned = canonical_captures(returned);
+        return match (argument.trim(), returned.trim()) {
+            ("", "none") | ("none", "none") => "none".to_string(),
+            ("", returned) => format!("ret: {returned}"),
+            // Saying the same of the return value as of the argument says
+            // nothing the first half has not.
+            (argument, returned) if argument == returned => argument.to_string(),
+            (argument, returned) => format!("{argument}, ret: {returned}"),
+        };
+    }
     let written: Vec<&str> = arguments
         .split(',')
         .map(str::trim)
         .filter(|word| !word.is_empty())
         .collect();
     if written.iter().any(|word| matches!(*word, "none" | "all")) || written.is_empty() {
-        return arguments.to_string();
+        return arguments.trim().to_string();
     }
     let mut components = Vec::new();
     for (wide, narrow) in [

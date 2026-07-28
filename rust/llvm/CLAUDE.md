@@ -1244,6 +1244,18 @@ a bound has caught a rule that looked right.
 So the tables print a number as a word and do not refuse a word as
 unknown. The `DW_TAG_badtag` entry stays open, and the reason it is open
 is now a sentence about defaults rather than about specifications.
+A seventy-eighth pass took three more from the same files. A global
+variable writes whether it is local to its unit and whether it is defined
+here whether or not the module said, which makes it the third node with
+fields of that kind, after the compile unit's three and the subprogram's
+scope; they are one table now rather than a special case each.
+Upstream works out the three arithmetic expressions when both sides are
+known, lane by lane for a vector, where before only the identities were
+folded. And `captures(...)` has a second half: `ret:` introduces what the
+return value captures and everything after it belongs to that list, so
+the two are reduced apart, `ret: none` alone is `none`, and a return that
+captures what the argument does says nothing the first half has not.
+Assembler 160 to 164.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

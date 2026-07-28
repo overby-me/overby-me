@@ -692,26 +692,41 @@ static DEFAULTED: &[(&str, &str)] = &[
     ("DITemplateValueParameter", "type"),
 ];
 
-/// A compile unit is the one node upstream writes fields on that the module
-/// never wrote. Three of them: whether the code was optimised, which Objective-C
-/// runtime it targets, and how much debug info to emit. They say something
-/// about the whole translation unit, so leaving them out says nothing rather
-/// than saying the default.
+/// The fields upstream writes whether or not the module did. They are the
+/// ones whose absence says nothing rather than saying the default: what a
+/// compile unit was built for, whether a global is local to its unit and
+/// whether it is defined here at all. Every other field goes when it holds
+/// what it would have held anyway.
+fn always_written(tag: &str) -> &'static [(&'static str, &'static str)] {
+    match tag {
+        "DICompileUnit" => &[
+            ("isOptimized", "false"),
+            ("runtimeVersion", "0"),
+            ("emissionKind", "NoDebug"),
+        ],
+        "DIGlobalVariable" => &[("isLocal", "false"), ("isDefinition", "false")],
+        _ => &[],
+    }
+}
+
 fn fill_compile_unit_defaults(tag: &str, args: SpecializedArgs) -> SpecializedArgs {
-    if tag != "DICompileUnit" {
+    let filled = always_written(tag);
+    if filled.is_empty() {
         return args;
     }
     let SpecializedArgs::Named(mut fields) = args else {
         return args;
     };
-    for (name, value) in [
-        ("isOptimized", MdField::Bool(false)),
-        ("runtimeVersion", MdField::Unsigned(0)),
-        ("emissionKind", MdField::Words(vec!["NoDebug".to_string()])),
-    ] {
-        if !fields.iter().any(|(written, _)| written == name) {
-            fields.push((name.to_string(), value));
+    for (name, default) in filled {
+        if fields.iter().any(|(written, _)| written == name) {
+            continue;
         }
+        let value = match *default {
+            "false" => MdField::Bool(false),
+            "0" => MdField::Unsigned(0),
+            word => MdField::Words(vec![word.to_string()]),
+        };
+        fields.push(((*name).to_string(), value));
     }
     SpecializedArgs::Named(fields)
 }

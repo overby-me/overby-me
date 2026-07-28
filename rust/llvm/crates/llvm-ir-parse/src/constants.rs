@@ -762,10 +762,14 @@ impl Parser {
                 _ => {}
             }
         }
-        if let ConstExpr::Binary { op, lhs, rhs, .. } = &expr
-            && let Some(folded) = self.folded_binary(*op, *lhs, *rhs)
-        {
-            return Ok(folded);
+        if let ConstExpr::Binary { op, lhs, rhs, .. } = &expr {
+            let (op, lhs, rhs) = (*op, *lhs, *rhs);
+            if let Some(folded) = self.computed_binary(op, lhs, rhs) {
+                return Ok(folded);
+            }
+            if let Some(folded) = self.folded_binary(op, lhs, rhs) {
+                return Ok(folded);
+            }
         }
         if let ConstExpr::Cast { op, operand, ty } = &expr
             && let Some(folded) = self.folded_cast(*op, *operand, *ty)
@@ -800,6 +804,53 @@ impl Parser {
         // a widening one would be a cast rather than a fold.
         (self.module.ctx.constant(identity).ty() == self.module.ctx.constant(lhs).ty())
             .then_some(identity)
+    }
+
+    /// The same three expressions where both sides are known, which upstream
+    /// works out rather than carries. A vector answers lane by lane.
+    fn computed_binary(&mut self, op: BinOp, lhs: ConstId, rhs: ConstId) -> Option<ConstId> {
+        let ty = self.module.ctx.constant(lhs).ty();
+        if ty != self.module.ctx.constant(rhs).ty() {
+            return None;
+        }
+        if let TypeKind::Vector {
+            element,
+            count,
+            scalable: false,
+        } = self.module.ctx.type_kind(ty).clone()
+        {
+            let width = usize::try_from(count).ok()?;
+            let lanes = |id: ConstId, ctx: &llvm_ir::Context| match ctx.constant(id).clone() {
+                Constant::Vector { elements, .. } => Some(elements),
+                Constant::Splat { element, .. } => Some(vec![element; width]),
+                _ => None,
+            };
+            let left = lanes(lhs, &self.module.ctx)?;
+            let right = lanes(rhs, &self.module.ctx)?;
+            let mut folded = Vec::with_capacity(width);
+            for (a, b) in left.into_iter().zip(right) {
+                folded.push(self.computed_binary(op, a, b)?);
+            }
+            let _ = element;
+            return Some(self.fold_aggregate(ty, &folded, true));
+        }
+        let (Constant::Integer { value: left, .. }, Constant::Integer { value: right, .. }) = (
+            self.module.ctx.constant(lhs).clone(),
+            self.module.ctx.constant(rhs).clone(),
+        ) else {
+            return None;
+        };
+        let value = match op {
+            BinOp::Add => left.wrapping_add(&right),
+            BinOp::Sub => left.wrapping_sub(&right),
+            BinOp::Xor => left.xor(&right),
+            _ => return None,
+        };
+        Some(
+            self.module
+                .ctx
+                .intern_constant(Constant::Integer { ty, value }),
+        )
     }
 
     /// What upstream computes rather than carries. A cast of a literal to a
