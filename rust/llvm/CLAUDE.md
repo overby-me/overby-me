@@ -1430,7 +1430,21 @@ names a node that holds them and upstream wants the braces. An operand
 list with nothing in it lists nothing, so it drops the way any other
 defaulted field does, which the derivation script now records rather than
 reporting the probe as refused.
-Assembler 171 to 186, Feature 61 to 65, Linker 200 to 201, Other 133 to
+One more, and it is a reader upgrade rather than a print rule. A module
+says which debug-info format it holds with a module flag, and upstream
+drops the lot rather than reading an older one: the `!dbg` attachments,
+the debug records and the `llvm.dbg.cu` list, leaving everything else.
+What is left is ordinary metadata, so a node some other named list still
+reaches survives and one only the debug info reached does not, which is
+the reachability the twenty-first pass built. An attachment naming a node
+the module never defines is left where it is, because that is a
+reference upstream refuses rather than debug info it drops, and the
+rejection table is what caught the first shape of that.
+A neighbouring file was probed and is not this: `opt` runs the verifier,
+finds a `#dbg_value` with no location, and strips the debug info on that
+basis rather than on the version. Reproducing that means stripping where
+this reports, which is a decision rather than a rule.
+Assembler 171 to 187, Feature 61 to 65, Linker 200 to 204, Other 133 to
 135.
 Acceptance: both numbers up again, recorded in the same commit.
 

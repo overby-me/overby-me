@@ -207,10 +207,10 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against upstream's own `opt -S`, and **186 of 221** are identical, with
-three more suites measured the same way: **65 of 71** in `Feature`, **201 of
-219** in `Linker` and **135 of 144** in `Other`. Fourteen of the
-fifty-three remaining differences are ones where we already match
+against upstream's own `opt -S`, and **187 of 221** are identical, with
+three more suites measured the same way: **65 of 71** in `Feature`, **204 of
+220** in `Linker` and **135 of 144** in `Other`. Fourteen of the
+fifty remaining differences are ones where we already match
 `llvm-as | llvm-dis` and `opt -S` does something else, so the attainable
 maximum is 641 rather than 655. ODR type uniquing is most of them; the
 clearest is `!DIObjCProperty`, where `opt -S` prints the setter and the

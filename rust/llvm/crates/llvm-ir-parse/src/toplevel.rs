@@ -495,6 +495,107 @@ const REWRITTEN_BEHAVIOUR: &[(&str, u64)] = &[
 impl Parser {
     /// Applies that rewrite, after the whole module, `!llvm.module.flags`
     /// being able to name a node the text has not reached yet.
+    /// Debug info a reader of this version cannot make sense of, taken out.
+    ///
+    /// A module says which debug-info format it holds with a module flag, and
+    /// upstream drops the lot rather than reading an older one: the `!dbg`
+    /// attachments, the debug records and the `llvm.dbg.cu` list. What is
+    /// left is ordinary metadata, so a node some other list still names
+    /// survives and one only the debug info reached does not.
+    pub(crate) fn drop_invalid_debug_info(&mut self) {
+        const CURRENT: u64 = 3;
+        if self.debug_info_version() == Some(CURRENT) {
+            return;
+        }
+        // An attachment naming a node the module never defines is left
+        // where it is, because that is a reference upstream refuses rather
+        // than debug info it drops.
+        self.module
+            .named_metadata
+            .retain(|named| named.name != "llvm.dbg.cu");
+        // An attachment naming a node the module never defines is left where
+        // it is, that being a reference upstream refuses rather than debug
+        // info it drops.
+        let known: Vec<bool> = self
+            .module
+            .metadata
+            .iter()
+            .map(|node| node.is_some())
+            .collect();
+        let module = known.as_slice();
+        for function in &mut self.module.functions {
+            function.metadata.retain(|attachment| {
+                attachment.kind != "dbg" || !defined(module, &attachment.node)
+            });
+            let records: Vec<(llvm_ir::BlockId, llvm_ir::InstId)> = function
+                .blocks()
+                .flat_map(|(block, _)| {
+                    function
+                        .block_instructions(block)
+                        .filter(|(_, instruction)| {
+                            matches!(
+                                instruction.kind,
+                                llvm_ir::instruction::InstKind::DebugRecord { .. }
+                            )
+                        })
+                        .map(move |(id, _)| (block, id))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            for (block, id) in records {
+                function.remove_instruction(block, id);
+            }
+            let ids: Vec<llvm_ir::InstId> = function
+                .blocks()
+                .flat_map(|(block, _)| {
+                    function
+                        .block_instructions(block)
+                        .map(|(id, _)| id)
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            for id in ids {
+                function.instruction_mut(id).metadata.retain(|attachment| {
+                    attachment.kind != "dbg" || !defined(module, &attachment.node)
+                });
+            }
+        }
+    }
+
+    /// The version the `Debug Info Version` module flag names, if it names one.
+    fn debug_info_version(&self) -> Option<u64> {
+        let flags: Vec<MdId> = self
+            .module
+            .named_metadata
+            .iter()
+            .filter(|named| named.name == "llvm.module.flags")
+            .flat_map(|named| named.operands.clone())
+            .collect();
+        for id in flags {
+            let Some(Metadata::Tuple { operands, .. }) = self.module.metadata_node(id) else {
+                continue;
+            };
+            let [
+                _,
+                MdOperand::String(name),
+                MdOperand::Value {
+                    value: Value::Constant(version),
+                    ..
+                },
+            ] = operands.as_slice()
+            else {
+                continue;
+            };
+            if name.as_str() != Some("Debug Info Version") {
+                continue;
+            }
+            if let Constant::Integer { value, .. } = self.module.ctx.constant(*version) {
+                return value.to_u64();
+            }
+        }
+        None
+    }
+
     pub(crate) fn upgrade_module_flags(&mut self) {
         let flags: Vec<MdId> = self
             .module
@@ -607,5 +708,14 @@ fn names_itself(node: &Metadata, id: MdId) -> bool {
                 .any(|field| matches!(field, MdField::Ref(named) if *named == id))
         }
         Metadata::String(_) => false,
+    }
+}
+
+/// Whether an attachment names a node the module defines. A node written in
+/// place is its own definition; a number has to have one.
+fn defined(known: &[bool], node: &llvm_ir::metadata::MdRef) -> bool {
+    match node {
+        llvm_ir::metadata::MdRef::Inline(_) => true,
+        llvm_ir::metadata::MdRef::Id(id) => known.get(id.0 as usize).copied().unwrap_or(false),
     }
 }

@@ -371,6 +371,39 @@ fn attachments_are_numbered_in_the_order_they_print() {
     );
 }
 
+/// A module says which debug-info format it holds with a module flag, and
+/// debug info an older one wrote is dropped rather than read.
+#[test]
+fn debug_info_of_another_version_is_dropped() {
+    let debug = "define void @f() !dbg !4 {\nentry:\n  ret void, !dbg !8\n}\n\n!llvm.dbg.cu = !{!0}\n!other = !{!5}\n!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!1 = !DIFile(filename: \"a\", directory: \"d\")\n!4 = distinct !DISubprogram(name: \"f\", scope: !1, file: !1, line: 1, type: !6, spFlags: DISPFlagDefinition, unit: !0)\n!5 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n!6 = !DISubroutineType(types: !7)\n!7 = !{null}\n!8 = !DILocation(line: 1, scope: !4)\n";
+    let older = format!(
+        "{debug}!llvm.module.flags = !{{!9}}\n!9 = !{{i32 2, !\"Debug Info Version\", i32 2}}\n"
+    );
+    let module = llvm_ir_parse::parse_module(&older)
+        .unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("define void @f() {") && !printed.contains("!dbg"),
+        "the debug info should be gone\n--- printed ---\n{printed}"
+    );
+    // A node some other list names is ordinary metadata and stays.
+    assert!(
+        printed.contains("!DIBasicType(name: \"int\""),
+        "only the debug info goes\n--- printed ---\n{printed}"
+    );
+
+    let current = format!(
+        "{debug}!llvm.module.flags = !{{!9}}\n!9 = !{{i32 2, !\"Debug Info Version\", i32 3}}\n"
+    );
+    let module = llvm_ir_parse::parse_module(&current)
+        .unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("define void @f() !dbg") && printed.contains("!llvm.dbg.cu"),
+        "this version is read\n--- printed ---\n{printed}"
+    );
+}
+
 /// A tag written as the number its word stands for is the same tag, so two
 /// nodes that spell it differently are one node.
 #[test]
