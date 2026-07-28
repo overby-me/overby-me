@@ -15,13 +15,17 @@ fn main() -> ExitCode {
     // A leading `--more`/`-m` (before the command) enables streaming replies for
     // `call`, matching upstream `varlinkctl --more call ...`.
     let mut more = false;
+    let mut json = false;
     let mut rest: Vec<String> = Vec::new();
     for a in &args[1..] {
         match a.as_str() {
             "--more" | "-m" | "-E" => more = true,
-            // Accepted, no-op formatting hints. `--json=off` is upstream's
-            // "human readable" mode, which is what this tool already prints.
-            "--json=short" | "--json=pretty" | "--json=off" | "-J" | "-j" => {}
+            // `--json=off` is upstream's "human readable" mode, which is what
+            // these commands print by default. The others select JSON, which
+            // changes what list-interfaces and list-methods emit: an array
+            // rather than one name per line. `info` is JSON either way.
+            "--json=short" | "--json=pretty" | "-J" | "-j" => json = true,
+            "--json=off" => json = false,
             // No pager is implemented, so --no-pager is always already true.
             "--no-pager" => {}
             "--help" | "-h" => {
@@ -55,8 +59,8 @@ fn main() -> ExitCode {
         "call" => cmd_call(&rest[1..], more),
         "introspect" => cmd_introspect(&rest[1..]),
         "info" => cmd_info(&rest[1..]),
-        "list-methods" => cmd_list_methods(&rest[1..]),
-        "list-interfaces" => cmd_list_interfaces(&rest[1..]),
+        "list-methods" => cmd_list_methods(&rest[1..], json),
+        "list-interfaces" => cmd_list_interfaces(&rest[1..], json),
         other => {
             eprintln!("varlinkctl: unknown command '{other}'");
             ExitCode::FAILURE
@@ -115,7 +119,7 @@ fn cmd_info(args: &[String]) -> ExitCode {
 
 /// varlinkctl list-methods <target> — list the methods of each interface the
 /// service exposes, via GetInfo + GetInterfaceDescription.
-fn cmd_list_methods(args: &[String]) -> ExitCode {
+fn cmd_list_methods(args: &[String], json: bool) -> ExitCode {
     if args.is_empty() {
         eprintln!("Usage: varlinkctl list-methods <target>");
         return ExitCode::FAILURE;
@@ -143,6 +147,7 @@ fn cmd_list_methods(args: &[String]) -> ExitCode {
         .cloned()
         .unwrap_or_default();
 
+    let mut methods: Vec<String> = Vec::new();
     for iface in interfaces {
         let name = match iface.as_str() {
             Some(n) => n,
@@ -165,9 +170,21 @@ fn cmd_list_methods(args: &[String]) -> ExitCode {
                 let t = line.trim_start();
                 if let Some(m) = t.strip_prefix("method ") {
                     let method = m.split('(').next().unwrap_or(m).trim();
-                    println!("{name}.{method}");
+                    methods.push(format!("{name}.{method}"));
                 }
             }
+        }
+    }
+
+    // Upstream sorts and de-duplicates before printing, and emits a JSON array
+    // rather than one name per line when JSON output was asked for.
+    methods.sort();
+    methods.dedup();
+    if json {
+        println!("{}", serde_json::to_string(&methods).unwrap());
+    } else {
+        for m in &methods {
+            println!("{m}");
         }
     }
     ExitCode::SUCCESS
@@ -175,7 +192,7 @@ fn cmd_list_methods(args: &[String]) -> ExitCode {
 
 /// varlinkctl list-interfaces <target> — print the names of the interfaces the
 /// service exposes (via org.varlink.service.GetInfo), one per line.
-fn cmd_list_interfaces(args: &[String]) -> ExitCode {
+fn cmd_list_interfaces(args: &[String], json: bool) -> ExitCode {
     if args.is_empty() {
         eprintln!("Usage: varlinkctl list-interfaces <target>");
         return ExitCode::FAILURE;
@@ -196,9 +213,15 @@ fn cmd_list_interfaces(args: &[String]) -> ExitCode {
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default();
-            for iface in interfaces {
-                if let Some(name) = iface.as_str() {
-                    println!("{name}");
+            // Upstream dumps the "interfaces" array itself under JSON output,
+            // and prints one name per line otherwise.
+            if json {
+                println!("{}", serde_json::to_string(&interfaces).unwrap());
+            } else {
+                for iface in interfaces {
+                    if let Some(name) = iface.as_str() {
+                        println!("{name}");
+                    }
                 }
             }
             ExitCode::SUCCESS
