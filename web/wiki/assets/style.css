@@ -295,13 +295,19 @@ a:hover {
 	padding-top: calc(var(--md-sys-spacing-16) + var(--md-sys-spacing-2));
 	min-height: 100vh;
 }
-/* Cap the reading column at ~A4 and centre it inside the pane, so content stays
-   legible (a comfortable line length) on wide screens instead of stretching the
-   full pane width. On compact/medium the viewport is narrower than the cap, so
-   this is a no-op there. */
+/* Cap the reading column at ~A4 so content stays legible (a comfortable line
+   length) on wide screens instead of stretching the full pane width. On
+   compact/medium the viewport is narrower than the cap, so this is a no-op.
+
+   Anchored to the START of the pane, not centred. The pane's right edge moves
+   whenever a docked tools sheet appears or goes away, and a centred column
+   would slide half that distance with it — so the text you are reading shifts
+   sideways as you move between a page that has tools and one that does not.
+   The pane's left edge only moves when the navigation rail itself expands, so
+   aligning there keeps the column still across every app and page. */
 .content-measure {
 	max-width: var(--md-sys-body-max);
-	margin-inline: auto;
+	margin-inline: 0 auto;
 }
 
 /* DESIGN (tonal scrollbars): slim, theme-tinted scrollbars app-wide. Elements
@@ -530,16 +536,17 @@ html {
 	height: 64px;
 	display: flex;
 	align-items: center;
-	/* Centre the capped inner so, on wide screens, the search bar lines up with
-	   the reading column (which is also capped + centred in the content pane). */
-	justify-content: center;
+	/* Start-align the capped inner so, on wide screens, the search bar lines up
+	   with the reading column (which is likewise capped and start-aligned in the
+	   content pane — see .content-measure for why neither is centred). */
+	justify-content: flex-start;
 	padding: 0 var(--md-sys-spacing-2);
 	background: var(--md-surface-container);
 	color: var(--md-on-surface);
 }
-/* Cap the bar content at the same reading-column width as the content, and let
-   justify-content on the bar centre it. flex-grow fills up to the cap, then the
-   leftover space is split evenly, matching the content column's centring. */
+/* Cap the bar content at the same reading-column width as the content. It grows
+   to the cap and then stops, sitting against the bar's start edge, which is
+   where the content column starts too. */
 .top-app-bar-inner {
 	flex: 1 1 auto;
 	min-width: 0;
@@ -926,6 +933,11 @@ html {
 }
 .app-shell:not([data-size-class="compact"]) .top-app-bar {
 	left: var(--md-sys-rail-width);
+	/* Match the content pane's side padding, so the bar's start-aligned inner
+	   begins at the same x as the reading column below it. While both were
+	   centred this did not matter (symmetric padding leaves the centre where it
+	   was); start-aligned, a difference here is a visible step. */
+	padding-inline: var(--md-sys-margin);
 	transition: left var(--md-sys-motion-duration-medium2)
 		var(--md-sys-motion-spring-spatial-default);
 }
