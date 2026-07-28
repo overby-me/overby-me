@@ -455,6 +455,15 @@ Document these as out of scope rather than carrying them as debt.
 - **23-UNIT-FILE whoami** asserts the running unit is `TEST-23-UNIT-FILE.service`.
   The NixOS driver runs subtests inside `backdoor.service`. Structural difference in
   the harness, not a defect.
+- **83-BTRFS did not exist upstream**, so its wrapper was removed on 2026-07-28.
+  systemd 260.2 ships TEST-80, 81, 82, 84, 86, 87, 88 and 89, and no TEST-83 of any
+  kind. The wrapper (added 2026-04-23, `name = "83-BTRFS"` and nothing else) therefore
+  ran `./TEST-83-BTRFS.sh` and got `No such file or directory`, failing permanently for
+  a reason unrelated to rust. `expectedSkip` could not have rescued it either: the
+  harness only creates `/skipped` on exit **77** (`testsuite.nix:846`), and a missing
+  script exits 127. A sweep of every wrapper's `name =` against the 66 upstream
+  families found this was the **only** such phantom registration. If systemd is ever
+  bumped to a version that ships TEST-83-BTRFS, re-add the wrapper.
 
 ## Cross-cutting risk
 
