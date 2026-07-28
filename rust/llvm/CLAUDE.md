@@ -1256,6 +1256,19 @@ return value captures and everything after it belongs to that list, so
 the two are reduced apart, `ret: none` alone is `none`, and a return that
 captures what the argument does says nothing the first half has not.
 Assembler 160 to 164.
+A seventy-ninth pass found that a field's default is not always its type's
+zero, which every derivation so far had assumed. A compile unit inlines
+its split debug info unless it says otherwise, so `splitDebugInlining:
+true` drops and `false` stays, the opposite way round from every other
+boolean. And a global variable is a definition unless it says otherwise
+where local-to-its-unit is false unless it says otherwise: two booleans
+next to each other defaulting opposite ways.
+So `corpus/md-field-defaults.nu` probes every boolean at both polarities
+now and records which value drops, and the table carries the value rather
+than the field alone. A compile unit's producer and flags went in with
+them, having never been probed. A `!DILocation` always writes its line,
+which is the fourth node with a field of that kind.
+Assembler 164 to 167, Other 132 to 133.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

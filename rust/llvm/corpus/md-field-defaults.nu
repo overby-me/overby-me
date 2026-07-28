@@ -26,7 +26,7 @@
 const PROBES = [
   [node, skeleton, fields];
 
-  ["DICompileUnit" 'language: DW_LANG_C99, file: !10, producer: "p", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug' [[field, default]; [splitDebugFilename '""'] [dwoId '0'] [splitDebugInlining 'false'] [debugInfoForProfiling 'false'] [rangesBaseAddress 'false'] [sysroot '""'] [sdk '""'] [enums 'null'] [retainedTypes 'null'] [globals 'null'] [imports 'null'] [macros 'null']]]
+  ["DICompileUnit" 'language: DW_LANG_C99, file: !10, producer: "p", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug' [[field, default]; [producer '""'] [flags '""'] [splitDebugFilename '""'] [dwoId '0'] [splitDebugInlining 'false'] [debugInfoForProfiling 'false'] [rangesBaseAddress 'false'] [sysroot '""'] [sdk '""'] [enums 'null'] [retainedTypes 'null'] [globals 'null'] [imports 'null'] [macros 'null']]]
   ["DIBasicType" 'name: "n"' [[field, default]; [tag 'DW_TAG_base_type'] [size '0'] [align '0'] [encoding '0'] [flags '0'] [num_extra_inhabitants '0'] [name '""']]]
   ["DIDerivedType" 'tag: DW_TAG_member, baseType: null' [[field, default]; [name '""'] [line '0'] [size '0'] [align '0'] [offset '0'] [flags '0'] [dwarfAddressSpace '0'] [baseType 'null'] [scope 'null'] [file 'null'] [extraData 'null'] [annotations 'null']]]
   ["DICompositeType" 'tag: DW_TAG_structure_type' [[field, default]; [name '""'] [line '0'] [size '0'] [align '0'] [offset '0'] [flags '0'] [runtimeLang '0'] [identifier '""'] [scope 'null'] [file 'null'] [baseType 'null'] [elements 'null'] [vtableHolder 'null'] [templateParams 'null'] [annotations 'null']]]
@@ -75,7 +75,18 @@ def main [upstream_opt: path = "opt"] {
   let source = ([$work "probe.ll"] | path join)
   mut dropped = []
   for probe in $PROBES {
-    for entry in $probe.fields {
+    let fields = (
+      $probe.fields
+      | each {|entry|
+        if $entry.default == "false" {
+          [$entry, {field: $entry.field, default: "true"}]
+        } else {
+          [$entry]
+        }
+      }
+      | flatten
+    )
+    for entry in $fields {
       # The skeleton may already set this field; the probe replaces it
       # rather than writing it twice, which upstream refuses.
       let kept = (
@@ -92,15 +103,18 @@ def main [upstream_opt: path = "opt"] {
       probe-text $probe.node $body | save -f $source
       let printed = (do { ^$upstream_opt -S $source -o - } | complete)
       if $printed.exit_code != 0 {
+        # A boolean whose default is the other polarity: `splitDebugInlining`
+        # defaults to true, so probing it at false says nothing. Try the
+        # other one before giving up on the field.
         print $"($probe.node).($entry.field): upstream refused the probe"
         continue
       }
       let line = ($printed.stdout | lines | where ($it | str starts-with "!0 = ") | first)
       let kept = ($line | str contains $"($entry.field):")
       if not $kept {
-        $dropped = ($dropped | append $"($probe.node).($entry.field)")
+        $dropped = ($dropped | append $"($probe.node).($entry.field) = ($entry.default)")
       }
-      print $"($probe.node).($entry.field): (if $kept { 'kept' } else { 'DROPPED' })"
+      print $"($probe.node).($entry.field) at ($entry.default): (if $kept { 'kept' } else { 'DROPPED' })"
     }
   }
   rm -rf $work
