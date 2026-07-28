@@ -150,7 +150,11 @@
 	--md-sys-list-pane-width: 360px; /* fixed list pane in list-detail */
 	--md-sys-rail-width: 88px; /* collapsed navigation rail */
 	--md-sys-rail-expanded: 384px; /* rail (88) + tree pane (~296) total */
-	--md-sys-body-max: 50rem; /* ≈ A4 page width (794px): centred reading-measure cap */
+	/* Centred cap on the content column (and, deliberately, on the top app bar's
+	   inner row, so the two stay aligned). Wider than the A4 page width it used
+	   to mirror: the column carries tables, carousels, rosters and file previews
+	   as often as prose, and those were the ones being squeezed. */
+	--md-sys-body-max: 60rem;
 	--md-sys-tools-width: 360px; /* docked tools side sheet (extra-large screens) */
 
 	/* ── Motion: spring tokens (Expressive) ──────────────────────────────

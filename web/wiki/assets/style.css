@@ -5163,6 +5163,15 @@ h6,
 	border-radius: var(--md-sys-shape-corner-large);
 }
 
+/* A PDF / office preview sat inside three insets at once: the viewer's padding,
+   the frame's margin and the frame's own padding, ~40px a side around a document
+   that is mostly margin already. Inside the viewer the frame keeps its tint and
+   rounding but gives that space back to the page. */
+.file-viewer .viewport-frame {
+	margin: var(--md-sys-spacing-1) 0 0;
+	padding: var(--md-sys-spacing-1);
+}
+
 .file-viewer iframe {
 	width: 100%;
 	/* Fill the viewport height minus the chrome (top/bottom bar + padding)
