@@ -1181,6 +1181,27 @@ written at every use, and a node written in place inside a *specialized
 field* was still being kept there, so `types: !{}` printed as itself
 rather than as `types: !5` with `!5 = !{}`. The reference case had been
 hoisting since that pass; the field case had not.
+A seventy-sixth pass took the debug-info upgrade, which had been recorded
+as blocked since the sixty-second and is not. It was written off as "not
+one transformation but a family, each needing the shape of the *older*
+debug info modelled", and one member of that family is nineteen of the
+fifty-four files and is a mechanical field mapping.
+A subprogram's `isLocal`, `isDefinition`, `isOptimized` and `virtuality`
+were four fields saying four things and are one `spFlags` set now, so a
+node writing any of them is written back with the set instead. The bits
+go in an order of their own, virtual before local before definition
+before optimised, and `isDefinition` is the one whose absence does not
+mean false: a subprogram in the old format is a definition unless it says
+otherwise, which is why `isLocal: true` alone comes back as a definition
+too. That last is what the probes were for; it is not a shape anyone
+would guess.
+One rule came with it that is not part of the upgrade at all: which slot
+in the vtable a subprogram occupies is nought for most of them and a
+virtual subprogram writes it anyway, whichever spelling set the flag.
+Assembler 155 to 157, Linker 177 to 187, Other 129 to 131. Ten files in
+Linker alone. What remains of the family is the compile unit whose file
+is filled in from a subprogram that names it, and the `DIExpression`
+opcode rewrites; those do want the older dialect modelled.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

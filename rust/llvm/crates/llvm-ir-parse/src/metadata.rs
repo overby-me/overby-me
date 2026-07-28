@@ -60,6 +60,7 @@ impl Parser {
                 self.check_specialized(schema, &tag, distinct, &args)?;
                 let args = drop_defaulted_fields(schema, &tag, args);
                 let args = fill_compile_unit_defaults(&tag, args);
+                let args = upgrade_subprogram_flags(&tag, args);
                 Ok(Metadata::Specialized {
                     distinct,
                     tag,
@@ -710,6 +711,86 @@ fn fill_compile_unit_defaults(tag: &str, args: SpecializedArgs) -> SpecializedAr
         if !fields.iter().any(|(written, _)| written == name) {
             fields.push((name.to_string(), value));
         }
+    }
+    SpecializedArgs::Named(fields)
+}
+
+/// The older spelling of a subprogram's flags, which upstream reads and
+/// replaces. `isLocal`, `isDefinition`, `isOptimized` and `virtuality` were
+/// four fields saying four things; they are one `spFlags` set now, and a node
+/// writing any of them is written back with the set instead.
+///
+/// `isDefinition` is the one whose absence does not mean false: a subprogram
+/// written in the old format is a definition unless it says otherwise, which
+/// is why `isLocal: true` alone comes back as a definition too.
+fn upgrade_subprogram_flags(tag: &str, args: SpecializedArgs) -> SpecializedArgs {
+    if tag != "DISubprogram" {
+        return args;
+    }
+    let SpecializedArgs::Named(fields) = args else {
+        return args;
+    };
+    const OLD: [&str; 4] = ["isLocal", "isDefinition", "isOptimized", "virtuality"];
+    if !fields.iter().any(|(name, _)| OLD.contains(&name.as_str())) {
+        return virtual_index_survives(SpecializedArgs::Named(fields));
+    }
+    let written = |wanted: &str| {
+        fields
+            .iter()
+            .find(|(name, _)| name == wanted)
+            .map(|(_, v)| v)
+    };
+    let is_set = |wanted: &str| matches!(written(wanted), Some(MdField::Bool(true)));
+    let virtuality = match written("virtuality") {
+        Some(MdField::Words(words)) => words.first().map(String::as_str),
+        _ => None,
+    };
+
+    // The order upstream writes them in, which is not the order the four
+    // fields were.
+    let mut flags = Vec::new();
+    match virtuality {
+        Some("DW_VIRTUALITY_virtual") => flags.push("DISPFlagVirtual"),
+        Some("DW_VIRTUALITY_pure_virtual") => flags.push("DISPFlagPureVirtual"),
+        _ => {}
+    }
+    if is_set("isLocal") {
+        flags.push("DISPFlagLocalToUnit");
+    }
+    if !matches!(written("isDefinition"), Some(MdField::Bool(false))) {
+        flags.push("DISPFlagDefinition");
+    }
+    if is_set("isOptimized") {
+        flags.push("DISPFlagOptimized");
+    }
+
+    let mut kept: Vec<(String, MdField)> = fields
+        .into_iter()
+        .filter(|(name, _)| !OLD.contains(&name.as_str()))
+        .collect();
+    let value = if flags.is_empty() {
+        MdField::Unsigned(0)
+    } else {
+        MdField::Words(flags.iter().map(|flag| (*flag).to_string()).collect())
+    };
+    kept.push(("spFlags".to_string(), value));
+    virtual_index_survives(SpecializedArgs::Named(kept))
+}
+
+/// Which slot in the vtable a subprogram occupies is nought for most of them,
+/// and a virtual subprogram writes it anyway: the number means something
+/// there, where on a subprogram that is not virtual it means nothing and goes.
+fn virtual_index_survives(args: SpecializedArgs) -> SpecializedArgs {
+    let SpecializedArgs::Named(mut fields) = args else {
+        return args;
+    };
+    let is_virtual = fields.iter().any(|(name, value)| {
+        name == "spFlags"
+            && matches!(value, MdField::Words(words)
+                if words.iter().any(|word| matches!(word.as_str(), "DISPFlagVirtual" | "DISPFlagPureVirtual")))
+    });
+    if is_virtual && !fields.iter().any(|(name, _)| name == "virtualIndex") {
+        fields.push(("virtualIndex".to_string(), MdField::Unsigned(0)));
     }
     SpecializedArgs::Named(fields)
 }
