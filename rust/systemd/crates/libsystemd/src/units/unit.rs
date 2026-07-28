@@ -553,26 +553,39 @@ impl ServiceState {
         #[cfg(target_os = "linux")]
         {
             let cgroup_path = &conf.platform_specific.cgroup_path;
-            if cgroup_path.exists()
-                && let Err(e) = crate::platform::cgroups::remove_cgroup_recursive(cgroup_path)
-            {
-                // A user manager runs unprivileged: it cannot remove a subcgroup
-                // the payload chown'd to another uid (nor, therefore, the tree
-                // above it). Escalate to PID 1, which removes it as root. Mirrors
-                // systemd's unit_prune_cgroup_via_bus.
-                if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
-                    if let Err(e2) = crate::control::escalate_remove_cgroup(cgroup_path) {
+            if cgroup_path.exists() {
+                let mut removed = true;
+                if let Err(e) = crate::platform::cgroups::remove_cgroup_recursive(cgroup_path) {
+                    removed = false;
+                    // A user manager runs unprivileged: it cannot remove a subcgroup
+                    // the payload chown'd to another uid (nor, therefore, the tree
+                    // above it). Escalate to PID 1, which removes it as root. Mirrors
+                    // systemd's unit_prune_cgroup_via_bus.
+                    if std::env::var_os("SYSTEMD_USER_MANAGER").is_some() {
+                        match crate::control::escalate_remove_cgroup(cgroup_path) {
+                            Ok(()) => removed = true,
+                            Err(e2) => log::warn!(
+                                "deactivate: escalated cgroup removal for {} failed: {e2} (local: {e})",
+                                id.name,
+                            ),
+                        }
+                    } else {
                         log::warn!(
-                            "deactivate: escalated cgroup removal for {} failed: {e2} (local: {e})",
+                            "deactivate: could not remove cgroup {} for {}: {}",
+                            cgroup_path.display(),
                             id.name,
+                            e
                         );
                     }
-                } else {
-                    log::warn!(
-                        "deactivate: could not remove cgroup {} for {}: {}",
-                        cgroup_path.display(),
-                        id.name,
-                        e
+                }
+                // Once the unit's own cgroup is gone, the slice above it may have
+                // just lost its last member. systemd prunes such a slice when it
+                // becomes empty; without this an emptied slice lingers forever
+                // (TEST-19-CGROUP.cleanup-slice waits for exactly that).
+                if removed {
+                    crate::platform::cgroups::prune_empty_parent_cgroups(
+                        cgroup_path,
+                        std::path::Path::new("/sys/fs/cgroup"),
                     );
                 }
             }

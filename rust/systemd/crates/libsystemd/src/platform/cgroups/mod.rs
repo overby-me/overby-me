@@ -349,6 +349,44 @@ pub fn remove_cgroup(cgroup_path: &std::path::Path) -> Result<(), CgroupError> {
 /// (still holds processes, or is owned by another user and its own children are
 /// not writable by us) is skipped rather than aborting, so as much of the tree
 /// is reclaimed as possible. Mirrors systemd's cg_trim.
+/// Remove now-empty ancestor cgroups, walking up from `start`.
+///
+/// A service's own cgroup is removed when it exits, but its slice's cgroup used
+/// to be left behind forever: TEST-19-CGROUP.cleanup-slice waits for
+/// `systemd-cgls /test19cleanup.slice` to start failing after the only service
+/// in it stops, and that never happened.
+///
+/// Walks upwards while each ancestor is genuinely empty — no processes in
+/// cgroup.procs and no child cgroup directories — and stops at the first one
+/// that is not, so shared slices like system.slice are never touched while they
+/// still hold anything. Also stops at `root` so it can never escape the cgroup
+/// hierarchy. Errors are ignored: a slice that cannot be pruned is untidy, not
+/// broken.
+pub fn prune_empty_parent_cgroups(start: &std::path::Path, root: &std::path::Path) {
+    let mut cur = start.parent();
+    while let Some(dir) = cur {
+        if dir == root || !dir.starts_with(root) {
+            return;
+        }
+        let procs_empty = fs::read_to_string(dir.join("cgroup.procs"))
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(false);
+        if !procs_empty {
+            return;
+        }
+        let has_children = fs::read_dir(dir)
+            .map(|mut it| it.any(|e| e.map(|e| e.path().is_dir()).unwrap_or(false)))
+            .unwrap_or(true);
+        if has_children {
+            return;
+        }
+        if fs::remove_dir(dir).is_err() {
+            return;
+        }
+        cur = dir.parent();
+    }
+}
+
 pub fn remove_cgroup_recursive(cgroup_path: &std::path::Path) -> Result<(), CgroupError> {
     if let Ok(entries) = fs::read_dir(cgroup_path) {
         for entry in entries.flatten() {

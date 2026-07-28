@@ -1561,6 +1561,9 @@ pub(crate) fn service_exit_handler(
                     // cgroups (including ones chown'd to another user) under the
                     // service cgroup; a plain remove_dir would fail ENOTEMPTY and
                     // leak the tree. See TEST-19-CGROUP.delegate testcase_user_unpriv.
+                    // Prune the slice above it too once it is empty, so a
+                    // slice does not outlive its last member.
+                    let pruned_from = cgroup_path.clone();
                     if let Err(e) = crate::platform::cgroups::remove_cgroup_recursive(cgroup_path) {
                         trace!(
                             "Could not remove cgroup dir {}: {}",
@@ -1568,30 +1571,15 @@ pub(crate) fn service_exit_handler(
                             e
                         );
                     } else {
+                        crate::platform::cgroups::prune_empty_parent_cgroups(
+                            &pruned_from,
+                            std::path::Path::new("/sys/fs/cgroup"),
+                        );
                         trace!(
                             "Cleaned up cgroup dir {} for {}",
                             cgroup_path.display(),
                             srvc_id.name
                         );
-                        // Try to remove the parent slice cgroup dir if empty.
-                        if let Some(parent) = cgroup_path.parent() {
-                            let parent_procs = parent.join("cgroup.procs");
-                            let parent_empty = std::fs::read_to_string(&parent_procs)
-                                .map(|s| s.trim().is_empty())
-                                .unwrap_or(false);
-                            if parent_empty {
-                                // Check no child dirs remain
-                                let has_children = std::fs::read_dir(parent)
-                                    .map(|entries| {
-                                        entries.filter_map(|e| e.ok()).any(|e| e.path().is_dir())
-                                    })
-                                    .unwrap_or(false);
-                                if !has_children {
-                                    let _ = std::fs::remove_dir(parent);
-                                }
-                            }
-                        }
-
                     }
                 }
             }
