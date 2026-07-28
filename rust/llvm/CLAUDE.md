@@ -1269,6 +1269,13 @@ than the field alone. A compile unit's producer and flags went in with
 them, having never been probed. A `!DILocation` always writes its line,
 which is the fourth node with a field of that kind.
 Assembler 164 to 167, Other 132 to 133.
+Four node kinds had never been probed at all, `DILexicalBlockFile` among
+them, which is why two of its nodes that differ only by a `file: null`
+stayed two nodes here and are one upstream. A hundred and twenty-two
+pairs now. And a `splat` a module writes is expanded the same way one
+this reads would have been folded: the shorthand is for repeated data, so
+a vector of the same symbol goes lane by lane whichever way it arrived.
+Assembler 167 to 168.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

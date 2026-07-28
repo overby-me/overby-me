@@ -341,6 +341,24 @@ impl Parser {
             self.require(Token::LeftParen)?;
             let (_, element) = self.parse_typed_constant()?;
             self.require(Token::RightParen)?;
+            // A splat is the shorthand for repeated *data*, so a vector of
+            // the same symbol is written out lane by lane whichever way the
+            // module spelled it. Reading the shorthand and printing the long
+            // form is what upstream does with one.
+            if let TypeKind::Vector {
+                count,
+                scalable: false,
+                ..
+            } = self.module.ctx.type_kind(ty).clone()
+                && !matches!(
+                    self.module.ctx.constant(element),
+                    Constant::Integer { .. } | Constant::Float { .. }
+                )
+                && let Ok(width) = usize::try_from(count)
+            {
+                let lanes = vec![element; width];
+                return Ok(Some(self.fold_aggregate(ty, &lanes, true)));
+            }
             return Ok(Some(
                 self.module
                     .ctx

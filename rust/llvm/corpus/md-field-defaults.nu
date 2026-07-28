@@ -47,6 +47,10 @@ const PROBES = [
   ["DIImportedEntity" 'tag: DW_TAG_imported_module, scope: null' [[field, default]; [name '""'] [line '0'] [scope 'null'] [entity 'null'] [file 'null'] [elements 'null']]]
   ["DILabel" 'scope: !9, name: "l", file: null, line: 1' [[field, default]; [column '0'] [column '0'] [file 'null']]]
   ["DIMacro" 'type: DW_MACINFO_define, name: "m"' [[field, default]; [line '0'] [value '""']]]
+  ["DILexicalBlockFile" 'scope: !9, discriminator: 1' [[field, default]; [file 'null']]]
+  ["DICommonBlock" 'scope: !9, declaration: null, name: "c"' [[field, default]; [file 'null'] [line '0']]]
+  ["DIGenericSubrange" 'count: !DIExpression()' [[field, default]; [lowerBound 'null'] [upperBound 'null'] [stride 'null']]]
+  ["GenericDINode" 'tag: DW_TAG_member' [[field, default]; [header '""'] [operands 'null']]]
   ["DIMacroFile" 'file: null' [[field, default]; [line '0'] [nodes 'null']]]
 ]
 

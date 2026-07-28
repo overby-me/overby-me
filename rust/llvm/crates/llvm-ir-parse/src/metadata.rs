@@ -598,6 +598,8 @@ static DEFAULTED: &[(&str, &str, &str)] = &[
     ("DIBasicType", "num_extra_inhabitants", "0"),
     ("DIBasicType", "size", "0"),
     ("DIBasicType", "tag", "DW_TAG_base_type"),
+    ("DICommonBlock", "file", "null"),
+    ("DICommonBlock", "line", "0"),
     ("DICompileUnit", "debugInfoForProfiling", "false"),
     ("DICompileUnit", "dwoId", "0"),
     ("DICompileUnit", "enums", "null"),
@@ -657,6 +659,7 @@ static DEFAULTED: &[(&str, &str, &str)] = &[
     ("DILexicalBlock", "column", "0"),
     ("DILexicalBlock", "file", "null"),
     ("DILexicalBlock", "line", "0"),
+    ("DILexicalBlockFile", "file", "null"),
     ("DILocalVariable", "align", "0"),
     ("DILocalVariable", "annotations", "null"),
     ("DILocalVariable", "arg", "0"),
@@ -709,6 +712,7 @@ static DEFAULTED: &[(&str, &str, &str)] = &[
     ("DITemplateValueParameter", "defaulted", "false"),
     ("DITemplateValueParameter", "name", "empty"),
     ("DITemplateValueParameter", "type", "null"),
+    ("GenericDINode", "header", "empty"),
 ];
 
 /// The fields upstream writes whether or not the module did. They are the
