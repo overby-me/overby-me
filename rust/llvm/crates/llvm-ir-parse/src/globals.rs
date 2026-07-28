@@ -60,7 +60,13 @@ impl Parser {
         if self.eat_word("ifunc") {
             let value_type = self.parse_type()?;
             self.require(Token::Comma)?;
-            let (_, resolver) = self.parse_typed_constant()?;
+            // A constant expression resolver says what it produces itself,
+            // so it is written with no type in front, the way an aliasee is.
+            let resolver = if self.starts_a_typeless_expression() {
+                self.parse_untyped_constant_expression()?
+            } else {
+                self.parse_typed_constant()?.1
+            };
             let mut ifunc = IFunc {
                 name,
                 qualifiers,

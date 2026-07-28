@@ -148,6 +148,116 @@ impl Parser {
         }
     }
 
+    /// The indices of a walk that answers with a vector, each written the way
+    /// upstream writes it: as a vector, except where it names a struct field.
+    fn widen_gep_indices(
+        &mut self,
+        result: TypeId,
+        source_type: TypeId,
+        indices: Vec<ConstId>,
+    ) -> Vec<ConstId> {
+        // The type the next index steps into, or `None` once the walk has
+        // lost it, after which the rest are left as they were written.
+        let mut current = Some(source_type);
+        let mut widened = Vec::with_capacity(indices.len());
+        for (position, index) in indices.into_iter().enumerate() {
+            // The first index strides over the source type rather than
+            // stepping into it, so the walk starts at the second.
+            let fields = match (position, current) {
+                (0, _) | (_, None) => None,
+                (_, Some(ty)) => self.struct_fields_of(ty),
+            };
+            if let Some(fields) = fields {
+                let index = self.narrow_struct_index(index);
+                widened.push(index);
+                current = self
+                    .constant_index(index)
+                    .and_then(|field| fields.get(field).copied());
+                continue;
+            }
+            widened.push(self.widen_to(result, index));
+            // The first index walks through the pointer to the source type,
+            // which is where the second index starts, so it steps into
+            // nothing.
+            if position == 0 {
+                continue;
+            }
+            current = match current.map(|ty| self.module.ctx.type_kind(ty)) {
+                Some(TypeKind::Array { element, .. } | TypeKind::Vector { element, .. }) => {
+                    Some(*element)
+                }
+                _ => None,
+            };
+        }
+        widened
+    }
+
+    /// A struct field named lane by lane, as the one field it names. Every
+    /// lane picks the same field or the walk has no type at the end of it,
+    /// so upstream writes the scalar whatever the module wrote.
+    fn narrow_struct_index(&mut self, index: ConstId) -> ConstId {
+        let element = match self.module.ctx.constant(index) {
+            Constant::Splat { element, .. } => Some(*element),
+            Constant::Vector { elements, .. } => match elements.first().copied() {
+                Some(first) if elements.iter().all(|lane| *lane == first) => Some(first),
+                _ => None,
+            },
+            Constant::ZeroInitializer(ty) => {
+                let TypeKind::Vector { element, .. } = self.module.ctx.type_kind(*ty) else {
+                    return index;
+                };
+                let element = *element;
+                let TypeKind::Integer(bits) = *self.module.ctx.type_kind(element) else {
+                    return index;
+                };
+                return self.module.ctx.const_int_of(bits, 0);
+            }
+            _ => None,
+        };
+        element.unwrap_or(index)
+    }
+
+    /// A struct's fields, when the type is one.
+    fn struct_fields_of(&self, ty: TypeId) -> Option<Vec<TypeId>> {
+        match self.module.ctx.type_kind(ty) {
+            TypeKind::Struct { fields, .. } => Some(fields.clone()),
+            TypeKind::NamedStruct(id) => self.module.ctx.struct_def(*id).fields.clone(),
+            _ => None,
+        }
+    }
+
+    /// The number a constant index carries, when it carries one.
+    fn constant_index(&self, index: ConstId) -> Option<usize> {
+        match self.module.ctx.constant(index) {
+            Constant::Integer { value, .. } => usize::try_from(value.to_u64()?).ok(),
+            Constant::ZeroInitializer(_) => Some(0),
+            _ => None,
+        }
+    }
+
+    /// A scalar written where the result has lanes, as the vector it stands
+    /// for. Anything already a vector, and anything at all when the result is
+    /// scalar or the count is not known, is left as it was.
+    fn widen_to(&mut self, result: TypeId, value: ConstId) -> ConstId {
+        let TypeKind::Vector {
+            count,
+            scalable: false,
+            ..
+        } = *self.module.ctx.type_kind(result)
+        else {
+            return value;
+        };
+        let element = self.module.ctx.constant(value).ty();
+        if matches!(self.module.ctx.type_kind(element), TypeKind::Vector { .. }) {
+            return value;
+        }
+        let Ok(count) = usize::try_from(count) else {
+            return value;
+        };
+        let ty = self.module.ctx.vector_type(element, count as u64, false);
+        self.fold_aggregate(ty, &vec![value; count], true)
+    }
+
     /// The shorthand upstream folds an aggregate into when every element
     /// says the same thing.
     ///
@@ -655,13 +765,22 @@ impl Parser {
                     indices.push(index);
                 }
                 self.require(Token::RightParen)?;
+                let ty = expected.unwrap_or(base_type);
+                // A walk that answers with a vector answers lane by lane, so
+                // an index written once stands for the same index in every
+                // lane and upstream writes it out as one: `i32 0` alongside a
+                // `<4 x i32>` index comes back `<4 x i32> zeroinitializer`.
+                // A struct field is the exception: every lane picks the same
+                // field or the walk has no type, so that index stays as it
+                // was written.
+                let indices = self.widen_gep_indices(ty, source_type, indices);
                 ConstExpr::GetElementPtr {
                     source_type,
                     base,
                     indices,
                     flags,
                     inrange,
-                    ty: expected.unwrap_or(base_type),
+                    ty,
                 }
             }
             // Three of the arithmetic expressions survived the removals; the
@@ -761,10 +880,21 @@ impl Parser {
         // and upstream folds it away as it reads: `getelementptr (i32, ptr
         // @foo)` and `getelementptr inbounds ([4 x i32], ptr @a, i64 0, i64
         // 0)` both print back as the base.
-        if let ConstExpr::GetElementPtr { base, indices, .. } = &expr
+        if let ConstExpr::GetElementPtr {
+            base,
+            indices,
+            ty,
+            inrange,
+            ..
+        } = &expr
+            && inrange.is_none()
             && indices.iter().all(|index| self.is_zero_constant(*index))
         {
-            return Ok(*base);
+            // Where the walk answers with a vector, every lane arrives back
+            // at the pointer it started from, so the answer is that pointer
+            // in every lane rather than the pointer itself.
+            let (base, ty) = (*base, *ty);
+            return Ok(self.widen_to(ty, base));
         }
         // Walking from a pointer nobody chose arrives nowhere in particular,
         // so the answer is the same nothing the walk started from.

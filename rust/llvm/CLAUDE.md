@@ -1396,7 +1396,24 @@ the strictest its fields ask for, and asking for the whole layout to get
 it failed on the first field that has no size. And a metadata name that
 opens with a digit reads as a number, so upstream escapes the first
 character alone: `!\3111` is the name `111`.
-Assembler 171 to 180, Feature 61 to 65, Linker 200 to 201, Other 133 to
+Four more, and one of them had a shape nothing else in the printer has. A
+walk that answers with a vector answers lane by lane, so an index written
+once stands for the same index in every lane and upstream writes it out
+as one: `getelementptr ([4 x i32], ptr @G, i32 0, <4 x i32> ...)` comes
+back with `<4 x i32> zeroinitializer` in the first position. A struct
+field is the exception and goes the other way, every lane picking the
+same field, so a `<2 x i32> <i32 1, i32 1>` there comes back `i32 1`.
+Telling the two apart needs the type walk, which the verifier had and the
+parser did not.
+With them: a walk that moves nowhere is the pointer it started from
+unless it carries an `inrange`, which says something the pointer does
+not; and an ifunc resolver that is a constant expression writes no type
+in front of it, on the way in as well as on the way out, which is the
+rule an alias aliasee has had since the fifty-second pass.
+Two more were measured and are not ours. `opt -S` drops a ThinLTO summary
+index that `llvm-as | llvm-dis` keeps, which is two files on the wrong
+side of the ceiling for the same reason ODR uniquing is.
+Assembler 171 to 184, Feature 61 to 65, Linker 200 to 201, Other 133 to
 135.
 Acceptance: both numbers up again, recorded in the same commit.
 

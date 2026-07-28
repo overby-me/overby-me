@@ -531,6 +531,39 @@ fn an_attribute_set_is_written_in_upstreams_order() {
 }
 
 const PRINTED: &[(&str, &str)] = &[
+    // A constant expression resolver writes what it produces itself, the way
+    // an alias aliasee does.
+    (
+        "define ptr @resolver() addrspace(1) {\nentry:\n  ret ptr null\n}\n\n@f = ifunc void (), addrspacecast (ptr addrspace(1) @resolver to ptr)\n",
+        "@f = ifunc void (), addrspacecast (ptr addrspace(1) @resolver to ptr)",
+    ),
+    // A bare symbol still needs one.
+    (
+        "define ptr @resolver() {\nentry:\n  ret ptr null\n}\n\n@f = ifunc void (), ptr @resolver\n",
+        "@f = ifunc void (), ptr @resolver",
+    ),
+    // A walk that answers with a vector answers lane by lane, so a scalar
+    // index stands for the same index in every lane.
+    (
+        "@G = external global [4 x i32]\n@a = global <4 x ptr> getelementptr ([4 x i32], ptr @G, i32 0, <4 x i32> <i32 0, i32 1, i32 2, i32 3>)\n",
+        "@a = global <4 x ptr> getelementptr ([4 x i32], ptr @G, <4 x i32> zeroinitializer, <4 x i32> <i32 0, i32 1, i32 2, i32 3>)",
+    ),
+    // A struct field is the exception: every lane picks the same field, so
+    // upstream writes the one scalar however the module wrote it.
+    (
+        "@z = global <2 x ptr> getelementptr ([3 x {i32, i32}], <2 x ptr> zeroinitializer, <2 x i32> <i32 1, i32 2>, <2 x i32> <i32 2, i32 3>, <2 x i32> <i32 1, i32 1>)\n",
+        "@z = global <2 x ptr> getelementptr ([3 x { i32, i32 }], <2 x ptr> zeroinitializer, <2 x i32> <i32 1, i32 2>, <2 x i32> <i32 2, i32 3>, i32 1)",
+    ),
+    // A walk that moves nowhere is the pointer it started from, unless it
+    // carries an `inrange`, which says something the pointer does not.
+    (
+        "@a = global [4 x ptr] zeroinitializer\n@b = alias ptr, getelementptr inbounds inrange(0, 4) ([4 x ptr], ptr @a, i32 0, i32 0)\n",
+        "@b = alias ptr, getelementptr inbounds inrange(0, 4) ([4 x ptr], ptr @a, i32 0, i32 0)",
+    ),
+    (
+        "@a = global [4 x ptr] zeroinitializer\n@c = alias ptr, getelementptr inbounds ([4 x ptr], ptr @a, i32 0, i32 0)\n",
+        "@c = alias ptr, ptr @a",
+    ),
     // A float class is a set of the ten kinds a float can be, and upstream
     // names it rather than writing the bits.
     (

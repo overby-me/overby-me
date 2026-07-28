@@ -99,7 +99,17 @@ impl Printer<'_> {
         self.push("ifunc ");
         self.ty(ifunc.value_type);
         self.push(", ");
-        self.constant_with_type(ifunc.resolver);
+        // A constant expression resolver writes what it produces itself, so
+        // upstream puts no type in front of it, the way an alias aliasee is
+        // written. A bare symbol does need one.
+        if matches!(
+            self.module.ctx.constant(ifunc.resolver),
+            llvm_ir::constant::Constant::Expression(_)
+        ) {
+            self.constant(ifunc.resolver);
+        } else {
+            self.constant_with_type(ifunc.resolver);
+        }
         if let Some(partition) = &ifunc.partition {
             let _ = write!(self.out, ", partition \"{}\"", escape_string(partition));
         }
