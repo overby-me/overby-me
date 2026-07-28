@@ -64,18 +64,7 @@ impl Printer<'_> {
                         // rather than the one they were read in, so a module
                         // that wrote them differently still prints the same.
                         let mut fields: Vec<_> = fields.iter().collect();
-                        if let Ok(index) = crate::md_slots::FIELD_ORDER
-                            .binary_search_by_key(&tag.as_str(), |(kind, _)| *kind)
-                        {
-                            let order = crate::md_slots::FIELD_ORDER[index].1;
-                            let rank = |key: &str| {
-                                order
-                                    .iter()
-                                    .position(|name| *name == key)
-                                    .unwrap_or(order.len())
-                            };
-                            fields.sort_by_key(|(key, _)| rank(key));
-                        }
+                        fields.sort_by_key(|(key, _)| llvm_ir::metadata::field_rank(tag, key));
                         for (index, (key, value)) in fields.iter().enumerate() {
                             if index > 0 {
                                 self.push(", ");

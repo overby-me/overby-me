@@ -61,6 +61,16 @@ impl Parser {
                 let args = drop_defaulted_fields(schema, &tag, args);
                 let args = fill_compile_unit_defaults(&tag, args);
                 let args = upgrade_subprogram_flags(&tag, args);
+                // Sorted here rather than at print time, because two nodes
+                // that differ only in the order their fields were written are
+                // one node upstream, and uniquing compares what is stored.
+                let args = match args {
+                    SpecializedArgs::Named(mut fields) => {
+                        fields.sort_by_key(|(name, _)| llvm_ir::metadata::field_rank(&tag, name));
+                        SpecializedArgs::Named(fields)
+                    }
+                    other => other,
+                };
                 Ok(Metadata::Specialized {
                     distinct,
                     tag,

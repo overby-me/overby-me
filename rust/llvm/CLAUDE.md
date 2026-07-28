@@ -1276,6 +1276,20 @@ pairs now. And a `splat` a module writes is expanded the same way one
 this reads would have been folded: the shorthand is for repeated data, so
 a vector of the same symbol goes lane by lane whichever way it arrived.
 Assembler 167 to 168.
+An eightieth pass moved the field sort from the printer to the parser,
+which is where it always belonged. Two nodes that differ only in the
+order their fields were written are one node upstream, and uniquing
+compares what is stored rather than what is printed, so sorting at the
+end left `!DILocation(line: 3, column: 7, scope: !0)` and
+`!DILocation(scope: !0, column: 7, line: 3)` as two nodes that print the
+same. The table moved to `llvm-ir` so both sides can reach it, and the
+printer still sorts, for the nodes the builder makes rather than the
+parser. Assembler 168 to 169.
+Also measured and left: the intrinsic name upgrades add a mangling suffix
+worked out from the overloaded positions, `llvm.stacksave` becoming
+`llvm.stacksave.p0` and `llvm.ctlz` becoming `llvm.ctlz.i32`. Which
+positions those are is the per-intrinsic table LangRef does not give, and
+it is three files.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the
