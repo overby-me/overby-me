@@ -207,8 +207,8 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against upstream's own `opt -S`, and **154 of 221** are identical, with
-three more suites measured the same way: **60 of 71** in `Feature`, **176 of
+against upstream's own `opt -S`, and **155 of 221** are identical, with
+three more suites measured the same way: **60 of 71** in `Feature`, **177 of
 219** in `Linker` and **129 of 144** in `Other`. Five of the
 eighty-seven remaining differences are ones where we already match
 `llvm-as | llvm-dis` and `opt -S` does something more, ODR type uniquing

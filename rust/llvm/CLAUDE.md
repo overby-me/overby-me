@@ -1166,6 +1166,15 @@ writes none, which is the target knowledge already recorded as missing,
 and a valueless quoted attribute, which turned out to print correctly in
 isolation and to differ only inside a file that has the debug-info
 upgrade in it too.
+A seventy-fifth pass took one more of the same shape. A node is uniqued by
+what it holds, so a node that holds itself cannot be, and upstream makes
+one distinct whether or not the module wrote the word. Two nodes that name
+each other are not this and stay as they were, which is the boundary a
+probe found and a rule about cycles would have got wrong.
+Assembler 154 to 155, Linker 176 to 177. What is left across the four
+print suites is fifty-four files, forty-one of them the three recorded
+blockers, three the data layout upstream supplies from a triple, two the
+ODR-uniquing ceiling that cannot move at all, and eight one-offs.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

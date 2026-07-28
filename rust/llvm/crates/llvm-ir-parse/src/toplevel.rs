@@ -6,7 +6,7 @@ use crate::{ParseError, Parser};
 use llvm_ir::TypeId;
 use llvm_ir::constant::Constant;
 use llvm_ir::global::{Comdat, ComdatKind};
-use llvm_ir::metadata::{MdOperand, Metadata, NamedMetadata};
+use llvm_ir::metadata::{MdField, MdOperand, Metadata, NamedMetadata, SpecializedArgs};
 use llvm_ir::summary::{SummaryEntry, SummaryField, SummaryValue};
 use llvm_ir::value::{GlobalRef, MdId, Name, Value};
 use llvm_support::{ApInt, DataLayout, Triple};
@@ -557,5 +557,55 @@ impl Parser {
             self.module
                 .set_metadata(id, Metadata::Tuple { distinct, operands });
         }
+    }
+}
+
+impl Parser {
+    /// A node is uniqued by what it holds, so a node that holds itself cannot
+    /// be: asking whether two of them are equal would never finish. Upstream
+    /// makes one distinct whether or not the module wrote the word. Two nodes
+    /// that name each other are not this and stay as they were.
+    pub(crate) fn mark_self_referencing_distinct(&mut self) {
+        let ids: Vec<MdId> = self.module.metadata_nodes().map(|(id, _)| id).collect();
+        for id in ids {
+            let Some(node) = self.module.metadata_node(id).cloned() else {
+                continue;
+            };
+            if node.is_distinct() || !names_itself(&node, id) {
+                continue;
+            }
+            let replacement = match node {
+                Metadata::Tuple { operands, .. } => Metadata::Tuple {
+                    distinct: true,
+                    operands,
+                },
+                Metadata::Specialized { tag, args, .. } => Metadata::Specialized {
+                    distinct: true,
+                    tag,
+                    args,
+                },
+                Metadata::String(_) => continue,
+            };
+            self.module.set_metadata(id, replacement);
+        }
+    }
+}
+
+/// Whether a node names the id it is stored under.
+fn names_itself(node: &Metadata, id: MdId) -> bool {
+    match node {
+        Metadata::Tuple { operands, .. } => operands
+            .iter()
+            .any(|operand| matches!(operand, MdOperand::Ref(named) if *named == id)),
+        Metadata::Specialized { args, .. } => {
+            let fields: Vec<&MdField> = match args {
+                SpecializedArgs::Named(fields) => fields.iter().map(|(_, value)| value).collect(),
+                SpecializedArgs::Positional(values) => values.iter().collect(),
+            };
+            fields
+                .iter()
+                .any(|field| matches!(field, MdField::Ref(named) if *named == id))
+        }
+        Metadata::String(_) => false,
     }
 }

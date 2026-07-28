@@ -92,6 +92,7 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
     }
     parser.add_implied_intrinsics();
     parser.upgrade_module_flags();
+    parser.mark_self_referencing_distinct();
     Ok(parser.module)
 }
 
