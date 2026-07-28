@@ -140,13 +140,25 @@
   # idle_timestamp_monotonic). testcase_list_users_sessions_seats asserts $9 is
   # '-', which the old column could never satisfy.
   #
-  # SEPARATE BUG FOUND HERE, MEASURED, NOT YET FIXED, and not this test's
-  # blocker: units/loading/directory_deps.rs resolve_specifiers() calls
+  # SEPARATE BUG FOUND HERE, and SINCE FIXED, not this test's blocker:
+  # units/loading/directory_deps.rs resolve_specifiers() used to call
   # system_specifier_context() unconditionally, so SpecifierContext::for_user()
-  # is dead code and every unit a USER manager loads gets system specifier
-  # values. %t resolves to /run rather than $XDG_RUNTIME_DIR, which is why the
-  # user dbus.socket tried to bind /run/bus; %S, %C and %h are wrong the same
-  # way. Fixing it means threading a system/user flavour through the loader.
+  # was dead code and every unit a USER manager loaded got system specifier
+  # values. %t resolved to /run rather than $XDG_RUNTIME_DIR, which is why the
+  # user dbus.socket tried to bind /run/bus; %S, %C and %h were wrong the same
+  # way. There is now a manager_specifier_context() (directory_deps.rs) that
+  # picks for_user() when SYSTEMD_USER_MANAGER is set, and every call site
+  # funnels through the one resolve_specifiers() wrapper that uses it;
+  # system_specifier_context() has no callers left.
+  #
+  # TENTH FIX, elsewhere but worth recording because it was the same class of
+  # user-manager defect: the generated user@.service carried no Delegate=, so
+  # the manager ran as the user while its cgroup stayed root-owned and every
+  # service it started died with "Couldnt create service cgroup: Permission
+  # denied". Fixed by declaring Delegate=pids memory cpu as upstream does.
+  #
+  # These notes are a running history, so read them as "what was true when
+  # written" and check the code before acting on any of them.
   # WHERE IT STOPS NOW, and the C ORACLE CANNOT ARBITRATE.
   # testcase_list_users_sessions_seats fails in check_session with "no session
   # or multiple sessions". The %I fix above did work: agetty no longer dies on
