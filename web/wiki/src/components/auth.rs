@@ -251,7 +251,13 @@ fn AuthForm(mode: AuthMode) -> Element {
                     }
                     match nhost::reset_password(&em).await {
                         Ok(()) => {
-                            nav.push(Route::SetPassword {});
+                            // Confirm the mail went out — do NOT jump to
+                            // set-password. That screen changes the password of
+                            // the CURRENT session, and asking for a reset does
+                            // not create one; reaching it from here showed a
+                            // form that could not work. The emailed link is what
+                            // lands there, carrying the session with it.
+                            nav.push(Route::CheckEmail {});
                         }
                         // This screen is the address alone: it renders no password
                         // box for a message to land under.
@@ -488,6 +494,24 @@ pub fn ResetPassword() -> Element {
 #[component]
 pub fn SetPassword() -> Element {
     rsx! { AuthForm { mode: AuthMode::SetPassword } }
+}
+
+/// Shown after asking for a password-reset link: the mail is out, and the next
+/// step is in the inbox. Mirrors [`Unverified`], the same shape of "we sent you
+/// something, go and look" screen.
+#[component]
+pub fn CheckEmail() -> Element {
+    rsx! {
+        div { class: "auth-container",
+            div { class: "auth-form",
+                div { class: "auth-hero-icon", span { class: "material-icons", "mark_email_read" } }
+                h2 { class: "headline-small auth-title", "{t(\"auth.checkEmail\")}" }
+                p { class: "body-large", "{t(\"auth.passwordResetSent\")}" }
+                p { class: "body-large", "{t(\"auth.useToResetPassword\")}" }
+                p { class: "body-medium", "{t(\"auth.checkSpam\")}" }
+            }
+        }
+    }
 }
 
 #[component]

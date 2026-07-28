@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::components::{
-    auth::{Login, Register, ResetPassword, SetPassword, Unverified},
+    auth::{CheckEmail, Login, Register, ResetPassword, SetPassword, Unverified},
     error::ErrorPage,
     layout::Layout,
     loader::{Home, PathPage},
@@ -29,8 +29,15 @@ pub enum Route {
     #[route("/user/reset-password")]
     ResetPassword {},
 
+    // Where NHost's reset email lands: it carries the session, and only then is
+    // there anything to change the password of.
     #[route("/user/set-password")]
     SetPassword {},
+
+    // Confirmation after asking for a reset link. The next step happens in the
+    // user's inbox, not here.
+    #[route("/user/check-email")]
+    CheckEmail {},
 
     #[route("/user/unverified")]
     Unverified {},
