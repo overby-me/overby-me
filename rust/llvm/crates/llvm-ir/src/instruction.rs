@@ -431,6 +431,10 @@ pub enum InstKind {
     Cast {
         op: CastOp,
         flags: IntFlags,
+        /// Only `fpext` and `fptrunc` carry these: they are the two casts
+        /// that change nothing but precision, so a promise about what the
+        /// value is not still means something afterwards.
+        fast_math: FastMathFlags,
         operand: Value,
         /// The source type, which the text writes out before the value.
         source_type: TypeId,

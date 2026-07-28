@@ -1335,6 +1335,53 @@ of every valid enumerator that no specification we may read enumerates.
 of a DWARF expression, which is `llvm-debuginfo`'s at T1. Module flag
 value shapes, and a handful of one-off rules that each cost more to state
 than they return.
+An eighty-second pass took three print classes and found a distinction
+under the third. Staying inside the object walked from is the stronger
+promise and has staying inside the signed range in it, so `getelementptr
+inbounds nusw` comes back as `inbounds` alone, while `nusw` on its own is
+written. Fast-math flags belong to the two casts that change nothing but
+precision: `fpext` and `fptrunc` carry them, and the others are refused
+where the word stands, an integer having no NaN for a promise to be
+about.
+The third was a `tag:` written at the one its kind assumes, which drops
+the way any other defaulted field does. Which word that is has no zero to
+probe at, so `corpus/md-field-defaults.nu` sweeps the whole vocabulary
+per kind instead: three kinds have a default tag and each has exactly
+one, `DIBasicType`'s being the only one the table already had.
+Underneath it was something no derivation had asked about. A field that
+is not written back may still be stored: `!DIBasicType()` and
+`!DIBasicType(size: 0)` print the same and are two nodes upstream,
+because a size is held as an operand and nought is a size where nothing
+is not. So each dropped field is now asked a second question, whether the
+two unique, and six answer no: `size` on four kinds and `offset` on two.
+Those six are dropped from the printing and kept in the node, which is
+the first time the two halves of "at its default" have had to come apart.
+The question can only be asked of a kind that uniques at all, a
+`distinct` one being its own node whatever it holds, and the script says
+so rather than reporting every field of those four kinds as stored.
+Three print rules came with them, all from the wider sample. A comdat is
+a group for symbols to join, so one nothing joins says nothing and is not
+written back. A declaration has no body for a `!dbg` to point into and
+writes what it carries between the word and the return type,
+`declare !attach !0 void @f()`, where a definition writes it after the
+signature. And `; Unknown intrinsic` goes between the attributes a
+function has and the line declaring it rather than above both.
+Three more went with them, and the first two were bugs of ours rather
+than rules we had not met. A run of function attributes that starts with
+a quoted key is the same run: it may name a group and it may hold the
+older memory spellings, and reading only the attributes there dropped
+both, so `define void @f() "a"="b" #0` lost everything `#0` held. And a
+node takes its number when it is first written, not when it was read, so
+attachments have to be walked in the sorted order they print in: a
+terminator carrying `!llvm.loop` before `!prof` numbered them backwards.
+The third is how six significant digits are written out. Upstream rounds
+to six and pads the seventh with a nought where `%.6e` keeps seven
+digits, so `bitcast (i64 42 to double)` is `2.075080e-322` and not
+`2.075076e-322`. The two agree wherever the value ends by the sixth
+digit, which is why only the subnormals showed it: adjacent values are
+far enough apart there that six digits still read back.
+Assembler 171 to 175, Feature 61 to 65, Linker 200 to 201, Other 133 to
+135.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

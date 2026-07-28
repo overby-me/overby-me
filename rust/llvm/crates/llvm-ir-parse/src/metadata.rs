@@ -559,10 +559,13 @@ fn drop_defaulted_fields(
                 let Some(default) = default_value(tag, name) else {
                     return true;
                 };
-                if required {
+                // A size or an offset is held whether or not it is written
+                // back, so dropping it here would unique two nodes upstream
+                // keeps apart. The printer is what leaves it out.
+                if required || llvm_ir::metadata::stored_at_zero(tag, name) {
                     return true;
                 }
-                !is_default(name, default, value)
+                !is_default(default, value)
             })
             .collect(),
     )
@@ -575,7 +578,7 @@ fn default_value(tag: &str, name: &str) -> Option<&'static str> {
         .map(|index| DEFAULTED[index].2)
 }
 
-fn is_default(name: &str, default: &str, value: &MdField) -> bool {
+fn is_default(default: &str, value: &MdField) -> bool {
     // The one field whose default is not its type's zero, and the string
     // fields whose default is no text at all.
     match default {
@@ -589,8 +592,9 @@ fn is_default(name: &str, default: &str, value: &MdField) -> bool {
         // A field that names a node names none when it is written `null`,
         // which is the same as not writing it.
         MdField::Null => true,
-        // `tag:` is the one word-valued field with a default.
-        MdField::Words(words) => name == "tag" && words == &["DW_TAG_base_type"],
+        // `tag:` is the word-valued field with a default, and the word is the
+        // kind's own: three kinds have one and each has exactly one.
+        MdField::Words(words) => words == &[default],
         _ => false,
     }
 }
@@ -700,6 +704,7 @@ static DEFAULTED: &[(&str, &str, &str)] = &[
     ("DIObjCProperty", "name", "empty"),
     ("DIObjCProperty", "setter", "empty"),
     ("DIObjCProperty", "type", "null"),
+    ("DIStringType", "tag", "DW_TAG_string_type"),
     ("DISubprogram", "annotations", "null"),
     ("DISubprogram", "containingType", "null"),
     ("DISubprogram", "declaration", "null"),
@@ -721,6 +726,11 @@ static DEFAULTED: &[(&str, &str, &str)] = &[
     ("DITemplateTypeParameter", "name", "empty"),
     ("DITemplateValueParameter", "defaulted", "false"),
     ("DITemplateValueParameter", "name", "empty"),
+    (
+        "DITemplateValueParameter",
+        "tag",
+        "DW_TAG_template_value_parameter",
+    ),
     ("DITemplateValueParameter", "type", "null"),
     ("GenericDINode", "header", "empty"),
 ];

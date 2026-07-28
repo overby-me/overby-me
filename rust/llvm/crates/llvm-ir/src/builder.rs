@@ -354,6 +354,7 @@ impl<'m> Builder<'m> {
             InstKind::Cast {
                 op,
                 flags: IntFlags::default(),
+                fast_math: FastMathFlags::default(),
                 operand: value,
                 source_type,
             },

@@ -132,9 +132,15 @@ impl<'m> Printer<'m> {
 
         self.type_identities();
 
+        // A comdat is a group for symbols to join, so one nothing joins says
+        // nothing and is not written back.
+        let joined = self.comdats_in_use();
         // A comdat stands on its own, so each is preceded by a blank line
         // rather than the group being preceded by one.
         for comdat in &self.module.comdats {
+            if !joined.contains(&comdat.name) {
+                continue;
+            }
             self.push("\n");
             let _ = writeln!(
                 self.out,
@@ -176,12 +182,6 @@ impl<'m> Printer<'m> {
                 continue;
             }
             self.push("\n");
-            // An `llvm.` name upstream does not know is not an intrinsic at
-            // all, only a function whose name looks like one, and upstream
-            // says so above the declaration.
-            if unknown_intrinsic(&self.module.functions[index]) {
-                self.push("; Unknown intrinsic\n");
-            }
             self.function(&self.module.functions[index]);
         }
 
@@ -638,9 +638,37 @@ fn structured_place(attribute: &Attribute) -> u8 {
     .map_or(u8::MAX, |place| place as u8)
 }
 
+/// The comdats some symbol joins. A bare `comdat` clause names the one the
+/// symbol's own name makes, so the symbol is what says which.
+impl Printer<'_> {
+    fn comdats_in_use(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut join = |comdat: &Option<llvm_ir::global::ComdatRef>, symbol: &Name| {
+            let Some(comdat) = comdat else {
+                return;
+            };
+            let name = match (&comdat.name, symbol) {
+                (Some(name), _) => name.clone(),
+                (None, Name::Named(name)) => name.clone(),
+                (None, Name::Number(number)) => number.to_string(),
+            };
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        };
+        for global in &self.module.globals {
+            join(&global.comdat, &global.name);
+        }
+        for function in &self.module.functions {
+            join(&function.comdat, &function.name);
+        }
+        names
+    }
+}
+
 /// Whether a function's name starts with `llvm.` and names no intrinsic
 /// LangRef documents. `corpus/intrinsic-names.nu` harvested the names.
-fn unknown_intrinsic(function: &Function) -> bool {
+pub(crate) fn unknown_intrinsic(function: &Function) -> bool {
     let Name::Named(name) = &function.name else {
         return false;
     };

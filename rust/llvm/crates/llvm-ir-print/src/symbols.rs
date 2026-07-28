@@ -183,11 +183,23 @@ impl Printer<'_> {
             let _ = writeln!(self.out, "; Function Attrs: {}", comment.join(" "));
         }
 
-        self.push(if function.is_definition() {
-            "define "
+        // An `llvm.` name upstream does not know is not an intrinsic at all,
+        // only a function whose name looks like one, and upstream says so
+        // between the attributes it has and the line declaring it.
+        if crate::printer::unknown_intrinsic(function) {
+            self.push("; Unknown intrinsic\n");
+        }
+
+        if function.is_definition() {
+            self.push("define ");
         } else {
-            "declare "
-        });
+            // A declaration has no body for a `!dbg` to point into, and
+            // writes what it carries between the word and the return type
+            // instead.
+            self.push("declare");
+            self.metadata_attachments(&function.metadata, " ");
+            self.push(" ");
+        }
         self.qualifiers(&function.qualifiers, false, false);
         self.calling_conv(function.calling_conv);
         if !function.return_attrs.is_empty() {
@@ -297,9 +309,9 @@ impl Printer<'_> {
             self.push(" ");
             self.constant(value);
         }
-        self.metadata_attachments(&function.metadata, " ");
-
-        if !function.is_definition() {
+        if function.is_definition() {
+            self.metadata_attachments(&function.metadata, " ");
+        } else {
             self.push("\n");
             return;
         }

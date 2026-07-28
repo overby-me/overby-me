@@ -283,6 +283,20 @@ const METADATA_DEFAULTS: &[(&str, &str)] = &[
         "!DIEnumerator(name: \"e\", value: 1, isUnsigned: false)",
         "!DIEnumerator(name: \"e\", value: 1)",
     ),
+    // A tag written at the one its kind assumes goes the same way, and each
+    // of the three kinds with a default tag assumes a different one.
+    (
+        "!DIStringType(tag: DW_TAG_string_type, name: \"s\", size: 8)",
+        "!DIStringType(name: \"s\", size: 8)",
+    ),
+    (
+        "!DITemplateValueParameter(tag: DW_TAG_template_value_parameter, type: null, value: i32 7)",
+        "!DITemplateValueParameter(value: i32 7)",
+    ),
+    (
+        "!DITemplateValueParameter(tag: DW_TAG_GNU_template_template_param, type: null, value: i32 7)",
+        "!DITemplateValueParameter(tag: DW_TAG_GNU_template_template_param, value: i32 7)",
+    ),
     // A metadata operand keeps a written zero: it is a constant there, not
     // an absence.
     (
@@ -326,6 +340,71 @@ fn dropping_a_default_uniques_two_nodes() {
     assert!(
         printed.contains("!named = !{!0, !0}"),
         "the two should have uniqued\n--- printed ---\n{printed}"
+    );
+}
+
+/// A run of function attributes that starts with a quoted key is the same
+/// run: it may name a group and it may hold the older memory spellings.
+#[test]
+fn a_quoted_key_does_not_end_the_attribute_run() {
+    let text = "define void @f() \"a\"=\"b\" readonly #0 {\nentry:\n  ret void\n}\n\nattributes #0 = { noinline }\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("attributes #0 = { noinline memory(read) \"a\"=\"b\" }"),
+        "the group and the upgrade should both have survived\n--- printed ---\n{printed}"
+    );
+}
+
+/// Attachments are written in an order of their own, and a node takes its
+/// number when it is first written rather than when it was read.
+#[test]
+fn attachments_are_numbered_in_the_order_they_print() {
+    let text = "define void @f() {\nentry:\n  ret void, !llvm.loop !0, !prof !1\n}\n\n!0 = distinct !{!0}\n!1 = !{!\"branch_weights\", i32 1}\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("ret void, !prof !0, !llvm.loop !1"),
+        "the written order decides the numbers\n--- printed ---\n{printed}"
+    );
+}
+
+/// A comdat is a group for symbols to join, so one nothing joins is not
+/// written back and one a symbol joins is.
+#[test]
+fn a_comdat_nothing_joins_is_not_written() {
+    let text = "$used = comdat any\n$unused = comdat largest\n\n@g = global i32 0, comdat($used)\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("$used = comdat any"),
+        "the joined one should be written\n--- printed ---\n{printed}"
+    );
+    assert!(
+        !printed.contains("$unused"),
+        "the unjoined one should not be\n--- printed ---\n{printed}"
+    );
+}
+
+/// A size is held even at nought, so writing one and leaving it out are two
+/// nodes that print alike rather than one node.
+#[test]
+fn a_stored_field_at_nought_keeps_two_nodes_apart() {
+    let text = "!named = !{!0, !1}\n!0 = !DIBasicType(name: \"n\")\n!1 = !DIBasicType(name: \"n\", size: 0)\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("!named = !{!0, !1}"),
+        "the two should have stayed apart\n--- printed ---\n{printed}"
+    );
+    assert_eq!(
+        printed.matches("!DIBasicType(name: \"n\")").count(),
+        2,
+        "both should print without the size\n--- printed ---\n{printed}"
     );
 }
 
@@ -452,6 +531,55 @@ fn an_attribute_set_is_written_in_upstreams_order() {
 }
 
 const PRINTED: &[(&str, &str)] = &[
+    // A declaration has no body for a `!dbg` to point into, and writes what
+    // it carries between the word and the return type.
+    (
+        "declare !attach !0 void @d()\n\n!0 = !{i32 7}\n",
+        "declare !attach !0 void @d()",
+    ),
+    // A definition writes them after the signature, where the body follows.
+    (
+        "define void @e() !attach !0 {\nentry:\n  ret void\n}\n\n!0 = !{i32 7}\n",
+        "define void @e() !attach !0 {",
+    ),
+    // An `llvm.` name upstream does not know is said to be unknown between
+    // the attributes the function has and the line declaring it.
+    (
+        "declare void @llvm.zonk(i32) nounwind\n",
+        "; Unknown intrinsic",
+    ),
+    // Staying inside the object walked from has staying inside the signed
+    // range in it, so the second word says nothing the first did not.
+    (
+        "define ptr @f(ptr %p, i64 %i) {\nentry:\n  %g = getelementptr inbounds nusw i8, ptr %p, i64 %i\n  ret ptr %g\n}\n",
+        "  %g = getelementptr inbounds i8, ptr %p, i64 %i",
+    ),
+    // Wrapping in the unsigned direction is a promise of its own and stays.
+    (
+        "define ptr @f(ptr %p, i64 %i) {\nentry:\n  %g = getelementptr inbounds nusw nuw i8, ptr %p, i64 %i\n  ret ptr %g\n}\n",
+        "  %g = getelementptr inbounds nuw i8, ptr %p, i64 %i",
+    ),
+    // On its own it is the only thing said, and is written.
+    (
+        "define ptr @f(ptr %p, i64 %i) {\nentry:\n  %g = getelementptr nusw i8, ptr %p, i64 %i\n  ret ptr %g\n}\n",
+        "  %g = getelementptr nusw i8, ptr %p, i64 %i",
+    ),
+    // A promise about a value survives a change of precision, and is written
+    // back after the opcode the way an arithmetic one is.
+    (
+        "define double @f(float %x) {\nentry:\n  %g = fpext nnan ninf float %x to double\n  ret double %g\n}\n",
+        "  %g = fpext nnan ninf float %x to double",
+    ),
+    (
+        "define half @f(float %x) {\nentry:\n  %g = fptrunc contract float %x to half\n  ret half %g\n}\n",
+        "  %g = fptrunc contract float %x to half",
+    ),
+    // A size is held whether or not it is written back, so a nought is left
+    // out of the text and kept in the node.
+    (
+        "!named = !{!0}\n!0 = !DIBasicType(name: \"n\", size: 0)\n",
+        "!0 = !DIBasicType(name: \"n\")",
+    ),
     // A struct with no fields is all zero; an array with no elements is
     // poison. Neither is a guess a reader would make.
     (

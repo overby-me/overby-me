@@ -149,9 +149,13 @@ impl Parser {
                     self.advance();
                     function.attrs.groups.push(number);
                 }
+                // A run that starts with a quoted key is the same run: it may
+                // name a group and it may hold the older memory spellings,
+                // and reading only the attributes here dropped both.
                 Token::Quoted(_) => {
-                    let attrs = self.parse_attribute_set(false)?;
+                    let attrs = self.parse_function_attribute_set()?;
                     function.attrs.attributes.extend(attrs.attributes);
+                    function.attrs.groups.extend(attrs.groups);
                 }
                 // `!dbg !0` is an attachment, and so is `!prof !{...}` with
                 // its node written in place; `!name = !{...}` on the next
@@ -655,7 +659,15 @@ impl Parser {
         if let Some(op) = CastOp::from_keyword(&opcode) {
             let mut flags = IntFlags::default();
             let mut fast_math = FastMathFlags::default();
+            // A promise that a value is no NaN survives a change of precision
+            // and nothing else: `fptosi` produces an integer, which has no
+            // NaN to be promised about, and `sitofp` starts from one. So the
+            // other casts never read a fast-math word, and upstream reports
+            // the type it was looking for where the word stands.
             self.parse_operation_flags(&mut flags, &mut fast_math);
+            if !fast_math.is_empty() && !matches!(op, CastOp::FpExt | CastOp::FpTrunc) {
+                return self.error("expected type");
+            }
             let source_type = self.parse_type()?;
             let operand = self.parse_value(function, state, source_type)?;
             if !self.eat_word("to") {
@@ -667,6 +679,7 @@ impl Parser {
                 InstKind::Cast {
                     op,
                     flags,
+                    fast_math,
                     operand,
                     source_type,
                 },

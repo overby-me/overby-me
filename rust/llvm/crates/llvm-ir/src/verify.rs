@@ -2047,6 +2047,7 @@ impl Verifier<'_> {
                 flags,
                 operand,
                 source_type,
+                ..
             } => {
                 let (op, flags, source_type) = (*op, *flags, *source_type);
                 let operand = *operand;

@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use llvm_ir::MdId;
-use llvm_ir::metadata::{MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
+use llvm_ir::metadata::{MdAttachment, MdField, MdOperand, MdRef, Metadata, SpecializedArgs};
 use llvm_ir::{Module, Value};
 
 /// Which node each id prints as, and what number that node gets.
@@ -50,21 +50,31 @@ impl MetadataSlots {
         self.canonical.get(&id).copied().unwrap_or(id)
     }
 
+    /// The attachments of one thing, in the order they will be written. A
+    /// node is numbered when it is first met and the attachments are written
+    /// in a sorted order rather than the read one, so numbering them as read
+    /// gives `!prof` a number `!llvm.loop` should have had.
+    fn in_print_order(attachments: &[MdAttachment]) -> Vec<&MdAttachment> {
+        let mut sorted: Vec<&MdAttachment> = attachments.iter().collect();
+        sorted.sort_by_key(|attachment| crate::metadata::attachment_rank(attachment));
+        sorted
+    }
+
     /// Walks the module in the order upstream walks it, numbering each node
     /// before its operands.
     fn assign_numbers(&mut self, module: &Module) {
         for global in &module.globals {
-            for attachment in &global.metadata {
+            for attachment in Self::in_print_order(&global.metadata) {
                 self.visit_ref(module, &attachment.node);
             }
         }
         for alias in &module.aliases {
-            for attachment in &alias.metadata {
+            for attachment in Self::in_print_order(&alias.metadata) {
                 self.visit_ref(module, &attachment.node);
             }
         }
         for ifunc in &module.ifuncs {
-            for attachment in &ifunc.metadata {
+            for attachment in Self::in_print_order(&ifunc.metadata) {
                 self.visit_ref(module, &attachment.node);
             }
         }
@@ -74,7 +84,7 @@ impl MetadataSlots {
             }
         }
         for function in &module.functions {
-            for attachment in &function.metadata {
+            for attachment in Self::in_print_order(&function.metadata) {
                 self.visit_ref(module, &attachment.node);
             }
             for (id, _) in function.blocks() {
@@ -84,7 +94,7 @@ impl MetadataSlots {
                     for operand in metadata_operands(module, instruction) {
                         self.visit(module, operand);
                     }
-                    for attachment in &instruction.metadata {
+                    for attachment in Self::in_print_order(&instruction.metadata) {
                         self.visit_ref(module, &attachment.node);
                     }
                 }

@@ -355,6 +355,25 @@ pub static FIELD_ORDER: &[(&str, &[&str])] = &[
     ),
 ];
 
+/// The fields a node keeps at nought and does not write back, measured by
+/// `corpus/md-field-defaults.nu`. A size or an offset is held as an operand,
+/// so nought is a size where nothing is not, and `!DIBasicType()` and
+/// `!DIBasicType(size: 0)` print the same and are two nodes.
+static STORED_AT_ZERO: &[(&str, &str)] = &[
+    ("DIBasicType", "size"),
+    ("DICompositeType", "offset"),
+    ("DICompositeType", "size"),
+    ("DIDerivedType", "offset"),
+    ("DIDerivedType", "size"),
+    ("DIStringType", "size"),
+];
+
+/// Whether a field is one of those: written back only when it is not nought,
+/// and kept in the node either way.
+pub fn stored_at_zero(tag: &str, field: &str) -> bool {
+    STORED_AT_ZERO.binary_search(&(tag, field)).is_ok()
+}
+
 /// Where a field sits in the order its node kind writes them. A field the
 /// table does not name sorts after the ones it does.
 pub fn field_rank(tag: &str, field: &str) -> usize {

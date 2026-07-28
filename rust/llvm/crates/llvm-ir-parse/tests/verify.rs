@@ -1011,6 +1011,17 @@ const BROKEN: &[(&str, &str)] = &[
 
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
+    // A promise about a value survives a change of precision and nothing
+    // else: an integer has no NaN for the promise to be about, so upstream
+    // reads no fast-math word there and reports the type it wanted.
+    (
+        "define float @f(i32 %i) {\nentry:\n  %r = sitofp nnan i32 %i to float\n  ret float %r\n}\n",
+        "expected type",
+    ),
+    (
+        "define i32 @f(float %x) {\nentry:\n  %r = fptosi ninf float %x to i32\n  ret i32 %r\n}\n",
+        "expected type",
+    ),
     // Seven fields a node cannot be written without, derived by
     // `corpus/md-required-fields.nu` and missing from the schema before it.
     (
@@ -1308,6 +1319,9 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // The two casts that change nothing but precision take them.
+    "define double @f(float %x) {\nentry:\n  %r = fpext nnan ninf float %x to double\n  ret double %r\n}\n",
+    "define half @f(float %x) {\nentry:\n  %r = fptrunc reassoc float %x to half\n  ret half %r\n}\n",
     // The same three with the field they need.
     "!llvm.dbg.cu = !{!0}\n!llvm.module.flags = !{!1}\n\n!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !2, producer: \"p\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n!1 = !{i32 2, !\"Debug Info Version\", i32 3}\n!2 = !DIFile(filename: \"a\", directory: \"d\")\n",
     "!named = !{!0}\n!0 = !DIModule(scope: null, name: \"M\")\n",

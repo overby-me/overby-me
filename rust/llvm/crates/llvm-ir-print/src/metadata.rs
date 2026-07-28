@@ -15,13 +15,7 @@ impl Printer<'_> {
         // writes them in that order rather than the order they were read, so
         // `!prof` comes before `!llvm.loop` however the module wrote them.
         let mut attachments: Vec<&MdAttachment> = attachments.iter().collect();
-        attachments.sort_by_key(|attachment| {
-            let name = attachment.kind.to_lossy();
-            ATTACHMENT_ORDER
-                .iter()
-                .position(|kind| *kind == name)
-                .unwrap_or(ATTACHMENT_ORDER.len())
-        });
+        attachments.sort_by_key(|attachment| attachment_rank(attachment));
         for attachment in attachments {
             let _ = write!(self.out, "{separator}!{} ", metadata_name(&attachment.kind));
             match &attachment.node {
@@ -63,7 +57,16 @@ impl Printer<'_> {
                         // Upstream writes the fields in an order of its own
                         // rather than the one they were read in, so a module
                         // that wrote them differently still prints the same.
-                        let mut fields: Vec<_> = fields.iter().collect();
+                        // A size or an offset is held even when it is nought,
+                        // so that two nodes writing it differently stay two
+                        // nodes, and is written back only when it is not.
+                        let mut fields: Vec<_> = fields
+                            .iter()
+                            .filter(|(key, value)| {
+                                !llvm_ir::metadata::stored_at_zero(tag, key)
+                                    || !matches!(value, MdField::Unsigned(0) | MdField::Signed(0))
+                            })
+                            .collect();
                         fields.sort_by_key(|(key, _)| llvm_ir::metadata::field_rank(tag, key));
                         for (index, (key, value)) in fields.iter().enumerate() {
                             if index > 0 {
@@ -213,6 +216,16 @@ impl Printer<'_> {
 ///
 /// A kind this does not name is written after the ones it does, in the order
 /// it was read.
+/// Where an attachment sits in that order. A kind the table does not name
+/// sorts after the ones it does.
+pub(crate) fn attachment_rank(attachment: &MdAttachment) -> usize {
+    let name = attachment.kind.to_lossy();
+    ATTACHMENT_ORDER
+        .iter()
+        .position(|kind| *kind == name)
+        .unwrap_or(ATTACHMENT_ORDER.len())
+}
+
 static ATTACHMENT_ORDER: &[&str] = &[
     "dbg",
     "tbaa",

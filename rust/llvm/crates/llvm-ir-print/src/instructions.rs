@@ -261,11 +261,13 @@ impl Printer<'_> {
             InstKind::Cast {
                 op,
                 flags,
+                fast_math,
                 operand,
                 source_type,
             } => {
                 self.push(op.keyword());
                 self.int_flags(*flags);
+                self.fast_math(*fast_math);
                 self.push(" ");
                 self.typed_value(function, *source_type, *operand);
                 self.push(" to ");

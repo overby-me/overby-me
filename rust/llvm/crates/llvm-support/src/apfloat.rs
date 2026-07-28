@@ -403,14 +403,20 @@ fn exact_decimal_form(value: f64) -> Option<String> {
     if reparsed == value { Some(text) } else { None }
 }
 
-/// `%.6e` in C, which Rust's `{:.6e}` almost but not quite matches: the
-/// exponent needs an explicit sign and at least two digits.
+/// Six significant digits, written out to six places after the point.
+///
+/// That is not `%.6e`, which keeps seven: upstream rounds to six digits and
+/// pads the seventh with a nought, so `bitcast (i64 42 to double)` is
+/// `2.075080e-322` where `%.6e` of the same value is `2.075076e-322`. The two
+/// agree on everything whose sixth digit is where the value ends, which is
+/// why only the subnormals showed it. The exponent needs an explicit sign and
+/// at least two digits, which Rust's own formatter does not give either.
 fn format_exponential_6(value: f64) -> String {
-    let raw = format!("{value:.6e}");
+    let raw = format!("{value:.5e}");
     let (mantissa, exponent) = raw.split_once('e').expect("scientific notation has an e");
     let exponent: i32 = exponent.parse().expect("exponent is an integer");
     let sign = if exponent < 0 { '-' } else { '+' };
-    format!("{mantissa}e{sign}{:02}", exponent.abs())
+    format!("{mantissa}0e{sign}{:02}", exponent.abs())
 }
 
 fn parse_hex_u64(digits: &str) -> Result<u64, FloatParseError> {
@@ -599,6 +605,20 @@ mod tests {
         assert_eq!(ApFloat::from_f64(-0.0).to_llvm_text(), "-0.000000e+00");
         assert_eq!(ApFloat::from_f64(100.0).to_llvm_text(), "1.000000e+02");
         assert_eq!(ApFloat::from_f64(1e-300).to_llvm_text(), "1.000000e-300");
+    }
+
+    #[test]
+    fn six_significant_digits_are_padded_rather_than_seven_written() {
+        // A subnormal is where the two spellings come apart: adjacent values
+        // are far enough apart that six digits still read back, and the
+        // seventh is a nought rather than the digit the value has there.
+        let subnormal = ApFloat::from_f64(f64::from_bits(42));
+        assert_eq!(subnormal.to_llvm_text(), "2.075080e-322");
+        let smallest = ApFloat::from_f64(f64::from_bits(1));
+        assert_eq!(smallest.to_llvm_text(), "4.940660e-324");
+        // And a value whose sixth digit is where it ends is written the same
+        // way either spelling arrives at it.
+        assert_eq!(ApFloat::from_f64(1.25).to_llvm_text(), "1.250000e+00");
     }
 
     #[test]

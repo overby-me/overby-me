@@ -269,7 +269,10 @@ impl Printer<'_> {
         if flags.inbounds {
             self.push("inbounds ");
         }
-        if flags.nusw {
+        // Staying inside the object walked from is the stronger promise and
+        // has staying inside the signed range in it, so `inbounds nusw` says
+        // nothing `inbounds` did not and comes back as the one word.
+        if flags.nusw && !flags.inbounds {
             self.push("nusw ");
         }
         if flags.nuw {
