@@ -11,6 +11,17 @@ impl Printer<'_> {
     // -------------------------------------------------------------- metadata
 
     pub(crate) fn metadata_attachments(&mut self, attachments: &[MdAttachment], separator: &str) {
+        // Upstream numbers each attachment kind as it first meets it and
+        // writes them in that order rather than the order they were read, so
+        // `!prof` comes before `!llvm.loop` however the module wrote them.
+        let mut attachments: Vec<&MdAttachment> = attachments.iter().collect();
+        attachments.sort_by_key(|attachment| {
+            let name = attachment.kind.to_lossy();
+            ATTACHMENT_ORDER
+                .iter()
+                .position(|kind| *kind == name)
+                .unwrap_or(ATTACHMENT_ORDER.len())
+        });
         for attachment in attachments {
             let _ = write!(self.out, "{separator}!{} ", metadata_name(&attachment.kind));
             match &attachment.node {
@@ -190,3 +201,39 @@ impl Printer<'_> {
         }
     }
 }
+
+/// The order upstream writes instruction metadata attachments in, which is
+/// the order it numbers the kinds rather than the order they were read.
+/// Measured by writing twenty of them on one call, backwards, and reading
+/// the order they came back in; the three that only a terminator takes came
+/// from a second probe, and where they sit relative to the load-only kinds
+/// cannot be seen, no instruction taking both.
+///
+/// A kind this does not name is written after the ones it does, in the order
+/// it was read.
+static ATTACHMENT_ORDER: &[&str] = &[
+    "dbg",
+    "tbaa",
+    "prof",
+    "fpmath",
+    "range",
+    "make.implicit",
+    "unpredictable",
+    "llvm.loop",
+    "invariant.load",
+    "alias.scope",
+    "noalias",
+    "nontemporal",
+    "nonnull",
+    "dereferenceable",
+    "invariant.group",
+    "align",
+    "callees",
+    "llvm.access.group",
+    "noundef",
+    "annotation",
+    "nosanitize",
+    "memprof",
+    "callsite",
+    "mmra",
+];

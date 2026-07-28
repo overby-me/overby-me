@@ -126,16 +126,16 @@ impl<'m> Printer<'m> {
 
         self.type_identities();
 
-        if !self.module.comdats.is_empty() {
+        // A comdat stands on its own, so each is preceded by a blank line
+        // rather than the group being preceded by one.
+        for comdat in &self.module.comdats {
             self.push("\n");
-            for comdat in &self.module.comdats {
-                let _ = writeln!(
-                    self.out,
-                    "${} = comdat {}",
-                    identifier(&comdat.name),
-                    comdat.kind.keyword()
-                );
-            }
+            let _ = writeln!(
+                self.out,
+                "${} = comdat {}",
+                identifier(&comdat.name),
+                comdat.kind.keyword()
+            );
         }
 
         if !self.module.globals.is_empty() {
@@ -170,6 +170,12 @@ impl<'m> Printer<'m> {
                 continue;
             }
             self.push("\n");
+            // An `llvm.` name upstream does not know is not an intrinsic at
+            // all, only a function whose name looks like one, and upstream
+            // says so above the declaration.
+            if unknown_intrinsic(&self.module.functions[index]) {
+                self.push("; Unknown intrinsic\n");
+            }
             self.function(&self.module.functions[index]);
         }
 
@@ -624,4 +630,19 @@ fn structured_place(attribute: &Attribute) -> u8 {
     .iter()
     .position(|known| *known == keyword)
     .map_or(u8::MAX, |place| place as u8)
+}
+
+/// Whether a function's name starts with `llvm.` and names no intrinsic
+/// LangRef documents. `corpus/intrinsic-names.nu` harvested the names.
+fn unknown_intrinsic(function: &Function) -> bool {
+    let Name::Named(name) = &function.name else {
+        return false;
+    };
+    if !name.starts_with("llvm.") {
+        return false;
+    }
+    // Either table will do, the same way the parser's gate takes either.
+    let base = llvm_ir::intrinsic::table::base_name(name);
+    !llvm_ir::intrinsic::names::is_documented(base)
+        && llvm_ir::intrinsic::table::signature(base).is_none()
 }

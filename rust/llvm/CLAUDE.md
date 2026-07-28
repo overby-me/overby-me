@@ -1116,6 +1116,56 @@ something about the whole translation unit, so leaving one out says
 nothing rather than saying the default, which is the opposite of how
 every other node treats an absent field. Assembler 150 to 151, Linker 173
 to 174.
+A seventy-fourth pass went at metadata numbering, which was the largest
+class left that nothing blocks, and it was the defaults table being
+short. Two nodes that differ only in a field written at its default are
+the same node once it is gone, so a `!named` list holding both names one
+twice; `!DINamespace(name: "", scope: !0)` and `!DINamespace(scope: !0)`
+are one node upstream and were two here.
+The reason the table missed it is that `corpus/md-field-defaults.nu` only
+probed the fields outside each node's legal skeleton, and a skeleton
+field can drop too. It probes every field now, replacing the skeleton's
+value rather than writing the field twice, which is what upstream refuses
+and what made the first attempt at this report nothing. Fifty-nine pairs
+became seventy-four: a name is droppable on seven kinds, a template value
+parameter's type is, and a macro's value is.
+Fixing the script also fixed a probe that had never worked: a `distinct`
+`!DISubprogram` is a definition, and a definition needs a compile unit,
+so every one of that kind's fields had been reported as refused rather
+than measured. Assembler 151 to 152.
+Two more things stood between a dropped field and a uniqued node, and
+neither is in any table. A field that names a node names none when it is
+written `null`, which is the same as not writing it, and `is_default` did
+not say so, so `entity: null` survived and the node stayed its own. And an
+empty argument list says nothing about which of the two spellings it is:
+`!DIObjCProperty()` parsed as positional while a node whose fields all
+dropped ended up named and empty, so uniquing saw two nodes where
+upstream sees one. They are the same thing now.
+The three files this class owns still differ, by the debug-info upgrade
+rather than by numbering, so no ratchet moved. What moved is the defaults
+table, from fifty-nine pairs to a hundred and fifteen, and three
+divergences that were real whether or not a test file showed them.
+Two one-offs closed with them. A comdat stands on its own, so each is
+preceded by a blank line rather than the group being preceded by one. And
+an `llvm.` name upstream does not know is not an intrinsic at all, only a
+function whose name looks like one, and upstream says `; Unknown
+intrinsic` above the declaration; whether it knows one is the same gate
+the parser already uses to decide whether to materialise a declaration
+from a call. Assembler 152 to 154, Linker 174 to 176.
+One more divergence closed without moving a number: upstream numbers each
+attachment kind as it first meets it and writes them in that order rather
+than the order they were read, so `!prof` comes before `!llvm.loop`
+however the module wrote them and `!tbaa` before `!range`. Twenty of them
+were written on one call, backwards, and the order they came back in is
+the table. The three that only a terminator takes came from a second
+probe, and where they sit relative to the load-only kinds cannot be seen
+at all, no instruction taking both.
+Two other differences in that batch were probed and are not ours: a
+`target datalayout` upstream supplies from the triple when the module
+writes none, which is the target knowledge already recorded as missing,
+and a valueless quoted attribute, which turned out to print correctly in
+isolation and to differ only inside a file that has the debug-info
+upgrade in it too.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the
