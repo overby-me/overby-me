@@ -49,4 +49,28 @@
   # both the per-user service manager and machined. Everything after it uses
   # --json=, --quiet, --job-mode=, --via-shell, --shell, --pty, --machine=,
   # --bind, --mask, --empower, --recursive-errors=, --system and --user=.
+  #
+  # MEASURED AGAIN 2026-07-28, and that stop point has MOVED, though the test
+  # is still red. Before, systemd-run fell back to direct execution and the
+  # assertion saw the caller's own cgroup:
+  #
+  #     [[ 0::/system.slice/backdoor.service =~ /user\.slice/.+/run-.+\.service$ ]]
+  #
+  # Since the -M routing fix the transient unit is really created under the
+  # target user ("Running as unit: run-u...-bash.service", "User: testuser"),
+  # and the user manager itself starts cleanly - the VM log shows
+  # `systemd --user starting (uid=1001, ... runtime=/run/user/1001/systemd)`
+  # with no bind failure. What is missing now is the bash -xec output: the
+  # traced assertion line never comes back, so --pipe is not returning the
+  # unit's output for a unit created via the USER manager.
+  #
+  # A theory that the manager's control socket was simply not bound yet when
+  # systemd-run connected was TESTED AND REJECTED: polling for the socket for
+  # up to 2s after `systemctl start user@<uid>.service` changed nothing at all,
+  # so the race is not the cause and that code was reverted rather than kept
+  # as a plausible-looking no-op.
+  #
+  # Note this test is red from the de-masking, not from any of the 2026-07-28
+  # commits: it fails identically with crates/run/src/main.rs restored to its
+  # pre-a27814e0 content.
 }
