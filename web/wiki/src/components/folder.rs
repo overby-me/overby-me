@@ -74,6 +74,9 @@ pub fn FolderApp(
         }));
     }
     let attachable = attachable_opt().unwrap_or(node.attachable);
+    // Paste deep-copies every selected node, one round trip per node and more
+    // for their subtrees, so it can run for a while with nothing on screen.
+    let mut pasting = use_signal(|| false);
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let access_token = session.read().access_token.clone();
     let name = node.name.clone();
@@ -417,36 +420,58 @@ pub fn FolderApp(
                             if !SELECTED.read().is_empty() {
                             button {
                                 class: "sheet-action",
+                                disabled: *pasting.read(),
                                 onclick: {
                                     let target = node.id.0.clone();
                                     let ctx = node.context_id.clone().map(|c| c.0);
                                     move |_| {
+                                        if *pasting.read() {
+                                            return;
+                                        }
                                         let token = session.read().access_token.clone();
                                         let target = target.clone();
                                         let ctx = ctx.clone();
+                                        pasting.set(true);
+                                        crate::snackbar::show_snackbar(&t("folder.pasting"));
                                         spawn(async move {
                                             let ids = SELECTED.read().clone();
+                                            let mut failed = 0usize;
                                             for id in ids {
                                                 // Never paste a folder into itself or
                                                 // its own subtree (would recurse).
                                                 if graphql::is_descendant_of(token.as_deref(), &target, &id).await {
                                                     continue;
                                                 }
-                                                let _ = graphql::deep_copy_node(
+                                                if graphql::deep_copy_node(
                                                     token.clone(),
                                                     id,
                                                     target.clone(),
                                                     ctx.clone(),
                                                     true,
                                                 )
-                                                .await;
+                                                .await
+                                                .is_err()
+                                                {
+                                                    failed += 1;
+                                                }
                                             }
                                             *SELECTED.write() = vec![];
                                             crate::session::bump_data_version();
+                                            pasting.set(false);
+                                            // A silent failure used to look exactly
+                                            // like a slow success: the list simply
+                                            // never grew.
+                                            if failed > 0 {
+                                                crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                            }
                                         });
                                     }
                                 },
-                                span { class: "material-icons", "content_paste" }
+                                if *pasting.read() {
+                                    div { class: "spinner spinner-xs" }
+                                } else {
+                                    span { class: "material-icons", "content_paste" }
+                                }
                                 "{t(\"folder.paste\")} ({SELECTED.read().len()})"
                             }
                             }
