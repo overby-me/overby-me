@@ -68,18 +68,37 @@
   # therefore NOT the exit-status-recording question that 59-RELOADING-RESTART is
   # stuck on; do not merge the two.
   #
-  # WHY IT SUCCEEDS is the remaining question, and the evidence points at the
-  # OTHER side of the connection. This section is supposed to be the
-  # invalid-client-cert case, yet the journal for this very phase shows
+  # WHY IT SUCCEEDS, now confirmed by reading the server: **our
+  # systemd-journal-remote never verifies client certificates at all.**
+  #
+  # `TrustedCertificateFile=` (crates/journal-remote/src/main.rs:136) and
+  # `--trust` (:57) are parsed, merged (:418) and stored into Config (:432) --
+  # and then never read again. Every one of the nine occurrences of
+  # `trusted_cert` is parse, store or plumb; none is a check. `read_ssl_config`
+  # (:346-373) builds `SslConfig { certificate, private_key }`, i.e. the SERVER
+  # key and cert only, so the trusted-CA value never reaches the TLS layer.
+  # tiny_http's SslConfig has no client-authentication field, so with this
+  # server stack mutual TLS cannot happen at all.
+  #
+  # That is exactly why the journal for this phase shows
   #
   #     systemd-journal-upload[...]: Uploading 17 entries to https://localhost:19532
   #     systemd-journal-upload[...]: Upload complete
   #
-  # i.e. the upload is ACCEPTED. Upstream expects journal-remote to answer
-  # "Client is not authorized" and 401, which is what would make journal-upload
-  # exit 1. The likely gap is that our systemd-journal-remote does not enforce
-  # client-certificate authorization, so there is nothing for the client to fail
-  # on. That is plausible but NOT yet proven -- confirm before building on it.
+  # The upload is ACCEPTED, so there is no 401, so the client has nothing to
+  # fail on, so it exits 0 and the unit lands `inactive`. The whole chain
+  # follows from the missing authorization check.
+  #
+  # NOTE THIS IS SECURITY-RELEVANT, not merely a test gap: `--trust` /
+  # `TrustedCertificateFile=` is an authorization control that silently does
+  # nothing, and the option's own help text (:55) even advertises `"-" to
+  # disable verification`, implying verification happens otherwise. Anyone
+  # relying on it to restrict who may upload journals is unprotected.
+  #
+  # Greening this needs real client-certificate verification in journal-remote,
+  # which tiny_http cannot express -- it would mean moving to a TLS stack that
+  # exposes peer verification (rustls directly, with a ClientCertVerifier built
+  # from the trusted CA). That is a genuine piece of work, not a patch.
   #
   # A SEPARATE, SMALLER DEFECT spotted by the same probe: `Description=` comes
   # back EMPTY for this unit, which is why the journal logs it as
