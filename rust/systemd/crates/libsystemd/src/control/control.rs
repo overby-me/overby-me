@@ -130,10 +130,19 @@ pub enum Command {
     AddRequires(String, String),
     /// `reset-failed [unit]` — clear the failed state of a unit (or all units).
     ResetFailed(Option<String>),
-    /// `kill <unit> [--signal=SIG] [--kill-whom=WHO] [--kill-value=N]`
+    /// `kill <unit> [--signal=SIG] [--kill-whom=WHO] [--kill-value=N]
+    /// [--kill-subgroup=PATH]`
     /// Send a signal to a unit's processes.
-    /// Fields: unit_name, signal, kill_whom ("main"/"control"/"all"), kill_value
-    Kill(String, i32, String, Option<i32>, bool),
+    /// Fields: unit_name, signal, kill_whom
+    /// ("main"/"control"/"all"/"cgroup"/"cgroup-fail"), kill_value, wait,
+    /// subgroup.
+    ///
+    /// `subgroup` names a cgroup path relative to the unit's own cgroup, so
+    /// only the processes in that subtree are signalled. It is only meaningful
+    /// with the "cgroup" and "cgroup-fail" whom values; the "-fail" variants
+    /// report an error when the subgroup turned out to hold no processes at
+    /// all. Mirrors systemd's KillUnitSubgroup.
+    Kill(String, i32, String, Option<i32>, bool, Option<String>),
     /// `remove-subgroup <abs-cgroup-path>` — privileged helper for an
     /// unprivileged (user) manager that could not remove a delegated cgroup
     /// subtree itself, e.g. because the payload created a subcgroup owned by
@@ -949,7 +958,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             // Params: String (unit name) or Array [unit_name, signal, kill_whom, kill_value]
             match &call.params {
                 Some(Value::String(s)) => {
-                    Command::Kill(s.clone(), 15, "all".to_string(), None, false)
+                    Command::Kill(s.clone(), 15, "all".to_string(), None, false, None)
                 }
                 Some(Value::Array(arr)) if !arr.is_empty() => {
                     let name = arr[0].as_str().unwrap_or("").to_owned();
@@ -968,7 +977,15 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         .and_then(|v| v.as_str())
                         .and_then(|s| s.parse::<i32>().ok());
                     let has_wait = arr.iter().any(|v| v.as_str() == Some("--wait"));
-                    Command::Kill(name, sig, whom, value, has_wait)
+                    // The subgroup rides along as a marker token rather than a
+                    // fixed position: kill_value is parsed as an integer, so a
+                    // "--subgroup=" string can never be mistaken for it.
+                    let subgroup = arr
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .find_map(|s| s.strip_prefix("--subgroup="))
+                        .map(|s| s.to_owned());
+                    Command::Kill(name, sig, whom, value, has_wait, subgroup)
                 }
                 Some(_) | None => {
                     return Err(ParseError::ParamsInvalid(
@@ -7888,7 +7905,7 @@ pub fn execute_command(
             }
             return Ok(serde_json::json!(null));
         }
-        Command::Kill(unit_name, signal, whom, kill_value, wait_for_stop) => {
+        Command::Kill(unit_name, signal, whom, kill_value, wait_for_stop, subgroup) => {
             let ri = run_info.read_poisoned();
             let units = find_units_with_name(&unit_name, &ri.unit_table);
             if units.is_empty() {
@@ -7898,6 +7915,55 @@ pub fn execute_command(
             let status = unit.common.status.read_poisoned();
             let is_active = matches!(&*status, UnitStatus::Started(_) | UnitStatus::Starting);
             drop(status);
+
+            // A subgroup restricts the signal to one subtree of the unit's own
+            // cgroup. It is handled separately because none of the whole-unit
+            // behaviour applies: no main-PID fallback, and above all no
+            // deactivation of the unit when the subtree turns out to be empty.
+            // Signalling a subgroup of user@N.service must never stop the user
+            // manager itself.
+            if let Some(sub) = &subgroup {
+                if !matches!(whom.as_str(), "cgroup" | "cgroup-fail") {
+                    return Err(
+                        "Subgroup can only be specified in combination with 'cgroup' or \
+                         'cgroup-fail'."
+                            .to_string(),
+                    );
+                }
+                // Reject anything that could climb out of the unit's cgroup.
+                // A leading '/' is merely cosmetic upstream, so strip it, but
+                // '..' and empty components are refused outright.
+                let rel = sub.trim_start_matches('/');
+                if rel.split('/').any(|c| c == ".." || c == "." || c.is_empty()) {
+                    return Err("Specified cgroup sub-path is not valid.".to_string());
+                }
+                let base = match &unit.specific {
+                    Specific::Service(svc) => svc.conf.platform_specific.cgroup_path.clone(),
+                    _ => return Err(format!("Unit {unit_name} has no cgroup.")),
+                };
+                drop(ri);
+
+                // Walk the cgroup itself rather than consulting the unit's
+                // state: an inactive unit simply has no cgroup, which reads as
+                // "no processes" and is exactly the answer upstream gives.
+                let target = base.join(rel);
+                let mut killed = 0usize;
+                for pid in crate::platform::cgroups::pids_in_cgroup_recursive(&target) {
+                    unsafe {
+                        libc::kill(pid, signal);
+                    }
+                    killed += 1;
+                }
+                // The "-fail" variants report an error when the subgroup held
+                // nothing, so a caller can tell "killed something" apart from
+                // "there was nothing there". Plain "cgroup" stays quiet.
+                if killed == 0 && whom == "cgroup-fail" {
+                    return Err(format!(
+                        "No processes in subgroup {rel} of unit {unit_name} to signal."
+                    ));
+                }
+                return Ok(serde_json::json!(null));
+            }
 
             if !is_active {
                 // Unit has no running processes — nothing to signal.
@@ -12859,7 +12925,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig, _whom, _val, _wait) => {
+            Command::Kill(name, sig, _whom, _val, _wait, _sub) => {
                 assert_eq!(name, "sshd.service");
                 assert_eq!(sig, 15); // SIGTERM
             }
@@ -12879,7 +12945,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig, _whom, _val, _wait) => {
+            Command::Kill(name, sig, _whom, _val, _wait, _sub) => {
                 assert_eq!(name, "sshd.service");
                 assert_eq!(sig, 9); // SIGKILL
             }
@@ -12898,7 +12964,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig, _whom, _val, _wait) => {
+            Command::Kill(name, sig, _whom, _val, _wait, _sub) => {
                 assert_eq!(name, "nginx.service");
                 assert_eq!(sig, 15); // default SIGTERM
             }
@@ -12928,7 +12994,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig, _whom, _val, _wait) => {
+            Command::Kill(name, sig, _whom, _val, _wait, _sub) => {
                 assert_eq!(name, "test.service");
                 assert_eq!(sig, 15); // fallback to SIGTERM
             }

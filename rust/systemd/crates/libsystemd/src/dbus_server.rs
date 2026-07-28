@@ -1100,7 +1100,7 @@ mod inner {
             };
             invoke_command(
                 &self.run_info,
-                crate::control::Command::Kill(name, signal, whom_norm, None, false),
+                crate::control::Command::Kill(name, signal, whom_norm, None, false, None),
             )
             .map_err(zbus::fdo::Error::Failed)?;
             Ok(())

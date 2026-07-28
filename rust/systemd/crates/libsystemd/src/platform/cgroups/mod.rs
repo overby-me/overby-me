@@ -387,6 +387,29 @@ pub fn prune_empty_parent_cgroups(start: &std::path::Path, root: &std::path::Pat
     }
 }
 
+/// Collect every pid in `cgroup_path` and, recursively, in its child cgroups.
+///
+/// Used by `systemctl kill --kill-subgroup=`, which signals a whole subtree
+/// rather than a single cgroup level. A missing directory yields no pids
+/// rather than an error: to the caller an absent subgroup and an empty one
+/// mean the same thing.
+pub fn pids_in_cgroup_recursive(cgroup_path: &std::path::Path) -> Vec<i32> {
+    let mut pids = Vec::new();
+    if let Ok(contents) = fs::read_to_string(cgroup_path.join("cgroup.procs")) {
+        pids.extend(contents.lines().filter_map(|l| l.trim().parse::<i32>().ok()));
+    }
+    if let Ok(entries) = fs::read_dir(cgroup_path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && !fs::symlink_metadata(&path).map(|m| m.is_symlink()).unwrap_or(true)
+            {
+                pids.extend(pids_in_cgroup_recursive(&path));
+            }
+        }
+    }
+    pids
+}
+
 pub fn remove_cgroup_recursive(cgroup_path: &std::path::Path) -> Result<(), CgroupError> {
     if let Ok(entries) = fs::read_dir(cgroup_path) {
         for entry in entries.flatten() {

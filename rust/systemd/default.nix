@@ -405,6 +405,10 @@ in {
         Environment=XDG_RUNTIME_DIR=/run/user/%i
         ExecStart=$out/lib/systemd/systemd --user
         Slice=user-%i.slice
+        # Without this the manager runs as the user but its cgroup stays
+        # root-owned, so every service it tries to start dies with EACCES on
+        # cgroup creation. Matches upstream units/user@.service.in.
+        Delegate=pids memory cpu
         KillMode=mixed
         TasksMax=infinity
         TimeoutStopSec=120s

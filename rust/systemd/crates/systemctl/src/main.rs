@@ -428,6 +428,7 @@ fn main() {
     let mut bind_read_only = false;
     let mut preset_mode: Option<String> = None;
     let mut kill_whom: Option<String> = None;
+    let mut kill_subgroup: Option<String> = None;
     let mut kill_value: Option<i32> = None;
     let mut kill_signal_str: Option<String> = None;
     let mut job_mode: Option<String> = None;
@@ -500,6 +501,20 @@ fn main() {
             .or_else(|| arg.strip_prefix("--kill-who="))
         {
             kill_whom = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --kill-subgroup flag (for `kill --kill-subgroup=app.slice/foo.service`)
+        if arg == "--kill-subgroup" {
+            if i + 1 < args.len() {
+                kill_subgroup = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--kill-subgroup=") {
+            kill_subgroup = Some(rest.to_string());
             i += 1;
             continue;
         }
@@ -1600,14 +1615,23 @@ fn main() {
         } else {
             arr.push(Value::String("15".to_string())); // SIGTERM default
         }
-        arr.push(Value::String(
-            kill_whom.unwrap_or_else(|| "all".to_string()),
-        ));
+        // Upstream defaults --kill-whom to "cgroup" once a subgroup is named,
+        // and to "all" otherwise.
+        arr.push(Value::String(kill_whom.unwrap_or_else(|| {
+            if kill_subgroup.is_some() {
+                "cgroup".to_string()
+            } else {
+                "all".to_string()
+            }
+        })));
         if let Some(val) = kill_value {
             arr.push(Value::String(val.to_string()));
         }
         if wait {
             arr.push(Value::String("--wait".to_string()));
+        }
+        if let Some(sub) = kill_subgroup {
+            arr.push(Value::String(format!("--subgroup={sub}")));
         }
         Some(Value::Array(arr))
     } else if method == "suspend"
