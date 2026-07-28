@@ -25,6 +25,7 @@ mod members;
 mod nhost;
 mod notify;
 mod oauth;
+mod office;
 mod pkce;
 mod push;
 mod roster;
@@ -95,6 +96,9 @@ pub async fn handle(req: Request<Body>) -> Response<Body> {
         "/members/claim" => members::claim(cfg, client, query, bearer).await,
         "/members/claim-link" => members::claim_link(cfg, client, query, bearer).await,
         "/feedback" => feedback::submit(cfg, client, query, bearer).await,
+        // Office viewer proxy: mint a signed link, then serve the bytes on it.
+        "/office/sign" => office::sign(cfg, client, query, bearer).await,
+        "/office/file" => office::file(cfg, client, query).await,
         "/health" => text(StatusCode::OK, "ok"),
         _ => text(StatusCode::NOT_FOUND, "not found"),
     }

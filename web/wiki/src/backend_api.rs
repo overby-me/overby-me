@@ -45,6 +45,31 @@ pub fn file_url(file_id: &str) -> String {
     format!("{}/files/{file_id}", crate::nhost::storage_url())
 }
 
+/// A backend-hosted URL for a document, for the Microsoft Office web viewer.
+///
+/// That viewer fetches the document from MICROSOFT'S servers, so neither a
+/// header nor a 30-second presigned URL is any use to it: it needs a link that
+/// is reachable without a session and stays reachable. The backend mints one,
+/// having first checked with the caller's own token that they may read the file,
+/// and serves the bytes on it from storage.
+///
+/// The link is a capability — whoever holds it reads that document until it
+/// expires — and using the viewer at all means sending the document to
+/// Microsoft. Both are inherent to this viewer, not to this function.
+pub async fn office_embed_url(file_id: &str, token: &str) -> Option<String> {
+    let resp = reqwest::Client::new()
+        .get(format!("{BACKEND_URL}/office/sign?fileId={file_id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    body.get("url")?.as_str().map(str::to_string)
+}
+
 /// A time-limited URL for a stored file that carries its own authorization, for
 /// the element `src`s that cannot send a header.
 ///

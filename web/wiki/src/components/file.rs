@@ -22,6 +22,16 @@ fn is_office_mime(mime: &str) -> bool {
     )
 }
 
+/// The state of the backend-signed link the Office viewer fetches on. Kept
+/// apart from "no URL yet" so a refusal shows the no-preview state instead of a
+/// spinner that never stops.
+#[derive(Clone, PartialEq)]
+enum OfficeLink {
+    Pending,
+    Ready(String),
+    Refused,
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_office_mime;
@@ -109,6 +119,33 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     // storage service reads. Empty until it resolves, which the branches below
     // already treat as "no preview yet".
     let file_url = super::loader::use_presigned_url(file_id.to_string()).unwrap_or_default();
+
+    // The Office viewer needs its own link (see the branch that uses it), fetched
+    // only for the mimes that go through it.
+    let mut office_embed = use_signal(|| OfficeLink::Pending);
+    {
+        let id = file_id.to_string();
+        let wanted = is_office_mime(file_mime);
+        let token = session.read().access_token.clone();
+        use_effect(use_reactive!(|(id, wanted, token)| {
+            office_embed.set(OfficeLink::Pending);
+            if !wanted || id.is_empty() {
+                return;
+            }
+            let Some(token) = token.clone() else {
+                office_embed.set(OfficeLink::Refused);
+                return;
+            };
+            spawn(async move {
+                office_embed.set(
+                    match crate::backend_api::office_embed_url(&id, &token).await {
+                        Some(url) => OfficeLink::Ready(url),
+                        None => OfficeLink::Refused,
+                    },
+                );
+            });
+        }));
+    }
 
     rsx! {
         super::widgets::SupportingPaneLayout {
@@ -240,19 +277,32 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 iframe { src: "{file_url}", title: "{name}", "referrerpolicy": "no-referrer" }
                             }
                         } else if is_office_mime(file_mime) {
-                            // Preview Word/Excel/PowerPoint via Microsoft's hosted
-                            // viewer, which fetches the file URL server-side (mirrors
-                            // the old wiki). The whole tokenised URL is percent-encoded.
-                            {
-                                let encoded = String::from(&js_sys::encode_uri_component(&file_url));
-                                rsx! {
-                                    div { class: "viewport-frame",
-                                        iframe {
-                                            src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
-                                            title: "{name}",
+                            // Word/Excel/PowerPoint through Microsoft's hosted
+                            // viewer, which fetches the document from ITS servers.
+                            // So it gets a backend link, not a storage URL: the
+                            // backend checked the caller may read the file and
+                            // serves the bytes for a couple of hours. A presigned
+                            // storage URL would be dead 30 seconds later.
+                            match office_embed() {
+                                OfficeLink::Pending => rsx! {
+                                    div { class: "empty-state empty-state-sm",
+                                        div { class: "spinner spinner-sm" }
+                                    }
+                                },
+                                OfficeLink::Ready(url) => {
+                                    let encoded = String::from(&js_sys::encode_uri_component(&url));
+                                    rsx! {
+                                        div { class: "viewport-frame",
+                                            iframe {
+                                                src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
+                                                title: "{name}",
+                                            }
                                         }
                                     }
                                 }
+                                OfficeLink::Refused => rsx! {
+                                    p { class: "body-medium", "{t(\"common.noPreview\")}" }
+                                },
                             }
                         } else {
                             // DESIGN: a rich "no preview" state (format orb +
