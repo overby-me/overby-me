@@ -220,6 +220,18 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             "--copy-root-password" => parsed.copy_root_password = true,
             "--copy-root-shell" => parsed.copy_root_shell = true,
 
+            // Upstream's process_reset() removes exactly locale.conf,
+            // vconsole.conf, hostname, machine-id, kernel/cmdline and
+            // localtime. It deliberately leaves the root account alone, so
+            // this is NOT simply every --reset-* flag at once.
+            "--reset" => {
+                parsed.reset_locale = true;
+                parsed.reset_keymap = true;
+                parsed.reset_timezone = true;
+                parsed.reset_hostname = true;
+                parsed.reset_machine_id = true;
+                parsed.reset_kernel_cmdline = true;
+            }
             "--reset-locale" => parsed.reset_locale = true,
             "--reset-keymap" => parsed.reset_keymap = true,
             "--reset-timezone" => parsed.reset_timezone = true,
@@ -972,11 +984,10 @@ fn apply_root_password(
         return Ok(false);
     };
 
-    if !should_apply(root, "etc/shadow", force) && !force {
-        // Even if shadow exists, we may need to update it
-        if !delete && settings.root_password.is_none() {
-            return Ok(false);
-        }
+    // Leave an already-provisioned root account alone. Deleting a password is
+    // an explicit request, so it is not gated on this.
+    if !delete && !should_configure_root(root, force) {
+        return Ok(false);
     }
 
     let shadow_path = root.join("etc/shadow");
@@ -1036,6 +1047,56 @@ fn apply_root_password(
     Ok(true)
 }
 
+/// `struct passwd`'s password field meaning "look in the shadow file".
+const PASSWORD_SEE_SHADOW: &str = "x";
+/// What sysusers leaves in shadow to mean "firstboot should fill this in".
+/// Note this is NOT the same as a locked password ("!*"): a root entry locked
+/// with anything else, say "!test", counts as already configured.
+const PASSWORD_UNPROVISIONED: &str = "!unprovisioned";
+
+/// Whether the root account should be (re)configured, mirroring upstream's
+/// should_configure() for passwd/shadow.
+///
+/// An already-provisioned root password must survive `--root-password=` unless
+/// --force is given: TEST-74-AUX-UTILS.firstboot seeds `root:!test:` and then
+/// requires it to still be there afterwards.
+fn should_configure_root(root: &Path, force: bool) -> bool {
+    if force {
+        return true;
+    }
+    let Ok(passwd) = fs::read_to_string(root.join("etc/passwd")) else {
+        return true; // missing
+    };
+    let mut saw_root = false;
+    for line in passwd.lines() {
+        let f: Vec<&str> = line.split(':').collect();
+        if f.first() != Some(&"root") {
+            continue;
+        }
+        saw_root = true;
+        // A root password held directly in passwd, rather than delegated to
+        // shadow, means the account is already configured.
+        if f.get(1).copied() != Some(PASSWORD_SEE_SHADOW) {
+            return false;
+        }
+        break;
+    }
+    if !saw_root {
+        return true;
+    }
+    let Ok(shadow) = fs::read_to_string(root.join("etc/shadow")) else {
+        return true; // missing
+    };
+    for line in shadow.lines() {
+        let f: Vec<&str> = line.split(':').collect();
+        if f.first() != Some(&"root") {
+            continue;
+        }
+        return f.get(1).copied() == Some(PASSWORD_UNPROVISIONED);
+    }
+    true
+}
+
 /// Shell used for a freshly created root account when none was configured.
 /// Upstream resolves this per-root via default_root_shell_at(); /bin/sh is the
 /// portable fallback it ends up at when nothing else is configured.
@@ -1091,12 +1152,23 @@ fn apply_root_shell(root: &Path, settings: &Settings, force: bool) -> io::Result
         None => return Ok(false),
     };
 
-    let passwd_path = root.join("etc/passwd");
-
-    if !passwd_path.exists() && !force {
+    // Gate on the same rule as the password, which is what upstream does:
+    // process_root_account() decides once via should_configure() and then
+    // writes the shell and the password together.
+    //
+    // This replaced a `!passwd_path.exists() && !force` early return that was
+    // wrong in both directions. A missing passwd means the account still needs
+    // creating, not that there is nothing to do, so `--root-shell=X` against a
+    // tree with no passwd silently dropped the shell. But simply dropping that
+    // check went too far the other way and let an already-configured root shell
+    // be overwritten, which the test catches: it configures /bin/fooshell, then
+    // runs firstboot again with --root-shell=shell-overwrite and requires
+    // /bin/fooshell to survive.
+    if !should_configure_root(root, force) {
         return Ok(false);
     }
 
+    let passwd_path = root.join("etc/passwd");
     ensure_parent_dir(&passwd_path)?;
 
     let existing = fs::read_to_string(&passwd_path).unwrap_or_default();
@@ -1115,6 +1187,7 @@ fn apply_root_shell(root: &Path, settings: &Settings, force: bool) -> io::Result
         }
     }
 
+    let created_root = !found_root;
     if !found_root {
         // Create minimal root entry
         lines.push(format!("root:x:0:0:root:/root:{}", shell));
@@ -1123,7 +1196,46 @@ fn apply_root_shell(root: &Path, settings: &Settings, force: bool) -> io::Result
     let content = lines.join("\n") + "\n";
     fs::write(&passwd_path, content)?;
     eprintln!("Set root shell to {} in {}.", shell, passwd_path.display());
+
+    // An account created here has no password, and passwd only says "see
+    // shadow". Leaving shadow without a matching entry would describe a root
+    // account whose password is simply unknown, so give it an explicitly
+    // locked, invalid one, as upstream does when no password was requested.
+    if created_root {
+        ensure_root_shadow_locked(root)?;
+    }
     Ok(true)
+}
+
+/// A locked *and* invalid password, upstream's PASSWORD_LOCKED_AND_INVALID.
+const PASSWORD_LOCKED_AND_INVALID: &str = "!*";
+
+/// Give root a locked shadow entry, but only if it has none: an existing
+/// password, provisioned or not, is left exactly as it is.
+fn ensure_root_shadow_locked(root: &Path) -> io::Result<()> {
+    let shadow_path = root.join("etc/shadow");
+    let existing = fs::read_to_string(&shadow_path).unwrap_or_default();
+    if existing
+        .lines()
+        .any(|l| l.split(':').next() == Some("root"))
+    {
+        return Ok(());
+    }
+
+    ensure_parent_dir(&shadow_path)?;
+    let days = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        / 86400;
+    let mut lines: Vec<String> = existing.lines().map(|l| l.to_string()).collect();
+    lines.push(format!("root:{PASSWORD_LOCKED_AND_INVALID}:{days}:0:99999:7:::"));
+    fs::write(&shadow_path, lines.join("\n") + "\n")?;
+    #[cfg(target_os = "linux")]
+    {
+        fs::set_permissions(&shadow_path, fs::Permissions::from_mode(0o640))?;
+    }
+    Ok(())
 }
 
 fn apply_kernel_cmdline(root: &Path, settings: &Settings, force: bool) -> io::Result<bool> {
