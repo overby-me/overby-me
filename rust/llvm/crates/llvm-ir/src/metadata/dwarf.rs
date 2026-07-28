@@ -344,3 +344,47 @@ pub static CHECKSUMKIND: &[(u64, &str)] = &[];
 
 /// The words `type:` takes, and the number behind each.
 pub static TYPE: &[(u64, &str)] = &[(1, "DW_MACINFO_define"), (2, "DW_MACINFO_undef")];
+
+/// The words a `flags:` set is made of, swept the same way: every single bit
+/// and every pair of them, with the words read out of what came back.
+///
+/// A set is written as its words joined by `|`, and a bit no word names is
+/// dropped rather than written as a number, which is why this is the set of
+/// words rather than a map from numbers. Turning a number back into the
+/// words upstream writes needs the order it writes them in, which is two
+/// grouped fields before the rest and was measured but is not done here: no
+/// module in the suites writes a `flags:` as a number.
+pub static FLAGS: &[&str] = &[
+    "DIFlagAllCallsDescribed",
+    "DIFlagAppleBlock",
+    "DIFlagArtificial",
+    "DIFlagBigEndian",
+    "DIFlagBitField",
+    "DIFlagEnumClass",
+    "DIFlagExplicit",
+    "DIFlagExportSymbols",
+    "DIFlagFwdDecl",
+    "DIFlagIndirectVirtualBase",
+    "DIFlagIntroducedVirtual",
+    "DIFlagLValueReference",
+    "DIFlagLittleEndian",
+    "DIFlagMultipleInheritance",
+    "DIFlagNoReturn",
+    "DIFlagNonTrivial",
+    "DIFlagObjcClassComplete",
+    "DIFlagObjectPointer",
+    "DIFlagPrivate",
+    "DIFlagProtected",
+    "DIFlagPrototyped",
+    "DIFlagPublic",
+    "DIFlagRValueReference",
+    "DIFlagReservedBit4",
+    "DIFlagSingleInheritance",
+    "DIFlagStaticMember",
+    "DIFlagThunk",
+    "DIFlagTypePassByReference",
+    "DIFlagTypePassByValue",
+    "DIFlagVector",
+    "DIFlagVirtual",
+    "DIFlagVirtualInheritance",
+];

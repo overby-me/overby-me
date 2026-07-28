@@ -172,6 +172,18 @@ impl Parser {
         {
             return self.error("expected '{' here");
         }
+        // A `flags:` is a set of words joined by `|`, and each of them has
+        // to be one: the words were swept out the same way the numbered
+        // vocabularies were, and no mask name is among them.
+        if name == "flags"
+            && let MdField::Words(words) = value
+        {
+            for word in words {
+                if !llvm_ir::metadata::dwarf::FLAGS.contains(&word.as_str()) {
+                    return self.error(format!("invalid debug info flag '{word}'"));
+                }
+            }
+        }
         // A word is read into the number it stands for, so one still written
         // as a word here is one no vocabulary has. Three of the nine tables
         // are not complete and refuse nothing.

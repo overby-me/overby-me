@@ -1486,10 +1486,23 @@ upstream refuses anyway.
 The field's node kind had to come with it, because `type:` is a macinfo
 kind on a macro and a node reference on the four kinds that say what
 something is.
-Assembler 461 to 463, with the modules we wrongly accept seventeen to
-fifteen and the ones we wrongly refuse still five. Ten of the fifteen are
-the use-list order tests that need the def-use chains PLAN 4.2 is
-waiting on.
+The `flags:` set went the same way, and it is a set rather than a
+vocabulary: words joined by `|`, each of which has to be one. They were
+swept out of every single bit and every pair of them, thirty-two words,
+and the mask names LLVM groups them under are not among them:
+`DIFlagAccessibility` is refused where `DIFlagPublic` is read.
+Turning a number back into those words is measured and not done. The
+order is two grouped fields, accessibility and inheritance, before the
+rest in ascending bit order, and a bit no word names is dropped rather
+than written, so `flags: 1073741825` comes back `DIFlagPrivate`. No
+module in the suites writes a `flags:` as a number, so the reach is
+nothing and the shape is recorded instead.
+Assembler 461 to 464, with the modules we wrongly accept seventeen to
+fourteen and the ones we wrongly refuse still five. Ten of the fourteen
+are the use-list order tests that need the def-use chains PLAN 4.2 is
+waiting on; the other four are the per-intrinsic signature, `immarg`
+positions, `DIExpression` opcodes and the target extension type table,
+each recorded already.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

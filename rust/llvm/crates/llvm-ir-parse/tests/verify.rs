@@ -1011,6 +1011,16 @@ const BROKEN: &[(&str, &str)] = &[
 
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
+    // A `flags:` is a set of words and each of them has to be one. The mask
+    // names LLVM groups them under are not words a module may write.
+    (
+        "!named = !{!0}\n!0 = !DIBasicType(name: \"n\", flags: DIFlagUnknown)\n",
+        "invalid debug info flag 'DIFlagUnknown'",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DIBasicType(name: \"n\", flags: DIFlagPublic | DIFlagAccessibility)\n",
+        "invalid debug info flag 'DIFlagAccessibility'",
+    ),
     // Each vocabulary was swept over its whole range, so a word none of the
     // tables has is a word upstream does not know.
     (
@@ -1343,6 +1353,9 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // Every word the sweep found, including the two that name a pair of
+    // bits and the one that is reserved.
+    "!named = !{!0}\n!0 = !DIBasicType(name: \"n\", flags: DIFlagPublic | DIFlagVirtualInheritance | DIFlagReservedBit4)\n",
     // A word each table does have.
     "!named = !{!0}\n!0 = !GenericDINode(tag: DW_TAG_entry_point)\n",
     "!named = !{!0}\n!0 = !DIBasicType(name: \"n\", encoding: DW_ATE_signed)\n",
