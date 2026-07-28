@@ -13,6 +13,26 @@ enum AuthMode {
     SetPassword,
 }
 
+/// Clear the OTHER field's error when it is the shared "wrong email or password"
+/// one.
+///
+/// A rejected sign-in cannot tell which of the pair was wrong, so it marks both
+/// boxes with the same message. Editing either one is an answer to that, so the
+/// twin has to come out of its error state as well: on its own it kept claiming
+/// the credentials were wrong while the user was busy correcting them.
+///
+/// Matching on the message keeps this to the paired case. A field's own
+/// validation error (missing, invalid, mismatch) is a different string and is
+/// left for that field to clear.
+fn clear_paired_error(mut other: Signal<String>) {
+    // Compare first, then write: the read guard would still be alive inside an
+    // `if *other.read() == ...` body and the write would panic on the borrow.
+    let is_paired = *other.read() == t("auth.wrongCredentials");
+    if is_paired {
+        other.set(String::new());
+    }
+}
+
 #[component]
 fn AuthForm(mode: AuthMode) -> Element {
     let nav = use_navigator();
@@ -233,6 +253,8 @@ fn AuthForm(mode: AuthMode) -> Element {
                                 if !evt.value().is_empty() {
                                     error_email.set(String::new());
                                 }
+                                // A wrong sign-in marked the password too.
+                                clear_paired_error(error_password);
                             },
                         }
                         if !error_email.read().is_empty() {
@@ -282,6 +304,10 @@ fn AuthForm(mode: AuthMode) -> Element {
                             oninput: move |evt| {
                                 password.set(evt.value());
                                 error_password.set(String::new());
+                                // ...and the email, unless its error is its own
+                                // (an unverified account keeps its message and
+                                // the resend button that goes with it).
+                                clear_paired_error(error_email);
                             },
                         }
                         if !error_password.read().is_empty() {
