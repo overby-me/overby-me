@@ -18,9 +18,11 @@ build:
     # served root ourselves. This is the single source of truth for the deploy
     # bundle — the Nix package (default.nix) runs `just build`, so both match.
     #   _redirects — SPA deep-link fallback for statichost.eu (e.g. /a/b resolves)
+    #   _headers   — cache policy: /assets/* is content-hashed, so immutable
     #   sw.js      — served from the ROOT so its scope is `/` (not the hashed
     #                /assets/ path, whose scope would only be /assets/)
     cp assets/_redirects target/dx/wiki-dioxus/release/web/public/_redirects
+    cp assets/_headers target/dx/wiki-dioxus/release/web/public/_headers
     cp assets/sw.js target/dx/wiki-dioxus/release/web/public/sw.js
 
 # Build the deployable frontend bundle (index.html + assets + sw.js at the root)

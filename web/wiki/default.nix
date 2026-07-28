@@ -78,8 +78,9 @@
         lld
       ];
 
-      # Run the same `just build` as a local build, so the SPA `_redirects` +
-      # root-scoped `sw.js` copies have a single source of truth (the justfile).
+      # Run the same `just build` as a local build, so the SPA `_redirects`,
+      # the `_headers` cache policy and the root-scoped `sw.js` copies have a
+      # single source of truth (the justfile).
       buildPhase = ''
         runHook preBuild
         just build
