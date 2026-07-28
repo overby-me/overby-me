@@ -1213,6 +1213,37 @@ hundred `declare` lines carry an attribute, which is too few to harvest
 from, so `@llvm.assume` coming back with five function attributes and an
 `i1 noundef` is not something this project can reproduce. Eighteen files,
 and the number is recorded rather than guessed at.
+Two more of the subprogram's rules came out of the same files. A `unit:`
+belongs to a subprogram that has a body, so one carrying it is a
+definition however it was spelled; and every subprogram says what it is
+scoped to, even when that is nothing, `scope: null` being written where
+the module wrote no scope at all. Linker 187 to 189, Other 131 to 132.
+A seventy-seventh pass took the DWARF vocabulary, which has been recorded
+as unobtainable since the sixty-third and is not. The reasoning was that
+no specification this project may read enumerates every `DW_TAG_*`, which
+is true and beside the point: the oracle knows. A field that takes a word
+takes the number behind it too, and upstream prints the word back, so
+writing `encoding: 5` and reading `DW_ATE_signed` is a question `llvm-as`
+answers. `corpus/dwarf-vocabulary.nu` sweeps each such field over a range
+of numbers and writes down what comes back.
+Six vocabularies came out whole: fifty-eight languages, twenty-four
+encodings, eighty-four calling conventions, four emission kinds, three
+name table kinds and the macro types. `tag` is per-node, each kind taking
+the tags that make sense for it, so it is swept on five kinds and unioned.
+Two came back empty, `virtuality` and `checksumkind`, their probes still
+being refused for reasons the sweep reports rather than hides.
+Assembler 157 to 160.
+The tables were then used to refuse a word they do not have, which the
+three files waiting on `DW_TAG_badtag` want, and that was wrong. The map
+is sound and the vocabulary is not complete: a value equal to the field's
+own default never prints, so the sweep never learns its word.
+`nameTableKind: Default` is the case that showed it, along with a vendor
+tag past the range the sweep first covered. The DebugInfo ratchet went
+1,101 to 1,098 and the Assembler ceiling 5 to 6, which is the third time
+a bound has caught a rule that looked right.
+So the tables print a number as a word and do not refuse a word as
+unknown. The `DW_TAG_badtag` entry stays open, and the reason it is open
+is now a sentence about defaults rather than about specifications.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

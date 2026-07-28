@@ -11,6 +11,9 @@
 //! module with sparse numbers prints differently through us than through
 //! `llvm-dis`; canonical input, which is what the corpus holds, is unaffected.
 
+/// The DWARF vocabulary a specialized node's word-valued fields take.
+pub mod dwarf;
+
 use crate::ByteString;
 use crate::types::TypeId;
 use crate::value::{MdId, Value};

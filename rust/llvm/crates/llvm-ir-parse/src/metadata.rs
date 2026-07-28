@@ -176,6 +176,7 @@ impl Parser {
             (md_schema::Shape::Enumerator(_, what), MdField::Str(_) | MdField::Signed(_)) => {
                 self.error(format!("expected {what}"))
             }
+
             (md_schema::Shape::SmallEnumerator(limit), MdField::Unsigned(written)) => {
                 if *written > u128::from(limit) {
                     return self.error(format!("value for '{name}' too large"));
@@ -732,6 +733,22 @@ fn upgrade_subprogram_flags(tag: &str, args: SpecializedArgs) -> SpecializedArgs
     };
     const OLD: [&str; 4] = ["isLocal", "isDefinition", "isOptimized", "virtuality"];
     if !fields.iter().any(|(name, _)| OLD.contains(&name.as_str())) {
+        let mut fields = fields;
+        // A `unit:` belongs to a subprogram that has a body, so one carrying
+        // it is a definition however it was spelled.
+        if fields.iter().any(|(name, _)| name == "unit")
+            && !fields.iter().any(|(name, _)| name == "spFlags")
+        {
+            fields.push((
+                "spFlags".to_string(),
+                MdField::Words(vec!["DISPFlagDefinition".to_string()]),
+            ));
+        }
+        // And every subprogram says what it is scoped to, even when that is
+        // nothing.
+        if !fields.iter().any(|(name, _)| name == "scope") {
+            fields.push(("scope".to_string(), MdField::Null));
+        }
         return virtual_index_survives(SpecializedArgs::Named(fields));
     }
     let written = |wanted: &str| {
@@ -774,6 +791,9 @@ fn upgrade_subprogram_flags(tag: &str, args: SpecializedArgs) -> SpecializedArgs
         MdField::Words(flags.iter().map(|flag| (*flag).to_string()).collect())
     };
     kept.push(("spFlags".to_string(), value));
+    if !kept.iter().any(|(name, _)| name == "scope") {
+        kept.push(("scope".to_string(), MdField::Null));
+    }
     virtual_index_survives(SpecializedArgs::Named(kept))
 }
 
