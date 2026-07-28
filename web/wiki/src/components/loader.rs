@@ -976,6 +976,8 @@ mod tests {
             is_owner: None,
             is_context_owner: None,
             owner: None,
+            author_name: None,
+            author_avatar: None,
             parent: None,
             data: None,
             mime: Some(MimeFields {

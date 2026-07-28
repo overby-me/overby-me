@@ -101,6 +101,10 @@ pub struct ChildNodeFields {
     pub is_context_owner: Option<bool>,
     /// Creating user (fallback label for questions/candidates/comments/amendments).
     pub owner: Option<UserRef>,
+    /// The author's name and avatar, readable even when `owner` above is not
+    /// (see the GraphQL fragment). Name and picture only, never the email.
+    pub author_name: Option<String>,
+    pub author_avatar: Option<String>,
     /// The parent node, for the "Newest" list's secondary line ("in <parent>").
     pub parent: Option<ParentNodeFields>,
 }

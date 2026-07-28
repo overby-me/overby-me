@@ -195,11 +195,15 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
     let node_id = node.id.0.clone();
     let key = node.key.clone();
 
-    // Author (owner) name + initials for the social-style avatar.
+    // Author name + initials for the social-style avatar. Prefer the `owner`
+    // relationship (it also carries the id, so the popover can link to a
+    // profile) and fall back to the computed `author_name`, which is readable
+    // for content in a context you do not belong to — most of this list.
     let author = node
         .owner
         .as_ref()
         .map(|o| o.display_name.clone())
+        .or_else(|| node.author_name.clone())
         .filter(|s| !s.is_empty());
     let initials = author
         .as_ref()
@@ -216,6 +220,7 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
         .owner
         .as_ref()
         .map(|o| o.avatar_url.clone())
+        .or_else(|| node.author_avatar.clone())
         .unwrap_or_default();
     let owner_id = node.owner.as_ref().map(|o| o.id.0.clone());
     let author_name = author.clone().unwrap_or_else(|| t("common.unknown"));

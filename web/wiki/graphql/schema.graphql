@@ -6395,6 +6395,16 @@ type nodes {
 	attachable: Boolean!
 
 	"""
+	A computed field, executes function "author_avatar"
+	"""
+	authorAvatar: String
+
+	"""
+	A computed field, executes function "author_name"
+	"""
+	authorName: String
+
+	"""
 	A computed field, executes function "check_unique"
 	"""
 	checkUnique(

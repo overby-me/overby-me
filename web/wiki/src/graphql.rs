@@ -111,6 +111,8 @@ impl From<ChildNodeFields> for model::ChildNodeFields {
             is_owner: c.is_owner,
             is_context_owner: c.is_context_owner,
             owner: c.owner.map(Into::into),
+            author_name: c.author_name,
+            author_avatar: c.author_avatar,
             parent: c.parent.map(Into::into),
         }
     }
@@ -502,6 +504,14 @@ pub struct ChildNodeFields {
     pub is_context_owner: Option<bool>,
     // Creating user (fallback label for questions/candidates/comments/amendments).
     pub owner: Option<UserRef>,
+    // The author's name and avatar as computed fields, which see past the row
+    // rule on `users` that `owner` above is subject to. That rule only reveals
+    // someone you share a context with, so on the home page — which lists
+    // content from public contexts you may not belong to — `owner` is null and
+    // the post looked anonymous. These carry the name and picture only; the
+    // email stays behind the users rule.
+    pub author_name: Option<String>,
+    pub author_avatar: Option<String>,
     // The parent node, for the "Newest" list's secondary line ("in <parent>"),
     // matching how search results show their context.
     pub parent: Option<ParentNodeFields>,
