@@ -23,6 +23,26 @@ Audited 2026-07-26 against nixpkgs systemd v258
 
 37 tests carry a real override.
 
+## Sweep, 2026-07-28
+
+Four tests not previously examined were run to sample the suite rather than
+keep polishing one failing test:
+
+| Test | Result |
+|------|--------|
+| 07-PID1 exec-deserialization | PASSES. The note calling it "the closest-to-green test, blocked on the invariant-I1 lock decoupling" is STALE — it is green. |
+| 05-RLIMITS effective-limit | PASSES |
+| 07-PID1 concurrency | FAILS: `ConcurrencyHardMax=`/`ConcurrencySoftMax=` are not implemented at all. The test starts units into a slice whose limit is reached and expects the next `systemctl start` to BLOCK (`timeout 1s` → 124); rust starts it immediately and returns 0. |
+| 07-PID1 delegate-namespaces | FAILS, not yet diagnosed |
+
+Also found by comparing upstream's `TEST-07-PID1.*.sh` against the registered
+set: 52 upstream subtests, 51 registered. `alias-corruption` had no wrapper and
+had never run. It is registered now with no override.
+
+Note the 07 family has 91 wrappers against 52 upstream subtests, so ~39 are
+hand-written additions rather than substitutions; upstream coverage there is
+essentially complete, which the "9 substitutes" row understates.
+
 **Retired so far:** 44-LOG-NAMESPACE (was a fake pass, now runs the upstream
 script to `/testok`). 34-DYNAMICUSERMIGRATE was the other fake pass; it is now an
 honest skip carrying its real first failure, so no test claims success without
