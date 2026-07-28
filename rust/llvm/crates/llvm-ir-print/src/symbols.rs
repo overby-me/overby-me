@@ -7,6 +7,7 @@ use llvm_ir::BlockId;
 use llvm_ir::attribute::Attribute;
 use llvm_ir::function::Function;
 use llvm_ir::global::{Alias, GlobalQualifiers, GlobalVariable, IFunc, Linkage, Visibility};
+use llvm_ir::value::Name;
 
 use crate::slots::FunctionSlots;
 use crate::{
@@ -58,7 +59,7 @@ impl Printer<'_> {
             let _ = write!(self.out, ", code_model \"{model}\"");
         }
         if let Some(comdat) = &global.comdat {
-            self.comdat_clause(comdat);
+            self.comdat_clause(comdat, &global.name);
         }
         if let Some(align) = global.align {
             let _ = write!(self.out, ", align {}", align.bytes());
@@ -151,12 +152,21 @@ impl Printer<'_> {
         }
     }
 
-    pub(crate) fn comdat_clause(&mut self, comdat: &llvm_ir::global::ComdatRef) {
-        match &comdat.name {
-            None => self.push(", comdat"),
-            Some(name) => {
-                let _ = write!(self.out, ", comdat(${})", identifier(name));
-            }
+    /// `comdat($name)`, or the bare `comdat` when the comdat is the one the
+    /// symbol's own name makes: a symbol in the comdat it heads writes the
+    /// short form, whichever way the module spelled it.
+    pub(crate) fn comdat_clause(&mut self, comdat: &llvm_ir::global::ComdatRef, symbol: &Name) {
+        let own = match (&comdat.name, symbol) {
+            (None, _) => true,
+            (Some(name), Name::Named(symbol)) => name == symbol,
+            (Some(_), Name::Number(_)) => false,
+        };
+        if own {
+            self.push(", comdat");
+            return;
+        }
+        if let Some(name) = &comdat.name {
+            let _ = write!(self.out, ", comdat(${})", identifier(name));
         }
     }
 
@@ -248,11 +258,19 @@ impl Printer<'_> {
             let _ = write!(self.out, " partition \"{}\"", escape_string(partition));
         }
         if let Some(comdat) = &function.comdat {
-            match &comdat.name {
-                None => self.push(" comdat"),
-                Some(name) => {
+            // The same short form a global takes, with a space rather than a
+            // comma in front of it.
+            let own = match (&comdat.name, &function.name) {
+                (None, _) => true,
+                (Some(name), Name::Named(symbol)) => name == symbol,
+                (Some(_), Name::Number(_)) => false,
+            };
+            match (own, &comdat.name) {
+                (true, _) => self.push(" comdat"),
+                (false, Some(name)) => {
                     let _ = write!(self.out, " comdat(${})", identifier(name));
                 }
+                (false, None) => {}
             }
         }
         if let Some(align) = function.align {

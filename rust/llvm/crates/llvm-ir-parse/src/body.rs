@@ -1206,6 +1206,11 @@ impl Parser {
                     return self.error("shufflevector shuffles two vectors of different types");
                 }
                 let ty = self.shuffle_result_type(vector_type, mask_type)?;
+                // A mask lane that picks nothing is a lane nobody reads, and
+                // upstream spells that `poison` rather than `undef`: the two
+                // say the same thing here and it writes back the one that
+                // says it of a value that was never chosen.
+                let mask = self.poison_the_undef_lanes(mask);
                 Ok((
                     ty,
                     InstKind::ShuffleVector {
@@ -1848,5 +1853,35 @@ fn debug_record_arity(kind: &InstKind) -> Option<usize> {
         "dbg_assign" => Some(7),
         "dbg_label" => Some(2),
         _ => None,
+    }
+}
+
+impl Parser {
+    /// Rewrites every `undef` lane of a constant vector to `poison`.
+    fn poison_the_undef_lanes(&mut self, mask: Value) -> Value {
+        let Value::Constant(id) = mask else {
+            return mask;
+        };
+        let Constant::Vector { ty, elements } = self.module.ctx.constant(id).clone() else {
+            return mask;
+        };
+        let mut lanes = Vec::with_capacity(elements.len());
+        let mut changed = false;
+        for element in elements {
+            match self.module.ctx.constant(element).clone() {
+                Constant::Undef(lane) => {
+                    changed = true;
+                    lanes.push(self.module.ctx.intern_constant(Constant::Poison(lane)));
+                }
+                _ => lanes.push(element),
+            }
+        }
+        if !changed {
+            return mask;
+        }
+        Value::Constant(self.module.ctx.intern_constant(Constant::Vector {
+            ty,
+            elements: lanes,
+        }))
     }
 }

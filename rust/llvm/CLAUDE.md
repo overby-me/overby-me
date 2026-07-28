@@ -1304,6 +1304,14 @@ proportion rising as the real differences close. The clearest new one is
 swapped and `llvm-dis` does not; it is a bug in one upstream tool rather
 than a rule to copy. The attainable maximum across the four suites is
 643 of 655, and sixty-three of the differences are genuinely ours.
+An eighty-first pass took two more of those. A symbol in the comdat its
+own name makes writes the bare `comdat` rather than naming it, which is
+four files in Linker and reads oddly until you see that a comdat is
+usually the symbol's own. And a shuffle mask lane that picks nothing is
+a lane nobody reads, which upstream spells `poison` rather than `undef`:
+the two say the same thing there and it writes back the one that says it
+of a value never chosen.
+Linker 196 to 200, Feature 60 to 61.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the
