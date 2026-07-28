@@ -59,6 +59,7 @@ fn main() -> ExitCode {
         "call" => cmd_call(&rest[1..], more),
         "introspect" => cmd_introspect(&rest[1..]),
         "info" => cmd_info(&rest[1..]),
+        "list-registry" => cmd_list_registry(json),
         "list-methods" => cmd_list_methods(&rest[1..], json),
         "list-interfaces" => cmd_list_interfaces(&rest[1..], json),
         other => {
@@ -115,6 +116,62 @@ fn cmd_info(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// varlinkctl list-registry — show the services in the Varlink service
+/// registry, as interface plus entrypoint.
+///
+/// A missing registry directory is not an error, matching upstream, which
+/// tolerates ENOENT and just prints an empty table.
+fn cmd_list_registry(json: bool) -> ExitCode {
+    const REGISTRY: &str = "/run/systemd/varlink/registry";
+
+    let mut rows: Vec<(String, String)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(REGISTRY) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !interface_name_is_valid(&name) {
+                continue;
+            }
+            let path = entry.path();
+            // A registry entry is normally a symlink to the socket or binary
+            // that serves the interface; fall back to the entry itself.
+            let entrypoint = std::fs::read_link(&path)
+                .map(|t| t.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| path.to_string_lossy().into_owned());
+            rows.push((name, entrypoint));
+        }
+    }
+    rows.sort();
+
+    if json {
+        let arr: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|(i, e)| serde_json::json!({ "interface": i, "entrypoint": e }))
+            .collect();
+        println!("{}", serde_json::to_string(&arr).unwrap());
+    } else {
+        println!("{:<48} {}", "INTERFACE", "ENTRYPOINT");
+        for (i, e) in &rows {
+            println!("{i:<48} {e}");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Whether a registry entry names a plausible Varlink interface: dot-separated
+/// labels of alphanumerics and dashes, as upstream's
+/// varlink_idl_interface_name_is_valid() requires.
+fn interface_name_is_valid(name: &str) -> bool {
+    if name.is_empty() || !name.contains('.') {
+        return false;
+    }
+    name.split('.').all(|label| {
+        !label.is_empty()
+            && label
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    })
 }
 
 /// varlinkctl list-methods <target> — list the methods of each interface the
