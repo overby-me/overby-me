@@ -52,10 +52,37 @@
   # (Do not read that as a pass for us; it only means real systemd stops sooner
   # in this harness.)
   #
-  # STILL OPEN, and NOT yet attributed: whether journal-upload itself exits 0
-  # when it cannot reach the server, or whether the exit status is recorded but
-  # mis-mapped to `inactive` instead of `failed`. Nothing in the VM log shows the
-  # process's exit code, so do not guess. Note 59-RELOADING-RESTART is stuck on a
-  # suspiciously similar question (ExecMainStatus empty for a stopped unit), so
-  # check whether one cause explains both.
+  # NOW ATTRIBUTED, measured 2026-07-28 with a temporary in-VM probe (since
+  # removed). PID 1 is NOT at fault and the unit is NOT mis-loaded:
+  #
+  #     FragmentPath=/etc/systemd/system/systemd-journal-upload.service
+  #     DropInPaths=/run/systemd/system/systemd-journal-upload.service.d/99-test.conf
+  #     ExecStart={ path=/nix/store/...-systemd-journal-upload ... }
+  #     after it exits: ActiveState=inactive SubState=dead
+  #                     ExecMainStatus=0 Result=success
+  #
+  # So the fragment, the drop-in and ExecStart all resolve correctly, and PID 1
+  # faithfully recorded what it was given. **Our systemd-journal-upload really
+  # does exit 0 here.** `inactive` is the correct state for a service that exits
+  # successfully -- the test wants `failed`, and nothing failed. This is
+  # therefore NOT the exit-status-recording question that 59-RELOADING-RESTART is
+  # stuck on; do not merge the two.
+  #
+  # WHY IT SUCCEEDS is the remaining question, and the evidence points at the
+  # OTHER side of the connection. This section is supposed to be the
+  # invalid-client-cert case, yet the journal for this very phase shows
+  #
+  #     systemd-journal-upload[...]: Uploading 17 entries to https://localhost:19532
+  #     systemd-journal-upload[...]: Upload complete
+  #
+  # i.e. the upload is ACCEPTED. Upstream expects journal-remote to answer
+  # "Client is not authorized" and 401, which is what would make journal-upload
+  # exit 1. The likely gap is that our systemd-journal-remote does not enforce
+  # client-certificate authorization, so there is nothing for the client to fail
+  # on. That is plausible but NOT yet proven -- confirm before building on it.
+  #
+  # A SEPARATE, SMALLER DEFECT spotted by the same probe: `Description=` comes
+  # back EMPTY for this unit, which is why the journal logs it as
+  # "Started systemd-journal-upload.service" rather than
+  # "Started Journal Remote Upload Service". Cosmetic, unrelated to the failure.
 }
