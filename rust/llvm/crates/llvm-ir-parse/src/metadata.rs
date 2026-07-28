@@ -57,8 +57,11 @@ impl Parser {
                     return self.error("expected metadata type");
                 };
                 let args = self.parse_specialized_args(context)?;
+                // Read before the grammar is checked, so that a word the
+                // vocabulary has is a number by the time its range is asked
+                // about and one it does not have is what is left over.
+                let args = read_vocabulary_words(&tag, args);
                 self.check_specialized(schema, &tag, distinct, &args)?;
-                let args = read_vocabulary_words(args);
                 let args = drop_defaulted_fields(schema, &tag, args);
                 let args = fill_compile_unit_defaults(&tag, args);
                 let args = upgrade_subprogram_flags(&tag, args);
@@ -123,7 +126,7 @@ impl Parser {
                 return self.error(format!("field '{name}' cannot be specified more than once"));
             }
             seen.push(spec.name);
-            self.check_field(spec, value)?;
+            self.check_field(tag, spec, value)?;
         }
 
         match schema.distinct {
@@ -157,6 +160,7 @@ impl Parser {
 
     fn check_field(
         &mut self,
+        tag: &str,
         spec: &'static md_schema::Field,
         value: &MdField,
     ) -> Result<(), ParseError> {
@@ -167,6 +171,15 @@ impl Parser {
             && !matches!(value, MdField::Inline(node) if matches!(**node, Metadata::Tuple { .. }))
         {
             return self.error("expected '{' here");
+        }
+        // A word is read into the number it stands for, so one still written
+        // as a word here is one no vocabulary has. Three of the nine tables
+        // are not complete and refuse nothing.
+        if let MdField::Words(words) = value
+            && let [word] = words.as_slice()
+            && let Some(vocabulary) = llvm_ir::metadata::vocabulary_name(tag, name)
+        {
+            return self.error(format!("invalid {vocabulary} '{word}'"));
         }
         if spec.non_null && matches!(value, MdField::Null) {
             return self.error(format!("'{name}' cannot be null"));
@@ -573,7 +586,7 @@ fn drop_defaulted_fields(
                 if required || llvm_ir::metadata::stored_at_zero(tag, name) {
                     return true;
                 }
-                !is_default(name, default, value)
+                !is_default(tag, name, default, value)
             })
             .collect(),
     )
@@ -588,7 +601,7 @@ fn default_value(tag: &str, name: &str) -> Option<&'static str> {
 
 /// A field that takes a word, holding the number the word stands for, so
 /// that `tag: 3` and `tag: DW_TAG_entry_point` are one node rather than two.
-fn read_vocabulary_words(args: SpecializedArgs) -> SpecializedArgs {
+fn read_vocabulary_words(tag: &str, args: SpecializedArgs) -> SpecializedArgs {
     let SpecializedArgs::Named(fields) = args else {
         return args;
     };
@@ -604,7 +617,7 @@ fn read_vocabulary_words(args: SpecializedArgs) -> SpecializedArgs {
                 let [word] = words.as_slice() else {
                     return (name, value);
                 };
-                match llvm_ir::metadata::number(&name, word) {
+                match llvm_ir::metadata::number(tag, &name, word) {
                     Some(number) => (name, MdField::Unsigned(u128::from(number))),
                     None => (name, value),
                 }
@@ -613,7 +626,7 @@ fn read_vocabulary_words(args: SpecializedArgs) -> SpecializedArgs {
     )
 }
 
-fn is_default(name: &str, default: &str, value: &MdField) -> bool {
+fn is_default(tag: &str, name: &str, default: &str, value: &MdField) -> bool {
     // The one field whose default is not its type's zero, and the string
     // fields whose default is no text at all.
     match default {
@@ -629,7 +642,7 @@ fn is_default(name: &str, default: &str, value: &MdField) -> bool {
     }
     // A word-valued field holds the number the word stands for by the time
     // this runs, so its default is looked up the same way.
-    if let Some(number) = llvm_ir::metadata::number(name, default) {
+    if let Some(number) = llvm_ir::metadata::number(tag, name, default) {
         return matches!(value, MdField::Unsigned(written) if *written == u128::from(number));
     }
     match value {

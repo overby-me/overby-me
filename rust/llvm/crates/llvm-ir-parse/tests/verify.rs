@@ -1011,6 +1011,24 @@ const BROKEN: &[(&str, &str)] = &[
 
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
+    // Each vocabulary was swept over its whole range, so a word none of the
+    // tables has is a word upstream does not know.
+    (
+        "!named = !{!0}\n!0 = !GenericDINode(tag: DW_TAG_badtag)\n",
+        "invalid DWARF tag 'DW_TAG_badtag'",
+    ),
+    (
+        "!named = !{!0}\n!0 = distinct !DICompileUnit(language: DW_LANG_NoSuch, file: !1)\n!1 = !DIFile(filename: \"a\", directory: \"d\")\n",
+        "invalid DWARF language 'DW_LANG_NoSuch'",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DIBasicType(name: \"n\", encoding: DW_ATE_nope)\n",
+        "invalid DWARF type attribute encoding 'DW_ATE_nope'",
+    ),
+    (
+        "!named = !{!0}\n!0 = !DISubroutineType(types: null, cc: DW_CC_nope)\n",
+        "invalid DWARF calling convention 'DW_CC_nope'",
+    ),
     // `operands:` holds the node's own operands, written with braces, so a
     // reference to a node that holds them is not what it takes.
     (
@@ -1325,6 +1343,14 @@ fn an_instruction_after_a_terminator_opens_a_new_block() {
 /// Syntax upstream accepts that we used to refuse. Each was found by the
 /// upstream suites rather than by reading LangRef.
 const ACCEPTED: &[&str] = &[
+    // A word each table does have.
+    "!named = !{!0}\n!0 = !GenericDINode(tag: DW_TAG_entry_point)\n",
+    "!named = !{!0}\n!0 = !DIBasicType(name: \"n\", encoding: DW_ATE_signed)\n",
+    // Three vocabularies the sweep cannot finish, because a value equal to
+    // the field's own default never prints its word. Those refuse nothing.
+    "!named = !{!0}\n!llvm.dbg.cu = !{!0}\n!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, nameTableKind: Default)\n!1 = !DIFile(filename: \"a\", directory: \"d\")\n!llvm.module.flags = !{!9}\n!9 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
+    "!named = !{!0}\n!0 = !DISubprogram(name: \"s\", scope: null, type: null, spFlags: 0, virtuality: DW_VIRTUALITY_none)\n",
+    "!named = !{!0}\n!0 = !DIFile(filename: \"f\", directory: \"d\", checksumkind: CSK_MD5, checksum: \"0123456789abcdef0123456789abcdef\")\n",
     // Written with braces it is.
     "!named = !{!1}\n!0 = !{}\n!1 = !GenericDINode(tag: DW_TAG_entry_point, operands: {!0})\n",
     // The two casts that change nothing but precision take them.

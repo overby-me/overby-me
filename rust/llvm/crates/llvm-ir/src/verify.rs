@@ -4954,7 +4954,8 @@ fn describe_attribute(attribute: &Attribute) -> String {
 fn tag_is(fields: &[(String, MdField)], wanted: &[&str]) -> bool {
     match field_of(fields, "tag") {
         Some(MdField::Unsigned(number)) => wanted.iter().any(|word| {
-            crate::metadata::number("tag", word).is_some_and(|value| u128::from(value) == *number)
+            crate::metadata::number("", "tag", word)
+                .is_some_and(|value| u128::from(value) == *number)
         }),
         // A word outside the vocabulary is kept as it was written.
         Some(MdField::Words(words)) => words.iter().any(|word| wanted.contains(&word.as_str())),

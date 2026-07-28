@@ -1,7 +1,7 @@
 #!/usr/bin/env nu
 # Derives the DWARF vocabulary by asking upstream what each number is called.
 #
-#   nu dwarf-vocabulary.nu [upstream-opt] [out.rs]
+#   nu dwarf-vocabulary.nu [llvm-as] [llvm-dis] [out.rs]
 #
 # A field like `encoding:` takes a word, and a module may write the number
 # behind it instead: `encoding: 5` and `encoding: DW_ATE_signed` are the same
@@ -12,40 +12,52 @@
 # The list has been recorded as unobtainable since the sixty-third pass,
 # because no specification this project may read enumerates every `DW_TAG_*`.
 # But the oracle does: writing `tag: 5` and reading back `DW_TAG_variable` is
-# a question `llvm-as` answers, the same way every other rule here is asked.
+# a question upstream answers, the same way every other rule here is asked.
 # So the vocabulary is swept out rather than looked up.
 #
-# What comes out is `crates/llvm-ir/src/metadata/dwarf.rs`, one table per field, giving
-# the word for each number upstream accepts. A number upstream refuses is not
-# in the table, which is what makes the table an answer to "is this a word"
-# as well as to "what is this number called".
+# The sweep covers each field's whole range rather than a sample, which is
+# what makes the tables an answer to "is this a word" as well as to "what is
+# this number called": a word none of them has is one upstream does not know.
+# Getting there needs the values asked in batches, one module holding a node
+# per value, because sixty-five thousand separate runs is an hour and one
+# module is a second.
+#
+# It reads back through `llvm-as | llvm-dis` rather than `opt -S`, because
+# some values are legal to write and refused by the verifier, and a verifier
+# complaint would take the whole batch with it.
 
-# Each field, where it is written, and the numbers worth asking about. The
-# ranges are wide enough to run past the last value each vocabulary defines,
-# which is how the sweep knows it has found the end rather than assuming one.
+# Each field, where it is written, the skeleton the node needs, and the range
+# of values worth asking about. `tag` is per-node, each kind taking the tags
+# that make sense for it, so it is swept on the kind that takes the most and
+# the answers are the union.
 const FIELDS = [
-  [name, node, skeleton, ranges];
+  [name, node, skeleton, first, last];
 
-  # `GenericDINode` takes whatever tag it is given and prints the word when
-  # there is one, so it is the probe that sees the whole vocabulary rather
-  # than the part one node kind allows.
-  ["tag" "GenericDINode" 'header: "h"' [[0 0x1200] [0x4000 0x4200] [0x8000 0x8100] [0x1400 0x1500]]]
-  ["encoding" "DIBasicType" 'name: "n", size: 8' [[0 0x100]]]
-  ["language" "DICompileUnit" 'file: !2' [[0 0x40] [0x8000 0x8100]]]
-  ["emissionKind" "DICompileUnit" 'language: DW_LANG_C99, file: !2' [[0 0x10]]]
-  ["nameTableKind" "DICompileUnit" 'language: DW_LANG_C99, file: !2' [[0 0x10]]]
-  ["virtuality" "DISubprogram" 'name: "s", scope: null, type: null, spFlags: 0' [[0 0x10]]]
-  ["cc" "DISubroutineType" 'types: null' [[0 0x100]]]
-  ["checksumkind" "DIFile" 'filename: "f", directory: "d", checksum: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"' [[0 0x10]]]
-  ["type" "DIMacro" 'name: "m", value: "v"' [[0 0x10]]]
+  ["tag" "GenericDINode" 'header: "h"' 0 65536]
+  ["encoding" "DIBasicType" 'name: "n", size: 8' 0 256]
+  ["language" "DICompileUnit" 'file: !2' 0 65536]
+  ["emissionKind" "DICompileUnit" 'language: DW_LANG_C99, file: !2' 0 16]
+  ["nameTableKind" "DICompileUnit" 'language: DW_LANG_C99, file: !2' 0 16]
+  ["virtuality" "DISubprogram" 'name: "s", scope: null, type: null, spFlags: 0' 0 16]
+  ["cc" "DISubroutineType" 'types: null' 0 256]
+  ["checksumkind" "DIFile" 'filename: "f", directory: "d", checksum: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"' 0 16]
+  ["type" "DIMacro" 'name: "m", value: "v"' 0 16]
 ]
 
-def probe-text [field: string, node: string, skeleton: string, value: int]: nothing -> string {
+# One module holding a node per value, so a whole range is one question.
+def batch-text [field: string, node: string, skeleton: string, values: list<int>]: nothing -> string {
   let distinct = if $node in ["DICompileUnit" "DISubprogram"] { "distinct " } else { "" }
-  let units = if $node == "DICompileUnit" { '!llvm.dbg.cu = !{!0}' } else { '' }
+  let nodes = ($values | enumerate | each {|pair|
+    $"!($pair.index + 100) = ($distinct)!($node)\(($skeleton), ($field): ($pair.item)\)"
+  })
+  let names = ($values | enumerate | each {|pair| $"!($pair.index + 100)" } | str join ", ")
+  let units = if $node == "DICompileUnit" {
+    # A compile unit has to be listed, and every one of these is a unit.
+    $"!llvm.dbg.cu = !{($names)}"
+  } else { '' }
   ([
-    '!named = !{!0}'
-    $"!0 = ($distinct)!($node)\(($skeleton), ($field): ($value)\)"
+    $"!named = !{($names)}"
+    ...$nodes
     '!2 = !DIFile(filename: "a", directory: "d")'
     $units
     '!llvm.module.flags = !{!9}'
@@ -53,27 +65,72 @@ def probe-text [field: string, node: string, skeleton: string, value: int]: noth
   ] | where $it != "" | str join "\n")
 }
 
-def main [upstream_opt: path = "opt", out: path = "dwarf.rs"] {
+# The words a batch comes back with, in the order the values went in, or
+# nothing at all when upstream refuses the batch.
+def ask [as: path, dis: path, source: path, text: string]: nothing -> any {
+  $text | save -f $source
+  let assembled = (do { ^$as $source -o - } | complete)
+  if $assembled.exit_code != 0 { return null }
+  let printed = (do { $assembled.stdout | ^$dis - -o - } | complete)
+  if $printed.exit_code != 0 { return null }
+  let text = (try { $printed.stdout | decode utf-8 } catch { $printed.stdout })
+  let lines = ($text | lines)
+  # The named list gives the printed number of each node in the order they
+  # were written, which is what maps an answer back to the value it came from.
+  let order = (
+    $lines
+    | where ($it | str starts-with "!named = ")
+    | get 0?
+    | default ""
+    | parse --regex '\{(?P<body>.*)\}'
+    | get body?
+    | default []
+  )
+  if ($order | is-empty) { return null }
+  let ids = ($order | first | split row ", ")
+  let by_id = (
+    $lines
+    | where ($it | str starts-with "!") and ($it | str contains " = ")
+    | reduce --fold {} {|line, acc|
+      let id = ($line | split row " = " | first)
+      $acc | upsert $id $line
+    }
+  )
+  $ids | each {|id| $by_id | get -o $id | default "" }
+}
+
+def main [
+  llvm_as: path = "llvm-as"
+  llvm_dis: path = "llvm-dis"
+  out: path = "dwarf.rs"
+] {
   let work = (mktemp -d)
   let source = ([$work "probe.ll"] | path join)
   mut tables = []
   for field in $FIELDS {
     mut pairs = []
-    for range in $field.ranges {
-      for value in ($range.0)..<($range.1) {
-        probe-text $field.name $field.node $field.skeleton $value | save -f $source
-        let printed = (do { ^$upstream_opt -S $source -o - } | complete)
-        if $printed.exit_code != 0 { continue }
-        let text = (try { $printed.stdout | decode utf-8 } catch { $printed.stdout })
-        let line = ($text | lines | where ($it | str starts-with "!0 = ") | first)
+    # Four thousand at a time: large enough that the whole tag range is
+    # sixteen questions, small enough that one refused value costs little.
+    let values = (($field.first)..<($field.last) | each {|v| $v} | chunks 4096)
+    for chunk in $values {
+      mut answers = (ask $llvm_as $llvm_dis $source (batch-text $field.name $field.node $field.skeleton $chunk))
+      if $answers == null {
+        # Something in the chunk is not a value this field takes, so it is
+        # asked one at a time and the refusals are the ones with no word.
+        $answers = ($chunk | each {|value|
+          let one = (ask $llvm_as $llvm_dis $source (batch-text $field.name $field.node $field.skeleton [$value]))
+          if $one == null { "" } else { $one | first }
+        })
+      }
+      for pair in ($chunk | zip $answers) {
         let word = (
-          $line
+          $pair.1
           | parse --regex $"($field.name): \(?P<word>[A-Za-z_][A-Za-z0-9_]*\)"
           | get word?
           | default []
         )
         if ($word | is-empty) { continue }
-        $pairs = ($pairs | append {value: $value, word: ($word | first)})
+        $pairs = ($pairs | append {value: $pair.0, word: ($word | first)})
       }
     }
     print $"($field.name) via ($field.node): ($pairs | length) words"
@@ -114,8 +171,9 @@ def main [upstream_opt: path = "opt", out: path = "dwarf.rs"] {
 //! question the assembler answers rather than a list to be copied from a
 //! specification this project may not read.
 //!
-//! A number no table here names is one upstream refuses, which makes these
-//! tables the answer to \"is this a word\" as well as to \"what is this number
+//! Each field is swept over its whole range rather than a sample, so a word
+//! none of these tables has is a word upstream does not know. That makes them
+//! the answer to \"is this a word\" as well as to \"what is this number
 //! called\".
 
 /// The word a number is spelled as, in the vocabulary a field takes.

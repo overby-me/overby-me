@@ -93,7 +93,7 @@ impl Printer<'_> {
                             // A field that takes a word takes the number
                             // behind it too, and upstream writes the word
                             // back either way.
-                            match (llvm_ir::metadata::vocabulary(key), value) {
+                            match (llvm_ir::metadata::vocabulary(tag, key), value) {
                                 (Some(words), MdField::Unsigned(number)) => {
                                     match u64::try_from(*number).ok().and_then(|number| {
                                         llvm_ir::metadata::dwarf::word(words, number)

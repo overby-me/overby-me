@@ -370,7 +370,7 @@ static STORED_AT_ZERO: &[(&str, &str)] = &[
 
 /// The words a field takes, when it takes words. A field the table does not
 /// name holds a number or something else entirely.
-pub fn vocabulary(field: &str) -> Option<&'static [(u64, &'static str)]> {
+pub fn vocabulary(tag: &str, field: &str) -> Option<&'static [(u64, &'static str)]> {
     match field {
         "tag" => Some(dwarf::TAG),
         "encoding" => Some(dwarf::ENCODING),
@@ -380,13 +380,37 @@ pub fn vocabulary(field: &str) -> Option<&'static [(u64, &'static str)]> {
         "virtuality" => Some(dwarf::VIRTUALITY),
         "cc" => Some(dwarf::CC),
         "checksumkind" => Some(dwarf::CHECKSUMKIND),
+        // `type:` is a macinfo kind on a macro and a node reference on the
+        // four kinds that name what something is, which is why the node kind
+        // has to be asked as well as the field.
+        "type" if tag == "DIMacro" => Some(dwarf::TYPE),
+        _ => None,
+    }
+}
+
+/// What upstream calls a field's vocabulary when it refuses a word that is
+/// not in it, and nothing for the three whose tables are not complete.
+///
+/// `nameTableKind: Default`, `virtuality: DW_VIRTUALITY_none` and
+/// `checksumkind: CSK_MD5` are words upstream takes and the sweep cannot
+/// learn: a value equal to a field's own default never prints, and the two
+/// probes that would show the others are refused for reasons of their own.
+/// So those three print a number as a word and refuse nothing.
+pub fn vocabulary_name(tag: &str, field: &str) -> Option<&'static str> {
+    match field {
+        "tag" => Some("DWARF tag"),
+        "language" => Some("DWARF language"),
+        "encoding" => Some("DWARF type attribute encoding"),
+        "cc" => Some("DWARF calling convention"),
+        "emissionKind" => Some("emission kind"),
+        "type" if tag == "DIMacro" => Some("macinfo type"),
         _ => None,
     }
 }
 
 /// The number a word stands for, in the vocabulary a field takes.
-pub fn number(field: &str, word: &str) -> Option<u64> {
-    vocabulary(field)?
+pub fn number(tag: &str, field: &str, word: &str) -> Option<u64> {
+    vocabulary(tag, field)?
         .iter()
         .find(|(_, name)| *name == word)
         .map(|(value, _)| *value)

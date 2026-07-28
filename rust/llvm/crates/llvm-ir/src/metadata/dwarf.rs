@@ -6,8 +6,9 @@
 //! question the assembler answers rather than a list to be copied from a
 //! specification this project may not read.
 //!
-//! A number no table here names is one upstream refuses, which makes these
-//! tables the answer to "is this a word" as well as to "what is this number
+//! Each field is swept over its whole range rather than a sample, so a word
+//! none of these tables has is a word upstream does not know. That makes them
+//! the answer to "is this a word" as well as to "what is this number
 //! called".
 
 /// The word a number is spelled as, in the vocabulary a field takes.
@@ -104,10 +105,41 @@ pub static TAG: &[(u64, &str)] = &[
     (16648, "DW_TAG_GNU_formal_parameter_pack"),
     (16649, "DW_TAG_GNU_call_site"),
     (16650, "DW_TAG_GNU_call_site_parameter"),
+    (16896, "DW_TAG_APPLE_property"),
+    (16897, "DW_TAG_SUN_function_template"),
+    (16898, "DW_TAG_SUN_class_template"),
+    (16899, "DW_TAG_SUN_struct_template"),
+    (16900, "DW_TAG_SUN_union_template"),
+    (16901, "DW_TAG_SUN_indirect_inheritance"),
+    (16902, "DW_TAG_SUN_codeflags"),
+    (16903, "DW_TAG_SUN_memop_info"),
+    (16904, "DW_TAG_SUN_omp_child_func"),
+    (16905, "DW_TAG_SUN_rtti_descriptor"),
+    (16906, "DW_TAG_SUN_dtor_info"),
+    (16907, "DW_TAG_SUN_dtor"),
+    (16908, "DW_TAG_SUN_f90_interface"),
+    (16909, "DW_TAG_SUN_fortran_vax_structure"),
+    (17151, "DW_TAG_SUN_hi"),
+    (17152, "DW_TAG_LLVM_ptrauth_type"),
+    (20737, "DW_TAG_ALTIUM_circ_type"),
+    (20738, "DW_TAG_ALTIUM_mwa_circ_type"),
+    (20739, "DW_TAG_ALTIUM_rev_carry_type"),
+    (20753, "DW_TAG_ALTIUM_rom"),
+    (24576, "DW_TAG_LLVM_annotation"),
     (32772, "DW_TAG_GHS_namespace"),
     (32773, "DW_TAG_GHS_using_namespace"),
     (32774, "DW_TAG_GHS_using_declaration"),
     (32775, "DW_TAG_GHS_template_templ_param"),
+    (34661, "DW_TAG_UPC_shared_type"),
+    (34662, "DW_TAG_UPC_strict_type"),
+    (34663, "DW_TAG_UPC_relaxed"),
+    (40960, "DW_TAG_PGI_kanji_type"),
+    (40992, "DW_TAG_PGI_interface_block"),
+    (45056, "DW_TAG_BORLAND_property"),
+    (45057, "DW_TAG_BORLAND_Delphi_string"),
+    (45058, "DW_TAG_BORLAND_Delphi_dynamic_array"),
+    (45059, "DW_TAG_BORLAND_Delphi_set"),
+    (45060, "DW_TAG_BORLAND_Delphi_variant"),
 ];
 
 /// The words `encoding:` takes, and the number behind each.
@@ -197,7 +229,12 @@ pub static LANGUAGE: &[(u64, &str)] = &[
     (56, "DW_LANG_CPP_for_OpenCL"),
     (57, "DW_LANG_SYCL"),
     (61, "DW_LANG_Metal"),
+    (64, "DW_LANG_Ruby"),
+    (65, "DW_LANG_Move"),
+    (66, "DW_LANG_Hylo"),
     (32769, "DW_LANG_Mips_Assembler"),
+    (36439, "DW_LANG_GOOGLE_RenderScript"),
+    (45056, "DW_LANG_BORLAND_Delphi"),
 ];
 
 /// The words `emissionKind:` takes, and the number behind each.

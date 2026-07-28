@@ -1459,7 +1459,37 @@ bug: upstream renames the two intrinsics as it reads, which is what puts
 the type definitions in the order it prints them, and the renaming needs
 the per-intrinsic overloaded positions.
 Assembler 171 to 188, Feature 61 to 65, Linker 200 to 205, Other 133 to
-135.
+135. What is left across the four suites is fifty-five differences and
+every one of them is a recorded blocker: thirty-five the per-intrinsic
+attributes, twelve the `opt`-versus-`llvm-dis` ceiling, six the data
+layout upstream supplies from a triple, and three one-offs. That avenue
+is finished at this tier.
+So the next pass went back to acceptance, where the Assembler suite still
+wrongly accepted seventeen modules, and took the DWARF vocabulary, which
+has been open since the sixty-third pass and half-open since the
+seventy-seventh. What blocked it was that the sweep only sampled: a word
+it had not seen might still be one upstream knows, so refusing an unknown
+word refused three files it should not have.
+The sweep covers each field's whole range now, which needs the values
+asked in batches: one module holding a node per value, sixty-five
+thousand of them for `tag`, read back through `llvm-as | llvm-dis`
+because a value that is legal to write and refused by the verifier would
+otherwise take the whole batch with it. `tag` goes from seventy-nine
+words to a hundred and fourteen and `language` from fifty-eight to
+sixty-three.
+Six of the nine vocabularies are complete that way and refuse a word they
+do not have. Three are not, and say so: `nameTableKind: Default`,
+`virtuality: DW_VIRTUALITY_none` and `checksumkind: CSK_MD5` are words
+upstream takes and no sweep can learn, a value equal to a field's own
+default never printing its word. `tag`'s one gap is `DW_TAG_null`, which
+upstream refuses anyway.
+The field's node kind had to come with it, because `type:` is a macinfo
+kind on a macro and a node reference on the four kinds that say what
+something is.
+Assembler 461 to 463, with the modules we wrongly accept seventeen to
+fifteen and the ones we wrongly refuse still five. Ten of the fifteen are
+the use-list order tests that need the def-use chains PLAN 4.2 is
+waiting on.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*
