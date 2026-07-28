@@ -497,12 +497,29 @@ fn try_create_transient_unit(
     // `--user` connects to the per-user manager's control socket under
     // $XDG_RUNTIME_DIR (see run_user_manager); the system manager uses its own
     // fixed path.
+    //
+    // When a target user is named, as `-M someuser@.host` and `--uid=someuser`
+    // both do, the manager to talk to is THAT user's, not the caller's. Using
+    // the caller's $XDG_RUNTIME_DIR here meant `systemd-run --user -M
+    // someuser@.host` looked for root's socket, never found one, and silently
+    // fell back to running the command directly, so the target user's manager
+    // was never involved at all.
     let user_socket_path;
     let socket_path: &str = if cli.user {
-        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() }));
+        let target_uid = cli
+            .uid
+            .as_deref()
+            .and_then(|u| match u.parse::<u32>() {
+                Ok(n) => Some(n),
+                Err(_) => lookup_user(u).ok().map(|(uid, _, _, _)| uid),
+            });
+        let runtime_dir = match target_uid {
+            Some(uid) => format!("/run/user/{uid}"),
+            None => std::env::var("XDG_RUNTIME_DIR")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() })),
+        };
         user_socket_path = format!("{runtime_dir}/systemd/control.socket");
         &user_socket_path
     } else {
@@ -987,21 +1004,6 @@ fn main() {
         }
     }
 
-    // run0 approximates a login session: ensure the target user's manager is
-    // running so a command like `systemd-run --user` run as that user can reach
-    // its user bus at /run/user/<uid>/bus. Real run0 does this via a PAM/logind
-    // session (pam_systemd -> logind -> user@<uid>.service); we start the unit
-    // directly. Best-effort and skipped for root.
-    if invoked_as_run0
-        && let Some(user) = cli.uid.as_deref()
-        && !matches!(user, "0" | "root")
-        && let Ok((uid, _, _, _)) = lookup_user(user)
-    {
-        let _ = std::process::Command::new("systemctl")
-            .args(["start", &format!("user@{uid}.service")])
-            .status();
-    }
-
     // Handle -M/--machine: parse "user@machine" format.
     // Only ".host" (local machine) is supported — translate to --uid for
     // the user part, allowing `systemd-run --user -M testuser@.host cmd`
@@ -1029,6 +1031,28 @@ fn main() {
         {
             cli.uid = Some(user);
         }
+    }
+
+    // Ensure the target user's manager is running before we try to reach it.
+    //
+    // run0 needs this because it approximates a login session: real run0 gets
+    // there via PAM/logind (pam_systemd -> logind -> user@<uid>.service), and
+    // we start the unit directly instead. `systemd-run --user -M someuser@.host`
+    // needs exactly the same thing, since that user has no session and so no
+    // manager of their own; without it the connect below finds no socket and
+    // silently falls back to running the command directly.
+    //
+    // This must run AFTER the -M parsing above: that is what populates cli.uid
+    // for the -M form, so doing it earlier saw None and started nothing.
+    // Best-effort, and skipped for root, who is served by the system manager.
+    if (invoked_as_run0 || cli.user)
+        && let Some(user) = cli.uid.as_deref()
+        && !matches!(user, "0" | "root")
+        && let Ok((uid, _, _, _)) = lookup_user(user)
+    {
+        let _ = std::process::Command::new("systemctl")
+            .args(["start", &format!("user@{uid}.service")])
+            .status();
     }
 
     // Determine the command to run
