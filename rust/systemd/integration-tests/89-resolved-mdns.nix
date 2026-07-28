@@ -23,37 +23,37 @@
   # And the panic below is in libsystemd, NOT in crates/nspawn -- crates/nspawn
   # contains no thread::spawn and no thread::Builder at all.
   #
-  # THE PANIC, and the chain that leads to it. Links 2 and 3 are observed;
-  # link 1 -> 2 is inference, not proof.
+  # THE FAILURE, and what has been ruled OUT. Re-measured 2026-07-28 after two
+  # fixes landed; an earlier version of this note presented an rlimit chain
+  # whose first link was explicitly marked as inference. THAT INFERENCE IS NOW
+  # REFUTED -- keep the refutation, it cost a VM run to get.
   #
-  # 1. crates/nspawn applies NO rlimits to the container payload (grep for
-  #    RLIMIT/setrlimit/rlimit under crates/nspawn/src returns nothing), so the
-  #    payload inherits the host's. Upstream deliberately resets the container
-  #    table, including
+  # The container's PID 1 (our libsystemd) still cannot create its first thread:
   #
-  #      [RLIMIT_STACK] = { 8388608, RLIM_INFINITY }   (nspawn.c:6007)
+  #   [libsystemd::entrypoints::service_manager][ERROR]
+  #     Failed to spawn the signal-handler thread: Invalid argument (os error 22)
   #
-  #    applied via setrlimit_closest_all (nspawn.c:3636).
+  # It no longer PANICS: the five bare `std::thread::spawn` sites in
+  # service_manager.rs now go through `spawn_critical_thread`, so the failure
+  # names the thread and the errno instead of an anonymous unwrap inside
+  # library/std. That change is what made this diagnosable; it did not fix it.
   #
-  # 2. The container's PID 1 then hits pthread_create EINVAL:
+  # RULED OUT BY MEASUREMENT, do not re-try these:
   #
-  #      thread 'main' panicked at library/std/src/thread/functions.rs
-  #      failed to spawn thread: Os { code: 22, kind: InvalidInput }
+  # 1. MISSING CONTAINER RLIMITS. crates/nspawn applied none at all where
+  #    upstream installs a table via setrlimit_closest_all (nspawn.c:3636,
+  #    table at :6007, including [RLIMIT_STACK] = { 8388608, RLIM_INFINITY }).
+  #    That table is now implemented (apply_container_rlimits, with upstream's
+  #    "closest" fallback on EPERM) -- and the EINVAL persists unchanged. The
+  #    rlimit gap was real and worth closing, but it was NOT the cause.
   #
-  #    which is the signature of an unusable thread stack size.
+  # 2. THE SECCOMP FILTER. SECCOMP_DEFAULT_DENY_SYSCALLS (main.rs:555) contains
+  #    no clone/clone3, and the filter returns EPERM for what it does deny,
+  #    whereas thread creation is failing with EINVAL.
   #
-  # 3. It PANICS rather than erroring because the four core PID 1 threads use
-  #    bare `std::thread::spawn`, whose failure path is an unwrap:
-  #    start_notification_handler_thread / stdout / stderr / signal, at
-  #    crates/libsystemd/src/entrypoints/service_manager.rs:1286, 1291, 1296
-  #    and 1309. Sibling spawn sites already do this correctly, with
-  #    thread::Builder plus explicit error handling: watchdog.rs:68,
-  #    timer_scheduler.rs:205, service_manager.rs:256, path_watcher.rs:428,
-  #    dbus_server.rs:1570 and activate.rs:2040.
-  #
-  # A panic is never correct behaviour, and mirroring the Builder sites is the
-  # small self-contained fix here. The missing container rlimit table is a
-  # separate, genuine divergence from upstream.
+  # So the EINVAL is still unattributed. Note it is the FIRST thread the manager
+  # spawns, so whatever is wrong is present immediately after the container
+  # child's namespace setup and exec.
   #
   # A THIRD DIVERGENCE, noted but NOT measured: upstream's exec of /bin/sh
   # (nspawn.c:3830-3831) is the fallback used when NOT booting a container, so

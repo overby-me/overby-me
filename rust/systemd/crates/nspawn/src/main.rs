@@ -3502,6 +3502,87 @@ fn find_shell(root: &Path) -> String {
 
 // ── Container child process ──────────────────────────────────────────────
 
+/// `DEFAULT_RLIMIT_MEMLOCK` from upstream's src/basic/constants.h.
+const DEFAULT_RLIMIT_MEMLOCK: libc::rlim_t = 8 * 1024 * 1024;
+
+/// Apply one limit the way upstream's `setrlimit_closest` does: ask for the
+/// pair we want, and if the kernel refuses purely for lack of privilege, retry
+/// clamped to the hard limit we already have rather than giving up.
+///
+/// Best effort throughout. A limit we cannot install must not stop the
+/// container from booting, which is also why nothing here is fatal.
+fn set_rlimit_closest(resource: libc::__rlimit_resource_t, soft: libc::rlim_t, hard: libc::rlim_t) {
+    let want = libc::rlimit {
+        rlim_cur: soft,
+        rlim_max: hard,
+    };
+    if unsafe { libc::setrlimit(resource, &want) } == 0 {
+        return;
+    }
+    if io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+        return;
+    }
+
+    let mut current = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    if unsafe { libc::getrlimit(resource, &mut current) } < 0 {
+        return;
+    }
+    // An unbounded hard limit means the EPERM came from something other than
+    // the ceiling, so there is nothing closer to try (upstream propagates the
+    // original EPERM here).
+    if current.rlim_max == libc::RLIM_INFINITY {
+        return;
+    }
+
+    let fixed = libc::rlimit {
+        rlim_cur: soft.min(current.rlim_max),
+        rlim_max: hard.min(current.rlim_max),
+    };
+    unsafe { libc::setrlimit(resource, &fixed) };
+}
+
+/// Reset the payload's resource limits to the table upstream nspawn installs
+/// before exec'ing a container (nspawn.c, applied via `setrlimit_closest_all`).
+///
+/// We previously applied none at all, so a container simply inherited whatever
+/// the host happened to have. That is the suspected cause of the container PID 1
+/// failing `pthread_create` with EINVAL in 89-RESOLVED-MDNS: an inherited
+/// RLIMIT_STACK that is not usable as a thread stack size.
+///
+/// RLIMIT_NPROC and RLIMIT_SIGPENDING are deliberately absent, matching
+/// upstream's reasoning: the kernel scales those two by the machine's RAM, so
+/// the payload should inherit PID 1's values instead of a hardcoded guess.
+fn apply_container_rlimits() {
+    const INF: libc::rlim_t = libc::RLIM_INFINITY;
+
+    let table: [(libc::__rlimit_resource_t, libc::rlim_t, libc::rlim_t); 13] = [
+        (libc::RLIMIT_CORE, 0, INF),
+        (libc::RLIMIT_CPU, INF, INF),
+        (libc::RLIMIT_DATA, INF, INF),
+        (libc::RLIMIT_FSIZE, INF, INF),
+        (libc::RLIMIT_LOCKS, INF, INF),
+        (
+            libc::RLIMIT_MEMLOCK,
+            DEFAULT_RLIMIT_MEMLOCK,
+            DEFAULT_RLIMIT_MEMLOCK,
+        ),
+        (libc::RLIMIT_MSGQUEUE, 819_200, 819_200),
+        (libc::RLIMIT_NICE, 0, 0),
+        (libc::RLIMIT_NOFILE, 1024, 4096),
+        (libc::RLIMIT_RSS, INF, INF),
+        (libc::RLIMIT_RTPRIO, 0, 0),
+        (libc::RLIMIT_RTTIME, INF, INF),
+        (libc::RLIMIT_STACK, 8_388_608, INF),
+    ];
+
+    for (resource, soft, hard) in table {
+        set_rlimit_closest(resource, soft, hard);
+    }
+}
+
 /// The entry point for the container child process (after clone/fork).
 /// Inner child logic, called after unshare() and parent sync are complete.
 /// The child has already:
@@ -3650,6 +3731,11 @@ fn container_child_inner(
             std::env::set_var(k, v);
         }
     }
+
+    // Give the payload the container limits upstream installs, rather than
+    // whatever the host happened to be running with. Must happen before exec,
+    // and after the namespace setup above.
+    apply_container_rlimits();
 
     // Exec the payload
     let c_path = CString::new(exec_path.as_str()).unwrap_or_else(|_| {
