@@ -1025,7 +1025,64 @@ fn apply_root_password(
     } else {
         eprintln!("Set root password in {}.", shadow_path.display());
     }
+
+    // A password in shadow is useless without the matching passwd entry, and
+    // the account may not exist yet: TEST-74-AUX-UTILS.firstboot deletes both
+    // files and then expects --root-password= alone to recreate them. Upstream
+    // does the same, writing passwd and shadow together in
+    // process_root_account() via write_root_passwd().
+    write_root_passwd_entry(root, settings.root_shell.as_deref())?;
+
     Ok(true)
+}
+
+/// Shell used for a freshly created root account when none was configured.
+/// Upstream resolves this per-root via default_root_shell_at(); /bin/sh is the
+/// portable fallback it ends up at when nothing else is configured.
+const DEFAULT_ROOT_SHELL: &str = "/bin/sh";
+
+/// Ensure `<root>/etc/passwd` has a root account, creating the file if needed.
+///
+/// An existing root line keeps its GECOS and home so only what firstboot owns
+/// changes: the password field becomes "x" (the real hash lives in shadow) and
+/// the shell is replaced when one was configured. Other accounts are left
+/// untouched. Mirrors upstream's write_root_passwd().
+fn write_root_passwd_entry(root: &Path, shell: Option<&str>) -> io::Result<()> {
+    let passwd_path = root.join("etc/passwd");
+    ensure_parent_dir(&passwd_path)?;
+
+    let existing = fs::read_to_string(&passwd_path).unwrap_or_default();
+    let mut lines: Vec<String> = Vec::new();
+    let mut found_root = false;
+
+    for line in existing.lines() {
+        if line.starts_with("root:") {
+            found_root = true;
+            // name:passwd:uid:gid:gecos:dir:shell
+            let f: Vec<&str> = line.split(':').collect();
+            let gecos = f.get(4).copied().unwrap_or("");
+            let dir = f.get(5).copied().unwrap_or("/root");
+            let old_shell = f.get(6).copied().unwrap_or(DEFAULT_ROOT_SHELL);
+            let sh = shell.unwrap_or(old_shell);
+            lines.push(format!("root:x:0:0:{gecos}:{dir}:{sh}"));
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !found_root {
+        let sh = shell.unwrap_or(DEFAULT_ROOT_SHELL);
+        // Upstream puts root first when it creates the file.
+        lines.insert(0, format!("root:x:0:0::/root:{sh}"));
+    }
+
+    let content = lines.join("\n") + "\n";
+    fs::write(&passwd_path, content)?;
+    #[cfg(target_os = "linux")]
+    {
+        fs::set_permissions(&passwd_path, fs::Permissions::from_mode(0o644))?;
+    }
+    Ok(())
 }
 
 fn apply_root_shell(root: &Path, settings: &Settings, force: bool) -> io::Result<bool> {
@@ -1290,8 +1347,19 @@ fn run(argv: &[String]) -> Result<(), String> {
         return Ok(());
     }
 
-    // Check if system was already booted
-    if system_already_booted(root) && !args.force {
+    // Check if system was already booted.
+    //
+    // Only for the RUNNING system. Applied to an arbitrary --root tree this is
+    // wrong and quietly destructive of intent: the check is "does <root>/etc/
+    // machine-id hold a real id", so as soon as anything sets a machine-id in
+    // that tree, every later firstboot call against it silently does nothing.
+    // TEST-74-AUX-UTILS.firstboot walks straight into that, setting
+    // --machine-id= and then finding --root-password= ignored.
+    //
+    // Upstream has no such blanket guard in firstboot itself; first-boot-ness
+    // gates the SERVICE via ConditionFirstBoot=, while the tool applies what it
+    // was asked for and each step decides on its own file.
+    if root == Path::new("/") && system_already_booted(root) && !args.force {
         eprintln!("System already booted, skipping firstboot configuration.");
         eprintln!("Use --force to override.");
         return Ok(());
@@ -2692,7 +2760,16 @@ mod tests {
     }
 
     #[test]
-    fn test_run_already_booted_skips() {
+    /// A machine-id in an explicit --root tree must NOT suppress configuration.
+    ///
+    /// This asserted the opposite until 2026-07-28. The already-booted check is
+    /// about the running system, and applying it to a --root tree meant that
+    /// once anything wrote a machine-id there, every later firstboot call
+    /// against that tree silently did nothing.
+    /// TEST-74-AUX-UTILS.firstboot does exactly that: it sets --machine-id= and
+    /// then finds --root-password= ignored. Upstream has no such blanket guard;
+    /// first-boot-ness gates the service via ConditionFirstBoot=.
+    fn test_run_already_booted_root_still_applies() {
         let tmp = temp_dir();
         setup_root(tmp.path());
         fs::write(
@@ -2704,9 +2781,9 @@ mod tests {
             format!("--root={}", tmp.path().display()),
             "--locale=en_US.UTF-8".to_string(),
         ];
-        // Should not error, just skip
         run(&args).unwrap();
-        assert!(!tmp.path().join("etc/locale.conf").exists());
+        let content = fs::read_to_string(tmp.path().join("etc/locale.conf")).unwrap();
+        assert!(content.contains("en_US.UTF-8"));
     }
 
     #[test]
