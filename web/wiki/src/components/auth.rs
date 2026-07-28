@@ -13,6 +13,14 @@ enum AuthMode {
     SetPassword,
 }
 
+/// Shortest value the sign-up schema accepts for a name or a password.
+///
+/// Checked here so a value below it is answered under the box it belongs to, in
+/// the user's language, without a round trip. The service enforces it too, but
+/// as `schema-validation-error` carrying "minimum string length is 3" and naming
+/// no field, which is not something a form can point at.
+const MIN_FIELD_LEN: usize = 3;
+
 /// A localized message for an auth failure.
 ///
 /// The service answers in English with a machine code beside it. The CODE is
@@ -32,6 +40,10 @@ fn auth_error_message(err: &nhost::NhostError) -> String {
         Some("password-too-short") => t("auth.passwordTooShort"),
         Some("password-in-hibp") => t("auth.passwordCompromised"),
         Some("disabled-user") => t("auth.userDisabled"),
+        // A value broke the request schema — a length or format rule. The
+        // detail ("minimum string length is 3") names no field, so the message
+        // has to ask the user to look rather than point.
+        Some("schema-validation-error") => t("auth.invalidInput"),
         // A password-reset or verification link that has expired or been used.
         Some("unauthenticated-user") | Some("invalid-refresh-token") => t("auth.linkExpired"),
         _ => {
@@ -45,10 +57,20 @@ fn auth_error_message(err: &nhost::NhostError) -> String {
 /// message lands under the box it is actually about. Everything else a sign-up
 /// or a reset rejects is about the address.
 fn is_password_error(err: &nhost::NhostError) -> bool {
-    matches!(
+    if matches!(
         err.error.as_deref(),
         Some("password-too-short") | Some("password-in-hibp")
-    )
+    ) {
+        return true;
+    }
+    // A schema rejection sometimes names its field in the detail. That text is
+    // the service's English and is never shown; it is only read here to decide
+    // which box the localized message belongs under.
+    matches!(err.error.as_deref(), Some("schema-validation-error"))
+        && err
+            .message
+            .as_deref()
+            .is_some_and(|m| m.to_ascii_lowercase().contains("password"))
 }
 
 /// Clear the OTHER field's error when it holds `shared`, the message a PAIRED
@@ -176,6 +198,11 @@ fn AuthForm(mode: AuthMode) -> Element {
                         loading.set(false);
                         return;
                     }
+                    if nm.chars().count() < MIN_FIELD_LEN {
+                        error_name.set(t("auth.nameTooShort"));
+                        loading.set(false);
+                        return;
+                    }
                     if em.is_empty() {
                         error_email.set(t("auth.missingEmail"));
                         loading.set(false);
@@ -183,6 +210,11 @@ fn AuthForm(mode: AuthMode) -> Element {
                     }
                     if pw.is_empty() {
                         error_password.set(t("auth.missingPassword"));
+                        loading.set(false);
+                        return;
+                    }
+                    if pw.chars().count() < MIN_FIELD_LEN {
+                        error_password.set(t("auth.passwordTooShort"));
                         loading.set(false);
                         return;
                     }
@@ -231,6 +263,11 @@ fn AuthForm(mode: AuthMode) -> Element {
                     let pw2 = password_repeat.read().clone();
                     if pw.is_empty() {
                         error_password.set(t("auth.missingPassword"));
+                        loading.set(false);
+                        return;
+                    }
+                    if pw.chars().count() < MIN_FIELD_LEN {
+                        error_password.set(t("auth.passwordTooShort"));
                         loading.set(false);
                         return;
                     }
