@@ -4,11 +4,12 @@ use crate::attributes::LegacyMemory;
 use crate::lexer::Token;
 use crate::{ParseError, Parser};
 use llvm_ir::TypeId;
+use llvm_ir::constant::Constant;
 use llvm_ir::global::{Comdat, ComdatKind};
-use llvm_ir::metadata::NamedMetadata;
+use llvm_ir::metadata::{MdOperand, Metadata, NamedMetadata};
 use llvm_ir::summary::{SummaryEntry, SummaryField, SummaryValue};
-use llvm_ir::value::{GlobalRef, MdId, Name};
-use llvm_support::{DataLayout, Triple};
+use llvm_ir::value::{GlobalRef, MdId, Name, Value};
+use llvm_support::{ApInt, DataLayout, Triple};
 
 impl Parser {
     // ------------------------------------------------------------- top level
@@ -474,5 +475,87 @@ impl Parser {
             key: None,
             value: self.parse_summary_value()?,
         })
+    }
+}
+
+/// The four module flags whose behaviour upstream rewrites as it reads. Each
+/// was once written `Error`, meaning two modules being linked had to agree
+/// exactly, and each turned out to want a rule that picks rather than one
+/// that refuses: the larger of two PIC levels, the smaller of two PIE levels,
+/// the larger of two branch-protection settings.
+const REWRITTEN_BEHAVIOUR: &[(&str, u64)] = &[
+    ("PIC Level", 8),
+    ("PIE Level", 7),
+    ("branch-target-enforcement", 8),
+    ("sign-return-address", 8),
+    ("sign-return-address-all", 8),
+    ("sign-return-address-with-bkey", 8),
+];
+
+impl Parser {
+    /// Applies that rewrite, after the whole module, `!llvm.module.flags`
+    /// being able to name a node the text has not reached yet.
+    pub(crate) fn upgrade_module_flags(&mut self) {
+        let flags: Vec<MdId> = self
+            .module
+            .named_metadata
+            .iter()
+            .filter(|named| named.name == "llvm.module.flags")
+            .flat_map(|named| named.operands.clone())
+            .collect();
+        for id in flags {
+            let Some(Metadata::Tuple { distinct, operands }) =
+                self.module.metadata_node(id).cloned()
+            else {
+                continue;
+            };
+            if operands.len() != 3 {
+                continue;
+            }
+            let MdOperand::String(name) = &operands[1] else {
+                continue;
+            };
+            let Some((_, wanted)) = REWRITTEN_BEHAVIOUR
+                .iter()
+                .find(|(flag, _)| name.as_str() == Some(*flag))
+            else {
+                continue;
+            };
+            let MdOperand::Value {
+                ty,
+                value: Value::Constant(behaviour),
+            } = operands[0].clone()
+            else {
+                continue;
+            };
+            let Some(written) = self
+                .module
+                .ctx
+                .constant(behaviour)
+                .as_integer()
+                .and_then(ApInt::to_u64)
+            else {
+                continue;
+            };
+            // `Error` is the one that is rewritten, and `PIC Level` takes
+            // `Min` as well: two PIC levels are picked between by taking the
+            // larger, whichever of the two rules a module wrote.
+            let picks_the_larger = name.as_str() == Some("PIC Level");
+            let rewrite = written == 1 || (written == 7 && picks_the_larger);
+            if !rewrite {
+                continue;
+            }
+            let replacement = self.module.ctx.intern_constant(Constant::Integer {
+                ty,
+                value: ApInt::from_u64(32, *wanted),
+            });
+            let mut operands = operands;
+            operands[0] = MdOperand::Value {
+                ty,
+                value: Value::Constant(replacement),
+            };
+            self.module
+                .set_metadata(id, Metadata::Tuple { distinct, operands });
+        }
     }
 }

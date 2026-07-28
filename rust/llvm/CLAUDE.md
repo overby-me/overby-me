@@ -1052,7 +1052,70 @@ Every cast but a bitcast works lane by lane, so a cast of a vector of
 literals is a vector of the answers, and the operand may be written out
 lane by lane or folded to a splat or to zero, all three describing the
 same lanes. Feature 57 to 60, Other 126 to 128.
-Assembler is unmoved, what it differs by being the blocked classes.
+A seventy-third pass finished the constant folding and found where the
+differential's ceiling is. Three arithmetic expressions answer with one
+of their operands: `add` and `xor` with nought on either side, `sub` only
+on the right, subtraction not being commutative. A cast undoes the one
+under it when nothing was lost in between, and the width upstream
+compares against there is a fixed sixty-four rather than the module's own
+pointer size, which a `p:32:32` layout is what shows. Walking from a
+pointer nobody chose arrives nowhere in particular, so a `getelementptr`
+from `undef` or `poison` is that. And a bitcast between vectors is
+answerable in two shapes without laying the bits out: a lane count that
+does not change, and a pattern that reads the same at any lane width,
+which all-zero, all-one, undef and poison are. Assembler 149 to 150.
+Then the ceiling. `!DICompositeType` with an ODR identifier comes back
+`distinct` from `opt -S` and plain from `llvm-as | llvm-dis`, the two
+upstream tools disagreeing on the same input, because `opt` enables ODR
+type uniquing and `llvm-dis` does not. Implementing what the differential
+asks for broke the corpus, which is real rustc output printed by
+`llvm-dis` and is the headline property. So it was reverted and measured
+instead: five of the eighty-seven remaining differences across the four
+suites are ones where we already match `llvm-dis` and `opt` does
+something more. Those are not closable, and the differential's reach is
+that much short of its denominator. The other eighty-two are ours, and
+sorting them showed the shape of what is left: sixteen the debug-info
+upgrade, fifteen the per-intrinsic attributes, five the declarations
+those come with, seven metadata numbering, three the order a specialized
+node's fields print in, and the rest one-offs.
+Two of the one-offs closed. A scalable vector has no fixed size and still
+has an alignment, the one the minimum-size vector would have, the target
+scaling the length rather than the alignment; `alloca <vscale x 4 x i32>`
+is sixteen-aligned and `<vscale x 1 x i8>` is one. And four module flags
+have their behaviour rewritten as the module is read: `PIC Level` and the
+three branch-protection ones take the larger of two, `PIE Level` the
+smaller, where each was once written `Error` and had to match exactly.
+`PIC Level` takes `Min` as well as `Error`, which the other three do not,
+and that asymmetry is why the rule is a table rather than a shape.
+Linker 171 to 173, Other 128 to 129.
+The last of the pass was the order a specialized node's fields print in,
+which is a sixth derivation script. Upstream writes them in an order of
+its own rather than the one they were read in, so
+`!DIBasicType(size: 32, name: "int")` comes back with the name first, and
+a printer that keeps the written order diverges on any module that did
+not already use upstream's. `corpus/md-field-order.nu` writes each kind's
+fields backwards and reads back the order they come out in, and thirteen
+of the twenty-four kinds print in an order the grammar does not give:
+`!DIBasicType` writes `flags` after `num_extra_inhabitants` and the
+grammar has it before.
+The script had to learn two things the corpus taught it. A field written
+at its default does not come back, so it would be missing from the order
+and sort to the end; the probe values are non-default now and the script
+reports any that still drop. And a `!DICompositeType`'s fields cannot all
+be written at once, `dataLocation` and its neighbours belonging to an
+array and `identifier` and its to a structure, so that kind takes two
+probes and the orders are merged on what they share.
+It moved no ratchet: the files whose fields were out of order are also
+waiting on the debug-info upgrade. It is still a divergence closed, and
+the corpus caught two of the ways it can be got wrong.
+The same measurement showed one more thing, and that one did close.
+Upstream writes some fields the module never wrote, and a compile unit is
+the only node it does that for: `isOptimized`, `runtimeVersion` and
+`emissionKind` appear whether or not they were written. They say
+something about the whole translation unit, so leaving one out says
+nothing rather than saying the default, which is the opposite of how
+every other node treats an absent field. Assembler 150 to 151, Linker 173
+to 174.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

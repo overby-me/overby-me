@@ -14,6 +14,7 @@ use crate::{ParseError, Parser};
 use llvm_ir::TypeId;
 use llvm_ir::attribute::AsmDialect;
 use llvm_ir::constant::{CastOp, ConstExpr, ConstId, Constant, GepFlags, InlineAsm};
+use llvm_ir::instruction::BinOp;
 use llvm_ir::types::TypeKind;
 use llvm_ir::value::{AliasId, FunctionId, GlobalRef, GlobalVarId, IFuncId, Name};
 use llvm_support::{ApFloat, FloatSemantics};
@@ -747,6 +748,25 @@ impl Parser {
         {
             return Ok(*base);
         }
+        // Walking from a pointer nobody chose arrives nowhere in particular,
+        // so the answer is the same nothing the walk started from.
+        if let ConstExpr::GetElementPtr { base, ty, .. } = &expr {
+            let (base, ty) = (*base, *ty);
+            match self.module.ctx.constant(base) {
+                Constant::Undef(_) => {
+                    return Ok(self.module.ctx.intern_constant(Constant::Undef(ty)));
+                }
+                Constant::Poison(_) => {
+                    return Ok(self.module.ctx.intern_constant(Constant::Poison(ty)));
+                }
+                _ => {}
+            }
+        }
+        if let ConstExpr::Binary { op, lhs, rhs, .. } = &expr
+            && let Some(folded) = self.folded_binary(*op, *lhs, *rhs)
+        {
+            return Ok(folded);
+        }
         if let ConstExpr::Cast { op, operand, ty } = &expr
             && let Some(folded) = self.folded_cast(*op, *operand, *ty)
         {
@@ -758,6 +778,30 @@ impl Parser {
             .intern_constant(Constant::Expression(Box::new(expr))))
     }
 
+    /// The three arithmetic constant expressions left, at the values where
+    /// they answer with one of their operands. `add` and `xor` do that with
+    /// nought on either side; `sub` only on the right, subtraction not being
+    /// commutative.
+    fn folded_binary(&mut self, op: BinOp, lhs: ConstId, rhs: ConstId) -> Option<ConstId> {
+        let identity = match op {
+            BinOp::Add | BinOp::Xor => {
+                if self.is_zero_constant(rhs) {
+                    Some(lhs)
+                } else if self.is_zero_constant(lhs) {
+                    Some(rhs)
+                } else {
+                    None
+                }
+            }
+            BinOp::Sub => self.is_zero_constant(rhs).then_some(lhs),
+            _ => None,
+        }?;
+        // Only when the answer is already the type the expression produces:
+        // a widening one would be a cast rather than a fold.
+        (self.module.ctx.constant(identity).ty() == self.module.ctx.constant(lhs).ty())
+            .then_some(identity)
+    }
+
     /// What upstream computes rather than carries. A cast of a literal to a
     /// type the target can express is a literal, and upstream folds one as it
     /// reads, so a module that writes the cast prints back the answer.
@@ -766,9 +810,101 @@ impl Parser {
         if self.module.ctx.constant(operand).ty() == ty {
             return Some(operand);
         }
-        // Every cast but a bitcast works lane by lane, so a cast of a vector
-        // of literals is a vector of the answers.
+        // A cast that undoes the one under it, when nothing was lost in
+        // between. The width upstream compares against is a fixed sixty-four
+        // rather than the module's own pointer size, which a `p:32:32` layout
+        // is what shows: `i32` is not folded there either.
+        if let Constant::Expression(inner) = self.module.ctx.constant(operand).clone()
+            && let ConstExpr::Cast {
+                op: under,
+                operand: original,
+                ..
+            } = *inner
+        {
+            let width =
+                |id: ConstId, ctx: &llvm_ir::Context| match ctx.type_kind(ctx.constant(id).ty()) {
+                    TypeKind::Integer(bits) => Some(*bits),
+                    _ => None,
+                };
+            let undone = match (op, under) {
+                (CastOp::IntToPtr, CastOp::PtrToInt) => {
+                    width(operand, &self.module.ctx) == Some(64)
+                }
+                (CastOp::PtrToInt, CastOp::IntToPtr) => {
+                    width(original, &self.module.ctx).is_some_and(|bits| bits <= 64)
+                }
+                _ => false,
+            };
+            if undone && self.module.ctx.constant(original).ty() == ty {
+                return Some(original);
+            }
+        }
+        // A bitcast between vectors keeps the bits and changes where the
+        // lane boundaries fall. Two shapes of that are answerable without
+        // laying the bits out: a lane count that does not change, where each
+        // lane is bitcast on its own, and a pattern that reads the same at
+        // any lane width, which all-zero, all-one, undef and poison are.
         let target = self.module.ctx.type_kind(ty).clone();
+        if op == CastOp::BitCast
+            && let TypeKind::Vector {
+                element: to_element,
+                count: to_count,
+                scalable: false,
+            } = target
+            && let TypeKind::Vector {
+                count: from_count,
+                scalable: false,
+                ..
+            } = self
+                .module
+                .ctx
+                .type_kind(self.module.ctx.constant(operand).ty())
+                .clone()
+        {
+            let source = self.module.ctx.constant(operand).clone();
+            match source {
+                Constant::ZeroInitializer(_) => {
+                    return Some(
+                        self.module
+                            .ctx
+                            .intern_constant(Constant::ZeroInitializer(ty)),
+                    );
+                }
+                Constant::Undef(_) => {
+                    return Some(self.module.ctx.intern_constant(Constant::Undef(ty)));
+                }
+                Constant::Poison(_) => {
+                    return Some(self.module.ctx.intern_constant(Constant::Poison(ty)));
+                }
+                // Every bit set stays every bit set however the lanes fall.
+                Constant::Splat { element, .. }
+                    if matches!(self.module.ctx.constant(element),
+                        Constant::Integer { value, .. } if value.is_all_ones()) =>
+                {
+                    let TypeKind::Integer(bits) = *self.module.ctx.type_kind(to_element) else {
+                        return None;
+                    };
+                    let ones = llvm_support::ApInt::from_u64(bits, 0).not();
+                    let lane = self.module.ctx.intern_constant(Constant::Integer {
+                        ty: to_element,
+                        value: ones,
+                    });
+                    return Some(
+                        self.module
+                            .ctx
+                            .intern_constant(Constant::Splat { ty, element: lane }),
+                    );
+                }
+                Constant::Vector { elements, .. } if from_count == to_count => {
+                    let mut folded = Vec::with_capacity(elements.len());
+                    for lane in elements {
+                        folded.push(self.folded_cast(CastOp::BitCast, lane, to_element)?);
+                    }
+                    return Some(self.fold_aggregate(ty, &folded, true));
+                }
+                _ => return None,
+            }
+        }
         if op != CastOp::BitCast
             && let TypeKind::Vector { element, .. } = target
         {

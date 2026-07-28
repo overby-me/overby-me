@@ -79,18 +79,33 @@ pub fn alloc_size_bytes(
 }
 
 /// The alignment the ABI requires for this type.
+/// A vector's size at `vscale` of one, which is what its alignment is worked
+/// out from. A fixed vector's minimum size is its size.
+fn minimum_size_in_bits(
+    ctx: &Context,
+    layout: &DataLayout,
+    ty: TypeId,
+) -> Result<u64, LayoutError> {
+    let TypeKind::Vector { element, count, .. } = ctx.type_kind(ty) else {
+        return size_in_bits(ctx, layout, ty);
+    };
+    Ok(size_in_bits(ctx, layout, *element)? * count)
+}
+
 pub fn abi_align(ctx: &Context, layout: &DataLayout, ty: TypeId) -> Result<Align, LayoutError> {
     let bits = match ctx.type_kind(ty) {
         TypeKind::Integer(width) => layout.integer_align(*width).abi_bits,
         TypeKind::Float(semantics) => layout.float_align(semantics.bit_width()).abi_bits,
         TypeKind::Pointer { address_space } => layout.pointer_spec(*address_space).align.abi_bits,
         TypeKind::Array { element, .. } => return abi_align(ctx, layout, *element),
-        TypeKind::Vector { scalable, .. } => {
-            if *scalable {
-                return Err(LayoutError::Scalable);
-            }
-            let size = size_in_bits(ctx, layout, ty)?;
-            layout.vector_align(size as u32).abi_bits
+        // A scalable vector has no fixed size and still has an alignment:
+        // it is the one the minimum-size vector would have, the target
+        // scaling the length rather than the alignment.
+        TypeKind::Vector { .. } => {
+            let size = minimum_size_in_bits(ctx, layout, ty)?;
+            layout
+                .vector_align(u32::try_from(size).unwrap_or(u32::MAX))
+                .abi_bits
         }
         TypeKind::Struct { .. } | TypeKind::NamedStruct(_) => {
             return Ok(struct_layout(ctx, layout, ty)?.align);
@@ -119,12 +134,11 @@ pub fn preferred_align(
             layout.pointer_spec(*address_space).align.preferred_bits
         }
         TypeKind::Array { element, .. } => return preferred_align(ctx, layout, *element),
-        TypeKind::Vector { scalable, .. } => {
-            if *scalable {
-                return Err(LayoutError::Scalable);
-            }
-            let size = size_in_bits(ctx, layout, ty)?;
-            layout.vector_align(size as u32).preferred_bits
+        TypeKind::Vector { .. } => {
+            let size = minimum_size_in_bits(ctx, layout, ty)?;
+            layout
+                .vector_align(u32::try_from(size).unwrap_or(u32::MAX))
+                .preferred_bits
         }
         // A struct's fields decide its ABI alignment, and the layout's
         // aggregate preference can ask for more: with the default `a:0:64`,

@@ -207,9 +207,12 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against upstream's own `opt -S`, and **149 of 221** are identical, with
-three more suites measured the same way: **60 of 71** in `Feature`, **171 of
-219** in `Linker` and **128 of 144** in `Other`. Two
+against upstream's own `opt -S`, and **151 of 221** are identical, with
+three more suites measured the same way: **60 of 71** in `Feature`, **174 of
+219** in `Linker` and **129 of 144** in `Other`. Five of the
+eighty-seven remaining differences are ones where we already match
+`llvm-as | llvm-dis` and `opt -S` does something more, ODR type uniquing
+being the case of it, so the reach is that much short of the denominator. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against

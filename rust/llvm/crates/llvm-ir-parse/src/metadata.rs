@@ -59,6 +59,7 @@ impl Parser {
                 let args = self.parse_specialized_args(context)?;
                 self.check_specialized(schema, &tag, distinct, &args)?;
                 let args = drop_defaulted_fields(schema, &tag, args);
+                let args = fill_compile_unit_defaults(&tag, args);
                 Ok(Metadata::Specialized {
                     distinct,
                     tag,
@@ -616,3 +617,27 @@ static DEFAULTED: &[(&str, &str)] = &[
     ("DITemplateTypeParameter", "defaulted"),
     ("DITemplateValueParameter", "defaulted"),
 ];
+
+/// A compile unit is the one node upstream writes fields on that the module
+/// never wrote. Three of them: whether the code was optimised, which Objective-C
+/// runtime it targets, and how much debug info to emit. They say something
+/// about the whole translation unit, so leaving them out says nothing rather
+/// than saying the default.
+fn fill_compile_unit_defaults(tag: &str, args: SpecializedArgs) -> SpecializedArgs {
+    if tag != "DICompileUnit" {
+        return args;
+    }
+    let SpecializedArgs::Named(mut fields) = args else {
+        return args;
+    };
+    for (name, value) in [
+        ("isOptimized", MdField::Bool(false)),
+        ("runtimeVersion", MdField::Unsigned(0)),
+        ("emissionKind", MdField::Words(vec!["NoDebug".to_string()])),
+    ] {
+        if !fields.iter().any(|(written, _)| written == name) {
+            fields.push((name.to_string(), value));
+        }
+    }
+    SpecializedArgs::Named(fields)
+}
