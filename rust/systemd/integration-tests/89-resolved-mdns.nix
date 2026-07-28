@@ -38,22 +38,40 @@
   # names the thread and the errno instead of an anonymous unwrap inside
   # library/std. That change is what made this diagnosable; it did not fix it.
   #
-  # RULED OUT BY MEASUREMENT, do not re-try these:
+  # THE EINVAL IS NOW FIXED. Root cause: we exec'd the container payload in the
+  # very process that had called `unshare(CLONE_NEWPID)`. Per clone(2),
+  # CLONE_THREAD is rejected with EINVAL once a process has done that, because
+  # unshare moves only that process's CHILDREN into the new PID namespace, never
+  # itself -- so the payload could run single-threaded (it loaded and pruned its
+  # units) and then died the instant it created its first thread. It was not
+  # actually PID 1 of the container either. Fixed by forking once more after the
+  # namespace setup, the way upstream splits its outer and inner child: the
+  # grandchild is PID 1 in the new namespace and execs the payload, while the
+  # intermediate waits and propagates its exit status.
   #
-  # 1. MISSING CONTAINER RLIMITS. crates/nspawn applied none at all where
-  #    upstream installs a table via setrlimit_closest_all (nspawn.c:3636,
-  #    table at :6007, including [RLIMIT_STACK] = { 8388608, RLIM_INFINITY }).
-  #    That table is now implemented (apply_container_rlimits, with upstream's
-  #    "closest" fallback on EPERM) -- and the EINVAL persists unchanged. The
-  #    rlimit gap was real and worth closing, but it was NOT the cause.
+  # MEASURED: the container's PID 1 now gets past unit loading and is running
+  # activate_units_recursive, and no thread-spawn error appears at all.
+  #
+  # TWO EARLIER CANDIDATES WERE RULED OUT BY MEASUREMENT FIRST. Keep them; each
+  # cost a VM run:
+  #
+  # 1. MISSING CONTAINER RLIMITS. crates/nspawn applied none where upstream
+  #    installs a table via setrlimit_closest_all (nspawn.c:3636, table at
+  #    :6007, including [RLIMIT_STACK] = { 8388608, RLIM_INFINITY }). The table
+  #    is now implemented anyway, because a container inheriting the host's
+  #    limits is wrong regardless -- but the EINVAL persisted unchanged with it
+  #    applied, so it was NOT the cause.
   #
   # 2. THE SECCOMP FILTER. SECCOMP_DEFAULT_DENY_SYSCALLS (main.rs:555) contains
-  #    no clone/clone3, and the filter returns EPERM for what it does deny,
-  #    whereas thread creation is failing with EINVAL.
+  #    no clone/clone3, and the filter answers EPERM for what it does deny,
+  #    whereas thread creation was failing with EINVAL.
   #
-  # So the EINVAL is still unattributed. Note it is the FIRST thread the manager
-  # spawns, so whatever is wrong is present immediately after the container
-  # child's namespace setup and exec.
+  # WHAT STILL BLOCKS THE TEST is the fixture, which is where this note started:
+  # `machinectl start test-mdns-1` spawns a container on
+  # /var/lib/machines/test-mdns-1, a tree the test only populates with an /etc
+  # skeleton. There is no init and no /bin/sh in it, so the exec fails with
+  # ENOENT and the container exits 127. The C oracle cannot get past this
+  # either.
   #
   # A THIRD DIVERGENCE, noted but NOT measured: upstream's exec of /bin/sh
   # (nspawn.c:3830-3831) is the fallback used when NOT booting a container, so

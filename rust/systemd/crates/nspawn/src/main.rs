@@ -4108,7 +4108,53 @@ fn run() -> i32 {
             }
             parent_done_pipe.close_read();
 
-            container_child_inner(&args, &root, &machine_name, &capabilities);
+            // unshare(CLONE_NEWPID) moves only our CHILDREN into the new PID
+            // namespace, never ourselves. Two things follow, and both bite if we
+            // exec the payload here:
+            //
+            //   * clone(2) refuses CLONE_THREAD after unshare(CLONE_NEWPID) with
+            //     EINVAL, so the payload could run single-threaded but died the
+            //     moment it created its first thread. That is exactly how
+            //     89-RESOLVED-MDNS failed: our libsystemd loaded its units and
+            //     then could not spawn the signal-handler thread.
+            //   * the payload would not actually be PID 1 of the container.
+            //
+            // So fork once more: the grandchild is PID 1 in the new namespace
+            // and execs the payload, while we wait here and hand its exit status
+            // back to the outer parent, which is still waiting on us. Upstream
+            // nspawn splits its outer and inner child for the same reason.
+            let inner_pid = unsafe { libc::fork() };
+            match inner_pid {
+                -1 => {
+                    eprintln!(
+                        "systemd-nspawn: inner fork failed: {}",
+                        std::io::Error::last_os_error()
+                    );
+                    std::process::exit(EXIT_FAILURE);
+                }
+                0 => container_child_inner(&args, &root, &machine_name, &capabilities),
+                _ => {
+                    let mut status: libc::c_int = 0;
+                    loop {
+                        let r = unsafe { libc::waitpid(inner_pid, &mut status, 0) };
+                        if r == -1
+                            && std::io::Error::last_os_error().kind()
+                                == std::io::ErrorKind::Interrupted
+                        {
+                            continue;
+                        }
+                        break;
+                    }
+                    let code = if libc::WIFEXITED(status) {
+                        libc::WEXITSTATUS(status)
+                    } else if libc::WIFSIGNALED(status) {
+                        128 + libc::WTERMSIG(status)
+                    } else {
+                        EXIT_FAILURE
+                    };
+                    std::process::exit(code);
+                }
+            }
         }
         child_pid => {
             // Parent: close unused ends
