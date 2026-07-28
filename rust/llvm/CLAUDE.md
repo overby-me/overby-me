@@ -1202,6 +1202,17 @@ Assembler 155 to 157, Linker 177 to 187, Other 129 to 131. Ten files in
 Linker alone. What remains of the family is the compile unit whose file
 is filled in from a subprogram that names it, and the `DIExpression`
 opcode rewrites; those do want the older dialect modelled.
+A third member closed with them: `llvm.dbg.value` and `llvm.dbg.declare`
+once took an offset into the variable between the value and the variable,
+and the expression took its place, so upstream drops the argument as it
+reads. The fiftieth pass read the newer four-argument spelling as a
+record and left the older five-argument one alone.
+The other class was measured and is blocked after all. The per-intrinsic
+attributes want a table LangRef does not have: fourteen of its eight
+hundred `declare` lines carry an attribute, which is too few to harvest
+from, so `@llvm.assume` coming back with five function attributes and an
+`i1 noundef` is not something this project can reproduce. Eighteen files,
+and the number is recorded rather than guessed at.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

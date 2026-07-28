@@ -1399,8 +1399,27 @@ impl Parser {
                 // attachments have been read.
                 if let Some(name) = self.debug_record_name(&call) {
                     self.wrote_debug_intrinsic = true;
-                    let operands = call
+                    // `llvm.dbg.value` and `llvm.dbg.declare` once took an
+                    // offset into the variable between the value and the
+                    // variable itself, and the expression took its place.
+                    // Upstream drops the argument as it reads, so a call
+                    // written the older way becomes the same record as one
+                    // written the newer.
+                    let args: Vec<_> = call
                         .args
+                        .iter()
+                        .enumerate()
+                        .filter(|(position, arg)| {
+                            !(*position == 1
+                                && call.args.len() == 4
+                                && matches!(
+                                    self.module.ctx.type_kind(arg.ty),
+                                    TypeKind::Integer(_)
+                                ))
+                        })
+                        .map(|(_, arg)| arg)
+                        .collect();
+                    let operands = args
                         .iter()
                         .map(|arg| match arg.value {
                             Value::Constant(id) => match self.module.ctx.constant(id).clone() {
