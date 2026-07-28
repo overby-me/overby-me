@@ -1097,6 +1097,11 @@ html {
    the avatar stays exactly where it was. (In the compact drawer this copy of the
    bar is hidden and the header shows its own, so the break-out is scoped here.) */
 .drawer-scroll .drawer-context-bar {
+	/* `.bar` pins width: 100%, which is the container's CONTENT width, so the
+	   negative margins below could only shift the header left, not stretch it:
+	   the rule reached the left edge and stopped 16px short of the right. `auto`
+	   lets the margins set the width (100% + 32px), which is the point. */
+	width: auto;
 	margin-inline: calc(var(--md-sys-spacing-4) * -1);
 	padding-left: calc(var(--md-sys-spacing-5) + var(--md-sys-spacing-4));
 	padding-right: calc(var(--md-sys-spacing-3) + var(--md-sys-spacing-4));
