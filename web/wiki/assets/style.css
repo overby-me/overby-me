@@ -867,6 +867,11 @@ html {
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
+	/* The context header below breaks out of this inset to reach the pane edge;
+	   without this its trailing overhang would count as scrollable width and a
+	   horizontal scrollbar would appear (one axis set to auto makes the other
+	   auto too). It reaches exactly the padding box, so nothing is clipped. */
+	overflow-x: hidden;
 	scrollbar-width: none;
 	padding: 0 var(--md-sys-spacing-4) var(--md-sys-spacing-4);
 }
@@ -1084,6 +1089,17 @@ html {
 	border-bottom: 1px solid var(--md-outline-variant);
 	transition: background-color var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-easing-standard);
+}
+/* ...and in the tree pane that separator must run the pane's full width, like
+   the docked Actions header's does. The scroll container insets its children by
+   16px, which cut the rule short at both ends, so the header breaks back out to
+   the pane edge and takes those 16px into its own padding: the rule spans, and
+   the avatar stays exactly where it was. (In the compact drawer this copy of the
+   bar is hidden and the header shows its own, so the break-out is scoped here.) */
+.drawer-scroll .drawer-context-bar {
+	margin-inline: calc(var(--md-sys-spacing-4) * -1);
+	padding-left: calc(var(--md-sys-spacing-5) + var(--md-sys-spacing-4));
+	padding-right: calc(var(--md-sys-spacing-3) + var(--md-sys-spacing-4));
 }
 .drawer-context-bar:hover {
 	background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
