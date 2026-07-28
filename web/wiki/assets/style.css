@@ -2205,6 +2205,32 @@ a.folder-item:focus-visible {
 	resize: vertical;
 }
 
+/* A <select> inside a text field wears the same outlined shell as the input
+   beside it. Two things this rule must not break:
+     - width: a select sizes to its widest option, so one long name would push
+       the control past a 420px dialog. Pin it to the field instead and let the
+       label ellipsize.
+     - the chevron: the base `select` rule paints it as a background-image, so
+       this sets `background-color` and never the `background` shorthand, which
+       would erase it. The right padding keeps text clear of it. */
+.text-field select {
+	width: 100%;
+	max-width: 100%;
+	padding: var(--md-sys-spacing-4) var(--md-sys-spacing-9)
+		var(--md-sys-spacing-4) var(--md-sys-spacing-4);
+	border: 1px solid var(--md-outline-strong);
+	border-radius: var(--md-sys-shape-corner-medium);
+	font-size: var(--md-sys-typescale-body-large-size);
+	line-height: var(--md-sys-typescale-body-large-line);
+	background-color: transparent;
+	color: var(--md-on-surface);
+	text-overflow: ellipsis;
+}
+
+.text-field select:focus {
+	border-color: var(--md-primary);
+}
+
 /* Styled file upload: a dashed drop-zone control wrapping a hidden native
  * <input type=file>, so uploads match the Material look instead of the raw
  * browser "Choose file" widget. Deliberately NOT inside a `.text-field` (whose
