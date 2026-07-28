@@ -582,6 +582,45 @@ fn an_attribute_set_is_written_in_upstreams_order() {
 }
 
 const PRINTED: &[(&str, &str)] = &[
+    // A function and a call both live in the program address space unless
+    // they say otherwise, and that is written whenever either it or the
+    // layout's is not nought: under a `P42` layout even nought is worth
+    // saying, because the default there is not nought.
+    (
+        "target datalayout = \"P42\"\n\ndefine ptr @f() {\nentry:\n  ret ptr null\n}\n",
+        "define ptr @f() addrspace(42) {",
+    ),
+    (
+        "target datalayout = \"P42\"\n\ndefine ptr @f() addrspace(0) {\nentry:\n  ret ptr null\n}\n",
+        "define ptr @f() addrspace(0) {",
+    ),
+    // With nothing to say, nothing is written.
+    (
+        "define ptr @f() addrspace(0) {\nentry:\n  ret ptr null\n}\n",
+        "define ptr @f() {",
+    ),
+    // A call writes it before the return type rather than after.
+    (
+        "target datalayout = \"P42\"\n\ndeclare void @g() addrspace(42)\n\ndefine void @f() addrspace(42) {\nentry:\n  call void @g()\n  ret void\n}\n",
+        "  call addrspace(42) void @g()",
+    ),
+    // A module that names an Objective-C image-info version is saying it has
+    // no class properties unless it says otherwise.
+    (
+        "!llvm.module.flags = !{!0}\n!0 = !{i32 1, !\"Objective-C Image Info Version\", i32 0}\n",
+        "!1 = !{i32 4, !\"Objective-C Class Properties\", i32 0}",
+    ),
+    // One that says otherwise keeps what it said.
+    (
+        "!llvm.module.flags = !{!0, !1}\n!0 = !{i32 1, !\"Objective-C Image Info Version\", i32 0}\n!1 = !{i32 4, !\"Objective-C Class Properties\", i32 1}\n",
+        "!llvm.module.flags = !{!0, !1}",
+    ),
+    // How the collector is configured is eight bits wide however wide the
+    // module wrote it.
+    (
+        "!llvm.module.flags = !{!0}\n!0 = !{i32 1, !\"Objective-C Garbage Collection\", i32 512}\n",
+        "!0 = !{i32 1, !\"Objective-C Garbage Collection\", i8 0}",
+    ),
     // A scalable vector has no lane count to write out, so a splat of a
     // symbol is written as the construction that makes one.
     (

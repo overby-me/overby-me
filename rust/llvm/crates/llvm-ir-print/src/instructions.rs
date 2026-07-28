@@ -685,6 +685,18 @@ impl Printer<'_> {
             } => (*result, params.clone(), *is_var_arg),
             _ => (call.function_type, Vec::new(), false),
         };
+        // A call goes through the program address space unless it says
+        // otherwise, and that is written before the return type, whenever
+        // either it or the layout's is not nought.
+        let program = self
+            .module
+            .data_layout
+            .as_ref()
+            .map_or(0, |layout| layout.program_address_space());
+        let address_space = call.address_space.unwrap_or(program);
+        if address_space != 0 || program != 0 {
+            let _ = write!(self.out, "addrspace({address_space}) ");
+        }
         if is_var_arg {
             self.ty(result);
             self.push(" (");
@@ -702,9 +714,6 @@ impl Printer<'_> {
             self.push(")");
         } else {
             self.ty(result);
-        }
-        if let Some(address_space) = call.address_space {
-            let _ = write!(self.out, " addrspace({address_space})");
         }
         self.push(" ");
         self.value(function, call.callee);

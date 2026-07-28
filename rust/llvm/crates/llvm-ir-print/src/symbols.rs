@@ -265,9 +265,17 @@ impl Printer<'_> {
         if let Some(unnamed) = function.qualifiers.unnamed_addr {
             let _ = write!(self.out, " {}", unnamed.keyword());
         }
-        if let Some(address_space) = function.qualifiers.address_space
-            && address_space != 0
-        {
+        // A function lives in the program address space unless it says
+        // otherwise, and that is written whenever either it or the layout's
+        // is not nought: under a `P42` layout even `addrspace(0)` is worth
+        // saying, because the default there is not nought.
+        let program = self
+            .module
+            .data_layout
+            .as_ref()
+            .map_or(0, |layout| layout.program_address_space());
+        let address_space = function.qualifiers.address_space.unwrap_or(program);
+        if address_space != 0 || program != 0 {
             let _ = write!(self.out, " addrspace({address_space})");
         }
         if let Some(group) = self.group_for(&function.attrs) {

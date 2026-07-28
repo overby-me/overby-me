@@ -596,6 +596,107 @@ impl Parser {
         None
     }
 
+    /// The two Objective-C module flags upstream rewrites as it reads.
+    ///
+    /// A module that says which image-info version it was built against is
+    /// also saying it has no class properties unless it says otherwise, so
+    /// the flag that says so is added. And how the collector is configured
+    /// is eight bits wide however wide the module wrote it.
+    pub(crate) fn upgrade_objc_module_flags(&mut self) {
+        let flags: Vec<MdId> = self.module_flags();
+        let mut has_version = false;
+        let mut has_properties = false;
+        for id in &flags {
+            let Some(name) = self.flag_name(*id) else {
+                continue;
+            };
+            match name.as_str() {
+                "Objective-C Image Info Version" => has_version = true,
+                "Objective-C Class Properties" => has_properties = true,
+                "Objective-C Garbage Collection" => self.narrow_flag_value(*id, 8),
+                _ => {}
+            }
+        }
+        if !has_version || has_properties {
+            return;
+        }
+        let i32_type = self.module.ctx.int_type(32);
+        let behaviour = self.module.ctx.const_int(i32_type, ApInt::from_u64(32, 4));
+        let value = self.module.ctx.const_int(i32_type, ApInt::from_u64(32, 0));
+        let node = self.module.add_metadata(Metadata::Tuple {
+            distinct: false,
+            operands: vec![
+                MdOperand::Value {
+                    ty: i32_type,
+                    value: Value::Constant(behaviour),
+                },
+                MdOperand::String("Objective-C Class Properties".into()),
+                MdOperand::Value {
+                    ty: i32_type,
+                    value: Value::Constant(value),
+                },
+            ],
+        });
+        for named in &mut self.module.named_metadata {
+            if named.name == "llvm.module.flags" {
+                named.operands.push(node);
+                return;
+            }
+        }
+    }
+
+    /// The nodes `llvm.module.flags` names.
+    fn module_flags(&self) -> Vec<MdId> {
+        self.module
+            .named_metadata
+            .iter()
+            .filter(|named| named.name == "llvm.module.flags")
+            .flat_map(|named| named.operands.clone())
+            .collect()
+    }
+
+    /// The name a flag node carries, when it has the three-operand shape.
+    fn flag_name(&self, id: MdId) -> Option<String> {
+        let Metadata::Tuple { operands, .. } = self.module.metadata_node(id)? else {
+            return None;
+        };
+        let [_, MdOperand::String(name), _] = operands.as_slice() else {
+            return None;
+        };
+        name.as_str().map(str::to_string)
+    }
+
+    /// A flag whose value is held in fewer bits than the module wrote it in.
+    fn narrow_flag_value(&mut self, id: MdId, bits: u32) {
+        let Some(Metadata::Tuple { distinct, operands }) = self.module.metadata_node(id).cloned()
+        else {
+            return;
+        };
+        let [
+            _,
+            _,
+            MdOperand::Value {
+                value: Value::Constant(written),
+                ..
+            },
+        ] = operands.as_slice()
+        else {
+            return;
+        };
+        let Some(value) = self.module.ctx.constant(*written).as_integer().cloned() else {
+            return;
+        };
+        let ty = self.module.ctx.int_type(bits);
+        let narrowed = self.module.ctx.const_int(ty, value.trunc(bits));
+        let mut operands = operands;
+        operands[2] = MdOperand::Value {
+            ty,
+            value: Value::Constant(narrowed),
+        };
+        self.module
+            .set_metadata(id, Metadata::Tuple { distinct, operands });
+    }
+
     pub(crate) fn upgrade_module_flags(&mut self) {
         let flags: Vec<MdId> = self
             .module

@@ -1444,7 +1444,21 @@ A neighbouring file was probed and is not this: `opt` runs the verifier,
 finds a `#dbg_value` with no location, and strips the debug info on that
 basis rather than on the version. Reproducing that means stripping where
 this reports, which is a decision rather than a rule.
-Assembler 171 to 187, Feature 61 to 65, Linker 200 to 204, Other 133 to
+Four more, two about where code lives and two about Objective-C. A
+function and a call both live in the program address space unless they
+say otherwise, so under a `P42` layout a function that writes nothing
+comes back `addrspace(42)` and one that writes `addrspace(0)` keeps it,
+nought being worth saying where the default is not nought. A call writes
+it before the return type rather than after.
+A module that names an Objective-C image-info version is saying it has no
+class properties unless it says otherwise, so the flag that says so is
+added; and how the collector is configured is eight bits wide however
+wide the module wrote it, so `i32 512` comes back `i8 0`.
+`remangle.ll` was looked at again and is blocked rather than a type-order
+bug: upstream renames the two intrinsics as it reads, which is what puts
+the type definitions in the order it prints them, and the renaming needs
+the per-intrinsic overloaded positions.
+Assembler 171 to 188, Feature 61 to 65, Linker 200 to 205, Other 133 to
 135.
 Acceptance: both numbers up again, recorded in the same commit.
 
