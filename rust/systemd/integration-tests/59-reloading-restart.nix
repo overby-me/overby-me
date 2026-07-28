@@ -21,25 +21,29 @@
   #
   #     test "$(systemctl show -p ExecMainStatus --value notify-reload-test)" = 109
   #
-  # with ExecMainStatus reading back EMPTY, not 109 and not the old 9. So the
-  # graceful-SIGTERM half really did land -- terminate_gracefully exists at
-  # services.rs:1272 and kill() calls it at 1377 -- but it does not help this
-  # unit, and WHICH branch swallows it is not yet known.
+  # with ExecMainStatus reading back EMPTY -- not 109, and not the 9 that the
+  # old SIGKILL behaviour produced.
   #
-  # Do not assume it is the no-live-PID early return at services.rs:1289. The
-  # lookup just above it (1281-1287) already falls back to scanning the live
-  # PID table precisely because "pid/main_pid ... are cleared on some paths
-  # before the stop (e.g. a transient notify unit)", which is this case, so
-  # that hole looks covered. The other candidates are the ServiceExited/None
-  # check at 1295, the KillMode::None guard at 1273 (the unit sets
-  # KillMode=process, so this should not fire), and everything after the
-  # SIGTERM is actually sent.
+  # THE STOP PATH IS NOT THE PROBLEM. A kmsg probe inside terminate_gracefully
+  # settled this: for this unit it reports
   #
-  # Settling it needs a kmsg probe at terminate_gracefully's entry recording
-  # main_pid, pid, and the unit's pid_table entry -- log:: never reaches the
-  # console from PID 1, only crate::entrypoints::kmsg. An earlier attempt at
-  # this bug burned several cycles on unconfirmed theories, so probe first and
-  # do not patch on a hunch.
+  #     kill_mode=Process main_pid=None pid=Some(5626) resolved=Some(5626)
+  #     SENDING target=5626
+  #
+  # so the SIGTERM really is delivered, and PID 1 reaps the process about
+  # 0.9s later (REAP pid=5626 -> ServiceExited). The journal shows the script's
+  # own trace running its handlers, e.g. the reload path reaching
+  # EXIT_STATUS=99. None of the terminate_gracefully early returns fire: not
+  # the KillMode::None guard, not the no-live-PID return, not the
+  # already-exited check.
+  #
+  # So the remaining question is why ExecMainStatus is EMPTY for a stopped
+  # TRANSIENT unit whose main process exited normally, rather than carrying its
+  # exit code. Look at how the exit status is recorded and reported for
+  # transient units around stop -- unit property reporting and transient unit
+  # lifetime -- NOT at the kill path. Two earlier rounds of work on this bug,
+  # including a note in this file, blamed the graceful-SIGTERM machinery; the
+  # probe shows that theory is wrong.
   patchScript = ''
         cat > TEST-59-RELOADING-RESTART.sh << 'TESTEOF'
     #!/usr/bin/env bash
