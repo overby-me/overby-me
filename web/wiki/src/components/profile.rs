@@ -8,8 +8,9 @@ use crate::session::use_session;
 
 use super::loader::{icon_el, user_avatar};
 
-/// ProfileApp — the signed-in user's profile (#78): who they are plus the groups
-/// and events they belong to. Reachable via `?app=profile`.
+/// ProfileApp — the signed-in user's profile (#78): who they are, plus what they
+/// have contributed. Reachable via `?app=profile`. Their groups and events are
+/// not listed here; the home page and the navigation tree are where those live.
 #[component]
 pub fn ProfileApp() -> Element {
     let session = use_session();
@@ -72,23 +73,6 @@ pub fn ProfileApp() -> Element {
         }
     });
 
-    // The user's groups + events (same query the home list uses), returned as two
-    // separate lists. A Result so a failed load shows an error state, not an empty
-    // membership list.
-    let memberships = crate::use_data_resource!(move || {
-        let token = access_token.clone();
-        let uid = user_id.clone();
-        async move {
-            type Lists = (Vec<model::ContextNodeFields>, Vec<model::ContextNodeFields>);
-            let Some(uid) = uid else {
-                return Ok::<Lists, String>((Vec::new(), Vec::new()));
-            };
-            let groups = graphql::query_contexts(token.as_deref(), &uid, "wiki/group").await?;
-            let events = graphql::query_contexts(token.as_deref(), &uid, "wiki/event").await?;
-            Ok((groups, events))
-        }
-    });
-
     let Some(user) = user else {
         return rsx! {
             div { class: "card",
@@ -100,7 +84,6 @@ pub fn ProfileApp() -> Element {
         };
     };
 
-    let mem_state = memberships.read().clone();
     let contrib_state = contributions.read().clone();
     let link = bsky_status.read().clone().unwrap_or_default();
     let show_linked = link.linked && !*just_unlinked.read();
@@ -292,42 +275,6 @@ pub fn ProfileApp() -> Element {
             }
         }
 
-        // Groups and Events as separate lists (mirroring the home page).
-        {
-            match &mem_state {
-                None => rsx! {
-                    div { class: "card",
-                        div { class: "card-content", crate::components::widgets::Spinner {} }
-                    }
-                },
-                Some(Err(e)) => {
-                    log::error!("Loading memberships failed: {e}");
-                    rsx! {
-                        crate::components::widgets::ErrorState {
-                            title: t("error.somethingWentWrong"),
-                            small: true,
-                        }
-                    }
-                }
-                Some(Ok((groups, events))) => rsx! {
-                    div { class: "card",
-                        div { class: "card-header",
-                            div { class: "avatar small", span { class: "material-icons", "groups" } }
-                            h3 { class: "title-medium", "{t(\"layout.groups\")}" }
-                        }
-                        ContextList { contexts: groups.clone() }
-                    }
-                    div { class: "card",
-                        div { class: "card-header",
-                            div { class: "avatar small", span { class: "material-icons", "event" } }
-                            h3 { class: "title-medium", "{t(\"layout.events\")}" }
-                        }
-                        ContextList { contexts: events.clone() }
-                    }
-                },
-            }
-        }
-
         // Latest contributions the user authored, each linking to the item.
         div { class: "card",
             div { class: "card-header",
@@ -367,50 +314,6 @@ fn ContributionList(items: Vec<model::ChildNodeFields>) -> Element {
             }
         }
         if items.len() > n {
-            button {
-                class: "btn btn-text",
-                onclick: move |_| {
-                    let s = *shown.read();
-                    shown.set(s + STEP);
-                },
-                "{t(\"layout.showMore\")}"
-            }
-        }
-    }
-}
-
-/// A group/event list body for the profile: links into each context, or an empty
-/// hint. Shared by the Groups and Events cards. Reveals a handful at a time via
-/// an incremental "show more".
-#[component]
-fn ContextList(contexts: Vec<model::ContextNodeFields>) -> Element {
-    const STEP: usize = 5;
-    let mut shown = use_signal(|| STEP);
-    if contexts.is_empty() {
-        return rsx! {
-            div { class: "card-content",
-                p { class: "body-medium", class: "text-muted", "{t(\"common.noContent\")}" }
-            }
-        };
-    }
-    let n = (*shown.read()).min(contexts.len());
-    rsx! {
-        div { class: "list",
-            for ctx in contexts[..n].iter() {
-                Link {
-                    key: "{ctx.id.0}",
-                    to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
-                    class: "list-link",
-                    super::widgets::ListItem {
-                        headline: ctx.name.clone(),
-                        leading: rsx! {
-                            div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
-                        },
-                    }
-                }
-            }
-        }
-        if contexts.len() > n {
             button {
                 class: "btn btn-text",
                 onclick: move |_| {
