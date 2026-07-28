@@ -102,7 +102,11 @@ struct Cli {
     wait: bool,
 
     /// Unload the transient unit after it finished, even if it failed.
-    #[arg(long)]
+    ///
+    /// The short form matters beyond brevity: busctl builds a `unixexec:` bus
+    /// address containing `argv2=-PGq`, and a missing `-G` makes the whole
+    /// short-flag cluster fail to parse rather than just that one flag.
+    #[arg(short = 'G', long)]
     collect: bool,
 
     /// Set the working directory for the spawned process.
