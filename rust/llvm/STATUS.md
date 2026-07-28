@@ -209,10 +209,14 @@ files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
 against upstream's own `opt -S`, and **171 of 221** are identical, with
 three more suites measured the same way: **60 of 71** in `Feature`, **196 of
-219** in `Linker` and **133 of 144** in `Other`. Five of the
-eighty-seven remaining differences are ones where we already match
-`llvm-as | llvm-dis` and `opt -S` does something more, ODR type uniquing
-being the case of it, so the reach is that much short of the denominator. Two
+219** in `Linker` and **133 of 144** in `Other`. Twelve of the
+seventy-five remaining differences are ones where we already match
+`llvm-as | llvm-dis` and `opt -S` does something else, so the attainable
+maximum is 643 rather than 655. ODR type uniquing is most of them; the
+clearest is `!DIObjCProperty`, where `opt -S` prints the setter and the
+getter swapped and `llvm-dis` does not. The corpus is `llvm-dis` output
+and is the headline property, so where the two upstream tools disagree
+this follows `llvm-dis`. Two
 path-derived lines are normalised away, because upstream regenerates the
 ModuleID from whatever path it read and synthesises a `source_filename` when
 the file has none; the corpus round trip pins both fields properly against

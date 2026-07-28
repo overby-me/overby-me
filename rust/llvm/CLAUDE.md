@@ -1296,6 +1296,14 @@ one fewer user, and a group with no users is not printed either; the
 collection that gathers groups was still counting the declarations the
 printer then skips. Assembler 169 to 171, Linker 189 to 196: seven files
 in Linker, which is more than the rule looks worth from its statement.
+Re-measuring the ceiling after all that: twelve of the seventy-five
+remaining differences are ones where this already matches
+`llvm-as | llvm-dis` and `opt -S` does something else, up from five, the
+proportion rising as the real differences close. The clearest new one is
+`!DIObjCProperty`, where `opt -S` prints the setter and the getter
+swapped and `llvm-dis` does not; it is a bug in one upstream tool rather
+than a rule to copy. The attainable maximum across the four suites is
+643 of 655, and sixty-three of the differences are genuinely ours.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the
