@@ -1290,6 +1290,12 @@ worked out from the overloaded positions, `llvm.stacksave` becoming
 `llvm.stacksave.p0` and `llvm.ctlz` becoming `llvm.ctlz.i32`. Which
 positions those are is the per-intrinsic table LangRef does not give, and
 it is three files.
+One more went with the same pass, and it was the fiftieth's leftover. A
+debug-info intrinsic's declaration is not printed, so a group it names has
+one fewer user, and a group with no users is not printed either; the
+collection that gathers groups was still counting the declarations the
+printer then skips. Assembler 169 to 171, Linker 189 to 196: seven files
+in Linker, which is more than the rule looks worth from its statement.
 Assembler 457 to 461. What is left in that suite is eleven use-list order
 negative tests that need the def-use chains PLAN 4.2 is waiting on, the
 DWARF vocabulary (three files), the target extension type table and the

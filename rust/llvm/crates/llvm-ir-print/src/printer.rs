@@ -71,6 +71,12 @@ impl<'m> Printer<'m> {
             sets.push(self.resolved_attributes(&global.attrs));
         }
         for function in &module.functions {
+            // A debug-info intrinsic's declaration is not printed, so the
+            // group it names has one fewer user, and a group with none is
+            // not printed either.
+            if is_debug_intrinsic(function) {
+                continue;
+            }
             sets.push(self.resolved_attributes(&function.attrs));
         }
         for function in &module.functions {
