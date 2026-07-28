@@ -465,6 +465,26 @@ Document these as out of scope rather than carrying them as debt.
   families found this was the **only** such phantom registration. If systemd is ever
   bumped to a version that ships TEST-83-BTRFS, re-add the wrapper.
 
+## Known flakes
+
+These fail intermittently on an unchanged tree. Treat a failure here as a flake only
+after re-running the *same* configuration, never on the strength of the name alone.
+
+- **03-JOBS**, at `systemctl stop --job-mode=replace-irreversibly unstoppable.service`,
+  reporting `Stop failed: ... reached its timeout` roughly 750 traced lines in.
+  Measured 2026-07-28: red once, then green on an immediate re-run of the identical
+  tree. Timing-sensitive by construction, since the subtest is about a service that
+  refuses to stop.
+- **07-PID1** `testcase_delegate_subgroup_control`.
+- **26-SYSTEMCTL** `assert_rc 3 systemctl --quiet is-active`.
+
+Beware a trap when baselining one of these. Reverting the change and rebuilding often
+resolves to a **cached** derivation, so nix returns `exit=0` in a handful of lines
+without booting a VM. That proves the parent passed at *some* point, which is exactly
+what a flaky test looks like too, so it cannot separate a flake from a regression.
+Re-run the *failing* configuration instead: failed derivations are not cached, so that
+run genuinely executes.
+
 ## Cross-cutting risk
 
 Several Tier 3 items (82-SOFTREBOOT, 60-MOUNT-RATELIMIT, 04-JOURNAL) stress the

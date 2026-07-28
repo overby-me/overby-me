@@ -562,7 +562,7 @@ fn sd_notify_user_manager(msg: &str) {
 /// so re-drives that make no progress are cheap, and once the goal is active we
 /// stop calling activation and just idle.
 fn spawn_active_goal_redrive(run_info: runtime_info::ArcMutRuntimeInfo) {
-    std::thread::spawn(move || {
+    spawn_critical_thread("goal-redrive", move || {
         // Up to ~120s of re-drives; stops issuing activations once the goal is
         // active. In the initrd the switch-root execve tears this thread down.
         for _ in 0..400 {
@@ -1282,18 +1282,46 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
     }))
 }
 
+/// Spawn one of the threads the manager cannot run without.
+///
+/// A failed spawn is fatal here: without these the manager cannot reap its
+/// children or receive readiness notifications, so continuing would leave a
+/// half-initialised init that never makes progress. Fail loudly instead, and
+/// report through `/dev/kmsg` as well as the log, because as PID 1 that is
+/// what actually reaches the console.
+///
+/// The bare `std::thread::spawn` this replaces unwrapped internally, so a
+/// spawn failure surfaced as a panic at `library/std` that did not say which
+/// thread failed. Naming the threads also makes them identifiable in
+/// `/proc/<pid>/task/*/comm` and in a debugger.
+fn spawn_critical_thread<F>(name: &str, f: F) -> std::thread::JoinHandle<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    match std::thread::Builder::new().name(name.to_owned()).spawn(f) {
+        Ok(handle) => handle,
+        Err(e) => {
+            error!("Failed to spawn the {name} thread: {e}");
+            kmsg(&format!(
+                "Failed to spawn the {name} thread: {e}. The manager cannot run without it, exiting."
+            ));
+            std::process::exit(1);
+        }
+    }
+}
+
 fn start_notification_handler_thread(run_info: runtime_info::ArcMutRuntimeInfo) {
-    std::thread::spawn(move || {
+    spawn_critical_thread("notify-handler", move || {
         notification_handler::handle_all_streams(run_info);
     });
 }
 fn start_stdout_handler_thread(run_info: runtime_info::ArcMutRuntimeInfo) {
-    std::thread::spawn(move || {
+    spawn_critical_thread("stdout-handler", move || {
         notification_handler::handle_all_std_out(run_info);
     });
 }
 fn start_stderr_handler_thread(run_info: runtime_info::ArcMutRuntimeInfo) {
-    std::thread::spawn(move || {
+    spawn_critical_thread("stderr-handler", move || {
         notification_handler::handle_all_std_err(run_info);
     });
 }
@@ -1306,7 +1334,7 @@ fn start_signal_handler_thread(
     // (Service → ServiceExited) without acquiring the RuntimeInfo read lock,
     // breaking the 3-way deadlock described in signal_handler.rs.
     let pid_table = run_info.read_poisoned().pid_table.clone();
-    std::thread::spawn(move || {
+    spawn_critical_thread("signal-handler", move || {
         // listen on signals from the child processes
         signal_handler::handle_signals(signals, run_info, pid_table);
     })
