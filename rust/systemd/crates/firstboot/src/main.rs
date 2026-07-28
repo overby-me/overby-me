@@ -214,6 +214,16 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             "--prompt-root-password" => parsed.prompt_root_password = true,
             "--prompt-root-shell" => parsed.prompt_root_shell = true,
 
+            // Upstream's ARG_COPY sets exactly these five. Unlike --reset,
+            // which leaves the root account alone, --copy does include the
+            // root password and shell.
+            "--copy" => {
+                parsed.copy_locale = true;
+                parsed.copy_keymap = true;
+                parsed.copy_timezone = true;
+                parsed.copy_root_password = true;
+                parsed.copy_root_shell = true;
+            }
             "--copy-locale" => parsed.copy_locale = true,
             "--copy-keymap" => parsed.copy_keymap = true,
             "--copy-timezone" => parsed.copy_timezone = true,
@@ -544,6 +554,31 @@ fn load_settings_from_credentials(settings: &mut Settings) {
 // ---------------------------------------------------------------------------
 // Copy from host
 // ---------------------------------------------------------------------------
+
+/// Copy `/<relative>` from the host into `<root>/<relative>`, byte for byte.
+///
+/// Returns false when there is nothing to copy, either because the host has no
+/// such file or because the target is already configured and --force was not
+/// given, so the caller can fall back to reconstructing the file from parsed
+/// values.
+fn copy_host_file_verbatim(root: &Path, relative: &str, force: bool) -> io::Result<bool> {
+    let host = Path::new("/").join(relative);
+    let Ok(content) = fs::read(&host) else {
+        return Ok(false);
+    };
+    if !should_apply(root, relative, force) {
+        return Ok(false);
+    }
+    let dest = root.join(relative);
+    ensure_parent_dir(&dest)?;
+    fs::write(&dest, content)?;
+    #[cfg(target_os = "linux")]
+    {
+        fs::set_permissions(&dest, fs::Permissions::from_mode(0o644))?;
+    }
+    eprintln!("Copied {} to {}.", host.display(), dest.display());
+    Ok(true)
+}
 
 fn copy_locale_from_host(settings: &mut Settings) {
     if settings.locale.is_some() {
@@ -1482,11 +1517,24 @@ fn run(argv: &[String]) -> Result<(), String> {
     // Load credentials
     load_settings_from_credentials(&mut settings);
 
-    // Copy from host
-    if args.copy_locale {
+    // Copy from host.
+    //
+    // For locale and keymap this is a VERBATIM file copy, as upstream does with
+    // copy_file_atomic_at(). Reconstructing the file from the LANG/LC_MESSAGES
+    // or KEYMAP values it happens to parse would drop every other variable, and
+    // any comments and formatting with them; the test diffs the copy against
+    // the host file, so it has to match byte for byte. Parsing into settings
+    // remains the fallback for when the host has no such file.
+    if args.copy_locale
+        && !copy_host_file_verbatim(root, "etc/locale.conf", args.force)
+            .map_err(|e| e.to_string())?
+    {
         copy_locale_from_host(&mut settings);
     }
-    if args.copy_keymap {
+    if args.copy_keymap
+        && !copy_host_file_verbatim(root, "etc/vconsole.conf", args.force)
+            .map_err(|e| e.to_string())?
+    {
         copy_keymap_from_host(&mut settings);
     }
     if args.copy_timezone {
