@@ -639,6 +639,30 @@ fn copy_root_password_from_host(settings: &mut Settings) {
     }
 }
 
+/// The root password hash, if root has a usable one.
+///
+/// This is the "is root's password usable" predicate: locked and placeholder
+/// values are not hashes and are skipped. No longer on the binary's path,
+/// since the only former caller was the --copy-root-password path and a copy
+/// must reproduce even a locked field, but kept with its unit coverage because
+/// it answers a different question from read_root_password_field_raw() below
+/// and the distinction is exactly what caused a bug once already.
+#[allow(dead_code)]
+fn read_root_password_hash(path: &str) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        let fields: Vec<&str> = line.split(':').collect();
+        if fields.len() >= 2 && fields[0] == "root" {
+            let hash = fields[1];
+            // Skip locked/empty passwords
+            if !hash.is_empty() && hash != "!" && hash != "!!" && hash != "*" && hash != "x" {
+                return Some(hash.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// The root password field from a shadow file exactly as written, with no
 /// judgement about whether it is a usable hash.
 fn read_root_password_field_raw(path: &str) -> Option<String> {
@@ -658,20 +682,6 @@ fn copy_root_shell_from_host(settings: &mut Settings) {
     }
 }
 
-fn read_root_password_hash(path: &str) -> Option<String> {
-    let content = fs::read_to_string(path).ok()?;
-    for line in content.lines() {
-        let fields: Vec<&str> = line.split(':').collect();
-        if fields.len() >= 2 && fields[0] == "root" {
-            let hash = fields[1];
-            // Skip locked/empty passwords
-            if !hash.is_empty() && hash != "!" && hash != "!!" && hash != "*" && hash != "x" {
-                return Some(hash.to_string());
-            }
-        }
-    }
-    None
-}
 
 fn read_root_shell(path: &str) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
@@ -1636,6 +1646,21 @@ fn run(argv: &[String]) -> Result<(), String> {
 
     // Apply settings
     let mut any_applied = false;
+
+    // Being asked for a root password and declining to give one is still an
+    // answer: upstream creates a LOCKED root account rather than leaving the
+    // tree with no root entry at all. Without this, `--prompt-root-password
+    // </dev/null` succeeded while writing nothing.
+    if (args.prompt || args.prompt_root_password)
+        && settings.root_password.is_none()
+        && !args.delete_root_password
+        && should_configure_root(root, args.force)
+    {
+        write_root_passwd_entry(root, settings.root_shell.as_deref())
+            .map_err(|e| e.to_string())?;
+        ensure_root_shadow_locked(root).map_err(|e| e.to_string())?;
+        any_applied = true;
+    }
 
     if apply_locale(root, &settings, args.force).map_err(|e| e.to_string())? {
         any_applied = true;
