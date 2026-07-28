@@ -108,7 +108,7 @@ pub fn abi_align(ctx: &Context, layout: &DataLayout, ty: TypeId) -> Result<Align
                 .abi_bits
         }
         TypeKind::Struct { .. } | TypeKind::NamedStruct(_) => {
-            return Ok(struct_layout(ctx, layout, ty)?.align);
+            return struct_align(ctx, layout, ty);
         }
         TypeKind::X86Amx => 8192,
         TypeKind::Void | TypeKind::Label | TypeKind::Metadata | TypeKind::Token => {
@@ -145,7 +145,7 @@ pub fn preferred_align(
         // an alloca of `{ i8 }` is eight-aligned even though nothing in it
         // needs to be.
         TypeKind::Struct { .. } | TypeKind::NamedStruct(_) => {
-            let from_fields = struct_layout(ctx, layout, ty)?.align;
+            let from_fields = struct_align(ctx, layout, ty)?;
             let preferred =
                 Align::from_bits(layout.aggregate_align().preferred_bits).unwrap_or(Align::ONE);
             return Ok(from_fields.max(preferred));
@@ -161,22 +161,45 @@ pub fn preferred_align(
 /// A packed struct takes byte alignment for every field and for itself; an
 /// unpacked one aligns each field to its own ABI alignment, then rounds the
 /// whole thing up so an array of the struct keeps every element aligned.
+/// A struct's own alignment, which is the strictest its fields ask for and
+/// at least whatever the layout asks of an aggregate.
+///
+/// This never asks a field how large it is, so a struct of scalable vectors
+/// has an alignment where it has no fixed size: `{ <vscale x 1 x i32> }` is
+/// four-aligned and takes however many bytes the vector length decides.
+pub fn struct_align(ctx: &Context, layout: &DataLayout, ty: TypeId) -> Result<Align, LayoutError> {
+    let (fields, packed) = struct_fields(ctx, ty)?;
+    if packed {
+        return Ok(Align::ONE);
+    }
+    let mut align = Align::from_bits(layout.aggregate_align().abi_bits).unwrap_or(Align::ONE);
+    for field in &fields {
+        align = align.max(abi_align(ctx, layout, *field)?);
+    }
+    Ok(align)
+}
+
+/// The fields a struct type holds, whether it was written out or named.
+fn struct_fields(ctx: &Context, ty: TypeId) -> Result<(Vec<TypeId>, bool), LayoutError> {
+    match ctx.type_kind(ty) {
+        TypeKind::Struct { fields, packed } => Ok((fields.clone(), *packed)),
+        TypeKind::NamedStruct(id) => {
+            let def = ctx.struct_def(*id);
+            match &def.fields {
+                Some(fields) => Ok((fields.clone(), def.packed)),
+                None => Err(LayoutError::Opaque(def.name.clone())),
+            }
+        }
+        _ => Err(LayoutError::Unsized("not a struct")),
+    }
+}
+
 pub fn struct_layout(
     ctx: &Context,
     layout: &DataLayout,
     ty: TypeId,
 ) -> Result<StructLayout, LayoutError> {
-    let (fields, packed) = match ctx.type_kind(ty) {
-        TypeKind::Struct { fields, packed } => (fields.clone(), *packed),
-        TypeKind::NamedStruct(id) => {
-            let def = ctx.struct_def(*id);
-            match &def.fields {
-                Some(fields) => (fields.clone(), def.packed),
-                None => return Err(LayoutError::Opaque(def.name.clone())),
-            }
-        }
-        _ => return Err(LayoutError::Unsized("not a struct")),
-    };
+    let (fields, packed) = struct_fields(ctx, ty)?;
 
     let mut offset = 0u64;
     let mut align = if packed {

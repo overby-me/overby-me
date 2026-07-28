@@ -476,8 +476,15 @@ impl Printer<'_> {
 /// room for, rather than being quoted the way a value's name is.
 pub(crate) fn metadata_name(name: &llvm_ir::ByteString) -> String {
     let mut out = String::new();
-    for byte in name.as_bytes().iter().copied() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$' | b'-') {
+    for (index, byte) in name.as_bytes().iter().copied().enumerate() {
+        // A name that opens with a digit reads as a number, so `!111` would
+        // be node 111 and `!42abc` a node followed by nothing that parses.
+        // Escaping the first character alone is enough to say it is a name,
+        // and what upstream does: `!\3111` is the name `111`.
+        let first_is_a_digit = index == 0 && byte.is_ascii_digit();
+        if !first_is_a_digit
+            && (byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$' | b'-'))
+        {
             out.push(byte as char);
         } else {
             let _ = write!(out, "\\{byte:02X}");

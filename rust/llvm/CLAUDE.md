@@ -1380,7 +1380,23 @@ digits, so `bitcast (i64 42 to double)` is `2.075080e-322` and not
 `2.075076e-322`. The two agree wherever the value ends by the sixth
 digit, which is why only the subnormals showed it: adjacent values are
 far enough apart there that six digits still read back.
-Assembler 171 to 175, Feature 61 to 65, Linker 200 to 201, Other 133 to
+Five more came from the same sample, four of them ours and one a whole
+vocabulary. A float class is a set of the ten kinds a float can be, and
+upstream names it rather than writing the bits: `nofpclass(504)` is
+`nofpclass(zero sub norm)`. The order it tries the names in is not the
+bit order, `pzero` coming before `nsub`, so it was measured by writing
+all 1,023 masks at once as the parameters of one function and reading
+back what each came out as. A module that writes the words already gets
+upstream's order back, which is why the naming happens as the attribute
+is read rather than as it is written.
+A `musttail` call in a function with variable arguments hands those over
+too, and the ellipsis that says so was read and not written back. A
+struct of scalable vectors has an alignment where it has no fixed size,
+the strictest its fields ask for, and asking for the whole layout to get
+it failed on the first field that has no size. And a metadata name that
+opens with a digit reads as a number, so upstream escapes the first
+character alone: `!\3111` is the name `111`.
+Assembler 171 to 180, Feature 61 to 65, Linker 200 to 201, Other 133 to
 135.
 Acceptance: both numbers up again, recorded in the same commit.
 

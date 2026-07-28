@@ -531,6 +531,42 @@ fn an_attribute_set_is_written_in_upstreams_order() {
 }
 
 const PRINTED: &[(&str, &str)] = &[
+    // A float class is a set of the ten kinds a float can be, and upstream
+    // names it rather than writing the bits.
+    (
+        "define void @f(float nofpclass(1023) %x) {\nentry:\n  ret void\n}\n",
+        "define void @f(float nofpclass(all) %x) {",
+    ),
+    (
+        "define void @f(float nofpclass(3) %x) {\nentry:\n  ret void\n}\n",
+        "define void @f(float nofpclass(nan) %x) {",
+    ),
+    (
+        "define void @f(float nofpclass(504) %x) {\nentry:\n  ret void\n}\n",
+        "define void @f(float nofpclass(zero sub norm) %x) {",
+    ),
+    // A module that writes the words still gets upstream's order back.
+    (
+        "define void @f(float nofpclass(inf nan) %x) {\nentry:\n  ret void\n}\n",
+        "define void @f(float nofpclass(nan inf) %x) {",
+    ),
+    // A `musttail` call in a function with variable arguments hands those
+    // over too, which is an ellipsis after the arguments it names.
+    (
+        "declare ptr @f(ptr, ...)\n\ndefine ptr @g(ptr %this, ...) {\nentry:\n  %rv = musttail call ptr (ptr, ...) @f(ptr %this, ...)\n  ret ptr %rv\n}\n",
+        "  %rv = musttail call ptr (ptr, ...) @f(ptr %this, ...)",
+    ),
+    // A struct of scalable vectors has an alignment where it has no fixed
+    // size, which is the strictest its fields ask for.
+    (
+        "%s = type { <vscale x 1 x i32>, <vscale x 1 x i32> }\n\ndefine void @f(ptr %x) {\nentry:\n  %a = load %s, ptr %x\n  ret void\n}\n",
+        "  %a = load %s, ptr %x, align 4",
+    ),
+    // A name that opens with a digit reads as a number, so the first
+    // character is escaped to say it is a name.
+    ("!\\31\\31\\31 = !{}\n", "!\\3111 = !{}"),
+    // One that does not is written as it stands.
+    ("!a111 = !{}\n", "!a111 = !{}"),
     // A declaration has no body for a `!dbg` to point into, and writes what
     // it carries between the word and the return type.
     (

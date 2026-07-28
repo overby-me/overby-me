@@ -9,7 +9,7 @@ use crate::{CONTINUATION, Printer, attribute_list, escape_string, name_text};
 use llvm_ir::BlockId;
 use llvm_ir::instruction::{
     CallData, CallingConv, FastMathFlags, InstKind, Instruction, IntFlags, LandingPadClause,
-    NamedCallingConv, SyncScope, UnwindTarget,
+    NamedCallingConv, SyncScope, TailKind, UnwindTarget,
 };
 
 use crate::align_text;
@@ -723,6 +723,16 @@ impl Printer<'_> {
             }
             self.push(" ");
             self.value(function, arg.value);
+        }
+        // A `musttail` call in a function with variable arguments hands those
+        // over too, which the text writes as an ellipsis after the arguments
+        // it names. Nothing else may write one, so the two facts say it.
+        if call.tail == TailKind::MustTail && function.is_var_arg {
+            if call.args.is_empty() {
+                self.push("...");
+            } else {
+                self.push(", ...");
+            }
         }
         self.push(")");
         if let Some(group) = self.group_for(&call.fn_attrs) {

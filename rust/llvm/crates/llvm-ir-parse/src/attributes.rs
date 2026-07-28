@@ -174,10 +174,10 @@ impl Parser {
             && self.peek() == &Token::LeftParen
         {
             let arguments = self.collect_parenthesised()?;
-            let arguments = if kind == StructuredAttr::Captures {
-                canonical_captures(&arguments)
-            } else {
-                arguments
+            let arguments = match kind {
+                StructuredAttr::Captures => canonical_captures(&arguments),
+                StructuredAttr::NoFpClass => float_classes(&arguments),
+                _ => arguments,
             };
             return Ok(Attribute::Structured { kind, arguments });
         }
@@ -442,6 +442,65 @@ fn wide_hex(word: &str, bits: u32) -> Option<ApInt> {
 /// `address` covers `address_is_null` and `provenance` covers
 /// `read_provenance`. Upstream writes the set back in its own order, address
 /// before provenance, so this reduces what was written to that form.
+/// The names a float class takes, in the order upstream tries them. Each
+/// entry that fits is written and taken out, so `all` beats the ten single
+/// kinds and each pair beats the two halves it is made of. The order was
+/// measured by writing every one of the 1,023 masks at once and reading the
+/// spellings back: it is not the bit order, `pzero` coming before `nsub`.
+static FLOAT_CLASSES: &[(u64, &str)] = &[
+    (1023, "all"),
+    (3, "nan"),
+    (1, "snan"),
+    (2, "qnan"),
+    (516, "inf"),
+    (4, "ninf"),
+    (512, "pinf"),
+    (96, "zero"),
+    (32, "nzero"),
+    (64, "pzero"),
+    (144, "sub"),
+    (16, "nsub"),
+    (128, "psub"),
+    (264, "norm"),
+    (8, "nnorm"),
+    (256, "pnorm"),
+];
+
+/// A float class mask as upstream spells it.
+fn float_classes(arguments: &str) -> String {
+    // A module may write the words already, and upstream still writes back
+    // its own spelling of the set they make: `nofpclass(inf nan)` is
+    // `nofpclass(nan inf)`. So the words are read into the mask they name
+    // and the mask is what is written out.
+    let mask = match arguments.trim().parse::<u64>() {
+        Ok(mask) => mask,
+        Err(_) => {
+            let mut mask = 0;
+            for word in arguments.split_whitespace() {
+                let Some((bits, _)) = FLOAT_CLASSES.iter().find(|(_, name)| *name == word) else {
+                    return arguments.to_string();
+                };
+                mask |= bits;
+            }
+            mask
+        }
+    };
+    let mut left = mask;
+    let mut words = Vec::new();
+    for (bits, word) in FLOAT_CLASSES {
+        if *bits != 0 && left & bits == *bits {
+            words.push(*word);
+            left &= !bits;
+        }
+    }
+    // A bit outside the ten is nothing this can name, and upstream refuses
+    // it, so there is nothing left over to write in practice.
+    if left != 0 || words.is_empty() {
+        return mask.to_string();
+    }
+    words.join(" ")
+}
+
 fn canonical_captures(arguments: &str) -> String {
     // `ret:` introduces what the return value captures, and everything after
     // it belongs to that list rather than to the argument's. So the two
