@@ -24,16 +24,22 @@
   # with ExecMainStatus reading back EMPTY, not 109 and not the old 9. So the
   # graceful-SIGTERM half really did land -- terminate_gracefully exists at
   # services.rs:1272 and kill() calls it at 1377 -- but it does not help this
-  # unit. The likely path is the early return at services.rs:1289 ("Graceful
-  # stop: <name> has no live PID, skipping SIGTERM"): a TRANSIENT
-  # Type=notify-reload service appears to lose its main PID before the real
-  # stop, so no SIGTERM is ever sent and `trap leave` never runs. That matches
-  # the earlier diagnosis of this bug, which was deferred as a deep lifecycle
-  # problem after several inconclusive cycles.
+  # unit, and WHICH branch swallows it is not yet known.
   #
-  # Confirming it needs a kmsg probe on terminate_gracefully's entry (self.pid
-  # and the pid_table entry) -- log:: never reaches the console from PID 1.
-  # Do not restart that investigation without budget for it.
+  # Do not assume it is the no-live-PID early return at services.rs:1289. The
+  # lookup just above it (1281-1287) already falls back to scanning the live
+  # PID table precisely because "pid/main_pid ... are cleared on some paths
+  # before the stop (e.g. a transient notify unit)", which is this case, so
+  # that hole looks covered. The other candidates are the ServiceExited/None
+  # check at 1295, the KillMode::None guard at 1273 (the unit sets
+  # KillMode=process, so this should not fire), and everything after the
+  # SIGTERM is actually sent.
+  #
+  # Settling it needs a kmsg probe at terminate_gracefully's entry recording
+  # main_pid, pid, and the unit's pid_table entry -- log:: never reaches the
+  # console from PID 1, only crate::entrypoints::kmsg. An earlier attempt at
+  # this bug burned several cycles on unconfirmed theories, so probe first and
+  # do not patch on a hunch.
   patchScript = ''
         cat > TEST-59-RELOADING-RESTART.sh << 'TESTEOF'
     #!/usr/bin/env bash
