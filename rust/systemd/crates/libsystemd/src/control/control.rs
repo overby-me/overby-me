@@ -9022,10 +9022,15 @@ pub fn execute_command(
                 }
                 deps_to_stop
             };
-            {
-                let ri = run_info.read_poisoned();
-                crate::units::reactivate_unit(id.clone(), &ri).map_err(|e| format!("{e}"))?;
-            }
+            // Pull the unit's Wants=/Requires= dependencies in BEFORE restarting
+            // it, the way `systemctl start` does via collect_unit_start_subgraph.
+            // Restarting first is what upstream does not do, and it cannot work
+            // here: reactivate_unit runs state_transition_starting, which refuses
+            // to leave NeverStarted while a pulled dep is itself NeverStarted, so
+            // it returns a DependencyError that propagates out of this handler and
+            // leaves the dependency-starting code below unreachable in exactly the
+            // case it was written for (e.g. `systemctl restart
+            // systemd-journal-upload` with Wants=network-online.target).
             // Re-start Wants/Requires deps that are Stopped.
             // Reset their status to NeverStarted so the normal activation
             // path picks them up (activate_unit skips StoppedFinal units).
@@ -9075,6 +9080,12 @@ pub fn execute_command(
                 for err in &errs {
                     warn!("Error re-starting dependency after restart: {err}");
                 }
+            }
+            // Now that the pulled dependencies have left NeverStarted, restart
+            // the unit itself.
+            {
+                let ri = run_info.read_poisoned();
+                crate::units::reactivate_unit(id.clone(), &ri).map_err(|e| format!("{e}"))?;
             }
             // Re-activate reverse deps (required_by/bound_by) that were stopped.
             // Use background threads so that Type=notify services that never send
@@ -9157,10 +9168,10 @@ pub fn execute_command(
                         }
                     }
                 }
-                {
-                    let ri = run_info.read_poisoned();
-                    crate::units::reactivate_unit(id.clone(), &ri).map_err(|e| format!("{e}"))?;
-                }
+                // Same ordering fix as the Restart handler above: pull the
+                // Wants=/Requires= dependencies in first, otherwise
+                // reactivate_unit fails with a DependencyError whenever one of
+                // them is still NeverStarted and this code never runs.
                 // Re-start stopped deps (same as Restart handler):
                 // reset Stopped → NeverStarted so activate_unit picks them up.
                 {
@@ -9208,6 +9219,11 @@ pub fn execute_command(
                     for err in &errs {
                         warn!("Error re-starting dependency after restart: {err}");
                     }
+                }
+                // Dependencies are up; now restart the unit itself.
+                {
+                    let ri = run_info.read_poisoned();
+                    crate::units::reactivate_unit(id.clone(), &ri).map_err(|e| format!("{e}"))?;
                 }
             }
         }
@@ -10475,12 +10491,11 @@ pub fn execute_command(
                         }
                     }
                 }
-                {
-                    let ri = run_info_clone.read_poisoned();
-                    if let Err(e) = crate::units::reactivate_unit(id.clone(), &ri) {
-                        log::error!("Background restart error for {unit_name}: {e}");
-                    }
-                }
+                // Same ordering fix as the Restart handlers: the pulled
+                // dependencies have to leave NeverStarted before reactivate_unit
+                // runs, or state_transition_starting refuses the restart. Here
+                // the error is only logged rather than propagated, so the restart
+                // silently failed while the dependency work below still ran.
                 // Re-start stopped deps: reset Stopped → NeverStarted
                 {
                     let ri = run_info_clone.read_poisoned();
@@ -10526,6 +10541,13 @@ pub fn execute_command(
                     let errs = crate::units::activate_needed_units(dep_id, run_info_clone.clone());
                     for err in &errs {
                         log::error!("Error re-starting dependency after restart: {err}");
+                    }
+                }
+                // Dependencies are up; now restart the unit itself.
+                {
+                    let ri = run_info_clone.read_poisoned();
+                    if let Err(e) = crate::units::reactivate_unit(id.clone(), &ri) {
+                        log::error!("Background restart error for {unit_name}: {e}");
                     }
                 }
             });
