@@ -70,6 +70,35 @@ script to `/testok`). 34-DYNAMICUSERMIGRATE was the other fake pass; it is now a
 honest skip carrying its real first failure, so no test claims success without
 running. There are no fake passes left.
 
+## Verification sweep, 2026-07-28 (later the same day)
+
+About 60 wrappers were run across roughly 20 families, chosen to spread over
+tests that had never been sampled rather than to re-run known ones. The point
+was to check the ledger's claims from the outside, especially "no fake passes
+left".
+
+Two real failures surfaced.
+
+| Test | Result |
+|------|--------|
+| 07-PID1 multi-exec-start | FAILED, now FIXED. A `Type=oneshot` with several `ExecStart=` ignored a failing preliminary command, because the deferred driver discarded `wait_for_helper_child`'s result while `Service::run_cmd` checks it. Fixing that exposed a second defect: reporting the failure without moving the unit out of `Starting` re-ran the whole sequence about every 61s forever. |
+| 59-RELOADING-RESTART | FAILS. Its wrapper described the graceful-SIGTERM fix as though the subtest passed; the note now records the real stop point. |
+
+Everything else was either a genuine pass or an honest declared skip. Short
+logs are common and are usually fine: `31-DEVICE-ENUMERATION` traces three
+lines because the upstream script really is ten lines, and
+`66-DEVICE-ISOLATION`, `44-LOG-NAMESPACE`, `52-HONORFIRSTSHUTDOWN` are
+similarly small. `43-PRIVATEUSER-UNPRIV` and `64-UDEV-STORAGE` produce no
+script trace at all, and both are `expectedSkip` entries whose wrappers
+replace the script with `exit 77`, which is what a declared skip should look
+like.
+
+So the "no fake passes" claim held everywhere it was tested. When judging a
+short or empty log, read the wrapper for `expectedSkip`/`patchScript`, read
+the upstream `test/units/<NAME>.sh`, and grep the log for `testok|skipped`;
+length alone proves nothing. A zero-length log with a non-zero exit is
+usually a mistyped attribute name rather than a failure.
+
 Environment-only patches are legitimate and are not tracked here. They are:
 deleting `systemctl --no-block exit 123` (upstream's own VM-teardown line, which the
 NixOS driver replaces with the `/testok` marker); rewriting bare `sleep`/`true`/`touch`
