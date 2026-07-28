@@ -23,6 +23,28 @@ Audited 2026-07-26 against nixpkgs systemd v258
 
 37 tests carry a real override.
 
+## Subtest registration audit, 2026-07-28
+
+Every upstream `TEST-NN-FAMILY.subtest.sh` was compared against the registered
+wrappers, not just one family. **209 upstream subtests, 207 registered.**
+Coverage is far better than the override counts alone suggest.
+
+The gaps:
+
+| Upstream subtest | Status |
+|------------------|--------|
+| `TEST-07-PID1.alias-corruption` | Was unregistered; now registered, and it FAILED on its first run with a real MainPID bug. |
+| `TEST-29-PORTABLE.user` | Unregistered. Self-skips in this VM anyway: it requires systemd-mountfsd.socket, systemd-nsresourced.socket, mksquashfs, the BPF LSM, libbpf, kernel >= 6.5, polkit >= 124 and a BTF build. Registering it would add a skip, not coverage. |
+| `TEST-50-DISSECT.encrypted` | Unregistered. Belongs to the DISSECT cluster already blocked on missing mkosi image fixtures. |
+
+Three others looked missing but are registered under shortened names, so do not
+re-report them: `stopped-socket-activation` → `04-journal-stopped-socket`,
+`SYSTEMD_JOURNAL_COMPRESS` → `04-journal-compress`, `JoinsNamespaceOf` →
+`23-unit-file-joinsnamespace-of`.
+
+Note also that the 07 family carries 91 wrappers against 51 upstream subtests,
+so roughly 40 are hand-written additions rather than substitutions.
+
 ## Sweep, 2026-07-28
 
 Four tests not previously examined were run to sample the suite rather than
