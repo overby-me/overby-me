@@ -351,7 +351,6 @@ pub(super) fn app_crumb_label(app: &str) -> String {
         "map" => t("mime.map"),
         "perm" => t("mime.permissions"),
         "parent" => t("mime.parent"),
-        "profile" => t("mime.profile"),
         "redirect" => t("mime.redirect"),
         "cow" => t("mime.cow"),
         other => other.to_string(),

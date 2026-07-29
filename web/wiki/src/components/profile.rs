@@ -373,15 +373,25 @@ fn ContributionItem(node: model::ChildNodeFields) -> Element {
     }
 }
 
-/// A per-user public profile viewed by user id (`/profile/:id`): the person's
-/// name + avatar and the groups/events you share with them. The memberships
-/// query is filtered by what the viewer may see, so it is the intersection —
-/// permission-safe. Distinct from the self-only [`ProfileApp`]; user
-/// representations across the app link here via [`super::loader::UserPopover`].
+/// The profile route (`/profile/:id`) — the one place a person is shown.
+///
+/// Your own id renders the full self view ([`ProfileApp`]: identity, the Bluesky
+/// link, your contributions). Anyone else's renders what you may see of them:
+/// their name + avatar and the groups and events you share. The memberships
+/// query is filtered by what the VIEWER may see, so it is the intersection —
+/// permission-safe. User representations across the app link here via
+/// [`super::loader::UserPopover`].
 #[component]
 pub fn UserProfile(id: String) -> Element {
     let session = use_session();
     let access_token = session.read().access_token.clone();
+
+    // Your own profile is the richer view, and it is the same page — there is no
+    // separate `?app=profile` any more.
+    let is_me = session.read().user.as_ref().map(|u| u.id.clone()) == Some(id.clone());
+    if is_me {
+        return rsx! { ProfileApp {} };
+    }
 
     let uid = id.clone();
     let tok = access_token.clone();
@@ -421,9 +431,6 @@ pub fn UserProfile(id: String) -> Element {
                 }
                 div {
                     h3 { class: "profile-hero-name", "{name}" }
-                    if !contexts.is_empty() {
-                        span { class: "count-badge", "{contexts.len()} · {t(\"profile.memberships\")}" }
-                    }
                 }
             }
         }
@@ -441,19 +448,49 @@ pub fn UserProfile(id: String) -> Element {
             } else {
                 div { class: "list",
                     for ctx in contexts.iter() {
-                        Link {
-                            key: "{ctx.id.0}",
-                            to: Route::PathPage { segments: vec![ctx.key.clone()], app: None },
-                            class: "list-link",
-                            super::widgets::ListItem {
-                                headline: ctx.name.clone(),
-                                leading: rsx! {
-                                    div { class: "avatar small", {icon_el(ctx.mime_id.as_deref().unwrap_or(""))} }
-                                },
-                            }
-                        }
+                        SharedContextItem { key: "{ctx.id.0}", node: ctx.clone() }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// One shared group/event row. Resolves the context's full ancestor path on
+/// click rather than linking to its bare key: a group or event nested inside
+/// another lives at `/parent/child`, so the one-segment link 404'd for exactly
+/// those. Mirrors the home list's `ContextItem`.
+#[component]
+fn SharedContextItem(node: model::ContextNodeFields) -> Element {
+    let session = use_session();
+    let nav = use_navigator();
+    let node_id = node.id.0.clone();
+    let key = node.key.clone();
+
+    rsx! {
+        div {
+            class: "list-link",
+            onclick: move |_| {
+                let node_id = node_id.clone();
+                let key = key.clone();
+                let token = session.read().access_token.clone();
+                spawn(async move {
+                    let mut segments = graphql::path_from_id(token.as_deref(), &node_id)
+                        .await
+                        .unwrap_or_default();
+                    // A path we cannot resolve is still better attempted than
+                    // dropped: the bare key works for a top-level context.
+                    if segments.is_empty() {
+                        segments = vec![key];
+                    }
+                    nav.push(Route::PathPage { segments, app: None });
+                });
+            },
+            super::widgets::ListItem {
+                headline: node.name.clone(),
+                leading: rsx! {
+                    div { class: "avatar small", {icon_el(node.mime_id.as_deref().unwrap_or(""))} }
+                },
             }
         }
     }

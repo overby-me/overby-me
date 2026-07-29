@@ -112,7 +112,8 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     // directly — otherwise the empty-path HomeApp short-circuit below would
     // swallow `/?app=profile` and show the home page instead.
     match app.as_deref() {
-        Some("profile") => return rsx! { super::profile::ProfileApp {} },
+        // No `profile` arm: a person is shown at /profile/:id, your own id
+        // included, so there is one profile page rather than two.
         Some("parent") => return rsx! { super::parent::ParentApp {} },
         Some("feedback") => return rsx! { super::feedback_app::FeedbackApp {} },
         _ => {}
@@ -620,9 +621,6 @@ pub fn UserPopover(
     // Anchors the card to the trigger (set from the opening click's position).
     let mut anchor_style = use_signal(String::new);
     let nav = use_navigator();
-    let session = use_session();
-    let my_id = session.read().user.as_ref().map(|u| u.id.clone());
-    let is_me = user_id.is_some() && user_id == my_id;
     // A linked Bluesky account is recognisable from its avatar URL: the bsky CDN
     // path embeds the account's DID, and bsky.app resolves profile URLs by DID —
     // so the popover can link to their Bluesky profile with no extra lookup.
@@ -692,11 +690,9 @@ pub fn UserPopover(
                         onclick: move |e| {
                             e.stop_propagation();
                             open.set(false);
-                            if is_me {
-                                nav.push(Route::Home { app: Some("profile".to_string()) });
-                            } else {
-                                nav.push(Route::UserProfile { id: uid.clone() });
-                            }
+                            // One destination for everyone, yourself included —
+                            // /profile/:id renders the self view for your own id.
+                            nav.push(Route::UserProfile { id: uid.clone() });
                         },
                         span { class: "material-icons", "person" }
                         " {t(\"profile.viewProfile\")}"

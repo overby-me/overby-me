@@ -45,6 +45,8 @@ pub(super) fn UserMenu() -> Element {
         .as_ref()
         .map(|u| u.email.clone())
         .unwrap_or_default();
+    // Your own id, so the identity card can open your profile at /profile/:id.
+    let my_id = session.read().user.as_ref().map(|u| u.id.clone());
 
     rsx! {
         div { class: "user-menu in-drawer",
@@ -87,12 +89,18 @@ pub(super) fn UserMenu() -> Element {
                     // Signed-in identity header (the old wiki had no user card in
                     // the sidebar; this belongs with the account menu instead).
                     if is_auth {
-                        // The identity card doubles as a shortcut to your profile.
+                        // The identity card IS the link to your profile — the one
+                        // route for everyone, your own id included.
                         button {
                             class: "user-menu-header",
-                            onclick: move |_| {
-                                menu_open.set(false);
-                                nav.push(Route::Home { app: Some("profile".to_string()) });
+                            onclick: {
+                                let my_id = my_id.clone();
+                                move |_| {
+                                    menu_open.set(false);
+                                    if let Some(id) = my_id.clone() {
+                                        nav.push(Route::UserProfile { id });
+                                    }
+                                }
                             },
                             span { class: "avatar secondary",
                                 {crate::components::loader::user_avatar(&avatar_url, rsx! { "{initial}" })}
@@ -213,17 +221,9 @@ pub(super) fn UserMenu() -> Element {
                         }
                     }
                     if is_auth {
-                        // Your profile (memberships + the link-Bluesky card). Only
-                        // reachable here, so keep it above the account actions.
-                        button {
-                            class: "list-item",
-                            onclick: move |_| {
-                                menu_open.set(false);
-                                nav.push(Route::Home { app: Some("profile".to_string()) });
-                            },
-                            span { class: "material-icons", "person" }
-                            " {t(\"layout.profile\")}"
-                        }
+                        // No separate "Profile" row: the identity card at the top
+                        // of this menu is the way to your profile, and two links to
+                        // one page is one too many.
                         button {
                             class: "list-item",
                             onclick: move |_| {

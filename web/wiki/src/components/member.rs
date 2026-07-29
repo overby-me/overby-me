@@ -135,8 +135,13 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                             }
                             button {
                                 class: "btn btn-primary",
-                                onclick: move |_| {
-                                    nav.push(Route::Home { app: Some("profile".to_string()) });
+                                onclick: {
+                                    let my_id = user_id.clone();
+                                    move |_| {
+                                        if let Some(id) = my_id.clone() {
+                                            nav.push(Route::UserProfile { id });
+                                        }
+                                    }
                                 },
                                 "{t(\"member.linkNudgeAction\")}"
                             }
