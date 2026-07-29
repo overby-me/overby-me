@@ -350,6 +350,7 @@ fn ContributionItem(node: model::ChildNodeFields) -> Element {
         node.name.clone()
     };
     let parent_name = node.parent.as_ref().map(|p| p.name.clone());
+    let created = node.created_at.as_ref().map(|c| c.0.clone());
 
     rsx! {
         div {
@@ -368,8 +369,23 @@ fn ContributionItem(node: model::ChildNodeFields) -> Element {
             div { class: "avatar small", {icon_el(&mime)} }
             div { class: "list-item-text",
                 div { class: "list-item-primary", "{primary}" }
-                if let Some(pn) = parent_name {
-                    div { class: "list-item-secondary", "{pn}" }
+                // Where and when, on one secondary line — the same relative time
+                // (with the exact date on hover) the home "Newest" list shows.
+                if parent_name.is_some() || created.is_some() {
+                    div { class: "list-item-secondary",
+                        if let Some(pn) = parent_name.as_ref() {
+                            span { "{pn}" }
+                        }
+                        if let Some(iso) = created.as_ref() {
+                            if parent_name.is_some() {
+                                span { " \u{00b7} " }
+                            }
+                            span {
+                                title: "{super::loader::full_datetime(iso)}",
+                                "{super::loader::relative_time(iso)}"
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -491,11 +507,12 @@ pub fn UserProfile(id: String) -> Element {
                 }
             }
         }
-        // What they have written — the same card your own profile carries.
+        // What they have written — the same card your own profile carries, but
+        // titled without the "Your", since this is someone else's page.
         div { class: "card mt-1",
             div { class: "card-header",
                 div { class: "avatar small", span { class: "material-icons", "history_edu" } }
-                h3 { class: "title-medium", "{t(\"profile.contributions\")}" }
+                h3 { class: "title-medium", "{t(\"profile.contributionsOther\")}" }
             }
             {match &contrib_state {
                 None => rsx! {
