@@ -46,27 +46,7 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let filter = use_signal(|| "all".to_string());
     let page = use_signal(|| 0usize);
 
-    let member_filter = {
-        let mut mf = model::MemberPageFilter {
-            search: search.read().clone(),
-            ..Default::default()
-        };
-        match filter.read().as_str() {
-            "owners" => mf.owner = Some(true),
-            "active" => mf.active = Some(true),
-            "invited" => {
-                mf.accepted = Some(false);
-                mf.hidden = Some(false);
-            }
-            "hidden" => mf.hidden = Some(true),
-            _ => {}
-        }
-        // Non-managers never see hidden members.
-        if !can_manage && mf.hidden.is_none() {
-            mf.hidden = Some(false);
-        }
-        mf
-    };
+    let member_filter = roster_filter(filter.read().as_str(), search.read().clone(), can_manage);
 
     let token = session.read().access_token.clone();
     let cur_page = *page.read();
@@ -537,14 +517,49 @@ fn member_columns(can_manage: bool) -> Vec<String> {
     c
 }
 
+/// The server-side predicate behind a roster filter chip.
+///
+/// The chips are named after `accepted`, the column that actually says whether
+/// someone joined. They used to say "Active", which is a different column
+/// entirely — attendance, toggled per row — and an invitation is created with
+/// `active = true` and `accepted = false`. So "Active" returned the whole roster:
+/// on the 2026 landsmøde, 887 rows of which 830 were invitations, each one
+/// labelled "Invitation" in its own status column. One word, two meanings, and
+/// the filter picked the wrong one.
+fn roster_filter(chip: &str, search: String, can_manage: bool) -> model::MemberPageFilter {
+    let mut mf = model::MemberPageFilter {
+        search,
+        ..Default::default()
+    };
+    match chip {
+        "owners" => mf.owner = Some(true),
+        "accepted" => mf.accepted = Some(true),
+        "invited" => {
+            mf.accepted = Some(false);
+            mf.hidden = Some(false);
+        }
+        "hidden" => mf.hidden = Some(true),
+        _ => {}
+    }
+    // Non-managers never see hidden members. Unconditional, not "unless one was
+    // asked for": the previous `is_none()` guard let a "hidden" chip value
+    // through untouched, which contradicted this line. Only the chip list keeps
+    // that value away from non-managers, and a UI list is not where an access
+    // rule belongs.
+    if !can_manage {
+        mf.hidden = Some(false);
+    }
+    mf
+}
+
 /// The roster filter chips as `(value, label)` (Hidden only for managers). The
-/// values map to the server-side predicate built in `MemberApp`.
+/// values map to the server-side predicate built by [`roster_filter`].
 fn member_filters(can_manage: bool) -> Vec<(String, String)> {
     let mut f = vec![
         ("all".to_string(), t("member.filterAll")),
         ("owners".to_string(), t("member.owner")),
-        ("active".to_string(), t("member.active")),
-        ("invited".to_string(), t("invite.invitations")),
+        ("accepted".to_string(), t("member.accepted")),
+        ("invited".to_string(), t("member.invited")),
     ];
     if can_manage {
         f.push(("hidden".to_string(), t("member.hidden")));
@@ -553,16 +568,20 @@ fn member_filters(can_manage: bool) -> Vec<(String, String)> {
 }
 
 /// The M3 status chip (icon + label) for a member's state: hidden > owner >
-/// active > pending-invitation.
+/// accepted > still-invited.
+///
+/// Says `accepted`/`invited`, matching the filter chips. It used to say "Active"
+/// for an accepted member, which read as though it described the attendance flag
+/// this column never consults.
 fn member_status(m: &MemberFields) -> (&'static str, String) {
     if m.hidden {
         ("visibility_off", t("member.hidden"))
     } else if m.owner {
         ("star", t("member.owner"))
     } else if m.accepted {
-        ("check_circle", t("member.active"))
+        ("check_circle", t("member.accepted"))
     } else {
-        ("mail", t("invite.invitations"))
+        ("mail", t("member.invited"))
     }
 }
 
@@ -835,4 +854,66 @@ fn apply_member_update(token: Option<String>, id: String, set: MembersSetInput) 
             _ => show_snackbar(&t("error.somethingWentWrong")),
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepted_excludes_pending_invitations() {
+        // The reported bug: an invitation is stored with active = true and
+        // accepted = false, so a chip that filtered on attendance returned it
+        // alongside people who had actually joined.
+        let f = roster_filter("accepted", String::new(), true);
+        assert_eq!(f.accepted, Some(true));
+        // Attendance is a separate question, and not this chip's.
+        assert_eq!(f.active, None);
+    }
+
+    #[test]
+    fn the_accepted_and_invited_chips_cannot_both_match_a_row() {
+        let accepted = roster_filter("accepted", String::new(), true);
+        let invited = roster_filter("invited", String::new(), true);
+        assert_eq!(accepted.accepted, Some(true));
+        assert_eq!(invited.accepted, Some(false));
+    }
+
+    #[test]
+    fn the_old_active_value_no_longer_selects_anything() {
+        // Renamed, so a stale value must fall through to "everything" rather
+        // than silently filtering on the attendance column again.
+        let f = roster_filter("active", String::new(), true);
+        assert_eq!(f.accepted, None);
+        assert_eq!(f.active, None);
+    }
+
+    #[test]
+    fn only_managers_may_ask_for_hidden_members() {
+        assert_eq!(
+            roster_filter("hidden", String::new(), true).hidden,
+            Some(true)
+        );
+        // Asking as a non-manager is overridden, not honoured — the chip list
+        // hides the option, but that is a UI list, not an access rule.
+        assert_eq!(
+            roster_filter("hidden", String::new(), false).hidden,
+            Some(false)
+        );
+        assert_eq!(
+            roster_filter("all", String::new(), false).hidden,
+            Some(false)
+        );
+        assert_eq!(roster_filter("all", String::new(), true).hidden, None);
+    }
+
+    #[test]
+    fn the_search_text_survives_every_chip() {
+        for chip in ["all", "owners", "accepted", "invited", "hidden"] {
+            assert_eq!(
+                roster_filter(chip, "pauline".into(), true).search,
+                "pauline"
+            );
+        }
+    }
 }
