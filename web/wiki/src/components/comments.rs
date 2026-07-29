@@ -96,10 +96,6 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
         graphql::query_comments(token.as_deref(), &nid).await
     });
     let state = comments.read().clone();
-    let count = match &state {
-        Some(Ok(list)) => list.len(),
-        _ => 0,
-    };
 
     // Live: refetch when any comment/reply in this context (or, lacking a context,
     // directly under this node) changes, so new comments and replies appear at
@@ -154,9 +150,6 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
             div { class: "card-header",
                 div { class: "avatar small", {crate::components::loader::icon_el("vote/comment")} }
                 h3 { class: "title-medium", "{t(\"vote.comments\")}" }
-                if count > 0 {
-                    span { class: "count-badge", "{count}" }
-                }
             }
             div { class: "card-content",
                 if is_auth && can_comment {
