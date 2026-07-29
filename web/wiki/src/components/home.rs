@@ -209,8 +209,18 @@ fn RecentContents() -> Element {
             spawn(async move {
                 let page =
                     graphql::query_recent_nodes(token.as_deref(), FEED_PAGE, offset, &uid).await;
+                // Ask for more only while pages come back full — a short page is
+                // the end. Judged on what the server sent, before deduping.
                 has_more.set(page.len() as i32 == FEED_PAGE);
-                items.write().extend(page);
+                // Never append a row already on screen. Offset paging repeats
+                // rows whenever something is inserted between two fetches, and a
+                // repeat is not merely untidy here: the list is keyed by id, and
+                // Dioxus panics on duplicate keys among siblings.
+                let mut list = items.write();
+                let seen: std::collections::HashSet<String> =
+                    list.iter().map(|n| n.id.0.clone()).collect();
+                list.extend(page.into_iter().filter(|n| !seen.contains(&n.id.0)));
+                drop(list);
                 loading.set(false);
             });
         }));

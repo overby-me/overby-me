@@ -591,6 +591,12 @@ pub struct NodesOrderBy {
     pub index: Option<OrderBy>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<OrderBy>,
+    // A tiebreaker, so a paged query is deterministic. Rows created in the same
+    // instant (a burst of reactions, an import) have no inherent order, and
+    // Postgres is free to return them differently per query — which makes
+    // offset paging repeat some rows and skip others.
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub id: Option<OrderBy>,
 }
 
 // --- Query: children of a node, filtered + ordered (drawer MenuList) ---
@@ -2905,6 +2911,7 @@ pub async fn query_user_contributions(
     let order_by = vec![NodesOrderBy {
         created_at: Some(OrderBy::Desc),
         index: None,
+        id: Some(OrderBy::Desc),
     }];
     let op = RecentNodesQuery::build(RecentNodesVariables {
         where_clause,
@@ -2965,6 +2972,7 @@ pub async fn query_recent_nodes(
     let order_by = vec![NodesOrderBy {
         created_at: Some(OrderBy::Desc),
         index: None,
+        id: Some(OrderBy::Desc),
     }];
     let op = RecentNodesQuery::build(RecentNodesVariables {
         where_clause,
@@ -3793,10 +3801,12 @@ fn drawer_child_order() -> Vec<NodesOrderBy> {
         NodesOrderBy {
             index: Some(OrderBy::Asc),
             created_at: None,
+            id: None,
         },
         NodesOrderBy {
             index: None,
             created_at: Some(OrderBy::Asc),
+            id: None,
         },
     ]
 }
