@@ -13,7 +13,13 @@ dev:
     {{dx}} serve
 
 build:
-    {{dx}} build --release {{remote_logging}}
+    # --debug-symbols keeps the DWARF line tables through wasm-bindgen and
+    # wasm-opt; split-symbols.nu then moves them out of the shipped binary into a
+    # sidecar, so a crash can be traced to a source line without every visitor
+    # downloading 20 MB of debug info. Costs ~2% on the bundle, because wasm-opt
+    # optimises less aggressively when it has to keep the mapping valid.
+    {{dx}} build --release --debug-symbols true {{remote_logging}}
+    nu scripts/split-symbols.nu
     # dx drops files from assets/ it doesn't recognize, so copy them into the
     # served root ourselves. This is the single source of truth for the deploy
     # bundle — the Nix package (default.nix) runs `just build`, so both match.
@@ -37,6 +43,8 @@ deploy-build:
     echo "frontend bundle: $out"
     echo "Upload the CONTENTS of that directory to statichost.eu (dev.radikal.wiki),"
     echo "keeping sw.js at the served root so its scope is '/'."
+    echo "Include symbols/ — the backend fetches it to turn crash reports into"
+    echo "source lines. No reader ever downloads it."
 
 check:
     cargo check --target wasm32-unknown-unknown

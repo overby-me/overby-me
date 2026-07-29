@@ -17,6 +17,10 @@
         dioxus-cli
         wasm-bindgen-cli
         binaryen
+        # Splits the DWARF out of the built wasm into a sidecar, so a crash can
+        # be traced to a source line without shipping ~20 MB to every visitor
+        # (scripts/split-symbols.nu).
+        wasm-tools
         lld
         # Browser testing (test-browser.nu): headless Servo driven over WebDriver.
         curl

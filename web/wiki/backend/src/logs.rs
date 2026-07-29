@@ -41,8 +41,13 @@ async fn ingest_inner(
         .map_err(|_| AppError::BadRequest("log body too large".into()))?;
     // Validate it parses as JSON before forwarding, so this proxy can't be used
     // to relay arbitrary bytes to the ingest host.
-    let batch: serde_json::Value = serde_json::from_slice(&bytes)
+    let mut batch: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| AppError::BadRequest("log body not JSON".into()))?;
+
+    // Resolve the wasm frames while the entry is passing through: a stack of
+    // `wasm-function[4231]:0x1d4c0` is unreadable in Better Stack, and the sink
+    // has no way to make sense of it later.
+    symbolicate_batch(cfg, client, &mut batch).await;
 
     let url = format!("https://{}/", cfg.betterstack_host);
     client
@@ -53,4 +58,26 @@ async fn ingest_inner(
         .await
         .map_err(|e| AppError::Upstream(format!("log ship failed: {e}")))?;
     Ok(())
+}
+
+/// Rewrite the `stack` of every entry in a batch, in place.
+///
+/// The frontend sends either one entry or an array of them, and only entries
+/// that actually carry a wasm stack cost anything — `resolve_stack` returns the
+/// input untouched when it finds no bundle hash, so ordinary JS stacks and
+/// stackless entries pass straight through.
+async fn symbolicate_batch(cfg: &Config, client: &reqwest::Client, batch: &mut serde_json::Value) {
+    let entries: Vec<&mut serde_json::Value> = match batch {
+        serde_json::Value::Array(items) => items.iter_mut().collect(),
+        single => vec![single],
+    };
+    for entry in entries {
+        let Some(stack) = entry.get("stack").and_then(|s| s.as_str()) else {
+            continue;
+        };
+        let resolved = crate::symbolicate::resolve_stack(client, &cfg.app_origin, stack).await;
+        if let Some(obj) = entry.as_object_mut() {
+            obj.insert("stack".into(), serde_json::Value::String(resolved));
+        }
+    }
 }

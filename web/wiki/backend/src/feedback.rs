@@ -47,6 +47,11 @@ async fn submit_inner(
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
         .ok_or(AppError::BadRequest("missing message".into()))?;
+    // A crash report carries the panic's stack in its message, so it gets the
+    // same treatment as a shipped log entry — otherwise the one report a reader
+    // deliberately chose to send would be the least readable thing in the sink.
+    // Ordinary feedback has no wasm frames and passes through untouched.
+    message = crate::symbolicate::resolve_stack(client, &cfg.app_origin, &message).await;
     message.truncate(MAX_MESSAGE);
     let kind = match get("kind").as_deref() {
         Some("bug") => "bug",

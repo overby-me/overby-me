@@ -42,9 +42,31 @@ pub fn install_hook(report: fn(&std::panic::PanicHookInfo<'_>)) {
     std::panic::set_hook(Box::new(move |info| {
         console_error_panic_hook::hook(info);
         report(info);
-        PANIC_MESSAGE.with(|m| *m.borrow_mut() = info.to_string());
+        // Message AND stack. The panic's own location is in the message, but for
+        // the crash that prompted all this it was `dioxus-core/src/diff/…` — a
+        // dependency. Which of OUR components was rendering is only in the stack,
+        // and the backend resolves its wasm offsets to source lines on the way to
+        // Better Stack (see backend/src/symbolicate.rs).
+        PANIC_MESSAGE.with(|m| {
+            *m.borrow_mut() = match js_stack() {
+                Some(stack) => format!("{info}\n{stack}"),
+                None => info.to_string(),
+            }
+        });
         show_overlay();
     }));
+}
+
+/// The JS call stack at this moment, from a throwaway `Error`. Its wasm frames
+/// carry the module URL and a code offset, which is what the backend needs to
+/// resolve them to source lines.
+fn js_stack() -> Option<String> {
+    let err = js_sys::Error::new("");
+    js_sys::Reflect::get(&err, &wasm_bindgen::JsValue::from_str("stack"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// A JS string literal for `text`, quoted and escaped. Via `serde_json` because

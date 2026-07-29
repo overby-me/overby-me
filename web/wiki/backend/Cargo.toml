@@ -13,6 +13,11 @@ name = "wiki-backend"
 path = "src/main.rs"
 
 [dependencies]
+# Crash symbolication: resolve the wasm code offsets in a reported stack back to
+# `file:line` against the DWARF sidecar the frontend build produces. `addr2line`
+# wraps `gimli` with the lookup logic; `object` parses the wasm container. Both
+# are pure Rust, so the minimal rustls container needs nothing new.
+addr2line = "0.24"
 axum = "0.8.6"
 # Just the pure-Rust stream combinators (buffer_unordered) for concurrent push
 # fan-out; no executor/thread-pool pulled in.
@@ -21,6 +26,10 @@ futures = { version = "0.3", default-features = false, features = [
   "std"
 ] }
 http = "1.3.1"
+object = { version = "0.36", default-features = false, features = [
+  "read",
+  "wasm"
+] }
 # rustls-tls (not the default native-tls/openssl): self-contained TLS with the CA
 # roots compiled in (webpki-roots), so the minimal container image needs no system
 # libssl and no ca-certificates for outbound HTTPS.

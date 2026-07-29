@@ -31,6 +31,7 @@ mod push;
 mod roster;
 mod statecookie;
 mod store;
+mod symbolicate;
 mod util;
 mod vote;
 

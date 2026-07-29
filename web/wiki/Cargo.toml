@@ -103,7 +103,17 @@ web = ["dioxus/router", "dioxus/web"]
 [profile.wasm-release]
 inherits = "release"
 opt-level = "s"
-strip = true
+# Keep DWARF line tables so a crash can be traced to a source line. They do NOT
+# ship: scripts/split-symbols.nu moves them into a sidecar after the build, and
+# the backend resolves reported offsets against it. Line tables only, since the
+# full DWARF is ~26 MB and nothing here reads variables.
+#
+# It is not free even so — the bundle grows ~2% because wasm-opt optimises less
+# aggressively when it has to keep the mapping valid. That buys readable stacks
+# for every reported error, which the alternative (shipping the name section)
+# could not do for a fifth of the cost.
+debug = "line-tables-only"
+strip = false
 lto = "fat"
 panic = "abort"
 codegen-units = 1
