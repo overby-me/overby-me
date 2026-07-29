@@ -152,9 +152,18 @@ fn update_keyboard_inset() {
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
     let covered = layout - (number("height") + number("offsetTop"));
+    // Pinch-zoom shrinks the visual viewport too, and it is not a keyboard —
+    // lifting the dock then would move it for no reason. Scale is 1 whenever the
+    // page is not zoomed, which is the only state a keyboard inset means
+    // anything in.
+    let zoomed = number("scale") > 1.01;
     // Below this it is rounding or rubber-banding, not a keyboard; treating it
     // as one would make the dock twitch on every scroll.
-    let inset = if covered < 24.0 { 0.0 } else { covered };
+    let inset = if zoomed || covered < 24.0 {
+        0.0
+    } else {
+        covered
+    };
     if let Some(html) = win
         .document()
         .and_then(|d| d.document_element())
