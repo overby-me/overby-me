@@ -7,10 +7,16 @@ use crate::session::use_session;
 
 use super::loader::icon_el;
 
-/// ParentApp — the "Missing parent" admin view (#149): lists nodes whose
-/// `parentId` is null, i.e. that have lost their parent. The single legitimate
+/// ParentApp — the "Missing parent" admin view (#149): lists nodes that have
+/// lost their parent, so they can be inspected and purged. The single legitimate
 /// root (the home node) is filtered out, so anything shown is an orphan worth
 /// investigating. Reachable via `?app=parent`.
+///
+/// "Lost its parent" is mostly NOT a null `parentId`. There is no foreign key on
+/// that column, so deleting a node leaves its children pointing at an id that is
+/// no longer there — a reaction outlives the comment it sat on exactly this way.
+/// [`graphql::query_orphans`] looks for both shapes; before it did, this view was
+/// permanently empty while hundreds of orphans existed.
 #[component]
 pub fn ParentApp() -> Element {
     let session = use_session();

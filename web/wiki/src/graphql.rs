@@ -735,6 +735,13 @@ pub struct NodesBoolExp {
     // Used to keep the "Newest" list to contexts the user belongs to.
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub context: Option<Box<NodesBoolExp>>,
+    #[cynic(rename = "_not", skip_serializing_if = "Option::is_none")]
+    pub not: Option<Box<NodesBoolExp>>,
+    // The node's parent row. `_not: { parent: {} }` is how an orphan is found:
+    // `parent_id` still holds the deleted parent's id (there is no foreign key
+    // on it), so the id is not null — the row it points at simply is not there.
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Box<NodesBoolExp>>,
 }
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -3693,10 +3700,33 @@ pub async fn query_orphans(
     access_token: Option<&str>,
 ) -> Result<Vec<model::ContextNodeFields>, String> {
     let where_clause = NodesBoolExp {
-        parent_id: Some(UuidComparisonExp {
-            is_null: Some(true),
-            eq: None,
-        }),
+        or: Some(vec![
+            // Parentless outright. Only the home node should be here, and the
+            // caller filters it out.
+            NodesBoolExp {
+                parent_id: Some(UuidComparisonExp {
+                    is_null: Some(true),
+                    eq: None,
+                }),
+                ..Default::default()
+            },
+            // The real orphans: a parent id pointing at a row that no longer
+            // exists. Deleting a node does not null its children's parent_id —
+            // there is no foreign key — so this, not `is_null`, is what losing a
+            // parent actually looks like. A reaction outlives the comment it was
+            // on this way.
+            NodesBoolExp {
+                parent_id: Some(UuidComparisonExp {
+                    is_null: Some(false),
+                    eq: None,
+                }),
+                not: Some(Box::new(NodesBoolExp {
+                    parent: Some(Box::new(NodesBoolExp::default())),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        ]),
         ..Default::default()
     };
     let operation = ContextsWhereQuery::build(NodesWhereVariables { where_clause });
