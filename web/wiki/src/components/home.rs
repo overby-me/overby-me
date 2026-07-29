@@ -177,7 +177,7 @@ fn RecentContents() -> Element {
         div { class: "card mt-2",
             div { class: "card-header",
                 div { class: "avatar small", span { class: "material-icons", "schedule" } }
-                h3 { class: "title-medium", "{t(\"layout.newestContent\")}" }
+                h3 { class: "title-medium", "{t(\"layout.feed\")}" }
             }
             div { class: "list",
                 for node in items.iter() {
