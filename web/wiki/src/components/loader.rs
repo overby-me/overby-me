@@ -902,18 +902,43 @@ fn mime_icon_by_prefix(mime_id: &str) -> &'static str {
 /// The URL-safe base of a node key: lowercase, non-alphanumerics collapsed to
 /// single dashes, trimmed. Pure (no browser globals) so it is unit-testable.
 pub fn slug_base(name: &str) -> String {
+    // Lowered once, as chars, so a hyphen can look at what follows it.
+    let lowered = name.trim().to_lowercase();
+    let chars: Vec<char> = lowered.chars().collect();
     let mut base = String::new();
-    let mut prev_dash = false;
-    for c in name.trim().to_lowercase().chars() {
+    let mut prev_sep = true; // nothing yet, so a leading separator is dropped
+    for (i, &c) in chars.iter().enumerate() {
+        // Letters and digits, kept as they are. `is_alphanumeric` is Unicode-aware,
+        // so ø, æ and å survive — the wiki's keys have always carried them
+        // (`landsmøde_2026`), and stripping them now would slug a name differently
+        // than it has been slugged for years.
         if c.is_alphanumeric() {
             base.push(c);
-            prev_dash = false;
-        } else if !prev_dash {
+            prev_sep = false;
+            continue;
+        }
+        // A hyphen BETWEEN two letters belongs to the word, not to the spacing:
+        // `Saint-Laguë`, `to-statsløsningen`. 415 of the wiki's 3729 navigable
+        // keys carry one for that reason, so folding it into a separator would
+        // spell the same convention a third way. A hyphen used as punctuation —
+        // `Klima-, og …`, `fra - en …`, `Trim -- Me` — is spacing, and becomes
+        // one separator like any other.
+        let joins_words =
+            c == '-' && !prev_sep && chars.get(i + 1).is_some_and(|next| next.is_alphanumeric());
+        if joins_words {
             base.push('-');
-            prev_dash = true;
+            prev_sep = false;
+        } else if !prev_sep {
+            // Everything else becomes an UNDERSCORE, which is what every key in
+            // the wiki uses. This emitted a hyphen, so a new node read
+            // `asger-holm-ørskov` beside the existing `asger_holm_ørskov`: one
+            // convention, two spellings, forever.
+            base.push('_');
+            prev_sep = true;
         }
     }
-    base.trim_matches('-').to_string()
+    // A trailing separator would leave the `-2` suffix sitting behind punctuation.
+    base.trim_end_matches('_').to_string()
 }
 
 /// Build a URL-safe node key from a display name plus a short unique suffix.
@@ -992,9 +1017,36 @@ mod tests {
 
     #[test]
     fn slug_base_is_url_safe() {
-        assert_eq!(super::slug_base("Hello, World! 123"), "hello-world-123");
-        assert_eq!(super::slug_base("  Trim -- Me  "), "trim-me");
+        // Underscores, like every key already in the wiki.
+        assert_eq!(super::slug_base("Hello, World! 123"), "hello_world_123");
+        assert_eq!(super::slug_base("  Trim -- Me  "), "trim_me");
         assert_eq!(super::slug_base("!!!"), "");
+        // Danish letters are kept, as the existing keys keep them.
+        assert_eq!(super::slug_base("Landsmøde 2026"), "landsmøde_2026");
+        assert_eq!(super::slug_base("Asger Holm Ørskov"), "asger_holm_ørskov");
+        // A hyphen JOINING two letters is part of the word and stays.
+        assert_eq!(
+            super::slug_base("Saint-Laguës metode"),
+            "saint-laguës_metode"
+        );
+        assert_eq!(super::slug_base("To-statsløsningen"), "to-statsløsningen");
+        // A hyphen used as punctuation is spacing, and collapses like any other.
+        assert_eq!(
+            super::slug_base("Klima-, og Miljøudvalget"),
+            "klima_og_miljøudvalget"
+        );
+        assert_eq!(
+            super::slug_base("EU- og Udenrigsudvalget"),
+            "eu_og_udenrigsudvalget"
+        );
+        assert_eq!(
+            super::slug_base("Hvor pengene kommer fra - en finansplan"),
+            "hvor_pengene_kommer_fra_en_finansplan"
+        );
+        // Nothing is left dangling for the `-2` suffix to sit behind.
+        assert_eq!(super::slug_base("Klima- "), "klima");
+        assert_eq!(super::slug_base("--"), "");
+        assert_eq!(super::slug_base("- Leading"), "leading");
     }
 
     #[test]
