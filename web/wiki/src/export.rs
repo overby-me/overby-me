@@ -629,31 +629,62 @@ pub fn build_odt(title: &str, content: Option<&Value>) -> Vec<u8> {
 }
 
 /// Trigger a browser download of `bytes` as `filename` with the given `mime`.
-/// Uses a base64 data URL (via `btoa`) so no Blob/URL web-sys features are
-/// needed; fine for document-sized payloads.
+///
+/// Two details here exist because of Safari, where the export silently did
+/// nothing on iOS.
+///
+/// **A blob URL, not a `data:` URL.** Safari refuses to navigate to a `data:`
+/// URL at the top level, so `<a download href="data:…">` had nothing to do.
+/// (The old comment claimed a data URL avoided needing Blob/URL web-sys
+/// features; they were already enabled for the image loader.)
+///
+/// **The anchor is put in the document before it is clicked.** A synthetic
+/// click on a detached element is honoured by Chrome but not by Safari or
+/// Firefox, so this failed twice over on iOS.
 pub fn download_bytes(filename: &str, mime: &str, bytes: &[u8]) {
     use wasm_bindgen::JsCast;
     let Some(window) = web_sys::window() else {
         return;
     };
-    // btoa reads each char's code (must be < 256); map bytes 1:1 to chars.
-    let binary: String = bytes.iter().map(|&b| b as char).collect();
-    let Ok(b64) = window.btoa(&binary) else {
-        return;
-    };
-    let href = format!("data:{mime};base64,{b64}");
-
     let Some(document) = window.document() else {
         return;
     };
-    let Ok(el) = document.create_element("a") else {
+    let Some(body) = document.body() else {
         return;
     };
-    let _ = el.set_attribute("href", &href);
+
+    let parts = js_sys::Array::new();
+    parts.push(&js_sys::Uint8Array::from(bytes));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(mime);
+    let Ok(blob) = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts) else {
+        return;
+    };
+    let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else {
+        return;
+    };
+
+    let Ok(el) = document.create_element("a") else {
+        let _ = web_sys::Url::revoke_object_url(&url);
+        return;
+    };
+    let _ = el.set_attribute("href", &url);
     let _ = el.set_attribute("download", filename);
-    if let Ok(anchor) = el.dyn_into::<web_sys::HtmlElement>() {
+    let _ = el.set_attribute("style", "display:none");
+    let _ = body.append_child(el.as_ref());
+    if let Ok(anchor) = el.clone().dyn_into::<web_sys::HtmlElement>() {
         anchor.click();
     }
+    let _ = body.remove_child(el.as_ref());
+
+    // Revoked on a later turn, never in this one: revoking a blob URL in the
+    // same tick as the click cancels the download it was just handed to.
+    let stale = url.clone();
+    let revoke = wasm_bindgen::closure::Closure::once_into_js(move || {
+        let _ = web_sys::Url::revoke_object_url(&stale);
+    });
+    let _ = window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 60_000);
 }
 
 /// Quote a CSV field per RFC 4180: wrap in double quotes when it contains a
