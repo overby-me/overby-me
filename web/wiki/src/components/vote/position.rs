@@ -261,11 +261,10 @@ fn AddCandidateButton(
             let parent_id = parent_id.clone();
             let context_id = context_id.clone();
             let path = path.clone();
-            let key = format!(
-                "{}-{}",
-                crate::components::loader::slugify(&cname),
-                js_sys::Date::now() as u64
-            );
+            // The optimistic card is keyed on the plain slug, which is what the
+            // insert asks for first; they differ only if the name is taken, and
+            // the navigation below then uses the key the server assigned.
+            let key = crate::components::loader::slug_base(&cname);
             // Optimistic: show the candidate card now and close the dialog; reconciled
             // by key against the fetched candidates, removed on error.
             pending.write().push(PendingCandidate {
@@ -276,8 +275,9 @@ fn AddCandidateButton(
             name.set(String::new());
             spawn(async move {
                 let input = model::NodesInsertInput {
-                    name: Some(cname),
-                    key: Some(key.clone()),
+                    name: Some(cname.clone()),
+                    // Assigned by insert_node_named.
+                    key: None,
                     mime_id: Some("vote/candidate".to_string()),
                     parent_id: Some(model::Uuid(parent_id)),
                     context_id: context_id.map(model::Uuid),
@@ -287,13 +287,13 @@ fn AddCandidateButton(
                     index: None,
                     created_at: None,
                 };
-                match graphql::insert_node(token.as_deref(), input).await {
-                    Ok(_) => {
+                match graphql::insert_node_named(token.as_deref(), input, &cname).await {
+                    Ok(inserted) => {
                         crate::session::bump_data_version();
                         // Land in the new candidate's editor so its text can be
                         // written now, as adding an amendment does.
                         let mut full = path.clone();
-                        full.push(key);
+                        full.push(inserted.map(|n| n.key).unwrap_or(key));
                         nav.push(Route::PathPage {
                             segments: full,
                             app: Some("editor".to_string()),
@@ -400,10 +400,9 @@ pub(super) fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Elem
             let context_id = context_id.clone();
             let path = path.clone();
             spawn(async move {
-                let key = crate::components::loader::slugify(&name);
                 let input = model::NodesInsertInput {
-                    name: Some(name),
-                    key: Some(key.clone()),
+                    name: Some(name.clone()),
+                    key: None,
                     mime_id: Some("vote/change".to_string()),
                     parent_id: Some(model::Uuid(node_id)),
                     context_id: context_id.map(model::Uuid),
@@ -412,12 +411,14 @@ pub(super) fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Elem
                     index: None,
                     created_at: None,
                 };
-                match graphql::insert_node(token.as_deref(), input).await {
-                    Ok(_) => {
+                match graphql::insert_node_named(token.as_deref(), input, &name).await {
+                    Ok(inserted) => {
                         crate::session::bump_data_version();
                         // Redirect to the new amendment's editor to write its body.
+                        // The key comes back from the insert, being whatever was free.
+                        let Some(inserted) = inserted else { return };
                         let mut full = path.clone();
-                        full.push(key);
+                        full.push(inserted.key);
                         nav.push(Route::PathPage {
                             segments: full,
                             app: Some("editor".to_string()),

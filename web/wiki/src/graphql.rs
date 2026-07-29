@@ -2084,6 +2084,58 @@ pub async fn path_crumbs(
 }
 
 /// Insert a node
+/// How many numbered keys to try before giving up on a readable one.
+const KEY_ATTEMPTS: u32 = 20;
+
+/// Insert a node under a name, giving it the cleanest key that is free.
+///
+/// The key is what appears in the URL forever, so it is worth spending a request
+/// on: `asger-holm-oerskov`, not `asger-holm-oerskov-8417`. A number is appended
+/// only when the plain slug is taken, and then it counts up from 2.
+///
+/// Collisions are found by ATTEMPTING the insert, not by looking first. The
+/// database has a unique index on (parent_id, key) and row-level permissions
+/// mean a caller cannot see every sibling, so a look-first check would still
+/// collide on a node it was not allowed to know about. Trying is also the common
+/// case in one round trip, since most names are free.
+///
+/// After [`KEY_ATTEMPTS`] the timestamped key from
+/// [`crate::components::loader::slugify`] ends it, so a pathological name can
+/// never loop or fail outright.
+pub async fn insert_node_named(
+    access_token: Option<&str>,
+    mut input: model::NodesInsertInput,
+    name: &str,
+) -> Result<Option<model::InsertedNode>, String> {
+    let base = crate::components::loader::slug_base(name);
+    let base = if base.is_empty() {
+        "n".to_string()
+    } else {
+        base
+    };
+    for attempt in 1..=KEY_ATTEMPTS {
+        let key = if attempt == 1 {
+            base.clone()
+        } else {
+            format!("{base}-{attempt}")
+        };
+        input.key = Some(key);
+        match insert_node(access_token, input.clone()).await {
+            Err(e) if is_key_taken(&e) => continue,
+            other => return other,
+        }
+    }
+    input.key = Some(crate::components::loader::slugify(name));
+    insert_node(access_token, input).await
+}
+
+/// Whether an insert failed because the key was already used under that parent,
+/// as opposed to anything else that can go wrong.
+fn is_key_taken(error: &str) -> bool {
+    error.contains("nodes_parent_id_namespace_key")
+        || (error.contains("Uniqueness violation") && error.contains("key"))
+}
+
 pub async fn insert_node(
     access_token: Option<&str>,
     input: model::NodesInsertInput,
@@ -2218,14 +2270,15 @@ pub async fn create_context(
     parent_context_id: &str,
     mime_id: &str,
     name: &str,
-    key: &str,
     creator: Option<&crate::session::User>,
 ) -> Result<model::InsertedNode, String> {
-    let inserted = insert_node(
+    // No `key` parameter: the caller would only have slugified the name, and the
+    // key it lands on depends on what is already there.
+    let inserted = insert_node_named(
         access_token,
         model::NodesInsertInput {
             name: Some(name.to_string()),
-            key: Some(key.to_string()),
+            key: None,
             mime_id: Some(mime_id.to_string()),
             parent_id: Some(model::Uuid(parent_id.to_string())),
             context_id: Some(model::Uuid(parent_context_id.to_string())),
@@ -2234,6 +2287,7 @@ pub async fn create_context(
             index: None,
             created_at: None,
         },
+        name,
     )
     .await?
     .ok_or("insert returned no node")?;
@@ -2284,7 +2338,6 @@ pub async fn create_speaker_list(
     access_token: Option<&str>,
     context_id: &str,
     name: &str,
-    key: &str,
 ) -> Result<model::InsertedNode, String> {
     let can_insert = node_insert_mimes(access_token, context_id)
         .await
@@ -2309,11 +2362,11 @@ pub async fn create_speaker_list(
         )
         .await?;
     }
-    insert_node(
+    insert_node_named(
         access_token,
         model::NodesInsertInput {
             name: Some(name.to_string()),
-            key: Some(key.to_string()),
+            key: None,
             mime_id: Some("speak/list".to_string()),
             parent_id: Some(model::Uuid(context_id.to_string())),
             context_id: Some(model::Uuid(context_id.to_string())),
@@ -2322,6 +2375,7 @@ pub async fn create_speaker_list(
             index: None,
             created_at: None,
         },
+        name,
     )
     .await?
     .ok_or_else(|| "insert returned no list".to_string())
@@ -2345,14 +2399,13 @@ pub fn deep_copy_node(
             Some(n) => n,
             None => return Ok(()),
         };
-        let key = if is_root {
-            format!("{}-{}", node.key, (js_sys::Date::now() as u64) % 1_000_000)
-        } else {
-            node.key.clone()
-        };
+        // A copy may land beside its source, so the root's key can collide; a
+        // child's cannot, sitting under a fresh parent. `insert_node_named` takes
+        // the plain name and counts up only if it has to, so a second copy reads
+        // `budget-2` rather than carrying six digits of clock.
         let input = model::NodesInsertInput {
             name: Some(node.name.clone()),
-            key: Some(key),
+            key: (!is_root).then(|| node.key.clone()),
             mime_id: node.mime_id.clone(),
             parent_id: Some(model::Uuid(parent_id.clone())),
             context_id: context_id.clone().map(model::Uuid),
@@ -2364,7 +2417,12 @@ pub fn deep_copy_node(
             // to the end of the folder as the newest item, dated today.
             created_at: node.created_at.clone(),
         };
-        let new_id = match insert_node(access_token.as_deref(), input).await? {
+        let inserted = if is_root {
+            insert_node_named(access_token.as_deref(), input, &node.name).await?
+        } else {
+            insert_node(access_token.as_deref(), input).await?
+        };
+        let new_id = match inserted {
             Some(inserted) => inserted.id.0,
             None => return Ok(()),
         };
@@ -4194,6 +4252,24 @@ mod tests {
 
     /// The invitations filter must omit null fields and carry the pending +
     /// group/event + user/email conditions the home list depends on.
+    #[test]
+    fn a_taken_key_is_told_apart_from_other_failures() {
+        // Hasura's wording for the (parent_id, key) index. Matching too broadly
+        // would retry a key that was never the problem; too narrowly would give
+        // up on a clean key at the first collision.
+        let taken = "hasura error: [{\"message\":\"Uniqueness violation. duplicate key \
+                     value violates unique constraint \\\"nodes_parent_id_namespace_key\\\"\"}]";
+        assert!(super::is_key_taken(taken));
+
+        for other in [
+            "hasura error: [{\"message\":\"permission denied\"}]",
+            "network error",
+            "hasura error: [{\"message\":\"not-null violation\"}]",
+        ] {
+            assert!(!super::is_key_taken(other), "should not retry on: {other}");
+        }
+    }
+
     #[test]
     fn invitations_where_clause_is_well_formed() {
         let clause = invitations_where_clause("user-1", "me@example.com");

@@ -127,12 +127,11 @@ fn AddSpeakerListButton(context_id: String) -> Element {
         if title.is_empty() || *busy.read() {
             return;
         }
-        let key = crate::components::loader::slugify(&title);
         let ctx = context_id.clone();
         let token = session.read().access_token.clone();
         busy.set(true);
         spawn(async move {
-            match graphql::create_speaker_list(token.as_deref(), &ctx, &title, &key).await {
+            match graphql::create_speaker_list(token.as_deref(), &ctx, &title).await {
                 Ok(_) => {
                     crate::session::bump_data_version();
                     busy.set(false);

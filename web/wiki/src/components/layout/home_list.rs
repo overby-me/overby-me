@@ -357,7 +357,6 @@ fn NewContextButton(
             if title.is_empty() || *busy.read() {
                 return;
             }
-            let key = crate::components::loader::slugify(&title);
             let mime = mime.clone();
             // A group is its own context (create_context locks it that way), so the
             // chosen group serves as both parent and context. An unknown or empty
@@ -385,7 +384,6 @@ fn NewContextButton(
                     &root_context_id,
                     &mime,
                     &title,
-                    &key,
                     creator.as_ref(),
                 )
                 .await

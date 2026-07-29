@@ -901,7 +901,7 @@ fn mime_icon_by_prefix(mime_id: &str) -> &'static str {
 
 /// The URL-safe base of a node key: lowercase, non-alphanumerics collapsed to
 /// single dashes, trimmed. Pure (no browser globals) so it is unit-testable.
-fn slug_base(name: &str) -> String {
+pub fn slug_base(name: &str) -> String {
     let mut base = String::new();
     let mut prev_dash = false;
     for c in name.trim().to_lowercase().chars() {
@@ -916,8 +916,13 @@ fn slug_base(name: &str) -> String {
     base.trim_matches('-').to_string()
 }
 
-/// Build a URL-safe node key from a display name plus a short unique suffix, so
-/// a freshly created child does not collide with a sibling's key.
+/// Build a URL-safe node key from a display name plus a short unique suffix.
+///
+/// The suffix makes a collision practically impossible, at the cost of a number
+/// in every URL forever. Prefer [`crate::graphql::insert_node_named`], which
+/// spends the clean key first and only falls back to something like this when
+/// the name is genuinely taken. This remains for callers with no parent to check
+/// against, and as that fallback.
 pub fn slugify(name: &str) -> String {
     let base = slug_base(name);
     let suffix = web_sys::window()

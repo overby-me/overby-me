@@ -893,7 +893,11 @@ fn FolderAdd(
             let parent_id = parent_id.clone();
             let context_id = context_id.clone();
             let parent_path = parent_path.clone();
-            let key = crate::components::loader::slugify(&name);
+            // The optimistic tile is keyed on the plain slug, which is also the
+            // key the insert asks for first. They diverge only when the name is
+            // already taken, and then the navigation below uses whatever key the
+            // server actually assigned.
+            let key = crate::components::loader::slug_base(&name);
             // Optimistic: show the child tile now and close the dialog; reconciled by
             // key against the fetched children, removed on error.
             pending.write().push(PendingChild {
@@ -907,8 +911,9 @@ fn FolderAdd(
             open.set(false);
             spawn(async move {
                 let input = crate::model::NodesInsertInput {
-                    name: Some(name),
-                    key: Some(key.clone()),
+                    name: Some(name.clone()),
+                    // Set by insert_node_named, which spends the clean key first.
+                    key: None,
                     mime_id: Some(mime),
                     parent_id: Some(crate::model::Uuid(parent_id)),
                     context_id: context_id.map(crate::model::Uuid),
@@ -917,14 +922,15 @@ fn FolderAdd(
                     index: None,
                     created_at: None,
                 };
-                match crate::graphql::insert_node(token.as_deref(), input).await {
-                    Ok(_) => {
+                match crate::graphql::insert_node_named(token.as_deref(), input, &name).await {
+                    Ok(inserted) => {
                         crate::session::bump_data_version();
                         // Open the node just created (at parent_path + its key), so
                         // adding content lands you on it rather than back on the
-                        // folder listing.
+                        // folder listing. The key comes BACK from the insert: it is
+                        // the plain slug unless that was taken.
                         let mut dest = parent_path.clone();
-                        dest.push(key.clone());
+                        dest.push(inserted.map(|n| n.key).unwrap_or_else(|| key.clone()));
                         nav.push(Route::PathPage {
                             segments: dest,
                             app: None,
