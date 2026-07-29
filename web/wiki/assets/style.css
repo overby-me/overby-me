@@ -3606,6 +3606,58 @@ select:focus {
 	overflow-wrap: anywhere;
 }
 
+/* A crash report, shown as the stack it is rather than as a paragraph.
+
+   The whole job of the colouring is to make the frames from THIS repo findable
+   among the standard library and dependency frames they are buried in, so app
+   frames keep full contrast and everything else steps back. */
+.feedback-stack {
+	margin-top: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-3);
+	border-radius: var(--md-sys-shape-corner-medium);
+	/* Border as well as fill: in the dark scheme a container surface sits so
+	   close to the page that the block stopped reading as one. */
+	border: 1px solid var(--md-outline-variant);
+	background: var(--md-surface-container-low);
+	font-family: ui-monospace, monospace;
+	font-size: var(--md-sys-typescale-body-small-size);
+	line-height: var(--md-sys-typescale-body-small-line);
+}
+
+/* Wrapping rather than scrolling: this is read on a phone as often as not, and a
+   stack full of long generic names would otherwise be a sideways drag per line.
+   The hanging indent keeps a wrapped frame visually attached to its own line. */
+.stack-line {
+	padding-left: var(--md-sys-spacing-4);
+	text-indent: calc(-1 * var(--md-sys-spacing-4));
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	color: var(--md-on-surface-variant);
+}
+
+/* The panic itself: the one line that says what happened. */
+.stack-panic {
+	color: var(--md-error);
+	font-weight: 700;
+}
+
+/* A frame in this repo. The default frame is muted (see .stack-line), so this is
+   what the eye lands on. */
+.stack-app .stack-fn {
+	color: var(--md-on-surface);
+	font-weight: 700;
+}
+
+.stack-app .stack-loc {
+	color: var(--md-primary);
+}
+
+/* A frame the backend could not resolve. Kept, since a gap in a stack is worth
+   seeing, but it should not compete with the frames that resolved. */
+.stack-raw {
+	opacity: 0.6;
+}
+
 /* The screenshot's link, which is what holds it off the message. A margin on the
    image alone did nothing: an inline anchor's line box does not grow for its
    child's margin-top, so the two touched. */

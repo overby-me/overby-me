@@ -151,6 +151,101 @@ pub fn FeedbackApp() -> Element {
     }
 }
 
+/// One line of a crash report, as it should be shown.
+///
+/// A resolved stack is structured text, and the structure is worth keeping: the
+/// point of reading one is to find the frame that belongs to THIS repo among the
+/// standard library and dependency frames it is buried in. Everything else is
+/// context.
+#[derive(Debug, PartialEq)]
+enum StackLine {
+    /// The panic itself, which is the first line and the reason for the rest.
+    Panic(String),
+    /// A resolved frame: a function, and the file and line it came from. `app`
+    /// marks a file in this repo, which is what someone is actually looking for
+    /// (`trim_path` in the backend keeps the owning crate on everything else).
+    Frame {
+        function: String,
+        location: String,
+        app: bool,
+    },
+    /// A frame the backend could not resolve, left as the browser wrote it. Kept,
+    /// because a gap in a stack is worth seeing, but it is noise.
+    Raw(String),
+    Plain(String),
+}
+
+/// Split a crash report into lines that can be styled.
+fn parse_stack(message: &str) -> Vec<StackLine> {
+    message
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("at ") {
+                // `function (file:line)` — the location is the trailing
+                // parenthesised group, and a function name may itself contain
+                // parentheses (`call_mut<fn(Props) -> ...>`), so find the LAST.
+                if let Some(open) = rest.rfind(" (") {
+                    if rest.ends_with(')') {
+                        let function = rest[..open].to_string();
+                        let location = rest[open + 2..rest.len() - 1].to_string();
+                        let app = location.starts_with("src/");
+                        return StackLine::Frame {
+                            function,
+                            location,
+                            app,
+                        };
+                    }
+                }
+                return StackLine::Frame {
+                    function: rest.to_string(),
+                    location: String::new(),
+                    app: false,
+                };
+            }
+            if trimmed.contains("wasm-function[") {
+                return StackLine::Raw(trimmed.to_string());
+            }
+            if trimmed.starts_with("panicked at") {
+                return StackLine::Panic(trimmed.to_string());
+            }
+            StackLine::Plain(line.to_string())
+        })
+        .collect()
+}
+
+/// A crash report, rendered as the stack it is.
+#[component]
+fn CrashStack(message: String) -> Element {
+    rsx! {
+        div { class: "feedback-stack",
+            for (i , line) in parse_stack(&message).into_iter().enumerate() {
+                match line {
+                    StackLine::Panic(text) => rsx! {
+                        div { key: "{i}", class: "stack-line stack-panic", "{text}" }
+                    },
+                    StackLine::Frame { function, location, app } => rsx! {
+                        div {
+                            key: "{i}",
+                            class: if app { "stack-line stack-frame stack-app" } else { "stack-line stack-frame" },
+                            span { class: "stack-fn", "{function}" }
+                            if !location.is_empty() {
+                                span { class: "stack-loc", " {location}" }
+                            }
+                        }
+                    },
+                    StackLine::Raw(text) => rsx! {
+                        div { key: "{i}", class: "stack-line stack-raw", "{text}" }
+                    },
+                    StackLine::Plain(text) => rsx! {
+                        div { key: "{i}", class: "stack-line", "{text}" }
+                    },
+                }
+            }
+        }
+    }
+}
+
 /// One feedback submission row.
 #[component]
 fn FeedbackRow(
@@ -187,7 +282,13 @@ fn FeedbackRow(
                     }
                 }
             }
-            p { class: "body-medium text-preserve-breaks feedback-message", "{item.message}" }
+            // A crash is a stack, not prose, and reads as one. Everything a
+            // person typed stays prose.
+            if item.kind == "crash" {
+                CrashStack { message: item.message.clone() }
+            } else {
+                p { class: "body-medium text-preserve-breaks feedback-message", "{item.message}" }
+            }
             if let Some(url) = screenshot {
                 // The anchor carries the spacing, not the image: an inline
                 // anchor's line box ignores its child's margin-top, so the
@@ -231,5 +332,58 @@ fn FeedbackRow(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_frame_in_this_repo_is_marked_as_such() {
+        let parsed = parse_stack("    at render (src/components/folder.rs:224)");
+        assert_eq!(
+            parsed,
+            vec![StackLine::Frame {
+                function: "render".into(),
+                location: "src/components/folder.rs:224".into(),
+                app: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_dependency_frame_is_not() {
+        // The backend keeps the owning crate on anything outside this repo, which
+        // is exactly what tells the two apart.
+        let parsed = parse_stack("    at new (alloc/src/boxed.rs:289)");
+        assert!(matches!(&parsed[0], StackLine::Frame { app: false, .. }));
+    }
+
+    #[test]
+    fn a_generic_function_keeps_its_own_parentheses() {
+        // The reason the location is found from the END: a monomorphised name
+        // contains parentheses of its own, and splitting on the first would cut
+        // the function in half.
+        let parsed =
+            parse_stack("    at call_mut<fn(Props) -> Element> (core/src/ops/function.rs:166)");
+        assert_eq!(
+            parsed,
+            vec![StackLine::Frame {
+                function: "call_mut<fn(Props) -> Element>".into(),
+                location: "core/src/ops/function.rs:166".into(),
+                app: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn the_panic_and_unresolved_frames_are_recognised() {
+        let parsed = parse_stack(
+            "panicked at src/x.rs:1:1: boom\n\
+             @https://radikal.wiki/assets/wiki-dioxus_bg-dxh1.wasm:wasm-function[5300]:0x36e775",
+        );
+        assert!(matches!(parsed[0], StackLine::Panic(_)));
+        assert!(matches!(parsed[1], StackLine::Raw(_)));
     }
 }
