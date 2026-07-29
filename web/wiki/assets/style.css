@@ -3606,6 +3606,26 @@ select:focus {
 	overflow-wrap: anywhere;
 }
 
+/* The screenshot's link, which is what holds it off the message. A margin on the
+   image alone did nothing: an inline anchor's line box does not grow for its
+   child's margin-top, so the two touched. */
+.feedback-screenshot {
+	display: block;
+	margin-top: var(--md-sys-spacing-3);
+}
+
+/* Who sent it, from where, and which build. A chip next to plain text needs more
+   than the default stack gap or the pill's border crowds the words. Wraps rather
+   than squeezes, since a path can be long.
+
+   Two classes deep on purpose: `.stack` sets the gap too and is declared later in
+   this file, so a single-class rule here would lose the tie on source order and
+   silently keep the tighter spacing. */
+.feedback-item .feedback-meta {
+	margin-top: var(--md-sys-spacing-3);
+	gap: var(--md-sys-spacing-3);
+}
+
 /* The build a report came from. Monospace so a hash reads as one. */
 .feedback-commit {
 	font-family: ui-monospace, monospace;

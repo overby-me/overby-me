@@ -166,7 +166,8 @@ fn FeedbackRow(
     rsx! {
         div { class: "feedback-item",
             div { class: "stack stack-h",
-                div { class: "avatar small", span { class: "material-icons", "{icon}" } }
+                // The chip carries the same glyph and names it, so an avatar
+                // beside it was the icon twice over.
                 span { class: "chip", span { class: "material-icons", "{icon}" }
                     span { class: "chip-label", "{t(label_key)}" }
                 }
@@ -188,16 +189,23 @@ fn FeedbackRow(
             }
             p { class: "body-medium text-preserve-breaks feedback-message", "{item.message}" }
             if let Some(url) = screenshot {
-                a { href: "{url}", target: "_blank", rel: "noopener",
+                // The anchor carries the spacing, not the image: an inline
+                // anchor's line box ignores its child's margin-top, so the
+                // screenshot sat flush against the message.
+                a {
+                    class: "feedback-screenshot",
+                    href: "{url}",
+                    target: "_blank",
+                    rel: "noopener",
                     img {
-                        class: "zoomable mt-1",
+                        class: "zoomable",
                         src: "{url}",
                         alt: t("feedback.screenshot"),
                         loading: "lazy",
                     }
                 }
             }
-            div { class: "stack stack-h mt-1",
+            div { class: "stack stack-h stack-wrap feedback-meta",
                 if show_owner {
                     super::loader::UserPopover {
                         name: if item.owner_name.is_empty() { t("feedback.anonymous") } else { item.owner_name.clone() },

@@ -23,9 +23,16 @@ use axum::response::Response;
 use http::StatusCode;
 use serde_json::{json, Value};
 
-/// Cap on the stored message (matches the client-side maxlength), so a runaway
-/// paste cannot bloat a node or an ingest event.
+/// Cap on the message as it ARRIVES (matches the client-side maxlength), so a
+/// runaway paste cannot bloat a node or an ingest event.
 const MAX_MESSAGE: usize = 4000;
+
+/// Cap on the message as STORED, which has to be far larger, because
+/// symbolication multiplies it: one wasm frame becomes every function inlined
+/// into it, so a stack that arrives as twenty lines can leave as a hundred.
+/// Capping the result at [`MAX_MESSAGE`] cut the resolved stack off partway
+/// through — losing precisely the outer frames that name the component.
+const MAX_STORED: usize = 32_000;
 
 /// Cap on the node's name, which is the message's first line in the feedback
 /// app's list. Matches the frontend's `insert_feedback`.
@@ -57,16 +64,19 @@ async fn submit_inner(
             .map(|(_, v)| v.clone())
     };
 
-    let mut message = get("message")
+    let message = get("message")
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
         .ok_or(AppError::BadRequest("missing message".into()))?;
+    // Bound what arrives, BEFORE resolving it: the cap exists to stop a runaway
+    // paste, and applying it afterwards would instead have trimmed the work.
+    let message = clamp(message, MAX_MESSAGE);
     // A crash report carries the panic's stack in its message, so it gets the
     // same treatment as a shipped log entry — otherwise the one report a reader
     // deliberately chose to send would be the least readable thing in the sink.
     // Ordinary feedback has no wasm frames and passes through untouched.
-    message = crate::symbolicate::resolve_stack(client, &cfg.app_origin, &message).await;
-    message.truncate(MAX_MESSAGE);
+    let message = crate::symbolicate::resolve_stack(client, &cfg.app_origin, &message).await;
+    let message = clamp(message, MAX_STORED);
     let kind = match get("kind").as_deref() {
         Some("bug") => "bug",
         Some("feature") => "feature",
@@ -214,6 +224,24 @@ async fn hasura(cfg: &Config, client: &reqwest::Client, body: &Value) -> Result<
     }
 }
 
+/// Cut `text` to at most `max` bytes without splitting a character.
+///
+/// `String::truncate` panics when the index lands mid-character, and a Danish
+/// message reaches that on any æ, ø or å sitting across the limit — so the cap
+/// that exists to keep a report small could instead have taken the request down
+/// with it.
+fn clamp(mut text: String, max: usize) -> String {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    text
+}
+
 /// A unique `key` for the node. The frontend uses time + a random number; here a
 /// process-local counter does the same job without a source of randomness, since
 /// two reports in the same millisecond would have to come from one process.
@@ -277,4 +305,35 @@ async fn ship_feedback(
         .await
         .map_err(|e| AppError::Upstream(format!("feedback ship failed: {e}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_messages_are_left_alone() {
+        assert_eq!(clamp("hej".to_string(), 4000), "hej");
+    }
+
+    #[test]
+    fn clamping_never_splits_a_character() {
+        // "ø" is two bytes, so a limit of 2 lands inside it. Truncating there is
+        // a panic, not a short string.
+        assert_eq!(clamp("aøb".to_string(), 2), "a");
+        // And a limit on the boundary keeps the whole character.
+        assert_eq!(clamp("aøb".to_string(), 3), "aø");
+    }
+
+    #[test]
+    fn a_resolved_stack_survives_the_stored_cap() {
+        // Roughly what symbolication produces from a full crash report: one wasm
+        // frame becomes every function inlined into it. This used to be cut off
+        // partway through, losing the outer frames that name the component.
+        let resolved = "    at drop_in_place<dioxus_primitives::switch::SwitchPropsWithOwner> \
+                        (core/src/ptr/mod.rs:805)\n"
+            .repeat(120);
+        assert!(resolved.len() > MAX_MESSAGE, "test stack is not big enough");
+        assert_eq!(clamp(resolved.clone(), MAX_STORED), resolved);
+    }
 }
