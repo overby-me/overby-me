@@ -157,6 +157,8 @@ pub struct ParentNodeFields {
     pub name: String,
     pub key: String,
     pub mime_id: Option<String>,
+    /// The parent's own content, for feed rows that quote what they are about.
+    pub data: Option<Jsonb>,
 }
 
 // --- Mime types ---

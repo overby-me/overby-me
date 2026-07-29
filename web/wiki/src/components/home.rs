@@ -154,22 +154,70 @@ pub fn HomeApp() -> Element {
     }
 }
 
-/// "Newest" — the most recently created content the user can see, each linking
-/// to its full path (resolved lazily on click, like search). #34.
+/// How many feed rows to fetch per page.
+const FEED_PAGE: i32 = 12;
+
+/// The activity feed: everything recent the reader may see — content, comments
+/// and reactions — newest first, paged in as they scroll (#34).
 #[component]
 fn RecentContents() -> Element {
     let session = use_session();
     let token = session.read().access_token.clone();
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
 
-    let recent = crate::use_data_resource!(|(token, user_id)| async move {
-        let Some(user_id) = user_id else {
-            return Vec::new();
-        };
-        graphql::query_recent_nodes(token.as_deref(), 8, &user_id).await
-    });
-    let items = recent.read().clone().unwrap_or_default();
-    if items.is_empty() {
+    // Pages accumulate here rather than in a resource: a resource re-runs and
+    // replaces, which would drop everything already scrolled past.
+    let mut items = use_signal(Vec::<model::ChildNodeFields>::new);
+    let mut loading = use_signal(|| false);
+    // Cleared when a page comes back short — that is the end of the feed, and
+    // without it the sentinel would keep asking forever.
+    let mut has_more = use_signal(|| true);
+
+    // First page, and a reset if the signed-in user changes.
+    {
+        let token = token.clone();
+        let user_id = user_id.clone();
+        use_effect(use_reactive!(|(token, user_id)| {
+            items.set(Vec::new());
+            has_more.set(true);
+            let Some(uid) = user_id.clone() else { return };
+            let token = token.clone();
+            loading.set(true);
+            spawn(async move {
+                let page = graphql::query_recent_nodes(token.as_deref(), FEED_PAGE, 0, &uid).await;
+                has_more.set(page.len() as i32 == FEED_PAGE);
+                items.set(page);
+                loading.set(false);
+            });
+        }));
+    }
+
+    // Next page, once the reader nears the end. `near_bottom` is driven by the
+    // shell's single scroll listener.
+    {
+        let token = token.clone();
+        let user_id = user_id.clone();
+        let near = crate::components::back_to_top::near_bottom();
+        use_effect(use_reactive!(|(near, token, user_id)| {
+            if !near || *loading.peek() || !*has_more.peek() {
+                return;
+            }
+            let Some(uid) = user_id.clone() else { return };
+            let token = token.clone();
+            let offset = items.peek().len() as i32;
+            loading.set(true);
+            spawn(async move {
+                let page =
+                    graphql::query_recent_nodes(token.as_deref(), FEED_PAGE, offset, &uid).await;
+                has_more.set(page.len() as i32 == FEED_PAGE);
+                items.write().extend(page);
+                loading.set(false);
+            });
+        }));
+    }
+
+    let rows = items.read().clone();
+    if rows.is_empty() && !*loading.read() {
         return rsx! {};
     }
 
@@ -180,8 +228,13 @@ fn RecentContents() -> Element {
                 h3 { class: "title-medium", "{t(\"layout.feed\")}" }
             }
             div { class: "list",
-                for node in items.iter() {
+                for node in rows.iter() {
                     RecentItem { key: "{node.id.0}", node: node.clone() }
+                }
+            }
+            if *loading.read() {
+                div { class: "empty-state empty-state-sm",
+                    div { class: "spinner spinner-sm" }
                 }
             }
         }
@@ -228,19 +281,50 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
     let parent_name = node.parent.as_ref().map(|p| p.name.clone());
     let mime = node.mime_id.clone().unwrap_or_default();
     let data = node.data.as_ref().map(|d| d.0.clone());
-    // A comment node's `name` is its author, which the row already shows above,
-    // so its headline is the comment text instead.
+    // Three kinds of row, because three kinds of thing happened. A comment and a
+    // reaction node's `name` is its AUTHOR (already shown above the row), so
+    // neither can use it as a headline the way content does.
     let is_comment = mime == "vote/comment";
-    let title = if is_comment {
-        node.data
-            .as_ref()
-            .and_then(|d| d.0.get("text"))
+    let is_reaction = mime == "vote/reaction";
+    let comment_text = |d: Option<&crate::model::Jsonb>| {
+        d.and_then(|d| d.0.get("text"))
             .and_then(|t| t.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| t("vote.comments"))
+    };
+    let title = if is_comment {
+        comment_text(node.data.as_ref()).unwrap_or_else(|| t("vote.comments"))
+    } else if is_reaction {
+        // The emoji is the whole of what happened.
+        node.data
+            .as_ref()
+            .and_then(|d| d.0.get("emoji"))
+            .and_then(|e| e.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| node.name.clone())
     } else {
         node.name.clone()
+    };
+    // What this row is ABOUT: the comment a reaction is on, or the comment a
+    // reply answers — quoted beneath, so the row stands on its own.
+    let about = if is_reaction || is_comment {
+        node.parent
+            .as_ref()
+            .filter(|p| p.mime_id.as_deref() == Some("vote/comment"))
+            .and_then(|p| comment_text(p.data.as_ref()))
+    } else {
+        None
+    };
+    // For content, the opening of the text itself, so the feed shows something
+    // rather than a list of titles.
+    let excerpt = if is_comment || is_reaction {
+        None
+    } else {
+        node.data
+            .as_ref()
+            .map(|d| super::content::slate_plain_text(&d.0))
+            .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|s| !s.is_empty())
     };
 
     rsx! {
@@ -253,7 +337,9 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                 // Resolve the node's full ancestor path, then navigate. A comment
                 // is not a page, so it opens the content hosting its thread.
                 spawn(async move {
-                    let target = if is_comment {
+                    // A reaction hangs on a comment, which hangs on content, so
+                    // both climb to the page that actually renders the thread.
+                    let target = if is_comment || is_reaction {
                         graphql::thread_host_id(token.as_deref(), &node_id).await
                     } else {
                         node_id.clone()
@@ -298,8 +384,20 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                         }
                     }
                 }
-                // What.
-                div { class: "recent-title", "{title}" }
+                // What. A reaction is one emoji, so it gets its own size rather
+                // than being set as a line of body text.
+                div {
+                    class: if is_reaction { "recent-title recent-reaction" } else { "recent-title" },
+                    "{title}"
+                }
+                // What it was about: the comment reacted to, or replied to.
+                if let Some(quote) = about.as_ref() {
+                    blockquote { class: "recent-quote", "{quote}" }
+                }
+                // The opening of the content itself, clamped by CSS.
+                if let Some(text) = excerpt.as_ref() {
+                    p { class: "recent-excerpt", "{text}" }
+                }
                 // Where (the content type + its context).
                 if let Some(parent) = parent_name.as_ref() {
                     div { class: "recent-context",

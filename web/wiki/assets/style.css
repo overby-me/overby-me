@@ -2482,6 +2482,42 @@ select:focus {
 	overflow-wrap: anywhere;
 }
 
+/* A reaction row's headline is a single emoji, so it is sized as a mark rather
+   than as a line of text. */
+.recent-reaction {
+	font-size: var(--md-sys-typescale-headline-small-size);
+	line-height: 1.2;
+}
+
+/* What a reaction or a reply is about: the comment it lands on, quoted so the
+   row reads on its own without opening the thread. Clamped — a feed row is a
+   glance, not the conversation. */
+.recent-quote {
+	margin-top: var(--md-sys-spacing-1);
+	padding-left: var(--md-sys-spacing-3);
+	border-left: 2px solid var(--md-outline-variant);
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-body-small-size);
+	overflow-wrap: anywhere;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+/* The opening of a document or policy, so the feed shows the writing and not
+   just its title. */
+.recent-excerpt {
+	margin-top: var(--md-sys-spacing-1);
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-body-small-size);
+	overflow-wrap: anywhere;
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
 .recent-context {
 	display: inline-flex;
 	align-items: center;

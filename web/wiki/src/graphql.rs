@@ -76,6 +76,7 @@ impl From<ParentNodeFields> for model::ParentNodeFields {
             name: p.name,
             key: p.key,
             mime_id: p.mime_id,
+            data: p.data.map(Into::into),
         }
     }
 }
@@ -485,6 +486,9 @@ pub struct ParentNodeFields {
     pub name: String,
     pub key: String,
     pub mime_id: Option<String>,
+    // What the parent says, for a feed row that is ABOUT its parent: a reaction
+    // shows the comment it is on, a reply the comment it answers.
+    pub data: Option<Jsonb>,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
@@ -667,6 +671,8 @@ pub struct RecentNodesVariables {
     pub where_clause: NodesBoolExp,
     pub order_by: Option<Vec<NodesOrderBy>>,
     pub limit: Option<i32>,
+    /// How many rows to skip — the feed pages through by raising this.
+    pub offset: Option<i32>,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone)]
@@ -676,7 +682,7 @@ pub struct RecentNodesVariables {
     variables = "RecentNodesVariables"
 )]
 pub struct RecentNodesQuery {
-    #[arguments(where: $where_clause, order_by: $order_by, limit: $limit)]
+    #[arguments(where: $where_clause, order_by: $order_by, limit: $limit, offset: $offset)]
     pub nodes: Vec<ChildNodeFields>,
 }
 
@@ -2900,6 +2906,7 @@ pub async fn query_user_contributions(
         where_clause,
         order_by: Some(order_by),
         limit: Some(limit),
+        offset: None,
     });
     match execute(access_token, op).await {
         Ok(d) => d.nodes.into_iter().map(Into::into).collect(),
@@ -2913,6 +2920,7 @@ pub async fn query_user_contributions(
 pub async fn query_recent_nodes(
     access_token: Option<&str>,
     limit: i32,
+    offset: i32,
     user_id: &str,
 ) -> Vec<model::ChildNodeFields> {
     let where_clause = NodesBoolExp {
@@ -2926,10 +2934,11 @@ pub async fn query_recent_nodes(
                         "vote/position".to_string(),
                         "vote/candidate".to_string(),
                         "wiki/file".to_string(),
-                        // Comments belong in the feed too — they are activity in
-                        // the same contexts. Their row shows the comment text and
-                        // opens the thread's host (see RecentItem).
+                        // Comments and reactions belong in the feed too — they are
+                        // activity in the same contexts. Their rows show what they
+                        // are about and open the thread's host (see RecentItem).
                         "vote/comment".to_string(),
+                        "vote/reaction".to_string(),
                     ]),
                     ..Default::default()
                 }),
@@ -2957,6 +2966,7 @@ pub async fn query_recent_nodes(
         where_clause,
         order_by: Some(order_by),
         limit: Some(limit),
+        offset: Some(offset),
     });
     match execute(access_token, op).await {
         Ok(d) => d.nodes.into_iter().map(Into::into).collect(),
@@ -3792,13 +3802,15 @@ fn drawer_child_order() -> Vec<NodesOrderBy> {
 /// the root node contributes no segment.
 /// The node whose page hosts `id`'s comment thread.
 ///
-/// A comment has no page of its own — the thread renders on the content it hangs
-/// under — so anything that links to a comment has to link there instead. Replies
-/// are comments on comments (both shapes exist in the data), so this climbs until
-/// the ancestor is something else, bounded like [`path_from_id`]. Anything that is
-/// not a comment is returned unchanged, so callers may pass any node id.
+/// Neither a comment nor a reaction has a page of its own — both render inside
+/// the thread on the content they hang under — so anything linking to one has to
+/// link there instead. A reaction sits on a comment, and replies are comments on
+/// comments (all three shapes exist in the data), so this climbs until the
+/// ancestor is something that renders, bounded like [`path_from_id`]. Anything
+/// else is returned unchanged, so callers may pass any node id.
 pub async fn thread_host_id(access_token: Option<&str>, id: &str) -> String {
     use cynic::QueryBuilder;
+    const PASS_THROUGH: [&str; 2] = ["vote/comment", "vote/reaction"];
     let mut current = id.to_string();
     for _ in 0..16 {
         let op = NodeByIdQuery::build(NodeByIdVariables {
@@ -3808,7 +3820,11 @@ pub async fn thread_host_id(access_token: Option<&str>, id: &str) -> String {
             break;
         };
         let Some(node) = data.node else { break };
-        if node.mime_id.as_deref() != Some("vote/comment") {
+        if !node
+            .mime_id
+            .as_deref()
+            .is_some_and(|m| PASS_THROUGH.contains(&m))
+        {
             break;
         }
         match node.parent_id {

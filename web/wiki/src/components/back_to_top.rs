@@ -31,9 +31,22 @@ const DOCK_SHOW_ABOVE: f64 = 64.0;
 /// Minimum scroll delta (px) before toggling the dock, to avoid jitter.
 const DOCK_SCROLL_DELTA: f64 = 6.0;
 
+/// Whether the viewport has come within [`NEAR_BOTTOM_PX`] of the end of the
+/// page — what an endless list watches to fetch its next page.
+static NEAR_BOTTOM: GlobalSignal<bool> = Signal::global(|| false);
+/// Start the next page this far from the bottom, so it is usually there by the
+/// time the reader arrives.
+const NEAR_BOTTOM_PX: f64 = 800.0;
+
 /// Whether the compact bottom dock should be hidden right now (hide-on-scroll).
 pub fn dock_hidden() -> bool {
     DOCK_HIDDEN()
+}
+
+/// Whether the page is scrolled near its end. Reactive: reading it in a
+/// component subscribes that component to the change.
+pub fn near_bottom() -> bool {
+    NEAR_BOTTOM()
 }
 
 /// Attach the single window scroll listener that feeds all scroll-driven signals.
@@ -82,6 +95,13 @@ fn install_listener() {
         let pct = (y / scrollable * 100.0).clamp(0.0, 100.0).round() as i32;
         if pct != *PROGRESS.peek() {
             *PROGRESS.write() = pct;
+        }
+
+        // Endless lists fetch their next page from here rather than installing a
+        // second scroll listener (this one already runs on every scroll event).
+        let near = doc_h - (y + inner_h) < NEAR_BOTTOM_PX;
+        if near != *NEAR_BOTTOM.peek() {
+            *NEAR_BOTTOM.write() = near;
         }
     });
     let _ = win.add_event_listener_with_callback("scroll", cb.as_ref().unchecked_ref());
