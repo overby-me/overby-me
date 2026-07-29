@@ -2926,12 +2926,17 @@ pub async fn query_recent_nodes(
                         "vote/position".to_string(),
                         "vote/candidate".to_string(),
                         "wiki/file".to_string(),
+                        // Comments belong in the feed too — they are activity in
+                        // the same contexts. Their row shows the comment text and
+                        // opens the thread's host (see RecentItem).
+                        "vote/comment".to_string(),
                     ]),
                     ..Default::default()
                 }),
                 ..Default::default()
             },
-            // Submitted only — drafts (mutable) never appear in Newest.
+            // Submitted only — drafts (mutable) never appear in Newest. Comments
+            // are written immutable, so this does not exclude them.
             NodesBoolExp {
                 mutable: Some(BooleanComparisonExp { eq: Some(false) }),
                 ..Default::default()
@@ -3785,6 +3790,35 @@ fn drawer_child_order() -> Vec<NodesOrderBy> {
 /// Resolve the path (list of keys from the root's child down to the node) for a
 /// node id by walking up the parent chain. Mirrors the React `fromId` helper:
 /// the root node contributes no segment.
+/// The node whose page hosts `id`'s comment thread.
+///
+/// A comment has no page of its own — the thread renders on the content it hangs
+/// under — so anything that links to a comment has to link there instead. Replies
+/// are comments on comments (both shapes exist in the data), so this climbs until
+/// the ancestor is something else, bounded like [`path_from_id`]. Anything that is
+/// not a comment is returned unchanged, so callers may pass any node id.
+pub async fn thread_host_id(access_token: Option<&str>, id: &str) -> String {
+    use cynic::QueryBuilder;
+    let mut current = id.to_string();
+    for _ in 0..16 {
+        let op = NodeByIdQuery::build(NodeByIdVariables {
+            id: Uuid(current.clone()),
+        });
+        let Ok(data) = execute(access_token, op).await else {
+            break;
+        };
+        let Some(node) = data.node else { break };
+        if node.mime_id.as_deref() != Some("vote/comment") {
+            break;
+        }
+        match node.parent_id {
+            Some(parent) => current = parent.0,
+            None => break,
+        }
+    }
+    current
+}
+
 pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<String>, String> {
     let mut segments: Vec<String> = Vec::new();
     let mut current = Some(id.to_string());

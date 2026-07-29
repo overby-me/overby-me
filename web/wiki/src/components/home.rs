@@ -228,6 +228,20 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
     let parent_name = node.parent.as_ref().map(|p| p.name.clone());
     let mime = node.mime_id.clone().unwrap_or_default();
     let data = node.data.as_ref().map(|d| d.0.clone());
+    // A comment node's `name` is its author, which the row already shows above,
+    // so its headline is the comment text instead.
+    let is_comment = mime == "vote/comment";
+    let title = if is_comment {
+        node.data
+            .as_ref()
+            .and_then(|d| d.0.get("text"))
+            .and_then(|t| t.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| t("vote.comments"))
+    } else {
+        node.name.clone()
+    };
 
     rsx! {
         div {
@@ -236,9 +250,15 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                 let node_id = node_id.clone();
                 let key = key.clone();
                 let token = session.read().access_token.clone();
-                // Resolve the node's full ancestor path, then navigate.
+                // Resolve the node's full ancestor path, then navigate. A comment
+                // is not a page, so it opens the content hosting its thread.
                 spawn(async move {
-                    let mut segments = graphql::path_from_id(token.as_deref(), &node_id)
+                    let target = if is_comment {
+                        graphql::thread_host_id(token.as_deref(), &node_id).await
+                    } else {
+                        node_id.clone()
+                    };
+                    let mut segments = graphql::path_from_id(token.as_deref(), &target)
                         .await
                         .unwrap_or_default();
                     if segments.is_empty() {
@@ -279,7 +299,7 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                     }
                 }
                 // What.
-                div { class: "recent-title", "{node.name}" }
+                div { class: "recent-title", "{title}" }
                 // Where (the content type + its context).
                 if let Some(parent) = parent_name.as_ref() {
                     div { class: "recent-context",
