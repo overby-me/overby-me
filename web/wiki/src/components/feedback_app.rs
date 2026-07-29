@@ -31,6 +31,81 @@ const ANONYMOUS: &str = "anonymous";
 /// A crash that hit fifty people should say so without becoming fifty chips.
 const MAX_REPORTER_CHIPS: usize = 6;
 
+/// The filter chips: every kind that can appear, plus "all".
+fn kind_filters() -> Vec<(String, String)> {
+    [
+        ("all", "member.filterAll"),
+        ("crash", "feedback.crash"),
+        ("bug", "feedback.bug"),
+        ("feature", "feedback.feature"),
+        ("other", "feedback.other"),
+    ]
+    .into_iter()
+    .map(|(value, key)| (value.to_string(), t(key)))
+    .collect()
+}
+
+/// The time-range choices, as (value, label).
+fn since_options() -> Vec<(String, String)> {
+    [
+        ("any", "feedback.anyTime"),
+        ("1", "feedback.lastDay"),
+        ("7", "feedback.lastWeek"),
+        ("30", "feedback.lastMonth"),
+    ]
+    .into_iter()
+    .map(|(value, key)| (value.to_string(), t(key)))
+    .collect()
+}
+
+/// The oldest timestamp a range admits, in epoch milliseconds; `None` for "any".
+fn cutoff_ms(since: &str) -> Option<f64> {
+    let days: f64 = since.parse().ok()?;
+    Some(js_sys::Date::now() - days * 24.0 * 60.0 * 60.0 * 1000.0)
+}
+
+fn matches_kind(item: &FeedbackItem, kind: &str) -> bool {
+    kind == "all" || item.kind == kind
+}
+
+/// Free text against everything a person might search by: what was reported,
+/// where it happened, which build, and who hit it.
+fn matches_search(item: &FeedbackItem, needle: &str, people: &[model::Author]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let named = |id: &String| {
+        people
+            .iter()
+            .find(|p| p.user_id.as_ref() == Some(id))
+            .map(|p| p.name.to_lowercase())
+            .unwrap_or_default()
+    };
+    item.message.to_lowercase().contains(needle)
+        || item.path.to_lowercase().contains(needle)
+        || item.commit.to_lowercase().contains(needle)
+        || item.owner_name.to_lowercase().contains(needle)
+        || item.reporters.iter().any(|id| named(id).contains(needle))
+}
+
+/// Whether the report falls inside the range.
+///
+/// Measured from the LAST sighting, not the first. A crash that started weeks ago
+/// and happened again this morning belongs in "last 24 hours" — the question the
+/// range answers is what is going on now.
+fn matches_since(item: &FeedbackItem, cutoff: Option<f64>) -> bool {
+    let Some(cutoff) = cutoff else {
+        return true;
+    };
+    let stamp = if item.last_seen.is_empty() {
+        &item.created_at
+    } else {
+        &item.last_seen
+    };
+    let at = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(stamp)).get_time();
+    at.is_nan() || at >= cutoff
+}
+
 /// The material icon + label key for a feedback kind.
 fn kind_glyph(kind: &str) -> (&'static str, &'static str) {
     match kind {
@@ -102,6 +177,22 @@ pub fn FeedbackApp() -> Element {
         items.retain(|it| it.owner_id.is_some() && it.owner_id == my_id);
     }
 
+    // Filtering is client-side because the whole list is already here:
+    // `query_feedback` fetches it unpaginated, feedback volume being low. If that
+    // stops being true this moves to Hasura, the way the roster did.
+    let kind = use_signal(|| "all".to_string());
+    let search = use_signal(String::new);
+    let since = use_signal(|| "any".to_string());
+    let total_before = items.len();
+    let needle = search.read().trim().to_lowercase();
+    let cutoff = cutoff_ms(&since.read());
+    items.retain(|it| {
+        matches_kind(it, &kind.read())
+            && matches_search(it, &needle, &people)
+            && matches_since(it, cutoff)
+    });
+    let filtered = items.len() != total_before;
+
     if !is_auth {
         return rsx! {
             div { class: "card",
@@ -135,8 +226,46 @@ pub fn FeedbackApp() -> Element {
                 h3 { class: "title-medium",
                     if is_owner { "{t(\"feedback.all\")}" } else { "{t(\"feedback.yours\")}" }
                 }
+                div { class: "flex-grow" }
+                // Composing lives here now, rather than as a second user-menu row
+                // that opened a dialog from anywhere.
+                if crate::components::feedback::FEEDBACK_ENABLED {
+                    button {
+                        class: "btn btn-primary",
+                        onclick: move |_| {
+                            *crate::components::feedback::FEEDBACK_OPEN.write() = true;
+                        },
+                        span { class: "material-icons", "add" }
+                        span { class: "feedback-compose-label", "{t(\"feedback.menu\")}" }
+                    }
+                }
             }
             div { class: "card-content",
+                // The same toolbar the member roster uses, so the two screens
+                // filter alike rather than merely resemble each other.
+                if !loading && total_before > 0 {
+                    super::widgets::FilterToolbar {
+                        search,
+                        filter: kind,
+                        filters: kind_filters(),
+                        search_placeholder: t("feedback.searchPlaceholder"),
+                        // A bare `select`, which the stylesheet already dresses;
+                        // a wrapper class here would style nothing.
+                        trailing: rsx! {
+                            select {
+                                aria_label: t("feedback.timeRange"),
+                                value: "{since}",
+                                onchange: {
+                                    let mut since = since;
+                                    move |e: FormEvent| since.set(e.value())
+                                },
+                                for (value , label) in since_options() {
+                                    option { key: "{value}", value: "{value}", "{label}" }
+                                }
+                            }
+                        },
+                    }
+                }
                 if loading {
                     super::widgets::Spinner {}
                 } else if items.is_empty() {
@@ -145,7 +274,15 @@ pub fn FeedbackApp() -> Element {
                             span { class: "material-icons", "feedback" }
                         }
                         p { class: "empty-state-body",
-                            if is_owner { "{t(\"feedback.empty\")}" } else { "{t(\"feedback.emptyMine\")}" }
+                            // Nothing matching and nothing at all are different
+                            // situations: one is answered by changing the filter.
+                            if filtered {
+                                "{t(\"common.noResults\")}"
+                            } else if is_owner {
+                                "{t(\"feedback.empty\")}"
+                            } else {
+                                "{t(\"feedback.emptyMine\")}"
+                            }
                         }
                     }
                 } else {

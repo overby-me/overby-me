@@ -192,32 +192,29 @@ pub(super) fn UserMenu() -> Element {
                         span { class: "material-icons", "language" }
                         {match *LANG.read() { Lang::En => " Dansk", Lang::Da => " English" }}
                     }
-                    // Send feedback / report a bug (available signed in or out).
-                    // The dialog itself renders at the app-shell root (see
-                    // `feedback::FEEDBACK_OPEN`) — inside this drawer pane its
+                    // One feedback row, not two. Sending and reading were separate
+                    // items that landed in the same place conceptually; the app
+                    // now carries its own compose button, the way the profile
+                    // links were merged into one.
+                    //
+                    // Signed out there is nothing to read — the app answers with a
+                    // locked empty state — so the entry goes straight to the
+                    // dialog. That dialog renders at the app-shell root (see
+                    // `feedback::FEEDBACK_OPEN`): inside this drawer pane its
                     // fixed scrim would be trapped by the pane's transform.
                     if crate::components::feedback::FEEDBACK_ENABLED {
                         button {
                             class: "list-item",
                             onclick: move |_| {
                                 menu_open.set(false);
-                                *crate::components::feedback::FEEDBACK_OPEN.write() = true;
+                                if is_auth {
+                                    nav.push(Route::Home { app: Some("feedback".to_string()) });
+                                } else {
+                                    *crate::components::feedback::FEEDBACK_OPEN.write() = true;
+                                }
                             },
                             span { class: "material-icons", "feedback" }
-                            " {t(\"feedback.menu\")}"
-                        }
-                        // Browse feedback: everyone sees their own submissions; home
-                        // context owners see all (enforced server-side).
-                        if is_auth {
-                            button {
-                                class: "list-item",
-                                onclick: move |_| {
-                                    menu_open.set(false);
-                                    nav.push(Route::Home { app: Some("feedback".to_string()) });
-                                },
-                                span { class: "material-icons", "forum" }
-                                " {t(\"feedback.view\")}"
-                            }
+                            " {t(\"feedback.view\")}"
                         }
                     }
                     if is_auth {

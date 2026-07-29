@@ -3016,6 +3016,12 @@ select:focus {
 }
 .search-field input {
 	flex: 1;
+	/* A flex item will not shrink below its intrinsic width without this, and an
+	   input's intrinsic width follows its placeholder. A long one therefore
+	   overflowed the pill and ran underneath the filter chips beside it — which
+	   only showed up once a screen used a placeholder longer than "Search
+	   members". */
+	min-width: 0;
 	border: none;
 	background: transparent;
 	outline: none;
@@ -3679,6 +3685,14 @@ select:focus {
 .feedback-item .feedback-meta {
 	margin-top: var(--md-sys-spacing-3);
 	gap: var(--md-sys-spacing-3);
+}
+
+/* The compose button's words. On a narrow screen the header already carries an
+   icon, a title and this button; the plus alone still reads as "add". */
+@media (max-width: 480px) {
+	.feedback-compose-label {
+		display: none;
+	}
 }
 
 /* The build a report came from. Monospace so a hash reads as one. */

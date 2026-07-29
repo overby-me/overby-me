@@ -24,6 +24,75 @@ pub fn DataTable(columns: Vec<String>, children: Element) -> Element {
     }
 }
 
+/// A search field and a row of single-select filter chips.
+///
+/// Extracted from [`PaginatedTable`] so a list can filter the same way a table
+/// does. It was worth doing the moment a second screen needed filtering: the two
+/// would otherwise have looked alike only for as long as someone kept them so.
+///
+/// Owns nothing — the parent binds `search` and `filter` and decides what they
+/// mean. `on_change` fires after either, which is how the table resets its page
+/// without this knowing pages exist. `trailing` takes anything else the screen
+/// needs in the bar, such as a date range.
+#[component]
+pub fn FilterToolbar(
+    search: Signal<String>,
+    filter: Signal<String>,
+    #[props(default)] filters: Vec<(String, String)>,
+    search_placeholder: String,
+    #[props(default)] on_change: EventHandler<()>,
+    #[props(default)] trailing: Option<Element>,
+) -> Element {
+    let mut search = search;
+    let mut filter = filter;
+    let active = filter.read().clone();
+    rsx! {
+        div { class: "paginated-table-toolbar",
+            label { class: "search-field",
+                span { class: "material-icons", "search" }
+                input {
+                    r#type: "text",
+                    placeholder: "{search_placeholder}",
+                    value: "{search}",
+                    oninput: move |e| {
+                        search.set(e.value());
+                        on_change.call(());
+                    },
+                }
+            }
+            if !filters.is_empty() {
+                div { class: "filter-chips", role: "group",
+                    for (value , label) in filters.iter().cloned() {
+                        {
+                            let selected = value == active;
+                            let v = value.clone();
+                            rsx! {
+                                button {
+                                    key: "{value}",
+                                    r#type: "button",
+                                    class: if selected { "m3-filter-chip selected" } else { "m3-filter-chip" },
+                                    "aria-pressed": if selected { "true" } else { "false" },
+                                    onclick: move |_| {
+                                        filter.set(v.clone());
+                                        on_change.call(());
+                                    },
+                                    if selected {
+                                        span { class: "material-icons", "check" }
+                                    }
+                                    "{label}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(trailing) = trailing {
+                {trailing}
+            }
+        }
+    }
+}
+
 /// A generic, wiki-agnostic paginated data table: a search field, an optional row
 /// of single-select filter chips, a [`DataTable`] body, and a footer with a range
 /// label and prev/next controls. It owns no data — the parent passes the current
@@ -45,55 +114,21 @@ pub fn PaginatedTable(
     next_label: String,
     children: Element,
 ) -> Element {
-    let mut search = search;
-    let mut filter = filter;
     let mut page = page;
     let page_count = total.div_ceil(page_size).max(1);
     let cur = (*page.read()).min(page_count - 1);
     let first = if total == 0 { 0 } else { cur * page_size + 1 };
     let last = ((cur + 1) * page_size).min(total);
-    let active = filter.read().clone();
     rsx! {
         div { class: "paginated-table",
-            div { class: "paginated-table-toolbar",
-                label { class: "search-field",
-                    span { class: "material-icons", "search" }
-                    input {
-                        r#type: "text",
-                        placeholder: "{search_placeholder}",
-                        value: "{search}",
-                        oninput: move |e| {
-                            search.set(e.value());
-                            page.set(0);
-                        },
-                    }
-                }
-                if !filters.is_empty() {
-                    div { class: "filter-chips", role: "group",
-                        for (value , label) in filters.iter().cloned() {
-                            {
-                                let selected = value == active;
-                                let v = value.clone();
-                                rsx! {
-                                    button {
-                                        key: "{value}",
-                                        r#type: "button",
-                                        class: if selected { "m3-filter-chip selected" } else { "m3-filter-chip" },
-                                        "aria-pressed": if selected { "true" } else { "false" },
-                                        onclick: move |_| {
-                                            filter.set(v.clone());
-                                            page.set(0);
-                                        },
-                                        if selected {
-                                            span { class: "material-icons", "check" }
-                                        }
-                                        "{label}"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            FilterToolbar {
+                search,
+                filter,
+                filters,
+                search_placeholder,
+                // Any change starts the results again from the first page; the
+                // toolbar itself knows nothing about paging.
+                on_change: move |_| page.set(0),
             }
             DataTable { columns, {children} }
             div { class: "paginated-table-footer",

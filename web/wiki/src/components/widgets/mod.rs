@@ -22,7 +22,7 @@ pub use dialog::Dialog;
 pub use feedback::{EmptyState, ErrorState};
 pub use image::ZoomableImage;
 pub use segmented_button::SegmentedButton;
-pub use table::{DataTable, PaginatedTable};
+pub use table::{DataTable, FilterToolbar, PaginatedTable};
 // CopyLinkAction is deliberately not re-exported: ToolSheet renders it itself as
 // its quick group's first segment, so no call site places (or misplaces) it.
 pub use tool_sheet::{ExportAction, SheetGroup, ToolSheet, TOOLS_DOCKED};
