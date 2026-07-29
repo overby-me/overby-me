@@ -117,6 +117,68 @@ fn install_listener() {
     cb.forget();
 }
 
+/// Whether focus currently sits in something you type into.
+fn focus_is_text_entry() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.active_element())
+        .map(|e| {
+            let tag = e.tag_name().to_lowercase();
+            tag == "input"
+                || tag == "textarea"
+                || tag == "select"
+                || e.get_attribute("contenteditable")
+                    .is_some_and(|v| v != "false")
+        })
+        .unwrap_or(false)
+}
+
+/// Hold the dock open from the moment a field takes focus.
+///
+/// The visual viewport is too late to drive this. Focusing a field on iOS goes:
+/// focus, then Safari scrolls the page to reveal the field, and only then does
+/// the keyboard animate in and the visual viewport resize. The dock's
+/// hide-on-scroll runs on that middle step, so by the time the resize said
+/// "keyboard", the dock — and the search box inside it — had already slid away.
+///
+/// `focusin` fires first and synchronously, so the hide is already standing down
+/// before that scroll arrives. The visual viewport still supplies the inset; this
+/// only decides WHEN to stop hiding.
+fn install_focus_listener() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let focus_in = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(|| {
+        if !focus_is_text_entry() {
+            return;
+        }
+        if !*KEYBOARD_OPEN.peek() {
+            *KEYBOARD_OPEN.write() = true;
+        }
+        if *DOCK_HIDDEN.peek() {
+            *DOCK_HIDDEN.write() = false;
+        }
+    });
+    let focus_out = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(|| {
+        // Deferred: focusout fires before focusin when moving between two
+        // fields, and dropping the guard in that gap would let the scroll
+        // between them hide the dock.
+        if let Some(win) = web_sys::window() {
+            let later = wasm_bindgen::closure::Closure::once_into_js(move || {
+                if !focus_is_text_entry() && *KEYBOARD_OPEN.peek() {
+                    *KEYBOARD_OPEN.write() = false;
+                }
+            });
+            let _ =
+                win.set_timeout_with_callback_and_timeout_and_arguments_0(later.unchecked_ref(), 0);
+        }
+    });
+    let _ = doc.add_event_listener_with_callback("focusin", focus_in.as_ref().unchecked_ref());
+    let _ = doc.add_event_listener_with_callback("focusout", focus_out.as_ref().unchecked_ref());
+    focus_in.forget();
+    focus_out.forget();
+}
+
 /// Publish the software keyboard's height as `--md-sys-keyboard-inset`.
 ///
 /// iOS does not shrink the LAYOUT viewport when the keyboard opens, so anything
@@ -183,14 +245,16 @@ fn update_keyboard_inset() {
             .set_property("--md-sys-keyboard-inset", &format!("{inset}px"));
     }
 
-    let open = inset > 0.0;
-    if open != *KEYBOARD_OPEN.peek() {
-        *KEYBOARD_OPEN.write() = open;
+    // Only ever RAISE the flag here. Lowering it is focusout's job: the inset
+    // reads 0 for the whole moment between the tap and the keyboard animating
+    // in, and clearing it then would reopen the very window this guards.
+    if inset > 0.0 && !*KEYBOARD_OPEN.peek() {
+        *KEYBOARD_OPEN.write() = true;
     }
     // Bring the dock back the moment the keyboard appears, rather than waiting
     // for a scroll to re-evaluate: it may well have been hidden before the field
     // was tapped, and the field is inside it.
-    if open && *DOCK_HIDDEN.peek() {
+    if inset > 0.0 && *DOCK_HIDDEN.peek() {
         *DOCK_HIDDEN.write() = false;
     }
 }
@@ -199,6 +263,7 @@ fn update_keyboard_inset() {
 pub fn BackToTop() -> Element {
     use_hook(install_listener);
     use_hook(install_keyboard_listener);
+    use_hook(install_focus_listener);
 
     rsx! {
         button {
