@@ -36,6 +36,12 @@ fn cache() -> &'static Cache {
     CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+/// Admits one symbolication at a time — see `resolve_stack` for why.
+fn permit() -> &'static tokio::sync::Semaphore {
+    static PERMIT: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+    PERMIT.get_or_init(|| tokio::sync::Semaphore::new(1))
+}
+
 /// Rewrite every wasm frame in `stack` that can be resolved, leaving the rest
 /// exactly as it arrived.
 ///
@@ -50,6 +56,12 @@ pub async fn resolve_stack(client: &reqwest::Client, app_origin: &str, stack: &s
         return stack.to_string();
     };
     let owned = stack.to_string();
+    // One at a time. Measured, a single symbolication peaks around 41 MB — 25 of
+    // it the shared sidecar, the rest per-parse state. The container has 256 MB
+    // and accepts 50 concurrent requests, so a burst of reports doing this at
+    // once is the one way this could exhaust it. Reports are rare enough that
+    // serialising them costs nothing worth having.
+    let _permit = permit().acquire().await.ok();
     // Parsing DWARF is CPU work and must not sit on the async runtime.
     let rewritten = tokio::task::spawn_blocking(move || rewrite(&bytes, &owned)).await;
     match rewritten {

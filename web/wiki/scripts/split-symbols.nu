@@ -49,6 +49,24 @@ def main [] {
     let symbols_dir = $"($PUBLIC)/symbols"
     mkdir $symbols_dir
     let sidecar = $"($symbols_dir)/($target.hash).debug.wasm"
+
+    # This rewrites the build output in place, and dx reuses an unchanged wasm
+    # rather than regenerating it — so a second `just build` finds the binary
+    # already stripped. That is success, not failure, as long as the sidecar from
+    # the first run is still there. Without this check the split would overwrite
+    # a good sidecar with a copy of the stripped binary, quietly destroying the
+    # symbols it exists to keep.
+    let has_debug = (^wasm-tools objdump $target.path | str contains ".debug_")
+    if not $has_debug {
+        if ($sidecar | path exists) {
+            print $"already split  ($sidecar)"
+            return
+        }
+        print "shipped wasm has no debug sections and no sidecar exists —"
+        print "was it built without --debug-symbols?"
+        exit 1
+    }
+
     cp $target.path $sidecar
 
     # `-d` takes a regex over section names. The DWARF sections are the only ones
