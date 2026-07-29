@@ -3707,6 +3707,28 @@ select:focus {
 	}
 }
 
+/* A chip that is also a button — a group author, which navigates to the group.
+   `display: contents` so the chip inside keeps its own box and the button adds
+   no second one, the same trick `.user-pop-trigger` uses for the identity
+   popover; without it the chip would sit inside a button's default padding and
+   border and stop matching the chips beside it. */
+.chip-button {
+	all: unset;
+	display: contents;
+	cursor: pointer;
+}
+.chip-button > * {
+	cursor: pointer;
+}
+.chip-button:focus-visible > * {
+	outline: 2px solid var(--md-primary);
+	outline-offset: 2px;
+	border-radius: var(--md-sys-shape-corner-full);
+}
+.chip-button:disabled > * {
+	opacity: 0.6;
+}
+
 /* The build a report came from. Monospace so a hash reads as one. */
 .feedback-commit {
 	font-family: ui-monospace, monospace;

@@ -296,16 +296,24 @@ pub fn ProfileApp() -> Element {
     }
 }
 
-/// The profile's authored-contributions list, revealed a handful at a time via an
+/// An authored-contributions list, revealed a handful at a time via an
 /// incremental "show more".
+///
+/// Shared with the group page: a group is credited on content the same way a
+/// person is, so it lists the same way (see `FolderApp`).
 #[component]
-fn ContributionList(items: Vec<model::ChildNodeFields>) -> Element {
+pub(crate) fn ContributionList(items: Vec<model::ChildNodeFields>) -> Element {
     const STEP: usize = 5;
     let mut shown = use_signal(|| STEP);
     if items.is_empty() {
         return rsx! {
             div { class: "card-content",
-                p { class: "body-medium", class: "text-muted", "{t(\"common.noContent\")}" }
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "history_edu" }
+                    }
+                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+                }
             }
         };
     }

@@ -154,6 +154,22 @@ pub fn FolderApp(
             }
         }));
     }
+    // A group is credited as an author on content the way a person is, so its
+    // page lists what it is credited on — the same list the profile shows. Only
+    // for a group: a folder is a place, not a party to anything.
+    let is_group = mime_id == "wiki/group";
+    let contrib_token = access_token.clone();
+    let contrib_id = node_id.clone();
+    let contributions =
+        crate::use_data_resource!(|(contrib_token, contrib_id, is_group)| async move {
+            if !is_group {
+                return Vec::new();
+            }
+            crate::graphql::query_group_contributions(contrib_token.as_deref(), &contrib_id, 12)
+                .await
+        });
+    let contrib_state = contributions.read().clone();
+
     // The path to return to after deleting this node (its parent).
     let delete_parent: Vec<String> = if parent_path.is_empty() {
         vec![]
@@ -734,6 +750,24 @@ pub fn FolderApp(
                         }
                     }
                 }
+            }
+        }
+
+        // What this group is credited on, below its own contents.
+        if is_group {
+            div { class: "card",
+                div { class: "card-header",
+                    div { class: "avatar small", span { class: "material-icons", "history_edu" } }
+                    h3 { class: "title-medium", "{t(\"profile.contributions\")}" }
+                }
+                {match &contrib_state {
+                    None => rsx! {
+                        div { class: "card-content", super::widgets::Spinner {} }
+                    },
+                    Some(items) => rsx! {
+                        super::profile::ContributionList { items: items.clone() }
+                    },
+                }}
             }
         }
 

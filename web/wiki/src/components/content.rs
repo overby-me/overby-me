@@ -546,18 +546,31 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
             if !members.is_empty() {
                 div { class: "chip-row chip-row-authors",
                     for member in members.iter() {
-                        super::loader::UserPopover {
-                            key: "{member.id.0}",
-                            name: member.label(),
-                            avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()).unwrap_or_default(),
-                            user_id: member.user.as_ref().map(|u| u.id.0.clone()),
-                            super::widgets::Chip {
-                                icon: mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
+                        // An author is either a person or a group. A person opens
+                        // the identity popover; a group is a place in the wiki, so
+                        // its chip goes there — it used to open a popover with no
+                        // identity behind it and nowhere to go.
+                        if member.user.is_none() && member.node.is_some() {
+                            GroupAuthorChip {
+                                key: "{member.id.0}",
+                                node_id: member.node_id.as_ref().map(|n| n.0.clone()).unwrap_or_default(),
                                 label: member.label(),
-                                title: t("member.author"),
-                                // The author's profile picture (e.g. their linked
-                                // Bluesky avatar) shows on the chip itself.
-                                avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()),
+                                mime: member.node.as_ref().and_then(|n| n.mime_id.clone()).unwrap_or_default(),
+                            }
+                        } else {
+                            super::loader::UserPopover {
+                                key: "{member.id.0}",
+                                name: member.label(),
+                                avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()).unwrap_or_default(),
+                                user_id: member.user.as_ref().map(|u| u.id.0.clone()),
+                                super::widgets::Chip {
+                                    icon: mime_icon(member.node.as_ref().and_then(|n| n.mime_id.as_deref()).unwrap_or("wiki/user")).to_string(),
+                                    label: member.label(),
+                                    title: t("member.author"),
+                                    // The author's profile picture (e.g. their linked
+                                    // Bluesky avatar) shows on the chip itself.
+                                    avatar_url: member.user.as_ref().map(|u| u.avatar_url.clone()),
+                                }
                             }
                         }
                     }
@@ -965,6 +978,55 @@ fn is_email(w: &str) -> bool {
                 && !domain.contains('@')
         }
         _ => false,
+    }
+}
+
+/// An author chip for a GROUP, which navigates to that group.
+///
+/// The path is resolved on CLICK, not while rendering. Nodes are addressed by
+/// path and there is no id route, so the group's ancestors have to be walked —
+/// one request per level. A page can carry several author chips and most are
+/// never followed, so paying for that up front would be a request per chip per
+/// page view.
+#[component]
+fn GroupAuthorChip(node_id: String, label: String, mime: String) -> Element {
+    let session = use_session();
+    let nav = use_navigator();
+    let mut going = use_signal(|| false);
+
+    rsx! {
+        button {
+            class: "chip-button",
+            r#type: "button",
+            title: t("member.author"),
+            disabled: *going.read() || node_id.is_empty(),
+            onclick: {
+                let node_id = node_id.clone();
+                move |_| {
+                    let token = session.read().access_token.clone();
+                    let node_id = node_id.clone();
+                    going.set(true);
+                    spawn(async move {
+                        let segments =
+                            crate::graphql::node_path(token.as_deref(), &node_id).await;
+                        going.set(false);
+                        if segments.is_empty() {
+                            // Nothing to navigate to: the group is not readable,
+                            // or its path does not resolve. Better to say so than
+                            // to send the reader to a 404.
+                            crate::snackbar::show_snackbar(&t("node.notFoundOrNoAccess"));
+                            return;
+                        }
+                        nav.push(Route::PathPage { segments, app: None });
+                    });
+                }
+            },
+            super::widgets::Chip {
+                icon: mime_icon(&mime).to_string(),
+                label: label.clone(),
+                title: t("member.author"),
+            }
+        }
     }
 }
 

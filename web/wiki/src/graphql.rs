@@ -3011,6 +3011,89 @@ pub async fn search_nodes(
     Ok(nodes.into_iter().map(Into::into).collect())
 }
 
+/// The URL path of a node, as the segments the router wants.
+///
+/// Walks parents up to the root, whose key is not a segment. Nodes are addressed
+/// by path, not id, and there is no id route to fall back on — so a chip that
+/// wants to link to a group has to ask.
+///
+/// One request per level, which is why the caller should do this on CLICK rather
+/// than while rendering: a page can carry many author chips and most are never
+/// followed.
+pub async fn node_path(access_token: Option<&str>, node_id: &str) -> Vec<String> {
+    // A path deeper than this is a cycle or a mistake; either way, stop.
+    const MAX_DEPTH: usize = 12;
+    let mut segments = Vec::new();
+    let mut current = Some(node_id.to_string());
+    for _ in 0..MAX_DEPTH {
+        let Some(id) = current.take() else { break };
+        let Ok(Some(node)) = query_node_by_id(access_token, &id).await else {
+            break;
+        };
+        // The root is the path's origin, not a step in it.
+        let Some(parent) = node.parent_id.as_ref().map(|p| p.0.clone()) else {
+            break;
+        };
+        segments.push(node.key.clone());
+        current = Some(parent);
+    }
+    segments.reverse();
+    segments
+}
+
+/// The content a GROUP is credited on, newest first.
+///
+/// A person's contributions are found by ownership ([`query_user_contributions`]),
+/// which cannot work for a group: a group owns nothing, it is named as an author.
+/// Authorship is a `members` row on the content pointing at the group, so that is
+/// what this asks for.
+///
+/// Typed like every other node query rather than raw. `ChildNodeFields` has no
+/// serde renaming, so deserialising camelCase JSON into it fails on the first
+/// snake_case field and yields an EMPTY list — which reads as "this group has
+/// contributed nothing" rather than as a bug.
+pub async fn query_group_contributions(
+    access_token: Option<&str>,
+    group_id: &str,
+    limit: i32,
+) -> Vec<model::ChildNodeFields> {
+    use cynic::QueryBuilder;
+    let where_clause = NodesBoolExp {
+        members: Some(MembersBoolExp {
+            node_id: Some(UuidComparisonExp {
+                eq: Some(Uuid(group_id.to_string())),
+                is_null: None,
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    // Two entries rather than one object with two keys: Hasura does not promise
+    // the order it applies the keys of a single order_by, and picked the id.
+    let order_by = vec![
+        NodesOrderBy {
+            created_at: Some(OrderBy::Desc),
+            index: None,
+            id: None,
+        },
+        NodesOrderBy {
+            created_at: None,
+            index: None,
+            id: Some(OrderBy::Desc),
+        },
+    ];
+    let op = RecentNodesQuery::build(RecentNodesVariables {
+        where_clause,
+        order_by: Some(order_by),
+        limit: Some(limit),
+        offset: None,
+    });
+    match execute(access_token, op).await {
+        Ok(d) => d.nodes.into_iter().map(Into::into).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// The signed-in user's most recent contributions for the profile: the
 /// meaningful content THEY authored (`owner_id`) — resolutions, amendments,
 /// candidacies, comments and questions — newest first. Unlike
