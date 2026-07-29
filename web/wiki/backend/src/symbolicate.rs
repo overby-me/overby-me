@@ -150,10 +150,30 @@ fn resolve_all<R: addr2line::gimli::Reader>(
     out
 }
 
-/// Keep the part of a path that identifies the file. Rust records absolute build
-/// paths, and rustc's own sources arrive under `/rustc/<hash>/`; neither means
-/// anything to whoever is reading the log.
+/// Keep the part of a path that identifies the file, and says whose it is.
+///
+/// Rust records absolute build paths, none of which mean anything to whoever
+/// reads the report. Trimming all of them to the trailing `src/…` was worse than
+/// verbose though: `/rustc/<hash>/library/alloc/src/boxed.rs` came out as
+/// `src/boxed.rs`, indistinguishable from a file in this repo, and a reader would
+/// go looking for code that is not there. Standard library and dependency paths
+/// now keep the crate that owns them.
 fn trim_path(path: &str) -> String {
+    // rustc's own sources: /rustc/<hash>/library/alloc/src/boxed.rs
+    if let Some(idx) = path.find("/library/") {
+        return path[idx + "/library/".len()..].to_string();
+    }
+    // A dependency:
+    // …/registry/src/index.crates.io-<hash>/parking_lot-0.12.4/src/raw_mutex.rs
+    // Checked before the `/src/` rule below, which such a path also matches.
+    if let Some(idx) = path.find("/registry/src/") {
+        let rest = &path[idx + "/registry/src/".len()..];
+        if let Some(slash) = rest.find('/') {
+            // Past the registry-index directory, so it starts at <crate>-<version>.
+            return rest[slash + 1..].to_string();
+        }
+    }
+    // This repo: an absolute checkout path ending in src/….
     if let Some(idx) = path.rfind("/src/") {
         return path[idx + 1..].to_string();
     }
@@ -256,10 +276,19 @@ mod tests {
             trim_path("/home/me/Work/overby.me2/web/wiki/src/components/folder.rs"),
             "src/components/folder.rs"
         );
-        // rustc's own sources have the same shape and trim the same way.
+        // The standard library keeps the crate that owns it, so it cannot be
+        // mistaken for a file in this repo.
         assert_eq!(
             trim_path("/rustc/59807616/library/alloc/src/boxed.rs"),
-            "src/boxed.rs"
+            "alloc/src/boxed.rs"
+        );
+        // So does a dependency, minus the registry-index directory.
+        assert_eq!(
+            trim_path(
+                "/home/me/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/\
+                 parking_lot-0.12.4/src/raw_mutex.rs"
+            ),
+            "parking_lot-0.12.4/src/raw_mutex.rs"
         );
         assert_eq!(trim_path("weird"), "weird");
     }
