@@ -119,9 +119,11 @@ pub fn ParentApp() -> Element {
                                     let id = id.clone();
                                     busy.set(true);
                                     spawn(async move {
-                                        let _ = graphql::delete_node_members(token.as_deref(), &id).await;
-                                        match graphql::delete_node(token.as_deref(), &id).await {
-                                            Ok(true) => {
+                                        // Recursive, or purging an orphan folder
+                                        // would just orphan everything filed under
+                                        // it — this view creating its own work.
+                                        match graphql::delete_node_deep(token, id).await {
+                                            Ok(()) => {
                                                 crate::session::bump_data_version();
                                                 confirm.set(None);
                                             }

@@ -231,15 +231,11 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                                 let parent = parent.clone();
                                                 confirm_open.set(false);
                                                 spawn(async move {
-                                                    // Abort if member cleanup fails, so we never orphan
-                                                    // member rows by deleting the node anyway.
-                                                    if let Err(e) = graphql::delete_node_members(token.as_deref(), &node_id).await {
-                                                        log::error!("delete_node_members failed: {e}");
-                                                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
-                                                        return;
-                                                    }
-                                                    match graphql::delete_node(token.as_deref(), &node_id).await {
-                                                        Ok(true) => {
+                                                    // Subtree and member rows together — nothing
+                                                    // cascades in the database, so a comment left
+                                                    // under a deleted file is unreachable forever.
+                                                    match graphql::delete_node_deep(token, node_id).await {
+                                                        Ok(()) => {
                                                             crate::session::bump_data_version();
                                                             nav.push(Route::PathPage { segments: parent, app: None });
                                                         }

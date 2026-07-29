@@ -74,8 +74,10 @@ pub(super) fn DeletePollButton(poll_id: String) -> Element {
                             let poll_id = poll_id.clone();
                             busy.set(true);
                             spawn(async move {
-                                match graphql::delete_node(token.as_deref(), &poll_id).await {
-                                    Ok(true) => {
+                                // The ballots cast on this poll are its children, so
+                                // they go with it rather than lingering unreachable.
+                                match graphql::delete_node_deep(token, poll_id).await {
+                                    Ok(()) => {
                                         crate::session::bump_data_version();
                                         confirm.set(false);
                                     }

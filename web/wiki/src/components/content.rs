@@ -494,27 +494,16 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                     let parent = parent.clone();
                                     confirm_open.set(false);
                                     spawn(async move {
-                                        // Remove the node's member rows first so
-                                        // deleting it leaves no orphans (React
-                                        // DeleteButton order). Abort if that fails,
-                                        // rather than deleting the node and orphaning
-                                        // its member rows.
-                                        if let Err(e) = graphql::delete_node_members(
-                                            token.as_deref(),
-                                            &node_id,
-                                        )
-                                        .await
-                                        {
-                                            log::error!("delete_node_members failed: {e}");
-                                            crate::snackbar::show_snackbar(&t(
-                                                "error.somethingWentWrong",
-                                            ));
-                                            return;
-                                        }
-                                        match graphql::delete_node(token.as_deref(), &node_id)
+                                        // The whole subtree, deepest first: the
+                                        // comments on this node, their replies and
+                                        // the reactions on those. Nothing cascades
+                                        // in the database, so anything left behind
+                                        // becomes unreachable. Member rows go with
+                                        // each node.
+                                        match graphql::delete_node_deep(token, node_id)
                                             .await
                                         {
-                                            Ok(true) => {
+                                            Ok(()) => {
                                                 crate::session::bump_data_version();
                                                 nav.push(Route::PathPage {
                                                     segments: parent,

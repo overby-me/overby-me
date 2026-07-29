@@ -588,13 +588,11 @@ pub fn FolderApp(
                                     let dest = dest.clone();
                                     confirm_open.set(false);
                                     spawn(async move {
-                                        if let Err(e) = graphql::delete_node_members(token.as_deref(), &node_del).await {
-                                            log::error!("delete_node_members failed: {e}");
-                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
-                                            return;
-                                        }
-                                        match graphql::delete_node(token.as_deref(), &node_del).await {
-                                            Ok(true) => {
+                                        // A folder is the one that really needs the
+                                        // recursion: everything filed under it went
+                                        // unreachable when only the folder row went.
+                                        match graphql::delete_node_deep(token, node_del).await {
+                                            Ok(()) => {
                                                 crate::session::bump_data_version();
                                                 nav.push(Route::PathPage { segments: dest, app: None });
                                             }

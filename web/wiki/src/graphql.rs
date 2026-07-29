@@ -685,6 +685,24 @@ pub struct RecentNodesVariables {
     pub offset: Option<i32>,
 }
 
+/// Just an id — for walking a subtree, where nothing else is needed.
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct NodeIdFields {
+    pub id: Uuid,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "NodesWhereVariables"
+)]
+pub struct ChildIdsQuery {
+    #[arguments(where: $where_clause)]
+    pub nodes: Vec<NodeIdFields>,
+}
+
 #[derive(cynic::QueryFragment, Debug, Clone)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
@@ -2420,6 +2438,58 @@ pub async fn update_node(
 }
 
 /// Delete a node by ID
+/// Delete a node and everything under it, deepest first.
+///
+/// Plain [`delete_node`] removes one row. Nothing cleans up after it — there is
+/// no foreign key on `parent_id` and so no cascade — so every child was left
+/// pointing at an id that no longer resolves. That is where the orphans in the
+/// missing-parent view come from: delete a comment and its replies and its
+/// reactions simply stay, unreachable.
+///
+/// Children go first so a failure part-way leaves a subtree that is still
+/// reachable from its parent, rather than a floating one. Members are removed
+/// with each node, as the single-node callers already do. Depth-bounded: the
+/// tree is shallow, and a cycle must not become an endless walk.
+pub fn delete_node_deep(
+    access_token: Option<String>,
+    id: String,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>> {
+    delete_node_deep_bounded(access_token, id, 32)
+}
+
+fn delete_node_deep_bounded(
+    access_token: Option<String>,
+    id: String,
+    depth: u32,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>> {
+    Box::pin(async move {
+        if depth == 0 {
+            return Err("delete: tree deeper than expected".to_string());
+        }
+        for child in child_ids(access_token.as_deref(), &id).await? {
+            delete_node_deep_bounded(access_token.clone(), child, depth - 1).await?;
+        }
+        delete_node_members(access_token.as_deref(), &id).await?;
+        delete_node(access_token.as_deref(), &id).await?;
+        Ok(())
+    })
+}
+
+/// The ids of a node's direct children, whatever their mime.
+async fn child_ids(access_token: Option<&str>, parent_id: &str) -> Result<Vec<String>, String> {
+    use cynic::QueryBuilder;
+    let where_clause = NodesBoolExp {
+        parent_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(parent_id.to_string())),
+            is_null: None,
+        }),
+        ..Default::default()
+    };
+    let op = ChildIdsQuery::build(NodesWhereVariables { where_clause });
+    let data = execute(access_token, op).await?;
+    Ok(data.nodes.into_iter().map(|n| n.id.0).collect())
+}
+
 pub async fn delete_node(access_token: Option<&str>, id: &str) -> Result<bool, String> {
     use cynic::MutationBuilder;
     let operation = DeleteNodeMutation::build(DeleteNodeVariables {
@@ -2981,6 +3051,13 @@ pub async fn query_recent_nodes(
             // Only content in a context (group/event) the user belongs to.
             NodesBoolExp {
                 context: Some(Box::new(belongs_to_user(user_id))),
+                ..Default::default()
+            },
+            // Its parent must still exist. An orphan (see `query_orphans`) has
+            // nowhere to open — the row would quote a comment that is gone, or
+            // resolve to no path at all.
+            NodesBoolExp {
+                parent: Some(Box::new(NodesBoolExp::default())),
                 ..Default::default()
             },
         ]),

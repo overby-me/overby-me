@@ -221,32 +221,13 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     }
 }
 
-/// Delete a comment and its whole reply subtree, deepest-first, so no orphaned
-/// replies are left pointing at a deleted parent. Best-effort: stops and reports on
-/// the first backend error.
+/// Delete a comment and everything under it, deepest-first.
+///
+/// Delegates to [`graphql::delete_node_deep`], which walks children of EVERY
+/// mime. This used to walk `vote/comment` children only, so replies went but the
+/// reactions on them stayed — pointing at a comment that no longer existed.
 async fn delete_comment_subtree(token: Option<String>, root: String) -> Result<(), String> {
-    // Discover the subtree (root + all descendants) breadth-first.
-    let mut all = vec![root.clone()];
-    let mut stack = vec![root];
-    let mut guard = 0;
-    while let Some(cur) = stack.pop() {
-        guard += 1;
-        if guard > 500 {
-            break;
-        }
-        for child in graphql::query_comments(token.as_deref(), &cur)
-            .await
-            .unwrap_or_default()
-        {
-            all.push(child.id.0.clone());
-            stack.push(child.id.0.clone());
-        }
-    }
-    // Delete leaves before their parents.
-    for id in all.iter().rev() {
-        graphql::delete_node(token.as_deref(), id).await?;
-    }
-    Ok(())
+    graphql::delete_node_deep(token, root).await
 }
 
 /// One comment and its nested replies (recursive; each level fetches its own
