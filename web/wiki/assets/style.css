@@ -288,12 +288,14 @@ a:hover {
    pill. Page scroll stays on the body so pull-to-refresh keeps working. */
 .app-shell {
 	min-height: 100vh;
+	min-height: 100dvh;
 }
 
 .content-pane {
 	padding: var(--md-sys-margin);
 	padding-top: calc(var(--md-sys-spacing-16) + var(--md-sys-spacing-2));
 	min-height: 100vh;
+	min-height: 100dvh;
 }
 /* Cap the reading column at ~A4 so content stays legible (a comfortable line
    length) on wide screens instead of stretching the full pane width. On
@@ -921,6 +923,7 @@ html {
 	margin-top: var(--md-sys-spacing-16);
 	margin-right: var(--md-sys-margin);
 	min-height: calc(100vh - 64px);
+	min-height: calc(100dvh - 64px);
 	/* margin-top clears the bar now, so the pane's own top padding is normal. */
 	padding-top: var(--md-sys-margin);
 	background: var(--md-surface);
@@ -989,7 +992,10 @@ html {
 	position: fixed;
 	left: 8px;
 	right: 8px;
-	bottom: 8px;
+	/* Lifted clear of the software keyboard. iOS leaves the layout viewport at
+	   full height when the keyboard opens, so a plain `bottom: 8px` puts the
+	   dock behind it; the inset is 0 whenever there is no keyboard. */
+	bottom: calc(8px + var(--md-sys-keyboard-inset));
 	z-index: 60;
 	display: flex;
 	flex-direction: column;
@@ -1331,6 +1337,7 @@ html {
 	display: block;
 	width: 100%;
 	height: 78vh;
+	height: 78dvh;
 	border: 0;
 	border-radius: var(--md-sys-shape-corner-medium);
 }
@@ -1443,6 +1450,7 @@ html {
 .content-hero.is-portrait {
 	aspect-ratio: 4 / 5;
 	max-height: min(75vh, 680px);
+	max-height: min(75dvh, 680px);
 }
 /* The hero image is a ZoomableImage; fill the hero as a cover crop (overriding the
    contained-thumbnail defaults of .zoomable) while keeping its click-to-expand. */
@@ -1785,6 +1793,9 @@ html {
 	align-items: center;
 	justify-content: center;
 	padding: var(--md-sys-spacing-4);
+	/* Unprefixed backdrop-filter only reached Safari 18, so iOS 15-17 needs the
+	   -webkit- spelling or the scrim is a flat tint with no blur behind it. */
+	-webkit-backdrop-filter: blur(2px);
 	backdrop-filter: blur(2px);
 	animation: m3-dialog-fade var(--md-sys-motion-duration-medium2)
 		var(--md-sys-motion-easing-standard);
@@ -3161,6 +3172,7 @@ select:focus {
 	right: 0;
 	bottom: 0;
 	max-height: 72vh;
+	max-height: 72dvh;
 	border-radius: var(--md-sys-shape-corner-extra-large)
 		var(--md-sys-shape-corner-extra-large) 0 0;
 	transform: translateY(101%);
@@ -4281,6 +4293,7 @@ h6,
 	min-width: 220px;
 	max-width: 340px;
 	max-height: 60vh;
+	max-height: 60dvh;
 	overflow-y: auto;
 	background: var(--md-surface-container-high);
 	border-radius: var(--md-sys-shape-corner-medium);
@@ -4991,6 +5004,7 @@ h6,
 .image-lightbox-img {
 	max-width: 96vw;
 	max-height: 92vh;
+	max-height: 92dvh;
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	box-shadow: var(--md-sys-elevation-5);
 	/* M3 emphasized expand: the image scales up as it fades in (a container-
@@ -5316,6 +5330,7 @@ h6,
    and is capped so the player never pushes the page controls off-screen. */
 .file-viewer video {
 	max-height: 70vh;
+	max-height: 70dvh;
 	border-radius: var(--md-sys-shape-corner-large);
 }
 
@@ -5333,6 +5348,7 @@ h6,
 	/* Fill the viewport height minus the chrome (top/bottom bar + padding)
        rather than a fixed 80vh, so a PDF/office preview uses the whole screen. */
 	height: calc(100vh - 160px);
+	height: calc(100dvh - 160px);
 	min-height: 480px;
 	border: none;
 	border-radius: var(--md-sys-shape-corner-small);
@@ -5382,6 +5398,7 @@ h6,
 .screen-full {
 	padding: 0;
 	min-height: 100vh;
+	min-height: 100dvh;
 	box-sizing: border-box;
 	/* Room-facing projector canvas: the plainest tonal step so bright panes pop
 	   and low contrast doesn't wash out under ambient light + projection. */
@@ -5395,6 +5412,7 @@ h6,
 	grid-template-columns: minmax(0, 1fr) 380px;
 	gap: var(--md-sys-pane-spacer);
 	min-height: 100vh;
+	min-height: 100dvh;
 	box-sizing: border-box;
 	padding: var(--md-sys-spacing-8) var(--md-sys-spacing-12);
 	align-items: start;
@@ -5403,6 +5421,7 @@ h6,
 	.projector {
 		grid-template-columns: minmax(0, 1fr) 480px;
 		padding: 4vh 5vw;
+		padding: 4dvh 5vw;
 	}
 }
 /* Below Large (unlikely for a projector): stack, hero over the speaker rail. */
@@ -5471,6 +5490,7 @@ h6,
 .projector-comments {
 	margin-top: var(--md-sys-spacing-4);
 	max-height: 46vh;
+	max-height: 46dvh;
 	overflow-y: auto;
 }
 .projector-comments textarea,

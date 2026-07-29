@@ -108,9 +108,68 @@ fn install_listener() {
     cb.forget();
 }
 
+/// Publish the software keyboard's height as `--md-sys-keyboard-inset`.
+///
+/// iOS does not shrink the LAYOUT viewport when the keyboard opens, so anything
+/// fixed to the bottom of the screen — the compact dock — is left sitting behind
+/// it. The VISUAL viewport does shrink, and the gap between the two is the
+/// keyboard. Reached through `Reflect` because `VisualViewport` is not in this
+/// crate's web-sys features (the same way `pwa` probes for `PushManager`).
+fn install_keyboard_listener() {
+    let Some(win) = web_sys::window() else { return };
+    let Ok(vv) = js_sys::Reflect::get(&win, &"visualViewport".into()) else {
+        return;
+    };
+    if vv.is_undefined() || vv.is_null() {
+        return;
+    }
+    let cb = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(update_keyboard_inset);
+    let target: &web_sys::EventTarget = vv.unchecked_ref();
+    // `resize` fires as the keyboard animates; `scroll` covers the page being
+    // panned to keep the focused field visible, which moves the visual viewport
+    // without resizing it.
+    for event in ["resize", "scroll"] {
+        let _ = target.add_event_listener_with_callback(event, cb.as_ref().unchecked_ref());
+    }
+    cb.forget();
+    update_keyboard_inset();
+}
+
+fn update_keyboard_inset() {
+    let Some(win) = web_sys::window() else { return };
+    let Ok(vv) = js_sys::Reflect::get(&win, &"visualViewport".into()) else {
+        return;
+    };
+    let number = |key: &str| {
+        js_sys::Reflect::get(&vv, &key.into())
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+    };
+    let layout = win
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let covered = layout - (number("height") + number("offsetTop"));
+    // Below this it is rounding or rubber-banding, not a keyboard; treating it
+    // as one would make the dock twitch on every scroll.
+    let inset = if covered < 24.0 { 0.0 } else { covered };
+    if let Some(html) = win
+        .document()
+        .and_then(|d| d.document_element())
+        .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        let _ = html
+            .style()
+            .set_property("--md-sys-keyboard-inset", &format!("{inset}px"));
+    }
+}
+
 #[component]
 pub fn BackToTop() -> Element {
     use_hook(install_listener);
+    use_hook(install_keyboard_listener);
 
     rsx! {
         button {

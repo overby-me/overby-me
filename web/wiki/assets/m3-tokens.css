@@ -143,6 +143,11 @@
 	--md-sys-spacing-16: 64px;
 	--md-sys-spacing-30: 120px;
 
+	/* How much of the screen the software keyboard covers, kept up to date from
+	   the visual viewport (see components/back_to_top.rs). 0 whenever there is
+	   no keyboard, which is every desktop and every idle phone. Bottom-fixed
+	   chrome adds it so iOS does not bury it behind the keyboard. */
+	--md-sys-keyboard-inset: 0px;
 	--md-sys-margin: 16px; /* body/side margin (compact) */
 	--md-sys-gutter: 16px; /* space between grid columns (compact) */
 	--md-sys-pane-spacer: 24px; /* gap between list + detail panes */
