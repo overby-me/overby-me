@@ -77,6 +77,7 @@ impl From<ParentNodeFields> for model::ParentNodeFields {
             key: p.key,
             mime_id: p.mime_id,
             data: p.data.map(Into::into),
+            author_avatar: p.author_avatar,
         }
     }
 }
@@ -489,6 +490,9 @@ pub struct ParentNodeFields {
     // What the parent says, for a feed row that is ABOUT its parent: a reaction
     // shows the comment it is on, a reply the comment it answers.
     pub data: Option<Jsonb>,
+    // And who wrote it. The computed field, not the `owner` relationship, so the
+    // face still appears for a comment in a context the reader is not in.
+    pub author_avatar: Option<String>,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]

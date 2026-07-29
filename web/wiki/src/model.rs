@@ -159,6 +159,8 @@ pub struct ParentNodeFields {
     pub mime_id: Option<String>,
     /// The parent's own content, for feed rows that quote what they are about.
     pub data: Option<Jsonb>,
+    /// The parent author's avatar, readable even where `owner` is not.
+    pub author_avatar: Option<String>,
 }
 
 // --- Mime types ---

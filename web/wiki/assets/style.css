@@ -2489,6 +2489,35 @@ select:focus {
 	line-height: 1.2;
 }
 
+/* Whose comment is being quoted: their face and name on a line above the words,
+   so the quote reads as someone speaking rather than as one run of grey. */
+.recent-quote-head {
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-1-5);
+	margin-bottom: var(--md-sys-spacing-0-5);
+}
+
+/* Smaller than the row's own author avatar — this is who is being quoted, not
+   who acted. */
+.recent-quote-avatar {
+	width: 20px;
+	height: 20px;
+	flex: 0 0 auto;
+	font-size: var(--md-sys-typescale-label-small-size);
+	background-color: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+}
+
+.recent-quote-author {
+	font-weight: 500;
+	color: var(--md-on-surface);
+}
+
+.recent-quote-text {
+	display: block;
+}
+
 /* What a reaction or a reply is about: the comment it lands on, quoted so the
    row reads on its own without opening the thread. Clamped — a feed row is a
    glance, not the conversation. */

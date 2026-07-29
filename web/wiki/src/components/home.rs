@@ -306,15 +306,36 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
         node.name.clone()
     };
     // What this row is ABOUT: the comment a reaction is on, or the comment a
-    // reply answers — quoted beneath, so the row stands on its own.
+    // reply answers — quoted beneath with WHOSE it is, so the row stands on its
+    // own. A comment node's `name` is its author, which is why the quote can
+    // name them without another lookup.
     let about = if is_reaction || is_comment {
         node.parent
             .as_ref()
             .filter(|p| p.mime_id.as_deref() == Some("vote/comment"))
-            .and_then(|p| comment_text(p.data.as_ref()))
+            .and_then(|p| {
+                comment_text(p.data.as_ref()).map(|text| {
+                    (
+                        p.name.trim().to_string(),
+                        p.author_avatar.clone().unwrap_or_default(),
+                        text,
+                    )
+                })
+            })
     } else {
         None
     };
+    let quote_initials = about
+        .as_ref()
+        .map(|(who, _, _)| {
+            who.split_whitespace()
+                .filter_map(|w| w.chars().next())
+                .take(2)
+                .collect::<String>()
+                .to_uppercase()
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "?".to_string());
     // For content, the opening of the text itself, so the feed shows something
     // rather than a list of titles.
     let excerpt = if is_comment || is_reaction {
@@ -390,19 +411,33 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                     class: if is_reaction { "recent-title recent-reaction" } else { "recent-title" },
                     "{title}"
                 }
-                // What it was about: the comment reacted to, or replied to.
-                if let Some(quote) = about.as_ref() {
-                    blockquote { class: "recent-quote", "{quote}" }
+                // What it was about: whose comment, and what it said.
+                if let Some((who, face, quote)) = about.as_ref() {
+                    blockquote { class: "recent-quote",
+                        div { class: "recent-quote-head",
+                            div { class: "avatar recent-quote-avatar",
+                                {super::loader::user_avatar(face, rsx! { "{quote_initials}" })}
+                            }
+                            if !who.is_empty() {
+                                span { class: "recent-quote-author", "{who}" }
+                            }
+                        }
+                        span { class: "recent-quote-text", "{quote}" }
+                    }
                 }
                 // The opening of the content itself, clamped by CSS.
                 if let Some(text) = excerpt.as_ref() {
                     p { class: "recent-excerpt", "{text}" }
                 }
-                // Where (the content type + its context).
-                if let Some(parent) = parent_name.as_ref() {
-                    div { class: "recent-context",
-                        {super::loader::node_icon_el(&mime, data.as_ref())}
-                        span { "{parent}" }
+                // Where. Skipped when the quote above already names the parent:
+                // a comment node's name IS its author, so for a reply or a
+                // reaction this line would just repeat the credit.
+                if about.is_none() {
+                    if let Some(parent) = parent_name.as_ref() {
+                        div { class: "recent-context",
+                            {super::loader::node_icon_el(&mime, data.as_ref())}
+                            span { "{parent}" }
+                        }
                     }
                 }
             }
