@@ -23,14 +23,20 @@ const PUBLIC = "target/dx/wiki-dioxus/release/web/public"
 # How many builds' worth of symbols to keep.
 #
 # dx never removes a superseded asset, so without this the directory gains ~26 MB
-# per build forever and every deploy uploads the lot. Three is the current build
-# plus enough history that someone who has not reloaded since the last deploy or
-# two still gets a resolved crash report.
+# per build forever and every deploy uploads the lot.
+#
+# Six, not three. Three assumed a reader reloads within a deploy or two, and a
+# day of thirteen deploys disproved it: a crash arrived from a tab whose build
+# was four deploys old, its symbols already pruned, and came back as raw offsets.
+# What bounds this is how long a tab stays open, not how often we deploy. Six
+# costs about 160 MB on the site and roughly a minute of upload.
 #
 # Losing an older one is not a failure: the backend fetches the sidecar, gets the
 # site's SPA fallback (HTML, not a wasm module) instead, recognises it by the
-# missing magic bytes and leaves the raw offsets alone.
-const KEEP = 3
+# missing magic bytes and leaves the raw offsets alone. Unresolved beats wrong,
+# which is why an older build is never resolved against a newer one's symbols —
+# the offsets would land in whatever function now occupies that address.
+const KEEP = 6
 
 # Drop all but the newest KEEP sidecars, never the one this build just produced.
 #

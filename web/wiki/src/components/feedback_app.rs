@@ -413,6 +413,41 @@ fn FeedbackRow(
                     // read to work out what someone was doing at the time.
                     span { class: "body-small text-muted", title: "{when_ago}", "{when}" }
                 }
+                // A stack is for pasting somewhere else — an editor, an issue,
+                // a message to whoever owns the code — and selecting forty
+                // wrapped monospace lines by hand on a phone is not that.
+                if item.kind == "crash" {
+                    button {
+                        class: "btn-icon",
+                        title: "{t(\"feedback.copyStack\")}",
+                        onclick: {
+                            let text = item.message.clone();
+                            move |_| {
+                                let text = text.clone();
+                                spawn(async move {
+                                    // Awaited, not fired and forgotten: the
+                                    // clipboard can refuse (permissions, an
+                                    // insecure context) and saying "copied" when
+                                    // nothing was is worse than saying nothing.
+                                    let copied = match web_sys::window() {
+                                        Some(win) => wasm_bindgen_futures::JsFuture::from(
+                                            win.navigator().clipboard().write_text(&text),
+                                        )
+                                        .await
+                                        .is_ok(),
+                                        None => false,
+                                    };
+                                    show_snackbar(&t(if copied {
+                                        "feedback.stackCopied"
+                                    } else {
+                                        "error.somethingWentWrong"
+                                    }));
+                                });
+                            }
+                        },
+                        span { class: "material-icons", "content_copy" }
+                    }
+                }
                 if can_delete {
                     button {
                         class: "btn-icon",

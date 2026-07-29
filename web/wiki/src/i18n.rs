@@ -143,6 +143,8 @@ const EN_JSON: &str = r#"{
         "seenByPeople": "Seen {{count}} times by {{people}} people",
         "lastSeen": "Last seen {{when}}",
         "andMore": "+{{count}} more",
+        "copyStack": "Copy stack trace",
+        "stackCopied": "Stack trace copied",
         "deleteConfirm": "Delete this feedback? This cannot be undone."
     },
     "editor": {
@@ -639,6 +641,8 @@ const DA_JSON: &str = r#"{
         "seenByPeople": "Set {{count}} gange af {{people}} personer",
         "lastSeen": "Sidst set {{when}}",
         "andMore": "+{{count}} flere",
+        "copyStack": "Kopiér stakspor",
+        "stackCopied": "Stakspor kopieret",
         "deleteConfirm": "Slet denne feedback? Dette kan ikke fortrydes."
     },
     "editor": {
