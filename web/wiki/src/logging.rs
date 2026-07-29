@@ -326,10 +326,25 @@ fn ship_sync(entry: Value) {
     let _ = xhr.send_with_opt_str(Some(&body));
 }
 
+/// Set once the app has panicked, after which the global handlers stay quiet.
+///
+/// A panic aborts, which traps the wasm instance, and every JavaScript call back
+/// into it then throws — "Unreachable code should not be executed", or a bare
+/// "Script error." when the throw is cross-origin. Those arrive as uncaught
+/// errors and were logged as if they were new failures, so one panic produced
+/// three entries and the two extra ones described the corpse rather than the
+/// cause.
+static PANICKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn panicked() -> bool {
+    PANICKED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn setup_panic_hook() {
     // The console output and the crash overlay come from `crash`; this only adds
     // the shipping. Synchronous, so the report is away before the app tears down.
     crate::crash::install_hook(|info| {
+        PANICKED.store(true, std::sync::atomic::Ordering::Relaxed);
         ship_sync(make_entry("error", format!("PANIC: {info}")));
     });
 }
@@ -344,6 +359,11 @@ fn setup_global_error_handlers() {
     };
     let et: &web_sys::EventTarget = win.as_ref();
     add_listener(et, "error", |ev| {
+        // Nothing after a panic is news: the instance is trapped and every call
+        // into it throws. The panic itself was already shipped.
+        if panicked() {
+            return;
+        }
         // Only genuine script errors: an `ErrorEvent` with a message. Resource
         // load failures (img/script 404) also fire "error" but carry none.
         if let Some(ee) = ev.dyn_ref::<web_sys::ErrorEvent>() {
@@ -356,6 +376,9 @@ fn setup_global_error_handlers() {
         }
     });
     add_listener(et, "unhandledrejection", |ev| {
+        if panicked() {
+            return;
+        }
         if let Some(pre) = ev.dyn_ref::<web_sys::PromiseRejectionEvent>() {
             let reason = pre.reason();
             let text = reason

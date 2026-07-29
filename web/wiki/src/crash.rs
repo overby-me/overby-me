@@ -40,6 +40,11 @@ const STATUS_ID: &str = "wiki-crash-status";
 /// on the far side (the backend's own cap is 4000 chars, applied after).
 const MAX_REPORT_CHARS: usize = 2000;
 
+/// How long the same crash stays suppressed before it is worth reporting again.
+/// Long enough that a reload loop files one node, short enough that a crash
+/// someone is still hitting later says so.
+const REPORT_AGAIN_MS: u64 = 30 * 60 * 1000;
+
 thread_local! {
     /// What panicked, captured in the hook so the report can carry it. Read when
     /// building the overlay, which happens in the same call.
@@ -175,7 +180,7 @@ fn digest(text: &str) -> String {
 fn settle_js(key: &str, sent_label: &str, failed_label: &str) -> String {
     format!(
         "function(ok){{\
-           if(ok){{try{{sessionStorage.setItem({key},'1');}}catch(e){{}}}}\
+           if(ok){{try{{sessionStorage.setItem({key},String(Date.now()));}}catch(e){{}}}}\
            var s=document.getElementById({status});if(s)s.textContent=ok?{sent}:{failed};\
          }}",
         key = js_string(key),
@@ -193,20 +198,40 @@ fn settle_js(key: &str, sent_label: &str, failed_label: &str) -> String {
 /// about to trap: the request now belongs to the browser, and the callback only
 /// touches the DOM.
 ///
-/// Sent at most once per crash per tab. A crash that survives a reload — a bad
-/// record on the page being opened, say — would otherwise file a node every time
-/// the reader tried again, burying the report under its own copies. Only a
-/// success is remembered, so a failed send still retries on the next load, and
-/// storage being unavailable (Safari in private mode) sends rather than skips:
-/// a duplicate is the cheaper mistake.
-fn auto_report_js(message: &str, sent_label: &str, failed_label: &str) -> String {
+/// The same crash is not re-sent for [`REPORT_AGAIN_MS`]. A crash that survives a
+/// reload — a bad record on the page being opened, say — would otherwise file a
+/// node every time the reader tried again, burying the report under its own
+/// copies.
+///
+/// The suppression EXPIRES, and it says so when it applies. It used to last the
+/// whole tab and still display "Reported — thank you", so triggering the same
+/// crash twice looked like reporting working once and then silently failing —
+/// flaky, when it was doing exactly what it was told. A report is worth
+/// refreshing eventually anyway: a crash still happening half an hour later is
+/// news about the present, not a duplicate.
+///
+/// Only a success is remembered, so a failed send retries on the next load, and
+/// storage being unavailable (private browsing) sends rather than skips: a
+/// duplicate is the cheaper mistake.
+fn auto_report_js(
+    message: &str,
+    sent_label: &str,
+    failed_label: &str,
+    already_label: &str,
+) -> String {
     let key = format!("wiki-crash-{}", digest(message));
     format!(
         "(function(){{var d={settle};\
-           try{{if(sessionStorage.getItem({key})){{d(true);return;}}}}catch(e){{}}\
+           try{{var t=Number(sessionStorage.getItem({key}));\
+             if(t>0&&Date.now()-t<{window}){{\
+               var s=document.getElementById({status});if(s)s.textContent={already};return;}}\
+           }}catch(e){{}}\
            {fetch}.then(function(r){{d(r.ok);}}).catch(function(){{d(false);}});}})();",
         settle = settle_js(&key, sent_label, failed_label),
         key = js_string(&key),
+        window = REPORT_AGAIN_MS,
+        status = js_string(STATUS_ID),
+        already = js_string(already_label),
         fetch = report_fetch_js(message),
     )
 }
@@ -280,5 +305,10 @@ pub fn show_overlay() {
     // File the report now the status line it writes into exists. Once per page:
     // the early return above means a burst of panics produces one overlay, and
     // so one report.
-    let _ = js_sys::eval(&auto_report_js(&message, &sent, &failed));
+    let _ = js_sys::eval(&auto_report_js(
+        &message,
+        &sent,
+        &failed,
+        &crate::i18n::t_static("error.crashAlreadyReported"),
+    ));
 }
