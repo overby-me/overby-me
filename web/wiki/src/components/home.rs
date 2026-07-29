@@ -346,6 +346,28 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
         })
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "?".to_string());
+    // The post's cover image (`data.image`, a file id). Resolved to a blob URL
+    // so the JWT stays in the Authorization header and never in an <img src>.
+    // Called unconditionally with an empty id when there is none, because it is
+    // a hook — the same shape ContentApp uses.
+    let cover_id = node
+        .data
+        .as_ref()
+        .and_then(|d| {
+            // A document, policy or candidate carries a cover in `image`; an
+            // uploaded picture IS its own image, under `fileId`.
+            d.0.get("image")
+                .and_then(|v| v.as_str())
+                .or_else(|| {
+                    d.0.get("type")
+                        .and_then(|t| t.as_str())
+                        .filter(|t| t.starts_with("image/"))
+                        .and_then(|_| d.0.get("fileId").and_then(|v| v.as_str()))
+                })
+                .filter(|s| !s.is_empty())
+        })
+        .map(String::from);
+    let cover_url = super::loader::use_file_object_url(cover_id.unwrap_or_default());
     // For content, the opening of the text itself, so the feed shows something
     // rather than a list of titles.
     let excerpt = if is_comment || is_reaction {
@@ -438,6 +460,16 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                 // The opening of the content itself, clamped by CSS.
                 if let Some(text) = excerpt.as_ref() {
                     p { class: "recent-excerpt", "{text}" }
+                }
+                // The node's own image, once its blob URL resolves.
+                if let Some(url) = cover_url.as_ref() {
+                    img {
+                        class: "recent-cover",
+                        src: "{url}",
+                        alt: "",
+                        loading: "lazy",
+                        "referrerpolicy": "no-referrer",
+                    }
                 }
                 // Where. Skipped when the quote above already names the parent:
                 // a comment node's name IS its author, so for a reply or a

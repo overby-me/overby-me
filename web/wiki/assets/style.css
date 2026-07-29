@@ -2534,6 +2534,19 @@ select:focus {
 	overflow: hidden;
 }
 
+/* The node's own picture — a document's cover, or an uploaded image itself.
+   Capped in height so a portrait cannot take over the feed, and cropped rather
+   than letterboxed so the row keeps a steady rhythm. */
+.recent-cover {
+	display: block;
+	width: 100%;
+	max-height: 220px;
+	object-fit: cover;
+	margin-top: var(--md-sys-spacing-2);
+	border-radius: var(--md-sys-shape-corner-medium);
+	background: var(--md-surface-container);
+}
+
 /* The opening of a document or policy, so the feed shows the writing and not
    just its title. */
 .recent-excerpt {
