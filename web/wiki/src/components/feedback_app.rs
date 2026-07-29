@@ -1,11 +1,19 @@
 //! The feedback app (`/?app=feedback`): browse feedback submissions. A home-
 //! context owner sees ALL feedback (with the submitter) and may delete items; a
-//! plain member sees only their own. NOTE: the own-only filtering is COSMETIC —
-//! the `nodes` select rule is open to any authenticated user, so a member could
-//! still read others' feedback via a raw query. It's a low-sensitivity report
-//! inbox, so this is a deliberate simplification (no restrictive select rule).
+//! plain member sees only their own.
+//!
+//! That own-only limit is real, not just a filter on this list. The `nodes`
+//! select rule grants a node to its owner, and to whoever owns or belongs to its
+//! context. Feedback lives in the ROOT context, which has one member row, so a
+//! member querying `wiki/feedback` directly gets back their own rows and nothing
+//! else. (This note said the opposite until 2026-07-29, when the rule still
+//! matched every authenticated user — worth knowing if you find older code that
+//! assumed feedback was readable by anyone.)
+//!
 //! Feedback is composed from the user-menu dialog
-//! ([`super::feedback::FeedbackDialog`]), which creates the `wiki/feedback` nodes.
+//! ([`super::feedback::FeedbackDialog`]), which creates the `wiki/feedback`
+//! nodes. Crashes arrive here too, as `kind = "crash"`, filed by the backend on
+//! the app's behalf (`src/crash.rs`, `backend/src/feedback.rs`).
 
 use dioxus::prelude::*;
 
