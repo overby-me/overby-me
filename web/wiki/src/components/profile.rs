@@ -202,7 +202,10 @@ pub fn ProfileApp() -> Element {
                         }
                     }
                     button {
-                        class: "btn btn-primary mt-1",
+                        // mt-2 (16px), the gap .auth-form puts between a field and
+                        // its submit. At mt-1 the button crowded the input, whose
+                        // floating label makes the pair read tighter still.
+                        class: "btn btn-primary mt-2",
                         disabled: bsky_handle.read().trim().is_empty(),
                         onclick: move |_| {
                             let handle = bsky_handle.read().trim().to_string();
