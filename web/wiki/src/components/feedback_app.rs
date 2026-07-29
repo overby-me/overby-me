@@ -306,20 +306,31 @@ fn FeedbackRow(
     on_delete: EventHandler<String>,
 ) -> Element {
     let (icon, label_key) = kind_glyph(&item.kind);
-    let date: String = item.created_at.chars().take(10).collect();
+    // Date AND time, in the reader's own timezone. Slicing the first ten
+    // characters off the ISO string was not just imprecise: the timestamp is
+    // UTC and Denmark runs ahead of it, so anything sent in the first hour or
+    // two after local midnight was still the previous day in UTC and was shown
+    // as such. `full_datetime` converts and localises.
+    let when = super::loader::full_datetime(&item.created_at);
+    let when_ago = super::loader::relative_time(&item.created_at);
     let screenshot = super::loader::use_file_object_url(item.image.clone().unwrap_or_default());
 
     rsx! {
         div { class: "feedback-item",
-            div { class: "stack stack-h",
+            // Wraps: a full timestamp is a good deal wider than a bare date, and
+            // on a phone it would otherwise squeeze the kind chip.
+            div { class: "stack stack-h stack-wrap",
                 // The chip carries the same glyph and names it, so an avatar
                 // beside it was the icon twice over.
                 span { class: "chip", span { class: "material-icons", "{icon}" }
                     span { class: "chip-label", "{t(label_key)}" }
                 }
                 div { class: "flex-grow" }
-                if !date.is_empty() {
-                    span { class: "body-small text-muted", "{date}" }
+                if !when.is_empty() {
+                    // Exact on the face of it, with "3 hours ago" a hover away —
+                    // the reverse of the pattern elsewhere, because a report is
+                    // read to work out what someone was doing at the time.
+                    span { class: "body-small text-muted", title: "{when_ago}", "{when}" }
                 }
                 if can_delete {
                     button {
