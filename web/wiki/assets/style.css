@@ -2541,14 +2541,18 @@ select:focus {
    the cap keeps a tall one from pushing the next row off screen. */
 .recent-cover {
 	display: block;
-	width: 100%;
 	aspect-ratio: 16 / 9;
-	max-height: 260px;
 	object-fit: cover;
 	object-position: center;
 	margin-top: var(--md-sys-spacing-2);
 	border-radius: var(--md-sys-shape-corner-medium);
 	background: var(--md-surface-container-high);
+	/* Bound the WIDTH, never the height. A max-height clamps the box after
+	   aspect-ratio has sized it, so the frame silently grows wider than the
+	   ratio asks — which is exactly the flat letterbox this was meant to fix.
+	   Capping the width keeps the 16/9 intact at every row width. */
+	width: 100%;
+	max-width: 460px;
 }
 
 /* The opening of a document or policy, so the feed shows the writing and not
