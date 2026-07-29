@@ -2553,6 +2553,11 @@ select:focus {
 	height: auto;
 	max-width: 100%;
 	max-height: 340px;
+	/* The row body is a flex column, whose children stretch across it by
+	   default. That overrides `width: auto` and forces the full column width,
+	   while max-height goes on clamping the height — so the picture distorts.
+	   Opting out of the stretch is what keeps `auto` meaning auto. */
+	align-self: flex-start;
 }
 
 /* The opening of a document or policy, so the feed shows the writing and not
