@@ -6605,6 +6605,11 @@ a.list-item:hover {
 	font-size: var(--md-sys-typescale-body-medium-size);
 }
 
-.crash-card button {
-	align-self: center;
+/* Report beside Reload. Wraps on a narrow phone rather than squeezing, and the
+   labels change length when a report is sent. */
+.crash-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--md-sys-spacing-2);
 }
