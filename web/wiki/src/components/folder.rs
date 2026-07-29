@@ -1026,16 +1026,28 @@ fn FolderAdd(
                     }
                 }
             }
-            div { class: "mt-2",
-                // A native <select> (styled to match the editor's), used because it
-                // renders localized option labels correctly when value != label.
-                select {
-                    class: "editor-select",
-                    "aria-label": t("common.type"),
-                    value: "{kind}",
-                    onchange: move |e| kind.set(e.value()),
-                    for (mime , label_key) in options.iter().copied() {
-                        option { key: "{mime}", value: "{mime}", "{t(label_key)}" }
+            // The kind, as icon buttons rather than a native <select>. An
+            // <option> cannot hold markup, so the select could not show the mime
+            // glyph the rest of the app identifies content by — the same picture
+            // the folder list, the breadcrumb and the header avatar use. This is
+            // the pattern the feedback dialog's type toggle already uses.
+            div { class: "stack stack-h stack-wrap mt-2", role: "group", aria_label: t("common.type"),
+                for (mime , label_key) in options.iter().copied() {
+                    {
+                        let selected = *kind.read() == mime;
+                        rsx! {
+                            button {
+                                key: "{mime}",
+                                r#type: "button",
+                                class: if selected { "btn btn-primary" } else { "btn btn-outlined" },
+                                "aria-pressed": if selected { "true" } else { "false" },
+                                onclick: move |_| kind.set(mime.to_string()),
+                                span { class: "material-icons",
+                                    "{crate::components::loader::mime_icon(mime)}"
+                                }
+                                "{t(label_key)}"
+                            }
+                        }
                     }
                 }
             }

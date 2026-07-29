@@ -4556,6 +4556,22 @@ h6,
 
 /* One breadcrumb crumb: an always-visible mime avatar + a name that expands on
  * hover (horizontal collapse), matching the old wiki. */
+/* A crumb whose node has not resolved yet: the shimmer, at roughly the width a
+   crumb occupies, so the rail holds its shape and nothing jumps when the name
+   arrives. It replaced a question-mark icon beside the raw URL slug, which read
+   as a broken link rather than a pending one. Pill-shaped like its neighbours,
+   overriding the shared skeleton's small radius. */
+.crumb-pending {
+	width: 84px;
+	height: 28px;
+	border-radius: var(--md-sys-shape-corner-full);
+}
+@media (prefers-reduced-motion: reduce) {
+	.crumb-pending {
+		animation: none;
+	}
+}
+
 .crumb {
 	flex: 0 0 auto;
 	display: inline-flex;

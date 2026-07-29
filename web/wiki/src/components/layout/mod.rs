@@ -29,6 +29,14 @@ use usermenu::*;
 /// read these so they agree on the context without each re-querying the path.
 pub(super) static NAV_CRUMBS: GlobalSignal<Vec<model::Crumb>> = Signal::global(Vec::new);
 
+/// Whether the path is currently being resolved into crumbs.
+///
+/// [`NAV_CRUMBS`] holds the PREVIOUS route's crumbs until the new ones arrive, so
+/// a deeper path has indices with nothing behind them for a moment. Without
+/// knowing that a resolution is in flight, the breadcrumbs cannot tell "not
+/// loaded yet" from "does not resolve", and showed a question mark for both.
+pub(super) static NAV_CRUMBS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
+
 pub(super) static CONTEXT_DEPTH: GlobalSignal<usize> = Signal::global(|| 0);
 
 /// The signed-in user's pending-invitation count, for the Home nav badge. Set by
@@ -176,6 +184,7 @@ pub fn Layout() -> Element {
         };
         let token = SESSION.read().access_token.clone();
         crate::use_data_resource!(|(segments, token)| async move {
+            *NAV_CRUMBS_LOADING.write() = true;
             let crumbs = graphql::path_crumbs(token.as_deref(), &segments)
                 .await
                 .unwrap_or_default();
@@ -189,6 +198,7 @@ pub fn Layout() -> Element {
                 doc.set_title(&title);
             }
             *NAV_CRUMBS.write() = crumbs;
+            *NAV_CRUMBS_LOADING.write() = false;
         });
     }
 

@@ -2047,6 +2047,7 @@ pub async fn path_crumbs(
         return Ok(segments
             .iter()
             .map(|s| Crumb {
+                key: s.clone(),
                 name: s.clone(),
                 mime_id: None,
                 ordinal: None,
@@ -2062,6 +2063,7 @@ pub async fn path_crumbs(
                 // getIndex is 1-based; node_avatar wants a 0-based ordinal.
                 let ordinal = n.get_index.filter(|i| *i >= 1).map(|i| (i - 1) as usize);
                 out.push(Crumb {
+                    key: segment.clone(),
                     name: n.name.clone(),
                     mime_id: n.mime_id.clone(),
                     ordinal,
@@ -2071,6 +2073,7 @@ pub async fn path_crumbs(
             }
             None => {
                 out.push(Crumb {
+                    key: segment.clone(),
                     name: segment.clone(),
                     mime_id: None,
                     ordinal: None,

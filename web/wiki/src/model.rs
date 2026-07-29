@@ -281,6 +281,13 @@ pub struct Author {
 /// avatar can show the same letter/number label as elsewhere.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Crumb {
+    /// The path segment this crumb resolved from.
+    ///
+    /// Kept so a crumb can be checked against the URL it is being shown for.
+    /// `NAV_CRUMBS` holds the previous route's crumbs until the new ones arrive,
+    /// so following a link into a different part of the wiki, or a search result,
+    /// briefly showed the OLD names as if they were the new place's.
+    pub key: String,
     pub name: String,
     pub mime_id: Option<String>,
     pub ordinal: Option<usize>,

@@ -249,6 +249,7 @@ pub(super) fn Breadcrumbs() -> Element {
 
     // Resolved once by `Layout`; read reactively so crumbs update on navigation.
     let crumbs = NAV_CRUMBS();
+    let resolving = super::NAV_CRUMBS_LOADING();
     let depth = CONTEXT_DEPTH();
     let total = segments.len();
 
@@ -286,7 +287,22 @@ pub(super) fn Breadcrumbs() -> Element {
             }
             for i in start..total {
                 {
-                    let info = crumbs.get(i);
+                    // A crumb counts only if it resolved from THIS segment.
+                    // Otherwise it belongs to the path we came from — following a
+                    // link deeper into the wiki, or a search result landing
+                    // somewhere else entirely, would show the old names in the new
+                    // place until the resolution caught up. Matching on the
+                    // segment also means navigating between siblings does not
+                    // shimmer the crumbs that did not change.
+                    let info = crumbs.get(i).filter(|c| c.key == segments[i]);
+                    // Nothing resolved for this step yet. Showing the URL slug
+                    // under a question-mark icon guessed at content and looked
+                    // like an error; a shimmer says "coming" and takes the space
+                    // the crumb will occupy, so the rail does not jump when the
+                    // name lands.
+                    if info.is_none() && resolving {
+                        rsx! { span { key: "{i}", class: "crumb crumb-pending skeleton" } }
+                    } else {
                     let name = info
                         .map(|c| c.name.clone())
                         .filter(|n| !n.is_empty())
@@ -311,6 +327,7 @@ pub(super) fn Breadcrumbs() -> Element {
                             // The current node's crumb doubles as the page TOC trigger.
                             toc_trigger: last_id == i + 1,
                         }
+                    }
                     }
                 }
             }
