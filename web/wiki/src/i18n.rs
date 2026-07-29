@@ -125,6 +125,7 @@ const EN_JSON: &str = r#"{
         "bug": "Bug",
         "feature": "Feature",
         "other": "Other",
+        "crash": "Crash",
         "send": "Send",
         "sent": "Thanks! Your feedback was sent.",
         "screenshot": "Screenshot (optional)",
@@ -330,7 +331,6 @@ const EN_JSON: &str = r#"{
     "error": {
         "somethingWentWrong": "Something went wrong!",
         "crashTitle": "The app stopped",
-        "crashReport": "Report this",
         "crashReported": "Reported — thank you",
         "crashReportFailed": "Could not send",
         "crashBody": "Something went wrong and the page cannot continue. The problem has been reported. Reloading should put it right.",
@@ -615,6 +615,7 @@ const DA_JSON: &str = r#"{
         "bug": "Fejl",
         "feature": "Ønske",
         "other": "Andet",
+        "crash": "Nedbrud",
         "send": "Send",
         "sent": "Tak! Din feedback blev sendt.",
         "screenshot": "Skærmbillede (valgfrit)",
@@ -820,7 +821,6 @@ const DA_JSON: &str = r#"{
     "error": {
         "somethingWentWrong": "Noget gik galt!",
         "crashTitle": "Appen stoppede",
-        "crashReport": "Rapportér fejlen",
         "crashReported": "Rapporteret — tak",
         "crashReportFailed": "Kunne ikke sendes",
         "crashBody": "Noget gik galt, og siden kan ikke fortsætte. Fejlen er rapporteret. Genindlæs siden, så virker det formentlig igen.",

@@ -20,6 +20,10 @@ fn kind_glyph(kind: &str) -> (&'static str, &'static str) {
     match kind {
         "bug" => ("bug_report", "feedback.bug"),
         "feature" => ("lightbulb", "feedback.feature"),
+        // Not offered in the dialog: a crash files itself (src/crash.rs), and
+        // telling it apart from a bug someone sat down and wrote matters, since
+        // one carries a stack and the other carries an account of what happened.
+        "crash" => ("error", "feedback.crash"),
         _ => ("chat", "feedback.other"),
     }
 }

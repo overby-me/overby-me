@@ -14,7 +14,7 @@
 //! BetterStack (Logtail) remains the fallback sink, for when the node cannot be
 //! written: a report is worth keeping even somewhere less convenient.
 //!
-//!   POST /feedback?kind=bug|feature|other&message=&path=&app=&ua=
+//!   POST /feedback?kind=bug|feature|other|crash&message=&path=&app=&commit=&ua=
 //!        (Authorization: Bearer <jwt> optional; captures the sender when present)
 
 use crate::error::AppError;
@@ -70,6 +70,10 @@ async fn submit_inner(
     let kind = match get("kind").as_deref() {
         Some("bug") => "bug",
         Some("feature") => "feature",
+        // The app reporting its own death, which the dialog never sends: it
+        // carries a stack rather than an account of what happened, and reads
+        // differently in the feedback app for that reason.
+        Some("crash") => "crash",
         _ => "other",
     };
     let path = get("path").unwrap_or_default();

@@ -4,9 +4,13 @@
 //! catch it, and the Dioxus runtime is left in an undefined state. The page does
 //! not close or reload; it simply stops responding, which looks identical to a
 //! slow network. This puts a plain statement and a reload button over it, and
-//! files the crash as a `wiki/feedback` node on the way — automatically, so the
-//! crashes worth hearing about are not the ones a reader happened to click
-//! through. A send-again button appears only if that fails.
+//! files the crash as a `wiki/feedback` node of kind `crash` on the way.
+//!
+//! Reporting is not offered, it just happens. Asking a reader to press a button
+//! meant the crashes worth hearing about were the ones least likely to be
+//! reported, and there is nothing for them to decide: the report says what broke
+//! and where, which is the same thing the page in front of them already said.
+//! All the overlay owes them is whether it got through.
 //!
 //! Two rules shape everything here.
 //!
@@ -15,12 +19,12 @@
 //! why the text comes from [`crate::i18n::t_static`] — risks panicking inside the
 //! panic hook and turning a reportable crash into a bare wasm trap.
 //!
-//! **The buttons are plain JavaScript, not Rust closures.** Once the panic has
-//! trapped the wasm instance, calls back into it may not run at all — so a button
-//! wired to a `Closure` could be dead on arrival, which is the one thing this
-//! overlay must not be. Everything the buttons need (the endpoint, the token, the
-//! panic message) is baked into their handlers while wasm is still alive, and the
-//! handlers themselves only touch `location` and `fetch`.
+//! **The interactive parts are plain JavaScript, not Rust closures.** Once the
+//! panic has trapped the wasm instance, calls back into it may not run at all —
+//! so anything wired to a `Closure` could be dead on arrival, which is the one
+//! thing this overlay must not be. Everything they need (the endpoint, the token,
+//! the panic message) is baked in while wasm is still alive, and what runs
+//! afterwards only touches `location`, `fetch` and the DOM.
 //!
 //! It also lives outside the `remote-logging` feature, since a dead page needs
 //! saying so whether or not anyone is collecting the report.
@@ -30,8 +34,6 @@ use std::cell::RefCell;
 const OVERLAY_ID: &str = "wiki-crash-overlay";
 /// The line that says whether the report got through.
 const STATUS_ID: &str = "wiki-crash-status";
-/// The send-again button, revealed only when the automatic report failed.
-const RETRY_ID: &str = "wiki-crash-retry";
 
 /// How much of the panic message + stack the report carries. See
 /// [`report_fetch_js`]: it goes in a URL, and symbolication expands it further
@@ -122,9 +124,9 @@ fn report_fetch_js(message: &str) -> String {
     let message: String = message.chars().take(MAX_REPORT_CHARS).collect();
 
     let url = format!(
-        "{}/feedback?kind=bug&message={}&path={}&app={}&commit={}&ua={}",
+        "{}/feedback?kind=crash&message={}&path={}&app={}&commit={}&ua={}",
         crate::backend_api::BACKEND_URL,
-        js_sys::encode_uri_component(&format!("CRASH: {message}")),
+        js_sys::encode_uri_component(&message),
         js_sys::encode_uri_component(&path),
         js_sys::encode_uri_component(env!("CARGO_PKG_VERSION")),
         // Which build crashed. The offsets in the stack only mean anything
@@ -159,21 +161,18 @@ fn digest(text: &str) -> String {
 }
 
 /// A JS function literal `function(ok){…}` that writes the outcome into the
-/// overlay's status line, reveals the send-again button when the report did not
-/// get through, and remembers a successful one under `key`.
+/// overlay's status line and remembers a successful report under `key`.
 ///
-/// By id rather than by closure, because both callers are strings evaluated after
-/// the wasm instance has trapped: one from `eval`, one from an `onclick`.
+/// By id rather than by closure, because it is a string evaluated after the wasm
+/// instance has trapped.
 fn settle_js(key: &str, sent_label: &str, failed_label: &str) -> String {
     format!(
         "function(ok){{\
            if(ok){{try{{sessionStorage.setItem({key},'1');}}catch(e){{}}}}\
            var s=document.getElementById({status});if(s)s.textContent=ok?{sent}:{failed};\
-           var q=document.getElementById({retry});if(q)q.hidden=ok;\
          }}",
         key = js_string(key),
         status = js_string(STATUS_ID),
-        retry = js_string(RETRY_ID),
         sent = js_string(sent_label),
         failed = js_string(failed_label),
     )
@@ -201,20 +200,6 @@ fn auto_report_js(message: &str, sent_label: &str, failed_label: &str) -> String
            {fetch}.then(function(r){{d(r.ok);}}).catch(function(){{d(false);}});}})();",
         settle = settle_js(&key, sent_label, failed_label),
         key = js_string(&key),
-        fetch = report_fetch_js(message),
-    )
-}
-
-/// The `onclick` for the send-again button, shown only after a failed automatic
-/// report. `this` is the button; disable it while the retry is in flight so a
-/// second tap cannot double-file.
-fn retry_report_js(message: &str, sent_label: &str, failed_label: &str) -> String {
-    let key = format!("wiki-crash-{}", digest(message));
-    format!(
-        "var b=this;b.disabled=true;var d={settle};{fetch}\
-         .then(function(r){{d(r.ok);b.disabled=false;}})\
-         .catch(function(){{d(false);b.disabled=false;}});",
-        settle = settle_js(&key, sent_label, failed_label),
         fetch = report_fetch_js(message),
     )
 }
@@ -271,17 +256,6 @@ pub fn show_overlay() {
 
     if let Ok(actions) = doc.create_element("div") {
         let _ = actions.set_attribute("class", "crash-actions");
-
-        // Hidden unless the automatic report fails — offering to send something
-        // already sent would only make the reader wonder which it was.
-        if let Ok(retry) = doc.create_element("button") {
-            let _ = retry.set_attribute("id", RETRY_ID);
-            let _ = retry.set_attribute("class", "btn btn-outlined");
-            let _ = retry.set_attribute("hidden", "");
-            retry.set_text_content(Some(&crate::i18n::t_static("error.crashReport")));
-            let _ = retry.set_attribute("onclick", &retry_report_js(&message, &sent, &failed));
-            let _ = actions.append_child(retry.as_ref());
-        }
 
         if let Ok(reload) = doc.create_element("button") {
             let _ = reload.set_attribute("class", "btn btn-primary");
