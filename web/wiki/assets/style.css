@@ -6545,7 +6545,10 @@ a.list-item:hover {
 	input,
 	textarea,
 	select,
-	[contenteditable="true"] {
+	/* Not [contenteditable="true"]: a bare `contenteditable` attribute means
+	   true in HTML, so matching the attribute and excluding "false" covers the
+	   editor however it comes to be written. */
+	[contenteditable]:not([contenteditable="false"]) {
 		/* !important because these are ELEMENT selectors, and every control that
 		   actually sizes its own text does so from a class — .search-input,
 		   .comment-input, .author-input-wrap > input — which outranks them. A
