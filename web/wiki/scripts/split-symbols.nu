@@ -20,6 +20,37 @@
 
 const PUBLIC = "target/dx/wiki-dioxus/release/web/public"
 
+# How many builds' worth of symbols to keep.
+#
+# dx never removes a superseded asset, so without this the directory gains ~26 MB
+# per build forever and every deploy uploads the lot. Three is the current build
+# plus enough history that someone who has not reloaded since the last deploy or
+# two still gets a resolved crash report.
+#
+# Losing an older one is not a failure: the backend fetches the sidecar, gets the
+# site's SPA fallback (HTML, not a wasm module) instead, recognises it by the
+# missing magic bytes and leaves the raw offsets alone.
+const KEEP = 3
+
+# Drop all but the newest KEEP sidecars, never the one this build just produced.
+#
+# What it removes is printed. A prune that stayed quiet would read as "everything
+# is still there", which is the one thing it is not.
+def prune_symbols [symbols_dir: string, current: string] {
+    let sidecars = (
+        ls $symbols_dir
+        | where name =~ '\.debug\.wasm$'
+        | sort-by modified --reverse
+    )
+    if ($sidecars | length) <= $KEEP {
+        return
+    }
+    for stale in ($sidecars | skip $KEEP | where name != $current) {
+        rm $stale.name
+        print $"pruned   ($stale.name)  ($stale.size)"
+    }
+}
+
 # The wasm this build actually serves, followed from index.html.
 #
 # NOT the newest file matching a glob: dx never removes superseded assets, so
@@ -60,6 +91,7 @@ def main [] {
     if not $has_debug {
         if ($sidecar | path exists) {
             print $"already split  ($sidecar)"
+            prune_symbols $symbols_dir $sidecar
             return
         }
         print "shipped wasm has no debug sections and no sidecar exists —"
@@ -82,4 +114,6 @@ def main [] {
         print "WARNING: stripping freed nothing — was the build made without debug info?"
         exit 1
     }
+
+    prune_symbols $symbols_dir $sidecar
 }
