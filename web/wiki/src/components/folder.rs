@@ -77,6 +77,8 @@ pub fn FolderApp(
     // Paste deep-copies every selected node, one round trip per node and more
     // for their subtrees, so it can run for a while with nothing on screen.
     let mut pasting = use_signal(|| false);
+    // Deleting walks the folder's whole subtree the same way.
+    let mut deleting = use_signal(|| false);
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let access_token = session.read().access_token.clone();
     let name = node.name.clone();
@@ -579,14 +581,20 @@ pub fn FolderApp(
                         }
                         button {
                             class: "btn btn-primary",
+                            disabled: deleting(),
                             onclick: {
                                 let node_del = node.id.0.clone();
                                 let dest = delete_parent.clone();
                                 move |_| {
+                                    if deleting() {
+                                        return;
+                                    }
                                     let token = session.read().access_token.clone();
                                     let node_del = node_del.clone();
                                     let dest = dest.clone();
-                                    confirm_open.set(false);
+                                    // A folder's subtree is the deepest of them all,
+                                    // so this is the delete most worth reporting.
+                                    deleting.set(true);
                                     spawn(async move {
                                         // A folder is the one that really needs the
                                         // recursion: everything filed under it went
@@ -594,16 +602,22 @@ pub fn FolderApp(
                                         match graphql::delete_node_deep(token, node_del).await {
                                             Ok(()) => {
                                                 crate::session::bump_data_version();
+                                                deleting.set(false);
+                                                confirm_open.set(false);
                                                 nav.push(Route::PathPage { segments: dest, app: None });
                                             }
                                             other => {
                                                 log::error!("delete_node failed: {other:?}");
+                                                deleting.set(false);
                                                 crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                             }
                                         }
                                     });
                                 }
                             },
+                            if deleting() {
+                                div { class: "spinner spinner-xs" }
+                            }
                             "{t(\"common.delete\")}"
                         }
                     },

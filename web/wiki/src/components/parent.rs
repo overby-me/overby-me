@@ -135,6 +135,9 @@ pub fn ParentApp() -> Element {
                                     });
                                 }
                             },
+                            if busy() {
+                                div { class: "spinner spinner-xs" }
+                            }
                             "{t(\"common.delete\")}"
                         }
                     },

@@ -77,6 +77,8 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     // Owners may delete the file (node/context owner); mirrors ContentApp gating.
     let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
     let mut confirm_open = use_signal(|| false);
+    // Deleting walks the file's comment subtree a request at a time.
+    let mut deleting = use_signal(|| false);
 
     let data = node.data.map(|d| d.0);
 
@@ -222,14 +224,20 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                     }
                                     button {
                                         class: "btn btn-primary",
+                                        disabled: deleting(),
                                         onclick: {
                                             let node_id = node_id.clone();
                                             let parent = segments[..segments.len() - 1].to_vec();
                                             move |_| {
+                                                if deleting() {
+                                                    return;
+                                                }
                                                 let token = session.read().access_token.clone();
                                                 let node_id = node_id.clone();
                                                 let parent = parent.clone();
-                                                confirm_open.set(false);
+                                                // Dialog stays open so the spinner has somewhere
+                                                // to be while the subtree is walked.
+                                                deleting.set(true);
                                                 spawn(async move {
                                                     // Subtree and member rows together — nothing
                                                     // cascades in the database, so a comment left
@@ -237,16 +245,22 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                                     match graphql::delete_node_deep(token, node_id).await {
                                                         Ok(()) => {
                                                             crate::session::bump_data_version();
+                                                            deleting.set(false);
+                                                            confirm_open.set(false);
                                                             nav.push(Route::PathPage { segments: parent, app: None });
                                                         }
                                                         other => {
                                                             log::error!("delete_node failed: {other:?}");
+                                                            deleting.set(false);
                                                             crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                                                         }
                                                     }
                                                 });
                                             }
                                         },
+                                        if deleting() {
+                                            div { class: "spinner spinner-xs" }
+                                        }
                                         "{t(\"common.delete\")}"
                                     }
                                 },

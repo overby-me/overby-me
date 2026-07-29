@@ -87,6 +87,9 @@ pub(super) fn DeletePollButton(poll_id: String) -> Element {
                             });
                         }
                     },
+                    if busy() {
+                        div { class: "spinner spinner-xs" }
+                    }
                     "{t(\"common.delete\")}"
                 }
             }

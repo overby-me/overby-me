@@ -56,6 +56,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
     // Submitting is irreversible (it makes the node immutable), so the sheet's
     // row opens the same warning dialog the editor's submit button opens.
     let mut confirm_submit = use_signal(|| false);
+    // A deep delete walks the subtree a request at a time, so the confirm button
+    // reports that it is working rather than appearing to do nothing.
+    let mut deleting = use_signal(|| false);
     let name = node.name.clone();
     let members = node.members.clone();
     let created = node.created_at.as_ref().map(|t| t.0.clone());
@@ -485,14 +488,21 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         }
                         button {
                             class: "btn btn-primary",
+                            disabled: deleting(),
                             onclick: {
                                 let node_id = node_id.clone();
                                 let parent = segments[..segments.len() - 1].to_vec();
                                 move |_| {
+                                    if deleting() {
+                                        return;
+                                    }
                                     let token = session.read().access_token.clone();
                                     let node_id = node_id.clone();
                                     let parent = parent.clone();
-                                    confirm_open.set(false);
+                                    // The dialog stays open, so the spinner has
+                                    // somewhere to be: a deep delete is a round
+                                    // trip per node and can run for a while.
+                                    deleting.set(true);
                                     spawn(async move {
                                         // The whole subtree, deepest first: the
                                         // comments on this node, their replies and
@@ -505,6 +515,8 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                         {
                                             Ok(()) => {
                                                 crate::session::bump_data_version();
+                                                deleting.set(false);
+                                                confirm_open.set(false);
                                                 nav.push(Route::PathPage {
                                                     segments: parent,
                                                     app: None,
@@ -512,6 +524,7 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                             }
                                             other => {
                                                 log::error!("delete_node failed: {other:?}");
+                                                deleting.set(false);
                                                 crate::snackbar::show_snackbar(&t(
                                                     "error.somethingWentWrong",
                                                 ));
@@ -520,6 +533,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                                     });
                                 }
                             },
+                            if deleting() {
+                                div { class: "spinner spinner-xs" }
+                            }
                             "{t(\"common.delete\")}"
                         }
                     },
