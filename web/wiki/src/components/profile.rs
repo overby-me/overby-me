@@ -351,15 +351,41 @@ fn ContributionItem(node: model::ChildNodeFields) -> Element {
     };
     let parent_name = node.parent.as_ref().map(|p| p.name.clone());
     let created = node.created_at.as_ref().map(|c| c.0.clone());
+    // A comment has no page of its own, so opening one has to open the content
+    // it hangs under, where the thread is rendered. Its parent is already on the
+    // row, which covers the common case without a query.
+    let is_comment = mime == "vote/comment";
+    let parent_id = node.parent.as_ref().map(|p| p.id.0.clone());
+    let parent_mime = node.parent.as_ref().and_then(|p| p.mime_id.clone());
 
     rsx! {
         div {
             class: "list-item",
             onclick: move |_| {
                 let node_id = node_id.clone();
+                let mut cur = parent_id.clone();
+                let mut cur_mime = parent_mime.clone();
                 let token = session.read().access_token.clone();
                 spawn(async move {
-                    if let Ok(segments) = graphql::path_from_id(token.as_deref(), &node_id).await {
+                    let mut target = node_id.clone();
+                    if is_comment {
+                        // Replies are comments on comments, so keep climbing
+                        // until the ancestor is something that renders.
+                        for _ in 0..16 {
+                            let Some(id) = cur.clone() else { break };
+                            target = id.clone();
+                            if cur_mime.as_deref() != Some("vote/comment") {
+                                break;
+                            }
+                            let Ok(Some(n)) = graphql::query_node_by_id(token.as_deref(), &id).await
+                            else {
+                                break;
+                            };
+                            cur = n.parent_id.map(|p| p.0);
+                            cur_mime = n.mime_id.clone();
+                        }
+                    }
+                    if let Ok(segments) = graphql::path_from_id(token.as_deref(), &target).await {
                         if !segments.is_empty() {
                             nav.push(Route::PathPage { segments, app: None });
                         }
