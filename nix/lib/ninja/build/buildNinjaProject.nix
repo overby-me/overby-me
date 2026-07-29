@@ -37,6 +37,14 @@
   target ? null,
   targets ? null,
   ninjaFile ? "build.ninja",
+  # Per-component grouping (task #26/#78): a function edgeIndex -> groupId. When
+  # set, edges are lowered one derivation per GROUP (each group's internal edges
+  # run via an emitted mini build.ninja) instead of one per edge -- far fewer
+  # derivations, still input-isolated. null keeps the per-edge behaviour.
+  grouping ? null,
+  # Task #80: run each group's per-edge lowering (rewrite/stage/run) at BUILD time via
+  # lower_group.py instead of in Nix eval, so eval only computes the group dep graph.
+  buildTimeLowering ? false,
   # Packages on PATH for every edge command (CMake bakes absolute tool paths;
   # hand-written manifests calling `cc`/`ar`/... need a toolchain here).
   toolchain ? [pkgs.stdenv.cc pkgs.coreutils],
@@ -156,31 +164,65 @@
 
   lowered =
     (import ./lower.nix {
-      inherit pkgs rewriteRoots extraInputs subs scanMounts;
+      inherit pkgs rewriteRoots extraInputs subs scanMounts graphDrv buildTimeLowering;
       src = ninjaRoot;
       toolchain = edgeToolchain;
     }).lowerGraph
     graph;
 
+  # Per-component grouping view of the same lowering (task #26/#78), or null.
+  groupedLowered =
+    if grouping == null
+    then null
+    else lowered.lowerGroupsBy grouping;
+
   sanOut = s:
     "ninja-out-"
     + lib.strings.sanitizeDerivationName (builtins.unsafeDiscardStringContext s);
 
-  # Copy just the requested target out of its producing edge's tree.
-  buildOne = t: let
-    drv = lowered.drvForOutput t;
-  in
-    pkgs.runCommand (sanOut t) {
-      passthru = {
-        producing = drv;
-        inherit graphDrv;
-        ninja = lowered;
-      };
-      meta.mainProgram = baseNameOf t;
-    } ''
-      mkdir -p "$out/$(dirname ${esc t})"
-      cp -r --reflink=auto ${drv}/${esc t} "$out/${t}"
-    '';
+  # Copy just the requested target out of its producing edge's tree. A phony
+  # aggregate (e.g. the top-level `all`, which `target = null` resolves to via
+  # `default`) has no file of its own, so instead stage every real target's
+  # declared outputs into one tree.
+  buildOne = t:
+    if lowered.isPhonyTarget t
+    then
+      pkgs.runCommand (sanOut t) {
+        passthru = {
+          inherit graphDrv;
+          ninja = lowered;
+          groupStats =
+            if grouping != null
+            then groupedLowered.groupStats
+            else null;
+        };
+      } ''
+        ${lib.concatMapStringsSep "\n" (o: ''
+            mkdir -p "$out/$(dirname ${esc o.path})"
+            cp -r --reflink=auto ${o.drv}/${esc o.path} "$out/${o.path}"
+          '') (
+            if grouping != null
+            then groupedLowered.realOutputsForTargetG t
+            else lowered.realOutputsForTarget t
+          )}
+      ''
+    else let
+      drv =
+        if grouping != null
+        then groupedLowered.groupDrvForOutput t
+        else lowered.drvForOutput t;
+    in
+      pkgs.runCommand (sanOut t) {
+        passthru = {
+          producing = drv;
+          inherit graphDrv;
+          ninja = lowered;
+        };
+        meta.mainProgram = baseNameOf t;
+      } ''
+        mkdir -p "$out/$(dirname ${esc t})"
+        cp -r --reflink=auto ${drv}/${esc t} "$out/${t}"
+      '';
 
   chosen =
     if target != null

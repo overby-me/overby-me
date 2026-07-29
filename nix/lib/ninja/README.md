@@ -7,10 +7,11 @@ with no `ninja` binary scheduling the build. A sibling to
 [`../buck2`](../buck2) (per-action Buck2 builds) and [`../cargo`](../cargo)
 (per-crate builds); design and milestones are in [PLAN.md](./PLAN.md).
 
-Status: the hand-written `trivial` fixture (compile one C file, link an
-executable) builds one derivation per edge and runs as a flake check. Header
-dependencies (`deps = gcc`/`depfile`), CMake-generated manifests, and scale are
-the next milestones. See PLAN.md.
+Status: builds real CMake projects (compile with `deps = gcc`/`depfile` header
+resolution, generated manifests, static/shared libs) as flake checks, and
+scales to a whole-OS graph (~17k edges) via **component grouping** and
+**build-time lowering** (below). Exercised at scale by Darling's libSystem
+build. See PLAN.md.
 
 ## Why per-edge derivations
 
@@ -65,8 +66,34 @@ The result's `$out/<target>` is the built output.
 | `ninjaFile` | `"build.ninja"` | Manifest filename |
 | `toolchain` | `[stdenv.cc coreutils]` | Packages on `PATH` for every edge command |
 | `rustNinja` | built here | The `rust-ninja` package used for graph extraction |
+| `grouping` | `null` | `edgeIndex -> groupId` (or a `groupOf` fn) to bundle edges into per-component derivations instead of one-per-edge (see below) |
+| `buildTimeLowering` | `false` | With `grouping`, compute each group's build in the sandbox (`lower_group.py`) rather than in Nix eval — collapses the eval floor at whole-OS scale |
 
 `lib.ninjaLib` exposes the lowering phase for tests and advanced use.
+
+## Grouping & build-time lowering (scale)
+
+One-derivation-per-edge is ideal for incrementality but at ~17k edges the Nix
+*evaluation* to construct all those derivations becomes the bottleneck. Two knobs
+address that:
+
+- **Grouping.** Pass `grouping` (an `edgeIndex -> groupId` map, e.g. one group
+  per CMake target) and edges are bundled into per-**component** derivations.
+  The grouping is condensed through strongly-connected components so it is always
+  acyclic across groups even when the raw component graph has cycles (the
+  caller's heuristic may be cyclic; the lowerer fixes it). A single edge's
+  producer `$out` trees still flow in by store-path interpolation, so cross-group
+  caching and remote scheduling are preserved at coarser granularity.
+- **Build-time lowering** (`buildTimeLowering = true`). Instead of Nix eval doing
+  the per-edge command rewriting / staging / topo-ordering for every group, eval
+  computes only each group's *edge-index list* + *external-group deps*, and a
+  helper (`build/lower_group.py`) does the per-edge work **inside each group's
+  sandbox** from a shared `graph.json`. This removes the per-edge eval cost that
+  otherwise dominates at whole-OS scale (Darling's ~17k-edge graph went from a
+  ~35-minute eval floor to ~1 minute). In-group edge order is a proper Tarjan
+  SCC-condensation (producers before consumers even across cycles); undeclared
+  `-I`-reached generated headers and source-backed generated headers are handled
+  so a merged build tree matches what the monolithic `ninja` run resolves.
 
 ## Tests
 
