@@ -323,12 +323,11 @@ fn ship_sync(entry: Value) {
 }
 
 fn setup_panic_hook() {
-    std::panic::set_hook(Box::new(|info| {
-        // Keep the rich console output from console_error_panic_hook.
-        console_error_panic_hook::hook(info);
-        // Ship the panic before the app tears down.
+    // The console output and the crash overlay come from `crash`; this only adds
+    // the shipping. Synchronous, so the report is away before the app tears down.
+    crate::crash::install_hook(|info| {
         ship_sync(make_entry("error", format!("PANIC: {info}")));
-    }));
+    });
 }
 
 /// Catch errors that never flow through `log::` or a Rust panic: uncaught JS

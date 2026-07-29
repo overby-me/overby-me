@@ -6563,3 +6563,48 @@ a.list-item:hover {
 		font-size: max(var(--md-sys-typescale-body-large-size), 1em) !important;
 	}
 }
+
+/* ═══ Crash overlay ═══
+   Shown by the panic hook (logging.rs) when the app has aborted. Deliberately
+   self-contained: it must render correctly with the Dioxus runtime dead, so it
+   depends on nothing but these rules and the theme variables already on :root. */
+.crash-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--md-sys-spacing-4);
+	background: color-mix(in srgb, var(--md-scrim) 48%, transparent);
+}
+
+.crash-card {
+	max-width: 28rem;
+	display: flex;
+	flex-direction: column;
+	gap: var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-6);
+	border-radius: var(--md-sys-shape-corner-extra-large);
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
+	box-shadow: var(--md-sys-elevation-3);
+	text-align: center;
+}
+
+.crash-card h2 {
+	margin: 0;
+	font-size: var(--md-sys-typescale-headline-small-size);
+	line-height: var(--md-sys-typescale-headline-small-line);
+	font-weight: 400;
+}
+
+.crash-card p {
+	margin: 0;
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-body-medium-size);
+}
+
+.crash-card button {
+	align-self: center;
+}

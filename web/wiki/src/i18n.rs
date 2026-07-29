@@ -58,6 +58,27 @@ pub fn t(key: &str) -> String {
     lookup_key(translations, key).unwrap_or_else(|| key.to_string())
 }
 
+/// Translate WITHOUT reading the language signal, for code that runs after a
+/// panic.
+///
+/// [`t`] reads `LANG`, and a signal read from inside the panic hook can panic
+/// again if the runtime was holding that borrow when it died — turning a
+/// reportable crash into an abort. The locale comes from `<html lang>` instead,
+/// which `apply_lang` keeps in step, so this touches nothing but the DOM.
+pub fn t_static(key: &str) -> String {
+    let danish = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.document_element())
+        .and_then(|e| e.get_attribute("lang"))
+        .is_some_and(|l| l.starts_with("da"));
+    let table = if danish {
+        da_translations()
+    } else {
+        en_translations()
+    };
+    lookup_key(table, key).unwrap_or_else(|| key.to_string())
+}
+
 /// Translation with interpolation: t_with("layout.greeting", &[("name", "Niclas")])
 pub fn t_with(key: &str, params: &[(&str, &str)]) -> String {
     let mut result = t(key);
@@ -308,6 +329,9 @@ const EN_JSON: &str = r#"{
     },
     "error": {
         "somethingWentWrong": "Something went wrong!",
+        "crashTitle": "The app stopped",
+        "crashBody": "Something went wrong and the page cannot continue. The problem has been reported. Reloading should put it right.",
+        "crashReload": "Reload",
         "sendMessage": "Please send the following message to"
     },
     "folder": {
@@ -787,6 +811,9 @@ const DA_JSON: &str = r#"{
     },
     "error": {
         "somethingWentWrong": "Noget gik galt!",
+        "crashTitle": "Appen stoppede",
+        "crashBody": "Noget gik galt, og siden kan ikke fortsætte. Fejlen er rapporteret. Genindlæs siden, så virker det formentlig igen.",
+        "crashReload": "Genindlæs",
         "sendMessage": "Send venligst f\u00f8lgende besked til"
     },
     "folder": {

@@ -1,5 +1,6 @@
 mod backend_api;
 mod components;
+mod crash;
 mod density;
 mod export;
 // cynic query-result structs must select fields the code doesn't read (e.g. an
@@ -58,7 +59,12 @@ fn main() {
     #[cfg(feature = "remote-logging")]
     logging::init();
     #[cfg(not(feature = "remote-logging"))]
-    wasm_logger::init(wasm_logger::Config::default());
+    {
+        wasm_logger::init(wasm_logger::Config::default());
+        // `logging::init` installs the same hook with a reporter attached;
+        // without that feature the app still needs to tell the reader it died.
+        crash::install_hook(|_| {});
+    }
     log::info!("RadikalWiki starting...");
 
     // Clean the stray trailing "?" the router emits for the optional `app` query
