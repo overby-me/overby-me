@@ -3569,6 +3569,9 @@ pub struct FeedbackItem {
     /// The screenshot file id (`data.image`), if one was attached.
     pub image: Option<String>,
     pub path: String,
+    /// The build it was sent from. Empty on anything submitted before builds
+    /// started recording it.
+    pub commit: String,
     pub created_at: String,
     pub owner_id: Option<String>,
     pub owner_name: String,
@@ -3596,6 +3599,10 @@ pub async fn insert_feedback(
         "message": message,
         "path": path,
         "appVersion": app_version,
+        // The build this was sent from. `appVersion` is the crate version, which
+        // is the same string for every build ever made; this is what actually
+        // says which code the reporter was looking at.
+        "commit": crate::build_info::COMMIT,
         "userAgent": user_agent,
     });
     if let Some(img) = image_file_id.filter(|i| !i.is_empty()) {
@@ -3667,6 +3674,7 @@ pub async fn query_feedback(access_token: Option<&str>) -> Result<Vec<FeedbackIt
                         message: field("message"),
                         image: if image.is_empty() { None } else { Some(image) },
                         path: field("path"),
+                        commit: field("commit"),
                         created_at: n
                             .get("createdAt")
                             .and_then(|v| v.as_str())

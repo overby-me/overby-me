@@ -8,7 +8,7 @@
 //   everything else same-origin (/, /wasm/*) → stale-while-revalidate: serve the
 //     cached copy instantly, refresh it in the background; fall back to the
 //     network, then to the cached app shell (/) when offline.
-const CACHE = "radikalwiki-v4";
+const CACHE = "radikalwiki-v5";
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -39,6 +39,12 @@ self.addEventListener("fetch", (event) => {
 	if (req.method !== "GET") return;
 	const url = new URL(req.url);
 	if (url.origin !== self.location.origin) return;
+
+	// Which build is deployed (src/update.rs). Never cached, and never served
+	// from cache: answering it from here would compare the running build against
+	// itself and could never report an update. Each check also carries a unique
+	// cache-buster, so caching them would only grow the cache forever.
+	if (url.pathname === "/version.json") return;
 
 	// Content-hashed assets never change for a given URL: cache-first.
 	if (url.pathname.startsWith("/assets/")) {

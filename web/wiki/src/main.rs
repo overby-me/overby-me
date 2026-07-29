@@ -1,4 +1,5 @@
 mod backend_api;
+mod build_info;
 mod components;
 mod crash;
 mod density;
@@ -19,6 +20,7 @@ mod session;
 pub mod snackbar;
 mod subscription;
 mod theme;
+mod update;
 mod window_size;
 
 use dioxus::prelude::*;
@@ -141,6 +143,11 @@ fn App() -> Element {
     use_hook(|| {
         // Load persisted session from localStorage.
         session::load_session();
+
+        // Watch for a newer deploy. A single-page app in a tab left open never
+        // re-fetches itself, and the service worker can serve a stale shell even
+        // on reload, so being out of date is otherwise invisible.
+        update::spawn_update_check();
 
         // If we just came back from the atproto (Bluesky) linking flow, surface the
         // outcome and drop the ?linked query so it does not re-fire on refresh.
@@ -278,5 +285,6 @@ fn App() -> Element {
         document::Stylesheet { href: STYLE_CSS }
         Router::<Route> {}
         snackbar::Snackbar {}
+        update::UpdateBanner {}
     }
 }

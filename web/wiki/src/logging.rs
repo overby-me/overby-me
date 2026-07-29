@@ -109,7 +109,8 @@ fn current_stack() -> Option<String> {
 /// One structured log entry with the standard enrichment, so Logtail can filter
 /// and group by any field:
 /// - who: `user_id` / `user_name`, plus a per-tab `session_id`
-/// - where: the current URL `path`, the app `app_version`, and a JS `stack`
+/// - where: the current URL `path`, the app `app_version` + `commit`, and a JS
+///   `stack`
 /// - what they did: `breadcrumbs` (the recent navigation + click/change/submit
 ///   trail, newest last)
 fn make_entry(level: &str, message: String) -> Value {
@@ -124,6 +125,9 @@ fn make_entry(level: &str, message: String) -> Value {
         "session_id": session_id,
         "path": current_path(),
         "app_version": env!("CARGO_PKG_VERSION"),
+        // Which build, so a stack can be read against the code that produced it
+        // — and so an error from a bundle nobody runs any more is recognisable.
+        "commit": crate::build_info::COMMIT,
         "stack": current_stack(),
         "user_agent": web_sys::window()
             .and_then(|w| w.navigator().user_agent().ok()),

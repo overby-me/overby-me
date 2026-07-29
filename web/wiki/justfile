@@ -9,6 +9,19 @@ dx := `which -a dx | grep dioxus | head -1`
 # Unset (e.g. the hermetic Nix package build), the flag is empty — console only.
 remote_logging := if env_var_or_default("BETTERSTACK_SOURCE_TOKEN", "") != "" { "--features remote-logging" } else { "" }
 
+# The commit this bundle is built from, baked in via `option_env!("GIT_COMMIT")`
+# (src/build_info.rs). It is what ties a crash report or a piece of feedback to
+# the code that produced it, and what the running app compares against to notice
+# it is outdated.
+#
+# GIT_COMMIT from the environment wins, so the Nix build — which has no .git —
+# can pass the flake's rev in. Falls back to `unknown` rather than to a wrong
+# answer: a report naming a commit that was never deployed is worse than one
+# naming none.
+# A `-dirty` suffix marks a bundle built over uncommitted changes, so a report
+# from one is not read as coming from the commit it merely sat on top of.
+export GIT_COMMIT := env_var_or_default("GIT_COMMIT", `printf '%s%s' "$(git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)" "$(test -z "$(git status --porcelain --untracked-files=no 2>/dev/null)" || echo -dirty)"`)
+
 dev:
     {{dx}} serve
 
@@ -30,6 +43,11 @@ build:
     cp assets/_redirects target/dx/wiki-dioxus/release/web/public/_redirects
     cp assets/_headers target/dx/wiki-dioxus/release/web/public/_headers
     cp assets/sw.js target/dx/wiki-dioxus/release/web/public/sw.js
+    # What this deploy is, for a running tab to compare itself against
+    # (src/update.rs). At the root, so `_headers` keeps it revalidated rather
+    # than cached like the hashed assets.
+    printf '{"commit":"%s","version":"0.1.0"}\n' "$GIT_COMMIT" \
+        > target/dx/wiki-dioxus/release/web/public/version.json
 
 # Build the deployable frontend bundle (index.html + assets + sw.js at the root)
 # via the Nix package, then print the output dir. The final upload to

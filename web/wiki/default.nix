@@ -85,6 +85,15 @@
       # Run the same `just build` as a local build, so the SPA `_redirects`,
       # the `_headers` cache policy and the root-scoped `sw.js` copies have a
       # single source of truth (the justfile).
+      #
+      # The bundle records the commit it was built from (src/build_info.rs), and
+      # this build cannot know it: the source set above has no `.git`, and taking
+      # the flake's rev would rebuild the frontend on every unrelated commit. So
+      # it reports `unknown` unless a caller passes one — `GIT_COMMIT=<rev> nix
+      # build …` — which the justfile prefers over its own lookup. Deploys go
+      # through `just build` in the devshell (it bakes in the Better Stack token
+      # this hermetic build has no access to), and that path resolves the commit
+      # properly.
       buildPhase = ''
         runHook preBuild
         just build

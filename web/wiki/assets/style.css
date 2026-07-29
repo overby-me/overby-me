@@ -3597,9 +3597,18 @@ select:focus {
 	border-bottom: none;
 }
 
-/* The submitted text itself (its line breaks come from .text-preserve-breaks). */
+/* The submitted text itself (its line breaks come from .text-preserve-breaks).
+   A crash report arrives here too, and its stack carries unbroken module URLs
+   far wider than the card — break them anywhere rather than let one line set the
+   width of the whole list. */
 .feedback-message {
 	margin-top: var(--md-sys-spacing-2);
+	overflow-wrap: anywhere;
+}
+
+/* The build a report came from. Monospace so a hash reads as one. */
+.feedback-commit {
+	font-family: ui-monospace, monospace;
 }
 
 .chip-label {
@@ -4119,6 +4128,34 @@ h6,
 		opacity: 1;
 		transform: translateX(-50%) translateY(0);
 	}
+}
+
+/* "A newer version is available" (src/update.rs). Sits where the snackbar does,
+   but stays until it is answered — it is an offer, not a notice. Above the
+   snackbar's z-index so a toast cannot cover the reload button, and clear of the
+   iOS home indicator via safe-area padding. */
+.update-banner {
+	position: fixed;
+	bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 310;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: var(--md-sys-spacing-2);
+	max-width: min(92vw, 520px);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
+	border-radius: var(--md-sys-shape-corner-large);
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
+	box-shadow: var(--md-sys-elevation-3);
+}
+
+.update-banner-text {
+	font-size: var(--md-sys-typescale-body-medium-size);
+	line-height: var(--md-sys-typescale-body-medium-line);
 }
 
 /* Loading spinner */
@@ -6605,8 +6642,15 @@ a.list-item:hover {
 	font-size: var(--md-sys-typescale-body-medium-size);
 }
 
-/* Report beside Reload. Wraps on a narrow phone rather than squeezing, and the
-   labels change length when a report is sent. */
+/* Whether the automatic report got through. Reserves its line from the start so
+   the buttons below do not jump when the fetch settles. */
+.crash-status {
+	min-height: var(--md-sys-typescale-body-small-line);
+	font-size: var(--md-sys-typescale-body-small-size);
+}
+
+/* Send-again beside Reload, on the rare page where the automatic report failed.
+   Wraps on a narrow phone rather than squeezing. */
 .crash-actions {
 	display: flex;
 	flex-wrap: wrap;

@@ -337,6 +337,11 @@ const EN_JSON: &str = r#"{
         "crashReload": "Reload",
         "sendMessage": "Please send the following message to"
     },
+    "update": {
+        "available": "A newer version of the app is available.",
+        "reload": "Reload",
+        "dismiss": "Not now"
+    },
     "folder": {
         "manageFolder": "Manage folder",
         "proposedBy": "Proposed by",
@@ -821,6 +826,11 @@ const DA_JSON: &str = r#"{
         "crashBody": "Noget gik galt, og siden kan ikke fortsætte. Fejlen er rapporteret. Genindlæs siden, så virker det formentlig igen.",
         "crashReload": "Genindlæs",
         "sendMessage": "Send venligst f\u00f8lgende besked til"
+    },
+    "update": {
+        "available": "En nyere version af appen er tilg\u00e6ngelig.",
+        "reload": "Genindl\u00e6s",
+        "dismiss": "Ikke nu"
     },
     "folder": {
         "manageFolder": "Administrer mappe",

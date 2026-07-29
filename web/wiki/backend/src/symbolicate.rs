@@ -93,41 +93,61 @@ fn rewrite(bytes: &[u8], stack: &str) -> Option<String> {
 
     let mut out = String::with_capacity(stack.len());
     for line in stack.lines() {
-        match offset_in(line).and_then(|offset| resolve_one(&context, offset)) {
-            Some(resolved) => {
-                out.push_str("    at ");
-                out.push_str(&resolved);
-            }
-            None => out.push_str(line),
+        let resolved = offset_in(line)
+            .map(|offset| resolve_all(&context, offset))
+            .unwrap_or_default();
+        if resolved.is_empty() {
+            out.push_str(line);
+            out.push('\n');
+            continue;
         }
-        out.push('\n');
+        // Innermost first, as the engine orders frames.
+        for frame in resolved {
+            out.push_str("    at ");
+            out.push_str(&frame);
+            out.push('\n');
+        }
     }
     Some(out)
 }
 
-/// `function (file:line)` for a code offset, or `None` when the address is not in
-/// a mapped range — library code built without line tables, say.
-fn resolve_one<R: addr2line::gimli::Reader>(
+/// Every `function (file:line)` at a code offset — the whole inlined chain, not
+/// just the innermost.
+///
+/// This matters more than it sounds. At `opt-level = "s"` with fat LTO almost
+/// everything small is inlined, so the innermost frame is usually a generic
+/// helper — `Box::new`, `Option::copied` — while the frame that names the
+/// component sits further out. Reporting only the first made resolved stacks
+/// read as if the crash happened in the standard library.
+///
+/// Empty when the address is in no mapped range, which the caller treats as
+/// "leave the raw frame alone".
+fn resolve_all<R: addr2line::gimli::Reader>(
     context: &addr2line::Context<R>,
     offset: u64,
-) -> Option<String> {
-    let mut frames = context.find_frames(offset).skip_all_loads().ok()?;
-    let frame = frames.next().ok()??;
-    let function = frame
-        .function
-        .as_ref()
-        .and_then(|f| f.demangle().ok())
-        .map(|name| name.to_string());
-    let location = frame.location.as_ref().and_then(|loc| {
-        loc.file
-            .map(|file| format!("{}:{}", trim_path(file), loc.line.unwrap_or(0)))
-    });
-    match (function, location) {
-        (Some(f), Some(l)) => Some(format!("{f} ({l})")),
-        (Some(f), None) => Some(f),
-        (None, Some(l)) => Some(l),
-        (None, None) => None,
+) -> Vec<String> {
+    let Ok(mut frames) = context.find_frames(offset).skip_all_loads() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    while let Ok(Some(frame)) = frames.next() {
+        let function = frame
+            .function
+            .as_ref()
+            .and_then(|f| f.demangle().ok())
+            .map(|name| name.to_string());
+        let location = frame.location.as_ref().and_then(|loc| {
+            loc.file
+                .map(|file| format!("{}:{}", trim_path(file), loc.line.unwrap_or(0)))
+        });
+        match (function, location) {
+            (Some(f), Some(l)) => out.push(format!("{f} ({l})")),
+            (Some(f), None) => out.push(f),
+            (None, Some(l)) => out.push(l),
+            (None, None) => {}
+        }
     }
+    out
 }
 
 /// Keep the part of a path that identifies the file. Rust records absolute build
@@ -157,7 +177,20 @@ async fn sidecar_bytes(
             tracing::warn!("symbols {hash}: {} from {url}", resp.status());
             return None;
         }
-        Some(Arc::new(resp.bytes().await.ok()?.to_vec()))
+        let bytes = resp.bytes().await.ok()?.to_vec();
+        // A 200 does not mean the file exists. The site serves index.html for any
+        // unknown path (the SPA fallback in `_redirects`), so a build with no
+        // sidecar — anything from before this feature — answers with HTML. Parsing
+        // that as wasm would fail somewhere deeper and look like a broken build
+        // rather than a missing one, and the bytes would be cached as if good.
+        if !bytes.starts_with(b"\0asm") {
+            tracing::warn!(
+                "symbols {hash}: not a wasm module ({} bytes) — no sidecar for that build",
+                bytes.len()
+            );
+            return None;
+        }
+        Some(Arc::new(bytes))
     }
     .await;
     if let Ok(mut c) = cache().lock() {

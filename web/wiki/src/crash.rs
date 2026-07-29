@@ -3,8 +3,10 @@
 //! A panic in wasm aborts — there is no unwinding, so no `ErrorBoundary` can
 //! catch it, and the Dioxus runtime is left in an undefined state. The page does
 //! not close or reload; it simply stops responding, which looks identical to a
-//! slow network. This puts a plain statement, a reload and a report button over
-//! it.
+//! slow network. This puts a plain statement and a reload button over it, and
+//! files the crash as a `wiki/feedback` node on the way — automatically, so the
+//! crashes worth hearing about are not the ones a reader happened to click
+//! through. A send-again button appears only if that fails.
 //!
 //! Two rules shape everything here.
 //!
@@ -26,6 +28,15 @@
 use std::cell::RefCell;
 
 const OVERLAY_ID: &str = "wiki-crash-overlay";
+/// The line that says whether the report got through.
+const STATUS_ID: &str = "wiki-crash-status";
+/// The send-again button, revealed only when the automatic report failed.
+const RETRY_ID: &str = "wiki-crash-retry";
+
+/// How much of the panic message + stack the report carries. See
+/// [`report_fetch_js`]: it goes in a URL, and symbolication expands it further
+/// on the far side (the backend's own cap is 4000 chars, applied after).
+const MAX_REPORT_CHARS: usize = 2000;
 
 thread_local! {
     /// What panicked, captured in the hook so the report can carry it. Read when
@@ -76,13 +87,15 @@ fn js_string(text: &str) -> String {
     serde_json::Value::String(text.to_string()).to_string()
 }
 
-/// The `onclick` handler for the report button: send the crash to the feedback
-/// endpoint, then say so in the button itself.
+/// The `fetch(…)` expression that files the crash report, with everything it
+/// needs baked in while wasm is still alive.
 ///
-/// The backend reads its fields from the query string (`backend/src/feedback.rs`),
-/// and takes the caller from the bearer token when there is one — a crash from a
-/// logged-out reader still reports, anonymously.
-fn report_handler_js(message: &str, sent_label: &str, failed_label: &str) -> String {
+/// The backend reads its fields from the query string, resolves the stack's wasm
+/// offsets to source lines, and files the result as a `wiki/feedback` node — the
+/// same node the in-app dialog creates, so the report lands in the feedback app
+/// (`backend/src/feedback.rs`). It takes the caller from the bearer token when
+/// there is one; a crash from a logged-out reader still reports, anonymously.
+fn report_fetch_js(message: &str) -> String {
     let token = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|s| s.get_item("wiki_session").ok().flatten())
@@ -101,29 +114,108 @@ fn report_handler_js(message: &str, sent_label: &str, failed_label: &str) -> Str
         .and_then(|w| w.navigator().user_agent().ok())
         .unwrap_or_default();
 
+    // The whole report travels in the query string, and percent-encoding a stack
+    // (newlines, colons, slashes) can triple its length — so cap the raw text
+    // well under any server's URL limit, or the one report a reader chose to send
+    // comes back 414. Cutting the TAIL is right: the panic's own message leads,
+    // and the frames after it are ordered innermost first.
+    let message: String = message.chars().take(MAX_REPORT_CHARS).collect();
+
     let url = format!(
-        "{}/feedback?kind=bug&message={}&path={}&app={}&ua={}",
+        "{}/feedback?kind=bug&message={}&path={}&app={}&commit={}&ua={}",
         crate::backend_api::BACKEND_URL,
         js_sys::encode_uri_component(&format!("CRASH: {message}")),
         js_sys::encode_uri_component(&path),
         js_sys::encode_uri_component(env!("CARGO_PKG_VERSION")),
+        // Which build crashed. The offsets in the stack only mean anything
+        // against the binary they came from, and the backend already keys its
+        // symbol lookup on the bundle hash in the stack — this says the same in
+        // terms a person can act on.
+        js_sys::encode_uri_component(crate::build_info::COMMIT),
         js_sys::encode_uri_component(&ua),
     );
 
-    // `this` is the button. Disable it first so a second tap cannot double-send,
-    // and report the outcome in place rather than with an alert.
     format!(
-        "var b=this;b.disabled=true;fetch({url},{{method:'POST',headers:{headers}}})\
-         .then(function(r){{b.textContent=r.ok?{sent}:{failed};}})\
-         .catch(function(){{b.textContent={failed};}});",
+        "fetch({url},{{method:'POST',headers:{headers}}})",
         url = js_string(&url),
         headers = if token.is_empty() {
             "{}".to_string()
         } else {
             format!("{{Authorization:'Bearer '+{}}}", js_string(&token))
         },
+    )
+}
+
+/// A short, stable digest of the crash text, used to recognise the same crash
+/// across reloads. FNV-1a: tiny, deterministic, and nothing here needs it to
+/// resist anything.
+fn digest(text: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// A JS function literal `function(ok){…}` that writes the outcome into the
+/// overlay's status line, reveals the send-again button when the report did not
+/// get through, and remembers a successful one under `key`.
+///
+/// By id rather than by closure, because both callers are strings evaluated after
+/// the wasm instance has trapped: one from `eval`, one from an `onclick`.
+fn settle_js(key: &str, sent_label: &str, failed_label: &str) -> String {
+    format!(
+        "function(ok){{\
+           if(ok){{try{{sessionStorage.setItem({key},'1');}}catch(e){{}}}}\
+           var s=document.getElementById({status});if(s)s.textContent=ok?{sent}:{failed};\
+           var q=document.getElementById({retry});if(q)q.hidden=ok;\
+         }}",
+        key = js_string(key),
+        status = js_string(STATUS_ID),
+        retry = js_string(RETRY_ID),
         sent = js_string(sent_label),
         failed = js_string(failed_label),
+    )
+}
+
+/// Send the report as soon as the overlay is up, without waiting for a click.
+///
+/// The reader has already lost their work; making the report conditional on them
+/// noticing a button meant the crashes worth hearing about were the ones least
+/// likely to be sent. `fetch` is safe to start here even though the instance is
+/// about to trap: the request now belongs to the browser, and the callback only
+/// touches the DOM.
+///
+/// Sent at most once per crash per tab. A crash that survives a reload — a bad
+/// record on the page being opened, say — would otherwise file a node every time
+/// the reader tried again, burying the report under its own copies. Only a
+/// success is remembered, so a failed send still retries on the next load, and
+/// storage being unavailable (Safari in private mode) sends rather than skips:
+/// a duplicate is the cheaper mistake.
+fn auto_report_js(message: &str, sent_label: &str, failed_label: &str) -> String {
+    let key = format!("wiki-crash-{}", digest(message));
+    format!(
+        "(function(){{var d={settle};\
+           try{{if(sessionStorage.getItem({key})){{d(true);return;}}}}catch(e){{}}\
+           {fetch}.then(function(r){{d(r.ok);}}).catch(function(){{d(false);}});}})();",
+        settle = settle_js(&key, sent_label, failed_label),
+        key = js_string(&key),
+        fetch = report_fetch_js(message),
+    )
+}
+
+/// The `onclick` for the send-again button, shown only after a failed automatic
+/// report. `this` is the button; disable it while the retry is in flight so a
+/// second tap cannot double-file.
+fn retry_report_js(message: &str, sent_label: &str, failed_label: &str) -> String {
+    let key = format!("wiki-crash-{}", digest(message));
+    format!(
+        "var b=this;b.disabled=true;var d={settle};{fetch}\
+         .then(function(r){{d(r.ok);b.disabled=false;}})\
+         .catch(function(){{d(false);b.disabled=false;}});",
+        settle = settle_js(&key, sent_label, failed_label),
+        fetch = report_fetch_js(message),
     )
 }
 
@@ -163,22 +255,32 @@ pub fn show_overlay() {
         let _ = card.append_child(text.as_ref());
     }
 
+    // Whether the automatic report got through. Empty until the fetch settles,
+    // which takes a moment — the alternative is claiming success before there is
+    // any.
+    if let Ok(status) = doc.create_element("p") {
+        let _ = status.set_attribute("id", STATUS_ID);
+        let _ = status.set_attribute("class", "crash-status");
+        let _ = status.set_attribute("aria-live", "polite");
+        let _ = card.append_child(status.as_ref());
+    }
+
+    let message = PANIC_MESSAGE.with(|m| m.borrow().clone());
+    let sent = crate::i18n::t_static("error.crashReported");
+    let failed = crate::i18n::t_static("error.crashReportFailed");
+
     if let Ok(actions) = doc.create_element("div") {
         let _ = actions.set_attribute("class", "crash-actions");
 
-        if let Ok(report) = doc.create_element("button") {
-            let _ = report.set_attribute("class", "btn btn-outlined");
-            report.set_text_content(Some(&crate::i18n::t_static("error.crashReport")));
-            let message = PANIC_MESSAGE.with(|m| m.borrow().clone());
-            let _ = report.set_attribute(
-                "onclick",
-                &report_handler_js(
-                    &message,
-                    &crate::i18n::t_static("error.crashReported"),
-                    &crate::i18n::t_static("error.crashReportFailed"),
-                ),
-            );
-            let _ = actions.append_child(report.as_ref());
+        // Hidden unless the automatic report fails — offering to send something
+        // already sent would only make the reader wonder which it was.
+        if let Ok(retry) = doc.create_element("button") {
+            let _ = retry.set_attribute("id", RETRY_ID);
+            let _ = retry.set_attribute("class", "btn btn-outlined");
+            let _ = retry.set_attribute("hidden", "");
+            retry.set_text_content(Some(&crate::i18n::t_static("error.crashReport")));
+            let _ = retry.set_attribute("onclick", &retry_report_js(&message, &sent, &failed));
+            let _ = actions.append_child(retry.as_ref());
         }
 
         if let Ok(reload) = doc.create_element("button") {
@@ -193,4 +295,9 @@ pub fn show_overlay() {
 
     let _ = overlay.append_child(card.as_ref());
     let _ = body.append_child(overlay.as_ref());
+
+    // File the report now the status line it writes into exists. Once per page:
+    // the early return above means a burst of panics produces one overlay, and
+    // so one report.
+    let _ = js_sys::eval(&auto_report_js(&message, &sent, &failed));
 }

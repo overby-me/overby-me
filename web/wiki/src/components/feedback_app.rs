@@ -211,6 +211,12 @@ fn FeedbackRow(
                 if !item.path.is_empty() {
                     span { class: "body-small text-muted", "{item.path}" }
                 }
+                // Which build it came from. Absent on anything submitted before
+                // builds recorded it, and on a build made outside the deploy
+                // path, which reports `unknown` rather than guessing.
+                if !item.commit.is_empty() && item.commit != "unknown" {
+                    span { class: "body-small text-muted feedback-commit", "{item.commit}" }
+                }
             }
         }
     }
