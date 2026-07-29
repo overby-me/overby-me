@@ -209,6 +209,17 @@ fn SpeakList(
     let mut busy = use_signal(|| false);
     // Optimistic joins: shown at once, reconciled by key against the fetched queue.
     let mut pending = use_signal(Vec::<PendingSpeaker>::new);
+    // Belongs to one speaker list. The component is reused across a route change
+    // rather than remounted, so a join still in flight when you move to another
+    // list would follow you there and never reconcile, the queue's own keys being
+    // different. Same defect FolderApp had.
+    let shown_list = list_id.clone();
+    use_effect(use_reactive!(|(shown_list)| {
+        let _ = &shown_list;
+        if !pending.peek().is_empty() {
+            pending.set(Vec::new());
+        }
+    }));
     // Optimistic removals (remove + next speaker): ids hidden until the delete
     // lands; an id is dropped from the set on error to restore the row.
     let mut removed = use_signal(std::collections::HashSet::<String>::new);

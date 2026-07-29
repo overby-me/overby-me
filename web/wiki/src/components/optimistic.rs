@@ -15,6 +15,30 @@
 //!       filter them from the render, restoring on error.
 //!
 //! The comments feature (src/components/comments.rs) is the original of recipe (a).
+//!
+//! # Clear pending rows when the thing they belong to changes
+//!
+//! A pending row belongs to ONE node — the folder it was added under, the post it
+//! was commented on, the speaker list it joined. The route components here are
+//! deliberately not remounted when the route changes (they refetch reactively
+//! instead; see `FolderApp`), so a `use_signal` holding pending rows survives
+//! navigation and is then reconciled against a DIFFERENT node's data. Its keys
+//! can never appear there, so [`reconcile_by_key`] keeps every row forever and a
+//! muted "sending" row sits on a page that finished loading.
+//!
+//! Adding a folder made this certain rather than merely possible, since it
+//! navigates into the node it just created. Every holder of pending state
+//! therefore resets it on the identity it belongs to:
+//!
+//! ```ignore
+//! let shown_node = node_id.clone();
+//! use_effect(use_reactive!(|(shown_node)| {
+//!     let _ = &shown_node;
+//!     if !pending.peek().is_empty() {
+//!         pending.set(Vec::new());
+//!     }
+//! }));
+//! ```
 
 use std::collections::HashSet;
 

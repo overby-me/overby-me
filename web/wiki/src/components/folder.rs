@@ -212,7 +212,20 @@ pub fn FolderApp(
         .collect();
     // Optimistic add-child (FolderAdd pushes here): muted tiles shown at once and
     // reconciled by key against the fetched children.
-    let pending = use_signal(Vec::<PendingChild>::new);
+    let mut pending = use_signal(Vec::<PendingChild>::new);
+    // An optimistic row belongs to the folder that was on screen when it was
+    // added, and this component is deliberately NOT remounted when the route
+    // changes (see the refetch above). Without clearing it, the row follows you:
+    // adding a folder navigates INTO the new folder, whose own key can never turn
+    // up among its children, so nothing ever reconciles it away and a muted
+    // "sending" row sits there permanently on a page that finished loading.
+    let shown_folder = node.id.0.clone();
+    use_effect(use_reactive!(|(shown_folder)| {
+        let _ = &shown_folder;
+        if !pending.peek().is_empty() {
+            pending.set(Vec::new());
+        }
+    }));
     let child_keys: std::collections::HashSet<String> =
         children.iter().map(|c| c.key.clone()).collect();
     let pending_shown = crate::components::optimistic::reconcile_by_key(

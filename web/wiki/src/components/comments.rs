@@ -138,7 +138,19 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
 
     // Optimistic comments: shown before the server confirms, reconciled by key —
     // an entry is hidden once the refetch returns a comment with the same key.
-    let pending = use_signal(Vec::<PendingComment>::new);
+    let mut pending = use_signal(Vec::<PendingComment>::new);
+    // Tied to the node it was posted under. This component is reused across a
+    // route change rather than remounted, so navigating away with a post still in
+    // flight would carry the muted row onto the next node, where its key can
+    // never come back from the server and so never reconciles away. Same defect
+    // FolderApp had, where adding a folder navigates into it every time.
+    let shown_node = node_id.clone();
+    use_effect(use_reactive!(|(shown_node)| {
+        let _ = &shown_node;
+        if !pending.peek().is_empty() {
+            pending.set(Vec::new());
+        }
+    }));
     let fetched_keys: std::collections::HashSet<String> = match &state {
         Some(Ok(list)) => list.iter().map(|c| c.key.clone()).collect(),
         _ => Default::default(),
