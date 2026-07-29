@@ -6510,3 +6510,22 @@ a.list-item:hover {
 		transform: rotate(360deg);
 	}
 }
+
+/* ═══ iOS: never let focusing a control zoom the page ═══
+   Mobile Safari zooms in whenever a focused text control computes below 16px,
+   and then leaves the viewport scaled — so tapping search or a comment box
+   pushed the whole app out of shape and made it feel like a document rather
+   than an app. (Safari ignores maximum-scale on a normal page, and pinning it
+   would take pinch-zoom away from everyone, so the fix belongs on the type.)
+
+   Only on coarse pointers, so the denser desktop sizes are untouched, and as a
+   floor rather than a fixed size: anything already larger stays larger.
+   `body-large` IS 16px, so this reads as the design token it is. */
+@media (pointer: coarse) {
+	input,
+	textarea,
+	select,
+	[contenteditable="true"] {
+		font-size: max(var(--md-sys-typescale-body-large-size), 1em);
+	}
+}
