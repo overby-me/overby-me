@@ -111,8 +111,8 @@ async fn submit_inner(
         // Losing the report would be worse than filing it somewhere awkward, so
         // fall back to the log sink rather than failing the request.
         Err(e) => {
-            tracing::warn!("feedback node insert failed ({e}); shipping to the log sink instead");
-            ship_feedback(cfg, client, &report, sender).await
+            tracing::error!("feedback node insert failed ({e}); shipping to the log sink instead");
+            ship_feedback(cfg, client, &report, sender, &e).await
         }
     }
 }
@@ -256,13 +256,21 @@ fn feedback_key() -> String {
 }
 
 /// Fallback sink: ship one feedback event to BetterStack (the frontend logger's
-/// sink; no `dt` field, so BetterStack stamps ingest time). Reached only when the
-/// node could not be written. A ship failure is UPSTREAM.
+/// sink; no `dt` field, so BetterStack stamps ingest time). A ship failure is
+/// UPSTREAM.
+///
+/// This is only ever reached when the `wiki/feedback` node could NOT be written,
+/// and it says so loudly — `level: error`, its own source, and `why` carrying the
+/// reason. It used to arrive as an ordinary `feedback` event at `info`, which
+/// made the one case worth noticing indistinguishable from the routine one: the
+/// reader was told "Reported", the report existed, and it was nowhere in the
+/// feedback app with nothing to say why.
 async fn ship_feedback(
     cfg: &Config,
     client: &reqwest::Client,
     report: &Report<'_>,
     sender: Option<(String, String)>,
+    why: &str,
 ) -> Result<(), AppError> {
     let (user_id, email) = sender.unwrap_or_else(|| ("anonymous".into(), String::new()));
     let Report {
@@ -277,14 +285,16 @@ async fn ship_feedback(
     if cfg.betterstack_token.is_empty() {
         // No sink configured: log server-side so the report is not silently
         // dropped (the container's stdout is captured).
-        tracing::warn!("feedback [{kind}] from {user_id}: {message} (path={path})");
+        tracing::error!(
+            "feedback [{kind}] from {user_id} NOT FILED ({why}): {message} (path={path})"
+        );
         return Ok(());
     }
 
     let entry = json!({
-        "level": "info",
-        "source": "feedback",
-        "message": format!("feedback [{kind}]: {message}"),
+        "level": "error",
+        "source": "feedback-not-filed",
+        "message": format!("feedback [{kind}] NOT FILED as a wiki/feedback node ({why}): {message}"),
         "feedback": {
             "kind": kind,
             "message": message,
@@ -294,6 +304,9 @@ async fn ship_feedback(
             "user_agent": ua,
             "user_id": user_id,
             "email": email,
+            // What to search for when a report is missing from the feedback app.
+            "filed": false,
+            "insert_error": why,
         },
     });
     let url = format!("https://{}/", cfg.betterstack_host);
