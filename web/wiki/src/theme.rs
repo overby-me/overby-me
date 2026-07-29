@@ -212,13 +212,25 @@ fn generate_scheme_css(primary: &str, accent: &str) -> Option<String> {
         }])
         .build();
     let group = theme.custom_colors.first()?;
+    // The `:root` on the end is not decoration — it outranks the baked theme.
+    //
+    // m3-theme.css uses these very selectors, so with matching specificity the
+    // cascade falls back to document order, and the override only won when its
+    // <style> happened to sit after the stylesheet. It does when the element is
+    // created by a colour change (the app's <link>s are long since in the head)
+    // and does not when it is created at startup from a saved seed, which runs
+    // before them. Hence: changing colours worked in a session that began on the
+    // brand defaults, and did nothing in one that began on a saved override.
+    //
+    // Repeating `:root` adds a pseudo-class, so these rules win on specificity
+    // whatever the order — and stay winning if the stylesheets move again.
     let light = scheme_block(
-        ":root,\nhtml[data-theme=\"light\"]",
+        ":root:root,\nhtml[data-theme=\"light\"]:root",
         &theme.schemes.light,
         &group.light,
     );
     let dark = scheme_block(
-        "html[data-theme=\"dark\"]",
+        "html[data-theme=\"dark\"]:root",
         &theme.schemes.dark,
         &group.dark,
     );
