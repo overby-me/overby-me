@@ -3572,6 +3572,17 @@ pub struct FeedbackItem {
     /// The build it was sent from. Empty on anything submitted before builds
     /// started recording it.
     pub commit: String,
+    /// How many times this crash has been reported. Repeats are folded into one
+    /// node by the backend, so this is the only record of how often it happens:
+    /// the log sink keeps three days, this keeps everything. 1 (or 0, on a typed
+    /// report, which is never folded) means it has been seen once.
+    pub seen: u64,
+    /// How many distinct people have hit it, counted from the reporter ids the
+    /// backend accumulates.
+    pub people: usize,
+    /// When it was last seen — the node's `updatedAt`, which a database trigger
+    /// moves on every fold.
+    pub last_seen: String,
     pub created_at: String,
     pub owner_id: Option<String>,
     pub owner_name: String,
@@ -3642,7 +3653,7 @@ pub async fn query_feedback(access_token: Option<&str>) -> Result<Vec<FeedbackIt
     let query = format!(
         "query {{ nodes(where: {{ parentId: {{ _eq: \"{root_id}\" }}, \
          mimeId: {{ _eq: \"wiki/feedback\" }} }}) \
-         {{ id data createdAt ownerId owner {{ displayName avatarUrl }} }} }}"
+         {{ id data createdAt updatedAt ownerId owner {{ displayName avatarUrl }} }} }}"
     );
     let data = execute_raw(access_token, &query).await?;
     let mut items: Vec<FeedbackItem> = data
@@ -3675,6 +3686,20 @@ pub async fn query_feedback(access_token: Option<&str>) -> Result<Vec<FeedbackIt
                         image: if image.is_empty() { None } else { Some(image) },
                         path: field("path"),
                         commit: field("commit"),
+                        seen: d
+                            .and_then(|d| d.get("seen"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        people: d
+                            .and_then(|d| d.get("reporters"))
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.len())
+                            .unwrap_or(0),
+                        last_seen: n
+                            .get("updatedAt")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
                         created_at: n
                             .get("createdAt")
                             .and_then(|v| v.as_str())

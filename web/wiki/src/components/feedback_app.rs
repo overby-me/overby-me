@@ -19,7 +19,7 @@ use dioxus::prelude::*;
 
 use crate::components::widgets::Dialog;
 use crate::graphql::{self, FeedbackItem};
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
 
@@ -321,6 +321,9 @@ fn FeedbackRow(
     // as such. `full_datetime` converts and localises.
     let when = super::loader::full_datetime(&item.created_at);
     let when_ago = super::loader::relative_time(&item.created_at);
+    // The date on the row is when it was FIRST seen; a folded crash also has a
+    // most recent sighting, which is the one that says whether it is still going.
+    let last_seen = super::loader::full_datetime(&item.last_seen);
     let screenshot = super::loader::use_file_object_url(item.image.clone().unwrap_or_default());
 
     rsx! {
@@ -334,6 +337,23 @@ fn FeedbackRow(
                     span { class: "chip-label", "{t(label_key)}" }
                 }
                 div { class: "flex-grow" }
+                // How often, and to how many. Repeats fold into this row rather
+                // than adding rows, so without this a crash hitting fifty people
+                // is indistinguishable from one that happened once.
+                if item.seen > 1 {
+                    span {
+                        class: "chip feedback-seen",
+                        title: "{t_with(\"feedback.lastSeen\", &[(\"when\", &last_seen)])}",
+                        span { class: "material-icons", "repeat" }
+                        span { class: "chip-label",
+                            if item.people > 1 {
+                                "{t_with(\"feedback.seenByPeople\", &[(\"count\", &item.seen.to_string()), (\"people\", &item.people.to_string())])}"
+                            } else {
+                                "{t_with(\"feedback.seenTimes\", &[(\"count\", &item.seen.to_string())])}"
+                            }
+                        }
+                    }
+                }
                 if !when.is_empty() {
                     // Exact on the face of it, with "3 hours ago" a hover away —
                     // the reverse of the pattern elsewhere, because a report is

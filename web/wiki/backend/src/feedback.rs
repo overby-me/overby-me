@@ -148,6 +148,17 @@ async fn insert_feedback_node(
 ) -> Result<(), String> {
     let root_id = root_node_id(cfg, client).await?;
 
+    // A crash that has been seen before becomes a count on the row that is
+    // already there, rather than another row. The node is the durable record —
+    // the log sink keeps three days — so "how often" and "how many people" have
+    // to survive here or not at all.
+    let digest = (report.kind == "crash").then(|| crash_digest(report.message));
+    if let Some(digest) = &digest {
+        if let Some((id, data)) = find_crash(cfg, client, &root_id, digest).await? {
+            return bump_crash(cfg, client, &id, data, owner_id).await;
+        }
+    }
+
     let name: String = report.message.trim().chars().take(MAX_NAME).collect();
     let name = if name.is_empty() {
         report.kind.to_string()
@@ -174,6 +185,14 @@ async fn insert_feedback_node(
     if let Some(uid) = owner_id {
         object["ownerId"] = Value::from(uid);
     }
+    // First sighting of this crash. `seen` and `reporters` are what later
+    // sightings add to; `updatedAt` (a database trigger keeps it) is when it was
+    // last seen, so nothing here has to carry a clock.
+    if let Some(digest) = digest {
+        object["data"]["crashDigest"] = Value::from(digest);
+        object["data"]["seen"] = Value::from(1);
+        object["data"]["reporters"] = json!([owner_id.unwrap_or(ANONYMOUS)]);
+    }
 
     let body = json!({
         "query": "mutation($object: nodes_insert_input!) { \
@@ -187,6 +206,125 @@ async fn insert_feedback_node(
         .filter(|n| !n.is_null())
         .map(|_| ())
         .ok_or_else(|| "insertNode returned no row".to_string())
+}
+
+/// Stands in for a reporter with no account, so anonymous sightings count once
+/// rather than once each.
+const ANONYMOUS: &str = "anonymous";
+
+/// Identify a crash by WHERE it happened, not by the exact bytes of its report.
+///
+/// Built from the panic text plus the source locations of the resolved frames,
+/// deliberately ignoring wasm offsets, function indices and asset URLs. Those
+/// change with every build, so hashing the whole message would start a fresh row
+/// at each deploy and the count would reset exactly when a recurring crash
+/// becomes most interesting.
+///
+/// A report with nothing resolved falls back to the whole message, which at
+/// least groups identical unresolved reports together.
+fn crash_digest(message: &str) -> String {
+    let mut material = String::new();
+    let mut resolved = 0usize;
+    for line in message.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("at ") {
+            // Keep only the trailing `(file:line)`; the function name carries
+            // monomorphised type parameters that shift between builds.
+            if let Some(open) = rest.rfind(" (") {
+                if rest.ends_with(')') {
+                    material.push_str(&rest[open + 2..rest.len() - 1]);
+                    material.push('\n');
+                    resolved += 1;
+                }
+            }
+        } else if !trimmed.contains("wasm-function[") && !trimmed.contains("://") {
+            // The panic itself and its message; everything else on these lines
+            // is an engine artefact.
+            material.push_str(trimmed);
+            material.push('\n');
+        }
+    }
+    if resolved == 0 {
+        material = message.to_string();
+    }
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in material.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// The existing node for this crash, if there is one.
+async fn find_crash(
+    cfg: &Config,
+    client: &reqwest::Client,
+    root_id: &str,
+    digest: &str,
+) -> Result<Option<(String, Value)>, String> {
+    let body = json!({
+        "query": "query($p: uuid!, $d: jsonb!) { \
+                  nodes(where: { parentId: { _eq: $p }, mimeId: { _eq: \"wiki/feedback\" }, \
+                                 data: { _contains: $d } }, limit: 1) { id data } }",
+        "variables": { "p": root_id, "d": { "crashDigest": digest } },
+    });
+    let value = hasura(cfg, client, &body).await?;
+    let Some(node) = value
+        .get("data")
+        .and_then(|d| d.get("nodes"))
+        .and_then(|n| n.as_array())
+        .and_then(|a| a.first())
+    else {
+        return Ok(None);
+    };
+    let id = node
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or("crash node has no id")?
+        .to_string();
+    Ok(Some((id, node.get("data").cloned().unwrap_or(json!({})))))
+}
+
+/// Record another sighting: one more occurrence, and one more reporter if this
+/// one is new. `updatedAt` moves on its own (a database trigger), which is what
+/// "last seen" reads from.
+async fn bump_crash(
+    cfg: &Config,
+    client: &reqwest::Client,
+    node_id: &str,
+    mut data: Value,
+    owner_id: Option<&str>,
+) -> Result<(), String> {
+    let seen = data.get("seen").and_then(|s| s.as_u64()).unwrap_or(1) + 1;
+    data["seen"] = Value::from(seen);
+
+    let who = owner_id.unwrap_or(ANONYMOUS);
+    let mut reporters: Vec<String> = data
+        .get("reporters")
+        .and_then(|r| r.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !reporters.iter().any(|r| r == who) {
+        reporters.push(who.to_string());
+    }
+    data["reporters"] = json!(reporters);
+
+    let body = json!({
+        "query": "mutation($id: uuid!, $data: jsonb!) { \
+                  updateNode(pk_columns: { id: $id }, _set: { data: $data }) { id } }",
+        "variables": { "id": node_id, "data": data },
+    });
+    let value = hasura(cfg, client, &body).await?;
+    value
+        .get("data")
+        .and_then(|d| d.get("updateNode"))
+        .filter(|n| !n.is_null())
+        .map(|_| ())
+        .ok_or_else(|| "updateNode returned no row".to_string())
 }
 
 /// The parent-less root node, which owns the feedback collection. Looked up per
@@ -323,6 +461,47 @@ async fn ship_feedback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_same_crash_digests_the_same_across_builds() {
+        // The same crash, reported from two builds: different wasm offsets,
+        // different asset hashes, same source locations. It must fold into one
+        // row, or the count resets at every deploy — exactly when a recurring
+        // crash becomes worth counting.
+        let from_build_a = "panicked at src/components/error.rs:20:5:\n\
+             Triggered test panic\n\
+             @https://radikal.wiki/assets/wiki-dioxus-dxhAAA.js:1:42944\n\
+             @…_bg-dxhAAA.wasm:wasm-function[6175]:0x376d02\n    \
+             at ZoomableImage (src/components/widgets/image.rs:11)\n";
+        let from_build_b = "panicked at src/components/error.rs:20:5:\n\
+             Triggered test panic\n\
+             @https://radikal.wiki/assets/wiki-dioxus-dxhBBB.js:1:51001\n\
+             6175@wasm-function[6175]\n    \
+             at ZoomableImage (src/components/widgets/image.rs:11)\n";
+        assert_eq!(crash_digest(from_build_a), crash_digest(from_build_b));
+    }
+
+    #[test]
+    fn a_different_crash_digests_differently() {
+        let one = "panicked at a.rs:1:1: boom\n    at Foo (src/one.rs:5)\n";
+        let other = "panicked at a.rs:1:1: boom\n    at Foo (src/two.rs:5)\n";
+        assert_ne!(crash_digest(one), crash_digest(other));
+        // And the panic text itself distinguishes two crashes in the same place.
+        let third = "panicked at a.rs:1:1: different message\n    at Foo (src/one.rs:5)\n";
+        assert_ne!(crash_digest(one), crash_digest(third));
+    }
+
+    #[test]
+    fn an_unresolved_report_still_groups_with_its_twin() {
+        // Nothing resolved, so there are no source locations to key on. Falling
+        // back to the whole message at least folds identical reports.
+        let raw = "panicked at a.rs:1:1: boom\n6175@wasm-function[6175]\n";
+        assert_eq!(crash_digest(raw), crash_digest(raw));
+        assert_ne!(
+            crash_digest(raw),
+            crash_digest("panicked at b.rs:2:2: boom\n")
+        );
+    }
 
     #[test]
     fn short_messages_are_left_alone() {

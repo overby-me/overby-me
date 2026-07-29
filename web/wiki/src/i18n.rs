@@ -139,6 +139,9 @@ const EN_JSON: &str = r#"{
         "all": "All feedback",
         "submittedBy": "From",
         "anonymous": "Anonymous",
+        "seenTimes": "Seen {{count}} times",
+        "seenByPeople": "Seen {{count}} times by {{people}} people",
+        "lastSeen": "Last seen {{when}}",
         "deleteConfirm": "Delete this feedback? This cannot be undone."
     },
     "editor": {
@@ -332,7 +335,6 @@ const EN_JSON: &str = r#"{
         "somethingWentWrong": "Something went wrong!",
         "crashTitle": "The app stopped",
         "crashReported": "Reported — thank you",
-        "crashAlreadyReported": "Already reported",
         "crashReportFailed": "Could not send",
         "crashBody": "Something went wrong and the page cannot continue. The problem has been reported. Reloading should put it right.",
         "crashReload": "Reload",
@@ -632,6 +634,9 @@ const DA_JSON: &str = r#"{
         "all": "Al feedback",
         "submittedBy": "Fra",
         "anonymous": "Anonym",
+        "seenTimes": "Set {{count}} gange",
+        "seenByPeople": "Set {{count}} gange af {{people}} personer",
+        "lastSeen": "Sidst set {{when}}",
         "deleteConfirm": "Slet denne feedback? Dette kan ikke fortrydes."
     },
     "editor": {
@@ -825,7 +830,6 @@ const DA_JSON: &str = r#"{
         "somethingWentWrong": "Noget gik galt!",
         "crashTitle": "Appen stoppede",
         "crashReported": "Rapporteret — tak",
-        "crashAlreadyReported": "Allerede rapporteret",
         "crashReportFailed": "Kunne ikke sendes",
         "crashBody": "Noget gik galt, og siden kan ikke fortsætte. Fejlen er rapporteret. Genindlæs siden, så virker det formentlig igen.",
         "crashReload": "Genindlæs",

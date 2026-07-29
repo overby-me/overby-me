@@ -40,11 +40,6 @@ const STATUS_ID: &str = "wiki-crash-status";
 /// on the far side (the backend's own cap is 4000 chars, applied after).
 const MAX_REPORT_CHARS: usize = 2000;
 
-/// How long the same crash stays suppressed before it is worth reporting again.
-/// Long enough that a reload loop files one node, short enough that a crash
-/// someone is still hitting later says so.
-const REPORT_AGAIN_MS: u64 = 30 * 60 * 1000;
-
 thread_local! {
     /// What panicked, captured in the hook so the report can carry it. Read when
     /// building the overlay, which happens in the same call.
@@ -160,30 +155,16 @@ fn report_fetch_js(message: &str) -> String {
     )
 }
 
-/// A short, stable digest of the crash text, used to recognise the same crash
-/// across reloads. FNV-1a: tiny, deterministic, and nothing here needs it to
-/// resist anything.
-fn digest(text: &str) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.as_bytes() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x100_0000_01b3);
-    }
-    format!("{hash:016x}")
-}
-
 /// A JS function literal `function(ok){…}` that writes the outcome into the
-/// overlay's status line and remembers a successful report under `key`.
+/// overlay's status line.
 ///
 /// By id rather than by closure, because it is a string evaluated after the wasm
 /// instance has trapped.
-fn settle_js(key: &str, sent_label: &str, failed_label: &str) -> String {
+fn settle_js(sent_label: &str, failed_label: &str) -> String {
     format!(
         "function(ok){{\
-           if(ok){{try{{sessionStorage.setItem({key},String(Date.now()));}}catch(e){{}}}}\
            var s=document.getElementById({status});if(s)s.textContent=ok?{sent}:{failed};\
          }}",
-        key = js_string(key),
         status = js_string(STATUS_ID),
         sent = js_string(sent_label),
         failed = js_string(failed_label),
@@ -198,40 +179,19 @@ fn settle_js(key: &str, sent_label: &str, failed_label: &str) -> String {
 /// about to trap: the request now belongs to the browser, and the callback only
 /// touches the DOM.
 ///
-/// The same crash is not re-sent for [`REPORT_AGAIN_MS`]. A crash that survives a
-/// reload — a bad record on the page being opened, say — would otherwise file a
-/// node every time the reader tried again, burying the report under its own
-/// copies.
+/// Every occurrence is sent. Nothing here suppresses a repeat, on purpose.
 ///
-/// The suppression EXPIRES, and it says so when it applies. It used to last the
-/// whole tab and still display "Reported — thank you", so triggering the same
-/// crash twice looked like reporting working once and then silently failing —
-/// flaky, when it was doing exactly what it was told. A report is worth
-/// refreshing eventually anyway: a crash still happening half an hour later is
-/// news about the present, not a duplicate.
-///
-/// Only a success is remembered, so a failed send retries on the next load, and
-/// storage being unavailable (private browsing) sends rather than skips: a
-/// duplicate is the cheaper mistake.
-fn auto_report_js(
-    message: &str,
-    sent_label: &str,
-    failed_label: &str,
-    already_label: &str,
-) -> String {
-    let key = format!("wiki-crash-{}", digest(message));
+/// It used to skip a crash already reported from this tab, to keep a reload loop
+/// from filing a node per attempt. The backend now folds repeats into the node
+/// that already exists and counts them, so flooding is no longer the failure
+/// mode — and suppressing a send would instead throw away the count, which is
+/// the durable record of how often a crash happens and to how many people. Better
+/// Stack keeps three days; the node keeps everything.
+fn auto_report_js(message: &str, sent_label: &str, failed_label: &str) -> String {
     format!(
-        "(function(){{var d={settle};\
-           try{{var t=Number(sessionStorage.getItem({key}));\
-             if(t>0&&Date.now()-t<{window}){{\
-               var s=document.getElementById({status});if(s)s.textContent={already};return;}}\
-           }}catch(e){{}}\
-           {fetch}.then(function(r){{d(r.ok);}}).catch(function(){{d(false);}});}})();",
-        settle = settle_js(&key, sent_label, failed_label),
-        key = js_string(&key),
-        window = REPORT_AGAIN_MS,
-        status = js_string(STATUS_ID),
-        already = js_string(already_label),
+        "(function(){{var d={settle};{fetch}\
+           .then(function(r){{d(r.ok);}}).catch(function(){{d(false);}});}})();",
+        settle = settle_js(sent_label, failed_label),
         fetch = report_fetch_js(message),
     )
 }
@@ -305,10 +265,5 @@ pub fn show_overlay() {
     // File the report now the status line it writes into exists. Once per page:
     // the early return above means a burst of panics produces one overlay, and
     // so one report.
-    let _ = js_sys::eval(&auto_report_js(
-        &message,
-        &sent,
-        &failed,
-        &crate::i18n::t_static("error.crashAlreadyReported"),
-    ));
+    let _ = js_sys::eval(&auto_report_js(&message, &sent, &failed));
 }
