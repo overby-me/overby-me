@@ -109,6 +109,9 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
                     Some(n) => rsx! { MimeLoader { key: "{n.id.0}", node: n, path: Vec::new(), projector: true } },
                     None => rsx! {
                         // DESIGN: an expressive idle state instead of a bare "…".
+                        // The LARGE orb on purpose: this is the projector, read
+                        // from across a room, and is the one place a full-size
+                        // empty state belongs outside a page-level state.
                         div { class: "card",
                             div { class: "empty-state",
                                 div { class: "empty-state-orb",
@@ -178,7 +181,7 @@ pub fn FollowApp(node: NodeWithChildren) -> Element {
 
     rsx! {
         div { class: "follow-view",
-            div { class: "follow-banner",
+            div { class: "status-banner is-live",
                 span { class: "material-icons follow-pulse", "sensors" }
                 span { "{crate::i18n::t(\"follow.live\")}" }
             }
@@ -186,8 +189,11 @@ pub fn FollowApp(node: NodeWithChildren) -> Element {
                 Some(n) => rsx! { MimeLoader { key: "{n.id.0}", node: n, path: Vec::new() } },
                 None => rsx! {
                     div { class: "card",
-                        div { class: "empty-state",
-                            div { class: "empty-state-orb",
+                        // In-card, so the small orb — the large one belongs to a
+                        // page-level state (not found) or to the projector, which
+                        // is read across a room.
+                        div { class: "empty-state empty-state-sm",
+                            div { class: "empty-state-orb empty-state-orb-sm",
                                 span { class: "material-icons", "sensors_off" }
                             }
                             p { class: "empty-state-body", "{crate::i18n::t(\"follow.idle\")}" }

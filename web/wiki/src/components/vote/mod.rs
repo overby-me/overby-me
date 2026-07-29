@@ -73,11 +73,14 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     // text card when there is no active vote.
     let no_vote = rsx! {
         div { class: "card",
-            div { class: "empty-state",
-                div { class: "empty-state-orb",
+            // Matches the speaker list beside it: the small orb and the message,
+            // no heading. A title here made the same situation look weightier in
+            // the vote app than in every other app, and the card is already under
+            // a header that says which app this is.
+            div { class: "empty-state empty-state-sm",
+                div { class: "empty-state-orb empty-state-orb-sm",
                     span { class: "material-icons", "how_to_vote" }
                 }
-                h3 { class: "empty-state-title", "{t(\"mime.vote\")}" }
                 p { class: "empty-state-body",
                     if is_auth { "{t(\"vote.noVoteNow\")}" } else { "{t(\"vote.noVotingRight\")}" }
                 }
@@ -131,7 +134,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
         // banner rather than a plain card (DESIGN).
         if is_auth {
             div {
-                class: if can_vote { "vote-rights-banner can-vote" } else { "vote-rights-banner cannot-vote" },
+                class: if can_vote { "status-banner" } else { "status-banner is-negative" },
                 span { class: "material-icons",
                     if can_vote { "how_to_reg" } else { "do_not_disturb" }
                 }

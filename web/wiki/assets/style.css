@@ -3909,7 +3909,15 @@ select:focus {
 }
 /* DESIGN (voting-rights banner): a tonal status banner coloured by whether you
    can vote, instead of a plain card. */
-.vote-rights-banner {
+/* ONE status banner for a state that describes the whole view: whether you may
+   vote, that the room is being followed live, that a redirect is in progress.
+   There were three of these — .vote-rights-banner, .tonal-banner and
+   .follow-banner — identical but for their tone, and one of them a fit-content
+   pill while the others were full-width bars, so the same kind of statement
+   looked like two different things depending on which app you were in. A status
+   about a ROW stays a chip (see .member-status); this is for a status about the
+   screen. */
+.status-banner {
 	display: flex;
 	align-items: center;
 	gap: var(--md-sys-spacing-2-5);
@@ -3917,27 +3925,18 @@ select:focus {
 	border-radius: var(--md-sys-shape-corner-large);
 	margin-bottom: var(--md-sys-spacing-3);
 	font-weight: 500;
-}
-.vote-rights-banner.can-vote {
 	background: var(--md-primary-container);
 	color: var(--md-on-primary-container);
 }
-.vote-rights-banner.cannot-vote {
+/* Something is denied or unavailable — no voting right, say. */
+.status-banner.is-negative {
 	background: var(--md-error-container);
 	color: var(--md-error);
 }
-/* Reusable tonal info banner (primary-container) — e.g. the redirect forwarding
-   state — for making transient states feel intentional. */
-.tonal-banner {
-	display: flex;
-	align-items: center;
-	gap: var(--md-sys-spacing-2-5);
-	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
-	border-radius: var(--md-sys-shape-corner-large);
-	background: var(--md-primary-container);
-	color: var(--md-on-primary-container);
-	margin-bottom: var(--md-sys-spacing-3);
-	font-weight: 500;
+/* Something is happening right now, which the pulsing icon says as well. */
+.status-banner.is-live {
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -4322,7 +4321,18 @@ h6,
 }
 
 /* DESIGN (expressive empty state): a centred "void portal" for not-found /
-   empty screens — a big floating, morphing tonal orb, bold title, helpful body. */
+   empty screens — a big floating, morphing tonal orb, bold title, helpful body.
+
+   WHICH SIZE. The full-size orb, with a title, is for a state that has taken over
+   the whole PAGE: not found, no access, a crashed route. Anything inside a card —
+   an app with nothing in it yet, an empty list, a section — takes
+   `.empty-state.empty-state-sm` with `.empty-state-orb-sm` and a body line, no
+   title. The one deliberate exception is the projector (`screen.rs`), which is
+   read from across a room.
+
+   This was drifting: the vote app announced "no vote" with a page-size orb and a
+   heading while the speaker list beside it used the small one, so identical
+   situations looked like different weather depending on the app. */
 .empty-state {
 	display: flex;
 	flex-direction: column;
@@ -5642,18 +5652,6 @@ h6,
 .follow-view {
 	max-width: 900px;
 	margin: 0 auto;
-}
-.follow-banner {
-	display: flex;
-	align-items: center;
-	gap: var(--md-sys-spacing-2);
-	width: fit-content;
-	margin-bottom: var(--md-sys-spacing-3);
-	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-3-5);
-	border-radius: var(--md-sys-shape-corner-full);
-	font-weight: 600;
-	background: var(--md-sys-color-secondary-container);
-	color: var(--md-sys-color-on-secondary-container);
 }
 .follow-pulse {
 	animation: follow-pulse 1.6s ease-in-out infinite;

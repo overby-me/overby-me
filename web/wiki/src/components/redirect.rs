@@ -49,7 +49,7 @@ pub fn RedirectApp(node: NodeWithChildren) -> Element {
                 match target {
                     Some(url) => rsx! {
                         // DESIGN: a tonal forwarding banner with the morphing loader.
-                        div { class: "tonal-banner",
+                        div { class: "status-banner",
                             div { class: "spinner spinner-sm" }
                             span { class: "body-medium", "{t(\"redirect.forwarding\")}" }
                         }

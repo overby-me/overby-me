@@ -196,7 +196,7 @@ pub fn FeedbackApp() -> Element {
     if !is_auth {
         return rsx! {
             div { class: "card",
-                div { class: "empty-state",
+                div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "lock" }
                     }
