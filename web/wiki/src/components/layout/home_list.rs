@@ -132,7 +132,20 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                 }
             }
             Some(Ok((groups, _, _))) if groups.is_empty() && invited_groups.is_empty() => rsx! {
-                p { class: "body-medium list-subheader", "{t(\"layout.noGroups\")}" }
+                // This list is a card on the home page and a bare list in the
+                // drawer. Cards get the orb empty state the rest of the app uses;
+                // the drawer keeps the compact line, where an orb would be a lot
+                // of furniture in a narrow rail.
+                if as_cards {
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "groups" }
+                        }
+                        p { class: "empty-state-body", "{t(\"layout.noGroups\")}" }
+                    }
+                } else {
+                    p { class: "body-medium list-subheader", "{t(\"layout.noGroups\")}" }
+                }
             },
             Some(Ok((groups, _, _))) => {
                 let expanded = *groups_expanded.read();
@@ -188,7 +201,17 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
                 }
             }
             Some(Ok((_, events, _))) if events.is_empty() && invited_events.is_empty() => rsx! {
-                p { class: "body-medium list-subheader", "{t(\"layout.noEvents\")}" }
+                // As above: orb in the card, compact line in the drawer.
+                if as_cards {
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "event" }
+                        }
+                        p { class: "empty-state-body", "{t(\"layout.noEvents\")}" }
+                    }
+                } else {
+                    p { class: "body-medium list-subheader", "{t(\"layout.noEvents\")}" }
+                }
             },
             Some(Ok((_, events, _))) => {
                 let expanded = *events_expanded.read();

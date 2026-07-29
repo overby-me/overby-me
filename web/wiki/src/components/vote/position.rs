@@ -125,7 +125,16 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     }
                 }
                 if candidates.is_empty() && pending_cand_shown.is_empty() {
-                    p { class: "body-medium list-subheader", "{t(\"vote.noCandidates\")}" }
+                    // The orb empty state every other card uses (policy's own
+                    // "no amendments" sits right beside this one). It had a bare
+                    // subheader line, which belongs to the drawer and home lists,
+                    // not inside a card.
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            {icon_el("vote/candidate")}
+                        }
+                        p { class: "empty-state-body", "{t(\"vote.noCandidates\")}" }
+                    }
                 }
                 // Candidates in an M3 carousel: a snapping, horizontally scrollable
                 // strip of rounded photo tiles with the name overlaid.
