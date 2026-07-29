@@ -2908,11 +2908,21 @@ pub async fn query_user_contributions(
         ]),
         ..Default::default()
     };
-    let order_by = vec![NodesOrderBy {
-        created_at: Some(OrderBy::Desc),
-        index: None,
-        id: Some(OrderBy::Desc),
-    }];
+    // Two entries, not one object with two fields: Hasura applies the keys of
+    // a single order_by object in an order it does not promise, and it picked
+    // the id first - sorting the feed by random UUID instead of by date.
+    let order_by = vec![
+        NodesOrderBy {
+            created_at: Some(OrderBy::Desc),
+            index: None,
+            id: None,
+        },
+        NodesOrderBy {
+            created_at: None,
+            index: None,
+            id: Some(OrderBy::Desc),
+        },
+    ];
     let op = RecentNodesQuery::build(RecentNodesVariables {
         where_clause,
         order_by: Some(order_by),
@@ -2969,11 +2979,21 @@ pub async fn query_recent_nodes(
         ]),
         ..Default::default()
     };
-    let order_by = vec![NodesOrderBy {
-        created_at: Some(OrderBy::Desc),
-        index: None,
-        id: Some(OrderBy::Desc),
-    }];
+    // Two entries, not one object with two fields: Hasura applies the keys of
+    // a single order_by object in an order it does not promise, and it picked
+    // the id first - sorting the feed by random UUID instead of by date.
+    let order_by = vec![
+        NodesOrderBy {
+            created_at: Some(OrderBy::Desc),
+            index: None,
+            id: None,
+        },
+        NodesOrderBy {
+            created_at: None,
+            index: None,
+            id: Some(OrderBy::Desc),
+        },
+    ];
     let op = RecentNodesQuery::build(RecentNodesVariables {
         where_clause,
         order_by: Some(order_by),
