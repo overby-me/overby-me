@@ -125,8 +125,8 @@
 
 | Project | Description |
 |-|-|
-| [Homepage 🐒➡️🔥](https://tangled.org/@overby.me/overby.me/tree/main/web/homepage) | Personal website and portfolio |
-| [Wiki 🐒➡️🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki) | Political conference and discussion platform |
+| [Homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/homepage) | Personal website and portfolio |
+| [Wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/web/wiki) | Political conference and discussion platform |
 
 #### Nix & Nickel
 
