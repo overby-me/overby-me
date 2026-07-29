@@ -137,8 +137,15 @@ fn report_fetch_js(message: &str) -> String {
         js_sys::encode_uri_component(&ua),
     );
 
+    // `keepalive` is the load-bearing option. This overlay puts a Reload button
+    // in front of someone whose app has just died, and pressing it is the
+    // obvious thing to do — but the report is a request in flight from a page
+    // that is then torn down, and an ordinary fetch dies with it. The first
+    // report for a build takes a couple of seconds (the backend fetches that
+    // build's symbols), which is exactly long enough to lose the race. With
+    // keepalive the browser owns the request and finishes it regardless.
     format!(
-        "fetch({url},{{method:'POST',headers:{headers}}})",
+        "fetch({url},{{method:'POST',keepalive:true,headers:{headers}}})",
         url = js_string(&url),
         headers = if token.is_empty() {
             "{}".to_string()
