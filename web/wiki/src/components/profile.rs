@@ -455,10 +455,13 @@ pub fn UserProfile(id: String) -> Element {
                     h3 { class: "profile-hero-name", "{name}" }
                     if let Some(did) = bsky_did.as_ref() {
                         a {
-                            class: "link-accent",
+                            // stack stack-h so the mark sits on the text baseline
+                            // row; .bsky-logo is already sized for inline use.
+                            class: "link-accent stack stack-h",
                             href: "https://bsky.app/profile/{did}",
                             target: "_blank",
                             rel: "noopener noreferrer",
+                            {crate::components::loader::bsky_logo()}
                             "{t(\"profile.blueskyAccount\")}"
                         }
                     }
@@ -467,6 +470,10 @@ pub fn UserProfile(id: String) -> Element {
         }
         div { class: "card mt-1",
             div { class: "card-header",
+                // join_inner, the set-intersection mark: this card is precisely
+                // the overlap between their memberships and yours, and it does not
+                // read as the plain "Groups" list, which owns the `groups` glyph.
+                div { class: "avatar small", span { class: "material-icons", "join_inner" } }
                 h3 { class: "title-medium", "{t(\"profile.sharedMemberships\")}" }
             }
             if contexts.is_empty() {
