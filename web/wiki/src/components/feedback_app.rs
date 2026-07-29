@@ -172,30 +172,67 @@ enum StackLine {
     /// A frame the backend could not resolve, left as the browser wrote it. Kept,
     /// because a gap in a stack is worth seeing, but it is noise.
     Raw(String),
+    /// A frame in JavaScript. Always generated code — wasm-bindgen's glue and the
+    /// bundler's runtime — since this app hand-writes no JavaScript beyond the
+    /// service worker. Nothing here will ever name your code, so it is shown as
+    /// the scaffolding it is.
+    Js(String),
     Plain(String),
+}
+
+/// Whether `text` reads as `path/to/file.rs:123` rather than a function name.
+///
+/// The backend emits a bare location when it resolved a line but no name, and a
+/// bare name when it resolved a name but no line. They arrive in the same shape,
+/// so this is what tells them apart — otherwise a location was styled as if it
+/// were a function.
+fn looks_like_location(text: &str) -> bool {
+    let Some((path, line)) = text.rsplit_once(':') else {
+        return false;
+    };
+    !line.is_empty()
+        && line.bytes().all(|b| b.is_ascii_digit())
+        && path.contains('/')
+        && !path.contains(' ')
 }
 
 /// Split a crash report into lines that can be styled.
 fn parse_stack(message: &str) -> Vec<StackLine> {
+    // A panic message can run to several lines, and only the first says
+    // "panicked at" — the rest is what was being asserted. They belong with it,
+    // so everything before the first frame reads as part of the panic.
+    let mut seen_frame = false;
     message
         .lines()
         .map(|line| {
             let trimmed = line.trim_start();
             if let Some(rest) = trimmed.strip_prefix("at ") {
+                seen_frame = true;
                 // `function (file:line)` — the location is the trailing
                 // parenthesised group, and a function name may itself contain
                 // parentheses (`call_mut<fn(Props) -> ...>`), so find the LAST.
                 if let Some(open) = rest.rfind(" (") {
                     if rest.ends_with(')') {
-                        let function = rest[..open].to_string();
                         let location = rest[open + 2..rest.len() - 1].to_string();
+                        // A JavaScript frame that reached here in Chrome's shape.
+                        if location.contains("://") {
+                            return StackLine::Js(trimmed.to_string());
+                        }
                         let app = location.starts_with("src/");
                         return StackLine::Frame {
-                            function,
+                            function: rest[..open].to_string(),
                             location,
                             app,
                         };
                     }
+                }
+                // One half only. Which half decides how it is coloured.
+                if looks_like_location(rest) {
+                    return StackLine::Frame {
+                        function: String::new(),
+                        app: rest.starts_with("src/"),
+                        location: rest.to_string(),
+                    };
                 }
                 return StackLine::Frame {
                     function: rest.to_string(),
@@ -204,9 +241,16 @@ fn parse_stack(message: &str) -> Vec<StackLine> {
                 };
             }
             if trimmed.contains("wasm-function[") {
+                seen_frame = true;
                 return StackLine::Raw(trimmed.to_string());
             }
-            if trimmed.starts_with("panicked at") {
+            // Firefox writes `name@url:line:col`, and the bundler's own frames
+            // arrive the same way.
+            if trimmed.contains("://") && trimmed.contains('@') {
+                seen_frame = true;
+                return StackLine::Js(trimmed.to_string());
+            }
+            if !seen_frame {
                 return StackLine::Panic(trimmed.to_string());
             }
             StackLine::Plain(line.to_string())
@@ -228,11 +272,18 @@ fn CrashStack(message: String) -> Element {
                         div {
                             key: "{i}",
                             class: if app { "stack-line stack-frame stack-app" } else { "stack-line stack-frame" },
-                            span { class: "stack-fn", "{function}" }
+                            if !function.is_empty() {
+                                span { class: "stack-fn", "{function}" }
+                            }
                             if !location.is_empty() {
-                                span { class: "stack-loc", " {location}" }
+                                span { class: "stack-loc",
+                                    if function.is_empty() { "{location}" } else { " {location}" }
+                                }
                             }
                         }
+                    },
+                    StackLine::Js(text) => rsx! {
+                        div { key: "{i}", class: "stack-line stack-js", "{text}" }
                     },
                     StackLine::Raw(text) => rsx! {
                         div { key: "{i}", class: "stack-line stack-raw", "{text}" }
@@ -375,6 +426,51 @@ mod tests {
                 app: false,
             }]
         );
+    }
+
+    #[test]
+    fn javascript_frames_are_recognised_in_both_engine_shapes() {
+        // Firefox: name@url:line:col, including the bundler's own frames.
+        let parsed = parse_stack(
+            "panicked at src/x.rs:1:1: boom\n\
+             Z/__wbg_new_1f236d63ba0c4784/<@https://radikal.wiki/assets/wiki-dioxus-dxh1.js:1:42935\n\
+             dt@https://radikal.wiki/assets/wiki-dioxus-dxh1.js:1:64939",
+        );
+        assert!(matches!(parsed[1], StackLine::Js(_)));
+        assert!(matches!(parsed[2], StackLine::Js(_)));
+        // Chrome: at name (url:line:col).
+        let chrome = parse_stack("    at Module.foo (https://radikal.wiki/assets/x.js:1:5)");
+        assert!(matches!(chrome[0], StackLine::Js(_)));
+    }
+
+    #[test]
+    fn a_frame_that_resolved_only_a_location_is_not_shown_as_a_function() {
+        // The backend emits a bare location when it found a line but no name.
+        let parsed = parse_stack("    at dioxus-core-0.7.9/src/any_props.rs:75");
+        assert_eq!(
+            parsed,
+            vec![StackLine::Frame {
+                function: String::new(),
+                location: "dioxus-core-0.7.9/src/any_props.rs:75".into(),
+                app: false,
+            }]
+        );
+        // And a bare name, when it found the name but no line, still reads as one.
+        let named = parse_stack("    at render_inner");
+        assert!(matches!(&named[0], StackLine::Frame { location, .. } if location.is_empty()));
+    }
+
+    #[test]
+    fn a_multi_line_panic_message_stays_with_the_panic() {
+        // The message runs past the first line; only the first says "panicked at".
+        let parsed = parse_stack(
+            "panicked at src/components/error.rs:20:5:\n\
+             Triggered test panic from /error\n\
+             \u{20}   at render (src/components/folder.rs:224)",
+        );
+        assert!(matches!(parsed[0], StackLine::Panic(_)));
+        assert!(matches!(parsed[1], StackLine::Panic(_)));
+        assert!(matches!(parsed[2], StackLine::Frame { .. }));
     }
 
     #[test]

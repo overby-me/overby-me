@@ -3652,9 +3652,12 @@ select:focus {
 	color: var(--md-primary);
 }
 
-/* A frame the backend could not resolve. Kept, since a gap in a stack is worth
-   seeing, but it should not compete with the frames that resolved. */
-.stack-raw {
+/* A frame the backend could not resolve, and a frame in JavaScript. Both are
+   scaffolding: the first is a gap worth seeing but not reading, the second is
+   wasm-bindgen glue and bundler runtime that will never name your code (which is
+   also why resolving it through a source map would buy nothing). */
+.stack-raw,
+.stack-js {
 	opacity: 0.6;
 }
 

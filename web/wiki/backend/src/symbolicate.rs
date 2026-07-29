@@ -159,15 +159,23 @@ fn resolve_all<R: addr2line::gimli::Reader>(
 /// go looking for code that is not there. Standard library and dependency paths
 /// now keep the crate that owns them.
 fn trim_path(path: &str) -> String {
-    // rustc's own sources: /rustc/<hash>/library/alloc/src/boxed.rs
-    if let Some(idx) = path.find("/library/") {
-        return path[idx + "/library/".len()..].to_string();
+    // rustc's own sources: /rustc/<hash>/library/alloc/src/boxed.rs, or the same
+    // relative when there was no compilation directory to join it to.
+    if let Some(rest) = after(path, "/library/").or_else(|| path.strip_prefix("library/")) {
+        return rest.to_string();
+    }
+    // A crate vendored into the compiler's own tree, which is where the hashbrown
+    // behind every HashMap comes from: /rust/deps/hashbrown-0.16.1/src/raw/mod.rs.
+    // Without this it trimmed to `src/raw/mod.rs` and read as a file in this
+    // repo — the frontend then styled it as one, pointing at code that does not
+    // exist.
+    if let Some(rest) = after(path, "/rust/deps/") {
+        return rest.to_string();
     }
     // A dependency:
     // …/registry/src/index.crates.io-<hash>/parking_lot-0.12.4/src/raw_mutex.rs
     // Checked before the `/src/` rule below, which such a path also matches.
-    if let Some(idx) = path.find("/registry/src/") {
-        let rest = &path[idx + "/registry/src/".len()..];
+    if let Some(rest) = after(path, "/registry/src/") {
         if let Some(slash) = rest.find('/') {
             // Past the registry-index directory, so it starts at <crate>-<version>.
             return rest[slash + 1..].to_string();
@@ -178,6 +186,11 @@ fn trim_path(path: &str) -> String {
         return path[idx + 1..].to_string();
     }
     path.rsplit('/').next().unwrap_or(path).to_string()
+}
+
+/// What follows `marker` in `path`, if it appears at all.
+fn after<'a>(path: &'a str, marker: &str) -> Option<&'a str> {
+    path.find(marker).map(|idx| &path[idx + marker.len()..])
 }
 
 /// Fetch a sidecar, remembering failures too so one missing build does not mean a
@@ -289,6 +302,19 @@ mod tests {
                  parking_lot-0.12.4/src/raw_mutex.rs"
             ),
             "parking_lot-0.12.4/src/raw_mutex.rs"
+        );
+        // And a crate vendored into the compiler, which is the one that used to
+        // masquerade as this repo: every HashMap operation resolves through
+        // hashbrown, and `src/raw/mod.rs` is indistinguishable from our own.
+        assert_eq!(
+            trim_path("/rust/deps/hashbrown-0.16.1/src/raw/mod.rs"),
+            "hashbrown-0.16.1/src/raw/mod.rs"
+        );
+        // A std path can arrive relative, with no compilation directory joined
+        // to it. It must not fall through to the this-repo rule either.
+        assert_eq!(
+            trim_path("library/core/src/ptr/mod.rs"),
+            "core/src/ptr/mod.rs"
         );
         assert_eq!(trim_path("weird"), "weird");
     }
