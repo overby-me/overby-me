@@ -20,8 +20,16 @@ use dioxus::prelude::*;
 use crate::components::widgets::Dialog;
 use crate::graphql::{self, FeedbackItem};
 use crate::i18n::{t, t_with};
+use crate::model;
 use crate::session::use_session;
 use crate::snackbar::show_snackbar;
+
+/// The reporter id the backend stores for someone with no account.
+const ANONYMOUS: &str = "anonymous";
+
+/// How many reporter chips a row shows before collapsing the rest into a count.
+/// A crash that hit fifty people should say so without becoming fifty chips.
+const MAX_REPORTER_CHIPS: usize = 6;
 
 /// The material icon + label key for a feedback kind.
 fn kind_glyph(kind: &str) -> (&'static str, &'static str) {
@@ -65,6 +73,30 @@ pub fn FeedbackApp() -> Element {
     });
     let loading = items_res.read().is_none();
     let mut items = items_res.read().clone().unwrap_or_default();
+
+    // Everyone named on any crash, resolved in ONE query for the whole list.
+    // Per row it would be a request per crash, and per reporter it would be a
+    // request per person.
+    let reporter_ids: Vec<String> = {
+        let mut ids: Vec<String> = items
+            .iter()
+            .flat_map(|it| it.reporters.iter().cloned())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    };
+    let people_token = session.read().access_token.clone();
+    let people_key = reporter_ids.join(",");
+    let people_res = crate::use_data_resource!(|(people_token, people_key)| async move {
+        let ids: Vec<String> = people_key
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        graphql::query_users_by_ids(people_token.as_deref(), &ids).await
+    });
+    let people: Vec<model::Author> = people_res.read().clone().unwrap_or_default();
     // Members see only their own (cosmetic — see the module doc); owners see all.
     if !is_owner {
         items.retain(|it| it.owner_id.is_some() && it.owner_id == my_id);
@@ -124,6 +156,7 @@ pub fn FeedbackApp() -> Element {
                                 item: item.clone(),
                                 show_owner: is_owner,
                                 can_delete: is_owner,
+                                people: people.clone(),
                                 on_delete: move |id| confirm_delete.set(Some(id)),
                             }
                         }
@@ -311,6 +344,9 @@ fn FeedbackRow(
     item: FeedbackItem,
     show_owner: bool,
     can_delete: bool,
+    /// Identities for every reporter across the whole list, resolved once by
+    /// [`FeedbackApp`]. Not all of them belong to this row.
+    people: Vec<model::Author>,
     on_delete: EventHandler<String>,
 ) -> Element {
     let (icon, label_key) = kind_glyph(&item.kind);
@@ -324,6 +360,23 @@ fn FeedbackRow(
     // The date on the row is when it was FIRST seen; a folded crash also has a
     // most recent sighting, which is the one that says whether it is still going.
     let last_seen = super::loader::full_datetime(&item.last_seen);
+
+    // (id, display name, avatar) per reporter. Someone the viewer may not read —
+    // the `users` select rule wants a shared context — still gets a chip, because
+    // "one more person" is worth knowing even without a name.
+    let reporters: Vec<(String, String, String)> = item
+        .reporters
+        .iter()
+        .map(|id| {
+            if id == ANONYMOUS {
+                return (id.clone(), t("feedback.anonymous"), String::new());
+            }
+            match people.iter().find(|p| p.user_id.as_deref() == Some(id)) {
+                Some(p) => (id.clone(), p.name.clone(), p.avatar_url.clone()),
+                None => (id.clone(), t("common.unknown"), String::new()),
+            }
+        })
+        .collect();
     let screenshot = super::loader::use_file_object_url(item.image.clone().unwrap_or_default());
 
     rsx! {
@@ -346,8 +399,8 @@ fn FeedbackRow(
                         title: "{t_with(\"feedback.lastSeen\", &[(\"when\", &last_seen)])}",
                         span { class: "material-icons", "repeat" }
                         span { class: "chip-label",
-                            if item.people > 1 {
-                                "{t_with(\"feedback.seenByPeople\", &[(\"count\", &item.seen.to_string()), (\"people\", &item.people.to_string())])}"
+                            if reporters.len() > 1 {
+                                "{t_with(\"feedback.seenByPeople\", &[(\"count\", &item.seen.to_string()), (\"people\", &reporters.len().to_string())])}"
                             } else {
                                 "{t_with(\"feedback.seenTimes\", &[(\"count\", &item.seen.to_string())])}"
                             }
@@ -397,7 +450,31 @@ fn FeedbackRow(
                 }
             }
             div { class: "stack stack-h stack-wrap feedback-meta",
-                if show_owner {
+                // A crash names everyone who hit it, not just whoever hit it
+                // first — that is the difference between "someone had a problem"
+                // and "eleven people are having this problem". Typed feedback has
+                // one author and keeps the single chip.
+                if show_owner && !reporters.is_empty() {
+                    for who in reporters.iter().take(MAX_REPORTER_CHIPS) {
+                        super::loader::UserPopover {
+                            key: "{who.0}",
+                            name: who.1.clone(),
+                            avatar_url: who.2.clone(),
+                            user_id: (who.0 != ANONYMOUS).then(|| who.0.clone()),
+                            span { class: "chip",
+                                span { class: "material-icons", "person" }
+                                span { class: "chip-label", "{who.1}" }
+                            }
+                        }
+                    }
+                    if reporters.len() > MAX_REPORTER_CHIPS {
+                        span { class: "chip",
+                            span { class: "chip-label",
+                                "{t_with(\"feedback.andMore\", &[(\"count\", &(reporters.len() - MAX_REPORTER_CHIPS).to_string())])}"
+                            }
+                        }
+                    }
+                } else if show_owner {
                     super::loader::UserPopover {
                         name: if item.owner_name.is_empty() { t("feedback.anonymous") } else { item.owner_name.clone() },
                         avatar_url: item.owner_avatar.clone(),

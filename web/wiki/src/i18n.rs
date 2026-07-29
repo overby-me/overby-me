@@ -142,6 +142,7 @@ const EN_JSON: &str = r#"{
         "seenTimes": "Seen {{count}} times",
         "seenByPeople": "Seen {{count}} times by {{people}} people",
         "lastSeen": "Last seen {{when}}",
+        "andMore": "+{{count}} more",
         "deleteConfirm": "Delete this feedback? This cannot be undone."
     },
     "editor": {
@@ -637,6 +638,7 @@ const DA_JSON: &str = r#"{
         "seenTimes": "Set {{count}} gange",
         "seenByPeople": "Set {{count}} gange af {{people}} personer",
         "lastSeen": "Sidst set {{when}}",
+        "andMore": "+{{count}} flere",
         "deleteConfirm": "Slet denne feedback? Dette kan ikke fortrydes."
     },
     "editor": {

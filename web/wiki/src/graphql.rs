@@ -3204,6 +3204,54 @@ pub async fn search_users(access_token: Option<&str>, query: &str) -> Vec<Author
     out
 }
 
+/// Public identities for a set of user ids, in one round trip.
+///
+/// Used to put faces on a crash's reporters. Raw rather than cynic because the
+/// generated `UuidComparisonExp` carries only `_eq` and `_is_null`, and one query
+/// per reporter would be a request per person on a crash that hit fifty.
+///
+/// Ids the viewer may not read (the `users` select rule wants a shared context)
+/// are simply absent from the result; the caller shows what it got.
+pub async fn query_users_by_ids(access_token: Option<&str>, ids: &[String]) -> Vec<Author> {
+    let wanted: Vec<String> = ids
+        .iter()
+        .filter(|id| id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-'))
+        .map(|id| format!("\"{}\"", gql_escape(id)))
+        .collect();
+    if wanted.is_empty() {
+        return vec![];
+    }
+    let query = format!(
+        "query {{ users(where: {{ id: {{ _in: [{}] }} }}) {{ id displayName avatarUrl }} }}",
+        wanted.join(",")
+    );
+    let Ok(data) = execute_raw(access_token, &query).await else {
+        return vec![];
+    };
+    data.get("users")
+        .and_then(|u| u.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|u| {
+                    let field = |k: &str| {
+                        u.get(k)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    let id = field("id");
+                    Author {
+                        name: field("displayName"),
+                        node_id: Some(id.clone()),
+                        avatar_url: field("avatarUrl"),
+                        user_id: Some(id),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Fetch a single user's public identity (id + name + avatar) by id, for the
 /// per-user profile page. Only readable when the viewer shares a context with
 /// them (the `users` select permission), so returns None otherwise.
@@ -3577,9 +3625,10 @@ pub struct FeedbackItem {
     /// the log sink keeps three days, this keeps everything. 1 (or 0, on a typed
     /// report, which is never folded) means it has been seen once.
     pub seen: u64,
-    /// How many distinct people have hit it, counted from the reporter ids the
-    /// backend accumulates.
-    pub people: usize,
+    /// Everyone who has hit it, as user ids, accumulated by the backend. The
+    /// literal string `anonymous` stands in for reporters with no account, and
+    /// appears at most once.
+    pub reporters: Vec<String>,
     /// When it was last seen — the node's `updatedAt`, which a database trigger
     /// moves on every fold.
     pub last_seen: String,
@@ -3690,11 +3739,15 @@ pub async fn query_feedback(access_token: Option<&str>) -> Result<Vec<FeedbackIt
                             .and_then(|d| d.get("seen"))
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0),
-                        people: d
+                        reporters: d
                             .and_then(|d| d.get("reporters"))
                             .and_then(|v| v.as_array())
-                            .map(|a| a.len())
-                            .unwrap_or(0),
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|v| v.as_str().map(str::to_string))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                         last_seen: n
                             .get("updatedAt")
                             .and_then(|v| v.as_str())
