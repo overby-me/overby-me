@@ -414,6 +414,15 @@ pub fn UserProfile(id: String) -> Element {
         out
     });
 
+    // What this person has written, the same list your own profile shows. The
+    // query is row-filtered by Hasura, so it is the intersection of their work
+    // and what you may see — never a window into contexts you are not in.
+    let uid3 = id.clone();
+    let tok3 = access_token.clone();
+    let contributions = crate::use_data_resource!(|(uid3, tok3)| async move {
+        graphql::query_user_contributions(tok3.as_deref(), &uid3, 12).await
+    });
+
     let user = user_res.read().clone().flatten();
     let name = user
         .as_ref()
@@ -425,6 +434,16 @@ pub fn UserProfile(id: String) -> Element {
         .map(|u| u.avatar_url.clone())
         .unwrap_or_default();
     let contexts = memberships.read().clone().unwrap_or_default();
+    // Their linked Bluesky account, read off the avatar: once linked, the picture
+    // is served from the bsky CDN and its path carries the account's DID, which
+    // bsky.app resolves. `/atproto/status` only answers for the caller, so this
+    // is the only way to show someone else's. Same trick as `UserPopover`.
+    let bsky_did = avatar_url
+        .contains("cdn.bsky.app/")
+        .then(|| avatar_url.split('/').find(|seg| seg.starts_with("did:")))
+        .flatten()
+        .map(str::to_string);
+    let contrib_state = contributions.read().clone();
 
     rsx! {
         div { class: "card",
@@ -434,6 +453,15 @@ pub fn UserProfile(id: String) -> Element {
                 }
                 div {
                     h3 { class: "profile-hero-name", "{name}" }
+                    if let Some(did) = bsky_did.as_ref() {
+                        a {
+                            class: "link-accent",
+                            href: "https://bsky.app/profile/{did}",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            "{t(\"profile.blueskyAccount\")}"
+                        }
+                    }
                 }
             }
         }
@@ -455,6 +483,21 @@ pub fn UserProfile(id: String) -> Element {
                     }
                 }
             }
+        }
+        // What they have written — the same card your own profile carries.
+        div { class: "card mt-1",
+            div { class: "card-header",
+                div { class: "avatar small", span { class: "material-icons", "history_edu" } }
+                h3 { class: "title-medium", "{t(\"profile.contributions\")}" }
+            }
+            {match &contrib_state {
+                None => rsx! {
+                    div { class: "card-content", crate::components::widgets::Spinner {} }
+                },
+                Some(items) => rsx! {
+                    ContributionList { items: items.clone() }
+                },
+            }}
         }
     }
 }
