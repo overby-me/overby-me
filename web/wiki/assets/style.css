@@ -6546,6 +6546,12 @@ a.list-item:hover {
 	textarea,
 	select,
 	[contenteditable="true"] {
-		font-size: max(var(--md-sys-typescale-body-large-size), 1em);
+		/* !important because these are ELEMENT selectors, and every control that
+		   actually sizes its own text does so from a class — .search-input,
+		   .comment-input, .author-input-wrap > input — which outranks them. A
+		   floor that loses to the rules it exists to correct is no floor. The
+		   same reason prefers-reduced-motion and print use it below: it is not
+		   competing with the design, it is a platform constraint. */
+		font-size: max(var(--md-sys-typescale-body-large-size), 1em) !important;
 	}
 }
