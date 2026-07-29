@@ -31,6 +31,11 @@ const DOCK_SHOW_ABOVE: f64 = 64.0;
 /// Minimum scroll delta (px) before toggling the dock, to avoid jitter.
 const DOCK_SCROLL_DELTA: f64 = 6.0;
 
+/// Whether the software keyboard is up. Read by the dock's hide-on-scroll, which
+/// must stand down while it is: the scroll iOS performs to reveal a focused field
+/// is indistinguishable from the user scrolling down.
+static KEYBOARD_OPEN: GlobalSignal<bool> = Signal::global(|| false);
+
 /// Whether the viewport has come within [`NEAR_BOTTOM_PX`] of the end of the
 /// page — what an endless list watches to fetch its next page.
 static NEAR_BOTTOM: GlobalSignal<bool> = Signal::global(|| false);
@@ -66,8 +71,12 @@ fn install_listener() {
 
         // Hide-on-scroll for the compact bottom dock: hide when scrolling down
         // past a small threshold, reveal on scroll up or near the top of the page.
+        //
+        // Never while the keyboard is up. Focusing a field makes iOS scroll the
+        // page to reveal it, which reads here as scrolling down — so tapping the
+        // search box slid the dock, and the box with it, off the screen.
         let dy = y - last_y;
-        let hidden_now = if y <= DOCK_SHOW_ABOVE {
+        let hidden_now = if *KEYBOARD_OPEN.peek() || y <= DOCK_SHOW_ABOVE {
             false
         } else if dy > DOCK_SCROLL_DELTA {
             true
@@ -172,6 +181,17 @@ fn update_keyboard_inset() {
         let _ = html
             .style()
             .set_property("--md-sys-keyboard-inset", &format!("{inset}px"));
+    }
+
+    let open = inset > 0.0;
+    if open != *KEYBOARD_OPEN.peek() {
+        *KEYBOARD_OPEN.write() = open;
+    }
+    // Bring the dock back the moment the keyboard appears, rather than waiting
+    // for a scroll to re-evaluate: it may well have been hidden before the field
+    // was tapped, and the field is inside it.
+    if open && *DOCK_HIDDEN.peek() {
+        *DOCK_HIDDEN.write() = false;
     }
 }
 
