@@ -997,6 +997,19 @@ html {
 .app-shell[data-tools-docked="true"] .fab {
 	right: calc(var(--md-sys-tools-width) + 24px);
 }
+/* Anchor the FAB to the READING COLUMN rather than the window, for the same
+   reason the join menu is (see .speak-join): the column is left-aligned in the
+   content pane, so on a wide screen a window-anchored FAB floats in the empty
+   gutter beside the content it acts on. Not applied while the tools sheet is
+   docked — there the rule above already pulls it inboard of that pane, which is
+   its own correct answer. */
+.app-shell:not([data-size-class="compact"]):not([data-tools-docked="true"]) .fab {
+	right: auto;
+	left: min(
+		calc(var(--content-left) + var(--md-sys-margin) + var(--md-sys-body-max) - 56px),
+		calc(100vw - 56px - 24px)
+	);
+}
 
 /* DESIGN (unified bottom dock): on compact the search/breadcrumb bar and the
    navigation bar share ONE elevated, rounded surface floating at the bottom,
@@ -1862,7 +1875,9 @@ html {
 	border-radius: var(--md-sys-shape-corner-extra-large);
 	padding: var(--md-sys-spacing-6);
 	width: 100%;
-	max-width: 420px;
+	/* M3's basic dialog is 560dp wide; this was capped at 420, which cramped the
+	   forms that carry a text field and a select (new event, invite). */
+	max-width: 560px;
 	box-shadow: var(--md-sys-elevation-3);
 	animation: m3-dialog-rise var(--md-sys-motion-duration-long1)
 		var(--md-sys-motion-spring-spatial-default);

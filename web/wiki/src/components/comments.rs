@@ -562,10 +562,14 @@ const QUICK_REACTIONS: &[&str] = &["👍", "❤️", "😂", "🎉", "😮", "�
 /// giant Unicode table shipped to the client): a few dozen common reactions
 /// across the categories members actually reach for, with `QUICK_REACTIONS`
 /// first so the common case is one tap.
+/// Category labels are i18n KEYS, not text: they are the picker's only words, so
+/// leaving them in English put six English headings inside a Danish app. The
+/// i18n test cannot catch that class on its own — it checks that keys used exist,
+/// and a bare literal uses no key — so the fix is to make them keys.
 const EMOJI_CATEGORIES: &[(&str, &[&str])] = &[
-    ("Quick", QUICK_REACTIONS),
+    ("emoji.quick", QUICK_REACTIONS),
     (
-        "Smileys",
+        "emoji.smileys",
         &[
             "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😊", "🙂", "😉", "😍", "🥰", "😘", "😜",
             "🤪", "🤔", "🤨", "😐", "😴", "😮", "😯", "🥳", "😎", "🤩", "😢", "😭", "😤", "😠",
@@ -573,26 +577,26 @@ const EMOJI_CATEGORIES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "Gestures",
+        "emoji.gestures",
         &[
             "👍", "👎", "👌", "🤌", "✌️", "🤞", "🤟", "🤙", "👏", "🙌", "🙏", "💪", "👊", "✊",
             "🤝", "👋", "🫶",
         ],
     ),
     (
-        "Hearts",
+        "emoji.hearts",
         &[
             "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔", "💯", "💖", "💕", "💗",
         ],
     ),
     (
-        "Celebration",
+        "emoji.celebration",
         &[
             "🎉", "🎊", "🥳", "🎁", "🎈", "✨", "🔥", "🚀", "⭐", "🌟", "💫", "🏆", "🥇", "👑",
         ],
     ),
     (
-        "Symbols",
+        "emoji.symbols",
         &[
             "✅", "❌", "⚠️", "❓", "❗", "💡", "📌", "🔔", "👀", "💬", "♻️", "🕊️", "⚖️", "📣",
         ],
@@ -749,7 +753,7 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
                                     button {
                                         key: "{label}",
                                         class: if picker_cat() == i { "reaction-picker-tab is-active" } else { "reaction-picker-tab" },
-                                        title: "{label}",
+                                        title: "{t(label)}",
                                         onclick: move |_| picker_cat.set(i),
                                         span { "{EMOJI_CATEGORIES[i].1[0]}" }
                                     }

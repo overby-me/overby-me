@@ -225,13 +225,32 @@ pub fn Layout() -> Element {
         });
     }
 
-    // Pending-invitation count for the Home nav badge. Session-stable deps, so
-    // this runs once per session and refreshes on mutations (data version).
+    // Pending-invitation count for the nav badge.
+    //
+    // Live, not just session-stable: the badge is the ONLY way an invitation
+    // announces itself, and one arriving while the tab sits open used to stay
+    // invisible until a reload or an unrelated mutation. It watches the same
+    // rows `HomeList` does — the member rows keyed to this user — which is
+    // exactly what an invitation creates. Riding the shared socket, so this
+    // costs a subscription and not a connection.
     {
         let uid = SESSION.read().user.as_ref().map(|u| u.id.clone());
         let email = SESSION.read().user.as_ref().map(|u| u.email.clone());
         let token = SESSION.read().access_token.clone();
-        crate::use_data_resource!(|(uid, email, token)| async move {
+        let invite_refresh = use_signal(|| 0u32);
+        let sub_uid = uid
+            .clone()
+            .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".to_string());
+        crate::subscription::use_live(
+            format!(
+                "subscription {{ members(where: {{ nodeId: {{ _eq: \"{}\" }} }}) {{ id }} }}",
+                graphql::gql_escape(&sub_uid)
+            ),
+            invite_refresh,
+        );
+        let rev = *invite_refresh.read();
+        crate::use_data_resource!(|(uid, email, token, rev)| async move {
+            let _ = rev;
             if let (Some(uid), Some(email)) = (uid, email) {
                 let list = graphql::query_invitations(token.as_deref(), &uid, &email)
                     .await

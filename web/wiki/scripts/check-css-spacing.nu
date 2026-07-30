@@ -8,7 +8,12 @@
 #      escapes the scale exactly the way a raw px in the stylesheet does, and
 #      gate A never saw it. Reach for a class or a token instead; an inline
 #      style should carry only values that are genuinely per-instance.
-#   C. Every custom property a rule references must be defined somewhere.
+#   C. Colour must flow through the roles too. A literal hex or rgb() cannot
+#      follow the theme into dark mode or a palette change, so it is the one
+#      place drift is invisible until someone switches themes. A handful are
+#      legitimate (scrim and shadow alphas no role covers), hence a ratchet
+#      rather than a ban.
+#   D. Every custom property a rule references must be defined somewhere.
 #      `var(--md-sys-motion-duration-medium4, 400ms)` reads as token-driven but
 #      is a literal wearing a token's name: the fallback silently takes over and
 #      the value stops tracking the scale.
@@ -21,6 +26,10 @@
 # Current sanctioned ceilings. Lower these as literals are migrated to tokens.
 const CSS_BASELINE = 0
 const RSX_BASELINE = 0
+# Raw colour literals outside comments. 31 at the time of writing; the honest
+# ones are scrim/shadow alphas, and everything else is a role waiting to be
+# used. Lower this as they go.
+const COLOR_BASELINE = 31
 
 # Custom properties that are deliberately undefined: a local API a rule sets on
 # itself and reads back through `var(--name, <default>)`.
@@ -75,7 +84,29 @@ if ($rsx_hits | length) > $RSX_BASELINE {
     print $"  Nice — lower RSX_BASELINE to ($rsx_hits | length) in this script."
 }
 
-# ── Gate C: every referenced custom property is defined ─────────────────────
+# ── Gate C: colour flows through the roles ─────────────────────────────────
+let css_nocomments = (
+    open --raw ($assets | path join "style.css")
+    | str replace --all --regex '(?s)/\*.*?\*/' ''
+)
+let color_hits = (
+    $css_nocomments
+    | ^rg --only-matching '#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)'
+    | lines
+    | where {|s| $s != "" }
+)
+print $"C. raw colour literals in style.css: ($color_hits | length) \(ceiling ($COLOR_BASELINE)\)"
+if ($color_hits | length) > $COLOR_BASELINE {
+    print ""
+    print "ERROR: a colour that cannot follow the theme. Use a role"
+    print "(--md-primary, --md-surface-container, --md-on-surface, ...)."
+    $color_hits | uniq | each {|h| print $"  ($h)" }
+    $failed = true
+} else if ($color_hits | length) < $COLOR_BASELINE {
+    print $"  Nice — lower COLOR_BASELINE to ($color_hits | length) in this script."
+}
+
+# ── Gate D: every referenced custom property is defined ─────────────────────
 let all_css = (
     ls $assets
     | where name =~ '\.css$'
@@ -101,7 +132,7 @@ let referenced = (
     | sort
 )
 let undefined = ($referenced | where {|r| $r not-in $defined and $r not-in $LOCAL_PROPS })
-print $"C. custom properties referenced but never defined: ($undefined | length)"
+print $"D. custom properties referenced but never defined: ($undefined | length)"
 if ($undefined | length) > 0 {
     print ""
     print "ERROR: these read as tokens but resolve to their inline fallback:"

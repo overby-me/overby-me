@@ -527,6 +527,14 @@ const EN_JSON: &str = r#"{
     "sort": {
         "saveSorting": "Save sorting"
     },
+    "emoji": {
+        "quick": "Quick",
+        "smileys": "Smileys",
+        "gestures": "Gestures",
+        "hearts": "Hearts",
+        "celebration": "Celebration",
+        "symbols": "Symbols"
+    },
     "invite": {
         "addAccess": "Add access",
         "noInvitations": "No invitations",
@@ -1037,6 +1045,14 @@ const DA_JSON: &str = r#"{
     },
     "sort": {
         "saveSorting": "Gem sortering"
+    },
+    "emoji": {
+        "quick": "Hurtige",
+        "smileys": "Smileyer",
+        "gestures": "Fagter",
+        "hearts": "Hjerter",
+        "celebration": "Fest",
+        "symbols": "Symboler"
     },
     "invite": {
         "addAccess": "Tilf\u00f8j adgang",
