@@ -23,6 +23,40 @@ fn is_agenda_item(mime: &str) -> bool {
 /// to the room + followers (the `active` relation), jump to the screen/speaker
 /// views, and watch every poll's live tally (with a close action). Non-owners see
 /// the agenda + results read-only.
+/// Which tab body the console shows, given the stored selection and whether the
+/// agenda has a pane of its own.
+///
+/// Agenda is tab 0. With the agenda always on screen its tab would select a pane
+/// that is already there, so the wide layout starts at the speaker list. The
+/// stored selection is deliberately NOT rewritten: narrowing the window puts the
+/// reader back on the agenda they had chosen, rather than on a tab they never did.
+fn console_tab(selected: usize, wide: bool) -> usize {
+    if wide && selected == 0 {
+        1
+    } else {
+        selected
+    }
+}
+
+/// Where the wide tab bar's index sits in the stored selection: the wide bar is
+/// the same bar without its first tab, so both directions shift by one.
+fn console_tab_from_bar(bar_index: usize, wide: bool) -> usize {
+    if wide {
+        bar_index + 1
+    } else {
+        bar_index
+    }
+}
+
+/// The reverse: which entry of the bar is highlighted for a stored selection.
+fn console_bar_index(selected: usize, wide: bool) -> usize {
+    if wide {
+        console_tab(selected, wide).saturating_sub(1)
+    } else {
+        selected
+    }
+}
+
 #[component]
 pub fn AdminApp(node: NodeWithChildren) -> Element {
     let session = use_session();
@@ -128,69 +162,15 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     });
     let polls = polls.read().clone().unwrap_or_default();
 
-    rsx! {
-        div {
-            // The room-facing views are still links: a projector and a follower
-            // screen are somewhere the chair SENDS the room, not something they
-            // work in, so they leave the console on purpose. Everything they work
-            // in is a tab below.
-            div { class: "console-actions",
-                Link {
-                    to: Route::PathPage { segments: segments.clone(), app: Some("screen".to_string()) },
-                    class: "btn btn-tonal",
-                    span { class: "material-icons", "connected_tv" }
-                    "{t(\"mime.screen\")}"
-                }
-                Link {
-                    to: Route::PathPage { segments: segments.clone(), app: Some("follow".to_string()) },
-                    class: "btn btn-tonal",
-                    span { class: "material-icons", "sensors" }
-                    "{t(\"mime.follow\")}"
-                }
-                // Put the feed on the room's screen. Not an agenda item, so it is
-                // not something the agenda can project: it is its own instruction
-                // about what the room should be looking at, and it wins over
-                // whatever was last projected until the chair turns it off.
-                if can_manage {
-                    button {
-                        class: if screen_feed { "btn btn-filled" } else { "btn btn-tonal" },
-                        "aria-pressed": if screen_feed { "true" } else { "false" },
-                        onclick: {
-                            let ctx = context_id.clone();
-                            move |_| {
-                                let ctx = ctx.clone();
-                                let token = session.read().access_token.clone();
-                                let next = !screen_feed;
-                                spawn(async move {
-                                    match graphql::set_screen_feed(token.as_deref(), &ctx, next).await {
-                                        Ok(_) => crate::session::bump_data_version(),
-                                        Err(e) => {
-                                            log::error!("screen feed toggle failed: {e}");
-                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
-                                        }
-                                    }
-                                });
-                            }
-                        },
-                        span { class: "material-icons", "view_agenda" }
-                        if screen_feed { "{t(\"console.feedOnScreenStop\")}" } else { "{t(\"console.feedOnScreen\")}" }
-                    }
-                }
-            }
+    // Wide enough for two panes, and the agenda stops being a tab: it becomes
+    // the console's supporting pane, standing beside whatever the chair is
+    // working in. Running a meeting is reading the agenda WHILE giving someone
+    // the floor or opening a poll, and a tab bar makes those alternatives — the
+    // chair kept flicking back to see where they were.
+    let wide = crate::window_size::use_window_size().is_expanded_rail();
+    let sel = console_tab(tab(), wide);
 
-            super::widgets::Tabs {
-                tabs: vec![
-                    (t("console.agenda"), "list_alt".to_string()),
-                    (t("mime.speak"), "record_voice_over".to_string()),
-                    (t("mime.vote"), "how_to_vote".to_string()),
-                    (t("layout.feed"), "view_agenda".to_string()),
-                ],
-                selected: tab(),
-                on_select: move |i| tab.set(i),
-            }
-
-            // ── Agenda ──────────────────────────────────────────────────────
-            if tab() == 0 {
+    let agenda_pane = rsx! {
             div { class: "card",
                 div { class: "card-header",
                     div { class: "avatar", {icon_el("app/program")} }
@@ -320,19 +300,41 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                     }
                 }
             }
+    };
 
-            }
+    let tab_bar = rsx! {
+        super::widgets::Tabs {
+            tabs: if wide {
+                vec![
+                    (t("mime.speak"), "record_voice_over".to_string()),
+                    (t("mime.vote"), "how_to_vote".to_string()),
+                    (t("layout.feed"), "view_agenda".to_string()),
+                ]
+            } else {
+                vec![
+                    (t("console.agenda"), "list_alt".to_string()),
+                    (t("mime.speak"), "record_voice_over".to_string()),
+                    (t("mime.vote"), "how_to_vote".to_string()),
+                    (t("layout.feed"), "view_agenda".to_string()),
+                ]
+            },
+            // The wide bar is the same bar without its first tab, so both the
+            // reading and the writing of the selection shift by one.
+            selected: console_bar_index(tab(), wide),
+            on_select: move |i: usize| tab.set(console_tab_from_bar(i, wide)),
+        }
+    };
 
+    let tab_body = rsx! {
             // ── Speak ───────────────────────────────────────────────────────
             // The speaker list in place. It was a link out of the console, which
             // meant the chair left the agenda to give someone the floor and had to
             // find their way back.
-            if tab() == 1 {
+            if sel == 1 {
                 super::speak::SpeakApp { node: node.clone(), mode: super::speak::SpeakMode::Full }
             }
-
             // ── Polls ───────────────────────────────────────────────────────
-            if tab() == 2 {
+            if sel == 2 {
                 div { class: "card",
                     div { class: "card-header",
                         div { class: "avatar", {icon_el("vote/poll")} }
@@ -359,7 +361,7 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
             // ── Feed ────────────────────────────────────────────────────────
             // What has landed in this context while the meeting ran: an amendment
             // posted from the floor shows up here without the chair going looking.
-            if tab() == 3 {
+            if sel == 3 {
                 div { class: "card",
                     div { class: "card-header",
                         div { class: "avatar small", span { class: "material-icons", "view_agenda" } }
@@ -370,6 +372,76 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                         autoload: true,
                     }
                 }
+            }
+    };
+
+    rsx! {
+        div {
+            // The room-facing views are still links: a projector and a follower
+            // screen are somewhere the chair SENDS the room, not something they
+            // work in, so they leave the console on purpose. Everything they work
+            // in is a tab below.
+            div { class: "console-actions",
+                Link {
+                    to: Route::PathPage { segments: segments.clone(), app: Some("screen".to_string()) },
+                    class: "btn btn-tonal",
+                    span { class: "material-icons", "connected_tv" }
+                    "{t(\"mime.screen\")}"
+                }
+                Link {
+                    to: Route::PathPage { segments: segments.clone(), app: Some("follow".to_string()) },
+                    class: "btn btn-tonal",
+                    span { class: "material-icons", "sensors" }
+                    "{t(\"mime.follow\")}"
+                }
+                // Put the feed on the room's screen. Not an agenda item, so it is
+                // not something the agenda can project: it is its own instruction
+                // about what the room should be looking at, and it wins over
+                // whatever was last projected until the chair turns it off.
+                if can_manage {
+                    button {
+                        class: if screen_feed { "btn btn-filled" } else { "btn btn-tonal" },
+                        "aria-pressed": if screen_feed { "true" } else { "false" },
+                        onclick: {
+                            let ctx = context_id.clone();
+                            move |_| {
+                                let ctx = ctx.clone();
+                                let token = session.read().access_token.clone();
+                                let next = !screen_feed;
+                                spawn(async move {
+                                    match graphql::set_screen_feed(token.as_deref(), &ctx, next).await {
+                                        Ok(_) => crate::session::bump_data_version(),
+                                        Err(e) => {
+                                            log::error!("screen feed toggle failed: {e}");
+                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                        }
+                                    }
+                                });
+                            }
+                        },
+                        span { class: "material-icons", "view_agenda" }
+                        if screen_feed { "{t(\"console.feedOnScreenStop\")}" } else { "{t(\"console.feedOnScreen\")}" }
+                    }
+                }
+            }
+
+            // Two panes where they fit, one column where they do not. The pane
+            // scaffold decides that from the width of the column it is in, so a
+            // docked tools sheet or an open tree collapses it back on its own.
+            if wide {
+                super::widgets::SupportingPaneLayout {
+                    primary: rsx! {
+                        {tab_bar}
+                        {tab_body}
+                    },
+                    supporting: rsx! { {agenda_pane} },
+                }
+            } else {
+                {tab_bar}
+                if sel == 0 {
+                    {agenda_pane}
+                }
+                {tab_body}
             }
         }
     }
@@ -691,5 +763,42 @@ fn AdminPollRow(poll: PollSummaryFields, #[props(default)] can_manage: bool) -> 
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{console_bar_index, console_tab, console_tab_from_bar};
+
+    #[test]
+    fn narrow_console_keeps_every_tab() {
+        for i in 0..4 {
+            assert_eq!(console_tab(i, false), i);
+            assert_eq!(console_bar_index(i, false), i);
+            assert_eq!(console_tab_from_bar(i, false), i);
+        }
+    }
+
+    #[test]
+    fn wide_console_drops_the_agenda_tab() {
+        // The agenda has its own pane, so its tab is gone and the body starts at
+        // the speaker list. Everything else keeps the body it selected.
+        assert_eq!(console_tab(0, true), 1);
+        for i in 1..4 {
+            assert_eq!(console_tab(i, true), i);
+        }
+    }
+
+    #[test]
+    fn wide_bar_indices_round_trip() {
+        // Whatever the bar reports must come back as the same highlighted entry,
+        // or clicking Polls would leave Speak underlined.
+        for bar in 0..3 {
+            let stored = console_tab_from_bar(bar, true);
+            assert_eq!(console_bar_index(stored, true), bar);
+        }
+        // A stored agenda selection highlights the first wide entry rather than
+        // underflowing to the last one.
+        assert_eq!(console_bar_index(0, true), 0);
     }
 }

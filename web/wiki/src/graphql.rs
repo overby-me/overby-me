@@ -4632,7 +4632,9 @@ pub async fn bin_node(
     let looked_up = match path.filter(|p| !p.is_empty()) {
         Some(_) => None,
         None => {
-            let segments = path_from_id(access_token, node_id).await.unwrap_or_default();
+            let segments = path_from_id(access_token, node_id)
+                .await
+                .unwrap_or_default();
             (!segments.is_empty()).then(|| segments.join("/"))
         }
     };

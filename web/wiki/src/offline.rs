@@ -23,8 +23,8 @@
 //! megabytes for the whole origin and the session lives there too. Losing a
 //! cached page costs a reader nothing; losing their session logs them out.
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 /// Key prefix, so eviction can tell this cache from everything else the app
 /// keeps in `localStorage` (the session, the density and folder-view prefs).

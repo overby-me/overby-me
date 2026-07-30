@@ -2957,9 +2957,29 @@ select:focus {
 }
 
 /* M3 supporting-pane scaffold (widgets::SupportingPaneLayout): the primary pane
-   then the supporting pane, stacked in one column. A side-by-side split is too
-   cramped inside the A4-capped body, so the supporting content simply follows
-   the primary. */
+   and, beside it wherever there is room, the supporting one — a document with
+   its comments, a candidate with the discussion about them, a roster with the
+   invite panel. Below that width the supporting content simply follows the
+   primary, which is the whole layout on a phone.
+
+   The split is decided by a CONTAINER query, not a viewport one. Whether these
+   two panes fit has nothing to do with the size of the window: the rail expands,
+   the tree pane opens, a tools sheet docks, and each of those takes a few
+   hundred pixels out of the content column. A viewport rule would split at
+   1200dp and hand the reader a 300px document with the tree open; this splits
+   when the column itself is wide enough, whatever is standing next to it.
+
+   The body cap comes off when a supporting pane is present, since the cap exists
+   to keep a line of prose readable and the pane is not prose — but the primary
+   pane inherits the cap in its place, so the text column is no wider than it
+   ever was. */
+.content-measure:has(.m3-supporting-pane) {
+	max-width: calc(
+		var(--md-sys-body-max) + var(--md-sys-list-pane-width) +
+			var(--md-sys-pane-spacer)
+	);
+	container-type: inline-size;
+}
 .m3-supporting-pane {
 	display: grid;
 	grid-template-columns: 1fr;
@@ -2969,6 +2989,17 @@ select:focus {
 .m3-pane-primary,
 .m3-pane-supporting {
 	min-width: 0;
+}
+/* 1000px: the supporting pane at its fixed width, a pane spacer, and a primary
+   still wide enough to read a document in (~615px). Any narrower and the split
+   costs the primary more than the pane is worth, so it stacks instead. */
+@container (min-width: 1000px) {
+	.m3-supporting-pane {
+		grid-template-columns: minmax(0, 1fr) var(--md-sys-list-pane-width);
+	}
+	.m3-pane-primary {
+		max-width: var(--md-sys-body-max);
+	}
 }
 
 /* Reset the anchor styling when a Link wraps a ListItem (row navigates). */
