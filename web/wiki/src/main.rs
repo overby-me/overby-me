@@ -3,6 +3,7 @@ mod build_info;
 mod components;
 mod crash;
 mod density;
+mod errors;
 mod export;
 // cynic query-result structs must select fields the code doesn't read (e.g. an
 // insert's returned `id`, a delete's `affected_rows`), which reads as dead code.

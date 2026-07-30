@@ -1871,7 +1871,30 @@ where
     // GraphQL error is captured with its operation, regardless of how the caller
     // surfaces it — many only show a generic toast and discard the detail.
     if let Err(e) = &result {
-        log::warn!("graphql error [{}]: {e}", short_type_name::<Q>());
+        // Every caller of this swallows the error into an empty list, so this is
+        // the last place that knows anything went wrong.
+        let failure = crate::errors::classify(e);
+        // The level decides what leaves the device: logging.rs ships warn and
+        // error to Better Stack. Only a genuine fault is worth paying to store.
+        //
+        // A refusal is normal traffic — every signed-out reader generates them by
+        // existing — and a dropped connection is the venue's wifi, not this code;
+        // at a congress that would be thousands of records saying the hall has bad
+        // reception. Both stay on the console, where they are still there when
+        // someone is debugging.
+        match failure {
+            crate::errors::Failure::Broken => {
+                log::warn!("graphql error [{}]: {e}", short_type_name::<Q>())
+            }
+            _ => log::info!(
+                "graphql {} [{}]: {e}",
+                failure.label(),
+                short_type_name::<Q>()
+            ),
+        }
+        // The user hears about it only if it is theirs to care about, once,
+        // throttled.
+        crate::errors::report(failure);
     }
     result
 }

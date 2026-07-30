@@ -477,7 +477,29 @@ pub fn Layout() -> Element {
             // wide screens instead of stretching edge to edge.
             main { class: "content-pane", id: "main-content",
                 div { class: "content-measure",
-                    Outlet::<Route> {}
+                    // A view that fails to render takes only itself down, not the
+                    // chrome around it: the rail, the drawer and the breadcrumbs
+                    // survive, so there is always a way out of a broken page.
+                    // Without this the whole shell unmounts and the reader is left
+                    // with a blank screen and no navigation.
+                    ErrorBoundary {
+                        handle_error: |error: ErrorContext| {
+                            // The detail goes to the log (and to Better Stack in a
+                            // remote-logging build); the reader gets the card, and
+                            // one throttled toast in case they were scrolled away
+                            // from where it broke.
+                            log::error!("view failed to render: {error:?}");
+                            crate::errors::report(crate::errors::Failure::Broken);
+                            rsx! {
+                                div { class: "card accent-error",
+                                    crate::components::widgets::ErrorState {
+                                        title: t("error.somethingWentWrong"),
+                                    }
+                                }
+                            }
+                        },
+                        Outlet::<Route> {}
+                    }
                     div { class: "bar-spacer" }
                 }
             }

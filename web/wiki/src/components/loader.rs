@@ -175,10 +175,17 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
         Some(Err(e)) => {
             // Log the detail; show a friendly state, never a raw debug dump.
             log::error!("resolve node: {e}");
-            rsx! {
-                div { class: "card accent-error",
-                    super::widgets::ErrorState { title: t("error.somethingWentWrong") }
-                }
+            // A refusal is not a fault. Signed out, most pages answer "you may
+            // not", and telling that reader something went wrong is both untrue
+            // and unhelpful: nothing is broken and retrying will not fix it. Say
+            // it needs an account instead, which is the actual next step.
+            match crate::errors::classify(e.as_str()) {
+                crate::errors::Failure::Refused => rsx! { NodeNotFound {} },
+                _ => rsx! {
+                    div { class: "card accent-error",
+                        super::widgets::ErrorState { title: t("error.somethingWentWrong") }
+                    }
+                },
             }
         }
         None => {
