@@ -10,6 +10,26 @@ use super::speak::{SpeakApp, SpeakMode};
 /// ScreenApp — the projector/presentation view (`?app=screen`). Shows the
 /// context's currently active node next to the speaker list, mirroring the
 /// React ScreenApp. Live: the active relation is re-resolved on each poll.
+/// The part of a crumb trail the ROOM needs: the content ancestry, without the
+/// filing.
+///
+/// A group, an event and the folders inside them are how the room got here, not
+/// what it is looking at, and on a projector every extra glyph is one the eye
+/// has to discard from across a hall. What is left is the political line of
+/// descent — a policy, the change to it, the change to that — which is exactly
+/// what a bare "Change 2" fails to say on its own.
+fn content_trail(crumbs: Vec<crate::model::Crumb>) -> Vec<crate::model::Crumb> {
+    crumbs
+        .into_iter()
+        .filter(|c| {
+            !matches!(
+                c.mime_id.as_deref().unwrap_or(""),
+                "wiki/group" | "wiki/event" | "wiki/folder" | "wiki/home"
+            )
+        })
+        .collect()
+}
+
 #[component]
 pub fn ScreenApp(node: NodeWithChildren) -> Element {
     let session = use_session();
@@ -70,6 +90,28 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
     });
     let show_feed = show_feed.read().unwrap_or(false);
 
+    // The line of descent of what is projected, as the same letter/number avatars
+    // the rest of the app labels these nodes with: Policy A, its Change 3, and
+    // that change's Change 2 read as A · 3 · 2 above the content.
+    //
+    // The room needs it and only the room lacks it. Everywhere else the trail is
+    // on screen — breadcrumbs, the tree, the folder you came through — but the
+    // projector is chromeless by design, so a change to a change arrives with no
+    // statement of what it changes, and "Change 2" alone is unreadable from the
+    // back of a hall.
+    let trail_path = active.as_ref().and_then(|n| n.path.clone());
+    let trail_token = access_token.clone();
+    let trail = crate::use_data_resource!(|(trail_path, trail_token)| async move {
+        let Some(path) = trail_path.filter(|p| !p.is_empty()) else {
+            return Vec::new();
+        };
+        let segments: Vec<String> = path.split('/').map(str::to_string).collect();
+        graphql::path_crumbs(trail_token.as_deref(), &segments)
+            .await
+            .unwrap_or_default()
+    });
+    let trail = content_trail(trail.read().clone().unwrap_or_default());
+
     // Live presenter focus: the section (heading anchor) the chair chose to bring
     // the room's attention to, for documents too long to show whole. Scrolled into
     // view on the projector when it (or the active node) changes.
@@ -117,6 +159,31 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         // current + on-deck speaker). Tonal, overscan-safe (see `.projector`).
         div { class: "projector",
             div { class: "projector-hero",
+                // Only when there is an ancestry to state: a plain document
+                // projected from a folder is its own whole answer, and a row
+                // holding one avatar of itself would be furniture.
+                if !show_feed && trail.len() > 1 {
+                    div { class: "projector-trail",
+                        for (i, crumb) in trail.iter().enumerate() {
+                            if i > 0 {
+                                span { class: "projector-trail-sep", "·" }
+                            }
+                            div {
+                                key: "{crumb.key}",
+                                class: if i + 1 == trail.len() { "avatar projector-trail-avatar is-current" } else { "avatar projector-trail-avatar" },
+                                title: "{crumb.name}",
+                                {super::loader::node_avatar(
+                                    &super::loader::node_icon_mime_id(
+                                        crumb.mime_id.as_deref().unwrap_or(""),
+                                        crumb.data.as_ref().map(|d| &d.0),
+                                    ),
+                                    &crumb.name,
+                                    crumb.ordinal,
+                                )}
+                            }
+                        }
+                    }
+                }
                 match active.clone() {
                     // Whatever is projected loses to an explicit "show the feed":
                     // the chair asked for this one, and the active node is often
@@ -226,5 +293,61 @@ pub fn FollowApp(node: NodeWithChildren) -> Element {
                 },
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::content_trail;
+    use crate::model::Crumb;
+
+    fn crumb(key: &str, mime: &str, ordinal: Option<usize>) -> Crumb {
+        Crumb {
+            key: key.to_string(),
+            name: key.to_string(),
+            mime_id: Some(mime.to_string()),
+            ordinal,
+            data: None,
+        }
+    }
+
+    #[test]
+    fn the_room_sees_the_political_line_only() {
+        // radikal_ungdom / landsmøde / resolutioner / Policy A / Change 3 / Change 2
+        let trail = content_trail(vec![
+            crumb("radikal_ungdom", "wiki/group", None),
+            crumb("landsmode", "wiki/event", None),
+            crumb("resolutioner", "wiki/folder", None),
+            crumb("policy", "vote/policy", Some(0)),
+            crumb("change_a", "vote/change", Some(2)),
+            crumb("change_b", "vote/change", Some(1)),
+        ]);
+        let keys: Vec<&str> = trail.iter().map(|c| c.key.as_str()).collect();
+        assert_eq!(keys, vec!["policy", "change_a", "change_b"]);
+        // A · 3 · 2: the ordinals the avatars label them with survive the filter.
+        let ordinals: Vec<Option<usize>> = trail.iter().map(|c| c.ordinal).collect();
+        assert_eq!(ordinals, vec![Some(0), Some(2), Some(1)]);
+    }
+
+    #[test]
+    fn a_document_in_a_folder_states_nothing() {
+        // One entry left is the item itself, and a row holding an avatar of what
+        // you are already looking at is furniture. The view requires len > 1.
+        let trail = content_trail(vec![
+            crumb("radikal_ungdom", "wiki/group", None),
+            crumb("papers", "wiki/folder", None),
+            crumb("dagsorden", "wiki/document", None),
+        ]);
+        assert_eq!(trail.len(), 1);
+    }
+
+    #[test]
+    fn a_candidate_keeps_the_position_it_stands_for() {
+        let trail = content_trail(vec![
+            crumb("event", "wiki/event", None),
+            crumb("formand", "vote/position", None),
+            crumb("asger", "vote/candidate", None),
+        ]);
+        assert_eq!(trail.len(), 2);
     }
 }
