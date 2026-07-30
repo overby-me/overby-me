@@ -50,9 +50,16 @@ fn test_service_state_transitions() {
 }
 
 fn test_service_state_transitions_inner() {
+    // Must not be a relative path: cargo runs tests with the crate directory as
+    // the working directory, so "./notifications" created a directory of live
+    // unix sockets inside the source tree. Nix refuses to copy a socket into the
+    // store ("has an unsupported type"), so a single leftover socket broke every
+    // flake evaluation of this repository until it was deleted by hand.
+    let notify_dir = tempfile::tempdir().unwrap();
+
     let run_info = std::sync::Arc::new(std::sync::RwLock::new(RuntimeInfo {
         config: crate::config::Config {
-            notification_sockets_dir: "./notifications".into(),
+            notification_sockets_dir: notify_dir.path().to_path_buf(),
             target_unit: "".into(),
             unit_dirs: vec![],
             self_path: std::path::PathBuf::from("./target/debug/rust-systemd"),
