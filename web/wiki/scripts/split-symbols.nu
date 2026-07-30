@@ -112,6 +112,16 @@ def main [] {
     # changes.
     ^wasm-tools strip -d '^\.debug_' $sidecar -o $target.path
 
+    # Optimise here, not in dx. dx runs wasm-opt BEFORE this script, while the
+    # DWARF is still in the module, and binaryen aborts on it (SIGABRT), so the
+    # optimisation was silently skipped and the unoptimised binary shipped. On
+    # the stripped module it takes about two seconds and gives back a good tenth
+    # of the payload. Rewriting the bytes under dx's content-hashed filename is
+    # what the strip above already does; nothing revalidates the hash.
+    let optimised = $"($target.path).opt"
+    ^wasm-opt -Oz $target.path -o $optimised
+    mv --force $optimised $target.path
+
     let symbols_size = (ls $sidecar | get size.0)
     let shipped_size = (ls $target.path | get size.0)
     print $"symbols  ($sidecar)  ($symbols_size)"
