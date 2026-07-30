@@ -758,7 +758,10 @@ pub fn FolderApp(
             div { class: "card",
                 div { class: "card-header",
                     div { class: "avatar small", span { class: "material-icons", "history_edu" } }
-                    h3 { class: "title-medium", "{t(\"profile.contributions\")}" }
+                    // The neutral heading, not the first-person one: these are the
+                    // GROUP's credits, and nobody reading a group's page is the
+                    // group. Same string another person's profile uses.
+                    h3 { class: "title-medium", "{t(\"profile.contributionsOther\")}" }
                 }
                 {match &contrib_state {
                     None => rsx! {

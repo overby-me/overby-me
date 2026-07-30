@@ -255,6 +255,9 @@ pub(super) fn NavigationDrawer(open: Signal<bool>) -> Element {
                     name: if segments.is_empty() { t("common.home") } else { ctx_name.clone() },
                     mime: ctx_mime.clone(),
                     at_home: segments.is_empty(),
+                    // At home the bar is a link, and a link that navigates behind
+                    // an open drawer leaves the drawer covering where it went.
+                    on_navigate: move |_| open.set(false),
                 }
                 button {
                     class: "btn-icon state-layer",

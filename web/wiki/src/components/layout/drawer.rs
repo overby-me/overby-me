@@ -107,15 +107,32 @@ pub(super) fn DrawerContent() -> Element {
 /// place is a move along the place axis alone: the apps of whatever you pick
 /// are still on the rail when you land.
 ///
-/// At the site root there is nothing to switch away from, so it is a plain
-/// header there rather than a control that would do nothing.
+/// At the site root there is nothing to switch away from, since the picker is
+/// already all there is to show, so there it is a link home instead: the root
+/// has apps of its own now (the feed, its members, feedback), and this is how you
+/// put one down and get the welcome page back.
+///
+/// `on_navigate` lets the compact drawer close itself when that link is taken;
+/// the bar sits in the drawer's header, outside the body whose clicks dismiss it.
 #[component]
-pub(super) fn ContextSwitchBar(name: String, mime: String, at_home: bool) -> Element {
+pub(super) fn ContextSwitchBar(
+    name: String,
+    mime: String,
+    at_home: bool,
+    #[props(default)] on_navigate: Option<EventHandler<()>>,
+) -> Element {
     let open = SWITCHER_OPEN();
 
     if at_home {
         return rsx! {
-            div { class: "bar drawer-context-bar",
+            Link {
+                to: Route::Home { app: None },
+                class: "bar drawer-context-bar",
+                onclick: move |_| {
+                    if let Some(cb) = on_navigate.as_ref() {
+                        cb.call(());
+                    }
+                },
                 div { class: "avatar small", span { class: "material-icons", "home" } }
                 span { class: "drawer-context-name", "{name}" }
             }
