@@ -6449,6 +6449,7 @@ input deletedNodes_order_by {
 columns and relationships of "nodes"
 """
 type nodes {
+	ancestors: [uuid!]
 	attachable: Boolean!
 
 	"""
@@ -7087,6 +7088,7 @@ input nodes_bool_exp {
 	_and: [nodes_bool_exp!]
 	_not: nodes_bool_exp
 	_or: [nodes_bool_exp!]
+	ancestors: uuid_array_comparison_exp
 	attachable: Boolean_comparison_exp
 	children: nodes_bool_exp
 	children_aggregate: nodes_aggregate_bool_exp
@@ -12114,6 +12116,23 @@ input users_updates {
 }
 
 scalar uuid
+
+"""
+Boolean expression to compare columns of type "uuid[]". All fields are combined with logical 'AND'.
+"""
+input uuid_array_comparison_exp {
+	_contained_in: [uuid!]
+	_contains: [uuid!]
+	_eq: [uuid!]
+	_gt: [uuid!]
+	_gte: [uuid!]
+	_in: [[uuid!]!]
+	_is_null: Boolean
+	_lt: [uuid!]
+	_lte: [uuid!]
+	_neq: [uuid!]
+	_nin: [[uuid!]!]
+}
 
 """
 Boolean expression to compare columns of type "uuid". All fields are combined with logical 'AND'.

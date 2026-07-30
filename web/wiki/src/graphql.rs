@@ -759,6 +759,11 @@ pub struct NodesBoolExp {
     pub path: Option<StringComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub context_id: Option<UuidComparisonExp>,
+    /// Every node above this one, by id. `_contains [x]` is "anywhere under x",
+    /// exactly and without escaping — which a `path _like 'x/%'` is not, since
+    /// keys contain the underscore that LIKE reads as a wildcard.
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub ancestors: Option<UuidArrayComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub mime_id: Option<StringComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
@@ -881,6 +886,18 @@ pub struct UuidComparisonExp {
     pub eq: Option<Uuid>,
     #[cynic(rename = "_is_null", skip_serializing_if = "Option::is_none")]
     pub is_null: Option<bool>,
+}
+
+/// Comparison on a `uuid[]` column. Only containment is used: "is x among this
+/// node's ancestors", which is the subtree test the feed rolls a group up with.
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "uuid_array_comparison_exp"
+)]
+pub struct UuidArrayComparisonExp {
+    #[cynic(rename = "_contains", skip_serializing_if = "Option::is_none")]
+    pub contains: Option<Vec<Uuid>>,
 }
 
 #[derive(cynic::InputObject, Debug, Default)]
@@ -3265,14 +3282,12 @@ pub async fn query_user_contributions(
 /// holds the group's own content and NOT its events' — an event under a group is
 /// its own context. Rolling those up would need the ancestor chain, which this
 /// column cannot express.
-pub async fn query_recent_nodes(
-    access_token: Option<&str>,
-    limit: i32,
-    offset: i32,
-    user_id: &str,
-    context_id: Option<&str>,
-) -> Vec<model::ChildNodeFields> {
-    let where_clause = NodesBoolExp {
+/// The feed's predicate: which nodes count as activity worth listing.
+///
+/// Pure and separate from the request so it can be read and tested on its own —
+/// it is the part of the feed with the actual meaning in it.
+fn recent_where_clause(user_id: &str, context_id: Option<&str>) -> NodesBoolExp {
+    NodesBoolExp {
         and: Some(vec![
             NodesBoolExp {
                 mime_id: Some(StringComparisonExp {
@@ -3303,11 +3318,29 @@ pub async fn query_recent_nodes(
             // context the user belongs to. Inside a context the membership test
             // is redundant — you are reading its page — so the id alone stands.
             match context_id {
+                // Everything that happened UNDER this context, not only what
+                // carries it as its own. A group holds events, an event's content
+                // belongs to the event, so a group's feed — filtered on the id
+                // alone — was blind to the meetings that are the reason the group
+                // exists: 52 items where 2924 had happened, at the time this was
+                // written. The id test stays alongside, for anything filed with
+                // this context but sitting elsewhere in the tree.
                 Some(id) => NodesBoolExp {
-                    context_id: Some(UuidComparisonExp {
-                        eq: Some(Uuid(id.to_string())),
-                        is_null: None,
-                    }),
+                    or: Some(vec![
+                        NodesBoolExp {
+                            context_id: Some(UuidComparisonExp {
+                                eq: Some(Uuid(id.to_string())),
+                                is_null: None,
+                            }),
+                            ..Default::default()
+                        },
+                        NodesBoolExp {
+                            ancestors: Some(UuidArrayComparisonExp {
+                                contains: Some(vec![Uuid(id.to_string())]),
+                            }),
+                            ..Default::default()
+                        },
+                    ]),
                     ..Default::default()
                 },
                 None => NodesBoolExp {
@@ -3324,7 +3357,17 @@ pub async fn query_recent_nodes(
             },
         ]),
         ..Default::default()
-    };
+    }
+}
+
+pub async fn query_recent_nodes(
+    access_token: Option<&str>,
+    limit: i32,
+    offset: i32,
+    user_id: &str,
+    context_id: Option<&str>,
+) -> Vec<model::ChildNodeFields> {
+    let where_clause = recent_where_clause(user_id, context_id);
     // Two entries, not one object with two fields: Hasura applies the keys of
     // a single order_by object in an order it does not promise, and it picked
     // the id first - sorting the feed by random UUID instead of by date.
@@ -4357,6 +4400,38 @@ mod tests {
     /// caught it: the local schema is the only thing cynic checks against, so
     /// the query compiled and would have been rejected by the server, on a
     /// screen the tests never open. This asserts the operation as sent.
+    /// The feed scoped to a context asks for its whole subtree, not just the
+    /// rows that name it. A group holds events and an event's content belongs to
+    /// the event, so without the ancestor test a group's feed shows almost none
+    /// of what happened in it.
+    #[test]
+    fn a_scoped_feed_rolls_up_the_subtree() {
+        let clause = recent_where_clause("user-1", Some("ctx-1"));
+        let json = serde_json::to_string(&clause).expect("serialize");
+        assert!(
+            json.contains(r#""ancestors":{"_contains":["ctx-1"]}"#),
+            "scoped feed must include everything under the context: {json}"
+        );
+        assert!(
+            json.contains(r#""contextId":{"_eq":"ctx-1"}"#),
+            "and anything filed with it directly: {json}"
+        );
+        // Unset comparison expressions must stay off the wire (Hasura rejects a
+        // null where a comparison object is expected).
+        assert!(!json.contains("null"), "no null comparisons: {json}");
+    }
+
+    /// Unscoped, the feed is still "contexts you belong to" — the ancestor test
+    /// belongs to the scoped branch only, or the home feed would widen to every
+    /// context that happens to sit under one you are in.
+    #[test]
+    fn an_unscoped_feed_stays_on_membership() {
+        let clause = recent_where_clause("user-1", None);
+        let json = serde_json::to_string(&clause).expect("serialize");
+        assert!(!json.contains("ancestors"), "{json}");
+        assert!(json.contains("members"), "{json}");
+    }
+
     #[test]
     fn bin_query_declares_the_types_hasura_defines() {
         use cynic::QueryBuilder;
