@@ -3771,6 +3771,8 @@ fn create_transient_unit(
     // Parse "Key=Value" pairs and set the corresponding fields.
     let mut failure_action = crate::units::UnitAction::None;
     let mut success_action = crate::units::UnitAction::None;
+    let mut success_action_exit_status: Option<u8> = None;
+    let mut failure_action_exit_status: Option<u8> = None;
     let mut prop_description: Option<String> = None;
     let mut prop_collect_mode: Option<crate::units::CollectMode> = None;
     let mut success_action_units: Vec<String> = vec![];
@@ -3893,21 +3895,25 @@ fn create_transient_unit(
                         _ => NotifyKind::None,
                     };
                 }
+                // Share the unit-file parser rather than re-listing the
+                // vocabulary here: the open-coded match this replaced knew only
+                // poweroff/reboot/exit and silently mapped every other action
+                // (halt, kexec, and all the -force/-immediate variants) to None.
                 "FailureAction" => {
-                    failure_action = match value {
-                        "poweroff" => crate::units::UnitAction::Poweroff,
-                        "reboot" => crate::units::UnitAction::Reboot,
-                        "exit" => crate::units::UnitAction::Exit,
-                        _ => crate::units::UnitAction::None,
-                    };
+                    failure_action =
+                        crate::units::unit_parsing::unit_parser::parse_unit_action(value)
+                            .unwrap_or(crate::units::UnitAction::None);
                 }
                 "SuccessAction" => {
-                    success_action = match value {
-                        "poweroff" => crate::units::UnitAction::Poweroff,
-                        "reboot" => crate::units::UnitAction::Reboot,
-                        "exit" => crate::units::UnitAction::Exit,
-                        _ => crate::units::UnitAction::None,
-                    };
+                    success_action =
+                        crate::units::unit_parsing::unit_parser::parse_unit_action(value)
+                            .unwrap_or(crate::units::UnitAction::None);
+                }
+                "FailureActionExitStatus" => {
+                    failure_action_exit_status = value.parse::<u8>().ok();
+                }
+                "SuccessActionExitStatus" => {
+                    success_action_exit_status = value.parse::<u8>().ok();
                 }
                 "User" => {
                     service_conf.exec_config.user = Some(value.to_string());
@@ -4974,6 +4980,8 @@ fn create_transient_unit(
                 assertions: vec![],
                 success_action,
                 failure_action,
+                success_action_exit_status,
+                failure_action_exit_status,
                 aliases: vec![],
                 ignore_on_isolate: false,
                 default_instance: None,
@@ -5311,6 +5319,8 @@ fn create_transient_unit(
                     assertions: vec![],
                     success_action: crate::units::UnitAction::None,
                     failure_action: crate::units::UnitAction::None,
+                    success_action_exit_status: None,
+                    failure_action_exit_status: None,
                     aliases: vec![],
                     ignore_on_isolate: false,
                     default_instance: None,
@@ -5470,6 +5480,8 @@ fn create_transient_unit(
                     assertions: vec![],
                     success_action: crate::units::UnitAction::None,
                     failure_action: crate::units::UnitAction::None,
+                    success_action_exit_status: None,
+                    failure_action_exit_status: None,
                     aliases: vec![],
                     ignore_on_isolate: false,
                     default_instance: None,
@@ -11616,6 +11628,8 @@ mod tests {
                     assertions: vec![],
                     success_action: crate::units::UnitAction::None,
                     failure_action: crate::units::UnitAction::None,
+                    success_action_exit_status: None,
+                    failure_action_exit_status: None,
                     aliases: vec![],
                     ignore_on_isolate: false,
                     default_instance: None,

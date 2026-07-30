@@ -485,7 +485,10 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
                 "Unit {name} hit start limit, triggering StartLimitAction={:?}",
                 start_limit_action
             );
-            crate::units::execute_unit_action(start_limit_action, &name);
+            // No status to propagate: upstream passes an explicit
+            // `exit_status = -1` for StartLimitAction= (unit.c:1880-1886),
+            // because hitting the start rate limit is not a child exit.
+            crate::units::execute_unit_action(start_limit_action, &name, None);
         }
         // For oneshot: propagate failure to required_by deps.
         if is_oneshot {
@@ -918,7 +921,14 @@ pub(crate) fn service_exit_handler(
                         "Service {} exited successfully, triggering SuccessAction={:?}",
                         name, success_action
                     );
-                    crate::units::execute_unit_action(success_action, name);
+                    crate::units::execute_unit_action(
+                        success_action,
+                        name,
+                        crate::units::resolve_action_exit_status(
+                            unit.common.unit.success_action_exit_status,
+                            &code,
+                        ),
+                    );
                 }
                 // Same re-drive as the RemainAfterExit=yes branch, but for the
                 // default RemainAfterExit=no oneshot: rw-sysroot-nix-store.service
@@ -964,7 +974,14 @@ pub(crate) fn service_exit_handler(
                     "Service {} failed ({:?}), triggering FailureAction={:?}",
                     name, code, failure_action
                 );
-                crate::units::execute_unit_action(failure_action, name);
+                crate::units::execute_unit_action(
+                    failure_action,
+                    name,
+                    crate::units::resolve_action_exit_status(
+                        unit.common.unit.failure_action_exit_status,
+                        &code,
+                    ),
+                );
             }
 
             // For failed oneshot services, check if we should restart.
@@ -1173,14 +1190,28 @@ pub(crate) fn service_exit_handler(
                 "Service {} exited successfully, triggering SuccessAction={:?}",
                 unit.id.name, success_action
             );
-            crate::units::execute_unit_action(success_action, &unit.id.name);
+            crate::units::execute_unit_action(
+                success_action,
+                &unit.id.name,
+                crate::units::resolve_action_exit_status(
+                    unit.common.unit.success_action_exit_status,
+                    &code,
+                ),
+            );
         }
     } else if *failure_action != UnitAction::None {
         info!(
             "Service {} failed ({:?}), triggering FailureAction={:?}",
             unit.id.name, code, failure_action
         );
-        crate::units::execute_unit_action(failure_action, &unit.id.name);
+        crate::units::execute_unit_action(
+            failure_action,
+            &unit.id.name,
+            crate::units::resolve_action_exit_status(
+                unit.common.unit.failure_action_exit_status,
+                &code,
+            ),
+        );
     }
 
     trace!("Check if we want to restart the unit");

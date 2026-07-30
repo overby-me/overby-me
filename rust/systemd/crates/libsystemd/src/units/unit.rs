@@ -2556,6 +2556,14 @@ pub struct UnitConfig {
     /// Matches systemd's `FailureAction=` setting.
     pub failure_action: UnitAction,
 
+    /// Exit status to propagate when `SuccessAction=exit` triggers.
+    /// Matches systemd's `SuccessActionExitStatus=` setting.
+    pub success_action_exit_status: Option<u8>,
+
+    /// Exit status to propagate when `FailureAction=exit` triggers.
+    /// Matches systemd's `FailureActionExitStatus=` setting.
+    pub failure_action_exit_status: Option<u8>,
+
     /// Alternative names for this unit from `Alias=` in the `[Install]` section.
     /// In systemd, these create symlinks when the unit is enabled.
     /// In rust-systemd, units can be looked up by any of their aliases.

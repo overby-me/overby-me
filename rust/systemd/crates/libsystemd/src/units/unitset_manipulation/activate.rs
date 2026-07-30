@@ -658,8 +658,49 @@ fn activate_slice_hierarchy(unit: &crate::units::Unit, run_info: &RuntimeInfo) {
     }
 }
 
+/// Are we the init of the machine itself, rather than a user manager or the
+/// PID 1 of a container?
+///
+/// Mirrors the `MANAGER_IS_USER(m) || detect_container() > 0` test that guards
+/// upstream's `exit` emergency action (emergency-action.c:153-170).  A user
+/// manager is never PID 1, and a container payload is PID 1 only of its own
+/// namespace, so in both cases exiting is harmless.  Exiting the machine's own
+/// init is not: the kernel panics with "Attempted to kill init".
+fn is_system_init() -> bool {
+    if std::process::id() != 1 {
+        return false;
+    }
+    // What nspawn and the other container managers set, and where PID 1
+    // records it for everyone else.
+    std::env::var_os("container").is_none()
+        && !std::path::Path::new("/run/systemd/container").exists()
+}
+
+/// Resolve the status to propagate for a `SuccessAction=`/`FailureAction=`.
+///
+/// Upstream's `unit_success_action_exit_status()` /
+/// `unit_failure_action_exit_status()` (unit.c:6283-6314): an explicit
+/// `SuccessActionExitStatus=`/`FailureActionExitStatus=` wins, otherwise the
+/// unit propagates its own main exit status, with 255 standing in for a process
+/// that did not exit cleanly (upstream's -EBADE case).
+pub fn resolve_action_exit_status(
+    configured: Option<u8>,
+    code: &crate::signal_handler::ChildTermination,
+) -> Option<u8> {
+    if let Some(status) = configured {
+        return Some(status);
+    }
+    match code {
+        crate::signal_handler::ChildTermination::Exit(c) => u8::try_from(*c).ok(),
+        crate::signal_handler::ChildTermination::Signal(_) => Some(255),
+    }
+}
+
 /// Execute a `SuccessAction=` or `FailureAction=` by initiating the
 /// appropriate system transition.
+///
+/// `exit_status` is the value to propagate for the `exit` variants, as resolved
+/// by [`resolve_action_exit_status`]; it is ignored by every other action.
 ///
 /// For the `-force` variants the service manager exits immediately after
 /// minimal cleanup.  For the `-immediate` variants we call
@@ -672,14 +713,26 @@ fn activate_slice_hierarchy(unit: &crate::units::Unit, run_info: &RuntimeInfo) {
 /// spawning the corresponding system command, which is the same strategy
 /// systemd uses when it is *not* PID 1.  The clean-shutdown path is handled
 /// by the global `SHUTTING_DOWN` flag in `crate::shutdown`.
-pub fn execute_unit_action(action: &UnitAction, unit_name: &str) {
+pub fn execute_unit_action(action: &UnitAction, unit_name: &str, exit_status: Option<u8>) {
     match action {
         UnitAction::None => {}
 
         // ── exit ────────────────────────────────────────────────────
         UnitAction::Exit | UnitAction::ExitForce => {
-            info!("{unit_name}: executing {action:?} — exiting service manager");
-            std::process::exit(0);
+            let status = exit_status.unwrap_or(0);
+            if is_system_init() {
+                // Upstream refuses to exit the machine's init: "exit" degrades
+                // to "poweroff" and "exit-force" to "poweroff-force"
+                // (emergency-action.c:164-170).  Exiting here would panic the
+                // kernel instead of shutting the machine down.
+                info!(
+                    "{unit_name}: doing \"poweroff\" action instead of an \"exit\" emergency action"
+                );
+                let _ = std::process::Command::new("poweroff").status();
+                std::process::exit(status as i32);
+            }
+            info!("{unit_name}: executing {action:?} — exiting service manager with {status}");
+            std::process::exit(status as i32);
         }
 
         // ── reboot ──────────────────────────────────────────────────
@@ -2234,4 +2287,41 @@ pub fn upholds_retry_loop(unit_id: UnitId, arc_ri: ArcMutRuntimeInfo) {
         "Upholds= gave up restarting {} after {} retries",
         unit_id.name, max_retries
     );
+}
+
+#[cfg(test)]
+mod action_exit_status_tests {
+    use super::resolve_action_exit_status;
+    use crate::signal_handler::ChildTermination;
+    use nix::sys::signal::Signal;
+
+    #[test]
+    fn configured_status_wins_over_the_exit_code() {
+        // TEST-18-FAILUREACTION relies on this: it runs `false` (exit 1) with
+        // -p FailureActionExitStatus=123 and expects 123, not 1.
+        let code = ChildTermination::Exit(1);
+        assert_eq!(resolve_action_exit_status(Some(123), &code), Some(123));
+    }
+
+    #[test]
+    fn without_a_configured_status_the_exit_code_is_propagated() {
+        let code = ChildTermination::Exit(7);
+        assert_eq!(resolve_action_exit_status(None, &code), Some(7));
+    }
+
+    #[test]
+    fn a_signalled_process_propagates_255() {
+        // Upstream's -EBADE case: exited, but not cleanly (unit.c:6293).
+        let code = ChildTermination::Signal(Signal::SIGKILL);
+        assert_eq!(resolve_action_exit_status(None, &code), Some(255));
+    }
+
+    #[test]
+    fn an_out_of_range_exit_code_propagates_nothing() {
+        // Exit statuses are a byte; anything else has nothing to propagate.
+        let code = ChildTermination::Exit(300);
+        assert_eq!(resolve_action_exit_status(None, &code), None);
+        // ...but an explicit setting still wins.
+        assert_eq!(resolve_action_exit_status(Some(5), &code), Some(5));
+    }
 }

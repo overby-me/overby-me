@@ -7,7 +7,7 @@ mod socket_unit;
 mod swap_unit;
 mod target_unit;
 mod timer_unit;
-mod unit_parser;
+pub(crate) mod unit_parser;
 
 pub use device_unit::*;
 pub use mount_unit::*;
@@ -1719,13 +1719,11 @@ pub struct ParsedUnitSection {
     /// Exit status to report when `SuccessAction=` triggers.
     /// Only meaningful when SuccessAction= is set to something other than `none`.
     /// Matches systemd's `SuccessActionExitStatus=` setting.
-    /// Parsed and stored; no runtime enforcement yet.
     pub success_action_exit_status: Option<u8>,
 
     /// Exit status to report when `FailureAction=` triggers.
     /// Only meaningful when FailureAction= is set to something other than `none`.
     /// Matches systemd's `FailureActionExitStatus=` setting.
-    /// Parsed and stored; no runtime enforcement yet.
     pub failure_action_exit_status: Option<u8>,
 
     /// Absolute paths that this unit requires mount points for.

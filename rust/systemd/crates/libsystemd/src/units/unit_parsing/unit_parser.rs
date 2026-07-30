@@ -211,7 +211,7 @@ pub(crate) fn mount_units_for_path(path: &str) -> Vec<String> {
     units
 }
 
-fn parse_unit_action(value: &str) -> Result<UnitAction, ParsingErrorReason> {
+pub(crate) fn parse_unit_action(value: &str) -> Result<UnitAction, ParsingErrorReason> {
     match value.to_lowercase().replace('-', "").as_str() {
         "none" => Ok(UnitAction::None),
         "exit" => Ok(UnitAction::Exit),

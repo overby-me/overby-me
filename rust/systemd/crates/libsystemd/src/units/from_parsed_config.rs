@@ -915,6 +915,8 @@ fn make_common_from_parsed(
             assertions: unit.assertions,
             success_action: unit.success_action,
             failure_action: unit.failure_action,
+            success_action_exit_status: unit.success_action_exit_status,
+            failure_action_exit_status: unit.failure_action_exit_status,
             job_timeout_action: unit.job_timeout_action,
             job_timeout_sec: unit.job_timeout_sec,
             allow_isolate: unit.allow_isolate,
