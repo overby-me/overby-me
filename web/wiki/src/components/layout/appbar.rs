@@ -39,14 +39,15 @@ pub(super) fn TopAppBar(
                     div { class: "expressive-search",
                         if size.is_compact() {
                             button {
-                                // The drawer holds the activity row, so a pending
-                                // invitation badges the button that opens it: the
-                                // count is visible from every page without the bar
-                                // spending a slot on it next to the crumbs.
+                                // A pending invitation badges the button that leads
+                                // to it (drawer, then the place picker holding the
+                                // invitation itself), so it is visible from every
+                                // page without the bar spending a slot on it next
+                                // to the crumbs.
                                 class: "expressive-search-btn menu-trigger state-layer",
                                 aria_label: t("common.menu"),
                                 onclick: move |_| open_drawer.set(true),
-                                crate::components::activity::NavBadge {
+                                NavBadge {
                                     span { class: "material-icons", "menu" }
                                 }
                             }

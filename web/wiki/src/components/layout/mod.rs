@@ -17,7 +17,7 @@ mod usermenu;
 use appbar::*;
 use breadcrumbs::*;
 use drawer::*;
-pub use home_list::{HomeList, InvitedContextItem};
+pub use home_list::HomeList;
 use navigation::*;
 use search::*;
 use usermenu::*;
@@ -42,6 +42,29 @@ pub(super) static CONTEXT_DEPTH: GlobalSignal<usize> = Signal::global(|| 0);
 /// The signed-in user's pending-invitation count, for the Home nav badge. Set by
 /// [`Layout`] (once per session, refreshed on mutations via the data version).
 pub static PENDING_INVITES: GlobalSignal<usize> = Signal::global(|| 0);
+
+/// Wraps an icon in the pending-invitation badge.
+///
+/// An invitation is a place you have been offered, so it lives in the drawer's
+/// place picker (inline in the groups/events list it would join). The badge is
+/// how it reaches you from anywhere: it marks each surface on the way in, the
+/// menu button that opens the drawer and the bar that opens the picker, and
+/// stops at whichever of them is already showing what it points at.
+///
+/// Nothing waiting means no badge at all, rather than a zero: the point is to be
+/// noticed when it appears.
+#[component]
+pub(super) fn NavBadge(children: Element) -> Element {
+    let pending = PENDING_INVITES();
+    rsx! {
+        span { class: "badged-icon",
+            {children}
+            if pending > 0 {
+                crate::components::widgets::Badge { count: Some(pending) }
+            }
+        }
+    }
+}
 
 /// The current context's key-path: the leading `CONTEXT_DEPTH` segments (or the
 /// first segment as a fallback until the context resolves).
@@ -343,11 +366,6 @@ pub fn Layout() -> Element {
             // Rendered here, at the app-shell root, so it escapes the breadcrumbs bar's
             // overflow clip and transform containing-block.
             breadcrumbs::TocPopover {}
-
-            // What is new (invitations + the feed), as an overlay over whatever
-            // is open. At the app-shell root so its scrim covers the chrome and
-            // escapes the top app bar's stacking context.
-            crate::components::activity::ActivitySheet {}
 
             // Feedback dialog (opened from the user menu). Also rendered at the
             // app-shell root: inside the drawer pane its fixed scrim would be

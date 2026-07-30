@@ -93,9 +93,7 @@ pub(super) fn DrawerContent() -> Element {
                 }
             }
             }
-            // Standing utilities, pinned below the scrolling tree: what is new,
-            // then the account.
-            crate::components::activity::ActivityRow {}
+            // Account menu, pinned at the bottom of the drawer.
             UserMenu {}
         }
     }
@@ -141,11 +139,19 @@ pub(super) fn ContextSwitchBar(name: String, mime: String, at_home: bool) -> Ele
             },
             div { class: "avatar small", {crate::components::loader::icon_el(&mime)} }
             span { class: "drawer-context-name", "{name}" }
-            // The up/down pair, not a single chevron: a plain chevron says "this
-            // section expands", while this is the standard mark of a control that
-            // offers alternatives to what it currently shows.
-            span { class: "material-icons drawer-context-chevron",
-                if open { "unfold_less" } else { "unfold_more" }
+            // A pending invitation is a place you have been offered, and it is
+            // waiting in the list this bar opens, so the count sits here. Not
+            // while the list is open: it is on screen then, at the top of the
+            // groups or events it would join.
+            if open {
+                // The up/down pair, not a single chevron: a plain chevron says
+                // "this section expands", while this is the standard mark of a
+                // control that offers alternatives to what it currently shows.
+                span { class: "material-icons drawer-context-chevron", "unfold_less" }
+            } else {
+                NavBadge {
+                    span { class: "material-icons drawer-context-chevron", "unfold_more" }
+                }
             }
         }
     }

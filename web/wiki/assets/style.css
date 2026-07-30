@@ -6817,13 +6817,9 @@ a.list-item:hover {
 	gap: var(--md-sys-spacing-2);
 }
 
-/* ── Activity sheet ("what's new") ─────────────────────────────────────
-   Invitations and the feed, opened over whatever page is already open rather
-   than replacing it, so checking them never costs the reader their place. Uses
-   the app's standard sheet geometry (.tool-sheet): bottom sheet on compact,
-   right side sheet on medium+. */
-/* An icon carrying the pending-invitation badge: the drawer's activity row, and
-   whichever menu button opens that drawer. */
+/* An icon carrying the pending-invitation badge: whichever menu button opens
+   the drawer, and the place bar inside it that opens the picker the invitation
+   is waiting in. */
 .badged-icon {
 	position: relative;
 	display: inline-flex;
@@ -6832,42 +6828,27 @@ a.list-item:hover {
 }
 /* The cutout ring has to match the surface the icon actually sits on, or it
    reads as an outline instead of a cutout: the top bar's menu button sits on the
-   search container, the drawer row on a tonal avatar. */
+   search container, the rail's and the place bar's on the side panel. */
 .expressive-search .badged-icon .md-badge {
 	box-shadow: 0 0 0 2px var(--md-surface-container-high);
 }
-.drawer-utility .badged-icon .md-badge {
-	box-shadow: 0 0 0 2px var(--md-surface-container);
+/* The place bar is a <button> now, and a button sizes to its CONTENT where the
+   old link filled the row, so `width: auto` (which the tree pane's break-out rule
+   sets, to let the negative margins do the sizing) leaves it hugging its label.
+   Spell the break-out width out instead: the pane insets its children by 16px on
+   each side, which the negative margins undo. */
+.drawer-scroll .drawer-context-switch {
+	width: calc(100% + var(--md-sys-spacing-4) * 2);
 }
 
-/* The drawer's standing utility rows (the activity row), pinned under the
-   scrolling tree and above the account. Shares the account row's metrics; the
-   divider between the two is the account's own, so this one only rules off the
-   tree above it. */
-.drawer-utility {
-	flex: 0 0 auto;
-	width: 100%;
-	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-2)
-		0 var(--md-sys-spacing-2);
-	border-top: 1px solid var(--md-outline-variant);
+/* The badge wraps the place bar's chevron, so the wrapper is what has to carry
+   the auto margin that pushes it to the trailing edge. */
+.drawer-context-switch .badged-icon {
+	margin-inline-start: auto;
 }
-.drawer-utility + .user-menu.in-drawer {
-	border-top: none;
-}
-.drawer-utility .drawer-account-trigger:hover {
-	background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
-}
-.activity-body {
-	gap: var(--md-sys-spacing-2);
-	padding-bottom: var(--md-sys-spacing-6);
-}
-.activity-section + .activity-section {
-	margin-top: var(--md-sys-spacing-3);
-	padding-top: var(--md-sys-spacing-2);
-	border-top: 1px solid var(--md-outline-variant);
-}
-/* The feed rows carry their own horizontal margin for the card they used to sit
-   in; inside the sheet that inset is the sheet's own padding. */
-.activity-section .recent-item {
-	margin-inline: 0;
+/* The chevron is smaller than a nav icon, so its badge tucks in closer than the
+   default offset. */
+.drawer-context-switch .badged-icon .md-badge {
+	top: -6px;
+	inset-inline-end: -8px;
 }

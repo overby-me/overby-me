@@ -2,10 +2,10 @@
 //! and reactions.
 //!
 //! One list, two scopes. [`FeedApp`] is a context's own feed, an app of that
-//! group or event ("what has happened here"), and a real page: it gets the full
-//! reading column and pages as you scroll. The activity sheet mounts the same
-//! [`FeedList`] unscoped ("what is new for me, anywhere") in a 360px sheet that
-//! scrolls in its own container, so there it pages on a button instead.
+//! group or event ("what has happened here"). The home page mounts the same
+//! [`FeedList`] unscoped: everything recent across the groups and events you
+//! belong to. Both are pages, so both get a full reading column and page as you
+//! scroll.
 
 use dioxus::prelude::*;
 
@@ -41,22 +41,16 @@ pub fn FeedApp(node: model::NodeWithChildren) -> Element {
 
 /// How many feed rows to fetch per page.
 const FEED_PAGE: i32 = 12;
-/// How many a peek shows: enough to answer "anything happened?", too few to
-/// invite reading in a sheet the width of a phone.
-const PEEK_PAGE: i32 = 5;
 
 /// The feed list itself.
 ///
 /// `context_id` scopes it to one group or event; without it the list is
 /// everything the reader may see. `autoload` fetches the next page as the reader
-/// nears the end of the window, which only works where the window is what
-/// scrolls (a page, not a sheet). `peek` is the digest form: the newest few and
-/// nothing more, for a caller that links on to the full list.
+/// nears the end of the window; without it the list pages on its button.
 #[component]
 pub fn FeedList(
     #[props(default)] context_id: Option<String>,
     #[props(default)] autoload: bool,
-    #[props(default)] peek: bool,
 ) -> Element {
     let session = use_session();
     let token = session.read().access_token.clone();
@@ -70,8 +64,7 @@ pub fn FeedList(
     // without it the list would keep asking for more.
     let mut has_more = use_signal(|| true);
 
-    // A peek asks for its handful once; everything else pages.
-    let page_size = if peek { PEEK_PAGE } else { FEED_PAGE };
+    let page_size = FEED_PAGE;
 
     // First page, and a reset if the scope or the signed-in user changes.
     {
@@ -178,8 +171,7 @@ pub fn FeedList(
             div { class: "empty-state empty-state-sm",
                 div { class: "spinner spinner-sm" }
             }
-        } else if *has_more.read() && !peek {
-            // A peek does not page: its caller offers the way to the full list.
+        } else if *has_more.read() {
             button {
                 class: "btn btn-text",
                 onclick: move |_| fetch_more(token.clone(), user_id.clone(), context_id.clone()),
@@ -322,11 +314,6 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
         div {
             class: "recent-item",
             onclick: move |_| {
-                // Following a row from the activity sheet is going somewhere, so
-                // the overlay has done its job and gets out of the way (the
-                // navigation below then lands on an unobstructed page). A no-op
-                // when the row is on the feed page instead.
-                crate::components::activity::close_activity();
                 let node_id = node_id.clone();
                 let key = key.clone();
                 let token = session.read().access_token.clone();
