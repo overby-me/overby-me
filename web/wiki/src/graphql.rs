@@ -3156,14 +3156,23 @@ pub async fn query_user_contributions(
     }
 }
 
-/// The most recently created content nodes for the home "Newest" list (#34):
-/// submitted (immutable) content whose context (group/event) the user belongs
-/// to. Drafts and content from contexts the user is not part of are excluded.
+/// The most recently created content nodes for a feed (#34): submitted
+/// (immutable) content, newest first. Drafts never appear.
+///
+/// `context_id` chooses the scope. `None` is the cross-context feed: everything
+/// in a group or event the user belongs to. `Some(id)` is one context's own
+/// feed, for the context's feed app.
+///
+/// A context node is its OWN context (`contextId == id`), so a group's feed
+/// holds the group's own content and NOT its events' — an event under a group is
+/// its own context. Rolling those up would need the ancestor chain, which this
+/// column cannot express.
 pub async fn query_recent_nodes(
     access_token: Option<&str>,
     limit: i32,
     offset: i32,
     user_id: &str,
+    context_id: Option<&str>,
 ) -> Vec<model::ChildNodeFields> {
     let where_clause = NodesBoolExp {
         and: Some(vec![
@@ -3192,10 +3201,21 @@ pub async fn query_recent_nodes(
                 mutable: Some(BooleanComparisonExp { eq: Some(false) }),
                 ..Default::default()
             },
-            // Only content in a context (group/event) the user belongs to.
-            NodesBoolExp {
-                context: Some(Box::new(belongs_to_user(user_id))),
-                ..Default::default()
+            // Scope: one context's own content, or (unscoped) everything in a
+            // context the user belongs to. Inside a context the membership test
+            // is redundant — you are reading its page — so the id alone stands.
+            match context_id {
+                Some(id) => NodesBoolExp {
+                    context_id: Some(UuidComparisonExp {
+                        eq: Some(Uuid(id.to_string())),
+                        is_null: None,
+                    }),
+                    ..Default::default()
+                },
+                None => NodesBoolExp {
+                    context: Some(Box::new(belongs_to_user(user_id))),
+                    ..Default::default()
+                },
             },
             // Its parent must still exist. An orphan (see `query_orphans`) has
             // nowhere to open — the row would quote a comment that is gone, or

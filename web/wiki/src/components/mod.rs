@@ -7,6 +7,7 @@ pub mod content;
 pub mod cow;
 pub mod editor;
 pub mod error;
+pub mod feed;
 pub mod feedback;
 pub mod feedback_app;
 pub mod file;

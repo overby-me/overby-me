@@ -133,6 +133,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
         Some(Ok(Some(node))) => {
             // The active app comes from the route's `?app=` query.
             match app.as_deref() {
+                Some("feed") => rsx! { super::feed::FeedApp { node } },
                 Some("vote") => rsx! { VoteApp { node } },
                 Some("speak") => rsx! {
                     SpeakApp { node, mode: super::speak::SpeakMode::Full }
@@ -411,6 +412,7 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "vote/poll" => "poll",
         // speak / apps (old wiki: speak/list=InterpreterMode, app/speak=RecordVoiceOver)
         "speak/list" => "interpreter_mode",
+        "app/feed" => "schedule",
         "app/speak" => "record_voice_over",
         "app/editor" => "edit",
         "app/sort" => "low_priority",

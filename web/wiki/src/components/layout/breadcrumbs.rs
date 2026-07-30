@@ -351,6 +351,7 @@ pub(super) fn Breadcrumbs() -> Element {
 /// app-rail labels; hidden/URL-only apps fall back to their key.
 pub(super) fn app_crumb_label(app: &str) -> String {
     match app {
+        "feed" => t("layout.feed"),
         "folder" => t("mime.folder"),
         "speak" => t("mime.speak"),
         "vote" => t("mime.vote"),
@@ -471,7 +472,24 @@ pub(super) fn context_apps(
     // in. Home is not a view of a context, and as a rail item it dropped the
     // context and emptied the rail of everything else. Changing place is the
     // drawer's job (see `ContextSwitchBar`); what is new is the top bar's.
-    let mut apps: Vec<(&str, String, Route, bool)> = vec![(
+    let mut apps: Vec<(&str, String, Route, bool)> = Vec::new();
+    // What has happened here, newest first. It takes the slot Home used to hold,
+    // so the reflex of reaching for the first rail item now answers "what did I
+    // miss" instead of dropping the context. Signed in only: the feed is what
+    // YOU may see, and a signed-out visitor would get an empty list that reads
+    // as "nothing happened" rather than "not for you".
+    if is_auth {
+        apps.push((
+            "app/feed",
+            t("layout.feed"),
+            Route::PathPage {
+                segments: ctx_path.clone(),
+                app: Some("feed".to_string()),
+            },
+            current_app.as_deref() == Some("feed"),
+        ));
+    }
+    apps.push((
         "app/folder",
         t("mime.folder"),
         Route::PathPage {
@@ -481,7 +499,7 @@ pub(super) fn context_apps(
         // The editor / sort sub-apps operate on folder content, so the folder
         // rail item stays highlighted while they are open.
         current_app.is_none() || matches!(current_app.as_deref(), Some("editor") | Some("sort")),
-    )];
+    ));
     if is_auth {
         // Members and the chair console are owner surfaces: only context owners
         // get their rail/bar entries (written by the path resolver as pages
