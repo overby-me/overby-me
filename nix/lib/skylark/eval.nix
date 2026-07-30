@@ -778,19 +778,24 @@
         then let
           iterR = evalExpr clause.iter e w;
           items = iterate iterR.value;
-          fold = j: accW: accItems:
-            if j >= length items
-            then {
-              world = accW;
-              items = accItems;
-            }
-            else let
-              e2 = (assignLvalue clause.targets (elemAt items j) e accW).env;
-              sub = go rest e2 accW accItems;
-            in
-              fold (j + 1) sub.world sub.items;
+          # foldl' for the same reason as execFor: a frame per ITEM overflows the C stack,
+          # and a comprehension is how a BUCK file declares one target per entry of a
+          # generated map (xnu exports 1,252 files that way).
+          step = accum: item: let
+            e2 = (assignLvalue clause.targets item e accum.world).env;
+            sub = go rest e2 accum.world accum.items;
+          in
+            # Force the accumulated list every step. foldl' is strict only in the
+            # accumulator's outermost value, so a lazy `acc ++ [x]` chain survives it and
+            # is still N thunks deep when something finally forces it -- the same C-stack
+            # overflow, one step later and in a confusing place (dict.items()).
+            builtins.seq (length sub.items) sub;
         in
-          fold 0 iterR.world acc
+          builtins.foldl' step {
+            world = iterR.world;
+            items = acc;
+          }
+          items
         else let
           testR = evalExpr clause.test e w;
         in
@@ -1001,27 +1006,49 @@
   execFor = currentFile: stmt: env: world: let
     iterR = evalExpr stmt.iter env world;
     items = iterate iterR.value;
-    loop = i: e: w:
-      if i >= length items
-      then {
-        env = e;
-        world = w;
-        ctrl = ctrlNormal;
-      }
+    # foldl', not recursion: Nix has no tail-call elimination, so a frame per ITERATION
+    # overflows the C stack on a real loop -- Darling's BUCK files iterate the generated
+    # SDK maps, 4,178 entries, and that is `max-call-depth exceeded` rather than a slow
+    # evaluation. A fold cannot stop early, so `done` carries break/return and the
+    # remaining items fall through untouched.
+    step = acc: item:
+      if acc.done
+      then acc
       else let
-        e1 = (assignLvalue stmt.targets (elemAt items i) e w).env;
-        r = execStmts currentFile stmt.body e1 w;
+        e1 = (assignLvalue stmt.targets item acc.env acc.world).env;
+        r = execStmts currentFile stmt.body e1 acc.world;
       in
         if r.ctrl.t == "return"
-        then r
+        then {
+          inherit (r) env world ctrl;
+          done = true;
+        }
         else if r.ctrl.t == "break"
         then {
           inherit (r) env world;
           ctrl = ctrlNormal;
+          done = true;
         }
-        else loop (i + 1) r.env r.world;
-  in
-    loop 0 env iterR.world;
+        else
+          # Same reason as the comprehension fold: the env an assignment produces is an
+          # attrset UPDATE, and a chain of those is as deep as the loop unless each step
+          # collapses it.
+          builtins.seq r.env (builtins.seq r.world {
+            inherit (r) env world;
+            ctrl = ctrlNormal;
+            done = false;
+          });
+    final =
+      builtins.foldl' step {
+        inherit env;
+        world = iterR.world;
+        ctrl = ctrlNormal;
+        done = false;
+      }
+      items;
+  in {
+    inherit (final) env world ctrl;
+  };
 
   execLoad = currentFile: stmt: env: world: let
     modGlobals = loadModule currentFile stmt.module;
