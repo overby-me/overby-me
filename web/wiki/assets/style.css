@@ -7174,6 +7174,8 @@ a.list-item:hover {
    field looking empty. */
 .pw-field {
 	position: relative;
+	/* Eight-lobed scallop, drawn once and masked into each dot. */
+	--pw-dot-shape: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23000' d='M24 2c2.6 0 4.9 1.6 5.9 3.9 2-1.6 4.9-1.8 7.1-.5s3.4 3.9 3 6.4c2.5-.4 5.1.7 6.4 3s1.1 5.1-.5 7.1c2.3 1 3.9 3.3 3.9 5.9s-1.6 4.9-3.9 5.9c1.6 2 1.8 4.9.5 7.1s-3.9 3.4-6.4 3c.4 2.5-.7 5.1-3 6.4s-5.1 1.1-7.1-.5c-1 2.3-3.3 3.9-5.9 3.9s-4.9-1.6-5.9-3.9c-2 1.6-4.9 1.8-7.1.5s-3.4-3.9-3-6.4c-2.5.4-5.1-.7-6.4-3s-1.1-5.1.5-7.1C2.6 32.9 1 30.6 1 28s1.6-4.9 3.9-5.9c-1.6-2-1.8-4.9-.5-7.1s3.9-3.4 6.4-3c-.4-2.5.7-5.1 3-6.4s5.1-1.1 7.1.5C19.1 3.6 21.4 2 24 2Z'/%3E%3C/svg%3E");
 }
 .pw-input:has(+ .pw-dots) {
 	color: transparent;
@@ -7192,10 +7194,19 @@ a.list-item:hover {
 .pw-dot {
 	--dot-i: 0;
 	flex: 0 0 auto;
-	width: 9px;
-	height: 9px;
-	border-radius: var(--md-sys-shape-corner-full);
+	width: 11px;
+	height: 11px;
+	/* The M3 Expressive scalloped "cookie" rather than a plain circle, which is
+	   the shape Android's password field uses. A native input cannot do this: its
+	   mask is U+2022 drawn in the input's font, so the only way to change the
+	   shape natively is to ship a font with a different bullet — and even then it
+	   could not be animated, because there are no per-character elements to
+	   animate. Drawn as a mask so the fill stays a colour role. */
 	background: var(--md-on-surface);
+	mask-image: var(--pw-dot-shape);
+	mask-size: contain;
+	mask-repeat: no-repeat;
+	mask-position: center;
 	/* Arrive with a spatial spring (the ones that overshoot), then settle into a
 	   slow, tiny sway with a per-dot phase, so the row breathes rather than
 	   twitches. Amplitude is deliberately under a pixel: this should be felt
@@ -7209,7 +7220,7 @@ a.list-item:hover {
 @keyframes pw-dot-in {
 	from {
 		opacity: 0;
-		transform: scale(0.2) translateY(-6px);
+		transform: scale(0.2) translateY(-6px) rotate(-40deg);
 	}
 	to {
 		opacity: 1;
@@ -7219,10 +7230,10 @@ a.list-item:hover {
 @keyframes pw-dot-sway {
 	0%,
 	100% {
-		transform: translateY(-0.6px);
+		transform: translateY(-0.6px) rotate(-6deg);
 	}
 	50% {
-		transform: translateY(0.6px);
+		transform: translateY(0.6px) rotate(6deg);
 	}
 }
 /* Drawn only while the field has focus, so a filled-but-idle field is still. */
