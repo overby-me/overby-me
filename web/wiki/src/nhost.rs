@@ -348,7 +348,11 @@ pub fn is_auth_error(err: &NhostError) -> bool {
 }
 
 pub fn sign_out() {
-    // Simply clear the session locally; NHost tokens will expire naturally
+    // Simply clear the session locally; NHost tokens will expire naturally.
+    // The offline copies of pages read in this session go too: the next person
+    // at this device is not the last one, and a cached page would otherwise
+    // outlive the session that was allowed to read it.
+    crate::offline::clear();
 }
 
 /// One entry of the storage `POST /files` response (`processedFiles[]`). The

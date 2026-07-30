@@ -283,7 +283,7 @@ pub struct Author {
 /// A resolved breadcrumb segment: its display name, mime, and (for policy /
 /// change nodes) its 0-based ordinal among same-type siblings, so the crumb
 /// avatar can show the same letter/number label as elsewhere.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Crumb {
     /// The path segment this crumb resolved from.
     ///

@@ -15,6 +15,8 @@ mod logging;
 /// Frontend-owned domain types (the anti-corruption seam over `graphql.rs`).
 pub mod model;
 mod nhost;
+/// Last-read pages kept in localStorage, served when nothing can be reached.
+mod offline;
 mod pwa;
 mod route;
 mod session;

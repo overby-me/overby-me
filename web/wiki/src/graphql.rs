@@ -86,7 +86,8 @@ impl From<MemberFields> for model::MemberFields {
         model::MemberFields {
             id: m.id.into(),
             name: m.name,
-            email: m.email,
+            // Not selected on a node read; see MemberFields.
+            email: None,
             accepted: m.accepted,
             active: m.active,
             owner: m.owner,
@@ -449,7 +450,12 @@ pub struct NodeWithChildren {
 pub struct MemberFields {
     pub id: Uuid,
     pub name: Option<String>,
-    pub email: Option<String>,
+    // No `email` here, deliberately. This fragment rides along with every node
+    // read, including a signed-out one, and the public role may not select a
+    // member's email — which failed the WHOLE node query, so an anonymous
+    // visitor could not open a single page of a public wiki. Nothing rendered
+    // from a node's members wanted it: the roster that does (member.rs) asks
+    // for it in its own query, as a signed-in owner.
     pub accepted: bool,
     pub active: bool,
     pub owner: bool,
@@ -2072,10 +2078,41 @@ pub async fn resolve_path(
         ..Default::default()
     };
     let op = NodesWhereQuery::build(NodesWhereVariables { where_clause });
-    let Some(found) = execute(access_token, op).await?.nodes.into_iter().next() else {
-        return Ok(None);
-    };
-    query_node_by_id(access_token, &found.id.0).await
+    let key = format!("node:{}", segments.join("/"));
+    let live = async {
+        let Some(found) = execute(access_token, op).await?.nodes.into_iter().next() else {
+            return Ok(None);
+        };
+        query_node_by_id(access_token, &found.id.0).await
+    }
+    .await;
+    // The page a reader opened before the tunnel is the page they meant to read
+    // in it. Anything that answered — including "no such node" — replaces the
+    // copy; only an unreachable server falls back to one.
+    match live {
+        Ok(Some(node)) => {
+            crate::offline::put(&key, &node);
+            Ok(Some(node))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => match offline_copy::<model::NodeWithChildren>(&key, &e) {
+            Some(node) => Ok(Some(node)),
+            None => Err(e),
+        },
+    }
+}
+
+/// The remembered answer to a read, if the failure was the kind a copy answers.
+///
+/// A refusal must not fall back: serving what someone could read yesterday would
+/// be the app overriding a permission change made since.
+fn offline_copy<T: serde::de::DeserializeOwned>(key: &str, error: &str) -> Option<T> {
+    if crate::errors::classify(error) != crate::errors::Failure::Offline {
+        return None;
+    }
+    let copy = crate::offline::get::<T>(key)?;
+    crate::errors::report_offline_copy();
+    Some(copy)
 }
 
 /// Resolve each path segment to its `(name, mime_id)`, walking from the root like
@@ -2103,12 +2140,24 @@ pub async fn path_crumbs(
         ..Default::default()
     };
     let op = NodesWhereQuery::build(NodesWhereVariables { where_clause });
-    let found = execute(access_token, op).await?.nodes;
+    // The trail is cached alongside the page: a bar of raw url slugs is how the
+    // app looked on a dropped connection, and the trail is the part of the
+    // chrome that says where you are.
+    let key = format!("crumbs:{}", segments.join("/"));
+    let found = match execute(access_token, op).await {
+        Ok(data) => data.nodes,
+        Err(e) => {
+            return match offline_copy::<Vec<Crumb>>(&key, &e) {
+                Some(cached) => Ok(cached),
+                None => Err(e),
+            };
+        }
+    };
 
     // Back into path order, and a crumb for every segment either way: a step the
     // reader may not see (permissions) or that does not resolve still holds its
     // place in the trail, showing its url slug, exactly as before.
-    Ok(prefixes
+    let crumbs: Vec<Crumb> = prefixes
         .iter()
         .zip(segments)
         .map(|(prefix, segment)| {
@@ -2130,7 +2179,9 @@ pub async fn path_crumbs(
                 },
             }
         })
-        .collect())
+        .collect();
+    crate::offline::put(&key, &crumbs);
+    Ok(crumbs)
 }
 
 /// Insert a node

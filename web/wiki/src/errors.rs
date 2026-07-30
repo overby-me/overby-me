@@ -126,6 +126,27 @@ pub fn report(failure: Failure) {
     }
 }
 
+/// Say that what is on screen is a copy from before the connection went.
+///
+/// Separate from [`report`] only in wording: a reader who can still see the
+/// page needs to know it may have moved on without them, which is a different
+/// message from "that did not work". Shares the throttle, so a page that
+/// restores several reads from the cache says it once.
+pub fn report_offline_copy() {
+    let now = js_sys::Date::now();
+    let show = LAST_SHOWN.with(|last| {
+        if now - last.get() < THROTTLE_MS {
+            false
+        } else {
+            last.set(now);
+            true
+        }
+    });
+    if show {
+        crate::snackbar::show_snackbar(&t("error.offlineCopy"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
