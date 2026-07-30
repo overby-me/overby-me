@@ -142,12 +142,18 @@ pub fn FeedbackApp() -> Element {
 
     let feed_token = session.read().access_token.clone();
     let items_res = crate::use_data_resource!(|(feed_token)| async move {
-        graphql::query_feedback(feed_token.as_deref())
-            .await
-            .unwrap_or_default()
+        graphql::query_feedback(feed_token.as_deref()).await
     });
     let loading = items_res.read().is_none();
-    let mut items = items_res.read().clone().unwrap_or_default();
+    // The screen already distinguishes "nothing matching your filter" from
+    // "nothing at all"; a failed fetch was falling into the second and telling
+    // people nobody had reported anything.
+    let load = items_res.read().clone();
+    let failed = matches!(load, Some(Err(_)));
+    if let Some(Err(e)) = &load {
+        log::error!("feedback load failed: {e}");
+    }
+    let mut items = load.and_then(|r| r.ok()).unwrap_or_default();
 
     // Everyone named on any crash, resolved in ONE query for the whole list.
     // Per row it would be a request per crash, and per reporter it would be a
@@ -268,6 +274,12 @@ pub fn FeedbackApp() -> Element {
                 }
                 if loading {
                     super::widgets::Spinner {}
+                } else if failed {
+                    super::widgets::ErrorState {
+                        title: t("error.couldNotLoad"),
+                        small: true,
+                        on_retry: move |_| crate::session::bump_data_version(),
+                    }
                 } else if items.is_empty() {
                     div { class: "empty-state empty-state-sm",
                         div { class: "empty-state-orb empty-state-orb-sm",

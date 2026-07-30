@@ -61,9 +61,15 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                 cur_page * PAGE_SIZE,
             )
             .await
-            .unwrap_or_default()
         });
-    let (rows, total) = roster.read().clone().unwrap_or_default();
+    // A roster that failed to load looked exactly like a context with no members
+    // — on the screen an owner uses to decide who is missing.
+    let load = roster.read().clone();
+    let roster_failed = matches!(load, Some(Err(_)));
+    if let Some(Err(e)) = &load {
+        log::error!("roster load failed: {e}");
+    }
+    let (rows, total) = load.and_then(|r| r.ok()).unwrap_or_default();
 
     // Edit dialog (name/email) and remove confirm, shared across the rows.
     let mut edit_id = use_signal(|| Option::<String>::None);
@@ -196,6 +202,13 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                         }
                     }
 
+                    if roster_failed {
+                        super::widgets::ErrorState {
+                            title: t("error.couldNotLoad"),
+                            small: true,
+                            on_retry: move |_| crate::session::bump_data_version(),
+                        }
+                    }
                     // Member roster: a SERVER-paginated, searchable, filterable
                     // table (scales to thousands via Hasura limit/offset/where),
                     // rendered through the reusable widgets::PaginatedTable.

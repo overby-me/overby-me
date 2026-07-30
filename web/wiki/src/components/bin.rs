@@ -37,11 +37,18 @@ pub fn BinApp(node: NodeWithChildren) -> Element {
     let ctx = context_id.clone();
     let here = node.id.0.clone();
     let items = crate::use_data_resource!(|(ctx, here, token)| async move {
-        graphql::query_deleted(token.as_deref(), &ctx, &here)
-            .await
-            .unwrap_or_default()
+        graphql::query_deleted(token.as_deref(), &ctx, &here).await
     });
-    let items = items.read().clone().unwrap_or_default();
+    // A bin that failed to load must not read as a bin with nothing in it: the
+    // reader came here to find something they deleted, and "nothing deleted
+    // here" is the one answer that would send them away.
+    let load = items.read().clone();
+    let failed = matches!(load, Some(Err(_)));
+    if let Some(Err(e)) = &load {
+        log::error!("bin load failed: {e}");
+    }
+    let loading = load.is_none();
+    let items: Vec<graphql::DeletedNodeFields> = load.and_then(|r| r.ok()).unwrap_or_default();
     // Emptying the bin is the one action here that cannot be taken back, so it
     // belongs to whoever answers for the context rather than to whoever deleted.
     let can_purge = node.is_context_owner.unwrap_or(false) || node.is_owner.unwrap_or(false);
@@ -52,7 +59,15 @@ pub fn BinApp(node: NodeWithChildren) -> Element {
                 div { class: "avatar", span { class: "material-icons", "restore_from_trash" } }
                 h3 { class: "title-medium", "{t(\"bin.title\")}" }
             }
-            if items.is_empty() {
+            if loading {
+                super::widgets::Spinner {}
+            } else if failed {
+                super::widgets::ErrorState {
+                    title: t("error.couldNotLoad"),
+                    small: true,
+                    on_retry: move |_| crate::session::bump_data_version(),
+                }
+            } else if items.is_empty() {
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "restore_from_trash" }

@@ -399,16 +399,18 @@ fn AgendaLevel(
 
     let children = crate::use_data_resource!(|(parent, token, user_id)| async move {
         let Some(user_id) = user_id else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        graphql::query_drawer_children(token.as_deref(), &parent, &user_id)
-            .await
-            .unwrap_or_default()
+        graphql::query_drawer_children(token.as_deref(), &parent, &user_id).await
     });
 
-    let items: Vec<_> = children
-        .read()
-        .clone()
+    let load = children.read().clone();
+    let failed = matches!(load, Some(Err(_)));
+    if let Some(Err(e)) = &load {
+        log::error!("agenda level load failed: {e}");
+    }
+    let items: Vec<_> = load
+        .and_then(|r| r.ok())
         .unwrap_or_default()
         .into_iter()
         .filter(|c| is_agenda_item(c.mime_id.as_deref().unwrap_or("")))
@@ -416,9 +418,17 @@ fn AgendaLevel(
 
     if items.is_empty() {
         // Only the top level speaks up about being empty; a leaf that turned out
-        // to have no agenda children just stops.
+        // to have no agenda children just stops. A failed load does speak up
+        // wherever it happens: a branch that silently stopped expanding read as
+        // an agenda item with nothing under it, which is a thing a chair acts on.
         return rsx! {
-            if depth == 0 {
+            if failed {
+                crate::components::widgets::ErrorState {
+                    title: t("error.couldNotLoad"),
+                    small: true,
+                    on_retry: move |_| crate::session::bump_data_version(),
+                }
+            } else if depth == 0 {
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
                         span { class: "material-icons", "list_alt" }

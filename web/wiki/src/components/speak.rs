@@ -255,9 +255,8 @@ fn SpeakList(
     let rev = *refresh.read();
     let state = crate::use_data_resource!(|(list_for_query, access_token, rev)| async move {
         let _ = rev;
-        let n = graphql::query_node_by_id(access_token.as_deref(), &list_for_query)
-            .await
-            .ok()??;
+        let n = graphql::query_node_by_id(access_token.as_deref(), &list_for_query).await?;
+        let Some(n) = n else { return Ok(None) };
         {
             let speakers = sorted_speakers(&n.children);
             // The speaking time limit + last-start live on the list node's data.
@@ -274,7 +273,7 @@ fn SpeakList(
                 .and_then(|t| t.as_str())
                 .unwrap_or("")
                 .to_string();
-            Some((n.mutable, time, updated_at, speakers))
+            Ok(Some((n.mutable, time, updated_at, speakers)))
         }
     });
 
@@ -290,7 +289,15 @@ fn SpeakList(
         }
     });
 
-    let st = state.read().clone().flatten();
+    // A queue that failed to load is not an empty queue. On the projector, in a
+    // hall, "no speakers" is read as "nobody wants the floor" and the chair moves
+    // on; it has to say instead that it could not ask.
+    let load: Option<Result<Option<_>, String>> = state.read().clone();
+    let load_failed = matches!(load, Some(Err(_)));
+    if let Some(Err(e)) = &load {
+        log::error!("speaker list load failed: {e}");
+    }
+    let st = load.and_then(|r| r.ok()).flatten();
     let mutable = st.as_ref().map(|s| s.0).unwrap_or(false);
     // Optimistically hide speakers the user just removed or advanced past. The
     // delete's refetch confirms the absence; on error the id is dropped from the set
@@ -405,7 +412,13 @@ fn SpeakList(
                 }
             }
 
-            if speakers.is_empty() && (screen || pending_shown.is_empty()) {
+            if load_failed && speakers.is_empty() {
+                crate::components::widgets::ErrorState {
+                    title: t("error.couldNotLoad"),
+                    small: true,
+                    on_retry: move |_| crate::session::bump_data_version(),
+                }
+            } else if speakers.is_empty() && (screen || pending_shown.is_empty()) {
                 // DESIGN: orb empty state for an empty speaker queue.
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",

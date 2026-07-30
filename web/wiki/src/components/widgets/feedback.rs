@@ -34,14 +34,31 @@ pub fn EmptyState(icon: String, message: String, #[props(default)] small: bool) 
 /// A standard error-state block: an error-tinted orb + a friendly title. Never
 /// renders raw error text (log the detail separately). Wrap in
 /// `.card.accent-error` for the carded form. Use for `Some(Err(_))`.
+///
+/// `on_retry` adds a "try again" button. Pass it wherever the load is worth
+/// another attempt, which is most of them: the usual cause is a network that
+/// dropped for a moment, on a phone in a hall full of other phones, and the
+/// alternative the reader is left with is reloading the whole app.
 #[component]
-pub fn ErrorState(title: String, #[props(default)] small: bool) -> Element {
+pub fn ErrorState(
+    title: String,
+    #[props(default)] small: bool,
+    on_retry: Option<EventHandler<()>>,
+) -> Element {
     rsx! {
         div { class: if small { "empty-state empty-state-sm" } else { "empty-state" },
             div { class: if small { "empty-state-orb empty-state-orb-sm error-orb" } else { "empty-state-orb error-orb" },
                 span { class: "material-icons", "error_outline" }
             }
             h3 { class: "empty-state-title", "{title}" }
+            if let Some(retry) = on_retry {
+                button {
+                    class: "btn btn-tonal btn-sm",
+                    onclick: move |_| retry.call(()),
+                    span { class: "material-icons", "refresh" }
+                    "{crate::i18n::t(\"error.retry\")}"
+                }
+            }
         }
     }
 }

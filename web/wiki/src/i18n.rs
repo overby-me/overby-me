@@ -359,6 +359,8 @@ const EN_JSON: &str = r#"{
     },
     "error": {
         "somethingWentWrong": "Something went wrong!",
+        "retry": "Try again",
+        "couldNotLoad": "Could not load this",
         "offline": "No connection to the server",
         "crashTitle": "The app stopped",
         "crashReported": "Reported — thank you",
@@ -893,6 +895,8 @@ const DA_JSON: &str = r#"{
     },
     "error": {
         "somethingWentWrong": "Noget gik galt!",
+        "retry": "Pr\u00f8v igen",
+        "couldNotLoad": "Kunne ikke indl\u00e6ses",
         "offline": "Ingen forbindelse til serveren",
         "crashTitle": "Appen stoppede",
         "crashReported": "Rapporteret — tak",

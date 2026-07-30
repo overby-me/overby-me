@@ -21,11 +21,16 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
         .unwrap_or_else(|| node.id.0.clone());
 
     let perms = crate::use_data_resource!(|(context_id, access_token)| async move {
-        graphql::query_permissions(access_token.as_deref(), &context_id)
-            .await
-            .unwrap_or_default()
+        graphql::query_permissions(access_token.as_deref(), &context_id).await
     });
-    let mut perms = perms.read().clone().unwrap_or_default();
+    // "No content" and "the query failed" are opposite answers on a screen about
+    // who is allowed to do what, and they used to look the same.
+    let load = perms.read().clone();
+    let failed = matches!(load, Some(Err(_)));
+    if let Some(Err(e)) = &load {
+        log::error!("permissions load failed: {e}");
+    }
+    let mut perms = load.and_then(|r| r.ok()).unwrap_or_default();
     perms.sort_by(|a, b| {
         (a.role.as_str(), a.mime_id.as_deref().unwrap_or(""))
             .cmp(&(b.role.as_str(), b.mime_id.as_deref().unwrap_or("")))
@@ -37,7 +42,13 @@ pub fn PermApp(node: NodeWithChildren) -> Element {
                 div { class: "avatar", span { class: "material-icons", "lock" } }
                 h3 { class: "title-medium", "{node.name}" }
             }
-            if perms.is_empty() {
+            if failed {
+                super::widgets::ErrorState {
+                    title: t("error.couldNotLoad"),
+                    small: true,
+                    on_retry: move |_| crate::session::bump_data_version(),
+                }
+            } else if perms.is_empty() {
                 div { class: "card-content",
                     p {
                         class: "body-medium",
