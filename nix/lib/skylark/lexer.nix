@@ -567,12 +567,23 @@ let
           ];
       };
 
-    loop = st:
-      if st ? done && st.done
+    # Iterate in CHUNKS rather than one self-recursive call per token: Nix has no
+    # tail-call elimination, so `loop = st: loop (step st)` costs a C-stack frame per
+    # token and overflows on a large file (a generated BUCK file can be tens of
+    # thousands of lines). foldl' drives the chunks -- iterative, constant stack --
+    # and each chunk recurses only `chunkSize` deep.
+    #
+    # Every step either advances `pos` or emits one pending DEDENT, so twice the
+    # character count plus a margin bounds the step count; running out early is
+    # harmless because a finished state is returned unchanged.
+    chunkSize = 200;
+    stepN = n: st:
+      if n == 0 || (st ? done && st.done)
       then st
-      else loop (step st);
+      else stepN (n - 1) (step st);
+    chunkCount = 1 + (2 * len + 16) / chunkSize;
 
-    final = loop {
+    final = builtins.foldl' (st: _: stepN chunkSize st) {
       pos = 0;
       line = 1;
       tokens = [];
@@ -580,7 +591,7 @@ let
       atLineStart = true;
       depth = 0;
       done = false;
-    };
+    } (builtins.genList (i: i) chunkCount);
   in
     final.tokens;
 

@@ -374,41 +374,41 @@
     inherit (namedStar) world;
   };
 
-  foldExprs = nodes: env: world: let
-    go = i: acc: w:
-      if i >= length nodes
-      then {
-        items = acc;
-        world = w;
-      }
-      else let
-        r = evalExpr (elemAt nodes i) env w;
-      in
-        go (i + 1) (acc ++ [r.value]) r.world;
-  in
-    go 0 [] world;
+  # foldl' rather than a recursive `go`: Nix has no tail-call elimination, so one
+  # frame per element overflows the C stack on a big literal. Buck2 projects have
+  # those -- a generated SDK header map is thousands of entries in one dict.
+  foldExprs = nodes: env: world:
+    builtins.foldl' (acc: node: let
+      r = evalExpr node env acc.world;
+    in {
+      items = acc.items ++ [r.value];
+      inherit (r) world;
+    }) {
+      items = [];
+      inherit world;
+    }
+    nodes;
 
-  foldNamed = kwargs: env: world: let
-    go = i: acc: w:
-      if i >= length kwargs
-      then {
-        named = acc;
-        world = w;
-      }
-      else let
-        kw = elemAt kwargs i;
-        r = evalExpr kw.value env w;
-      in
-        go (i + 1) (acc
-          ++ [
-            {
-              inherit (kw) name;
-              inherit (r) value;
-            }
-          ])
-        r.world;
-  in
-    go 0 [] world;
+  # Same reason as foldExprs: iterative, so a call with many keyword arguments
+  # cannot exhaust the stack.
+  foldNamed = kwargs: env: world:
+    builtins.foldl' (acc: kw: let
+      r = evalExpr kw.value env acc.world;
+    in {
+      named =
+        acc.named
+        ++ [
+          {
+            inherit (kw) name;
+            inherit (r) value;
+          }
+        ];
+      inherit (r) world;
+    }) {
+      named = [];
+      inherit world;
+    }
+    kwargs;
 
   findNamed = named: name: let
     go = i:
@@ -622,22 +622,46 @@
     }
     else throw "skylark: cannot evaluate node '${k}'";
 
+  # A dict LITERAL is built iteratively, and string keys (the overwhelmingly common
+  # case, and the only one a generated header map uses) dedup through an attrset
+  # index rather than dictSetEntries' linear scan. Recursion here overflowed the
+  # stack on a 4000-entry literal, and the linear scan made it O(n^2) besides.
   evalDictLiteral = node: env: world: let
-    go = i: acc: w:
-      if i >= length node.entries
+    step = acc: e: let
+      kr = evalExpr e.key env acc.world;
+      vr = evalExpr e.value env kr.world;
+      k = kr.value;
+      isStrKey = builtins.isString k;
+    in
+      if isStrKey && !(acc.idx ? ${k})
       then {
-        value = mkDict acc;
-        world = w;
+        entries =
+          acc.entries
+          ++ [
+            {
+              key = k;
+              inherit (vr) value;
+            }
+          ];
+        idx = acc.idx // {${k} = true;};
+        inherit (vr) world;
       }
-      else let
-        e = elemAt node.entries i;
-        kr = evalExpr e.key env w;
-        vr = evalExpr e.value env kr.world;
-        acc' = dictSetEntries acc kr.value vr.value;
-      in
-        go (i + 1) acc' vr.world;
-  in
-    go 0 [] world;
+      else {
+        entries = dictSetEntries acc.entries k vr.value;
+        inherit (acc) idx;
+        inherit (vr) world;
+      };
+    r =
+      builtins.foldl' step {
+        entries = [];
+        idx = {};
+        inherit world;
+      }
+      node.entries;
+  in {
+    value = mkDict r.entries;
+    inherit (r) world;
+  };
 
   dictSetEntries = entries: key: value: let
     n = length entries;
