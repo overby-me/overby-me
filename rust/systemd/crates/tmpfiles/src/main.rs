@@ -3242,7 +3242,8 @@ mod tests {
 
     #[test]
     fn test_discover_config_files_no_crash() {
-        let _files = discover_config_files();
+        let _system = discover_config_files(false);
+        let _user = discover_config_files(true);
     }
 
     #[test]
