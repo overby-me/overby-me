@@ -1450,6 +1450,14 @@ html {
 .card-content {
 	padding: var(--md-sys-spacing-4);
 }
+/* A second header further down a card, introducing a section that belongs to the
+   same node (a position's candidates under its text). The card's own brow tints
+   the top and fades out; repeating that wash mid-card would read as a second card
+   starting, so this rules off with a hairline instead. */
+.card-header-section {
+	background: none;
+	border-top: 1px solid var(--md-outline-variant);
+}
 
 /* Content hero: a full-bleed cover image with the document identity overlaid on a
    scrim at its base, so the image frames the title instead of sitting above the

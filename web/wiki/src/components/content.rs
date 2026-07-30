@@ -32,7 +32,16 @@ pub(crate) fn safe_href(url: &str) -> String {
 /// [`super::comments::CommentSection`] composed by each caller, so composite
 /// views (policy/position) can place amendments/candidates above the thread.
 #[component]
-pub fn ContentApp(node: NodeWithChildren) -> Element {
+pub fn ContentApp(
+    node: NodeWithChildren,
+    /// A section that belongs to this node but is not its text, rendered inside
+    /// the same card under the body: a position's candidates, which are the
+    /// substance of the page when (as usually) the position itself is untitled
+    /// prose. Its presence also means an empty body is not "no content", so the
+    /// empty state stands down rather than announcing a lack nobody felt.
+    #[props(default)]
+    extra: Option<Element>,
+) -> Element {
     let session = use_session();
     let is_auth = session.read().is_authenticated();
     // Whether the user has a linked Bluesky account — gates the "share to Bluesky"
@@ -576,12 +585,14 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                     }
                 }
             }
-            div { class: "card-content",
-                // Render the body when there is one; otherwise a compact orb empty
-                // state (matching FileApp/FolderApp) instead of a bare empty paragraph.
-                if has_rich_content(data.as_ref()) {
-                    SlateRenderer { data: data.clone() }
-                } else {
+            // Render the body when there is one; otherwise a compact orb empty
+            // state (matching FileApp/FolderApp) instead of a bare empty paragraph
+            // — unless a section below carries the page, in which case neither the
+            // empty state nor its padding has anything to say.
+            if has_rich_content(data.as_ref()) {
+                div { class: "card-content", SlateRenderer { data: data.clone() } }
+            } else if extra.is_none() {
+                div { class: "card-content",
                     div { class: "empty-state empty-state-sm",
                         div { class: "empty-state-orb empty-state-orb-sm",
                             span { class: "material-icons", "description" }
@@ -589,6 +600,9 @@ pub fn ContentApp(node: NodeWithChildren) -> Element {
                         p { class: "empty-state-body", "{t(\"common.noContent\")}" }
                     }
                 }
+            }
+            if let Some(extra) = extra.clone() {
+                {extra}
             }
         }
     }

@@ -102,28 +102,26 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
     // same way FolderApp's does for a folder's motions.
     let can_add_candidate = (*can_add_candidate_res.read()).unwrap_or(false) && node.attachable;
 
-    rsx! {
-        // Position text + edit / delete. The comment thread renders at the very
-        // end, below the candidate gallery.
-        ContentApp { node: node.clone() }
-
-        // Candidate gallery (photos from `data.image`). Shown, with an empty state,
-        // to members who can add a candidature so they can add the first one.
+    // The candidate gallery (photos from `data.image`), rendered INSIDE the
+    // position's own card rather than as a second one below it. A position rarely
+    // carries any text, so two cards meant an empty card announcing "no content"
+    // stacked above the only thing on the page. Shown, with an empty state, to
+    // members who can add a candidature so they can add the first one.
+    let candidate_section = rsx! {
         if !candidates.is_empty() || !pending_cand_shown.is_empty() || can_add_candidate {
-            div { class: "card mt-1",
-                div { class: "card-header",
-                    div { class: "avatar small", {icon_el("vote/candidate")} }
-                    h3 { class: "title-medium", "{t(\"vote.candidates\")}" }
-                    div { class: "flex-grow" }
-                    if can_add_candidate {
-                        AddCandidateButton {
-                            parent_id: node_id.clone(),
-                            context_id: context_id.clone(),
-                            path: path.clone(),
-                            pending: pending_cand,
-                        }
+            div { class: "card-header card-header-section",
+                div { class: "avatar small", {icon_el("vote/candidate")} }
+                h3 { class: "title-medium", "{t(\"vote.candidates\")}" }
+                div { class: "flex-grow" }
+                if can_add_candidate {
+                    AddCandidateButton {
+                        parent_id: node_id.clone(),
+                        context_id: context_id.clone(),
+                        path: path.clone(),
+                        pending: pending_cand,
                     }
                 }
+            }
                 if candidates.is_empty() && pending_cand_shown.is_empty() {
                     // The orb empty state every other card uses (policy's own
                     // "no amendments" sits right beside this one). It had a bare
@@ -177,7 +175,13 @@ pub fn PositionApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     }
                 }
             }
-        }
+    };
+
+    rsx! {
+        // The position's text and its candidates as ONE card (see
+        // `candidate_section` above). The comment thread renders at the very end,
+        // below the polls.
+        ContentApp { node: node.clone(), extra: candidate_section }
 
         // Polls come after the candidates they are opened on: a poll is voted on
         // the field, so the field is read first. Owner-only creation sits with
