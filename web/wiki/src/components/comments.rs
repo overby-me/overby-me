@@ -69,7 +69,11 @@ fn PendingRow(author: String, text: String, depth: usize) -> Element {
                         span { class: "comment-dot", "·" }
                         span { class: "comment-time", "{t(\"vote.sending\")}" }
                     }
-                    p { class: "comment-text", "{text}" }
+                    p { class: "comment-text",
+                        // A comment is where people actually paste links: the
+                        // motion they are answering, the article they are citing.
+                        super::content::AutoLinked { text: text.clone() }
+                    }
                 }
             }
         }
@@ -441,7 +445,11 @@ fn CommentThread(
                         }
                     }
                     if !deleted {
-                        p { class: "comment-text", "{text}" }
+                        p { class: "comment-text",
+                        // A comment is where people actually paste links: the
+                        // motion they are answering, the article they are citing.
+                        super::content::AutoLinked { text: text.clone() }
+                    }
                         ReactionBar {
                             comment_id: comment.id.0.clone(),
                             context_id: context_id.clone(),

@@ -953,7 +953,7 @@ fn SlateInline(node: serde_json::Value) -> Element {
 /// line — the break survived the editor, the save and the round trip, and died
 /// at the last step.
 #[component]
-fn AutoLinked(text: String) -> Element {
+pub(crate) fn AutoLinked(text: String) -> Element {
     rsx! {
         for (line_no , line) in text.split('\n').enumerate() {
             if line_no > 0 {
@@ -1164,5 +1164,47 @@ mod tests {
         assert!(!is_email("not-an-email"));
         assert!(!is_email("a@b"));
         assert!(is_email("a@b.dk"));
+    }
+
+    /// Only http(s) is linked, which is what keeps this safe to run over text
+    /// anyone can write. A comment is now autolinked too, so a `javascript:`
+    /// URL typed into one must stay a word — the renderer's `safe_href` is the
+    /// second line, not the first.
+    #[test]
+    fn autolink_never_makes_a_link_out_of_a_scheme_it_should_not() {
+        for dangerous in [
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox",
+            "file:///etc/passwd",
+        ] {
+            let toks = autolink_tokens(dangerous);
+            assert!(
+                !toks.iter().any(|t| matches!(t, LinkToken::Url(..))),
+                "{dangerous} must stay text: {toks:?}"
+            );
+        }
+        assert_eq!(safe_href("javascript:alert(1)"), "#");
+    }
+
+    /// The rendered comment splits on newlines before tokenising, so a run never
+    /// carries one — but a URL at the end of a line still has to keep its own
+    /// trailing punctuation out of the href.
+    #[test]
+    fn a_url_keeps_its_sentence_punctuation_outside_the_link() {
+        let toks = autolink_tokens("read https://radikal.wiki/hb1.");
+        assert!(
+            toks.contains(&LinkToken::Url("https://radikal.wiki/hb1".into(), ".".into())),
+            "{toks:?}"
+        );
+        // A path that genuinely ends in a slash keeps it.
+        let toks = autolink_tokens("see https://radikal.wiki/hb1/ please");
+        assert!(
+            toks.contains(&LinkToken::Url(
+                "https://radikal.wiki/hb1/".into(),
+                String::new()
+            )),
+            "{toks:?}"
+        );
     }
 }

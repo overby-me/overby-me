@@ -317,7 +317,9 @@ fn TextNode(node: NodeWithChildren) -> Element {
                 if has_rich {
                     super::content::SlateRenderer { data: data.clone() }
                 } else if !text.is_empty() {
-                    p { class: "body-large text-preserve-breaks", "{text}" }
+                    p { class: "body-large text-preserve-breaks",
+                        super::content::AutoLinked { text: text.clone() }
+                    }
                 } else {
                     p { class: "body-medium text-muted", "{t(\"common.noContent\")}" }
                 }
