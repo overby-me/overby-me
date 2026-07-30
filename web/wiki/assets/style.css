@@ -4626,12 +4626,38 @@ h6,
 	border-radius: var(--md-sys-shape-corner-full);
 }
 @media (prefers-reduced-motion: reduce) {
-	.crumb-pending {
+	.crumb-pending,
+	.crumb {
 		animation: none;
 	}
 }
 
+/* DESIGN (the trail draws itself): the crumbs used to appear one at a time
+   because each segment took its own query, so the trail unfolded left to right
+   at the mercy of the network. They now arrive together (one query for the whole
+   path), and that unfolding is worth keeping, so it is staggered on purpose:
+   fast, in reading order, and over before anyone waits on it.
+
+   `backwards`, not `both`: the fill must stop applying once the entrance ends,
+   or its final `transform: none` would outrank the hover lift below. Only crumbs
+   that actually changed replay it, since a crumb is keyed by its segment. */
+@keyframes crumb-in {
+	from {
+		opacity: 0;
+		transform: translateX(-6px) scale(0.94);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
 .crumb {
+	/* Position in the trail, set inline per crumb by the breadcrumbs component;
+	   this declaration is the default and the documentation of it. */
+	--crumb-i: 0;
+	animation: crumb-in var(--md-sys-motion-duration-medium1)
+		var(--md-sys-motion-easing-emphasized-decelerate) backwards;
+	animation-delay: calc(var(--crumb-i) * 40ms);
 	flex: 0 0 auto;
 	display: inline-flex;
 	align-items: center;

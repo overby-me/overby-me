@@ -304,7 +304,13 @@ pub(super) fn Breadcrumbs() -> Element {
                     // the crumb will occupy, so the rail does not jump when the
                     // name lands.
                     if info.is_none() && resolving {
-                        rsx! { span { key: "{i}", class: "crumb crumb-pending skeleton" } }
+                        rsx! {
+                            span {
+                                key: "{i}-{segments[i]}",
+                                class: "crumb crumb-pending skeleton",
+                                style: "--crumb-i: {i - start + usize::from(show_home)}",
+                            }
+                        }
                     } else {
                     let name = info
                         .map(|c| c.name.clone())
@@ -321,11 +327,13 @@ pub(super) fn Breadcrumbs() -> Element {
                     let ordinal = info.and_then(|c| c.ordinal);
                     rsx! {
                         BreadcrumbCrumb {
-                            key: "{i}",
+                            key: "{i}-{segments[i]}",
                             to: Route::PathPage { segments: segments[..=i].to_vec(), app: None },
                             mime,
                             name,
                             ordinal,
+                            // Position in the trail, for the staggered entrance.
+                            step: i - start + usize::from(show_home),
                             open: last_id == i + 1,
                             // The current node's crumb doubles as the page TOC trigger.
                             toc_trigger: last_id == i + 1,
@@ -393,6 +401,11 @@ pub(super) fn BreadcrumbCrumb(
     mime: String,
     name: String,
     ordinal: Option<usize>,
+    /// Position in the trail, left to right. The trail used to draw itself as
+    /// each segment resolved, a query at a time; it now arrives in one, so the
+    /// unfolding is staggered deliberately instead of by latency.
+    #[props(default)]
+    step: usize,
     /// Whether this is the deepest (current) crumb, whose name is shown by default;
     /// every other crumb reveals its name on hover via CSS (`.crumb:hover`).
     open: bool,
@@ -409,7 +422,9 @@ pub(super) fn BreadcrumbCrumb(
         // The current crumb toggles the page TOC; the popover itself is rendered by
         // `Layout` (via `TocPopover`) OUTSIDE this overflow-clipped, transformed bar.
         return rsx! {
-            div { class: if app_crumb { "crumb app-crumb crumb-toc" } else { "crumb crumb-toc" },
+            div {
+                class: if app_crumb { "crumb app-crumb crumb-toc" } else { "crumb crumb-toc" },
+                style: "--crumb-i: {step}",
                 div {
                     class: "crumb-link",
                     onclick: move |_| {
@@ -432,6 +447,7 @@ pub(super) fn BreadcrumbCrumb(
     rsx! {
         div {
             class: if app_crumb { "crumb app-crumb" } else { "crumb" },
+            style: "--crumb-i: {step}",
             // Clicking a crumb (navigating to an ancestor, or re-clicking the
             // current node) scrolls the content back to the top.
             onclick: move |_| {
