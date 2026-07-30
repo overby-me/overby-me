@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod admin;
 pub mod auth;
 pub mod back_to_top;

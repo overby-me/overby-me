@@ -17,7 +17,7 @@ mod usermenu;
 use appbar::*;
 use breadcrumbs::*;
 use drawer::*;
-pub use home_list::HomeList;
+pub use home_list::{HomeList, InvitedContextItem};
 use navigation::*;
 use search::*;
 use usermenu::*;
@@ -41,7 +41,7 @@ pub(super) static CONTEXT_DEPTH: GlobalSignal<usize> = Signal::global(|| 0);
 
 /// The signed-in user's pending-invitation count, for the Home nav badge. Set by
 /// [`Layout`] (once per session, refreshed on mutations via the data version).
-pub(super) static PENDING_INVITES: GlobalSignal<usize> = Signal::global(|| 0);
+pub static PENDING_INVITES: GlobalSignal<usize> = Signal::global(|| 0);
 
 /// The current context's key-path: the leading `CONTEXT_DEPTH` segments (or the
 /// first segment as a fallback until the context resolves).
@@ -343,6 +343,11 @@ pub fn Layout() -> Element {
             // Rendered here, at the app-shell root, so it escapes the breadcrumbs bar's
             // overflow clip and transform containing-block.
             breadcrumbs::TocPopover {}
+
+            // What is new (invitations + the feed), as an overlay over whatever
+            // is open. At the app-shell root so its scrim covers the chrome and
+            // escapes the top app bar's stacking context.
+            crate::components::activity::ActivitySheet {}
 
             // Feedback dialog (opened from the user menu). Also rendered at the
             // app-shell root: inside the drawer pane its fixed scrim would be

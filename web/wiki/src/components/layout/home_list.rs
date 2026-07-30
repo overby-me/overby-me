@@ -505,7 +505,7 @@ pub(super) fn ContextItem(node: model::ContextNodeFields) -> Element {
 /// conflict when a membership already exists) accept that row and drop the
 /// duplicate invite.
 #[component]
-pub(super) fn InvitedContextItem(invite: model::InvitationFields) -> Element {
+pub fn InvitedContextItem(invite: model::InvitationFields) -> Element {
     let session = use_session();
     let mut confirm_open = use_signal(|| false);
     // Optimistic: accepting or declining hides the invite at once; the refetch then

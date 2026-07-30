@@ -14,7 +14,6 @@ pub(super) fn NavigationRail(tree_open: bool, on_toggle: EventHandler<()>) -> El
     let is_auth = session.read().is_authenticated();
     let route = use_route::<Route>();
     let apps = context_apps(&route, is_auth);
-    let pending = PENDING_INVITES();
 
     rsx! {
         nav { class: "nav-rail",
@@ -41,9 +40,6 @@ pub(super) fn NavigationRail(tree_open: bool, on_toggle: EventHandler<()>) -> El
                         title: "{label}",
                         span { class: "nav-rail-indicator",
                             span { {crate::components::loader::icon_el(mime_id)} }
-                            if mime_id == "app/home" && pending > 0 {
-                                crate::components::widgets::Badge { count: Some(pending) }
-                            }
                         }
                         span {
                             class: if active { "nav-rail-label md-label-medium-emphasized" } else { "nav-rail-label md-label-medium" },
@@ -57,7 +53,7 @@ pub(super) fn NavigationRail(tree_open: bool, on_toggle: EventHandler<()>) -> El
 }
 
 /// Bottom navigation bar (APP axis) on compact — the same context destinations as
-/// the rail, with the secondary-container pill indicator and the Home badge.
+/// the rail, with the secondary-container pill indicator.
 #[component]
 pub(super) fn NavigationBar() -> Element {
     let session = use_session();
@@ -67,7 +63,6 @@ pub(super) fn NavigationBar() -> Element {
     if apps.is_empty() {
         return rsx! {};
     }
-    let pending = PENDING_INVITES();
 
     // M3 bottom navigation shows up to 5 destinations. Beyond that the bar does
     // not scale, so the surplus moves into an "apps" switcher sheet: the bar keeps
@@ -90,9 +85,6 @@ pub(super) fn NavigationBar() -> Element {
                     aria_label: "{label}",
                     span { class: "nav-bar-indicator",
                         span { {crate::components::loader::icon_el(mime_id)} }
-                        if mime_id == "app/home" && pending > 0 {
-                            crate::components::widgets::Badge { count: Some(pending) }
-                        }
                     }
                     span { class: "nav-bar-label md-label-medium", "{label}" }
                 }
@@ -250,24 +242,13 @@ pub(super) fn NavigationDrawer(open: Signal<bool>) -> Element {
                 }
             }
             div { class: "nav-drawer-header",
-                if segments.is_empty() {
-                    Link {
-                        to: Route::Home { app: None },
-                        class: "bar drawer-context-bar",
-                        onclick: move |_| open.set(false),
-                        div { class: "avatar small",
-                            span { class: "material-icons", "home" }
-                        }
-                        span { class: "drawer-context-name", "{t(\"common.home\")}" }
-                    }
-                } else {
-                    Link {
-                        to: Route::PathPage { segments: ctx_path.clone(), app: None },
-                        class: "bar drawer-context-bar",
-                        onclick: move |_| open.set(false),
-                        div { class: "avatar small", {crate::components::loader::icon_el(&ctx_mime)} }
-                        span { class: "drawer-context-name", "{ctx_name}" }
-                    }
+                // The same place bar the tree pane shows: where you are, and the
+                // way to somewhere else. It opens the picker inside the drawer
+                // rather than navigating, so the drawer stays open while you look.
+                ContextSwitchBar {
+                    name: if segments.is_empty() { t("common.home") } else { ctx_name.clone() },
+                    mime: ctx_mime.clone(),
+                    at_home: segments.is_empty(),
                 }
                 button {
                     class: "btn-icon state-layer",

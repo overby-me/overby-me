@@ -7,6 +7,13 @@ use crate::i18n::t;
 use crate::route::Route;
 use crate::session::use_session;
 
+/// Whether the drawer is showing the place picker (your groups and events)
+/// instead of the current context's tree.
+///
+/// Global because the bar that toggles it lives in the compact drawer's own
+/// header, while the list it swaps sits in [`DrawerContent`] below.
+pub(super) static SWITCHER_OPEN: GlobalSignal<bool> = Signal::global(|| false);
+
 /// Drawer content — shows navigation tree
 #[component]
 pub(super) fn DrawerContent() -> Element {
@@ -19,8 +26,8 @@ pub(super) fn DrawerContent() -> Element {
     let is_auth = session.read().is_authenticated();
 
     // The drawer's top entry switches from Home to the current context (the
-    // nearest group/event, linking to its root) once inside one — mirroring the
-    // old wiki's drawer, whose title switched Home → the selected context.
+    // nearest group/event) once inside one, mirroring the old wiki's drawer,
+    // whose title switched Home to the selected context.
     let ctx_path = context_path(&segments);
     let crumbs = NAV_CRUMBS();
     let ctx_crumb = crumbs.get(ctx_path.len().saturating_sub(1));
@@ -32,40 +39,53 @@ pub(super) fn DrawerContent() -> Element {
         .and_then(|c| c.mime_id.clone())
         .unwrap_or_default();
 
+    // Arriving somewhere answers the question the picker was asking, so any
+    // navigation closes it and the tree of wherever you landed takes over.
+    let path_key = segments.join("/");
+    use_effect(use_reactive!(|(path_key,)| {
+        let _ = &path_key;
+        *SWITCHER_OPEN.write() = false;
+    }));
+
+    // Off a context there is no tree to show, so the picker is all there is.
+    let show_switcher = SWITCHER_OPEN() || segments.is_empty();
+
     rsx! {
         div { class: "drawer-content",
             div { class: "drawer-scroll",
             div { class: "list",
-                if segments.is_empty() {
-                    // At the home route: Home, styled as a bar like the top panel.
-                    Link {
-                        to: Route::Home { app: None },
-                        class: "bar drawer-context-bar",
-                        div { class: "avatar small", span { class: "material-icons", "home" } }
-                        span { class: "drawer-context-name", "{t(\"common.home\")}" }
-                    }
-                } else {
-                    // Inside a context: the current context, styled as a bar like
-                    // the top panel (the old wiki's drawer Bar/Title), linking to
-                    // its root.
-                    Link {
-                        to: Route::PathPage { segments: ctx_path.clone(), app: None },
-                        class: "bar drawer-context-bar",
-                        div { class: "avatar small", {crate::components::loader::icon_el(&ctx_mime)} }
-                        span { class: "drawer-context-name", "{ctx_name}" }
-                    }
+                ContextSwitchBar {
+                    name: if segments.is_empty() { t("common.home") } else { ctx_name.clone() },
+                    mime: ctx_mime.clone(),
+                    at_home: segments.is_empty(),
                 }
             }
 
-            // In-context navigation: at the home route show the groups/events
-            // home list; once inside a context show its lazy child tree (the
-            // React app's MenuList).
             if is_auth {
-                if segments.is_empty() {
+                if show_switcher {
+                    // Picking a place: everywhere this user can go. The app axis
+                    // (the rail) is untouched, so nothing they were using is lost
+                    // by looking.
+                    if !segments.is_empty() {
+                        div { class: "list mt-1",
+                            Link {
+                                to: Route::Home { app: None },
+                                class: "list-item",
+                                div { class: "avatar small secondary",
+                                    span { class: "material-icons", "home" }
+                                }
+                                div { class: "list-item-text",
+                                    div { class: "list-item-primary", "{t(\"common.home\")}" }
+                                }
+                            }
+                        }
+                    }
                     HomeList {}
                 } else {
-                    // Key on the context so switching contexts remounts and
-                    // re-resolves (use_resource does not re-run for prop changes).
+                    // In-context navigation: the context's lazy child tree (the
+                    // React app's MenuList). Key on the context so switching
+                    // contexts remounts and re-resolves (use_resource does not
+                    // re-run for prop changes).
                     MenuList {
                         key: "{segments.first().cloned().unwrap_or_default()}",
                         segments: segments.clone(),
@@ -75,6 +95,53 @@ pub(super) fn DrawerContent() -> Element {
             }
             // Account menu, pinned at the bottom of the drawer.
             UserMenu {}
+        }
+    }
+}
+
+/// The place bar at the top of the drawer: where you are, and the way somewhere
+/// else. Tapping it swaps the tree below for your groups and events, so changing
+/// place is a move along the place axis alone: the apps of whatever you pick
+/// are still on the rail when you land.
+///
+/// At the site root there is nothing to switch away from, so it is a plain
+/// header there rather than a control that would do nothing.
+#[component]
+pub(super) fn ContextSwitchBar(name: String, mime: String, at_home: bool) -> Element {
+    let open = SWITCHER_OPEN();
+
+    if at_home {
+        return rsx! {
+            div { class: "bar drawer-context-bar",
+                div { class: "avatar small", span { class: "material-icons", "home" } }
+                span { class: "drawer-context-name", "{name}" }
+            }
+        };
+    }
+
+    rsx! {
+        button {
+            class: if open {
+                "bar drawer-context-bar drawer-context-switch open"
+            } else {
+                "bar drawer-context-bar drawer-context-switch"
+            },
+            r#type: "button",
+            title: "{t(\"common.switchPlace\")}",
+            aria_label: "{t(\"common.switchPlace\")}",
+            "aria-expanded": if open { "true" } else { "false" },
+            onclick: move |evt: Event<MouseData>| {
+                // The compact drawer closes on any click in its body; this one
+                // opens a list inside it instead, so it must not bubble.
+                evt.stop_propagation();
+                let now = !SWITCHER_OPEN();
+                *SWITCHER_OPEN.write() = now;
+            },
+            div { class: "avatar small", {crate::components::loader::icon_el(&mime)} }
+            span { class: "drawer-context-name", "{name}" }
+            span { class: "material-icons drawer-context-chevron",
+                if open { "expand_less" } else { "expand_more" }
+            }
         }
     }
 }

@@ -1134,6 +1134,28 @@ html {
 	background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
 }
 
+/* The bar is also the place switcher, so it is a button rather than a link and
+   needs the reset a link never did. The chevron is what says it opens
+   something, and the tinted open state says the list below belongs to it. */
+.drawer-context-switch {
+	border: none;
+	appearance: none;
+	font: inherit;
+	text-align: start;
+	cursor: pointer;
+}
+.drawer-context-switch.open {
+	background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+.drawer-context-chevron {
+	margin-inline-start: auto;
+	flex: 0 0 auto;
+	font-size: 1.25rem;
+	color: var(--md-on-surface-variant);
+	transition: transform var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+
 /* Size the header badge to the Actions badge (36px), beating .avatar.small. */
 .drawer-context-bar .avatar.small {
 	width: 36px;
@@ -6793,4 +6815,35 @@ a.list-item:hover {
 	flex-wrap: wrap;
 	justify-content: center;
 	gap: var(--md-sys-spacing-2);
+}
+
+/* ── Activity sheet ("what's new") ─────────────────────────────────────
+   Invitations and the feed, opened over whatever page is already open rather
+   than replacing it, so checking them never costs the reader their place. Uses
+   the app's standard sheet geometry (.tool-sheet): bottom sheet on compact,
+   right side sheet on medium+. */
+.activity-trigger-indicator {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+/* The trigger sits on the search container, not the shell backdrop, so the
+   badge's cutout ring has to match that surface to read as a cutout. */
+.activity-trigger-indicator .md-badge {
+	box-shadow: 0 0 0 2px var(--md-surface-container-high);
+}
+.activity-body {
+	gap: var(--md-sys-spacing-2);
+	padding-bottom: var(--md-sys-spacing-6);
+}
+.activity-section + .activity-section {
+	margin-top: var(--md-sys-spacing-3);
+	padding-top: var(--md-sys-spacing-2);
+	border-top: 1px solid var(--md-outline-variant);
+}
+/* The feed rows carry their own horizontal margin for the card they used to sit
+   in; inside the sheet that inset is the sheet's own padding. */
+.activity-section .recent-item {
+	margin-inline: 0;
 }

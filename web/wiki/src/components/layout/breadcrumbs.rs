@@ -442,7 +442,7 @@ pub(super) fn BreadcrumbCrumb(
 }
 
 /// App rail — vertical icon navigation for large screens
-/// The context apps for the current route (home, folder, and for authed users
+/// The context apps for the current route (folder, and for authed users
 /// speak/vote/member), each as `(mime, label, route, is-active)`. Shared by the
 /// desktop rail and the mobile app bar, mirroring React's `useApps`. Empty off a
 /// context (`segments` empty), which hides both nav surfaces.
@@ -455,15 +455,9 @@ pub(super) fn context_apps(
         _ => vec![],
     };
     if segments.is_empty() {
-        // Home: the folder/speak/vote/member apps all need a context, but show
-        // the Home destination (active) so the rail isn't blank on the landing
-        // page.
-        return vec![(
-            "app/home",
-            t("common.home"),
-            Route::Home { app: None },
-            true,
-        )];
+        // The landing page is not a context, so it has no apps. The rail keeps
+        // only its menu button and the bottom bar hides itself entirely.
+        return vec![];
     }
     let current_app = match route {
         Route::PathPage { app, .. } => app.clone(),
@@ -473,26 +467,21 @@ pub(super) fn context_apps(
     // resolver swaps the view without a reload.
     let ctx_path = context_path(&segments);
 
-    let mut apps: Vec<(&str, String, Route, bool)> = vec![
-        (
-            "app/home",
-            t("common.home"),
-            Route::Home { app: None },
-            false,
-        ),
-        (
-            "app/folder",
-            t("mime.folder"),
-            Route::PathPage {
-                segments: ctx_path.clone(),
-                app: None,
-            },
-            // The editor / sort sub-apps operate on folder content, so the folder
-            // rail item stays highlighted while they are open.
-            current_app.is_none()
-                || matches!(current_app.as_deref(), Some("editor") | Some("sort")),
-        ),
-    ];
+    // No Home here. The rail is the APP axis: which view of THIS context am I
+    // in. Home is not a view of a context, and as a rail item it dropped the
+    // context and emptied the rail of everything else. Changing place is the
+    // drawer's job (see `ContextSwitchBar`); what is new is the top bar's.
+    let mut apps: Vec<(&str, String, Route, bool)> = vec![(
+        "app/folder",
+        t("mime.folder"),
+        Route::PathPage {
+            segments: ctx_path.clone(),
+            app: None,
+        },
+        // The editor / sort sub-apps operate on folder content, so the folder
+        // rail item stays highlighted while they are open.
+        current_app.is_none() || matches!(current_app.as_deref(), Some("editor") | Some("sort")),
+    )];
     if is_auth {
         // Members and the chair console are owner surfaces: only context owners
         // get their rail/bar entries (written by the path resolver as pages

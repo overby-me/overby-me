@@ -46,6 +46,10 @@ pub(super) fn TopAppBar(
                             }
                         }
                         div { class: "expressive-search-crumbs", Breadcrumbs {} }
+                        // What is new: invitations and the feed, opened over the
+                        // current page rather than replacing it. Badged, so a
+                        // waiting invitation is visible from anywhere.
+                        crate::components::activity::ActivityButton {}
                         button {
                             class: "expressive-search-btn state-layer",
                             aria_label: t("common.search"),
