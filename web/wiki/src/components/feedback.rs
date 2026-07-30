@@ -145,6 +145,8 @@ pub fn FeedbackDialog() -> Element {
             open: FEEDBACK_OPEN(),
             on_dismiss: move |_| *FEEDBACK_OPEN.write() = false,
             headline: t("feedback.title"),
+            // A form, so it takes the screen on a phone (see widgets::Dialog).
+            form: true,
             icon: "feedback".to_string(),
             actions: rsx! {
                 button {

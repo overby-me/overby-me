@@ -411,6 +411,8 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
             open: edit_id.read().is_some(),
             on_dismiss: move |_| edit_id.set(None),
             headline: t("member.edit"),
+            // A form, so it takes the screen on a phone (see widgets::Dialog).
+            form: true,
             actions: rsx! {
                 button {
                     class: "btn btn-outlined",

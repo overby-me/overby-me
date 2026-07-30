@@ -158,6 +158,8 @@ fn AddSpeakerListButton(context_id: String) -> Element {
             open: open(),
             on_dismiss: move |_| open.set(false),
             headline: t("speak.newList"),
+            // A form, so it takes the screen on a phone (see widgets::Dialog).
+            form: true,
             icon: "record_voice_over".to_string(),
             actions: rsx! {
                 button {

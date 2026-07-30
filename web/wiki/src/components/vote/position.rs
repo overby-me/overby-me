@@ -342,6 +342,8 @@ fn AddCandidateButton(
             open: open(),
             on_dismiss: move |_| open.set(false),
             headline: t("vote.addCandidate"),
+            // A form, so it takes the screen on a phone (see widgets::Dialog).
+            form: true,
             icon: "person".to_string(),
             actions: rsx! {
                 button {
@@ -452,6 +454,8 @@ pub(super) fn AddChangeButton(node: NodeWithChildren, path: Vec<String>) -> Elem
             open: open(),
             on_dismiss: move |_| open.set(false),
             headline: t("vote.newAmendment"),
+            // A form, so it takes the screen on a phone (see widgets::Dialog).
+            form: true,
             actions: rsx! {
                 button {
                     class: "btn btn-outlined",

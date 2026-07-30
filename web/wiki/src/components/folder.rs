@@ -1022,6 +1022,8 @@ fn FolderAdd(
             open: open(),
             on_dismiss: move |_| open.set(false),
             headline: t("content.addContent"),
+            // A form, so it takes the screen on a phone (see widgets::Dialog).
+            form: true,
             actions: rsx! {
                 button {
                     class: "btn btn-outlined",

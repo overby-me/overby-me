@@ -422,6 +422,8 @@ fn NewContextButton(
             open: open(),
             on_dismiss: move |_| open.set(false),
             headline: label.clone(),
+            // A form, so it takes the screen on a phone (see widgets::Dialog).
+            form: true,
             icon: (if is_group { "group_add" } else { "event" }).to_string(),
             actions: rsx! {
                 button {

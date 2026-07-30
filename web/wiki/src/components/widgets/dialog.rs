@@ -16,6 +16,14 @@ pub fn Dialog(
     headline: String,
     actions: Element,
     icon: Option<String>,
+    /// This dialog is a FORM rather than a question. On a phone it then takes
+    /// the whole screen, which is what M3 asks for and what the content wants:
+    /// a card floating in a scrim, with a keyboard over its lower half and its
+    /// buttons somewhere under that, is the worst place to fill in three fields.
+    /// Confirmations stay as cards at every size — they are one sentence, and a
+    /// full screen for "delete this?" reads as a page you have navigated to.
+    #[props(default)]
+    form: bool,
     children: Element,
 ) -> Element {
     // Remember the trigger so focus returns to it on dismiss (a11y). Declared
@@ -30,7 +38,7 @@ pub fn Dialog(
             role: "presentation",
             onclick: move |_| dialog_dismiss(on_dismiss, return_focus),
             div {
-                class: "m3-dialog",
+                class: if form { "m3-dialog m3-dialog-form" } else { "m3-dialog" },
                 role: "dialog",
                 "aria-modal": "true",
                 // Name the dialog by its headline so screen readers announce it
