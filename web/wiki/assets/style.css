@@ -7007,3 +7007,88 @@ a.list-item:hover {
 .projector-feed .recent-item {
 	cursor: default;
 }
+
+/* ── Join-the-speaker-list FAB menu ────────────────────────────────────
+   The old wiki's speed dial, rebuilt on the M3 Expressive FAB-menu shape:
+   closed it is one button under the thumb; open it is a stack of labelled
+   actions that unfold from it, each keeping the icon its speech type uses in
+   the queue. Asking for the floor is THE action on this screen, so it does not
+   sit in a panel below the queue. */
+.speak-join {
+	position: fixed;
+	right: 24px;
+	/* Sits where a lone .fab sits; the compact rule below lifts it clear of the
+	   bottom dock exactly as the .fab rule does. */
+	bottom: 88px;
+	z-index: 120;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: var(--md-sys-spacing-2);
+}
+.speak-join-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+}
+.speak-join-items {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: var(--md-sys-spacing-2);
+	/* Closed: gone, and not in the tab order or the hit area. */
+	visibility: hidden;
+	pointer-events: none;
+}
+.speak-join-items.open {
+	visibility: visible;
+	pointer-events: auto;
+}
+.speak-join-item {
+	--join-i: 0;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-2)
+		var(--md-sys-spacing-1-5) var(--md-sys-spacing-4);
+	border: none;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
+	box-shadow: var(--md-sys-elevation-2);
+	cursor: pointer;
+	font: inherit;
+	/* Unfold outward from the trigger rather than appearing whole. */
+	opacity: 0;
+	transform: translateY(8px) scale(0.9);
+	transition:
+		opacity var(--md-sys-motion-duration-short4)
+			var(--md-sys-motion-easing-standard),
+		transform var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default);
+}
+.speak-join-items.open .speak-join-item {
+	opacity: 1;
+	transform: none;
+	transition-delay: calc(var(--join-i) * 30ms);
+}
+.speak-join-label {
+	font-size: var(--md-sys-typescale-label-large-size);
+	font-weight: 500;
+	white-space: nowrap;
+}
+.speak-join-icon {
+	color: var(--md-primary);
+}
+/* The trigger sits with the items rather than floating on its own. */
+.speak-join-fab {
+	position: static;
+}
+.app-shell[data-size-class="compact"] .speak-join {
+	bottom: calc(120px + 16px);
+}
+@media (prefers-reduced-motion: reduce) {
+	.speak-join-item {
+		transition: none;
+	}
+}

@@ -227,12 +227,25 @@ fn SpeakList(
     // harmless); on error the entry is dropped to snap back.
     let mut reorder = use_signal(std::collections::HashMap::<String, i32>::new);
 
-    // Live updates: subscribe to this list's entries over the Hasura WebSocket
-    // so entries added/removed by anyone appear at once.
+    // Live updates: the list's entries AND the list node itself, in one
+    // subscription.
+    //
+    // The entries alone were not enough. Opening or closing the list is `mutable`
+    // on the list node, and the speaking clock is that node's `data`, so a chair
+    // starting the timer changed nothing this watched: their own device caught up
+    // through the local data version, and the room's screen sat on a stale clock
+    // until someone joined the queue.
+    //
+    // The selected fields matter as much as the filter: a subscription re-fires
+    // when its RESULT changes, so `{ id }` on a row whose id never changes would
+    // never fire. `mutable` and `data` are what the views actually read.
     let sub_list = crate::graphql::gql_escape(&list_id);
     crate::subscription::use_live(
         format!(
-            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{sub_list}\" }}, mimeId: {{ _eq: \"speak/speak\" }} }}) {{ id }} }}"
+            "subscription {{ nodes(where: {{ _or: [\
+             {{ parentId: {{ _eq: \"{sub_list}\" }}, mimeId: {{ _eq: \"speak/speak\" }} }}, \
+             {{ id: {{ _eq: \"{sub_list}\" }} }}\
+             ] }}) {{ id mutable data }} }}"
         ),
         refresh,
     );
@@ -264,6 +277,9 @@ fn SpeakList(
             Some((n.mutable, time, updated_at, speakers))
         }
     });
+
+    // Whether the join menu is unfolded.
+    let mut join_open = use_signal(|| false);
 
     // Tick once a second so the countdown updates (cancelled on unmount).
     let mut tick = use_signal(|| 0u32);
@@ -353,7 +369,13 @@ fn SpeakList(
                     if mutable { span { class: "material-icons", "lock_open" } } else { span { class: "material-icons", "lock" } }
                 }
                 div {
-                    h3 { class: "title-medium", "{list_name}" }
+                    // The list's name is the chair's filing label for keeping
+                    // several lists apart, not something the room needs: on the
+                    // projector it is one more line competing with the names of
+                    // the people actually waiting to speak.
+                    if !screen {
+                        h3 { class: "title-medium", "{list_name}" }
+                    }
                     p {
                         class: "body-medium",
                         class: "text-muted",
@@ -726,28 +748,36 @@ fn SpeakList(
             }
         }
 
-        // Join panel — insert a speak/speak entry under this list.
+        // Joining is a FAB menu, the way the old wiki's speed dial was: asking for
+        // the floor is THE action on this screen, so it sits under the thumb
+        // rather than in a panel below the queue, and each way of asking keeps its
+        // own icon. Closed it is one button; open it is five labelled ones.
         if is_auth && !screen && mutable {
-            div { class: "card",
-                div { class: "card-header",
-                    h3 { class: "title-medium", "{t(\"speak.joinSpeakerList\")}" }
+            div { class: "speak-join",
+                if join_open() {
+                    div {
+                        class: "speak-join-scrim",
+                        role: "presentation",
+                        onclick: move |_| join_open.set(false),
+                    }
                 }
-                div { class: "card-content",
-                    div { class: "stack stack-v",
-                        {
-                            // Five join types, indexed 0..4 to match React and the
-                            // existing `data` rows ("4" = procedure); higher jumps
-                            // the queue (order_by data desc).
-                            let speak_types = [
-                                ("0", t("speak.talk")),
-                                ("1", t("speak.question")),
-                                ("2", t("speak.clarify")),
-                                ("3", t("speak.misunderstood")),
-                                ("4", t("speak.procedure")),
-                            ];
-                            rsx! {
-                                for (type_key , label) in speak_types {
-                                    {
+                div {
+                    class: if join_open() { "speak-join-items open" } else { "speak-join-items" },
+                    {
+                        // Five join types, indexed 0..4 to match React and the
+                        // existing `data` rows ("4" = procedure); higher jumps
+                        // the queue (order_by data desc). Rendered highest-first
+                        // so the plain "I want to speak" sits nearest the thumb.
+                        let speak_types = [
+                            ("4", t("speak.procedure")),
+                            ("3", t("speak.misunderstood")),
+                            ("2", t("speak.clarify")),
+                            ("1", t("speak.question")),
+                            ("0", t("speak.talk")),
+                        ];
+                        rsx! {
+                            for (i , (type_key , label)) in speak_types.into_iter().enumerate() {
+                                {
                                         let list = list_id.clone();
                                         let context_id = context_id.clone();
                                         let display_name = session
@@ -757,10 +787,17 @@ fn SpeakList(
                                             .map(|u| u.display_name.clone())
                                             .unwrap_or_default();
                                         let token = session.read().access_token.clone();
+                                        let (icon, _) = speak_type_meta(
+                                            type_key.parse::<i64>().unwrap_or(0),
+                                        );
                                         rsx! {
                                             button {
-                                                class: "btn btn-outlined",
+                                                class: "speak-join-item",
+                                                // Stagger outward from the trigger, so the
+                                                // menu unfolds rather than appearing whole.
+                                                style: "--join-i: {i}",
                                                 onclick: move |_| {
+                                                    join_open.set(false);
                                                     // Joining is a user gesture: ask for
                                                     // notification permission so we can ping
                                                     // this speaker when it is their turn (#139).
@@ -813,13 +850,26 @@ fn SpeakList(
                                                         }
                                                     });
                                                 },
-                                                "{label}"
+                                                span { class: "speak-join-label", "{label}" }
+                                                span { class: "speak-join-icon material-icons", "{icon}" }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                button {
+                    class: "fab speak-join-fab",
+                    aria_label: t("speak.joinSpeakerList"),
+                    title: "{t(\"speak.joinSpeakerList\")}",
+                    "aria-expanded": if join_open() { "true" } else { "false" },
+                    onclick: move |_| {
+                        let now = join_open();
+                        join_open.set(!now);
+                    },
+                    span { class: "material-icons",
+                        if join_open() { "close" } else { "record_voice_over" }
                     }
                 }
             }
