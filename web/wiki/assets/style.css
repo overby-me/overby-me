@@ -6905,3 +6905,95 @@ a.list-item:hover {
 	background: var(--md-surface-container-high);
 	color: var(--md-on-surface-variant);
 }
+
+/* ── M3 Expressive primary tabs (widgets::Tabs) ────────────────────────
+   A row of equal-width tabs with ONE active indicator that springs between
+   them. Equal widths are what make that possible without measuring anything:
+   the indicator's slot is `100% / --tab-count` and its offset is `--tab-i`
+   slots along, both set inline by the component. */
+.m3-tabs {
+	position: relative;
+	display: flex;
+	align-items: stretch;
+	border-bottom: 1px solid var(--md-outline-variant);
+	margin-bottom: var(--md-sys-spacing-3);
+	/* Slot geometry, overridden inline per instance. */
+	--tab-count: 1;
+	--tab-i: 0;
+}
+.m3-tab {
+	flex: 1 1 0;
+	min-width: 0;
+	display: inline-flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--md-sys-spacing-0-5);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-2)
+		var(--md-sys-spacing-3);
+	border: none;
+	background: none;
+	cursor: pointer;
+	color: var(--md-on-surface-variant);
+	border-radius: var(--md-sys-shape-corner-medium)
+		var(--md-sys-shape-corner-medium) 0 0;
+	transition: color var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-easing-standard);
+}
+.m3-tab.selected {
+	color: var(--md-primary);
+}
+.m3-tab-icon {
+	font-size: 1.375rem;
+}
+.m3-tab-label {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 100%;
+}
+/* The indicator: a full-round pill in the Expressive style rather than a square
+   3dp rule, inset from the slot edges so it reads as marking the label. */
+.m3-tab-indicator {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	height: 3px;
+	width: calc(100% / var(--tab-count));
+	transform: translateX(calc(var(--tab-i) * 100%));
+	transition: transform var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-spring-spatial-default);
+	pointer-events: none;
+}
+.m3-tab-indicator::after {
+	content: "";
+	position: absolute;
+	inset: 0 25%;
+	background: var(--md-primary);
+	border-radius: var(--md-sys-shape-corner-full)
+		var(--md-sys-shape-corner-full) 0 0;
+}
+@media (prefers-reduced-motion: reduce) {
+	.m3-tab-indicator {
+		transition: none;
+	}
+}
+
+/* The agenda tree in the console: the expander sits before the mime icon, and a
+   childless row keeps a spacer of the same width so every name in a level starts
+   on the same edge. */
+.agenda-expander {
+	flex: 0 0 auto;
+	width: 32px;
+	height: 32px;
+	color: var(--md-on-surface-variant);
+}
+.agenda-expander-spacer {
+	flex: 0 0 auto;
+	width: 32px;
+}
+/* A nested level is quieter than the one above it: the meeting is the top level,
+   its papers are support. */
+.agenda-children .agenda-name {
+	color: var(--md-on-surface-variant);
+}

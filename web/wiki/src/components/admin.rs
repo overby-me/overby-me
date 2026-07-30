@@ -98,14 +98,15 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     });
     let active_headings = active_headings.read().clone().unwrap_or_default();
 
-    // Agenda = the context's content children, in order.
-    let mut agenda: Vec<_> = node
-        .children
-        .iter()
-        .filter(|c| is_agenda_item(c.mime_id.as_deref().unwrap_or("")))
-        .cloned()
-        .collect();
-    agenda.sort_by_key(|c| c.index);
+    // Which nodes are unfolded in the agenda. Held here, not per row, so a whole
+    // meeting's structure can be folded away at once: a chair looking for the next
+    // item wants the shape of the day on one screen, not one item and its
+    // paperwork.
+    let mut expanded = use_signal(std::collections::HashSet::<String>::new);
+    // Which panel is open. Local state, not a route: a chair switching between the
+    // agenda and the speaker list is not going anywhere, and their place in the
+    // agenda should survive the trip.
+    let mut tab = use_signal(|| 0usize);
 
     let polls_ctx = context_id.clone();
     let polls = crate::use_data_resource!(|(polls_ctx, access_token)| async move {
@@ -117,7 +118,10 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
 
     rsx! {
         div {
-            // Jump to the room-facing views without leaving the console flow.
+            // The room-facing views are still links: a projector and a follower
+            // screen are somewhere the chair SENDS the room, not something they
+            // work in, so they leave the console on purpose. Everything they work
+            // in is a tab below.
             div { class: "console-actions",
                 Link {
                     to: Route::PathPage { segments: segments.clone(), app: Some("screen".to_string()) },
@@ -131,20 +135,35 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                     span { class: "material-icons", "sensors" }
                     "{t(\"mime.follow\")}"
                 }
-                Link {
-                    to: Route::PathPage { segments: segments.clone(), app: Some("speak".to_string()) },
-                    class: "btn btn-tonal",
-                    span { class: "material-icons", "record_voice_over" }
-                    "{t(\"mime.speak\")}"
-                }
             }
 
-            // Agenda: project any item to the room + followers with one tap.
+            super::widgets::Tabs {
+                tabs: vec![
+                    (t("console.agenda"), "list_alt".to_string()),
+                    (t("mime.speak"), "record_voice_over".to_string()),
+                    (t("mime.vote"), "how_to_vote".to_string()),
+                    (t("layout.feed"), "view_agenda".to_string()),
+                ],
+                selected: tab(),
+                on_select: move |i| tab.set(i),
+            }
+
+            // ── Agenda ──────────────────────────────────────────────────────
+            if tab() == 0 {
             div { class: "card",
                 div { class: "card-header",
                     div { class: "avatar", {icon_el("app/program")} }
                     h3 { class: "title-medium", "{t(\"console.agenda\")}" }
                     div { class: "flex-grow" }
+                    if !expanded.read().is_empty() {
+                        button {
+                            class: "btn-icon",
+                            title: "{t(\"console.collapseAll\")}",
+                            aria_label: "{t(\"console.collapseAll\")}",
+                            onclick: move |_| expanded.write().clear(),
+                            span { class: "material-icons", "unfold_less" }
+                        }
+                    }
                     if can_manage && active_id.is_some() {
                         button {
                             class: "btn-icon",
@@ -172,67 +191,19 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                         }
                     }
                 }
-                if agenda.is_empty() {
-                    div { class: "empty-state empty-state-sm",
-                        div { class: "empty-state-orb empty-state-orb-sm",
-                            span { class: "material-icons", "list_alt" }
-                        }
-                        p { class: "empty-state-body", "{t(\"common.noContent\")}" }
-                    }
-                } else {
-                    div { class: "list",
-                        for item in agenda.iter() {
-                            {
-                                let is_active = active_id.as_deref() == Some(item.id.0.as_str());
-                                let mut item_path = segments.clone();
-                                item_path.push(item.key.clone());
-                                let item_id = item.id.0.clone();
-                                let proj_ctx = context_id.clone();
-                                rsx! {
-                                    div {
-                                        key: "{item.id.0}",
-                                        class: if is_active { "list-item agenda-item active" } else { "list-item agenda-item" },
-                                        span { class: "material-icons agenda-icon",
-                                            "{mime_icon(item.mime_id.as_deref().unwrap_or(\"wiki/document\"))}"
-                                        }
-                                        Link {
-                                            to: Route::PathPage { segments: item_path, app: None },
-                                            class: "list-item-text agenda-name",
-                                            "{item.name}"
-                                        }
-                                        if is_active {
-                                            span { class: "chip agenda-live",
-                                                span { class: "material-icons", "connected_tv" }
-                                                span { class: "chip-label", "{t(\"console.onScreen\")}" }
-                                            }
-                                        } else if can_manage {
-                                            button {
-                                                class: "btn btn-tonal btn-sm",
-                                                onclick: move |_| {
-                                                    let ctx = proj_ctx.clone();
-                                                    let item_id = item_id.clone();
-                                                    let token = session.read().access_token.clone();
-                                                    // Optimistic: highlight this item as projected now.
-                                                    projected_opt.set(Some(Some(item_id.clone())));
-                                                    spawn(async move {
-                                                        match graphql::set_active_relation(token.as_deref(), &ctx, Some(&item_id)).await {
-                                                            Ok(_) => crate::snackbar::show_snackbar(&t("content.projected")),
-                                                            Err(_) => {
-                                                                projected_opt.set(None);
-                                                                crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
-                                                            }
-                                                        }
-                                                    });
-                                                },
-                                                span { class: "material-icons", "cast" }
-                                                "{t(\"content.projectScreen\")}"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                // The whole tree, not just the top level: an agenda item's papers
+                // (a motion's amendments, a folder's documents) are what the room
+                // actually turns to, and the chair had to leave the console to
+                // reach them. Each level is fetched only when it is opened.
+                AgendaLevel {
+                    parent_id: node.id.0.clone(),
+                    path: segments.clone(),
+                    depth: 0,
+                    context_id: context_id.clone(),
+                    can_manage,
+                    active_id: active_id.clone(),
+                    projected: projected_opt,
+                    expanded,
                 }
             }
 
@@ -309,27 +280,240 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                 }
             }
 
-            // Live results: every poll's tally, with a close action for owners.
-            div { class: "card",
-                div { class: "card-header",
-                    div { class: "avatar", {icon_el("vote/poll")} }
-                    h3 { class: "title-medium", "{t(\"admin.results\")}" }
-                }
-                if polls.is_empty() {
-                    div { class: "empty-state empty-state-sm",
-                        div { class: "empty-state-orb empty-state-orb-sm",
-                            span { class: "material-icons", "how_to_vote" }
-                        }
-                        p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+            }
+
+            // ── Speak ───────────────────────────────────────────────────────
+            // The speaker list in place. It was a link out of the console, which
+            // meant the chair left the agenda to give someone the floor and had to
+            // find their way back.
+            if tab() == 1 {
+                super::speak::SpeakApp { node: node.clone(), mode: super::speak::SpeakMode::Full }
+            }
+
+            // ── Polls ───────────────────────────────────────────────────────
+            if tab() == 2 {
+                div { class: "card",
+                    div { class: "card-header",
+                        div { class: "avatar", {icon_el("vote/poll")} }
+                        h3 { class: "title-medium", "{t(\"admin.results\")}" }
                     }
-                } else {
-                    super::widgets::DataTable {
-                        columns: vec![t("admin.poll"), t("admin.results"), t("admin.votes")],
-                        for poll in polls.iter() {
-                            AdminPollRow { key: "{poll.id.0}", poll: poll.clone(), can_manage }
+                    if polls.is_empty() {
+                        div { class: "empty-state empty-state-sm",
+                            div { class: "empty-state-orb empty-state-orb-sm",
+                                span { class: "material-icons", "how_to_vote" }
+                            }
+                            p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+                        }
+                    } else {
+                        super::widgets::DataTable {
+                            columns: vec![t("admin.poll"), t("admin.results"), t("admin.votes")],
+                            for poll in polls.iter() {
+                                AdminPollRow { key: "{poll.id.0}", poll: poll.clone(), can_manage }
+                            }
                         }
                     }
                 }
+            }
+
+            // ── Feed ────────────────────────────────────────────────────────
+            // What has landed in this context while the meeting ran: an amendment
+            // posted from the floor shows up here without the chair going looking.
+            if tab() == 3 {
+                div { class: "card",
+                    div { class: "card-header",
+                        div { class: "avatar small", span { class: "material-icons", "view_agenda" } }
+                        h3 { class: "title-medium", "{t(\"layout.feed\")}" }
+                    }
+                    crate::components::feed::FeedList {
+                        context_id: context_id.clone(),
+                        autoload: true,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One level of the agenda tree: the content children of `parent_id`, in meeting
+/// order, each projectable and each unfoldable if it has papers of its own.
+///
+/// Lazy by level, like the drawer's tree: a congress is thousands of nodes and
+/// the chair opens a handful of them. Recursion is what keeps a row identical at
+/// every depth, so a motion's amendment projects exactly the way the motion does.
+#[component]
+fn AgendaLevel(
+    parent_id: String,
+    path: Vec<String>,
+    depth: usize,
+    context_id: String,
+    can_manage: bool,
+    active_id: Option<String>,
+    projected: Signal<Option<Option<String>>>,
+    expanded: Signal<std::collections::HashSet<String>>,
+) -> Element {
+    let session = use_session();
+    let token = session.read().access_token.clone();
+    let user_id = session.read().user.as_ref().map(|u| u.id.clone());
+    let parent = parent_id.clone();
+
+    let children = crate::use_data_resource!(|(parent, token, user_id)| async move {
+        let Some(user_id) = user_id else {
+            return Vec::new();
+        };
+        graphql::query_drawer_children(token.as_deref(), &parent, &user_id)
+            .await
+            .unwrap_or_default()
+    });
+
+    let items: Vec<_> = children
+        .read()
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| is_agenda_item(c.mime_id.as_deref().unwrap_or("")))
+        .collect();
+
+    if items.is_empty() {
+        // Only the top level speaks up about being empty; a leaf that turned out
+        // to have no agenda children just stops.
+        return rsx! {
+            if depth == 0 {
+                div { class: "empty-state empty-state-sm",
+                    div { class: "empty-state-orb empty-state-orb-sm",
+                        span { class: "material-icons", "list_alt" }
+                    }
+                    p { class: "empty-state-body", "{t(\"common.noContent\")}" }
+                }
+            }
+        };
+    }
+
+    rsx! {
+        div { class: if depth == 0 { "list" } else { "list agenda-children" },
+            for item in items.iter() {
+                AgendaRow {
+                    key: "{item.id.0}",
+                    item: item.clone(),
+                    path: path.clone(),
+                    depth,
+                    context_id: context_id.clone(),
+                    can_manage,
+                    active_id: active_id.clone(),
+                    projected,
+                    expanded,
+                }
+            }
+        }
+    }
+}
+
+/// One agenda row, and its subtree when unfolded.
+#[component]
+fn AgendaRow(
+    item: model::DrawerChildFields,
+    path: Vec<String>,
+    depth: usize,
+    context_id: String,
+    can_manage: bool,
+    active_id: Option<String>,
+    mut projected: Signal<Option<Option<String>>>,
+    mut expanded: Signal<std::collections::HashSet<String>>,
+) -> Element {
+    let session = use_session();
+    let item_id = item.id.0.clone();
+    let is_active = active_id.as_deref() == Some(item_id.as_str());
+    let is_open = expanded.read().contains(&item_id);
+    let has_children = item.has_children();
+
+    let mut item_path = path.clone();
+    item_path.push(item.key.clone());
+
+    // Indent on the spacing scale, the same step the drawer tree uses, so a
+    // density change moves both together.
+    let indent =
+        format!("padding-left: calc(var(--md-sys-spacing-3) + {depth} * var(--nav-indent-step));");
+
+    rsx! {
+        div {
+            class: if is_active { "list-item agenda-item active" } else { "list-item agenda-item" },
+            style: "{indent}",
+            if has_children {
+                button {
+                    class: "btn-icon agenda-expander",
+                    aria_label: "{t(\"common.expand\")}",
+                    "aria-expanded": if is_open { "true" } else { "false" },
+                    onclick: {
+                        let id = item_id.clone();
+                        move |_| {
+                            let mut set = expanded.write();
+                            if !set.remove(&id) {
+                                set.insert(id.clone());
+                            }
+                        }
+                    },
+                    span { class: "material-icons",
+                        if is_open { "expand_more" } else { "chevron_right" }
+                    }
+                }
+            } else {
+                // Keeps the names of childless rows on the same line as the rest.
+                span { class: "agenda-expander-spacer" }
+            }
+            span { class: "material-icons agenda-icon",
+                "{mime_icon(item.mime_id.as_deref().unwrap_or(\"wiki/document\"))}"
+            }
+            Link {
+                to: Route::PathPage { segments: item_path, app: None },
+                class: "list-item-text agenda-name",
+                "{item.name}"
+            }
+            if is_active {
+                span { class: "chip agenda-live",
+                    span { class: "material-icons", "connected_tv" }
+                    span { class: "chip-label", "{t(\"console.onScreen\")}" }
+                }
+            } else if can_manage {
+                button {
+                    class: "btn btn-tonal btn-sm",
+                    onclick: {
+                        let ctx = context_id.clone();
+                        let id = item_id.clone();
+                        move |_| {
+                            let ctx = ctx.clone();
+                            let id = id.clone();
+                            let token = session.read().access_token.clone();
+                            // Optimistic: highlight this item as projected now.
+                            projected.set(Some(Some(id.clone())));
+                            spawn(async move {
+                                match graphql::set_active_relation(token.as_deref(), &ctx, Some(&id)).await {
+                                    Ok(_) => crate::snackbar::show_snackbar(&t("content.projected")),
+                                    Err(_) => {
+                                        projected.set(None);
+                                        crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                    }
+                                }
+                            });
+                        }
+                    },
+                    span { class: "material-icons", "cast" }
+                    "{t(\"content.projectScreen\")}"
+                }
+            }
+        }
+        if has_children && is_open {
+            AgendaLevel {
+                parent_id: item.id.0.clone(),
+                path: {
+                    let mut p = path.clone();
+                    p.push(item.key.clone());
+                    p
+                },
+                depth: depth + 1,
+                context_id: context_id.clone(),
+                can_manage,
+                active_id: active_id.clone(),
+                projected,
+                expanded,
             }
         }
     }

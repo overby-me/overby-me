@@ -587,6 +587,7 @@ const EN_JSON: &str = r#"{
         "stopProjecting": "Stop projecting",
         "focusSection": "Focus a section on screen",
         "focusWhole": "Show the whole document",
+        "collapseAll": "Collapse all",
         "focusNoSections": "This item has no sections to focus."
     },
     "mime": {
@@ -1094,6 +1095,7 @@ const DA_JSON: &str = r#"{
         "stopProjecting": "Stop projektion",
         "focusSection": "Fokusér en sektion på skærmen",
         "focusWhole": "Vis hele dokumentet",
+        "collapseAll": "Fold alle sammen",
         "focusNoSections": "Dette element har ingen sektioner at fokusere på."
     },
     "mime": {
