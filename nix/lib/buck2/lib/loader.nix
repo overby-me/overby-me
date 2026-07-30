@@ -10,6 +10,8 @@
   root,
   cells,
   system,
+  # Parsed .buckconfig (+ .buckconfig.local) sections, for read_root_config.
+  sections ? {},
 }: let
   labels = import ./labels.nix;
   mkGlobals = import ./globals.nix;
@@ -25,7 +27,7 @@
 
   globalsFor = currentFile:
     mkGlobals {
-      inherit V system;
+      inherit V system sections;
       inherit currentFile;
     };
 

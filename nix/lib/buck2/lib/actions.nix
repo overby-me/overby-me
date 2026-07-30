@@ -197,6 +197,42 @@
           };
       });
 
+      # symlinked_dir(name, {path: artifact}): a directory output whose entries point at
+      # the mapped artifacts. Buck2 rules use it to stage a view of files under names of
+      # their own choosing -- an include root whose layout differs from the source tree
+      # is the common case, and it is what keeps a compile from seeing a whole source
+      # directory just to reach one header.
+      symlinked_dir = builtin ({
+        pos,
+        world,
+        ...
+      }: let
+        name = elemAt pos 0;
+        mapping = elemAt pos 1;
+        d = declareArtifact world name;
+        seq = d.world.actionSeq or 0;
+        entries =
+          map (e: {
+            path = e.key;
+            src = e.value;
+          })
+          mapping.entries;
+        action = {
+          kind = "symlinked_dir";
+          id = mkId seq "symlinked_dir";
+          output = d.artifact;
+          inherit entries;
+        };
+      in {
+        value = d.artifact;
+        world =
+          d.world
+          // {
+            actions = (d.world.actions or []) ++ [action];
+            actionSeq = seq + 1;
+          };
+      });
+
       copy_file = builtin ({
         pos,
         world,

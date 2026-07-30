@@ -17,9 +17,21 @@
   mkAnalysis = import ./analysis.nix;
   serialize = import ./serialize.nix;
 
-  inherit ((buckconfig.parse (builtins.readFile (src + "/.buckconfig")))) cells;
+  parsedConfig = buckconfig.parse (builtins.readFile (src + "/.buckconfig"));
+  inherit (parsedConfig) cells;
+  # A project may keep machine-local values (tool paths) in .buckconfig.local, which
+  # buck2 layers on top of .buckconfig; read_root_config has to see those too.
+  localConfigPath = src + "/.buckconfig.local";
+  localSections =
+    if builtins.pathExists localConfigPath
+    then (buckconfig.parse (builtins.readFile localConfigPath)).sections
+    else {};
+  configSections = builtins.foldl' (acc: name:
+    acc // {${name} = (acc.${name} or {}) // localSections.${name};})
+  parsedConfig.sections (builtins.attrNames localSections);
   loader = mkLoader {
     inherit skylark cells system;
+    sections = configSections;
     root = src;
   };
   analysis = mkAnalysis {inherit skylark loader;};

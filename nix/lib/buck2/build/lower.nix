@@ -192,7 +192,9 @@
   lowerGraph = graph: let
     inherit (graph) actions;
     actionOutputs = a:
-      if a.kind == "run"
+      if a.kind == "symlinked_dir" || a.kind == "copy"
+      then [a.output]
+      else if a.kind == "run"
       then collectOutputs (a.cmd.parts ++ a.cmd.hidden)
       else if a ? output
       then [a.output]
@@ -212,7 +214,11 @@
       })
       actions);
     runDepIds = a:
-      if a.kind == "run"
+      if a.kind == "symlinked_dir"
+      then lib.unique (map producerId (filter (x: x.kind != "source") (collectInputs (map (e: e.src) a.entries))))
+      else if a.kind == "copy"
+      then lib.unique (map producerId (filter (x: x.kind != "source") (collectInputs [a.src])))
+      else if a.kind == "run"
       then lib.unique (map producerId (filter (x: x.kind != "source") (collectInputs (a.cmd.parts ++ a.cmd.hidden))))
       else [];
     # An action needs autoPatchelf only when it materializes real files from a
@@ -279,6 +285,51 @@
         ${lib.optionalString a.isExecutable ''chmod +x "$out/${outRel}"''}
       '';
 
+    # symlinked_dir: a directory of links to the mapped artifacts. Dependency trees are
+    # symlinked in the same way mkRun stages them (cp -rs), and each entry is then linked
+    # to its file inside that staged tree, so nothing is copied twice and a staged header
+    # still resolves through the link.
+    mkSymlinkedDir = a: let
+      outRel = artPath a.output;
+      srcs = filter (x: x.kind == "source") (collectInputs (map (e: e.src) a.entries));
+      depIds =
+        lib.unique (map producerId (filter (x: x.kind != "source")
+            (collectInputs (map (e: e.src) a.entries))));
+      stageDeps =
+        builtins.concatStringsSep "\n"
+        (map (id: "cp -rsf --no-preserve=mode ${drvById.${id}}/. ./staged/") depIds);
+      stageSrcs =
+        builtins.concatStringsSep "\n"
+        (map (x: "install -Dm644 ${srcStorePath x} ./staged/${artPath x}") srcs);
+      linkEntries = builtins.concatStringsSep "\n" (map (e: let
+          from = artPath (builtins.head (collectInputs [e.src]));
+        in ''
+          mkdir -p "$out/${outRel}/$(dirname ${esc e.path})"
+          cp -a --no-preserve=mode "./staged/${from}" "$out/${outRel}/${e.path}"
+        '')
+        a.entries);
+    in
+      pkgs.runCommand (sanDrv a.id) {preferLocalBuild = true;} ''
+        mkdir -p ./staged "$out/${outRel}"
+        ${stageDeps}
+        ${stageSrcs}
+        ${linkEntries}
+      '';
+
+    # copy_file: one file, same staging rules.
+    mkCopy = a: let
+      outRel = artPath a.output;
+      ins = collectInputs [a.src];
+      src = builtins.head ins;
+      srcPath =
+        if src.kind == "source"
+        then srcStorePath src
+        else "${drvById.${producerId src}}/${artPath src}";
+    in
+      pkgs.runCommand (sanDrv a.id) {preferLocalBuild = true;} ''
+        install -D ${srcPath} "$out/${outRel}"
+      '';
+
     mkDownload = a: let
       fod = pkgs.fetchurl ({inherit (a) url;}
         // (
@@ -301,6 +352,10 @@
       then mkWrite a
       else if a.kind == "download"
       then mkDownload a
+      else if a.kind == "symlinked_dir"
+      then mkSymlinkedDir a
+      else if a.kind == "copy"
+      then mkCopy a
       else throw "buck2: cannot lower action kind '${a.kind}'";
 
     drvById = listToAttrs (map (a: {
