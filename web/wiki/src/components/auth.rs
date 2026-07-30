@@ -392,8 +392,10 @@ fn AuthForm(mode: AuthMode) -> Element {
                                 "{t(\"auth.password\")}"
                             }
                         }
+                        div { class: "pw-field",
                         input {
                             id: "auth-password",
+                            class: "pw-input",
                             r#type: "password",
                             name: "password",
                             autocomplete: "current-password",
@@ -413,6 +415,8 @@ fn AuthForm(mode: AuthMode) -> Element {
                                 );
                             },
                         }
+                        super::widgets::PasswordDots { len: password.read().chars().count() }
+                        }
                         if !error_password.read().is_empty() {
                             div { class: "helper-text", "{error_password}" }
                         }
@@ -423,8 +427,10 @@ fn AuthForm(mode: AuthMode) -> Element {
                 if mode == AuthMode::Register || mode == AuthMode::SetPassword {
                     div { class: if error_password_repeat.read().is_empty() { "text-field" } else { "text-field error" },
                         label { r#for: "auth-password-repeat", "{t(\"auth.repeatPassword\")}" }
+                        div { class: "pw-field",
                         input {
                             id: "auth-password-repeat",
+                            class: "pw-input",
                             r#type: "password",
                             name: "password-repeat",
                             value: "{password_repeat}",
@@ -434,6 +440,10 @@ fn AuthForm(mode: AuthMode) -> Element {
                                 // A mismatch marked the first box as well.
                                 clear_paired_error(error_password, &t("auth.passwordMismatch"));
                             },
+                        }
+                        super::widgets::PasswordDots {
+                            len: password_repeat.read().chars().count(),
+                        }
                         }
                         if !error_password_repeat.read().is_empty() {
                             div { class: "helper-text", "{error_password_repeat}" }

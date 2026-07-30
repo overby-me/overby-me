@@ -7146,3 +7146,98 @@ a.list-item:hover {
 		transition: none;
 	}
 }
+
+/* ── Password dots (widgets::PasswordDots) ─────────────────────────────
+   M3 Expressive has no password component, but it does have a motion-physics
+   system and an instruction to use it: "apply the expressive motion springs or
+   custom micro animations". A masked character arriving with a spring is one of
+   the few places a login screen can have any character at all.
+
+   The real input keeps every job it had; this only paints over it. The rule that
+   hides the browser's own glyphs REQUIRES the overlay to be present, so if the
+   overlay ever fails to render the native dots come straight back instead of the
+   field looking empty. */
+.pw-field {
+	position: relative;
+}
+.pw-input:has(+ .pw-dots) {
+	color: transparent;
+	caret-color: transparent;
+}
+.pw-dots {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-1-5);
+	padding-inline: var(--md-sys-spacing-4);
+	pointer-events: none;
+	overflow: hidden;
+}
+.pw-dot {
+	--dot-i: 0;
+	flex: 0 0 auto;
+	width: 9px;
+	height: 9px;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-on-surface);
+	/* Arrive with a spatial spring (the ones that overshoot), then settle into a
+	   slow, tiny sway with a per-dot phase, so the row breathes rather than
+	   twitches. Amplitude is deliberately under a pixel: this should be felt
+	   rather than watched, on a screen where people are typing a secret. */
+	animation:
+		pw-dot-in var(--md-sys-motion-duration-medium2)
+			var(--md-sys-motion-spring-spatial-default) backwards,
+		pw-dot-sway 2.8s ease-in-out infinite;
+	animation-delay: 0ms, calc(var(--dot-i) * -260ms);
+}
+@keyframes pw-dot-in {
+	from {
+		opacity: 0;
+		transform: scale(0.2) translateY(-6px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes pw-dot-sway {
+	0%,
+	100% {
+		transform: translateY(-0.6px);
+	}
+	50% {
+		transform: translateY(0.6px);
+	}
+}
+/* Drawn only while the field has focus, so a filled-but-idle field is still. */
+.pw-caret {
+	width: 2px;
+	height: var(--md-sys-typescale-body-large-size);
+	margin-inline-start: calc(var(--md-sys-spacing-1) * -1);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-primary);
+	opacity: 0;
+}
+.pw-field:focus-within .pw-caret {
+	animation: pw-caret-blink 1.1s step-end infinite;
+}
+@keyframes pw-caret-blink {
+	0%,
+	49% {
+		opacity: 1;
+	}
+	50%,
+	100% {
+		opacity: 0;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.pw-dot {
+		animation: none;
+	}
+	.pw-caret {
+		animation: none;
+		opacity: 1;
+	}
+}
