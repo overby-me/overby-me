@@ -6997,3 +6997,13 @@ a.list-item:hover {
 .agenda-children .agenda-name {
 	color: var(--md-on-surface-variant);
 }
+
+/* The feed when it IS the projection: room distance, so the rows breathe and the
+   card takes the hero rather than sitting in a column beside it. */
+.projector-feed {
+	max-height: 100%;
+	overflow-y: auto;
+}
+.projector-feed .recent-item {
+	cursor: default;
+}

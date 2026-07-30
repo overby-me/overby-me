@@ -1189,6 +1189,52 @@ pub async fn set_screen_comments(
     Ok(result.insert_relation.is_some())
 }
 
+/// Whether the chair has put the context's feed on the room's screen.
+pub async fn screen_feed_on(access_token: Option<&str>, context_id: &str) -> Result<bool, String> {
+    let where_clause = RelationsBoolExp {
+        name: Some(StringComparisonExp {
+            eq: Some("screenFeed".to_string()),
+            ..Default::default()
+        }),
+        parent_id: Some(UuidComparisonExp {
+            eq: Some(Uuid(context_id.to_string())),
+            is_null: None,
+        }),
+    };
+    let operation = RelationsQuery::build(RelationsWhereVariables { where_clause });
+    let result = execute(access_token, operation).await?;
+    Ok(result.relations.into_iter().any(|r| r.node_id.is_some()))
+}
+
+/// Chair toggle: show the context's feed on the projector, or stop.
+///
+/// A projection target that is not a node, so it cannot be the `active` relation
+/// (which points at one). It is its own flag, upserted the way `screenComments`
+/// is, and the projector prefers it over `active`: asking for the feed is an
+/// explicit instruction about what the room should be looking at.
+pub async fn set_screen_feed(
+    access_token: Option<&str>,
+    context_id: &str,
+    on: bool,
+) -> Result<bool, String> {
+    use cynic::MutationBuilder;
+    let object = RelationsInsertInput {
+        name: Some("screenFeed".to_string()),
+        node_id: on.then(|| Uuid(context_id.to_string())),
+        parent_id: Some(Uuid(context_id.to_string())),
+    };
+    let on_conflict = RelationsOnConflict {
+        constraint: RelationsConstraint::RelationsParentIdNameKey,
+        update_columns: vec![RelationsUpdateColumn::NodeId],
+    };
+    let operation = InsertRelationMutation::build(InsertRelationVariables {
+        object,
+        on_conflict,
+    });
+    let result = execute(access_token, operation).await?;
+    Ok(result.insert_relation.is_some())
+}
+
 /// Open a poll on `parent_id` (a policy/change/position): close any prior active
 /// poll, insert a `vote/poll` node with the ballot config, and set the context's
 /// `active` relation to it. Mirrors React's PollDialog.

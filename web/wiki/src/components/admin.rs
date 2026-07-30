@@ -108,6 +108,18 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
     // agenda should survive the trip.
     let mut tab = use_signal(|| 0usize);
 
+    // Whether the room's screen is currently showing the feed rather than an
+    // agenda item. Live, so two chairs on two devices agree.
+    let feed_ctx = context_id.clone();
+    let feed_token = access_token.clone();
+    let screen_feed = crate::use_data_resource!(|(feed_ctx, feed_token, rev)| async move {
+        let _ = rev;
+        graphql::screen_feed_on(feed_token.as_deref(), &feed_ctx)
+            .await
+            .unwrap_or(false)
+    });
+    let screen_feed = screen_feed.read().unwrap_or(false);
+
     let polls_ctx = context_id.clone();
     let polls = crate::use_data_resource!(|(polls_ctx, access_token)| async move {
         graphql::query_context_polls(access_token.as_deref(), &polls_ctx)
@@ -134,6 +146,35 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                     class: "btn btn-tonal",
                     span { class: "material-icons", "sensors" }
                     "{t(\"mime.follow\")}"
+                }
+                // Put the feed on the room's screen. Not an agenda item, so it is
+                // not something the agenda can project: it is its own instruction
+                // about what the room should be looking at, and it wins over
+                // whatever was last projected until the chair turns it off.
+                if can_manage {
+                    button {
+                        class: if screen_feed { "btn btn-filled" } else { "btn btn-tonal" },
+                        "aria-pressed": if screen_feed { "true" } else { "false" },
+                        onclick: {
+                            let ctx = context_id.clone();
+                            move |_| {
+                                let ctx = ctx.clone();
+                                let token = session.read().access_token.clone();
+                                let next = !screen_feed;
+                                spawn(async move {
+                                    match graphql::set_screen_feed(token.as_deref(), &ctx, next).await {
+                                        Ok(_) => crate::session::bump_data_version(),
+                                        Err(e) => {
+                                            log::error!("screen feed toggle failed: {e}");
+                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                        }
+                                    }
+                                });
+                            }
+                        },
+                        span { class: "material-icons", "view_agenda" }
+                        if screen_feed { "{t(\"console.feedOnScreenStop\")}" } else { "{t(\"console.feedOnScreen\")}" }
+                    }
                 }
             }
 

@@ -27,7 +27,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
     let sub_ctx = crate::graphql::gql_escape(&context_id);
     crate::subscription::use_live(
         format!(
-            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _in: [\"active\", \"screenComments\"] }} }}) {{ nodeId name }} }}"
+            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _in: [\"active\", \"screenComments\", \"screenFeed\"] }} }}) {{ nodeId name }} }}"
         ),
         refresh,
     );
@@ -57,6 +57,18 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
                 .unwrap_or(false)
         });
     let show_comments = show_comments.read().unwrap_or(false);
+
+    // The feed as a projection target: the chair can put what the room has been
+    // posting on the screen itself, rather than only the item under discussion.
+    let feed_ctx = context_id.clone();
+    let feed_token = access_token.clone();
+    let show_feed = crate::use_data_resource!(|(feed_ctx, feed_token, rev)| async move {
+        let _ = rev;
+        graphql::screen_feed_on(feed_token.as_deref(), &feed_ctx)
+            .await
+            .unwrap_or(false)
+    });
+    let show_feed = show_feed.read().unwrap_or(false);
 
     // Live presenter focus: the section (heading anchor) the chair chose to bring
     // the room's attention to, for documents too long to show whole. Scrolled into
@@ -106,6 +118,18 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
         div { class: "projector",
             div { class: "projector-hero",
                 match active.clone() {
+                    // Whatever is projected loses to an explicit "show the feed":
+                    // the chair asked for this one, and the active node is often
+                    // just whatever was last discussed.
+                    _ if show_feed => rsx! {
+                        div { class: "card projector-feed",
+                            div { class: "card-header",
+                                div { class: "avatar", span { class: "material-icons", "view_agenda" } }
+                                h3 { class: "title-medium", "{crate::i18n::t(\"layout.feed\")}" }
+                            }
+                            crate::components::feed::FeedList { context_id: context_id.clone() }
+                        }
+                    },
                     Some(n) => rsx! { MimeLoader { key: "{n.id.0}", node: n, path: Vec::new(), projector: true } },
                     None => rsx! {
                         // DESIGN: an expressive idle state instead of a bare "…".
