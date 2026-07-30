@@ -7021,10 +7021,10 @@ a.list-item:hover {
 	   bottom dock exactly as the .fab rule does. */
 	bottom: 88px;
 	z-index: 120;
-	display: flex;
-	flex-direction: column;
-	align-items: flex-end;
-	gap: var(--md-sys-spacing-2);
+	/* Only as big as the trigger. The items hang ABOVE it, positioned rather than
+	   stacked, so the box that opens on hover is the button and not a column of
+	   empty space over the page. */
+	display: block;
 }
 .speak-join-scrim {
 	position: fixed;
@@ -7032,10 +7032,16 @@ a.list-item:hover {
 	z-index: -1;
 }
 .speak-join-items {
+	position: absolute;
+	right: 0;
+	bottom: 100%;
 	display: flex;
 	flex-direction: column;
 	align-items: flex-end;
 	gap: var(--md-sys-spacing-2);
+	/* The gap to the trigger belongs to the items, so a pointer travelling from
+	   the button to an action never crosses a dead strip that closes the menu. */
+	padding-bottom: var(--md-sys-spacing-2);
 	/* Closed: gone, and not in the tab order or the hit area. */
 	visibility: hidden;
 	pointer-events: none;
@@ -7043,6 +7049,23 @@ a.list-item:hover {
 .speak-join-items.open {
 	visibility: visible;
 	pointer-events: auto;
+}
+/* Hover opens it, the way the old speed dial did, and leaving closes it again.
+   Only where hovering is a real thing: on touch there is no pointer to rest, and
+   a hover rule there leaves the menu stuck open after a tap. Focus does the same
+   for the keyboard, so tabbing to the trigger reveals what it offers. */
+@media (hover: hover) and (pointer: fine) {
+	.speak-join:hover .speak-join-items,
+	.speak-join:focus-within .speak-join-items {
+		visibility: visible;
+		pointer-events: auto;
+	}
+	.speak-join:hover .speak-join-item,
+	.speak-join:focus-within .speak-join-item {
+		opacity: 1;
+		transform: none;
+		transition-delay: calc(var(--join-i) * 30ms);
+	}
 }
 .speak-join-item {
 	--join-i: 0;
