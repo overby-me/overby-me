@@ -142,6 +142,21 @@ pub fn HomeApp() -> Element {
                         crate::components::layout::HomeList { as_cards: true }
                     }
                 }
+                // Everything recent across the user's groups and events (#34).
+                // This is the cross-context feed's full form: the activity sheet
+                // shows only the newest few and links here, and a single
+                // context's own feed is its `?app=feed` page.
+                if is_auth {
+                    div { class: "card mt-2",
+                        div { class: "card-header",
+                            div { class: "avatar small",
+                                span { class: "material-icons", "view_agenda" }
+                            }
+                            h3 { class: "title-medium", "{t(\"layout.feed\")}" }
+                        }
+                        crate::components::feed::FeedList { autoload: true }
+                    }
+                }
             }
         }
     }

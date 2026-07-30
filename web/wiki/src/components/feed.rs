@@ -41,18 +41,22 @@ pub fn FeedApp(node: model::NodeWithChildren) -> Element {
 
 /// How many feed rows to fetch per page.
 const FEED_PAGE: i32 = 12;
+/// How many a peek shows: enough to answer "anything happened?", too few to
+/// invite reading in a sheet the width of a phone.
+const PEEK_PAGE: i32 = 5;
 
 /// The feed list itself.
 ///
 /// `context_id` scopes it to one group or event; without it the list is
 /// everything the reader may see. `autoload` fetches the next page as the reader
 /// nears the end of the window, which only works where the window is what
-/// scrolls (a page, not a sheet); everything else pages on the button, which is
-/// shown whenever there is more either way.
+/// scrolls (a page, not a sheet). `peek` is the digest form: the newest few and
+/// nothing more, for a caller that links on to the full list.
 #[component]
 pub fn FeedList(
     #[props(default)] context_id: Option<String>,
     #[props(default)] autoload: bool,
+    #[props(default)] peek: bool,
 ) -> Element {
     let session = use_session();
     let token = session.read().access_token.clone();
@@ -65,6 +69,9 @@ pub fn FeedList(
     // Cleared when a page comes back short: that is the end of the feed, and
     // without it the list would keep asking for more.
     let mut has_more = use_signal(|| true);
+
+    // A peek asks for its handful once; everything else pages.
+    let page_size = if peek { PEEK_PAGE } else { FEED_PAGE };
 
     // First page, and a reset if the scope or the signed-in user changes.
     {
@@ -81,13 +88,13 @@ pub fn FeedList(
             spawn(async move {
                 let page = graphql::query_recent_nodes(
                     token.as_deref(),
-                    FEED_PAGE,
+                    page_size,
                     0,
                     &uid,
                     ctx.as_deref(),
                 )
                 .await;
-                has_more.set(page.len() as i32 == FEED_PAGE);
+                has_more.set(page.len() as i32 == page_size);
                 items.set(page);
                 loading.set(false);
             });
@@ -171,7 +178,8 @@ pub fn FeedList(
             div { class: "empty-state empty-state-sm",
                 div { class: "spinner spinner-sm" }
             }
-        } else if *has_more.read() {
+        } else if *has_more.read() && !peek {
+            // A peek does not page: its caller offers the way to the full list.
             button {
                 class: "btn btn-text",
                 onclick: move |_| fetch_more(token.clone(), user_id.clone(), context_id.clone()),

@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 
 use crate::graphql;
 use crate::i18n::t;
+use crate::route::Route;
 use crate::session::use_session;
 
 /// Whether the activity sheet is open. Global because the trigger lives in the
@@ -18,10 +19,11 @@ use crate::session::use_session;
 /// scrim escapes the bar's stacking context.
 pub static ACTIVITY_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 
-/// Close the sheet and put focus back on the trigger that opened it. The trigger
-/// is a single, always-present button, so it is found by class rather than
-/// stashed in a signal. Public so a feed row can dismiss the sheet it was
-/// followed from.
+/// Close the sheet and put focus back where it came from. The trigger lives in
+/// the drawer, which on compact has itself closed by the time the sheet opens,
+/// so focus falls back to the menu button that leads there. Found by class
+/// rather than stashed in a signal, since both are single and always present.
+/// Public so a feed row can dismiss the sheet it was followed from.
 pub fn close_activity() {
     // Called by feed rows, which also live on the feed page: with nothing open
     // there is nothing to close, and the focus move below would be a jump for no
@@ -30,20 +32,31 @@ pub fn close_activity() {
         return;
     }
     *ACTIVITY_OPEN.write() = false;
-    if let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.query_selector(".activity-trigger").ok().flatten())
-        .and_then(|e| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(e).ok())
-    {
-        let _ = el.focus();
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    for sel in [".activity-trigger", ".menu-trigger"] {
+        if let Some(el) = doc
+            .query_selector(sel)
+            .ok()
+            .flatten()
+            .and_then(|e| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(e).ok())
+        {
+            let _ = el.focus();
+            return;
+        }
     }
 }
 
-/// The top app bar's activity trigger, badged with the pending-invitation count
-/// so an invitation is visible from every page instead of only from the home
-/// page the reader has no reason to visit.
+/// The drawer's activity row, pinned above the account menu.
+///
+/// It sits with the drawer's other standing utilities rather than in the top app
+/// bar: the bar is at its most cramped on a phone, where it also carries the
+/// breadcrumb trail. What has to be visible everywhere is not this row but the
+/// count on it, and that travels to whichever menu button opens the drawer (see
+/// [`NavBadge`]), so a waiting invitation still announces itself from every page.
 #[component]
-pub fn ActivityButton() -> Element {
+pub fn ActivityRow() -> Element {
     let session = use_session();
     if !session.read().is_authenticated() {
         return rsx! {};
@@ -51,25 +64,49 @@ pub fn ActivityButton() -> Element {
     let pending = crate::components::layout::PENDING_INVITES();
     let label = t("common.activity");
     rsx! {
-        button {
-            class: "expressive-search-btn activity-trigger state-layer",
-            aria_label: "{label}",
-            title: "{label}",
-            "aria-haspopup": "dialog",
-            "aria-expanded": if ACTIVITY_OPEN() { "true" } else { "false" },
-            onclick: move |_| {
-                let now = !ACTIVITY_OPEN();
-                if now {
-                    *ACTIVITY_OPEN.write() = true;
-                } else {
-                    close_activity();
+        div { class: "drawer-utility",
+            button {
+                class: "drawer-account-trigger activity-trigger state-layer",
+                aria_label: "{label}",
+                title: "{label}",
+                "aria-haspopup": "dialog",
+                "aria-expanded": if ACTIVITY_OPEN() { "true" } else { "false" },
+                // Deliberately NOT stop_propagation, unlike the account trigger
+                // below: on compact this click should dismiss the drawer, because
+                // the sheet it opens is what takes its place.
+                onclick: move |_| {
+                    let now = !ACTIVITY_OPEN();
+                    if now {
+                        *ACTIVITY_OPEN.write() = true;
+                    } else {
+                        close_activity();
+                    }
+                },
+                span { class: "avatar small badged-icon",
+                    span { class: "material-icons", "notifications" }
+                    if pending > 0 {
+                        crate::components::widgets::Badge { count: Some(pending) }
+                    }
                 }
-            },
-            span { class: "activity-trigger-indicator",
-                span { class: "material-icons", "notifications" }
-                if pending > 0 {
-                    crate::components::widgets::Badge { count: Some(pending) }
-                }
+                span { class: "drawer-account-name", "{label}" }
+            }
+        }
+    }
+}
+
+/// The pending-invitation count, for the menu button that opens the drawer the
+/// activity row lives in. Wraps the caller's icon, so the badge overlays it.
+///
+/// Nothing to answer means no badge at all, rather than a zero: the point is to
+/// be noticed when it appears.
+#[component]
+pub fn NavBadge(children: Element) -> Element {
+    let pending = crate::components::layout::PENDING_INVITES();
+    rsx! {
+        span { class: "badged-icon",
+            {children}
+            if pending > 0 {
+                crate::components::widgets::Badge { count: Some(pending) }
             }
         }
     }
@@ -144,9 +181,17 @@ pub fn ActivitySheet() -> Element {
                     PendingInvitations {}
                     div { class: "activity-section",
                         p { class: "title-small list-subheader", "{t(\"layout.feed\")}" }
-                        // Unscoped: everything the reader may see, wherever they
-                        // are. A context's own feed is its `?app=feed` page.
-                        crate::components::feed::FeedList {}
+                        // A peek, not a feed: the newest few across everything the
+                        // reader may see, enough to answer "did I miss anything".
+                        // Reading properly happens in a full column, on the home
+                        // page (everywhere) or a context's own `?app=feed`.
+                        crate::components::feed::FeedList { peek: true }
+                        Link {
+                            to: Route::Home { app: None },
+                            class: "btn btn-text",
+                            onclick: move |_| close_activity(),
+                            "{t(\"layout.allActivity\")}"
+                        }
                     }
                 }
             }

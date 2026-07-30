@@ -6822,16 +6822,40 @@ a.list-item:hover {
    than replacing it, so checking them never costs the reader their place. Uses
    the app's standard sheet geometry (.tool-sheet): bottom sheet on compact,
    right side sheet on medium+. */
-.activity-trigger-indicator {
+/* An icon carrying the pending-invitation badge: the drawer's activity row, and
+   whichever menu button opens that drawer. */
+.badged-icon {
 	position: relative;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 }
-/* The trigger sits on the search container, not the shell backdrop, so the
-   badge's cutout ring has to match that surface to read as a cutout. */
-.activity-trigger-indicator .md-badge {
+/* The cutout ring has to match the surface the icon actually sits on, or it
+   reads as an outline instead of a cutout: the top bar's menu button sits on the
+   search container, the drawer row on a tonal avatar. */
+.expressive-search .badged-icon .md-badge {
 	box-shadow: 0 0 0 2px var(--md-surface-container-high);
+}
+.drawer-utility .badged-icon .md-badge {
+	box-shadow: 0 0 0 2px var(--md-surface-container);
+}
+
+/* The drawer's standing utility rows (the activity row), pinned under the
+   scrolling tree and above the account. Shares the account row's metrics; the
+   divider between the two is the account's own, so this one only rules off the
+   tree above it. */
+.drawer-utility {
+	flex: 0 0 auto;
+	width: 100%;
+	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-2)
+		0 var(--md-sys-spacing-2);
+	border-top: 1px solid var(--md-outline-variant);
+}
+.drawer-utility + .user-menu.in-drawer {
+	border-top: none;
+}
+.drawer-utility .drawer-account-trigger:hover {
+	background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
 }
 .activity-body {
 	gap: var(--md-sys-spacing-2);

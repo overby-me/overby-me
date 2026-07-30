@@ -93,7 +93,9 @@ pub(super) fn DrawerContent() -> Element {
                 }
             }
             }
-            // Account menu, pinned at the bottom of the drawer.
+            // Standing utilities, pinned below the scrolling tree: what is new,
+            // then the account.
+            crate::components::activity::ActivityRow {}
             UserMenu {}
         }
     }
@@ -139,8 +141,11 @@ pub(super) fn ContextSwitchBar(name: String, mime: String, at_home: bool) -> Ele
             },
             div { class: "avatar small", {crate::components::loader::icon_el(&mime)} }
             span { class: "drawer-context-name", "{name}" }
+            // The up/down pair, not a single chevron: a plain chevron says "this
+            // section expands", while this is the standard mark of a control that
+            // offers alternatives to what it currently shows.
             span { class: "material-icons drawer-context-chevron",
-                if open { "expand_less" } else { "expand_more" }
+                if open { "unfold_less" } else { "unfold_more" }
             }
         }
     }

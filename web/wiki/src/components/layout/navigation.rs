@@ -20,12 +20,19 @@ pub(super) fn NavigationRail(tree_open: bool, on_toggle: EventHandler<()>) -> El
             // Header: the menu button opens / closes the context tree pane.
             div { class: "nav-rail-header",
                 button {
-                    class: "btn-icon state-layer",
+                    class: "btn-icon menu-trigger state-layer",
                     aria_label: t("common.menu"),
                     "aria-expanded": if tree_open { "true" } else { "false" },
                     onclick: move |_| on_toggle.call(()),
-                    span { class: "material-icons",
-                        if tree_open { "menu_open" } else { "menu" }
+                    // Badge only while the pane is shut. Open, the activity row it
+                    // stands for is on screen carrying its own count, and two of
+                    // them would just be two.
+                    if tree_open {
+                        span { class: "material-icons", "menu_open" }
+                    } else {
+                        crate::components::activity::NavBadge {
+                            span { class: "material-icons", "menu" }
+                        }
                     }
                 }
             }
