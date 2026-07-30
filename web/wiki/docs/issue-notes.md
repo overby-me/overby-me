@@ -1,8 +1,7 @@
 # Notes on the open issues
 
-Written 2026-07-31, after working through the small ones. Three of the issues
-turned out to need a decision rather than an implementation, and one turned out
-to be already done. This is what was found, so the decisions can be made from
+Written 2026-07-31, after working through the small ones. Two of them turned out to need a
+decision rather than an implementation, and one turned out to be already done. This is what was found, so the decisions can be made from
 evidence rather than from memory.
 
 ## Already delivered: #11 (random ballot order), #7 in part
@@ -18,45 +17,33 @@ the screen showed. Covered by `ballot_order_keeps_blank_last_and_is_a_permutatio
 **#7** was half delivered for the same reason: documents autolinked, comments
 and plain text nodes did not. They do now.
 
-## Blocked on a decision: images on a comment
+## Done: images on a comment
 
-The client half is straightforward and was written; it is not committed, because
-the images it produces would be **readable by nobody**. What the permission model
-actually says, verified against production:
+Straightforward in the end, once the mechanism was read rather than inferred.
+The first pass here concluded it was blocked, on the grounds that a file is only
+readable through the `nodes.file_id` column and no client may write it. Both
+halves of that are true and the conclusion was still wrong: **`file_id` is a
+GENERATED column**, derived from `data->>'image'` (or `data->>'fileId'`) and
+validated as a uuid. The client never writes it. It writes `data.image`, exactly
+as a candidate's photo and a document's cover image already do, and the column —
+and with it the storage permission — follows.
 
-- `storage.files` is readable by role `user` under two conditions: the file was
-  uploaded by them (`uploaded_by_user_id`), or it is referenced by a NODE they
-  may read, through a manual relationship mapping `files.id -> nodes.file_id`.
-- `uploaded_by_user_id` is **null on all 1023 files**. That branch has never
-  matched anyone. The only path that works is the node reference.
-- The reference is the `nodes.file_id` COLUMN, not anything inside `data`. Every
-  node in the wiki that carries a file sets it — 653 of them, with no exceptions.
-- `file_id` is neither selectable nor insertable by `public` or `user`. A client
-  cannot write it, and no backend route does either.
+So a comment carries one image, stored at `data.image`. One, because the
+generated column holds one uuid; a second would be invisible, which is worse than
+not offering it.
 
-Verified end to end: a member of the context can read a file behind a node's
-`file_id`, someone outside it gets nothing, and an anonymous reader can read it
-when the node is public. Exactly the behaviour wanted — but only reachable
-through a column the client may not write.
+Verified against production with the shape the app now inserts: a member posted a
+comment with `data.image`, the `file_id` column generated itself, and a DIFFERENT
+member of that context could read the file row. The probe was removed afterwards.
 
-So an image attached to a comment cannot be made readable today. Three ways out,
-in the order I would pick them:
+What is worth knowing about the permission, since it is not obvious:
 
-1. **A child `wiki/file` node per attachment.** This is how the wiki already
-   models a file, so the permissions, the bin, restore and orphan cleanup all
-   work with no server change. The comment renders its file children. More code
-   than the alternatives, and comment queries would have to fetch children.
-2. **A backend attach route.** The backend holds admin rights; it could create
-   the file node (and set `file_id`) after checking the caller may comment on
-   that parent. Keeps one image per comment simple, but adds a route that writes
-   nodes, which the backend does not do today.
-3. **Widen the client's insert permission to `file_id`.** Smallest change,
-   largest blast radius: any client could then point a node at any file id,
-   including one it may not read, and use a readable node as a lever to expose
-   it. I would not do this.
-
-I stopped rather than pick, because it is a data-shape decision that outlives
-the feature.
+- `storage.files` is readable when the file was uploaded by the reader
+  (`uploaded_by_user_id`) or when a NODE the reader may read points at it.
+- `uploaded_by_user_id` is **null on all 1023 files** in this deployment. That
+  branch has never matched anyone, so the node reference is the only path — which
+  is why storing an id anywhere other than where the generated column reads it
+  produces an image nobody can see, not even its author.
 
 ## Needs design: #10, node revision table
 

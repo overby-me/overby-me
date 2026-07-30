@@ -6745,6 +6745,39 @@ a.list-item:hover {
 	color: var(--md-on-surface-variant);
 }
 
+/* An image attached to a comment: sized so it reads as an attachment rather
+   than as the comment, opening full size through the document lightbox. */
+.comment-image img,
+.comment-attachment img {
+	max-width: 260px;
+	max-height: 260px;
+	border-radius: var(--md-sys-shape-corner-medium);
+	object-fit: cover;
+}
+.comment-image,
+.comment-attachment {
+	margin: var(--md-sys-spacing-2) 0;
+}
+/* The composer's preview carries its remove button in the corner. */
+.comment-attachment {
+	position: relative;
+	width: fit-content;
+}
+.comment-attachment-remove {
+	position: absolute;
+	top: var(--md-sys-spacing-1);
+	inset-inline-end: var(--md-sys-spacing-1);
+	background: var(--md-surface-container-highest);
+	box-shadow: var(--md-sys-elevation-1);
+}
+/* A label acting as the button for the hidden file input. */
+.comment-attach {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+}
+
 .comment-text {
 	margin: var(--md-sys-spacing-0-5) 0 var(--md-sys-spacing-1);
 	font-size: var(--md-sys-typescale-body-medium-size);

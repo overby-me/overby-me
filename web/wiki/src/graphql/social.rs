@@ -51,6 +51,29 @@ pub async fn query_comments(
 /// comment for a nested reply). `author` is stored as the node name and `text`
 /// as `data.text`, matching the reference comment shape.
 #[allow(clippy::too_many_arguments)]
+/// A comment's stored `data`.
+///
+/// An attached image goes under `image`, which is not an arbitrary choice: the
+/// `nodes.file_id` column is GENERATED from `data->>'image'` (or `data->>'fileId'`),
+/// and that column is what the storage permission joins on to decide who may
+/// read the file. Store the id anywhere else and the image is readable by
+/// nobody — not even its author, since `uploaded_by_user_id` is null on every
+/// file in this deployment. This is the same path a candidate's photo and a
+/// document's cover image already take.
+///
+/// One image, because the generated column holds one uuid. A second would be
+/// invisible, which is worse than not offering it.
+///
+/// The key is OMITTED when there is no image, so a plain comment keeps the exact
+/// shape every comment has always had (`{"text": ...}`) and old readers need
+/// learn nothing.
+pub(crate) fn comment_data(text: &str, image: Option<&str>) -> serde_json::Value {
+    match image.filter(|i| !i.is_empty()) {
+        Some(id) => serde_json::json!({ "text": text, "image": id }),
+        None => serde_json::json!({ "text": text }),
+    }
+}
+
 pub async fn insert_comment(
     access_token: Option<&str>,
     parent_id: &str,
@@ -58,6 +81,7 @@ pub async fn insert_comment(
     key: &str,
     author: &str,
     text: &str,
+    image: Option<&str>,
 ) -> Result<bool, String> {
     let input = model::NodesInsertInput {
         name: Some(author.to_string()),
@@ -65,7 +89,7 @@ pub async fn insert_comment(
         mime_id: Some("vote/comment".to_string()),
         parent_id: Some(model::Uuid(parent_id.to_string())),
         context_id: context_id.map(|c| model::Uuid(c.to_string())),
-        data: Some(model::Jsonb(serde_json::json!({ "text": text }))),
+        data: Some(model::Jsonb(comment_data(text, image))),
         mutable: Some(false),
         index: None,
         created_at: None,

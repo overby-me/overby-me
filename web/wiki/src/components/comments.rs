@@ -24,6 +24,54 @@ fn comment_text(comment: &ChildNodeFields) -> String {
         .to_string()
 }
 
+/// How large an attached image may be.
+///
+/// Ten megabytes is roughly a phone photo straight from the camera; the point is
+/// to stop a video renamed to .jpg, not to make people compress a screenshot
+/// before answering a motion.
+const MAX_COMMENT_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+
+/// Whether a picked file may be attached, or the key of the reason it may not.
+///
+/// Pure, so the rules can be tested without a browser — and worth stating
+/// server-shaped rather than trusting `accept="image/*"`, which is a hint the
+/// file picker may ignore.
+fn image_rejection(content_type: &str, size: usize) -> Option<&'static str> {
+    if !content_type.starts_with("image/") {
+        return Some("vote.imageNotAnImage");
+    }
+    if size > MAX_COMMENT_IMAGE_BYTES {
+        return Some("vote.imageTooLarge");
+    }
+    None
+}
+
+/// The image attached to a comment (`data.image`), if any.
+fn comment_image(comment: &ChildNodeFields) -> Option<String> {
+    comment
+        .data
+        .as_ref()
+        .and_then(|d| d.0.get("image"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// An attached image, fetched with the session token into a blob URL so the JWT
+/// never enters an `<img src>`, and opening full size through the same lightbox
+/// a document's image uses.
+#[component]
+fn CommentImage(file_id: String) -> Element {
+    let url = super::loader::use_file_object_url(file_id);
+    rsx! {
+        if let Some(src) = url {
+            div { class: "comment-image",
+                super::widgets::ZoomableImage { src, alt: t("vote.imageAlt") }
+            }
+        }
+    }
+}
+
 /// A comment shown optimistically before the server confirms it. Reconciled by
 /// `key`: once the refetch returns a comment with the same key, the pending row is
 /// dropped — no duplicate, no flicker.
@@ -32,6 +80,9 @@ struct PendingComment {
     key: String,
     author: String,
     text: String,
+    /// Uploaded before the comment was posted, so the optimistic row shows it
+    /// rather than looking as though the attachment was dropped.
+    image: Option<String>,
 }
 
 /// Reconcile optimistic comments against the fetched set: keep only the pending
@@ -52,7 +103,7 @@ fn reconcile_pending(
 /// An optimistic (not-yet-confirmed) comment row at `depth`, muted with a
 /// "sending" marker.
 #[component]
-fn PendingRow(author: String, text: String, depth: usize) -> Element {
+fn PendingRow(author: String, text: String, image: Option<String>, depth: usize) -> Element {
     let initial = author
         .chars()
         .next()
@@ -73,6 +124,9 @@ fn PendingRow(author: String, text: String, depth: usize) -> Element {
                         // A comment is where people actually paste links: the
                         // motion they are answering, the article they are citing.
                         super::content::AutoLinked { text: text.clone() }
+                    }
+                    if let Some(id) = image.clone() {
+                        CommentImage { file_id: id }
                     }
                 }
             }
@@ -186,6 +240,7 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                                 key: "{p.key}",
                                 author: p.author.clone(),
                                 text: p.text.clone(),
+                                image: p.image.clone(),
                                 depth: 0,
                             }
                         }
@@ -400,6 +455,7 @@ fn CommentThread(
     // free-text authors with no linked account.
     let author_id = comment.owner.as_ref().map(|o| o.id.0.clone());
     let text = comment_text(&comment);
+    let image = comment_image(&comment);
     let when = comment
         .created_at
         .as_ref()
@@ -446,10 +502,13 @@ fn CommentThread(
                     }
                     if !deleted {
                         p { class: "comment-text",
-                        // A comment is where people actually paste links: the
-                        // motion they are answering, the article they are citing.
-                        super::content::AutoLinked { text: text.clone() }
-                    }
+                            // A comment is where people actually paste links: the
+                            // motion they are answering, the article they are citing.
+                            super::content::AutoLinked { text: text.clone() }
+                        }
+                        if let Some(id) = image.clone() {
+                            CommentImage { file_id: id }
+                        }
                         ReactionBar {
                             comment_id: comment.id.0.clone(),
                             context_id: context_id.clone(),
@@ -555,6 +614,7 @@ fn CommentThread(
                     key: "{p.key}",
                     author: p.author.clone(),
                     text: p.text.clone(),
+                    image: p.image.clone(),
                     depth: depth + 1,
                 }
             }
@@ -836,10 +896,49 @@ fn CommentComposer(
     let mut text = use_signal(String::new);
     let mut posting = use_signal(|| false);
     let mut pending = pending;
+    // The attached image, uploaded as soon as it is picked so posting is one
+    // insert rather than an upload the reader waits through. Picking a second
+    // replaces the first: the node carries one image (see graphql::comment_data).
+    let mut attached = use_signal(|| None::<String>);
+    let mut uploading = use_signal(|| false);
+
+    let pick_image = move |evt: FormEvent| {
+        let Some(fd) = evt.files().into_iter().next() else {
+            return;
+        };
+        let token = session.read().access_token.clone();
+        spawn(async move {
+            let name = fd.name();
+            let ctype = fd.content_type().unwrap_or_default();
+            let bytes = match fd.read_bytes().await {
+                Ok(b) => b,
+                Err(e) => {
+                    log::error!("read attachment failed: {e}");
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                    return;
+                }
+            };
+            if let Some(reason) = image_rejection(&ctype, bytes.len()) {
+                crate::snackbar::show_snackbar(&t(reason));
+                return;
+            }
+            uploading.set(true);
+            match crate::nhost::upload_file(token.as_deref(), bytes.to_vec(), &name, &ctype).await {
+                Ok(f) => attached.set(Some(f.id)),
+                Err(e) => {
+                    log::error!("attachment upload failed: {e:?}");
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                }
+            }
+            uploading.set(false);
+        });
+    };
 
     let post = move |_| {
         let body = text.read().trim().to_string();
-        if body.is_empty() {
+        let image = attached.read().clone();
+        // A comment that is only an image is still a comment.
+        if body.is_empty() && image.is_none() {
             return;
         }
         // Natural opt-in: if you're joining the conversation, offer to notify you
@@ -864,8 +963,10 @@ fn CommentComposer(
             key: key.clone(),
             author: author.clone(),
             text: body.clone(),
+            image: image.clone(),
         });
         text.set(String::new());
+        attached.set(None);
         spawn(async move {
             posting.set(true);
             let result = graphql::insert_comment(
@@ -875,6 +976,7 @@ fn CommentComposer(
                 &key,
                 &author,
                 &body,
+                image.as_deref(),
             )
             .await;
             posting.set(false);
@@ -910,31 +1012,70 @@ fn CommentComposer(
                 }
                 Err(e) => {
                     log::error!("comment post failed: {e}");
-                    // Roll back the optimistic row and restore the unsent text.
+                    // Roll back the optimistic row and restore the unsent text —
+                    // and the attachment, which is already uploaded, so a retry
+                    // does not ask for the photo again.
                     pending.write().retain(|p| p.key != key);
                     text.set(body);
+                    attached.set(image);
                     crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
                 }
             }
         });
     };
 
+    let input_id = use_hook(|| format!("comment-image-{}", (js_sys::Math::random() * 1e9) as u64));
+    let attachment = attached.read().clone();
+
     rsx! {
-        div { class: "comment-composer",
-            textarea {
-                class: "comment-input",
-                placeholder: "{placeholder}",
-                rows: "2",
-                value: "{text}",
-                oninput: move |evt| text.set(evt.value()),
+        div { class: "comment-composer-wrap",
+            div { class: "comment-composer",
+                textarea {
+                    class: "comment-input",
+                    placeholder: "{placeholder}",
+                    rows: "2",
+                    value: "{text}",
+                    oninput: move |evt| text.set(evt.value()),
+                }
+                // The input itself is never shown; its label is the button.
+                input {
+                    id: "{input_id}",
+                    class: "file-upload-input",
+                    r#type: "file",
+                    accept: "image/*",
+                    onchange: pick_image,
+                }
+                label {
+                    r#for: "{input_id}",
+                    class: "btn-icon state-layer comment-attach",
+                    title: "{t(\"vote.addImage\")}",
+                    aria_label: "{t(\"vote.addImage\")}",
+                    if *uploading.read() {
+                        div { class: "spinner spinner-xs" }
+                    } else {
+                        span { class: "material-icons", "image" }
+                    }
+                }
+                button {
+                    class: "btn-icon",
+                    r#type: "button",
+                    aria_label: "{t(\"common.send\")}",
+                    disabled: *posting.read() || *uploading.read(),
+                    onclick: post,
+                    span { class: "material-icons", "send" }
+                }
             }
-            button {
-                class: "btn-icon",
-                r#type: "button",
-                aria_label: "{t(\"common.send\")}",
-                disabled: *posting.read(),
-                onclick: post,
-                span { class: "material-icons", "send" }
+            if let Some(id) = attachment {
+                div { class: "comment-attachment",
+                    CommentImage { file_id: id }
+                    button {
+                        class: "btn-icon comment-attachment-remove",
+                        r#type: "button",
+                        aria_label: "{t(\"common.delete\")}",
+                        onclick: move |_| attached.set(None),
+                        span { class: "material-icons", "close" }
+                    }
+                }
             }
         }
     }
@@ -950,7 +1091,51 @@ mod tests {
             key: key.to_string(),
             author: "Me".to_string(),
             text: "hi".to_string(),
+            image: None,
         }
+    }
+
+    #[test]
+    fn an_attachment_must_be_an_image_of_a_sane_size() {
+        use super::{image_rejection, MAX_COMMENT_IMAGE_BYTES};
+        assert_eq!(image_rejection("image/jpeg", 3_000_000), None);
+        // `accept="image/*"` is a hint the picker may ignore, and a scripted
+        // post never sees it at all.
+        assert_eq!(
+            image_rejection("application/pdf", 10),
+            Some("vote.imageNotAnImage")
+        );
+        assert_eq!(
+            image_rejection("video/mp4", 10),
+            Some("vote.imageNotAnImage")
+        );
+        // A video renamed .jpg is caught by size rather than by its name.
+        assert_eq!(
+            image_rejection("image/jpeg", MAX_COMMENT_IMAGE_BYTES + 1),
+            Some("vote.imageTooLarge")
+        );
+    }
+
+    /// The id must land under `data.image`, because `nodes.file_id` — the column
+    /// the storage permission joins on to decide who may read the file — is
+    /// GENERATED from it. Anywhere else and the image is readable by nobody.
+    #[test]
+    fn an_attached_image_is_stored_where_the_generated_column_reads_it() {
+        let with = crate::graphql::comment_data("hi", Some("7b0d79b7-de73-4291-9cd5-e8b3413d9246"));
+        assert_eq!(
+            with,
+            serde_json::json!({"text": "hi", "image": "7b0d79b7-de73-4291-9cd5-e8b3413d9246"})
+        );
+        // And a plain comment keeps the shape every comment has always had, so
+        // older readers need learn nothing.
+        assert_eq!(
+            crate::graphql::comment_data("hi", None),
+            serde_json::json!({"text": "hi"})
+        );
+        assert_eq!(
+            crate::graphql::comment_data("hi", Some("")),
+            serde_json::json!({"text": "hi"})
+        );
     }
 
     #[test]
