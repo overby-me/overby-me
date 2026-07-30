@@ -6867,3 +6867,15 @@ a.list-item:hover {
 	top: -6px;
 	inset-inline-end: -8px;
 }
+
+/* An emptied comment: the row a thread's replies hang from, after its words
+   were deleted. Recessive, because it is structure rather than content. */
+.comment-deleted .comment-author,
+.comment-deleted .comment-time {
+	color: var(--md-on-surface-variant);
+	font-style: italic;
+}
+.comment-deleted .comment-avatar {
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface-variant);
+}

@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 
 use crate::graphql::{self};
 use crate::i18n::t;
-use crate::model::ChildNodeFields;
+use crate::model::{self, ChildNodeFields};
 use crate::session::use_session;
 
 use super::loader::relative_time;
@@ -242,6 +242,51 @@ async fn delete_comment_subtree(token: Option<String>, root: String) -> Result<(
     graphql::delete_node_deep(token, root).await
 }
 
+/// Whether a comment has been emptied rather than removed (see
+/// [`tombstone_comment`]).
+fn is_tombstone(comment: &ChildNodeFields) -> bool {
+    comment
+        .data
+        .as_ref()
+        .and_then(|d| d.0.get("deleted"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Empty a comment in place, keeping the row.
+///
+/// Deleting a comment used to take its whole subthread, so one person changing
+/// their mind erased everyone who had answered them. A comment with replies is
+/// load-bearing: it is what the answers hang from. So the words go and the
+/// hanger stays, and the thread keeps its shape.
+///
+/// What goes: the text, the author's name, and the reactions, which reacted to
+/// something that no longer says anything. What stays: the row, its position,
+/// and its replies.
+///
+/// The name is what a comment carries its author in, so blanking it is the scrub
+/// that matters here. `owner_id` still holds the account, since the update input
+/// cannot send an explicit null; nothing renders it for a tombstone, but a real
+/// scrub of that column needs a mutation that can (worth doing when the bin
+/// lands).
+async fn tombstone_comment(token: Option<String>, id: String) -> Result<(), String> {
+    // Reactions first: if the update fails, the comment is still whole, whereas
+    // the reverse would leave a live comment stripped of its reactions.
+    for reaction in graphql::query_reactions(token.as_deref(), &id)
+        .await
+        .unwrap_or_default()
+    {
+        let _ = graphql::delete_node(token.as_deref(), &reaction.id.0).await;
+    }
+    let set = model::NodesSetInput {
+        name: Some(String::new()),
+        data: Some(model::Jsonb(serde_json::json!({ "deleted": true }))),
+        ..Default::default()
+    };
+    graphql::update_node(token.as_deref(), &id, set).await?;
+    Ok(())
+}
+
 /// One comment and its nested replies (recursive; each level fetches its own
 /// `vote/comment` children).
 #[component]
@@ -320,7 +365,12 @@ fn CommentThread(
         }));
     }
 
-    let author = if comment.name.trim().is_empty() {
+    // An emptied comment shows as one: no author, no text, no reactions, just
+    // the hanger its replies are on.
+    let deleted = is_tombstone(&comment);
+    let author = if deleted {
+        t("vote.commentDeleted")
+    } else if comment.name.trim().is_empty() {
         t("common.unknown")
     } else {
         comment.name.clone()
@@ -348,37 +398,51 @@ fn CommentThread(
     let indent = depth.min(6) as f32 * 1.5;
 
     rsx! {
-        div { class: "comment", style: "margin-left: {indent}rem;",
+        div {
+            class: if deleted { "comment comment-deleted" } else { "comment" },
+            style: "margin-left: {indent}rem;",
             div { class: "comment-main",
-                super::loader::UserPopover {
-                    name: author.clone(),
-                    avatar_url: avatar_url.clone(),
-                    user_id: author_id.clone(),
+                if deleted {
                     div { class: "avatar small comment-avatar",
-                        {super::loader::user_avatar(&avatar_url, rsx! { "{initial}" })}
+                        span { class: "material-icons", "block" }
+                    }
+                } else {
+                    super::loader::UserPopover {
+                        name: author.clone(),
+                        avatar_url: avatar_url.clone(),
+                        user_id: author_id.clone(),
+                        div { class: "avatar small comment-avatar",
+                            {super::loader::user_avatar(&avatar_url, rsx! { "{initial}" })}
+                        }
                     }
                 }
                 div { class: "comment-body",
                     div { class: "comment-meta",
-                        super::loader::UserPopover {
-                            name: author.clone(),
-                            avatar_url: avatar_url.clone(),
-                            user_id: author_id.clone(),
+                        if deleted {
                             span { class: "comment-author", "{author}" }
+                        } else {
+                            super::loader::UserPopover {
+                                name: author.clone(),
+                                avatar_url: avatar_url.clone(),
+                                user_id: author_id.clone(),
+                                span { class: "comment-author", "{author}" }
+                            }
                         }
                         if !when.is_empty() {
                             span { class: "comment-dot", "·" }
                             span { class: "comment-time", "{when}" }
                         }
                     }
-                    p { class: "comment-text", "{text}" }
-                    ReactionBar {
-                        comment_id: comment.id.0.clone(),
-                        context_id: context_id.clone(),
-                        can_react: is_auth && can_comment,
+                    if !deleted {
+                        p { class: "comment-text", "{text}" }
+                        ReactionBar {
+                            comment_id: comment.id.0.clone(),
+                            context_id: context_id.clone(),
+                            can_react: is_auth && can_comment,
+                        }
                     }
                     div { class: "comment-actions",
-                        if is_auth && can_comment {
+                        if is_auth && can_comment && !deleted {
                             button {
                                 class: "comment-action",
                                 aria_label: "{t(\"vote.reply\")}",
@@ -395,7 +459,9 @@ fn CommentThread(
                                 "{replies.len()} {t(\"vote.replies\")}"
                             }
                         }
-                        if can_del {
+                        // Nothing left to delete on an emptied comment, and
+                        // deleting the hanger would take the replies.
+                        if can_del && !deleted {
                             button {
                                 class: "comment-action comment-action-danger",
                                 aria_label: "{t(\"common.delete\")}",
@@ -420,12 +486,21 @@ fn CommentThread(
                                     class: "btn btn-primary",
                                     onclick: {
                                         let del_id = comment.id.0.clone();
+                                        // Answered comments are emptied, not removed: the
+                                        // replies hang from this row, and taking it would
+                                        // take them with it.
+                                        let has_replies = !replies.is_empty();
                                         move |_| {
                                             let token = session.read().access_token.clone();
                                             let del_id = del_id.clone();
                                             del_confirm.set(false);
                                             spawn(async move {
-                                                match delete_comment_subtree(token, del_id).await {
+                                                let outcome = if has_replies {
+                                                    tombstone_comment(token, del_id).await
+                                                } else {
+                                                    delete_comment_subtree(token, del_id).await
+                                                };
+                                                match outcome {
                                                     Ok(()) => {
                                                         let mut refresh = refresh;
                                                         refresh += 1;
