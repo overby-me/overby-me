@@ -1,15 +1,14 @@
 -- 0001: node paths, and the columns a bin is built on.
 --
+-- APPLIED to production on 2026-07-30. Kept as the record of what was run and
+-- as the thing to re-run against any other copy of this database.
+--
 -- Additive and backward compatible: old.radikal.wiki names none of these
--- columns, so it cannot see them, and no behaviour changes until a client
--- starts writing `deleted_at`.
+-- columns, so it cannot see them, and nothing changes for either app until a
+-- client writes `deleted_at`.
 --
--- Apply through the Hasura console's SQL runner (Data -> SQL) or psql, then
--- refresh graphql/schema.graphql by introspection so cynic can see the new
--- columns. The Hasura metadata changes that go with it are listed at the end;
--- they are NOT SQL and have to be made in the console or through /v1/metadata.
---
--- Everything here is idempotent, so a partial run can be repeated.
+-- Everything is idempotent, so a partial run can be repeated. The Hasura
+-- metadata that goes with it is NOT SQL and is listed at the end.
 
 begin;
 
@@ -32,9 +31,27 @@ comment on column nodes.deleted_at is
   'Set instead of deleting. Hidden from every client by the select rule; '
   'restorable from the bin.';
 
+-- ── backfill, BEFORE the triggers exist ──────────────────────────────────
+-- Deliberately first: this writes `path` on every row, and doing it with the
+-- cascade trigger installed would fire that trigger once per row, each firing a
+-- subtree update that the single statement below has already done.
+with recursive t as (
+  select id, ''::text as p
+    from nodes
+   where parent_id is null
+  union all
+  select n.id, case when t.p = '' then n.key else t.p || '/' || n.key end
+    from nodes n
+    join t on n.parent_id = t.id
+)
+update nodes n set path = t.p from t where t.id = n.id and n.path is distinct from t.p;
+-- Rows unreachable from the root (orphans and their descendants) keep a null
+-- path. There were 527 of them at the time of writing, under 279 missing
+-- parents, which is the orphan problem this does not attempt to solve.
+
 -- ── path maintenance ─────────────────────────────────────────────────────
--- Deliberately never raises: a write that fails because a denormalised cache
--- could not be computed would be a far worse bug than a null path.
+-- Never raises: a write that failed because a denormalised cache could not be
+-- computed would be a far worse bug than a null path.
 create or replace function nodes_set_path() returns trigger as $$
 declare
   parent_path text;
@@ -76,47 +93,48 @@ $$ language plpgsql;
 
 drop trigger if exists nodes_path_after on nodes;
 create trigger nodes_path_after
-  after update of path on nodes
+  after update on nodes
   for each row
-  -- Depth guard: the cascade above updates `path` on each descendant, which
-  -- would otherwise re-enter this trigger once per row and re-do work already
-  -- done by the single statement.
-  when (pg_trigger_depth() < 2)
+  -- NOT `after update of path`: that fires only when `path` is named in the
+  -- statement's SET list, and a rename sets `key`. The BEFORE trigger changing
+  -- NEW.path does not count, so the first version of this cascaded nothing.
+  --
+  -- pg_trigger_depth() = 0 restricts it to top-level statements: the cascade
+  -- above writes `path` on each descendant, and without this each of those
+  -- writes would re-enter here and redo work already done.
+  when (new.path is distinct from old.path and pg_trigger_depth() = 0)
   execute function nodes_cascade_path();
 
--- ── backfill ─────────────────────────────────────────────────────────────
-with recursive t as (
-  select id, ''::text as p
-    from nodes
-   where parent_id is null
-  union all
-  select n.id, case when t.p = '' then n.key else t.p || '/' || n.key end
-    from nodes n
-    join t on n.parent_id = t.id
-)
-update nodes n set path = t.p from t where t.id = n.id and n.path is distinct from t.p;
-
 -- ── indexes ──────────────────────────────────────────────────────────────
--- Prefix matching for the subtree operations (LIKE 'x/%').
 create index if not exists nodes_path_prefix_idx on nodes (path text_pattern_ops);
 
--- One live node per path. Partial, so a binned node does not block a new one
--- from taking its place, and does not block its own restore either.
 create unique index if not exists nodes_path_live_idx
   on nodes (path) where deleted_at is null and path is not null;
 
--- Same reasoning for the key within a parent. NOTE: this one can fail on
--- existing data. Check first, and clean up what it reports:
+-- (parent_id, key) was an UNCONDITIONAL unique constraint, which would have made
+-- restoring from the bin impossible: a binned node keeps its key, so anything
+-- created in its place would block it coming back. Swapped for the partial form.
 --
---   select parent_id, key, count(*) from nodes
---    where deleted_at is null group by 1, 2 having count(*) > 1;
---
-create unique index if not exists nodes_parent_key_live_idx
-  on nodes (parent_id, key) where deleted_at is null;
+-- Deliberately keeping the constraint's NAME: components/vote/poll.rs matches on
+-- it in an error string to tell a duplicate apart from a real failure, and
+-- Postgres reports the index name in that message.
+do $$
+begin
+  if exists (select 1 from pg_constraint
+              where conrelid = 'public.nodes'::regclass
+                and conname = 'nodes_parent_id_namespace_key') then
+    alter table nodes drop constraint nodes_parent_id_namespace_key;
+    create unique index nodes_parent_id_namespace_key
+      on nodes (parent_id, key) where deleted_at is null;
+  end if;
+end $$;
 
 commit;
 
 -- ── consistency check (run any time; zero rows means correct) ─────────────
+-- Verified zero across all 3975 rows after applying, and again after a rename
+-- and a move test that cascaded 150 descendants each.
+--
 -- with recursive t as (
 --   select id, ''::text as p from nodes where parent_id is null
 --   union all
@@ -127,17 +145,17 @@ commit;
 --   from nodes n join t using (id)
 --  where n.path is distinct from t.p;
 
--- ── Hasura metadata, not SQL ──────────────────────────────────────────────
--- 1. Reload the schema so the new columns appear.
--- 2. SELECT permission on `nodes`, every role: add `deleted_at: {_is_null: true}`
---    to the filter, and add `path` to the allowed columns. This is what makes a
---    binned node invisible, in the new app AND in old.radikal.wiki, with no
---    client change.
--- 3. UPDATE permission on `nodes`: add `deleted_at`, `deleted_by`, `deleted_root`
---    to the allowed columns for whoever may already update a node, so a client
---    can bin one. Do NOT add `path`: the trigger owns it and nothing else should
---    ever write it.
--- 4. The bin view comes with the app that reads it (a later migration):
+-- ── Hasura metadata, applied alongside this ───────────────────────────────
+-- 1. reload_metadata with reload_sources, so the new columns are known.
+-- 2. SELECT on `nodes`, roles `public` and `user`: filter wrapped as
+--    {_and: [<existing>, {deleted_at: {_is_null: true}}]}, and `path` added to
+--    the columns. This is what makes a binned node invisible to BOTH apps with
+--    no client change. Verified by binning a node and watching it vanish and
+--    come back for the public role.
+-- 3. UPDATE on `nodes`, role `user`: `deleted_at`, `deleted_by`, `deleted_root`
+--    added to the columns, so a client can bin one. NOT `path`: the trigger owns
+--    it and nothing else should ever write it.
+-- 4. Still to do, with the bin app itself:
 --      create view deleted_nodes as
 --        select * from nodes where deleted_at is not null and id = deleted_root;
 --    tracked, select-only, for context owners.

@@ -151,6 +151,7 @@ impl From<NodeFields> for model::NodeFields {
             id: n.id.into(),
             name: n.name,
             key: n.key,
+            path: n.path,
             mime_id: n.mime_id,
             parent_id: n.parent_id.map(Into::into),
             context_id: n.context_id.map(Into::into),
@@ -364,6 +365,9 @@ pub struct NodeFields {
     pub id: Uuid,
     pub name: String,
     pub key: String,
+    /// Slash-joined keys from the root (`ru/lm2026/dagsorden`), maintained by a
+    /// database trigger. Null for a node whose parent row is missing.
+    pub path: Option<String>,
     pub mime_id: Option<String>,
     pub parent_id: Option<Uuid>,
     pub context_id: Option<Uuid>,
@@ -724,6 +728,8 @@ pub struct RecentNodesQuery {
 pub struct NodesBoolExp {
     #[cynic(rename = "_and", skip_serializing_if = "Option::is_none")]
     pub and: Option<Vec<NodesBoolExp>>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub id: Option<UuidComparisonExp>,
     #[cynic(rename = "_or", skip_serializing_if = "Option::is_none")]
     pub or: Option<Vec<NodesBoolExp>>,
     #[cynic(skip_serializing_if = "Option::is_none")]
@@ -737,6 +743,10 @@ pub struct NodesBoolExp {
     pub content_text: Option<StringComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<UuidComparisonExp>,
+    /// The materialised ancestor path. `_eq` resolves a whole URL in one query;
+    /// `_in` fetches a whole breadcrumb trail in one; `_like 'x/%'` is a subtree.
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub path: Option<StringComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub context_id: Option<UuidComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
@@ -1917,42 +1927,6 @@ pub async fn execute_raw_vars(
 
 // --- High-level query functions ---
 
-pub async fn query_node_by_key(
-    access_token: Option<&str>,
-    key: &str,
-    parent_id: Option<&str>,
-) -> Result<Option<model::NodeFields>, String> {
-    let where_clause = NodesBoolExp {
-        and: Some(vec![
-            NodesBoolExp {
-                key: Some(StringComparisonExp {
-                    eq: Some(key.to_string()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            NodesBoolExp {
-                parent_id: Some(match parent_id {
-                    Some(id) => UuidComparisonExp {
-                        eq: Some(Uuid(id.to_string())),
-                        is_null: None,
-                    },
-                    None => UuidComparisonExp {
-                        eq: None,
-                        is_null: Some(true),
-                    },
-                }),
-                ..Default::default()
-            },
-        ]),
-        ..Default::default()
-    };
-
-    let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
-    let result = execute(access_token, operation).await?;
-    Ok(result.nodes.into_iter().next().map(Into::into))
-}
-
 pub async fn query_node_by_id(
     access_token: Option<&str>,
     id: &str,
@@ -2011,30 +1985,24 @@ pub async fn resolve_path(
     access_token: Option<&str>,
     segments: &[String],
 ) -> Result<Option<model::NodeWithChildren>, String> {
-    // Path segments are keys of nodes below the root, so start the walk at the
-    // root node rather than at the (parent-less) top level.
-    let Some(root_id) = query_root_id(access_token).await? else {
+    if segments.is_empty() {
+        return Ok(None);
+    }
+    // The URL IS the stored path (`nodes.path`, kept by a database trigger), so
+    // one query finds the node however deep it is. This used to walk key by key
+    // from the root, a round trip per segment, on every navigation.
+    let where_clause = NodesBoolExp {
+        path: Some(StringComparisonExp {
+            eq: Some(segments.join("/")),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let op = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    let Some(found) = execute(access_token, op).await?.nodes.into_iter().next() else {
         return Ok(None);
     };
-    let mut parent_id: Option<String> = Some(root_id);
-    let mut last_node_id: Option<String> = None;
-
-    for segment in segments {
-        let found = query_node_by_key(access_token, segment, parent_id.as_deref()).await?;
-        match found {
-            Some(n) => {
-                last_node_id = Some(n.id.0.clone());
-                parent_id = Some(n.id.0);
-            }
-            None => return Ok(None),
-        }
-    }
-
-    if let Some(id) = last_node_id {
-        return query_node_by_id(access_token, &id).await;
-    }
-
-    Ok(None)
+    query_node_by_id(access_token, &found.id.0).await
 }
 
 /// Resolve each path segment to its `(name, mime_id)`, walking from the root like
@@ -2043,47 +2011,53 @@ pub async fn path_crumbs(
     access_token: Option<&str>,
     segments: &[String],
 ) -> Result<Vec<Crumb>, String> {
-    let Some(root_id) = query_root_id(access_token).await? else {
-        return Ok(segments
-            .iter()
-            .map(|s| Crumb {
-                key: s.clone(),
-                name: s.clone(),
-                mime_id: None,
-                ordinal: None,
-                data: None,
-            })
-            .collect());
+    if segments.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Every crumb in one query. A trail is the set of prefixes of the current
+    // path, and each node stores its own, so `path _in [...]` fetches the lot.
+    // This used to resolve a segment at a time, from the root down, which meant
+    // five sequential round trips to draw the trail on a five-deep page — on
+    // whatever network the reader happened to be on.
+    let prefixes: Vec<String> = (1..=segments.len())
+        .map(|n| segments[..n].join("/"))
+        .collect();
+    let where_clause = NodesBoolExp {
+        path: Some(StringComparisonExp {
+            in_: Some(prefixes.clone()),
+            ..Default::default()
+        }),
+        ..Default::default()
     };
-    let mut parent_id: Option<String> = Some(root_id);
-    let mut out = Vec::with_capacity(segments.len());
-    for segment in segments {
-        match query_node_by_key(access_token, segment, parent_id.as_deref()).await? {
-            Some(n) => {
-                // getIndex is 1-based; node_avatar wants a 0-based ordinal.
-                let ordinal = n.get_index.filter(|i| *i >= 1).map(|i| (i - 1) as usize);
-                out.push(Crumb {
+    let op = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    let found = execute(access_token, op).await?.nodes;
+
+    // Back into path order, and a crumb for every segment either way: a step the
+    // reader may not see (permissions) or that does not resolve still holds its
+    // place in the trail, showing its url slug, exactly as before.
+    Ok(prefixes
+        .iter()
+        .zip(segments)
+        .map(|(prefix, segment)| {
+            match found.iter().find(|n| n.path.as_deref() == Some(prefix)) {
+                Some(n) => Crumb {
                     key: segment.clone(),
                     name: n.name.clone(),
                     mime_id: n.mime_id.clone(),
-                    ordinal,
-                    data: n.data.clone(),
-                });
-                parent_id = Some(n.id.0);
-            }
-            None => {
-                out.push(Crumb {
+                    // getIndex is 1-based; node_avatar wants a 0-based ordinal.
+                    ordinal: n.get_index.filter(|i| *i >= 1).map(|i| (i - 1) as usize),
+                    data: n.data.clone().map(Into::into),
+                },
+                None => Crumb {
                     key: segment.clone(),
                     name: segment.clone(),
                     mime_id: None,
                     ordinal: None,
                     data: None,
-                });
-                break;
+                },
             }
-        }
-    }
-    Ok(out)
+        })
+        .collect())
 }
 
 /// Insert a node
@@ -4227,28 +4201,23 @@ pub async fn thread_host_id(access_token: Option<&str>, id: &str) -> String {
 }
 
 pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<String>, String> {
-    let mut segments: Vec<String> = Vec::new();
-    let mut current = Some(id.to_string());
-    // Guard against cycles / unexpectedly deep trees.
-    for _ in 0..32 {
-        let Some(node_id) = current.take() else {
-            break;
-        };
-        let operation = NodeByIdQuery::build(NodeByIdVariables { id: Uuid(node_id) });
-        let data = execute(access_token, operation).await?;
-        match data.node {
-            Some(node) => match node.parent_id {
-                Some(parent) => {
-                    segments.push(node.key);
-                    current = Some(parent.0);
-                }
-                // Reached the root — stop without adding its key.
-                None => break,
-            },
-            None => break,
-        }
-    }
-    segments.reverse();
+    // One query: the node stores its own trail (`nodes.path`, kept by a database
+    // trigger). This used to climb parent by parent, a round trip per level, on
+    // every feed row, search result and contribution that someone opened.
+    let where_clause = NodesBoolExp {
+        id: Some(UuidComparisonExp {
+            eq: Some(Uuid(id.to_string())),
+            is_null: None,
+        }),
+        ..Default::default()
+    };
+    let op = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    let found = execute(access_token, op).await?.nodes.into_iter().next();
+    let segments: Vec<String> = found
+        .and_then(|n| n.path)
+        .filter(|p| !p.is_empty())
+        .map(|p| p.split('/').map(str::to_string).collect())
+        .unwrap_or_default();
     Ok(segments)
 }
 

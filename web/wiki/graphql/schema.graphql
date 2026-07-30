@@ -6744,6 +6744,7 @@ type nodes {
 	"""
 	parent: nodes
 	parentId: uuid
+	path: String
 
 	"""
 	An array relationship
@@ -7057,6 +7058,7 @@ input nodes_bool_exp {
 	owners: users_bool_exp
 	parent: nodes_bool_exp
 	parentId: uuid_comparison_exp
+	path: String_comparison_exp
 	permissions: permissions_bool_exp
 	permissions_aggregate: permissions_aggregate_bool_exp
 	relations: relations_bool_exp
@@ -7407,6 +7409,9 @@ input nodes_set_input {
 	name: String
 	ownerId: uuid
 	parentId: uuid
+	deleted_at: timestamptz
+	deleted_by: uuid
+	deleted_root: uuid
 	updatedAt: timestamptz
 }
 
