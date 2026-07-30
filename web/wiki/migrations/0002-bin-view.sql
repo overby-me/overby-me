@@ -29,7 +29,17 @@ comment on view deleted_nodes is
 --                                  {node_id: {_eq: X-Hasura-User-Id}}]}}}
 --    so only someone who owns the context can see what was binned in it.
 --    Verified: the public role cannot see the field at all.
+-- 4. `deleted_at` and `deleted_root` MUST be in the `nodes` SELECT permission
+--    for roles `public` and `user`. Hasura builds `nodes_bool_exp` from the
+--    role's selectable columns, so a column missing there cannot be filtered on
+--    either: binning ("only stamp what is not already stamped") and restoring
+--    (where deleted_root = the id asked for) both failed with
+--    "field 'deleted_at' not found in type: 'nodes_bool_exp'". Granting SELECT
+--    leaks nothing, because the row filter still hides every stamped row, so
+--    the two columns read as null on everything a client can reach.
 --
 -- Verified end to end against production: binning a folder stamped it and its
 -- child in one statement, the view listed only the folder, restoring by
--- deleted_root brought both back, and the bin went empty.
+-- deleted_root brought both back, and the bin went empty. Re-verified as the
+-- `user` role (impersonated a real context owner) after 4 above, since the
+-- first pass ran as admin, which is exactly why the missing columns slipped by.

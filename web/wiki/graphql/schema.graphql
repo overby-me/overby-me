@@ -6783,6 +6783,9 @@ type nodes {
 	"""
 	parent: nodes
 	parentId: uuid
+	deleted_at: timestamptz
+	deleted_by: uuid
+	deleted_root: uuid
 	path: String
 
 	"""
@@ -7076,6 +7079,9 @@ input nodes_bool_exp {
 	createdAt: timestamptz_comparison_exp
 	data: jsonb_comparison_exp
 	delete: Boolean_comparison_exp
+	deleted_at: timestamptz_comparison_exp
+	deleted_by: uuid_comparison_exp
+	deleted_root: uuid_comparison_exp
 	fields: fields_bool_exp
 	fields_aggregate: fields_aggregate_bool_exp
 	getIndex: Int_comparison_exp
