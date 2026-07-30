@@ -29,6 +29,8 @@ comment on view deleted_nodes is
 --                                  {node_id: {_eq: X-Hasura-User-Id}}]}}}
 --    so only someone who owns the context can see what was binned in it.
 --    Verified: the public role cannot see the field at all.
+--    (Widened in 0003 to include the person who deleted it and the person who
+--    owned it: recovering is for whoever deleted, not only for owners.)
 -- 4. `deleted_at` and `deleted_root` MUST be in the `nodes` SELECT permission
 --    for roles `public` and `user`. Hasura builds `nodes_bool_exp` from the
 --    role's selectable columns, so a column missing there cannot be filtered on

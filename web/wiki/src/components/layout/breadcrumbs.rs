@@ -516,8 +516,13 @@ pub(super) fn context_apps(
                 current_app.as_deref() == Some("member"),
             ));
         }
-        // The root's own bin: a binned group or event comes back from here.
-        if crate::components::loader::CTX_IS_OWNER().unwrap_or(false) {
+        // The root's own bin: a binned group or event comes back from here, and
+        // only from here — a context is its own context, so a deleted group's
+        // own bin would be inside the thing that is gone. That makes this the
+        // recovery path for whoever owned the group, who is rarely an owner of
+        // the root, so it cannot be a root-owner surface. The view shows each
+        // person only what was theirs.
+        if is_auth {
             root_apps.push((
                 "app/bin",
                 t("bin.title"),
@@ -640,9 +645,12 @@ pub(super) fn context_apps(
         // parent) are still reachable via their `?app=` URL but hidden from these
         // nav surfaces until they are ready to show. (admin IS shown, just above.)
 
-        // What was deleted here, and the way back. An owner surface, next to the
-        // other owner surfaces rather than among the apps everyone uses.
-        if is_ctx_owner {
+        // What was deleted here, and the way back. Not an owner surface: anyone
+        // who can delete something can undo it, and the view shows each person
+        // what was theirs (owners see the context's whole bin). Hiding it from
+        // the people most likely to need it would make the bin a thing you have
+        // to ask an owner for.
+        if is_auth {
             apps.push((
                 "app/bin",
                 t("bin.title"),

@@ -193,7 +193,11 @@ const EN_JSON: &str = r#"{
         "empty": "Nothing deleted here",
         "explain": "Deleted items are kept here. Restoring one brings back everything that was filed under it.",
         "restore": "Restore",
-        "restored": "Restored"
+        "restored": "Restored",
+        "purge": "Delete for good",
+        "purgeHeadline": "Delete for good?",
+        "purgeWarning": "This leaves the bin as well, together with everything filed under it. Nothing brings it back.",
+        "purged": "Deleted for good"
     },
     "common": {
         "add": "Add",
@@ -723,7 +727,11 @@ const DA_JSON: &str = r#"{
         "empty": "Intet slettet her",
         "explain": "Slettede ting bliver gemt her. Gendanner du en, kommer alt, der lå under den, med tilbage.",
         "restore": "Gendan",
-        "restored": "Gendannet"
+        "restored": "Gendannet",
+        "purge": "Slet permanent",
+        "purgeHeadline": "Slet permanent?",
+        "purgeWarning": "Så ryger den ud af papirkurven også, sammen med alt, der ligger under den. Intet kan hente den tilbage.",
+        "purged": "Slettet permanent"
     },
     "common": {
         "add": "Tilf\u00f8j",

@@ -6391,7 +6391,8 @@ type mutation_root {
 """
 The bin: one row per delete a user actually asked for.
 """
-type deleted_nodes {
+type deletedNodes {
+	context: nodes
 	contextId: uuid
 	deletedAt: timestamptz
 	deletedBy: uuid
@@ -6408,22 +6409,39 @@ type deleted_nodes {
 """
 Boolean expression to filter rows from the table "deleted_nodes".
 """
-input deleted_nodes_bool_exp {
-	_and: [deleted_nodes_bool_exp!]
-	_not: deleted_nodes_bool_exp
-	_or: [deleted_nodes_bool_exp!]
+input deletedNodes_bool_exp {
+	_and: [deletedNodes_bool_exp!]
+	_not: deletedNodes_bool_exp
+	_or: [deletedNodes_bool_exp!]
+	context: nodes_bool_exp
 	contextId: uuid_comparison_exp
 	deletedAt: timestamptz_comparison_exp
+	deletedBy: uuid_comparison_exp
+	deletedRoot: uuid_comparison_exp
 	id: uuid_comparison_exp
+	key: String_comparison_exp
+	mimeId: String_comparison_exp
+	name: String_comparison_exp
+	ownerId: uuid_comparison_exp
+	parentId: uuid_comparison_exp
 	path: String_comparison_exp
 }
 
 """
 Ordering options when selecting data from "deleted_nodes".
 """
-input deleted_nodes_order_by {
+input deletedNodes_order_by {
+	context: nodes_order_by
+	contextId: order_by
 	deletedAt: order_by
+	deletedBy: order_by
+	deletedRoot: order_by
+	id: order_by
+	key: order_by
+	mimeId: order_by
 	name: order_by
+	ownerId: order_by
+	parentId: order_by
 	path: order_by
 }
 
@@ -9012,13 +9030,13 @@ type query_root {
 		"""
 		sort the rows by one or more columns
 		"""
-		order_by: [deleted_nodes_order_by!]
+		order_by: [deletedNodes_order_by!]
 
 		"""
 		filter the rows returned
 		"""
-		where: deleted_nodes_bool_exp
-	): [deleted_nodes!]!
+		where: deletedNodes_bool_exp
+	): [deletedNodes!]!
 
 	nodes(
 		"""

@@ -8,6 +8,11 @@
 //!
 //! Only the tops are listed: deleting a folder stamps everything under it, but
 //! what the reader asked for was the folder, and that is what they get back.
+//!
+//! Anyone signed in can put back what they deleted or what was theirs; only an
+//! owner of the context can empty it for good. Recovering is the reason the bin
+//! exists and costs nothing if it was a mistake, so it needs no special standing;
+//! the irreversible half does.
 
 use dioxus::prelude::*;
 
@@ -30,12 +35,16 @@ pub fn BinApp(node: NodeWithChildren) -> Element {
         .unwrap_or_else(|| node.id.0.clone());
 
     let ctx = context_id.clone();
-    let items = crate::use_data_resource!(|(ctx, token)| async move {
-        graphql::query_deleted(token.as_deref(), &ctx)
+    let here = node.id.0.clone();
+    let items = crate::use_data_resource!(|(ctx, here, token)| async move {
+        graphql::query_deleted(token.as_deref(), &ctx, &here)
             .await
             .unwrap_or_default()
     });
     let items = items.read().clone().unwrap_or_default();
+    // Emptying the bin is the one action here that cannot be taken back, so it
+    // belongs to whoever answers for the context rather than to whoever deleted.
+    let can_purge = node.is_context_owner.unwrap_or(false) || node.is_owner.unwrap_or(false);
 
     rsx! {
         div { class: "card",
@@ -59,7 +68,11 @@ pub fn BinApp(node: NodeWithChildren) -> Element {
                 }
                 div { class: "list",
                     for item in items.iter() {
-                        BinRow { key: "{item.id.as_ref().map(|i| i.0.clone()).unwrap_or_default()}", item: item.clone() }
+                        BinRow {
+                            key: "{item.id.as_ref().map(|i| i.0.clone()).unwrap_or_default()}",
+                            item: item.clone(),
+                            can_purge,
+                        }
                     }
                 }
             }
@@ -67,11 +80,13 @@ pub fn BinApp(node: NodeWithChildren) -> Element {
     }
 }
 
-/// One binned item: what it was, where it was, when it went, and a way back.
+/// One binned item: what it was, where it was, when it went, and a way back —
+/// plus, for an owner, the way out that is not a way back.
 #[component]
-fn BinRow(item: graphql::DeletedNodeFields) -> Element {
+fn BinRow(item: graphql::DeletedNodeFields, can_purge: bool) -> Element {
     let session = use_session();
     let mut busy = use_signal(|| false);
+    let mut purge_confirm = use_signal(|| false);
     let id = item.id.as_ref().map(|i| i.0.clone()).unwrap_or_default();
     let when = item
         .deleted_at
@@ -132,6 +147,68 @@ fn BinRow(item: graphql::DeletedNodeFields) -> Element {
                 },
                 span { class: "material-icons", "restore" }
                 "{t(\"bin.restore\")}"
+            }
+            if can_purge {
+                button {
+                    class: "btn-icon",
+                    disabled: busy(),
+                    aria_label: t("bin.purge"),
+                    title: t("bin.purge"),
+                    onclick: move |_| purge_confirm.set(true),
+                    span { class: "material-icons", "delete_forever" }
+                }
+            }
+        }
+        if can_purge {
+            // Named for what it does. "Delete" would read as the same delete that
+            // put this row here, which is exactly the thing it is not.
+            super::widgets::Dialog {
+                open: purge_confirm(),
+                on_dismiss: move |_| purge_confirm.set(false),
+                headline: t("bin.purgeHeadline"),
+                icon: "delete_forever".to_string(),
+                actions: rsx! {
+                    button {
+                        class: "btn btn-outlined",
+                        onclick: move |_| purge_confirm.set(false),
+                        "{t(\"common.cancel\")}"
+                    }
+                    button {
+                        class: "btn btn-primary",
+                        disabled: busy(),
+                        onclick: {
+                            let id = id.clone();
+                            move |_| {
+                                if busy() {
+                                    return;
+                                }
+                                let id = id.clone();
+                                let token = session.read().access_token.clone();
+                                busy.set(true);
+                                spawn(async move {
+                                    match graphql::purge_node(token.as_deref(), &id).await {
+                                        Ok(n) if n > 0 => {
+                                            purge_confirm.set(false);
+                                            crate::snackbar::show_snackbar(&t("bin.purged"));
+                                            crate::session::bump_data_version();
+                                        }
+                                        other => {
+                                            busy.set(false);
+                                            log::error!("purge failed: {other:?}");
+                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                        }
+                                    }
+                                });
+                            }
+                        },
+                        if busy() {
+                            div { class: "spinner spinner-xs" }
+                        }
+                        "{t(\"bin.purge\")}"
+                    }
+                },
+                p { class: "body-medium", "{item.name.clone().unwrap_or_default()}" }
+                p { class: "body-medium text-muted", "{t(\"bin.purgeWarning\")}" }
             }
         }
     }

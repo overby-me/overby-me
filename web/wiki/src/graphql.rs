@@ -4298,6 +4298,36 @@ pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<St
 mod tests {
     use super::*;
 
+    /// The bin's list query names types Hasura actually defines.
+    ///
+    /// A tracked view gets its GraphQL types from its custom name, so the view
+    /// `deleted_nodes` produced `deletedNodes_bool_exp`, not the
+    /// `deleted_nodes_bool_exp` the hand-written schema entry claimed. Nothing
+    /// caught it: the local schema is the only thing cynic checks against, so
+    /// the query compiled and would have been rejected by the server, on a
+    /// screen the tests never open. This asserts the operation as sent.
+    #[test]
+    fn bin_query_declares_the_types_hasura_defines() {
+        use cynic::QueryBuilder;
+        let op = DeletedNodesQuery::build(DeletedNodesVariables {
+            where_clause: DeletedNodesBoolExp::default(),
+            order_by: Some(vec![DeletedNodesOrderBy {
+                deleted_at: Some(OrderBy::Desc),
+            }]),
+        });
+        assert!(
+            op.query.contains("deletedNodes_bool_exp")
+                && op.query.contains("deletedNodes_order_by"),
+            "the view's types are camelCase after its custom name: {}",
+            op.query
+        );
+        assert!(
+            !op.query.contains("deleted_nodes_"),
+            "no snake_case type survives: {}",
+            op.query
+        );
+    }
+
     #[test]
     fn detects_jwt_errors_for_refresh_retry() {
         // Hasura's JWT failures all mention "JWT"; refresh + retry may recover.
@@ -4437,7 +4467,7 @@ mod tests {
 // --- The bin: soft delete, list, restore ---
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
-#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "deleted_nodes")]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "deletedNodes")]
 pub struct DeletedNodeFields {
     pub id: Option<Uuid>,
     pub name: Option<String>,
@@ -4450,17 +4480,21 @@ pub struct DeletedNodeFields {
 #[derive(cynic::InputObject, Debug, Default)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
-    graphql_type = "deleted_nodes_bool_exp"
+    graphql_type = "deletedNodes_bool_exp"
 )]
 pub struct DeletedNodesBoolExp {
+    #[cynic(rename = "_or", skip_serializing_if = "Option::is_none")]
+    pub or: Option<Vec<DeletedNodesBoolExp>>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub context_id: Option<UuidComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<UuidComparisonExp>,
 }
 
 #[derive(cynic::InputObject, Debug)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
-    graphql_type = "deleted_nodes_order_by"
+    graphql_type = "deletedNodes_order_by"
 )]
 pub struct DeletedNodesOrderBy {
     #[cynic(skip_serializing_if = "Option::is_none")]
@@ -4485,18 +4519,37 @@ pub struct DeletedNodesQuery {
 }
 
 /// What is in a context's bin: one row per delete someone asked for, newest
-/// first. Owner-only, enforced by the view's own permission rather than here.
+/// first. Who sees which rows is the view's own permission, not this clause.
+///
+/// Two ways in, because a context is its own context: everything binned INSIDE
+/// this context, and any context binned directly UNDER this node. Without the
+/// second, deleting a group or an event put it in a bin reachable only through
+/// itself — the one delete in the app that could not be undone.
 pub async fn query_deleted(
     access_token: Option<&str>,
     context_id: &str,
+    node_id: &str,
 ) -> Result<Vec<DeletedNodeFields>, String> {
     use cynic::QueryBuilder;
     let op = DeletedNodesQuery::build(DeletedNodesVariables {
         where_clause: DeletedNodesBoolExp {
-            context_id: Some(UuidComparisonExp {
-                eq: Some(Uuid(context_id.to_string())),
-                is_null: None,
-            }),
+            or: Some(vec![
+                DeletedNodesBoolExp {
+                    context_id: Some(UuidComparisonExp {
+                        eq: Some(Uuid(context_id.to_string())),
+                        is_null: None,
+                    }),
+                    ..Default::default()
+                },
+                DeletedNodesBoolExp {
+                    parent_id: Some(UuidComparisonExp {
+                        eq: Some(Uuid(node_id.to_string())),
+                        is_null: None,
+                    }),
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
         },
         order_by: Some(vec![DeletedNodesOrderBy {
             deleted_at: Some(OrderBy::Desc),
@@ -4514,13 +4567,26 @@ pub async fn query_deleted(
 ///
 /// Rows the caller may not update are simply not updated — the same authority
 /// the old delete had, since it deleted node by node under the same rules.
+///
+/// `path` is what the caller already has on screen. Callers that do not carry it
+/// (a comment, a poll: shapes the lists fetch without it) pass `None` and the
+/// path is looked up, one query, rather than binning the node alone and leaving
+/// its replies or its ballots behind.
 pub async fn bin_node(
     access_token: Option<&str>,
     node_id: &str,
     path: Option<&str>,
     actor: Option<&str>,
 ) -> Result<u32, String> {
-    let subtree = match path.filter(|p| !p.is_empty()) {
+    let looked_up = match path.filter(|p| !p.is_empty()) {
+        Some(_) => None,
+        None => {
+            let segments = path_from_id(access_token, node_id).await.unwrap_or_default();
+            (!segments.is_empty()).then(|| segments.join("/"))
+        }
+    };
+    let path = path.filter(|p| !p.is_empty()).or(looked_up.as_deref());
+    let subtree = match path {
         Some(p) => format!(r#"{{path: {{_like: "{}/%"}}}}"#, gql_escape(p)),
         // No path (an orphan, or a node the trigger could not place) means the
         // node alone: a prefix of nothing would match everything.
@@ -4547,6 +4613,29 @@ pub async fn bin_node(
     .await?;
     Ok(data
         .get("updateNodes")
+        .and_then(|u| u.get("affected_rows"))
+        .and_then(|a| a.as_u64())
+        .unwrap_or(0) as u32)
+}
+
+/// Delete for good everything one bin action took, by the `deleted_root` it
+/// stamped: the way out of the bin that restore is not.
+///
+/// Members, fields, relations and permissions hanging off these nodes go with
+/// them — every foreign key pointing at `nodes` cascades — so this leaves
+/// nothing behind, which is the whole point of it.
+///
+/// The row rules decide who may: the database applies the same delete
+/// permission it always did, so a caller who could not have deleted the node in
+/// the first place removes nothing here either. The app offers this to context
+/// owners only.
+pub async fn purge_node(access_token: Option<&str>, root_id: &str) -> Result<u32, String> {
+    let query = r#"mutation($id: uuid!) {
+        deleteNodes(where: {deleted_root: {_eq: $id}}) { affected_rows }
+    }"#;
+    let data = execute_raw_vars(access_token, query, serde_json::json!({ "id": root_id })).await?;
+    Ok(data
+        .get("deleteNodes")
         .and_then(|u| u.get("affected_rows"))
         .and_then(|a| a.as_u64())
         .unwrap_or(0) as u32)

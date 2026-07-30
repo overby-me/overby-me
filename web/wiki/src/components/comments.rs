@@ -233,13 +233,20 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     }
 }
 
-/// Delete a comment and everything under it, deepest-first.
+/// Bin a comment and everything under it: replies, and the reactions on those.
 ///
-/// Delegates to [`graphql::delete_node_deep`], which walks children of EVERY
-/// mime. This used to walk `vote/comment` children only, so replies went but the
-/// reactions on them stayed — pointing at a comment that no longer existed.
-async fn delete_comment_subtree(token: Option<String>, root: String) -> Result<(), String> {
-    graphql::delete_node_deep(token, root).await
+/// Stamped in one statement by path prefix, so a thread goes as a thread and
+/// comes back as one. Deleting used to be final here, which made a mis-click on
+/// someone else's argument unrecoverable — the one place in the app where that
+/// was true of writing rather than of a container.
+async fn delete_comment_subtree(
+    token: Option<String>,
+    root: String,
+    actor: Option<String>,
+) -> Result<(), String> {
+    graphql::bin_node(token.as_deref(), &root, None, actor.as_deref())
+        .await
+        .map(|_| ())
 }
 
 /// Whether a comment has been emptied rather than removed (see
@@ -492,13 +499,14 @@ fn CommentThread(
                                         let has_replies = !replies.is_empty();
                                         move |_| {
                                             let token = session.read().access_token.clone();
+                                            let actor = session.read().user.as_ref().map(|u| u.id.clone());
                                             let del_id = del_id.clone();
                                             del_confirm.set(false);
                                             spawn(async move {
                                                 let outcome = if has_replies {
                                                     tombstone_comment(token, del_id).await
                                                 } else {
-                                                    delete_comment_subtree(token, del_id).await
+                                                    delete_comment_subtree(token, del_id, actor).await
                                                 };
                                                 match outcome {
                                                     Ok(()) => {
@@ -518,9 +526,7 @@ fn CommentThread(
                                 }
                             },
                             p { class: "body-medium", "{t(\"vote.confirmDeleteComment\")}" }
-                            // Comments are not binned, so unlike a document this
-                            // really is the end of them.
-                            p { class: "body-medium text-muted", "{t(\"common.deletePermanent\")}" }
+                            p { class: "body-medium text-muted", "{t(\"content.deleteRecoverable\")}" }
                         }
                     }
                     if replying() {

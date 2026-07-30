@@ -56,7 +56,7 @@ pub(super) fn DeletePollButton(poll_id: String) -> Element {
         super::super::widgets::Dialog {
             open: confirm(),
             on_dismiss: move |_| confirm.set(false),
-            headline: t("content.confirmDelete"),
+            headline: t("content.confirmDeleteBin"),
             icon: "delete".to_string(),
             actions: rsx! {
                 button {
@@ -71,13 +71,16 @@ pub(super) fn DeletePollButton(poll_id: String) -> Element {
                         let poll_id = poll_id.clone();
                         move |_| {
                             let token = session.read().access_token.clone();
+                            let actor = session.read().user.as_ref().map(|u| u.id.clone());
                             let poll_id = poll_id.clone();
                             busy.set(true);
                             spawn(async move {
                                 // The ballots cast on this poll are its children, so
-                                // they go with it rather than lingering unreachable.
-                                match graphql::delete_node_deep(token, poll_id).await {
-                                    Ok(()) => {
+                                // they go with it rather than lingering unreachable —
+                                // and to the bin, so a poll deleted mid-meeting comes
+                                // back with the votes already cast on it.
+                                match graphql::bin_node(token.as_deref(), &poll_id, None, actor.as_deref()).await {
+                                    Ok(_) => {
                                         crate::session::bump_data_version();
                                         confirm.set(false);
                                     }
@@ -93,9 +96,7 @@ pub(super) fn DeletePollButton(poll_id: String) -> Element {
                     "{t(\"common.delete\")}"
                 }
             },
-            // A poll does not go to the bin — the ballots under it go with it —
-            // so this dialog has to say what the content ones no longer do.
-            p { class: "body-medium text-muted", "{t(\"common.deletePermanent\")}" }
+            p { class: "body-medium text-muted", "{t(\"content.deleteRecoverableTree\")}" }
         }
     }
 }
