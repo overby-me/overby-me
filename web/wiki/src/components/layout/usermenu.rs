@@ -192,31 +192,15 @@ pub(super) fn UserMenu() -> Element {
                         span { class: "material-icons", "language" }
                         {match *LANG.read() { Lang::En => " Dansk", Lang::Da => " English" }}
                     }
-                    // One feedback row, not two. Sending and reading were separate
-                    // items that landed in the same place conceptually; the app
-                    // now carries its own compose button, the way the profile
-                    // links were merged into one.
+                    // No feedback row: the app ends every rail now, which is a door
+                    // in plain sight rather than one two lids down in here.
                     //
-                    // Signed out there is nothing to read — the app answers with a
-                    // locked empty state — so the entry goes straight to the
-                    // dialog. That dialog renders at the app-shell root (see
-                    // `feedback::FEEDBACK_OPEN`): inside this drawer pane its
-                    // fixed scrim would be trapped by the pane's transform.
-                    if crate::components::feedback::FEEDBACK_ENABLED {
-                        button {
-                            class: "list-item",
-                            onclick: move |_| {
-                                menu_open.set(false);
-                                if is_auth {
-                                    nav.push(Route::Home { app: Some("feedback".to_string()) });
-                                } else {
-                                    *crate::components::feedback::FEEDBACK_OPEN.write() = true;
-                                }
-                            },
-                            span { class: "material-icons", "feedback" }
-                            " {t(\"feedback.view\")}"
-                        }
-                    }
+                    // Signed out it used to open the compose dialog instead, on the
+                    // reasoning that there was nothing to read. That path could not
+                    // work: `nodes` grants insert to the `user` role only, so the
+                    // send was always going to be refused. Better no affordance
+                    // than one that fails. A channel for people who cannot sign in
+                    // wants the backend, which can rate-limit, not a public insert.
                     if is_auth {
                         // No separate "Profile" row: the identity card at the top
                         // of this menu is the way to your profile, and two links to
