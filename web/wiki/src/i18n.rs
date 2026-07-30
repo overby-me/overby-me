@@ -191,7 +191,7 @@ const EN_JSON: &str = r#"{
     "bin": {
         "title": "Bin",
         "empty": "Nothing deleted here",
-        "explain": "Deleted items stay here until an owner removes them for good.",
+        "explain": "Deleted items are kept here. Restoring one brings back everything that was filed under it.",
         "restore": "Restore",
         "restored": "Restored"
     },
@@ -199,6 +199,7 @@ const EN_JSON: &str = r#"{
         "add": "Add",
         "cancel": "Cancel",
         "delete": "Delete",
+        "deletePermanent": "This one cannot be undone.",
         "edit": "Edit",
         "save": "Save",
         "previous": "Previous",
@@ -292,6 +293,9 @@ const EN_JSON: &str = r#"{
         "commentsOnScreen": "Comments now shown on the screen",
         "commentsOffScreen": "Comments hidden from the screen",
         "confirmDelete": "Confirm Deletion",
+        "confirmDeleteBin": "Move to the bin?",
+        "deleteRecoverable": "This is not permanent. It goes to the bin, where an owner can restore it.",
+        "deleteRecoverableTree": "This is not permanent. It goes to the bin together with everything filed under it, and an owner can restore the lot.",
         "confirmSubmit": "Confirm Submission",
         "submitWarning": "Once you have submitted, it is no longer possible to edit.",
         "submit": "Submit",
@@ -717,7 +721,7 @@ const DA_JSON: &str = r#"{
     "bin": {
         "title": "Papirkurv",
         "empty": "Intet slettet her",
-        "explain": "Slettede ting bliver her, indtil en ejer fjerner dem permanent.",
+        "explain": "Slettede ting bliver gemt her. Gendanner du en, kommer alt, der lå under den, med tilbage.",
         "restore": "Gendan",
         "restored": "Gendannet"
     },
@@ -725,6 +729,7 @@ const DA_JSON: &str = r#"{
         "add": "Tilf\u00f8j",
         "cancel": "Annuller",
         "delete": "Slet",
+        "deletePermanent": "Denne kan ikke fortrydes.",
         "edit": "Rediger",
         "save": "Gem",
         "previous": "Forrige",
@@ -818,6 +823,9 @@ const DA_JSON: &str = r#"{
         "commentsOnScreen": "Kommentarer vises nu p\u00e5 sk\u00e6rmen",
         "commentsOffScreen": "Kommentarer skjult fra sk\u00e6rmen",
         "confirmDelete": "Bekr\u00e6ft sletning",
+        "confirmDeleteBin": "Flyt til papirkurven?",
+        "deleteRecoverable": "Det er ikke permanent. Det havner i papirkurven, hvor en ejer kan gendanne det.",
+        "deleteRecoverableTree": "Det er ikke permanent. Det havner i papirkurven sammen med alt, der ligger under det, og en ejer kan gendanne det hele.",
         "confirmSubmit": "Bekr\u00e6ft indsendelse",
         "submitWarning": "N\u00e5r du har indsendt, er det ikke l\u00e6ngere muligt at redigere.",
         "submit": "Indsend",

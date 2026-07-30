@@ -518,6 +518,9 @@ fn CommentThread(
                                 }
                             },
                             p { class: "body-medium", "{t(\"vote.confirmDeleteComment\")}" }
+                            // Comments are not binned, so unlike a document this
+                            // really is the end of them.
+                            p { class: "body-medium text-muted", "{t(\"common.deletePermanent\")}" }
                         }
                     }
                     if replying() {

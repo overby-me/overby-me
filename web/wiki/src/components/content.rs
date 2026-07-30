@@ -491,7 +491,9 @@ pub fn ContentApp(
                 super::widgets::Dialog {
                     open: confirm_open(),
                     on_dismiss: move |_| confirm_open.set(false),
-                    headline: t("content.confirmDelete"),
+                    // Deleting is a move to the bin, so the dialog asks for that
+                    // rather than for a deletion the app no longer performs.
+                    headline: t("content.confirmDeleteBin"),
                     icon: "delete".to_string(),
                     actions: rsx! {
                         button {
@@ -561,6 +563,7 @@ pub fn ContentApp(
                         }
                     },
                     p { class: "body-medium", "{name}" }
+                    p { class: "body-medium text-muted", "{t(\"content.deleteRecoverableTree\")}" }
                 }
             }
             // Author chips (the document's members), mirroring MemberChips.

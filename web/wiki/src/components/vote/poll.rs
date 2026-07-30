@@ -92,7 +92,10 @@ pub(super) fn DeletePollButton(poll_id: String) -> Element {
                     }
                     "{t(\"common.delete\")}"
                 }
-            }
+            },
+            // A poll does not go to the bin — the ballots under it go with it —
+            // so this dialog has to say what the content ones no longer do.
+            p { class: "body-medium text-muted", "{t(\"common.deletePermanent\")}" }
         }
     }
 }

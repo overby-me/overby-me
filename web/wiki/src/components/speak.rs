@@ -708,6 +708,8 @@ fn SpeakList(
                                 }
                             },
                             p { class: "body-medium", "{t(\"speak.confirmClear\")}" }
+                            // The queue is not binned: a cleared list is gone.
+                            p { class: "body-medium text-muted", "{t(\"common.deletePermanent\")}" }
                         }
                         button {
                             class: "btn btn-primary",

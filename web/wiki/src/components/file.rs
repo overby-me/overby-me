@@ -73,6 +73,9 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     };
     let created = node.created_at.as_ref().map(|t| t.0.clone());
     let node_id = node.id.0.clone();
+    // What binning needs: the path stamps the subtree, the actor records who.
+    let node_path = node.path.clone();
+    let actor = session.read().user.as_ref().map(|u| u.id.clone());
     let context_id = node.context_id.clone().map(|c| c.0);
     // Owners may delete the file (node/context owner); mirrors ContentApp gating.
     let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
@@ -214,7 +217,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                             super::widgets::Dialog {
                                 open: confirm_open(),
                                 on_dismiss: move |_| confirm_open.set(false),
-                                headline: t("content.confirmDelete"),
+                                headline: t("content.confirmDeleteBin"),
                                 icon: "delete".to_string(),
                                 actions: rsx! {
                                     button {
@@ -228,6 +231,8 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                         onclick: {
                                             let node_id = node_id.clone();
                                             let parent = segments[..segments.len() - 1].to_vec();
+                                            let node_path = node_path.clone();
+                                            let actor = actor.clone();
                                             move |_| {
                                                 if deleting() {
                                                     return;
@@ -235,15 +240,28 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                                 let token = session.read().access_token.clone();
                                                 let node_id = node_id.clone();
                                                 let parent = parent.clone();
+                                                let node_path = node_path.clone();
+                                                let actor = actor.clone();
                                                 // Dialog stays open so the spinner has somewhere
-                                                // to be while the subtree is walked.
+                                                // to be while the statement runs.
                                                 deleting.set(true);
                                                 spawn(async move {
-                                                    // Subtree and member rows together — nothing
-                                                    // cascades in the database, so a comment left
-                                                    // under a deleted file is unreachable forever.
-                                                    match graphql::delete_node_deep(token, node_id).await {
-                                                        Ok(()) => {
+                                                    // To the bin, like a document or a folder:
+                                                    // deleting a file from its own page used to be
+                                                    // final while deleting the folder around it was
+                                                    // recoverable, which made the promise depend on
+                                                    // which page you happened to be looking at.
+                                                    // The stored object is untouched either way, so
+                                                    // a restored file is a working file.
+                                                    match graphql::bin_node(
+                                                        token.as_deref(),
+                                                        &node_id,
+                                                        node_path.as_deref(),
+                                                        actor.as_deref(),
+                                                    )
+                                                    .await
+                                                    {
+                                                        Ok(_) => {
                                                             crate::session::bump_data_version();
                                                             deleting.set(false);
                                                             confirm_open.set(false);
@@ -265,6 +283,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                     }
                                 },
                                 p { class: "body-medium", "{name}" }
+                                p { class: "body-medium text-muted", "{t(\"content.deleteRecoverable\")}" }
                             }
                         }
                     }

@@ -600,7 +600,7 @@ pub fn FolderApp(
                 super::widgets::Dialog {
                     open: confirm_open(),
                     on_dismiss: move |_| confirm_open.set(false),
-                    headline: t("content.confirmDelete"),
+                    headline: t("content.confirmDeleteBin"),
                     icon: "delete".to_string(),
                     actions: rsx! {
                         button {
@@ -663,6 +663,9 @@ pub fn FolderApp(
                         }
                     },
                     p { class: "body-medium", "{name}" }
+                    // A folder takes its whole subtree with it, which is the one
+                    // case where the reader most needs to know it comes back.
+                    p { class: "body-medium text-muted", "{t(\"content.deleteRecoverableTree\")}" }
                 }
             }
             // The node's own description: groups, events and folders can carry
