@@ -500,6 +500,24 @@ pub fn UserProfile(id: String) -> Element {
                 }
             }
         }
+        // What they have written, first: it is why you opened someone's profile.
+        // The same card your own profile carries, but titled without the "Your",
+        // since this is someone else's page.
+        div { class: "card mt-1",
+            div { class: "card-header",
+                div { class: "avatar small", span { class: "material-icons", "history_edu" } }
+                h3 { class: "title-medium", "{t(\"profile.contributionsOther\")}" }
+            }
+            {match &contrib_state {
+                None => rsx! {
+                    div { class: "card-content", crate::components::widgets::Spinner {} }
+                },
+                Some(items) => rsx! {
+                    ContributionList { items: items.clone() }
+                },
+            }}
+        }
+        // Where you overlap, below it: context for the reader, not the point.
         div { class: "card mt-1",
             div { class: "card-header",
                 // join_inner, the set-intersection mark: this card is precisely
@@ -522,22 +540,6 @@ pub fn UserProfile(id: String) -> Element {
                     }
                 }
             }
-        }
-        // What they have written — the same card your own profile carries, but
-        // titled without the "Your", since this is someone else's page.
-        div { class: "card mt-1",
-            div { class: "card-header",
-                div { class: "avatar small", span { class: "material-icons", "history_edu" } }
-                h3 { class: "title-medium", "{t(\"profile.contributionsOther\")}" }
-            }
-            {match &contrib_state {
-                None => rsx! {
-                    div { class: "card-content", crate::components::widgets::Spinner {} }
-                },
-                Some(items) => rsx! {
-                    ContributionList { items: items.clone() }
-                },
-            }}
         }
     }
 }
