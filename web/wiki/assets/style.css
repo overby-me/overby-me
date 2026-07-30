@@ -918,6 +918,20 @@ html {
 .app-shell:not([data-size-class="compact"]) {
 	background: var(--md-surface-container);
 }
+/* Where the content pane starts, per shell state. Mirrors the pane's own
+   margin-left rules so anything anchored to the reading column (a FAB) moves
+   with it when the rail expands. */
+.app-shell {
+	--content-left: 0px;
+}
+.app-shell:not([data-size-class="compact"]) {
+	--content-left: var(--md-sys-rail-width);
+}
+.app-shell[data-tree-open="true"][data-size-class="large"],
+.app-shell[data-tree-open="true"][data-size-class="extra-large"] {
+	--content-left: var(--md-sys-rail-expanded);
+}
+
 .app-shell:not([data-size-class="compact"]) .content-pane {
 	margin-left: var(--md-sys-rail-width);
 	margin-top: var(--md-sys-spacing-16);
@@ -7109,6 +7123,23 @@ a.list-item:hover {
 }
 .app-shell[data-size-class="compact"] .speak-join {
 	bottom: calc(120px + 16px);
+}
+/* Anchor it to the READING COLUMN, not the window.
+   `.content-measure` is `margin-inline: 0 auto`, so the column is left-aligned
+   in the content pane and everything right of it is empty on a wide screen. A
+   window-anchored FAB ends up floating in that emptiness, far from the list it
+   acts on, so its right edge lines up with the column's instead. Clamped to the
+   viewport for the case where the column is wider than the space. */
+.app-shell:not([data-size-class="compact"]) .speak-join {
+	--fab-size: 56px;
+	right: auto;
+	left: min(
+		calc(
+			var(--content-left) + var(--md-sys-margin) + var(--md-sys-body-max) -
+				var(--fab-size)
+		),
+		calc(100vw - var(--fab-size) - 24px)
+	);
 }
 @media (prefers-reduced-motion: reduce) {
 	.speak-join-item {
