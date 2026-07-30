@@ -70,7 +70,10 @@ pub(super) fn DrawerContent() -> Element {
                         div { class: "list mt-1",
                             Link {
                                 to: Route::Home { app: None },
-                                class: "list-item",
+                                // A peer of the Groups and Events headings below,
+                                // not one of the rows under them, so it lines up
+                                // with those rather than with their contents.
+                                class: "list-item list-item-flush",
                                 div { class: "avatar small secondary",
                                     span { class: "material-icons", "home" }
                                 }

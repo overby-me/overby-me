@@ -2904,6 +2904,13 @@ select:focus {
 	gap: var(--md-sys-spacing-3);
 	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4);
 }
+/* A row that stands at HEADER level rather than among a header's contents (the
+   place picker's Home, above the Groups and Events headings). A .list-item is
+   inset by the margin that shapes its hover pill, which reads as one indent step
+   — right for a row under a heading, wrong for a row beside one. */
+.list-item-flush {
+	margin-inline: 0;
+}
 
 /* Matches .card-header h3, so both section headers read at the same weight. */
 .list-section-header h4 {
