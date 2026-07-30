@@ -52,6 +52,16 @@ pub fn dock_hidden() -> bool {
 /// component subscribes that component to the change. Only meaningful for a list
 /// the WINDOW scrolls; one inside its own scroll container (a sheet) never moves
 /// this and pages on a button instead.
+/// Take the reader back to the top of the page.
+///
+/// Smooth via the `html { scroll-behavior: smooth }` rule, which reduced-motion
+/// neutralises.
+pub fn scroll_to_top() {
+    if let Some(win) = web_sys::window() {
+        win.scroll_to_with_x_and_y(0.0, 0.0);
+    }
+}
+
 pub fn near_bottom() -> bool {
     NEAR_BOTTOM()
 }
@@ -272,13 +282,7 @@ pub fn BackToTop() -> Element {
             class: if VISIBLE() { "back-to-top visible" } else { "back-to-top" },
             aria_label: t("common.backToTop"),
             title: t("common.backToTop"),
-            onclick: move |_| {
-                if let Some(win) = web_sys::window() {
-                    // Smooth via the html { scroll-behavior: smooth } rule (which
-                    // reduced-motion neutralises).
-                    win.scroll_to_with_x_and_y(0.0, 0.0);
-                }
-            },
+            onclick: move |_| scroll_to_top(),
             span { class: "material-icons", "arrow_upward" }
         }
     }

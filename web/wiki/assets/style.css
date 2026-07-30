@@ -3092,6 +3092,18 @@ select:focus {
 	text-decoration: none;
 }
 
+/* The feed's "3 new" pill: arrivals offered rather than inserted, so the line
+   someone is reading never moves under them. Sticky at the top of the list, the
+   way every feed that respects its reader does it. */
+.feed-new-pill {
+	position: sticky;
+	top: var(--md-sys-spacing-4);
+	z-index: 5;
+	margin: 0 auto var(--md-sys-spacing-3);
+	display: flex;
+	box-shadow: var(--md-sys-elevation-2);
+}
+
 /* M3 data table (widgets::DataTable): a scrollable semantic table with a quiet
    surface-container header and tonal row dividers. */
 .m3-data-table-wrap {

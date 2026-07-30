@@ -10,7 +10,7 @@
 use dioxus::prelude::*;
 
 use crate::graphql;
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::model;
 use crate::route::Route;
 use crate::session::use_session;
@@ -61,10 +61,56 @@ const FEED_PAGE: i32 = 12;
 pub fn FeedList(
     #[props(default)] context_id: Option<String>,
     #[props(default)] autoload: bool,
+    /// Insert new arrivals the moment they land, rather than offering them.
+    ///
+    /// True for the room's screen and the chair's console, where the newest
+    /// thing IS the point and nobody is scrolling; false on a page someone is
+    /// reading, where content appearing above the line they are on moves that
+    /// line, so arrivals wait behind a count they can tap.
+    #[props(default)]
+    instant: bool,
 ) -> Element {
     let session = use_session();
     let token = session.read().access_token.clone();
     let user_id = session.read().user.as_ref().map(|u| u.id.clone());
+
+    // Live. A feed you have to leave and come back to is not a feed, it is a
+    // page, and on the projector it was worse than that: an amendment posted
+    // from the floor never reached the screen it was posted at.
+    //
+    // The subscription carries ONE id, not the feed. It exists to say "something
+    // landed", and the page is then refetched through the same query the first
+    // page came from — the feed query joins, computes and orders, and running
+    // that as a live query for every reader would be paying continuously for
+    // something that changes a few times an hour.
+    let live = use_signal(|| 0u32);
+    {
+        let scope = match &context_id {
+            // Everything under this context, which is what the feed itself now
+            // asks for (see graphql::recent_where_clause).
+            Some(id) => {
+                let id = crate::graphql::gql_escape(id);
+                format!(
+                    r#"{{_or: [{{contextId: {{_eq: "{id}"}}}}, {{ancestors: {{_contains: ["{id}"]}}}}]}}"#
+                )
+            }
+            // Unscoped: the contexts this reader belongs to.
+            None => {
+                let uid = crate::graphql::gql_escape(user_id.as_deref().unwrap_or_default());
+                format!(r#"{{context: {{members: {{nodeId: {{_eq: "{uid}"}}}}}}}}"#)
+            }
+        };
+        if user_id.is_some() {
+            crate::subscription::use_live(
+                format!(
+                    "subscription {{ nodes(where: {scope}, order_by: [{{createdAt: desc}}], limit: 1) {{ id }} }}"
+                ),
+                live,
+            );
+        }
+    }
+    // Arrivals waiting to be shown, on a feed someone is reading.
+    let mut pending = use_signal(Vec::<model::ChildNodeFields>::new);
 
     // Pages accumulate here rather than in a resource: a resource re-runs and
     // replaces, which would drop everything already read past.
@@ -83,6 +129,7 @@ pub fn FeedList(
         let ctx = context_id.clone();
         use_effect(use_reactive!(|(token, user_id, ctx)| {
             items.set(Vec::new());
+            pending.set(Vec::new());
             has_more.set(true);
             let Some(uid) = user_id.clone() else { return };
             let token = token.clone();
@@ -100,6 +147,66 @@ pub fn FeedList(
                 has_more.set(page.len() as i32 == page_size);
                 items.set(page);
                 loading.set(false);
+            });
+        }));
+    }
+
+    // Something landed: refetch the FIRST page and take what is new from it.
+    //
+    // A refetch rather than a merge of pushed rows, because the subscription
+    // carries an id and the list needs the whole shape (author, parent, ordinal)
+    // that the feed query computes. Merged by id into the head of the list, so
+    // pages already read stay where they are and nothing appears twice — offset
+    // paging repeats rows whenever something is inserted between two fetches,
+    // and a repeat here is a duplicate key, which Dioxus panics on.
+    {
+        let token = token.clone();
+        let user_id = user_id.clone();
+        let ctx = context_id.clone();
+        let rev = live();
+        let data_rev = crate::session::DATA_VERSION();
+        use_effect(use_reactive!(|(rev, data_rev, token, user_id, ctx)| {
+            // The subscription fires once on connect, which is the page the
+            // first-page effect has already fetched.
+            if rev == 0 && data_rev == 0 {
+                return;
+            }
+            let Some(uid) = user_id.clone() else { return };
+            let token = token.clone();
+            let ctx = ctx.clone();
+            spawn(async move {
+                let page = graphql::query_recent_nodes(
+                    token.as_deref(),
+                    FEED_PAGE,
+                    0,
+                    &uid,
+                    ctx.as_deref(),
+                )
+                .await;
+                let seen: std::collections::HashSet<String> = items
+                    .peek()
+                    .iter()
+                    .map(|n| n.id.0.clone())
+                    .chain(pending.peek().iter().map(|n| n.id.0.clone()))
+                    .collect();
+                let fresh: Vec<model::ChildNodeFields> = page
+                    .into_iter()
+                    .filter(|n| !seen.contains(&n.id.0))
+                    .collect();
+                if fresh.is_empty() {
+                    return;
+                }
+                if instant {
+                    let mut list = items.write();
+                    for (i, node) in fresh.into_iter().enumerate() {
+                        list.insert(i, node);
+                    }
+                } else {
+                    let mut waiting = pending.write();
+                    for (i, node) in fresh.into_iter().enumerate() {
+                        waiting.insert(i, node);
+                    }
+                }
             });
         }));
     }
@@ -153,6 +260,25 @@ pub fn FeedList(
         }));
     }
 
+    // Show the arrivals now.
+    let mut show_pending = move || {
+        let waiting: Vec<model::ChildNodeFields> = pending.write().drain(..).collect();
+        let mut list = items.write();
+        for (i, node) in waiting.into_iter().enumerate() {
+            list.insert(i, node);
+        }
+        crate::components::back_to_top::scroll_to_top();
+    };
+    let waiting_count = pending.read().len();
+
+    let rows = items.read().clone();
+    if rows.is_empty() {
+        // Nothing yet, but something arrived: an empty feed with a "1 new" pill
+        // over it would be absurd, so the arrivals simply are the feed.
+        if waiting_count > 0 {
+            show_pending();
+        }
+    }
     let rows = items.read().clone();
     if rows.is_empty() {
         return rsx! {
@@ -172,6 +298,15 @@ pub fn FeedList(
     }
 
     rsx! {
+        if waiting_count > 0 {
+            // Offered, not inserted: the reader decides when the list moves.
+            button {
+                class: "btn btn-tonal feed-new-pill",
+                onclick: move |_| show_pending(),
+                span { class: "material-icons", "arrow_upward" }
+                "{t_with(\"layout.feedNew\", &[(\"count\", &waiting_count.to_string())])}"
+            }
+        }
         div { class: "list",
             for node in rows.iter() {
                 RecentItem { key: "{node.id.0}", node: node.clone() }

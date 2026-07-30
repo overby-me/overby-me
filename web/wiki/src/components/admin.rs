@@ -370,6 +370,8 @@ pub fn AdminApp(node: NodeWithChildren) -> Element {
                     crate::components::feed::FeedList {
                         context_id: context_id.clone(),
                         autoload: true,
+                        // The chair is watching for what just landed, not reading.
+                        instant: true,
                     }
                 }
             }

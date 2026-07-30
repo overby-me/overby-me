@@ -127,7 +127,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
                                 div { class: "avatar", span { class: "material-icons", "view_agenda" } }
                                 h3 { class: "title-medium", "{crate::i18n::t(\"layout.feed\")}" }
                             }
-                            crate::components::feed::FeedList { context_id: context_id.clone() }
+                            crate::components::feed::FeedList { context_id: context_id.clone(), instant: true }
                         }
                     },
                     Some(n) => rsx! { MimeLoader { key: "{n.id.0}", node: n, path: Vec::new(), projector: true } },
