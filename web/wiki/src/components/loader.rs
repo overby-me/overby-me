@@ -412,7 +412,7 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "vote/poll" => "poll",
         // speak / apps (old wiki: speak/list=InterpreterMode, app/speak=RecordVoiceOver)
         "speak/list" => "interpreter_mode",
-        "app/feed" => "dynamic_feed",
+        "app/feed" => "view_agenda",
         "app/speak" => "record_voice_over",
         "app/editor" => "edit",
         "app/sort" => "low_priority",
