@@ -31,7 +31,7 @@ pub fn FeedApp(node: model::NodeWithChildren) -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar small", span { class: "material-icons", "schedule" } }
+                div { class: "avatar small", span { class: "material-icons", "dynamic_feed" } }
                 h3 { class: "title-large", "{t(\"layout.feed\")}" }
             }
             FeedList { context_id, autoload: true }
@@ -153,7 +153,7 @@ pub fn FeedList(
             } else {
                 div { class: "empty-state empty-state-sm",
                     div { class: "empty-state-orb empty-state-orb-sm",
-                        span { class: "material-icons", "schedule" }
+                        span { class: "material-icons", "dynamic_feed" }
                     }
                     p { class: "empty-state-body", "{t(\"layout.feedEmpty\")}" }
                 }
