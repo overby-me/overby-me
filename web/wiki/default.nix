@@ -41,6 +41,8 @@
     wasm-bindgen-cli,
     binaryen,
     lld,
+    nushell,
+    wasm-tools,
     ...
   }:
     rustPlatform.buildRustPackage {
@@ -57,6 +59,10 @@
           ./src
           ./assets
           ./graphql
+          # `just build` ends in this script. Named on its own rather than the
+          # whole scripts/ directory, so editing an unrelated script does not
+          # rebuild the frontend.
+          ./scripts/split-symbols.nu
         ];
       };
 
@@ -80,6 +86,12 @@
         binaryen
         # dx links the wasm with lld.
         lld
+        # `just build` finishes with scripts/split-symbols.nu, which moves the
+        # DWARF out of the shipped wasm into a sidecar. Without these two the
+        # hermetic build died there ("nu: command not found"), so the documented
+        # `just deploy-build` could not produce a bundle at all.
+        nushell
+        wasm-tools
       ];
 
       # Run the same `just build` as a local build, so the SPA `_redirects`,
