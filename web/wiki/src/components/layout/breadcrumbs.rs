@@ -361,6 +361,7 @@ pub(super) fn Breadcrumbs() -> Element {
 pub(super) fn app_crumb_label(app: &str) -> String {
     match app {
         "feed" => t("layout.feed"),
+        "feedback" => t("feedback.view"),
         "folder" => t("mime.folder"),
         "speak" => t("mime.speak"),
         "vote" => t("mime.vote"),
@@ -498,6 +499,19 @@ pub(super) fn context_apps(
                 current_app.as_deref() == Some("member"),
             ));
         }
+        // What people have reported. It has been an app all along, but the only
+        // way in was the account menu inside the drawer, two lids down from
+        // anywhere, which is no way to invite anyone to say what is wrong.
+        if crate::components::feedback::FEEDBACK_ENABLED {
+            root_apps.push((
+                "app/feedback",
+                t("feedback.view"),
+                Route::Home {
+                    app: Some("feedback".to_string()),
+                },
+                current_app.as_deref() == Some("feedback"),
+            ));
+        }
         return root_apps;
     }
     // The app is part of the route's query, so these navigate client-side and the
@@ -597,6 +611,26 @@ pub(super) fn context_apps(
         // The other apps (screen, program, graph, social, map, profile, perm,
         // parent) are still reachable via their `?app=` URL but hidden from these
         // nav surfaces until they are ready to show. (admin IS shown, just above.)
+
+        // Feedback, always last: it is a tool rather than a view of this context,
+        // so it sits after everything the context is actually about, and is the
+        // first thing the bottom bar pushes into its overflow sheet.
+        //
+        // Addressed at the context you are in, not at the site root. The app
+        // needs no node (the resolver dispatches it before resolution), so the
+        // path costs nothing and buys everything: the rail keeps this context's
+        // apps while you write, and one tap on the crumb puts you back.
+        if is_auth && crate::components::feedback::FEEDBACK_ENABLED {
+            apps.push((
+                "app/feedback",
+                t("feedback.view"),
+                Route::PathPage {
+                    segments: ctx_path.clone(),
+                    app: Some("feedback".to_string()),
+                },
+                current_app.as_deref() == Some("feedback"),
+            ));
+        }
     }
     apps
 }
