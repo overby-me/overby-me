@@ -35,6 +35,8 @@ pub struct NodeWithChildren {
     pub id: Uuid,
     pub name: String,
     pub key: String,
+    /// Slash-joined keys from the root, maintained by a database trigger.
+    pub path: Option<String>,
     pub mime_id: Option<String>,
     pub parent_id: Option<Uuid>,
     pub context_id: Option<Uuid>,

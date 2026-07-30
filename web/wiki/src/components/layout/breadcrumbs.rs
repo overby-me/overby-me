@@ -369,6 +369,7 @@ pub(super) fn Breadcrumbs() -> Element {
 pub(super) fn app_crumb_label(app: &str) -> String {
     match app {
         "feed" => t("layout.feed"),
+        "bin" => t("bin.title"),
         "feedback" => t("feedback.view"),
         "folder" => t("mime.folder"),
         "speak" => t("mime.speak"),
@@ -515,6 +516,17 @@ pub(super) fn context_apps(
                 current_app.as_deref() == Some("member"),
             ));
         }
+        // The root's own bin: a binned group or event comes back from here.
+        if crate::components::loader::CTX_IS_OWNER().unwrap_or(false) {
+            root_apps.push((
+                "app/bin",
+                t("bin.title"),
+                Route::Home {
+                    app: Some("bin".to_string()),
+                },
+                current_app.as_deref() == Some("bin"),
+            ));
+        }
         // What people have reported. It has been an app all along, but the only
         // way in was the account menu inside the drawer, two lids down from
         // anywhere, which is no way to invite anyone to say what is wrong.
@@ -628,6 +640,19 @@ pub(super) fn context_apps(
         // parent) are still reachable via their `?app=` URL but hidden from these
         // nav surfaces until they are ready to show. (admin IS shown, just above.)
 
+        // What was deleted here, and the way back. An owner surface, next to the
+        // other owner surfaces rather than among the apps everyone uses.
+        if is_ctx_owner {
+            apps.push((
+                "app/bin",
+                t("bin.title"),
+                Route::PathPage {
+                    segments: ctx_path.clone(),
+                    app: Some("bin".to_string()),
+                },
+                current_app.as_deref() == Some("bin"),
+            ));
+        }
         // Feedback, always last: it is a tool rather than a view of this context,
         // so it sits after everything the context is actually about, and is the
         // first thing the bottom bar pushes into its overflow sheet.

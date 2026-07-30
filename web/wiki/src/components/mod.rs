@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod auth;
 pub mod back_to_top;
+pub mod bin;
 pub mod comments;
 pub mod content;
 pub mod cow;

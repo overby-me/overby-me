@@ -61,11 +61,15 @@ pub fn ContentApp(
         _ => vec![],
     };
     let node_id = node.id.0.clone();
+    // Where the bin finds this node's subtree, and who to record as having binned
+    // it (see `graphql::bin_node`).
+    let node_path = node.path.clone();
+    let actor = session.read().user.as_ref().map(|u| u.id.clone());
     let mut confirm_open = use_signal(|| false);
     // Submitting is irreversible (it makes the node immutable), so the sheet's
     // row opens the same warning dialog the editor's submit button opens.
     let mut confirm_submit = use_signal(|| false);
-    // A deep delete walks the subtree a request at a time, so the confirm button
+    // Binning is one statement, but it still round-trips, so the confirm button
     // reports that it is working rather than appearing to do nothing.
     let mut deleting = use_signal(|| false);
     let name = node.name.clone();
@@ -501,6 +505,8 @@ pub fn ContentApp(
                             onclick: {
                                 let node_id = node_id.clone();
                                 let parent = segments[..segments.len() - 1].to_vec();
+                                let node_path = node_path.clone();
+                                let actor = actor.clone();
                                 move |_| {
                                     if deleting() {
                                         return;
@@ -508,21 +514,27 @@ pub fn ContentApp(
                                     let token = session.read().access_token.clone();
                                     let node_id = node_id.clone();
                                     let parent = parent.clone();
-                                    // The dialog stays open, so the spinner has
-                                    // somewhere to be: a deep delete is a round
-                                    // trip per node and can run for a while.
+                                    let node_path = node_path.clone();
+                                    let actor = actor.clone();
+                                    // The dialog stays open so the spinner has
+                                    // somewhere to be.
                                     deleting.set(true);
                                     spawn(async move {
-                                        // The whole subtree, deepest first: the
-                                        // comments on this node, their replies and
-                                        // the reactions on those. Nothing cascades
-                                        // in the database, so anything left behind
-                                        // becomes unreachable. Member rows go with
-                                        // each node.
-                                        match graphql::delete_node_deep(token, node_id)
-                                            .await
+                                        // To the bin, not out of existence: one
+                                        // statement stamps this node and everything
+                                        // under it (found by path prefix), and the
+                                        // context's bin can put the lot back. The
+                                        // old deep delete walked the subtree a
+                                        // request at a time and was final.
+                                        match graphql::bin_node(
+                                            token.as_deref(),
+                                            &node_id,
+                                            node_path.as_deref(),
+                                            actor.as_deref(),
+                                        )
+                                        .await
                                         {
-                                            Ok(()) => {
+                                            Ok(_) => {
                                                 crate::session::bump_data_version();
                                                 deleting.set(false);
                                                 confirm_open.set(false);

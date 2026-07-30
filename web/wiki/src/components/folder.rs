@@ -613,6 +613,8 @@ pub fn FolderApp(
                             disabled: deleting(),
                             onclick: {
                                 let node_del = node.id.0.clone();
+                                let del_path = node.path.clone();
+                                let del_actor = session.read().user.as_ref().map(|u| u.id.clone());
                                 let dest = delete_parent.clone();
                                 move |_| {
                                     if deleting() {
@@ -620,16 +622,26 @@ pub fn FolderApp(
                                     }
                                     let token = session.read().access_token.clone();
                                     let node_del = node_del.clone();
+                                    let del_path = del_path.clone();
+                                    let del_actor = del_actor.clone();
                                     let dest = dest.clone();
                                     // A folder's subtree is the deepest of them all,
                                     // so this is the delete most worth reporting.
                                     deleting.set(true);
                                     spawn(async move {
-                                        // A folder is the one that really needs the
-                                        // recursion: everything filed under it went
-                                        // unreachable when only the folder row went.
-                                        match graphql::delete_node_deep(token, node_del).await {
-                                            Ok(()) => {
+                                        // A folder is the case that most needs to be
+                                        // recoverable: everything filed under it
+                                        // goes with it. One statement stamps the
+                                        // subtree, and the bin puts the lot back.
+                                        match graphql::bin_node(
+                                            token.as_deref(),
+                                            &node_del,
+                                            del_path.as_deref(),
+                                            del_actor.as_deref(),
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => {
                                                 crate::session::bump_data_version();
                                                 deleting.set(false);
                                                 confirm_open.set(false);

@@ -125,6 +125,7 @@ impl From<NodeWithChildren> for model::NodeWithChildren {
             id: n.id.into(),
             name: n.name,
             key: n.key,
+            path: n.path,
             mime_id: n.mime_id,
             parent_id: n.parent_id.map(Into::into),
             context_id: n.context_id.map(Into::into),
@@ -412,6 +413,9 @@ pub struct NodeWithChildren {
     pub id: Uuid,
     pub name: String,
     pub key: String,
+    /// The node's own trail, for the subtree operations that key off it (the
+    /// bin). Maintained by a database trigger.
+    pub path: Option<String>,
     pub mime_id: Option<String>,
     pub parent_id: Option<Uuid>,
     pub context_id: Option<Uuid>,
@@ -4428,4 +4432,138 @@ mod tests {
             "missing parent mime filter: {json}"
         );
     }
+}
+
+// --- The bin: soft delete, list, restore ---
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "deleted_nodes")]
+pub struct DeletedNodeFields {
+    pub id: Option<Uuid>,
+    pub name: Option<String>,
+    pub key: Option<String>,
+    pub path: Option<String>,
+    pub mime_id: Option<String>,
+    pub deleted_at: Option<Timestamptz>,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "deleted_nodes_bool_exp"
+)]
+pub struct DeletedNodesBoolExp {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub context_id: Option<UuidComparisonExp>,
+}
+
+#[derive(cynic::InputObject, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "deleted_nodes_order_by"
+)]
+pub struct DeletedNodesOrderBy {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<OrderBy>,
+}
+
+#[derive(cynic::QueryVariables)]
+pub struct DeletedNodesVariables {
+    pub where_clause: DeletedNodesBoolExp,
+    pub order_by: Option<Vec<DeletedNodesOrderBy>>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "DeletedNodesVariables"
+)]
+pub struct DeletedNodesQuery {
+    #[arguments(where: $where_clause, order_by: $order_by)]
+    pub deleted_nodes: Vec<DeletedNodeFields>,
+}
+
+/// What is in a context's bin: one row per delete someone asked for, newest
+/// first. Owner-only, enforced by the view's own permission rather than here.
+pub async fn query_deleted(
+    access_token: Option<&str>,
+    context_id: &str,
+) -> Result<Vec<DeletedNodeFields>, String> {
+    use cynic::QueryBuilder;
+    let op = DeletedNodesQuery::build(DeletedNodesVariables {
+        where_clause: DeletedNodesBoolExp {
+            context_id: Some(UuidComparisonExp {
+                eq: Some(Uuid(context_id.to_string())),
+                is_null: None,
+            }),
+        },
+        order_by: Some(vec![DeletedNodesOrderBy {
+            deleted_at: Some(OrderBy::Desc),
+        }]),
+    });
+    Ok(execute(access_token, op).await?.deleted_nodes)
+}
+
+/// Bin a node and everything under it, in one statement.
+///
+/// The subtree is found by path prefix, which is what the `path` column is for:
+/// the old deep delete walked it a request per node. Every stamped row carries
+/// `deleted_root`, so restore can undo exactly this action rather than guessing
+/// at a tree that may have changed since.
+///
+/// Rows the caller may not update are simply not updated — the same authority
+/// the old delete had, since it deleted node by node under the same rules.
+pub async fn bin_node(
+    access_token: Option<&str>,
+    node_id: &str,
+    path: Option<&str>,
+    actor: Option<&str>,
+) -> Result<u32, String> {
+    let subtree = match path.filter(|p| !p.is_empty()) {
+        Some(p) => format!(r#"{{path: {{_like: "{}/%"}}}}"#, gql_escape(p)),
+        // No path (an orphan, or a node the trigger could not place) means the
+        // node alone: a prefix of nothing would match everything.
+        None => r#"{id: {_is_null: true}}"#.to_string(),
+    };
+    let query = format!(
+        r#"mutation($id: uuid!, $set: nodes_set_input!) {{
+             updateNodes(where: {{_and: [
+                 {{deleted_at: {{_is_null: true}}}},
+                 {{_or: [{{id: {{_eq: $id}}}}, {subtree}]}}
+             ]}}, _set: $set) {{ affected_rows }}
+           }}"#
+    );
+    let set = serde_json::json!({
+        "deleted_at": "now()",
+        "deleted_by": actor,
+        "deleted_root": node_id,
+    });
+    let data = execute_raw_vars(
+        access_token,
+        &query,
+        serde_json::json!({ "id": node_id, "set": set }),
+    )
+    .await?;
+    Ok(data
+        .get("updateNodes")
+        .and_then(|u| u.get("affected_rows"))
+        .and_then(|a| a.as_u64())
+        .unwrap_or(0) as u32)
+}
+
+/// Put back everything one bin action took, by the `deleted_root` it stamped.
+pub async fn restore_node(access_token: Option<&str>, root_id: &str) -> Result<u32, String> {
+    let query = r#"mutation($id: uuid!) {
+        updateNodes(where: {deleted_root: {_eq: $id}},
+                    _set: {deleted_at: null, deleted_by: null, deleted_root: null}) {
+            affected_rows
+        }
+    }"#;
+    let data = execute_raw_vars(access_token, query, serde_json::json!({ "id": root_id })).await?;
+    Ok(data
+        .get("updateNodes")
+        .and_then(|u| u.get("affected_rows"))
+        .and_then(|a| a.as_u64())
+        .unwrap_or(0) as u32)
 }

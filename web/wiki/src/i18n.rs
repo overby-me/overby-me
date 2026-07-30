@@ -188,6 +188,13 @@ const EN_JSON: &str = r#"{
         "title": "On this page",
         "empty": "No sections on this page"
     },
+    "bin": {
+        "title": "Bin",
+        "empty": "Nothing deleted here",
+        "explain": "Deleted items stay here until an owner removes them for good.",
+        "restore": "Restore",
+        "restored": "Restored"
+    },
     "common": {
         "add": "Add",
         "cancel": "Cancel",
@@ -706,6 +713,13 @@ const DA_JSON: &str = r#"{
     "toc": {
         "title": "P\u00e5 denne side",
         "empty": "Ingen sektioner p\u00e5 denne side"
+    },
+    "bin": {
+        "title": "Papirkurv",
+        "empty": "Intet slettet her",
+        "explain": "Slettede ting bliver her, indtil en ejer fjerner dem permanent.",
+        "restore": "Gendan",
+        "restored": "Gendannet"
     },
     "common": {
         "add": "Tilf\u00f8j",

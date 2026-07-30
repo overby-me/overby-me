@@ -6389,6 +6389,45 @@ type mutation_root {
 }
 
 """
+The bin: one row per delete a user actually asked for.
+"""
+type deleted_nodes {
+	contextId: uuid
+	deletedAt: timestamptz
+	deletedBy: uuid
+	deletedRoot: uuid
+	id: uuid
+	key: String
+	mimeId: String
+	name: String
+	ownerId: uuid
+	parentId: uuid
+	path: String
+}
+
+"""
+Boolean expression to filter rows from the table "deleted_nodes".
+"""
+input deleted_nodes_bool_exp {
+	_and: [deleted_nodes_bool_exp!]
+	_not: deleted_nodes_bool_exp
+	_or: [deleted_nodes_bool_exp!]
+	contextId: uuid_comparison_exp
+	deletedAt: timestamptz_comparison_exp
+	id: uuid_comparison_exp
+	path: String_comparison_exp
+}
+
+"""
+Ordering options when selecting data from "deleted_nodes".
+"""
+input deleted_nodes_order_by {
+	deletedAt: order_by
+	name: order_by
+	path: order_by
+}
+
+"""
 columns and relationships of "nodes"
 """
 type nodes {
@@ -8958,6 +8997,23 @@ type query_root {
 	"""
 	fetch data from the table: "nodes"
 	"""
+	deletedNodes(
+		"""
+		distinct select on columns
+		"""
+		limit: Int
+
+		"""
+		sort the rows by one or more columns
+		"""
+		order_by: [deleted_nodes_order_by!]
+
+		"""
+		filter the rows returned
+		"""
+		where: deleted_nodes_bool_exp
+	): [deleted_nodes!]!
+
 	nodes(
 		"""
 		distinct select on columns
