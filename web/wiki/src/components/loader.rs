@@ -122,13 +122,24 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
     // `/` (empty path, no app) is the welcome page. Render HomeApp directly: it
     // fetches the root itself and still renders when logged out (or when the root
     // isn't readable), whereas resolving the root here would 404 for an anonymous
-    // visitor and hide the welcome card + login links. `/?app=editor` falls
-    // through to the resolver below to open the owner editor on the root node.
-    if segments.is_empty() && app.as_deref() != Some("editor") {
+    // visitor and hide the welcome card + login links.
+    //
+    // WITH an app it falls through to the resolver, which resolves the root node
+    // and opens that app on it. The root is a context like any other: it has
+    // members (its owners), permission rules and editable content, and this is
+    // the only way to reach them. Only `?app=editor` used to get through, so the
+    // root's own member list could not be opened at all.
+    if segments.is_empty() && app.is_none() {
         return rsx! { HomeApp {} };
     }
 
     let result = node_future.read().clone();
+    // At the root, a resolve that fails or finds nothing is not an error page:
+    // `/` is the welcome page, and an anonymous visitor cannot read the root node
+    // at all. Only real paths get "not found" and the error card.
+    if segments.is_empty() && matches!(result, Some(Err(_)) | Some(Ok(None))) {
+        return rsx! { HomeApp {} };
+    }
     match result {
         Some(Ok(Some(node))) => {
             // The active app comes from the route's `?app=` query.

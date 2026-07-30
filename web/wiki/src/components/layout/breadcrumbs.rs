@@ -244,6 +244,9 @@ pub(super) fn Breadcrumbs() -> Element {
     let route = use_route::<Route>();
     let (segments, app) = match &route {
         Route::PathPage { segments, app } => (segments.clone(), app.clone()),
+        // The root takes apps too (`/?app=member`), so its trail ends in the same
+        // app crumb every other page's does.
+        Route::Home { app } => (vec![], app.clone()),
         _ => (vec![], None),
     };
 
@@ -335,7 +338,13 @@ pub(super) fn Breadcrumbs() -> Element {
             // crumb — a labelled, clickable step rather than a badge on the node.
             if let Some(a) = app.clone() {
                 BreadcrumbCrumb {
-                    to: Route::PathPage { segments: segments.clone(), app: Some(a.clone()) },
+                    // `/` has its own route variant, so an app on the root cannot
+                    // be addressed as an empty-segment PathPage.
+                    to: if segments.is_empty() {
+                        Route::Home { app: Some(a.clone()) }
+                    } else {
+                        Route::PathPage { segments: segments.clone(), app: Some(a.clone()) }
+                    },
                     mime: format!("app/{a}"),
                     name: app_crumb_label(&a),
                     ordinal: None,
@@ -455,15 +464,27 @@ pub(super) fn context_apps(
         Route::PathPage { segments, .. } => segments.clone(),
         _ => vec![],
     };
-    if segments.is_empty() {
-        // The landing page is not a context, so it has no apps. The rail keeps
-        // only its menu button and the bottom bar hides itself entirely.
-        return vec![];
-    }
     let current_app = match route {
-        Route::PathPage { app, .. } => app.clone(),
+        Route::PathPage { app, .. } | Route::Home { app } => app.clone(),
         _ => None,
     };
+    if segments.is_empty() {
+        // The root is a context too, and its members are its owners: the people
+        // who may create groups and events. It is managed by the same app every
+        // other context uses, and this rail entry is the only way in. The rest of
+        // the apps need content to act on, which the root has none of.
+        if is_auth && crate::components::loader::CTX_IS_OWNER().unwrap_or(false) {
+            return vec![(
+                "app/member",
+                t("common.members"),
+                Route::Home {
+                    app: Some("member".to_string()),
+                },
+                current_app.as_deref() == Some("member"),
+            )];
+        }
+        return vec![];
+    }
     // The app is part of the route's query, so these navigate client-side and the
     // resolver swaps the view without a reload.
     let ctx_path = context_path(&segments);
