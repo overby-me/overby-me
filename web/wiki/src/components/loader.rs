@@ -962,7 +962,46 @@ pub fn slug_base(name: &str) -> String {
         }
     }
     // A trailing separator would leave the `-2` suffix sitting behind punctuation.
-    base.trim_end_matches('_').to_string()
+    let base = base.trim_end_matches('_');
+    truncate_key(base)
+}
+
+/// The longest a generated key may be.
+///
+/// A key is forever: it is the URL, and every descendant's path carries it. The
+/// name it comes from is capped at 120 characters in the inputs, which does
+/// nothing about what was already typed elsewhere or pasted before that cap
+/// existed — the longest key in this wiki is 2140 characters, a whole
+/// candidature pasted into a name field, giving its node a 2211-character path
+/// that every child would have extended further.
+///
+/// 60 leaves room for a readable title (the average key here is 32) and bounds
+/// a nine-deep path to something a URL bar can show. It applies to keys made
+/// from here on; the ones already stored are what people have linked to, so
+/// they stay as they are.
+pub const KEY_MAXLEN: usize = 60;
+
+/// Cut a slug to [`KEY_MAXLEN`], on a word boundary where there is one.
+///
+/// Cutting mid-word gives `hovedbestyrelsesmedlemmer_til_klima_og_miljoudval`;
+/// cutting at the last separator before the limit gives
+/// `hovedbestyrelsesmedlemmer_til_klima_og`, which is still the title. A single
+/// word longer than the limit has no boundary to find, and is cut where it must
+/// be — a key is an identifier, not a sentence.
+fn truncate_key(base: &str) -> String {
+    // Char-wise, not byte-wise: the keys here carry ø, æ and å.
+    let chars: Vec<char> = base.chars().collect();
+    if chars.len() <= KEY_MAXLEN {
+        return base.to_string();
+    }
+    let cut: String = chars[..KEY_MAXLEN].iter().collect();
+    // Prefer the last separator, but not one so early that the key stops saying
+    // anything: half the budget is the floor.
+    let boundary = cut
+        .rfind('_')
+        .filter(|i| *i >= KEY_MAXLEN / 2)
+        .unwrap_or(cut.len());
+    cut[..boundary].trim_end_matches(['_', '-']).to_string()
 }
 
 /// Build a URL-safe node key from a display name plus a short unique suffix.
@@ -1071,6 +1110,55 @@ mod tests {
         assert_eq!(super::slug_base("Klima- "), "klima");
         assert_eq!(super::slug_base("--"), "");
         assert_eq!(super::slug_base("- Leading"), "leading");
+    }
+
+    #[test]
+    fn a_key_is_cut_to_something_a_url_can_carry() {
+        // The real case this exists for: a whole candidature pasted into a name
+        // field, which gave one node a 2140-character key and a 2211-character
+        // path that every child would have extended.
+        let pasted = "## Kandidatur til Klima- og Miljøudvalget  Kære alle,  jeg stiller (igen) op til Klima- og Miljøudvalget, fordi jeg mener at";
+        let key = slug_base(pasted);
+        assert!(key.chars().count() <= KEY_MAXLEN, "{key}");
+        // Cut on a word boundary, so it still reads as the title it came from.
+        assert!(!key.ends_with('_'), "{key}");
+        // `Klima-` has its hyphen before a SPACE, so it is punctuation and folds
+        // to a separator like any other (see slug_base) — not a word-joining
+        // hyphen as in `to-statsløsningen`.
+        assert!(key.starts_with("kandidatur_til_klima_og_milj"), "{key}");
+    }
+
+    #[test]
+    fn a_short_key_is_left_exactly_as_it_was() {
+        // Every existing key under the limit must slug identically to before,
+        // or the same name would produce two different URLs across a deploy.
+        for name in [
+            "Dagsorden 3.0",
+            "Landsmøde 2026",
+            "Asger Holm Ørskov",
+            "to-statsløsningen",
+        ] {
+            let key = slug_base(name);
+            assert!(key.chars().count() <= KEY_MAXLEN);
+            assert!(!key.is_empty());
+        }
+        assert_eq!(slug_base("Dagsorden 3.0"), "dagsorden_3_0");
+        assert_eq!(slug_base("to-statsløsningen"), "to-statsløsningen");
+    }
+
+    #[test]
+    fn one_enormous_word_is_cut_where_it_must_be() {
+        // No separator to fall back on: an identifier, not a sentence.
+        let key = slug_base(&"a".repeat(200));
+        assert_eq!(key.chars().count(), KEY_MAXLEN);
+    }
+
+    #[test]
+    fn a_multibyte_key_is_cut_by_character_not_byte() {
+        // æ, ø and å are two bytes each: a byte-wise cut would slice one in half
+        // and panic, on exactly the names this wiki is full of.
+        let key = slug_base(&"æøå".repeat(40));
+        assert!(key.chars().count() <= KEY_MAXLEN, "{key}");
     }
 
     #[test]

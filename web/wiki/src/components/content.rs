@@ -1194,7 +1194,10 @@ mod tests {
     fn a_url_keeps_its_sentence_punctuation_outside_the_link() {
         let toks = autolink_tokens("read https://radikal.wiki/hb1.");
         assert!(
-            toks.contains(&LinkToken::Url("https://radikal.wiki/hb1".into(), ".".into())),
+            toks.contains(&LinkToken::Url(
+                "https://radikal.wiki/hb1".into(),
+                ".".into()
+            )),
             "{toks:?}"
         );
         // A path that genuinely ends in a slash keeps it.
