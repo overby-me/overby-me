@@ -183,6 +183,31 @@ mod tests {
         assert_eq!(attr_escape("plain"), "plain");
     }
 
+    /// A shift-enter is stored as a newline inside the text leaf, and has to come
+    /// back as a `<br>` when the document is reopened for editing — otherwise the
+    /// break survives the save and dies on the next edit, which is worse than
+    /// never having worked.
+    #[test]
+    fn a_soft_break_survives_back_into_the_editor() {
+        let content = serde_json::json!([
+            {"type": "paragraph", "children": [{"text": "Radikal Ungdom\nStore Kannikestræde 19"}]}
+        ]);
+        let html = slate_to_html(&content);
+        assert!(html.contains("<br>"), "{html}");
+        assert!(html.contains("Radikal Ungdom<br>Store"), "{html}");
+    }
+
+    /// Marks wrap the whole run, breaks and all: a bolded address block is one
+    /// leaf with a newline in it, not two leaves.
+    #[test]
+    fn a_break_inside_a_marked_run_stays_inside_it() {
+        let content = serde_json::json!([
+            {"type": "paragraph", "children": [{"text": "one\ntwo", "bold": true}]}
+        ]);
+        let html = slate_to_html(&content);
+        assert!(html.contains("<strong>one<br>two</strong>"), "{html}");
+    }
+
     #[test]
     fn strips_a_leading_blank_paragraph_but_keeps_a_sole_one() {
         let empty = json!({"type": "paragraph", "children": [{"text": ""}]});

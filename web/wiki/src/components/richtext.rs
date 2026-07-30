@@ -599,6 +599,18 @@ mod dom {
             .unwrap_or(false)
     }
 
+    /// Insert a line break at the caret, inside the current block.
+    ///
+    /// `insertLineBreak` is the command that means exactly this; where it is not
+    /// implemented, inserting the HTML says the same thing, and the trailing
+    /// zero-width-free `<br>` the browser would add on its own is what the
+    /// serializer already knows to drop.
+    pub fn insert_line_break() {
+        if !exec("insertLineBreak") {
+            exec_value("insertHTML", "<br>");
+        }
+    }
+
     /// Run an `execCommand` that takes a value (e.g. `formatBlock`, `createLink`).
     pub fn exec_value(command: &str, value: &str) -> bool {
         document()
@@ -860,9 +872,9 @@ mod dom {
 
 #[cfg(target_arch = "wasm32")]
 pub use dom::{
-    current_link, exec, exec_value, focus_editor, install_paste_handler, query_state, query_value,
-    restore_selection, save_selection, seed_editor, serialize_editor, use_semantic_tags,
-    wrap_selection_code,
+    current_link, exec, exec_value, focus_editor, insert_line_break, install_paste_handler,
+    query_state, query_value, restore_selection, save_selection, seed_editor, serialize_editor,
+    use_semantic_tags, wrap_selection_code,
 };
 
 /// Non-wasm stubs so the editor component still compiles for host `cargo test`
@@ -870,6 +882,8 @@ pub use dom::{
 #[cfg(not(target_arch = "wasm32"))]
 mod dom_stub {
     use super::Value;
+    pub fn insert_line_break() {}
+
     pub fn exec(_command: &str) -> bool {
         false
     }
@@ -899,9 +913,9 @@ mod dom_stub {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use dom_stub::{
-    current_link, exec, exec_value, focus_editor, install_paste_handler, query_state, query_value,
-    restore_selection, save_selection, seed_editor, serialize_editor, use_semantic_tags,
-    wrap_selection_code,
+    current_link, exec, exec_value, focus_editor, insert_line_break, install_paste_handler,
+    query_state, query_value, restore_selection, save_selection, seed_editor, serialize_editor,
+    use_semantic_tags, wrap_selection_code,
 };
 
 #[cfg(test)]

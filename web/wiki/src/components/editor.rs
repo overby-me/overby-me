@@ -632,6 +632,9 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
         });
     };
     let mut schedule_title = schedule_autosave.clone();
+    // A third handle, for the key handler: shift-enter changes the surface
+    // without an `input` event, so it has to start the debounce itself.
+    let mut schedule_break = schedule_autosave.clone();
     let mut schedule_editor = schedule_autosave;
 
     // Upload a chosen cover image to storage, then remember its id + filename so
@@ -1177,11 +1180,26 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                     },
                     // Ctrl/Cmd + ` toggles code (bold/italic/underline shortcuts
                     // are handled natively by the contenteditable surface).
-                    onkeydown: move |evt| {
+                    //
+                    // Shift+Enter is a line break WITHIN the block, not a new
+                    // one: the address in a resolution, the lines of a motion's
+                    // preamble. Browsers do this natively in a contenteditable,
+                    // but not all of them and not the same way, and the editor
+                    // has to agree with what the serializer stores — so it is
+                    // driven explicitly rather than left to the surface.
+                    onkeydown: move |evt: Event<KeyboardData>| {
                         let m = evt.modifiers();
-                        if (m.ctrl() || m.meta()) && evt.key().to_string() == "`" {
+                        let key = evt.key().to_string();
+                        if (m.ctrl() || m.meta()) && key == "`" {
                             evt.prevent_default();
                             richtext::wrap_selection_code();
+                        } else if key == "Enter" && m.shift() {
+                            evt.prevent_default();
+                            richtext::insert_line_break();
+                            // The surface changed without an `input` event, so the
+                            // autosave has to be told, or a break typed just before
+                            // a tab closes is the one edit that does not survive.
+                            schedule_break();
                         }
                     },
                     onkeyup: move |_| {

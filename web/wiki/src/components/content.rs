@@ -944,9 +944,29 @@ fn SlateInline(node: serde_json::Value) -> Element {
     rsx! {}
 }
 
-/// A plain-text run with bare URLs and email addresses turned into links (#97).
+/// A plain-text run with bare URLs and email addresses turned into links (#97),
+/// and with the author's own line breaks kept.
+///
+/// A shift-enter inside a paragraph is stored as a newline in the text run (see
+/// richtext's serializer, which turns a `<br>` into one). HTML collapses that to
+/// a space, so an address block or a motion's preamble came back as one running
+/// line — the break survived the editor, the save and the round trip, and died
+/// at the last step.
 #[component]
 fn AutoLinked(text: String) -> Element {
+    rsx! {
+        for (line_no , line) in text.split('\n').enumerate() {
+            if line_no > 0 {
+                br {}
+            }
+            AutoLinkedLine { key: "{line_no}", text: line.to_string() }
+        }
+    }
+}
+
+/// One line of a text run: the links in it, and nothing about breaks.
+#[component]
+fn AutoLinkedLine(text: String) -> Element {
     rsx! {
         for (i , token) in autolink_tokens(&text).into_iter().enumerate() {
             match token {
