@@ -469,21 +469,36 @@ pub(super) fn context_apps(
         _ => None,
     };
     if segments.is_empty() {
-        // The root is a context too, and its members are its owners: the people
-        // who may create groups and events. It is managed by the same app every
-        // other context uses, and this rail entry is the only way in. The rest of
-        // the apps need content to act on, which the root has none of.
-        if is_auth && crate::components::loader::CTX_IS_OWNER().unwrap_or(false) {
-            return vec![(
+        // The root has a rail too, holding the two apps that mean something at the
+        // top of the wiki. The rest act on content, which the root has none of.
+        let mut root_apps: Vec<(&str, String, Route, bool)> = Vec::new();
+        if !is_auth {
+            return root_apps;
+        }
+        // The feed, which at the root means every group and event you belong to
+        // (see `FeedApp`) rather than one context's own.
+        root_apps.push((
+            "app/feed",
+            t("layout.feed"),
+            Route::Home {
+                app: Some("feed".to_string()),
+            },
+            current_app.as_deref() == Some("feed"),
+        ));
+        // The root's members are its owners: the people who may create groups and
+        // events. It is managed by the same app every other context uses, and
+        // this entry is the only way in.
+        if crate::components::loader::CTX_IS_OWNER().unwrap_or(false) {
+            root_apps.push((
                 "app/member",
                 t("common.members"),
                 Route::Home {
                     app: Some("member".to_string()),
                 },
                 current_app.as_deref() == Some("member"),
-            )];
+            ));
         }
-        return vec![];
+        return root_apps;
     }
     // The app is part of the route's query, so these navigate client-side and the
     // resolver swaps the view without a reload.

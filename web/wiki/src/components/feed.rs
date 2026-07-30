@@ -20,13 +20,23 @@ use crate::session::use_session;
 /// Scoped by the node's context, so it is the same list wherever in the context
 /// it was opened from. Note that a context is its own context: an event under a
 /// group has its own feed, and does not appear in the group's.
+///
+/// At the ROOT (the parent-less node behind `/`) that scoping would be almost
+/// empty, since every group and event is its own context. There the feed means
+/// what it should mean at the top of the wiki: everything across the groups and
+/// events you belong to.
 #[component]
 pub fn FeedApp(node: model::NodeWithChildren) -> Element {
-    let context_id = node
-        .context_id
-        .clone()
-        .map(|c| c.0)
-        .unwrap_or_else(|| node.id.0.clone());
+    let context_id = if node.parent_id.is_none() {
+        None
+    } else {
+        Some(
+            node.context_id
+                .clone()
+                .map(|c| c.0)
+                .unwrap_or_else(|| node.id.0.clone()),
+        )
+    };
 
     rsx! {
         div { class: "card",
