@@ -413,10 +413,15 @@ let
             ];
         };
 
+    # `st.tokens` holds only the CURRENT chunk (see the driver), so an empty one is
+    # not necessarily the start of the stream: fall back to the type carried over from
+    # the previous chunk, which is null only at the real start.
     lastIsNewlineOrEmpty = st: let
       n = length st.tokens;
     in
-      n == 0 || (elemAt st.tokens (n - 1)).type == "NEWLINE";
+      if n == 0
+      then st.prevLastType == null || st.prevLastType == "NEWLINE"
+      else (elemAt st.tokens (n - 1)).type == "NEWLINE";
 
     emitString = st: let
       i = st.pos;

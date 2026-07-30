@@ -370,6 +370,15 @@
     defaultOutputDrv =
       if defaultOut == null
       then throw "buck2: target has no DefaultInfo default output"
+      # A target whose default output IS a source file, which export_file is exactly:
+      # DefaultInfo(default_output = ctx.attrs.src). No action produces it, so asking
+      # which one does fails before it can even report why -- a source artifact carries
+      # no action id. Materialize the source itself, under the path a consumer expects.
+      else if defaultOut.kind == "source"
+      then
+        pkgs.runCommand (sanDrv "src-${defaultOut.name}") {preferLocalBuild = true;} ''
+          install -D ${srcStorePath defaultOut} "$out/${artPath defaultOut}"
+        ''
       else drvById.${producerId defaultOut};
     defaultOutputRel =
       if defaultOut == null
