@@ -4302,7 +4302,6 @@ select:focus {
    the body-large tracking on the whole document, so a role that stayed silent
    would inherit 0.5px and a headline would not be the size the scale says.
    ─────────────────────────────────────────────────────────────────────────── */
-.md-display-large,
 .display-large {
 	font-size: var(--md-sys-typescale-display-large-size);
 	line-height: var(--md-sys-typescale-display-large-line);
@@ -4310,7 +4309,6 @@ select:focus {
 	letter-spacing: -0.015625em;
 }
 
-.md-display-medium,
 .display-medium {
 	font-size: var(--md-sys-typescale-display-medium-size);
 	line-height: var(--md-sys-typescale-display-medium-line);
@@ -4318,7 +4316,6 @@ select:focus {
 	letter-spacing: normal;
 }
 
-.md-display-small,
 .display-small {
 	font-size: var(--md-sys-typescale-display-small-size);
 	line-height: var(--md-sys-typescale-display-small-line);
@@ -4327,7 +4324,6 @@ select:focus {
 }
 
 h1,
-.md-headline-large,
 .headline-large {
 	font-size: var(--md-sys-typescale-headline-large-size);
 	line-height: var(--md-sys-typescale-headline-large-line);
@@ -4336,7 +4332,6 @@ h1,
 }
 
 h2,
-.md-headline-medium,
 .headline-medium {
 	font-size: var(--md-sys-typescale-headline-medium-size);
 	line-height: var(--md-sys-typescale-headline-medium-line);
@@ -4345,7 +4340,6 @@ h2,
 }
 
 h3,
-.md-headline-small,
 .headline-small {
 	font-size: var(--md-sys-typescale-headline-small-size);
 	line-height: var(--md-sys-typescale-headline-small-line);
@@ -4354,7 +4348,6 @@ h3,
 }
 
 h4,
-.md-title-large,
 .title-large {
 	font-size: var(--md-sys-typescale-title-large-size);
 	line-height: var(--md-sys-typescale-title-large-line);
@@ -4363,7 +4356,6 @@ h4,
 }
 
 h5,
-.md-title-medium,
 .title-medium {
 	font-size: var(--md-sys-typescale-title-medium-size);
 	line-height: var(--md-sys-typescale-title-medium-line);
@@ -4372,7 +4364,6 @@ h5,
 }
 
 h6,
-.md-title-small,
 .title-small {
 	font-size: var(--md-sys-typescale-title-small-size);
 	line-height: var(--md-sys-typescale-title-small-line);
@@ -4380,7 +4371,6 @@ h6,
 	letter-spacing: var(--md-sys-typescale-title-small-tracking);
 }
 
-.md-body-large,
 .body-large {
 	font-size: var(--md-sys-typescale-body-large-size);
 	line-height: var(--md-sys-typescale-body-large-line);
@@ -4388,7 +4378,6 @@ h6,
 	letter-spacing: var(--md-sys-typescale-body-large-tracking);
 }
 
-.md-body-medium,
 .body-medium {
 	font-size: var(--md-sys-typescale-body-medium-size);
 	line-height: var(--md-sys-typescale-body-medium-line);
@@ -4396,7 +4385,6 @@ h6,
 	letter-spacing: var(--md-sys-typescale-body-medium-tracking);
 }
 
-.md-body-small,
 .body-small {
 	font-size: var(--md-sys-typescale-body-small-size);
 	line-height: var(--md-sys-typescale-body-small-line);
@@ -4404,7 +4392,6 @@ h6,
 	letter-spacing: var(--md-sys-typescale-body-small-tracking);
 }
 
-.md-label-large,
 .label-large {
 	font-size: var(--md-sys-typescale-label-large-size);
 	line-height: var(--md-sys-typescale-label-large-line);
@@ -4412,7 +4399,6 @@ h6,
 	letter-spacing: var(--md-sys-typescale-label-large-tracking);
 }
 
-.md-label-medium,
 .label-medium {
 	font-size: var(--md-sys-typescale-label-medium-size);
 	line-height: var(--md-sys-typescale-label-medium-line);
@@ -4420,7 +4406,6 @@ h6,
 	letter-spacing: var(--md-sys-typescale-label-medium-tracking);
 }
 
-.md-label-small,
 .label-small {
 	font-size: var(--md-sys-typescale-label-small-size);
 	line-height: var(--md-sys-typescale-label-small-line);
@@ -4431,56 +4416,56 @@ h6,
 /* Type scale — EMPHASIZED tier (Expressive): a genuinely heavier cut used ONLY
    on the single focal element per screen (active nav label, current node title,
    selected item, primary CTA, current speaker, open ballot). */
-.md-label-large-emphasized {
+.label-large-emphasized {
 	font-size: var(--md-sys-typescale-label-large-size);
 	line-height: var(--md-sys-typescale-label-large-line);
-	font-weight: 700;
+	font-weight: var(--md-sys-typescale-emphasized-weight);
 	letter-spacing: var(--md-sys-typescale-label-large-tracking);
 }
 
-.md-label-medium-emphasized {
+.label-medium-emphasized {
 	font-size: var(--md-sys-typescale-label-medium-size);
 	line-height: var(--md-sys-typescale-label-medium-line);
-	font-weight: 700;
+	font-weight: var(--md-sys-typescale-emphasized-weight);
 	letter-spacing: var(--md-sys-typescale-label-medium-tracking);
 }
 
-.md-title-small-emphasized {
+.title-small-emphasized {
 	font-size: var(--md-sys-typescale-title-small-size);
 	line-height: var(--md-sys-typescale-title-small-line);
-	font-weight: 700;
+	font-weight: var(--md-sys-typescale-emphasized-weight);
 	letter-spacing: var(--md-sys-typescale-title-small-tracking);
 }
 
-.md-title-medium-emphasized {
+.title-medium-emphasized {
 	font-size: var(--md-sys-typescale-title-medium-size);
 	line-height: var(--md-sys-typescale-title-medium-line);
-	font-weight: 700;
+	font-weight: var(--md-sys-typescale-emphasized-weight);
 	letter-spacing: var(--md-sys-typescale-title-medium-tracking);
 }
 
-.md-title-large-emphasized {
+.title-large-emphasized {
 	font-size: var(--md-sys-typescale-title-large-size);
 	line-height: var(--md-sys-typescale-title-large-line);
 	font-weight: 600;
 	letter-spacing: normal;
 }
 
-.md-headline-small-emphasized {
+.headline-small-emphasized {
 	font-size: var(--md-sys-typescale-headline-small-size);
 	line-height: var(--md-sys-typescale-headline-small-line);
 	font-weight: 600;
 	letter-spacing: normal;
 }
 
-.md-headline-medium-emphasized {
+.headline-medium-emphasized {
 	font-size: var(--md-sys-typescale-headline-medium-size);
 	line-height: var(--md-sys-typescale-headline-medium-line);
 	font-weight: 600;
 	letter-spacing: normal;
 }
 
-.md-body-large-emphasized {
+.body-large-emphasized {
 	font-size: var(--md-sys-typescale-body-large-size);
 	line-height: var(--md-sys-typescale-body-large-line);
 	font-weight: 600;
