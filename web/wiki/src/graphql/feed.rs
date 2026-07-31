@@ -32,7 +32,10 @@ pub async fn count_nodes(
     where_clause: NodesBoolExp,
 ) -> Result<usize, String> {
     use cynic::QueryBuilder;
-    let op = NodesCountQuery::build(NodesWhereVariables { where_clause });
+    let op = NodesCountQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     let r = execute(access_token, op).await?;
     Ok(r.nodes_aggregate
         .aggregate
@@ -340,7 +343,10 @@ pub async fn query_contexts(
     mime_id: &str,
 ) -> Result<Vec<model::ContextNodeFields>, String> {
     let where_clause = contexts_where_clause(user_id, mime_id);
-    let operation = ContextsWhereQuery::build(NodesWhereVariables { where_clause });
+    let operation = ContextsWhereQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     let mut result = execute(access_token, operation).await?;
     // Newest first (the API returns no guaranteed order).
     result.nodes.sort_by(|a, b| {
@@ -387,7 +393,10 @@ pub async fn query_orphans(
         ]),
         ..Default::default()
     };
-    let operation = ContextsWhereQuery::build(NodesWhereVariables { where_clause });
+    let operation = ContextsWhereQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     let result = execute(access_token, operation).await?;
     Ok(result.nodes.into_iter().map(Into::into).collect())
 }

@@ -18,6 +18,38 @@ pub struct Jsonb(pub serde_json::Value);
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
 #[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct SearchNodeFields {
+    pub id: Uuid,
+    pub name: String,
+    pub key: String,
+    pub path: Option<String>,
+    pub mime_id: Option<String>,
+    pub parent_id: Option<Uuid>,
+    pub context_id: Option<Uuid>,
+    pub owner_id: Option<Uuid>,
+    pub mutable: bool,
+    pub index: i32,
+    pub get_index: Option<i32>,
+    /// The one thing a result row needs out of the document: a file's content
+    /// `type`, which picks its icon.
+    ///
+    /// `data(path: "type")` rather than `data` — Hasura will select INSIDE a
+    /// jsonb column, and the difference is the whole point of this fragment. A
+    /// search for three letters was answering 1.5 MB because thirty rows each
+    /// carried a complete document to be thrown away except for one string.
+    /// With the path it is 23 KB, and the icons still work.
+    #[arguments(path: "type")]
+    pub data: Option<Jsonb>,
+    pub mime: Option<MimeFields>,
+    pub is_owner: Option<bool>,
+    pub is_context_owner: Option<bool>,
+    pub created_at: Option<Timestamptz>,
+    /// The lean parent: a result prints its name and nothing else.
+    pub parent: Option<ParentNameRef>,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
 pub struct NodeFields {
     pub id: Uuid,
     pub name: String,
@@ -43,6 +75,21 @@ pub struct NodeFields {
     pub created_at: Option<Timestamptz>,
     // The parent node, for the search-result secondary line ("in <parent>").
     pub parent: Option<ParentNodeFields>,
+}
+
+/// A parent reduced to what a LIST needs: the name of the thing this sits under.
+///
+/// `ParentNodeFields` below carries the parent's whole document and its author's
+/// avatar, which the feed needs because its rows are ABOUT their parent. A
+/// search result only prints the parent's name, and paying a document per hit
+/// for it is how thirty results became 147 KB.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct ParentNameRef {
+    pub id: Uuid,
+    pub name: String,
+    pub key: String,
+    pub mime_id: Option<String>,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]

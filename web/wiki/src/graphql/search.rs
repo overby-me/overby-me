@@ -103,7 +103,13 @@ pub async fn search_nodes(
         ..Default::default()
     };
 
-    let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    // A search box shows a page of hits, not every hit: unbounded, this answered
+    // 407 rows and 1.5 MB for three letters, because each row carries its whole
+    // document. Thirty is more than anyone reads before retyping.
+    let operation = NodesSearchQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: Some(30),
+    });
     let result = execute(access_token, operation).await?;
     // The search query sets no order_by (it shares NodesWhereVariables), so order
     // the hits newest-first here — more useful than Hasura's arbitrary order.
@@ -161,11 +167,52 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
         return vec![];
     }
     let mut out: Vec<Author> = Vec::new();
+    // Groups, asked for as GROUPS. This used to run the full node search and
+    // filter the answer down to `wiki/group` in the client, which meant the
+    // server sent every matching node of every kind — with its whole document
+    // in `data`, and its parent's — so the picker could keep at most ten names
+    // from it. On production one keystroke of "ann" cost 407 rows and 1.5 MB.
+    // Asking for what is wanted costs 0.2 KB.
+    let groups_where = NodesBoolExp {
+        and: Some(vec![
+            NodesBoolExp {
+                or: Some(vec![
+                    NodesBoolExp {
+                        name: Some(StringComparisonExp {
+                            ilike: Some(format!("%{query}%")),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    NodesBoolExp {
+                        content_text: Some(StringComparisonExp {
+                            ilike: Some(format!("%{query}%")),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ]),
+                ..Default::default()
+            },
+            NodesBoolExp {
+                mime_id: Some(StringComparisonExp {
+                    eq: Some("wiki/group".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ]),
+        ..Default::default()
+    };
     // The two searches are independent, so they go together rather than one
     // after the other. Awaited in sequence they cost the SUM of two round trips
     // on every keystroke — about a second from Denmark — for no reason beyond
     // the order they were written in.
     use cynic::QueryBuilder;
+    let groups_op = NodePickerQuery::build(NodePickerVariables {
+        where_clause: groups_where,
+        limit: Some(10),
+    });
     let users_op = UsersSearchQuery::build(UsersSearchVariables {
         where_clause: UsersBoolExp {
             display_name: Some(StringComparisonExp {
@@ -175,17 +222,13 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
             ..Default::default()
         },
     });
-    let (nodes_res, users_res) = futures_util::join!(
-        search_nodes(access_token, query, None),
+    let (groups_res, users_res) = futures_util::join!(
+        execute(access_token, groups_op),
         execute(access_token, users_op)
     );
     // Groups can author content.
-    if let Ok(nodes) = nodes_res {
-        for n in nodes
-            .into_iter()
-            .filter(|n| n.mime_id.as_deref() == Some("wiki/group"))
-            .take(10)
-        {
+    if let Ok(r) = groups_res {
+        for n in r.nodes {
             out.push(Author {
                 name: n.name,
                 node_id: Some(n.id.0),
@@ -307,4 +350,37 @@ pub async fn query_user(access_token: Option<&str>, id: &str) -> Option<model::U
         .into_iter()
         .next()
         .map(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The search bar's query must ask for the file TYPE, not the document.
+    ///
+    /// Thirty results carrying a whole Slate document each is how a three-letter
+    /// search became 1.5 MB. Hasura selects inside a jsonb column, so the row
+    /// costs one string instead — and this asserts the operation as sent, since
+    /// the difference is a single argument that is easy to lose in a refactor.
+    #[test]
+    fn the_search_query_selects_only_the_file_type_and_caps_its_results() {
+        use cynic::QueryBuilder;
+        let op = NodesSearchQuery::build(NodesWhereVariables {
+            where_clause: NodesBoolExp::default(),
+            limit: Some(30),
+        });
+        assert!(
+            op.query.contains(r#"data(path: "type")"#),
+            "must select inside the document: {}",
+            op.query
+        );
+        assert!(op.query.contains("limit: $limit"), "{}", op.query);
+        // And the parent must stay lean: its document is what the feed needs,
+        // not what a result row prints.
+        assert!(
+            !op.query.contains("authorAvatar"),
+            "the parent is only a name here: {}",
+            op.query
+        );
+    }
 }

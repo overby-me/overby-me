@@ -328,6 +328,9 @@ pub struct InsertMime {
 #[derive(cynic::QueryVariables, Debug)]
 pub struct NodesWhereVariables {
     pub where_clause: NodesBoolExp,
+    /// Unset means every match, which is right for "all children of X" and
+    /// wrong for a search box — see the picker query above.
+    pub limit: Option<i32>,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone)]
@@ -337,8 +340,91 @@ pub struct NodesWhereVariables {
     variables = "NodesWhereVariables"
 )]
 pub struct NodesWhereQuery {
-    #[arguments(where: $where_clause)]
+    #[arguments(where: $where_clause, limit: $limit)]
     pub nodes: Vec<NodeFields>,
+}
+
+/// A node reduced to what a PICKER needs: something to show and something to
+/// return. No `data`, which on a wiki node is the whole document.
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "nodes")]
+pub struct NodeRef {
+    pub id: Uuid,
+    pub name: String,
+}
+
+#[derive(cynic::QueryVariables)]
+pub struct NodePickerVariables {
+    pub where_clause: NodesBoolExp,
+    pub limit: Option<i32>,
+}
+
+/// A capped, lean node lookup for autocomplete.
+///
+/// `NodesWhereQuery` above answers with every field a page needs — including
+/// `data`, the node's entire document, and the parent's — and has no limit. For
+/// a search box that is the wrong shape twice over: it fetches everything that
+/// matches and then throws nearly all of it away. Measured on production, one
+/// keystroke of "ann" answered 407 rows and 1.5 MB in 4.4 seconds, to show at
+/// most ten names.
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "NodePickerVariables"
+)]
+pub struct NodePickerQuery {
+    #[arguments(where: $where_clause, limit: $limit)]
+    pub nodes: Vec<NodeRef>,
+}
+
+/// The search bar's own query: the lean fragment, and a cap.
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "query_root",
+    variables = "NodesWhereVariables"
+)]
+pub struct NodesSearchQuery {
+    #[arguments(where: $where_clause, limit: $limit)]
+    pub nodes: Vec<SearchNodeFields>,
+}
+
+impl From<SearchNodeFields> for model::NodeFields {
+    fn from(n: SearchNodeFields) -> Self {
+        model::NodeFields {
+            id: n.id.into(),
+            name: n.name,
+            key: n.key,
+            path: n.path,
+            mime_id: n.mime_id,
+            parent_id: n.parent_id.map(Into::into),
+            context_id: n.context_id.map(Into::into),
+            owner_id: n.owner_id.map(Into::into),
+            mutable: n.mutable,
+            index: n.index,
+            get_index: n.get_index,
+            // `data` here is the VALUE at `$.type`, not the document. Put it back
+            // under the key the icon helper reads, so a search result and a
+            // folder row pick the same glyph from the same code.
+            data: n
+                .data
+                .map(|t| model::Jsonb(serde_json::json!({ "type": t.0 }))),
+            mime: n.mime.map(Into::into),
+            is_owner: n.is_owner,
+            is_context_owner: n.is_context_owner,
+            created_at: n.created_at.map(Into::into),
+            parent: n.parent.map(|p| model::ParentNodeFields {
+                id: p.id.into(),
+                name: p.name,
+                key: p.key,
+                mime_id: p.mime_id,
+                // Not fetched for a search result; see ParentNameRef.
+                data: None,
+                author_avatar: None,
+            }),
+        }
+    }
 }
 
 // --- Node with children ---
@@ -656,7 +742,10 @@ pub(crate) async fn query_root_id(access_token: Option<&str>) -> Result<Option<S
         }),
         ..Default::default()
     };
-    let operation = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    let operation = NodesWhereQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     let result = execute(access_token, operation).await?;
     let id = result.nodes.into_iter().next().map(|n| n.id.0);
     if let Some(id) = &id {
@@ -696,7 +785,10 @@ pub async fn resolve_path(
         }),
         ..Default::default()
     };
-    let op = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    let op = NodesWhereQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     let key = format!("node:{}", segments.join("/"));
     let live = async {
         let Some(found) = execute(access_token, op).await?.nodes.into_iter().next() else {
@@ -745,7 +837,10 @@ pub async fn path_crumbs(
         }),
         ..Default::default()
     };
-    let op = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    let op = NodesWhereQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     // The trail is cached alongside the page: a bar of raw url slugs is how the
     // app looked on a dropped connection, and the trail is the part of the
     // chrome that says where you are.
@@ -1253,7 +1348,10 @@ pub(crate) async fn child_ids(
         }),
         ..Default::default()
     };
-    let op = ChildIdsQuery::build(NodesWhereVariables { where_clause });
+    let op = ChildIdsQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     let data = execute(access_token, op).await?;
     Ok(data.nodes.into_iter().map(|n| n.id.0).collect())
 }
@@ -1291,7 +1389,10 @@ pub async fn query_context_polls(
         ]),
         ..Default::default()
     };
-    let operation = PollsWhereQuery::build(NodesWhereVariables { where_clause });
+    let operation = PollsWhereQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     let mut result = execute(access_token, operation).await?;
     result.nodes.sort_by(|a, b| {
         let a_ts = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
@@ -1326,7 +1427,10 @@ pub async fn query_poll_votes(
         ]),
         ..Default::default()
     };
-    let operation = VotesWhereQuery::build(NodesWhereVariables { where_clause });
+    let operation = VotesWhereQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     let result = execute(access_token, operation).await?;
     Ok(result
         .nodes
@@ -1553,7 +1657,10 @@ pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<St
         }),
         ..Default::default()
     };
-    let op = NodesWhereQuery::build(NodesWhereVariables { where_clause });
+    let op = NodesWhereQuery::build(NodesWhereVariables {
+        where_clause,
+        limit: None,
+    });
     let found = execute(access_token, op).await?.nodes.into_iter().next();
     let segments: Vec<String> = found
         .and_then(|n| n.path)
