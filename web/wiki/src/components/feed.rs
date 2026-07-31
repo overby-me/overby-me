@@ -326,6 +326,43 @@ pub fn FeedList(
     }
 }
 
+/// The file a feed row should show, if any.
+///
+/// Three cases, because a feed row is about three different things:
+///
+/// - the node's own `image` — a document's cover, a candidate's photo, and now
+///   the picture attached to a comment;
+/// - an uploaded picture, which IS its own image and carries `fileId`;
+/// - a REACTION, which has no image of its own and is about something that may
+///   have one. A row reading "❤ on a comment" beside the comment's text, with
+///   the picture that comment was making its point with missing, is a quotation
+///   with the subject cut out.
+fn row_image(node: &model::ChildNodeFields) -> Option<String> {
+    fn from_data(data: Option<&crate::model::Jsonb>) -> Option<String> {
+        let d = &data?.0;
+        d.get("image")
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                d.get("type")
+                    .and_then(|t| t.as_str())
+                    .filter(|t| t.starts_with("image/"))
+                    .and_then(|_| d.get("fileId").and_then(|v| v.as_str()))
+            })
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    }
+    from_data(node.data.as_ref()).or_else(|| {
+        // Only for a reaction: a COMMENT quoting its parent already shows its own
+        // image, and borrowing the parent's as well would put two pictures in one
+        // row, neither of them clearly the subject.
+        if node.mime_id.as_deref() == Some("vote/reaction") {
+            from_data(node.parent.as_ref().and_then(|p| p.data.as_ref()))
+        } else {
+            None
+        }
+    })
+}
+
 #[component]
 fn RecentItem(node: model::ChildNodeFields) -> Element {
     let session = use_session();
@@ -425,23 +462,7 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
     // so the JWT stays in the Authorization header and never in an <img src>.
     // Called unconditionally with an empty id when there is none, because it is
     // a hook — the same shape ContentApp uses.
-    let cover_id = node
-        .data
-        .as_ref()
-        .and_then(|d| {
-            // A document, policy or candidate carries a cover in `image`; an
-            // uploaded picture IS its own image, under `fileId`.
-            d.0.get("image")
-                .and_then(|v| v.as_str())
-                .or_else(|| {
-                    d.0.get("type")
-                        .and_then(|t| t.as_str())
-                        .filter(|t| t.starts_with("image/"))
-                        .and_then(|_| d.0.get("fileId").and_then(|v| v.as_str()))
-                })
-                .filter(|s| !s.is_empty())
-        })
-        .map(String::from);
+    let cover_id = row_image(&node);
     let cover_url = super::loader::use_file_object_url(cover_id.unwrap_or_default());
     // For content, the opening of the text itself, so the feed shows something
     // rather than a list of titles.
@@ -559,5 +580,93 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::row_image;
+    use crate::model::{ChildNodeFields, Jsonb, ParentNodeFields, Uuid};
+
+    fn node(
+        mime: &str,
+        data: serde_json::Value,
+        parent: Option<serde_json::Value>,
+    ) -> ChildNodeFields {
+        ChildNodeFields {
+            id: Uuid("n".into()),
+            name: String::new(),
+            key: "k".into(),
+            mime_id: Some(mime.into()),
+            mutable: false,
+            index: 0,
+            created_at: None,
+            owner_id: None,
+            data: Some(Jsonb(data)),
+            mime: None,
+            is_owner: None,
+            is_context_owner: None,
+            owner: None,
+            author_name: None,
+            author_avatar: None,
+            parent: parent.map(|d| ParentNodeFields {
+                id: Uuid("p".into()),
+                name: "parent".into(),
+                key: "p".into(),
+                mime_id: Some("vote/comment".into()),
+                data: Some(Jsonb(d)),
+                author_avatar: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn a_comment_shows_the_picture_it_attached() {
+        let n = node(
+            "vote/comment",
+            serde_json::json!({"text": "look", "image": "f1"}),
+            None,
+        );
+        assert_eq!(row_image(&n), Some("f1".to_string()));
+    }
+
+    #[test]
+    fn a_reaction_shows_the_picture_it_is_about() {
+        // A reaction has no image of its own; the comment it answers does, and a
+        // quotation with the subject cut out is not a quotation.
+        let n = node(
+            "vote/reaction",
+            serde_json::json!({"emoji": "❤"}),
+            Some(serde_json::json!({"text": "look", "image": "f1"})),
+        );
+        assert_eq!(row_image(&n), Some("f1".to_string()));
+    }
+
+    #[test]
+    fn a_comment_does_not_borrow_its_parents_picture() {
+        // Two pictures in one row, neither clearly the subject.
+        let n = node(
+            "vote/comment",
+            serde_json::json!({"text": "agreed"}),
+            Some(serde_json::json!({"text": "look", "image": "f1"})),
+        );
+        assert_eq!(row_image(&n), None);
+    }
+
+    #[test]
+    fn an_uploaded_picture_is_its_own_image() {
+        let n = node(
+            "wiki/file",
+            serde_json::json!({"fileId": "f2", "type": "image/png"}),
+            None,
+        );
+        assert_eq!(row_image(&n), Some("f2".to_string()));
+        // A non-image upload has no picture to show.
+        let pdf = node(
+            "wiki/file",
+            serde_json::json!({"fileId": "f3", "type": "application/pdf"}),
+            None,
+        );
+        assert_eq!(row_image(&pdf), None);
     }
 }

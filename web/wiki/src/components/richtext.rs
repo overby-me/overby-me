@@ -13,8 +13,9 @@ use serde_json::Value;
 mod serialize;
 pub use serialize::{slate_to_html, strip_leading_empty_paragraph};
 // The DOM -> Slate parser and the paste sanitiser (both browser-only) reuse the
-// shared HTML escaper.
-#[cfg(target_arch = "wasm32")]
+// shared HTML escaper — and so does `plain_text_to_html`, which is tested on the
+// host, hence the `test` arm.
+#[cfg(any(target_arch = "wasm32", test))]
 use serialize::html_escape;
 
 // ---------------------------------------------------------------------------
@@ -132,6 +133,28 @@ fn split_link_word(word: &str) -> Option<(String, String, String, String)> {
     }
     let href = link_href(core)?;
     Some((pre.to_string(), core.to_string(), href, post.to_string()))
+}
+
+/// Plain text as the editor's HTML: escaped, newlines as `<br>`, and any URL or
+/// email as a real anchor.
+///
+/// Shared by the paste handler and testable without a DOM. Only what
+/// [`link_segments`] recognises becomes a link, so the scheme allowlist that
+/// governs rendered content governs pasting too.
+#[cfg(any(target_arch = "wasm32", test))]
+fn plain_text_to_html(text: &str) -> String {
+    let mut out = String::new();
+    for (seg, href) in link_segments(text) {
+        let escaped = html_escape(&seg).replace('\n', "<br>");
+        match href {
+            Some(url) => out.push_str(&format!(
+                "<a href=\"{}\">{escaped}</a>",
+                serialize::attr_escape(&url)
+            )),
+            None => out.push_str(&escaped),
+        }
+    }
+    out
 }
 
 /// Split a bare text run into consecutive `(text, Some(href) | None)` segments,
@@ -830,12 +853,15 @@ mod dom {
                     return;
                 }
             }
-            // No HTML on the clipboard: insert plain text, keeping line breaks.
+            // No HTML on the clipboard: insert plain text, keeping line breaks
+            // and linking what is a link.
+            //
+            // The stored model autolinks a bare URL on the way out (see
+            // `push_autolinked`), so a pasted address WAS a link everywhere it
+            // was read — just not in the editor that had it on screen, which
+            // made the editing surface disagree with its own preview.
             let text = cd.get_data("text/plain").unwrap_or_default();
-            exec_value(
-                "insertHTML",
-                &super::html_escape(&text).replace('\n', "<br>"),
-            );
+            exec_value("insertHTML", &super::plain_text_to_html(&text));
         }) as Box<dyn FnMut(web_sys::Event)>);
         let _ = el.add_event_listener_with_callback("paste", closure.as_ref().unchecked_ref());
         // Leak the closure so the listener lives as long as the editor.
@@ -1013,6 +1039,31 @@ mod tests {
     }
 
     #[test]
+    /// A pasted address must become a link in the EDITOR, not only in what the
+    /// editor saves. The stored model has always autolinked on the way out, so a
+    /// pasted URL was a link everywhere it was read while showing as plain text
+    /// in the surface that had just received it.
+    #[test]
+    fn pasted_plain_text_becomes_the_editors_html() {
+        let html = plain_text_to_html("see https://radikal.wiki/hb1 now");
+        assert_eq!(
+            html,
+            r#"see <a href="https://radikal.wiki/hb1">https://radikal.wiki/hb1</a> now"#
+        );
+        // Line breaks survive as breaks, as they did before.
+        assert_eq!(plain_text_to_html("a\nb"), "a<br>b");
+        // And the escaping still happens: pasted text is not markup.
+        assert_eq!(
+            plain_text_to_html("<script>alert(1)</script>"),
+            "&lt;script&gt;alert(1)&lt;/script&gt;"
+        );
+        // Only schemes link_segments accepts become anchors.
+        assert_eq!(
+            plain_text_to_html("javascript:alert(1)"),
+            "javascript:alert(1)"
+        );
+    }
+
     fn autolink_segments_preserve_surrounding_text() {
         // A URL mid-sentence splits into plain / link / plain, verbatim around it.
         let segs = link_segments("see https://x.io now");

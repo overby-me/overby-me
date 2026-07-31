@@ -21,7 +21,7 @@ pub(super) fn html_escape(s: &str) -> String {
 }
 
 /// Escape text for use inside a double-quoted HTML attribute.
-fn attr_escape(s: &str) -> String {
+pub(super) fn attr_escape(s: &str) -> String {
     html_escape(s).replace('"', "&quot;")
 }
 

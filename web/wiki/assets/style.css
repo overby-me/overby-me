@@ -6410,6 +6410,15 @@ a.list-item:hover {
  * exactly where the content it formats begins. */
 /* M3 docked formatting toolbar: a tonal surface-container pill instead of a
    border-bottom bar, so it reads as a distinct control surface. */
+/* The card around the editor must CLIP rather than HIDE, or the toolbar below
+   cannot stick. `overflow: hidden` makes an element a scroll container, and a
+   sticky descendant sticks inside THAT — the card scrolls out of the viewport
+   taking the toolbar with it, which is what "sticky" looked like here: nothing.
+   `overflow: clip` cuts the corners identically and creates no scroll container,
+   so the toolbar sticks against the viewport where it was meant to. */
+.card:has(> .card-content > .editor-toolbar) {
+	overflow: clip;
+}
 .editor-toolbar {
 	position: sticky;
 	top: calc(var(--md-sys-spacing-16) + var(--md-sys-spacing-2));

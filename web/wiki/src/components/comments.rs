@@ -57,6 +57,18 @@ fn comment_image(comment: &ChildNodeFields) -> Option<String> {
         .map(str::to_string)
 }
 
+/// A blob URL for bytes already in the browser, for showing a picked image
+/// before it exists anywhere else.
+fn object_url(bytes: &[u8], content_type: &str) -> Option<String> {
+    let array = js_sys::Uint8Array::from(bytes);
+    let parts = js_sys::Array::new();
+    parts.push(&array.buffer());
+    let mut opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(content_type);
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).ok()?;
+    web_sys::Url::create_object_url_with_blob(&blob).ok()
+}
+
 /// An attached image, fetched with the session token into a blob URL so the JWT
 /// never enters an `<img src>`, and opening full size through the same lightbox
 /// a document's image uses.
@@ -80,8 +92,10 @@ struct PendingComment {
     key: String,
     author: String,
     text: String,
-    /// Uploaded before the comment was posted, so the optimistic row shows it
-    /// rather than looking as though the attachment was dropped.
+    /// The blob URL of the picked image, handed over from the composer when the
+    /// comment was posted. NOT the stored file id: until the insert lands there
+    /// is no node pointing at the file, so fetching it back would show nothing.
+    /// The row owns this URL and revokes it when it goes away.
     image: Option<String>,
 }
 
@@ -104,6 +118,16 @@ fn reconcile_pending(
 /// "sending" marker.
 #[component]
 fn PendingRow(author: String, text: String, image: Option<String>, depth: usize) -> Element {
+    {
+        // The composer handed this URL over rather than revoking it; this row is
+        // its owner now, and it lives exactly as long as the row does.
+        let owned = image.clone();
+        use_drop(move || {
+            if let Some(url) = owned.as_ref() {
+                let _ = web_sys::Url::revoke_object_url(url);
+            }
+        });
+    }
     let initial = author
         .chars()
         .next()
@@ -125,8 +149,10 @@ fn PendingRow(author: String, text: String, image: Option<String>, depth: usize)
                         // motion they are answering, the article they are citing.
                         super::content::AutoLinked { text: text.clone() }
                     }
-                    if let Some(id) = image.clone() {
-                        CommentImage { file_id: id }
+                    if let Some(src) = image.clone() {
+                        div { class: "comment-image",
+                            img { src: "{src}", alt: "{t(\"vote.imageAlt\")}" }
+                        }
                     }
                 }
             }
@@ -901,6 +927,27 @@ fn CommentComposer(
     // replaces the first: the node carries one image (see graphql::comment_data).
     let mut attached = use_signal(|| None::<String>);
     let mut uploading = use_signal(|| false);
+    // The preview is made from the bytes in the browser, NOT fetched back from
+    // storage: until the comment exists there is no node pointing at the file,
+    // and a file nothing points at is readable by nobody — including the person
+    // who just uploaded it, since `uploaded_by_user_id` is null in this
+    // deployment. Fetching it back showed an empty box every time. The local
+    // blob also needs no round trip, which is what a preview should cost.
+    let mut preview = use_signal(|| None::<String>);
+    // Revoke the object URL when this composer goes away, so the bytes are not
+    // held for the life of the tab.
+    use_drop(move || {
+        if let Some(url) = preview.peek().as_ref() {
+            let _ = web_sys::Url::revoke_object_url(url);
+        }
+    });
+    // Replace the preview, revoking whatever it was showing.
+    let mut set_preview = move |url: Option<String>| {
+        if let Some(old) = preview.peek().clone() {
+            let _ = web_sys::Url::revoke_object_url(&old);
+        }
+        preview.set(url);
+    };
 
     let pick_image = move |evt: FormEvent| {
         let Some(fd) = evt.files().into_iter().next() else {
@@ -922,12 +969,16 @@ fn CommentComposer(
                 crate::snackbar::show_snackbar(&t(reason));
                 return;
             }
+            // Show it at once, from the bytes already in hand, and upload behind
+            // that: the reader sees what they picked while the network works.
+            set_preview(object_url(&bytes, &ctype));
             uploading.set(true);
             match crate::nhost::upload_file(token.as_deref(), bytes.to_vec(), &name, &ctype).await {
                 Ok(f) => attached.set(Some(f.id)),
                 Err(e) => {
                     log::error!("attachment upload failed: {e:?}");
                     crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                    set_preview(None);
                 }
             }
             uploading.set(false);
@@ -937,6 +988,10 @@ fn CommentComposer(
     let post = move |_| {
         let body = text.read().trim().to_string();
         let image = attached.read().clone();
+        // Handed to the optimistic row, which revokes it when it is reconciled
+        // away — so the picked image stays on screen from the moment it is
+        // chosen until the real comment replaces it, with no gap and no leak.
+        let shown = preview.peek().clone();
         // A comment that is only an image is still a comment.
         if body.is_empty() && image.is_none() {
             return;
@@ -963,10 +1018,12 @@ fn CommentComposer(
             key: key.clone(),
             author: author.clone(),
             text: body.clone(),
-            image: image.clone(),
+            image: shown,
         });
         text.set(String::new());
         attached.set(None);
+        // Cleared WITHOUT revoking: the pending row owns that URL now.
+        preview.set(None);
         spawn(async move {
             posting.set(true);
             let result = graphql::insert_comment(
@@ -1025,7 +1082,7 @@ fn CommentComposer(
     };
 
     let input_id = use_hook(|| format!("comment-image-{}", (js_sys::Math::random() * 1e9) as u64));
-    let attachment = attached.read().clone();
+    let attachment = preview.read().clone();
 
     rsx! {
         div { class: "comment-composer-wrap",
@@ -1065,14 +1122,17 @@ fn CommentComposer(
                     span { class: "material-icons", "send" }
                 }
             }
-            if let Some(id) = attachment {
+            if let Some(src) = attachment {
                 div { class: "comment-attachment",
-                    CommentImage { file_id: id }
+                    img { src: "{src}", alt: "{t(\"vote.imageAlt\")}" }
                     button {
                         class: "btn-icon comment-attachment-remove",
                         r#type: "button",
                         aria_label: "{t(\"common.delete\")}",
-                        onclick: move |_| attached.set(None),
+                        onclick: move |_| {
+                            attached.set(None);
+                            set_preview(None);
+                        },
                         span { class: "material-icons", "close" }
                     }
                 }
