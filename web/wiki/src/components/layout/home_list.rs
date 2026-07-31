@@ -36,7 +36,10 @@ pub fn HomeList(#[props(default = false)] as_cards: bool) -> Element {
         .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".to_string());
     crate::subscription::use_live(
         format!(
-            "subscription {{ members(where: {{ nodeId: {{ _eq: \"{sub_uid}\" }} }}) {{ id }} }}"
+            // `accepted` and `active` as well as `id`: a subscription fires when its
+            // RESULT changes, and accepting an invitation is an UPDATE, so a
+            // selection of ids alone never noticed it.
+            "subscription {{ members(where: {{ nodeId: {{ _eq: \"{sub_uid}\" }} }}) {{ id accepted active }} }}"
         ),
         refresh,
     );

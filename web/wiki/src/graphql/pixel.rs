@@ -345,3 +345,38 @@ pub async fn set_focused_canvas(
     .await
     .map(|_| ())
 }
+
+/// One node's live state, pushed when it changes.
+///
+/// A stream rather than a change token: the row that arrives IS the new state, so
+/// nothing has to be fetched to find out what changed. Used for a poll's
+/// open/closed flag, where the alternative was re-fetching the whole node (with
+/// its children and members) to read one boolean.
+///
+/// `fields` is the selection, and must include a field that actually changes, or
+/// the stream has nothing to carry.
+pub fn node_state_stream(node_id: &str, since: &str, fields: &str) -> String {
+    format!(
+        "subscription {{ \
+           nodes_stream(batch_size: 10, \
+                        cursor: {{initial_value: {{updatedAt: \"{since}\"}}, ordering: ASC}}, \
+                        where: {{id: {{_eq: \"{id}\"}}}}) {{ {fields} }} }}",
+        since = gql_escape(since),
+        id = gql_escape(node_id),
+    )
+}
+
+/// Nodes matching `where_clause`, streamed as they change, carrying `fields`.
+///
+/// The general form of [`canvas_stream`]. A stream says WHICH rows changed, which
+/// a change token cannot: a context-wide token wakes every watcher, while these
+/// rows let a watcher decide whether the change was any of its business.
+pub fn nodes_stream(where_clause: &str, since: &str, fields: &str) -> String {
+    format!(
+        "subscription {{ \
+           nodes_stream(batch_size: 100, \
+                        cursor: {{initial_value: {{updatedAt: \"{since}\"}}, ordering: ASC}}, \
+                        where: {{ {where_clause} }}) {{ {fields} }} }}",
+        since = gql_escape(since),
+    )
+}

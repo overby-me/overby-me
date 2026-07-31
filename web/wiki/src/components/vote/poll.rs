@@ -147,7 +147,6 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     let name = node.name.clone();
     let poll_id = node.id.0.clone();
     let context_id = node.context_id.clone().map(|c| c.0);
-    let open = node.mutable;
     let single = max_vote == 1 && min_vote == 1;
     // hideResult (`data.hidden`): a hide-result poll reveals tallies only to the
     // context owner; other viewers see the options without any counts.
@@ -207,14 +206,35 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         )),
         refresh,
     );
-    // React to the poll being opened/closed on its own counter — selecting
-    // `mutable` so the live query fires on that update — so a member's ballot hides
-    // promptly when the chair closes the poll, without refetching on every vote.
-    let poll_refresh = use_signal(|| 0u32);
-    crate::subscription::use_live(
-        crate::subscription::nodes_changed(&format!("id: {{ _eq: \"{sub_poll}\" }}")),
-        poll_refresh,
-    );
+    // The chair opening or closing the poll, STREAMED: the pushed row carries the
+    // new `mutable`, so the ballot hides the moment the poll closes without
+    // anything being fetched to find out. It used to be a change token that
+    // triggered a whole node-with-children query to read one boolean.
+    let mut live_open = use_signal(|| node.mutable);
+    let poll_since = use_hook(|| {
+        js_sys::Date::new_0()
+            .to_iso_string()
+            .as_string()
+            .unwrap_or_default()
+    });
+    let poll_stream = crate::subscription::use_graphql_subscription(graphql::node_state_stream(
+        &sub_poll,
+        &poll_since,
+        "id mutable",
+    ));
+    use_effect(move || {
+        let Some(payload) = poll_stream.read().clone() else {
+            return;
+        };
+        // The newest row wins: a batch can carry several changes to one node.
+        if let Some(mutable) = payload
+            .get("nodes_stream")
+            .and_then(|r| r.as_array())
+            .and_then(|rows| rows.iter().rev().find_map(|r| r.get("mutable")?.as_bool()))
+        {
+            live_open.set(mutable);
+        }
+    });
 
     // Live results depend on the poll (node) id and the refresh counter; use
     // use_reactive so they re-run when navigating to a different poll, not only
@@ -320,20 +340,10 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     let eligible_count = (*eligible.read()).unwrap_or(0);
     let turnout_pct = (total_votes * 100).checked_div(eligible_count).unwrap_or(0);
 
-    // Live poll-open state, so the ballot disappears when the chair closes the
-    // poll (shadows the prop value; the server-side gate for late votes is separate).
-    let po_poll = poll_id.clone();
-    let po_token = session.read().access_token.clone();
-    let po_rev = *poll_refresh.read();
-    let poll_open_res = crate::use_data_resource!(|(po_poll, po_token, po_rev)| async move {
-        let _ = po_rev;
-        graphql::query_node_by_id(po_token.as_deref(), &po_poll)
-            .await
-            .ok()
-            .flatten()
-            .map(|n| n.mutable)
-    });
-    let open = (*poll_open_res.read()).flatten().unwrap_or(open) && !closed_opt();
+    // The ballot disappears when the chair closes the poll. The value comes from
+    // the stream above (shadowing the prop); the server-side gate for late votes
+    // is separate and does not trust this.
+    let open = live_open() && !closed_opt();
     // The trailing option is always the "Blank" abstention (see StartPollButton /
     // ballot_order): it is shown as a distinct muted row and excluded from the
     // winner, and the For/Imod split is computed on the non-blank cast votes.
