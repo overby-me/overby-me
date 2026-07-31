@@ -176,6 +176,40 @@ fn add_author(
 /// Author autocomplete: type a name to search groups and users (or add a
 /// free-text author with Enter), shown as removable chips. Mirrors the React
 /// `AuthorTextField`; the list is persisted as the node's members on save.
+/// The face beside an author's name: their picture if they have one, their
+/// initials if not, and the group glyph for a group.
+///
+/// The kind is told apart by `user_id`, NOT by `node_id`: a group carries a node
+/// id and so does a user, so testing the node id showed the group glyph for
+/// everyone — including the people whose picture the app already had in hand
+/// from the same search that found them.
+fn author_face(a: &model::Author) -> Element {
+    if a.user_id.is_some() {
+        let initials: String = a
+            .name
+            .split_whitespace()
+            .filter_map(|w| w.chars().next())
+            .take(2)
+            .collect::<String>()
+            .to_uppercase();
+        let initials = if initials.is_empty() {
+            "?".to_string()
+        } else {
+            initials
+        };
+        super::loader::user_avatar(&a.avatar_url, rsx! { "{initials}" })
+    } else if a.node_id.is_some() {
+        rsx! {
+            span { class: "material-icons", "groups" }
+        }
+    } else {
+        // Typed in by hand: a name with nobody behind it.
+        rsx! {
+            span { class: "material-icons", "face" }
+        }
+    }
+}
+
 #[component]
 fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
     let session = use_session();
@@ -199,9 +233,7 @@ fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
                             name: a.name.clone(),
                             avatar_url: a.avatar_url.clone(),
                             user_id: a.user_id.clone(),
-                            span { class: "material-icons",
-                                if a.node_id.is_some() { "groups" } else { "face" }
-                            }
+                            {author_face(a)}
                             span { "{a.name}" }
                         }
                         button {
@@ -275,14 +307,14 @@ fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
                         for s in suggestions.read().iter() {
                             {
                                 let chosen = s.clone();
-                                let icon = if s.node_id.is_some() { "groups" } else { "face" };
+                                let face = author_face(s);
                                 rsx! {
                                     button {
                                         class: "author-suggestion",
                                         r#type: "button",
                                         key: "{s.node_id:?}{s.name}",
                                         onclick: move |_| add_author(authors, input, suggestions, chosen.clone()),
-                                        span { class: "material-icons", "{icon}" }
+                                        {face}
                                         span { "{s.name}" }
                                     }
                                 }
