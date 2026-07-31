@@ -48,6 +48,24 @@ fn write_grid_pref(grid: bool) {
     }
 }
 
+/// Whether a newly created node should open in its EDITOR rather than its page.
+///
+/// A policy or a document IS its text: created empty, the read view shows a
+/// title and nothing else, and the way to write is behind the Actions sheet —
+/// which is how someone ends up reporting that they "cannot write anything but
+/// the title". Adding an amendment or a candidature already lands in the
+/// editor; this is the same rule for the kinds the folder's own Add offers.
+///
+/// A folder, group or event is a PLACE: you fill it by adding children, and its
+/// editor holds only a description. A file is its upload, already chosen in the
+/// dialog. Those stay on the page they made.
+fn opens_in_editor(mime: &str) -> bool {
+    matches!(
+        mime,
+        "wiki/document" | "vote/policy" | "vote/change" | "vote/position" | "vote/candidate"
+    )
+}
+
 #[component]
 pub fn FolderApp(
     node: NodeWithChildren,
@@ -961,6 +979,7 @@ fn FolderAdd(
             file_id.set(None);
             file_name.set(String::new());
             open.set(false);
+            let mime_for_nav = mime.clone();
             spawn(async move {
                 let input = crate::model::NodesInsertInput {
                     name: Some(name.clone()),
@@ -985,7 +1004,7 @@ fn FolderAdd(
                         dest.push(inserted.map(|n| n.key).unwrap_or_else(|| key.clone()));
                         nav.push(Route::PathPage {
                             segments: dest,
-                            app: None,
+                            app: opens_in_editor(&mime_for_nav).then(|| "editor".to_string()),
                         });
                     }
                     Err(e) => {
@@ -1178,6 +1197,35 @@ fn FolderItem(
                     trailing: copy_btn,
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::opens_in_editor;
+
+    /// The report this came from: someone creating a policy or an external
+    /// resolution landed on a page showing their title and nothing to write in.
+    #[test]
+    fn writing_kinds_land_in_the_editor() {
+        for mime in [
+            "wiki/document",
+            "vote/policy",
+            "vote/change",
+            "vote/position",
+            "vote/candidate",
+        ] {
+            assert!(opens_in_editor(mime), "{mime} is its text");
+        }
+    }
+
+    #[test]
+    fn places_and_files_stay_on_their_page() {
+        // A folder is filled by adding children, not by writing; a file is the
+        // upload that was already chosen in the dialog.
+        for mime in ["wiki/folder", "wiki/group", "wiki/event", "wiki/file"] {
+            assert!(!opens_in_editor(mime), "{mime} is not its text");
         }
     }
 }

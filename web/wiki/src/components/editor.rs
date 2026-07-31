@@ -873,45 +873,36 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                 // A docked M3 toolbar (see .m3-toolbar): the standard colour,
                 // since this is a working surface rather than an emphasis one.
                 div { class: "m3-toolbar m3-toolbar-standard editor-toolbar",
-                    // Save, with submit as its related action: an M3 split
-                    // button, which is the shape this pair has always had —
-                    // saving happens constantly while writing, submitting once
-                    // and irreversibly at the end. The confirm dialog still
-                    // guards the second, so the menu is not the safety.
+                    // Save and Submit, both visible.
+                    //
+                    // This was briefly an M3 split button, with submit in its
+                    // menu — the component fits the pair, since saving happens
+                    // constantly and submitting once. It went back before it
+                    // ever shipped: the same week, members told us they could
+                    // not find where to write in a new resolution at all. On a
+                    // deadline, with people who use this twice a year, the last
+                    // thing to do is move the button that ends the task one tap
+                    // deeper. The widget stays in the library for a calmer
+                    // surface (widgets::SplitButton).
                     div { class: "stack stack-h mb-1",
-                        if node.mutable {
-                            super::widgets::SplitButton {
-                                label: t("common.save"),
-                                icon: "save".to_string(),
-                                disabled: *saving.read(),
-                                menu_label: t("content.submit"),
-                                on_click: {
-                                    let save = handle_save.clone();
-                                    move |_| save(true)
-                                },
-                                button {
-                                    class: "split-menu-item",
-                                    r#type: "button",
-                                    onclick: move |_| confirm_submit.set(true),
-                                    span { class: "material-icons", "publish" }
-                                    " {t(\"content.submit\")}"
-                                }
-                            }
-                        } else {
-                            // Already submitted: nothing to submit, so the plain
-                            // button rather than a split with an empty menu.
-                            button {
-                                class: "btn btn-primary",
-                                disabled: *saving.read(),
-                                onclick: {
-                                    let save = handle_save.clone();
-                                    move |_| save(true)
-                                },
-                                span { class: "material-icons", "save" }
-                                " {t(\"common.save\")}"
-                            }
+                        button {
+                            class: "btn btn-primary",
+                            disabled: *saving.read(),
+                            onclick: {
+                                let save = handle_save.clone();
+                                move |_| save(true)
+                            },
+                            span { class: "material-icons", "save" }
+                            " {t(\"common.save\")}"
                         }
                         if node.mutable {
+                            button {
+                                class: "btn btn-secondary",
+                                disabled: *saving.read(),
+                                onclick: move |_| confirm_submit.set(true),
+                                span { class: "material-icons", "publish" }
+                                " {t(\"content.submit\")}"
+                            }
                             super::widgets::Dialog {
                                 open: confirm_submit(),
                                 on_dismiss: move |_| confirm_submit.set(false),
