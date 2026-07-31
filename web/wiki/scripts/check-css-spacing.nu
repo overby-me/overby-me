@@ -141,4 +141,35 @@ if ($undefined | length) > 0 {
     $failed = true
 }
 
+# ── Gate E: the stylesheet actually parses ─────────────────────────────────
+# A CSS comment ends at the FIRST `*/`, so a comment containing one — a glob
+# like `p-*/m-*`, a URL, a regex — closes early and everything after it is read
+# as CSS. What follows is usually swallowed into the next selector, which drops
+# a whole rule silently: no error, no warning, just a class that stops working.
+# That is not hypothetical. `.mt-1` was dead in every browser for months for
+# exactly this reason, on 17 elements across ten screens, and nothing in this
+# script or in the compiler could see it. Biome parses the file properly, so ask
+# it.
+let css_files = (ls $assets | where name =~ '\.css$' | get name)
+let parse_errors = (
+    $css_files
+    | each {|f|
+        let out = (do -i { ^biome format $f } | complete)
+        if $out.exit_code != 0 and ($out.stderr | str contains "parse") {
+            $f
+        } else {
+            null
+        }
+    }
+    | compact
+)
+print $"E. stylesheets that do not parse: ($parse_errors | length)"
+if ($parse_errors | length) > 0 {
+    print ""
+    print "ERROR: a CSS parser rejects these files. A rule is probably being"
+    print "swallowed — check for `*/` inside a comment."
+    $parse_errors | each {|f| print $"  ($f)" }
+    $failed = true
+}
+
 if $failed { exit 1 }
