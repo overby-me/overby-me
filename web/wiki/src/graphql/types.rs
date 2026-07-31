@@ -344,6 +344,10 @@ pub struct StringComparisonExp {
 pub struct UuidComparisonExp {
     #[cynic(rename = "_eq", skip_serializing_if = "Option::is_none")]
     pub eq: Option<Uuid>,
+    /// "these ones", for fetching exactly the rows a stream said had changed
+    /// rather than a whole page to find them.
+    #[cynic(rename = "_in", skip_serializing_if = "Option::is_none")]
+    pub in_: Option<Vec<Uuid>>,
     #[cynic(rename = "_is_null", skip_serializing_if = "Option::is_none")]
     pub is_null: Option<bool>,
 }

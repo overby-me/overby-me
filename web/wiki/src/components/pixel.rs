@@ -93,7 +93,14 @@ fn geometry(node: &NodeWithChildren) -> (u32, u32, u32) {
 ///
 /// Pure, and worth its own test: an off-by-one here paints the wrong cell, which
 /// is the one bug in this app a user would find hilarious rather than annoying.
-pub fn cell_at(px: f64, py: f64, box_w: f64, box_h: f64, cols: u32, rows: u32) -> Option<(u32, u32)> {
+pub fn cell_at(
+    px: f64,
+    py: f64,
+    box_w: f64,
+    box_h: f64,
+    cols: u32,
+    rows: u32,
+) -> Option<(u32, u32)> {
     if box_w <= 0.0 || box_h <= 0.0 || px < 0.0 || py < 0.0 || px >= box_w || py >= box_h {
         return None;
     }
@@ -182,9 +189,8 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             .unwrap_or_default()
     });
     let stream_id = dom_id.clone();
-    let stream = crate::subscription::use_graphql_subscription(graphql::canvas_stream(
-        &canvas_id, &since,
-    ));
+    let stream =
+        crate::subscription::use_graphql_subscription(graphql::canvas_stream(&canvas_id, &since));
     use_effect(move || {
         let Some(payload) = stream.read().clone() else {
             return;

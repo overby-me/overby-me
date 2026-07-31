@@ -114,6 +114,7 @@ pub async fn count_active_members(access_token: Option<&str>, context_id: &str) 
     let op = MembersCountQuery::build(MembersCountVariables {
         where_clause: MembersBoolExp {
             parent_id: Some(UuidComparisonExp {
+                in_: None,
                 eq: Some(Uuid(context_id.to_string())),
                 is_null: None,
             }),
@@ -399,6 +400,7 @@ pub(crate) fn invitations_where_clause(user_id: &str, email: &str) -> MembersBoo
                 or: Some(vec![
                     MembersBoolExp {
                         node_id: Some(UuidComparisonExp {
+                            in_: None,
                             eq: Some(Uuid(user_id.to_string())),
                             is_null: None,
                         }),
@@ -546,10 +548,12 @@ pub async fn is_active_member(access_token: Option<&str>, context_id: &str, user
     use cynic::QueryBuilder;
     let where_clause = MembersBoolExp {
         parent_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(context_id.to_string())),
             is_null: None,
         }),
         node_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(user_id.to_string())),
             is_null: None,
         }),
@@ -641,10 +645,12 @@ pub async fn accept_existing_member(
     let op = UpdateMembersMutation::build(UpdateMembersWhereVariables {
         where_clause: MembersBoolExp {
             parent_id: Some(UuidComparisonExp {
+                in_: None,
                 eq: Some(Uuid(parent_id.to_string())),
                 is_null: None,
             }),
             node_id: Some(UuidComparisonExp {
+                in_: None,
                 eq: Some(Uuid(node_id.to_string())),
                 is_null: None,
             }),
@@ -672,6 +678,7 @@ pub async fn delete_node_members(
     let del = DeleteMembersMutation::build(DeleteMembersVariables {
         where_clause: MembersBoolExp {
             parent_id: Some(UuidComparisonExp {
+                in_: None,
                 eq: Some(Uuid(node_id.to_string())),
                 is_null: None,
             }),
@@ -694,6 +701,7 @@ pub async fn set_node_authors(
     let del = DeleteMembersMutation::build(DeleteMembersVariables {
         where_clause: MembersBoolExp {
             parent_id: Some(UuidComparisonExp {
+                in_: None,
                 eq: Some(Uuid(node_id.to_string())),
                 is_null: None,
             }),

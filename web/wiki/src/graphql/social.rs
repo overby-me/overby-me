@@ -28,6 +28,7 @@ pub async fn query_comments(
     use cynic::QueryBuilder;
     let where_clause = NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(parent_id.to_string())),
             is_null: None,
         }),
@@ -110,6 +111,7 @@ pub async fn query_reactions(
     use cynic::QueryBuilder;
     let where_clause = NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(parent_id.to_string())),
             is_null: None,
         }),

@@ -195,10 +195,9 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                 crate::graphql::gql_escape(&node_id)
             ),
         };
-        crate::subscription::use_live(
-            crate::subscription::nodes_changed(&format!(
-                "{filter}, mimeId: {{ _eq: \"vote/comment\" }}"
-            )),
+        crate::subscription::use_live_children(
+            format!("{filter}, mimeId: {{ _eq: \"vote/comment\" }}"),
+            node_id.clone(),
             refresh,
         );
     }
@@ -404,8 +403,32 @@ fn CommentThread(
     let can_del = comment.is_owner.unwrap_or(false) || comment.is_context_owner.unwrap_or(false);
     let mut del_confirm = use_signal(|| false);
 
+    // Replies to THIS comment, and nothing else. The section and every other
+    // thread share the same subscription (the hub folds them into one), but each
+    // wakes only for its own children.
+    let own = use_signal(|| 0u32);
+    {
+        let filter = match &context_id {
+            Some(ctx) => format!(
+                "contextId: {{ _eq: \"{}\" }}",
+                crate::graphql::gql_escape(ctx)
+            ),
+            None => format!(
+                "parentId: {{ _eq: \"{}\" }}",
+                crate::graphql::gql_escape(&comment.id.0)
+            ),
+        };
+        crate::subscription::use_live_children(
+            format!("{filter}, mimeId: {{ _eq: \"vote/comment\" }}"),
+            comment.id.0.clone(),
+            own,
+        );
+    }
+
     let cid = comment.id.0.clone();
-    let rev = refresh();
+    // The prop counter is a local post or a pull-to-refresh; `own` is a reply
+    // arriving from someone else.
+    let rev = refresh() + own();
     let replies_res = crate::use_data_resource!(|(cid, token, rev)| async move {
         let _ = rev;
         graphql::query_comments(token.as_deref(), &cid)
@@ -777,44 +800,13 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
             crate::graphql::gql_escape(&comment_id)
         ),
     };
-    // STREAMED, not a change token, and the difference is which bars wake up. A
-    // token says only "something changed somewhere in this context", so every bar
-    // on screen refetched its own reactions: forty comments meant forty queries
-    // for one tap. The stream carries the rows, so a bar can see whether the
-    // reaction was on ITS comment and ignore the rest. Still one shared
-    // subscription per device (the hub folds identical queries together).
-    let since = use_hook(|| {
-        js_sys::Date::new_0()
-            .to_iso_string()
-            .as_string()
-            .unwrap_or_default()
-    });
-    let stream = crate::subscription::use_graphql_subscription(crate::graphql::nodes_stream(
-        &format!("{scope}, mimeId: {{ _eq: \"vote/reaction\" }}"),
-        &since,
-        "parentId",
-    ));
-    let mine = comment_id.clone();
-    let mut refresh = refresh;
-    use_effect(move || {
-        let Some(payload) = stream.read().clone() else {
-            return;
-        };
-        let touched_me = payload
-            .get("nodes_stream")
-            .and_then(|r| r.as_array())
-            .map(|rows| {
-                rows.iter()
-                    .any(|r| r.get("parentId").and_then(|p| p.as_str()) == Some(mine.as_str()))
-            })
-            .unwrap_or(false);
-        if touched_me {
-            // The list itself is still re-fetched rather than merged: reactions
-            // are a handful of rows, and a refetch cannot drift out of step with
-            // the server the way hand-applied deltas can.
-            refresh += 1;
-        }
-    });
+    // Only this comment's reactions wake this bar. A context-wide token woke all
+    // of them, so forty comments on a motion meant forty refetches for one tap.
+    crate::subscription::use_live_children(
+        format!("{scope}, mimeId: {{ _eq: \"vote/reaction\" }}"),
+        comment_id.clone(),
+        refresh,
+    );
 
     let load_id = comment_id.clone();
     let token = session.read().access_token.clone();

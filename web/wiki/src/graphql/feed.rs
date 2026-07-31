@@ -60,6 +60,7 @@ pub async fn query_group_contributions(
     let where_clause = NodesBoolExp {
         members: Some(MembersBoolExp {
             node_id: Some(UuidComparisonExp {
+                in_: None,
                 eq: Some(Uuid(group_id.to_string())),
                 is_null: None,
             }),
@@ -107,6 +108,7 @@ pub async fn query_user_contributions(
         and: Some(vec![
             NodesBoolExp {
                 owner_id: Some(UuidComparisonExp {
+                    in_: None,
                     eq: Some(Uuid(user_id.to_string())),
                     ..Default::default()
                 }),
@@ -213,6 +215,7 @@ pub(crate) fn recent_where_clause(user_id: &str, context_id: Option<&str>) -> No
                     or: Some(vec![
                         NodesBoolExp {
                             context_id: Some(UuidComparisonExp {
+                                in_: None,
                                 eq: Some(Uuid(id.to_string())),
                                 is_null: None,
                             }),
@@ -286,6 +289,7 @@ pub async fn query_recent_nodes(
 pub(crate) fn belongs_to_user(user_id: &str) -> NodesBoolExp {
     let owned = NodesBoolExp {
         owner_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(user_id.to_string())),
             is_null: None,
         }),
@@ -300,6 +304,7 @@ pub(crate) fn belongs_to_user(user_id: &str) -> NodesBoolExp {
                 },
                 MembersBoolExp {
                     node_id: Some(UuidComparisonExp {
+                        in_: None,
                         eq: Some(Uuid(user_id.to_string())),
                         is_null: None,
                     }),
@@ -363,6 +368,7 @@ pub async fn query_orphans(
             // caller filters it out.
             NodesBoolExp {
                 parent_id: Some(UuidComparisonExp {
+                    in_: None,
                     is_null: Some(true),
                     eq: None,
                 }),
@@ -375,6 +381,7 @@ pub async fn query_orphans(
             // on this way.
             NodesBoolExp {
                 parent_id: Some(UuidComparisonExp {
+                    in_: None,
                     is_null: Some(false),
                     eq: None,
                 }),
@@ -390,4 +397,44 @@ pub async fn query_orphans(
     let operation = ContextsWhereQuery::build(NodesWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
     Ok(result.nodes.into_iter().map(Into::into).collect())
+}
+
+/// Exactly these nodes, in the feed's row shape.
+///
+/// The companion to a stream: the stream says WHICH rows are new, and this
+/// fetches those and no others. The feed used to re-fetch a whole page on every
+/// push and diff it against what it already had, which is a page of rich rows to
+/// discover one.
+///
+/// The row shape stays defined by `ChildNodeFields` rather than being spelled out
+/// again inside a subscription string, so the feed's rows cannot drift from the
+/// feed's rows.
+pub async fn query_nodes_by_ids(
+    access_token: Option<&str>,
+    ids: &[String],
+) -> Vec<model::ChildNodeFields> {
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    let where_clause = NodesBoolExp {
+        id: Some(UuidComparisonExp {
+            in_: Some(ids.iter().cloned().map(Uuid).collect()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let order_by = vec![NodesOrderBy {
+        created_at: Some(OrderBy::Desc),
+        ..Default::default()
+    }];
+    let op = RecentNodesQuery::build(RecentNodesVariables {
+        where_clause,
+        order_by: Some(order_by),
+        limit: Some(ids.len() as i32),
+        offset: Some(0),
+    });
+    match execute(access_token, op).await {
+        Ok(r) => r.nodes.into_iter().map(Into::into).collect(),
+        Err(_) => Vec::new(),
+    }
 }

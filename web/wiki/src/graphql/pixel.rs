@@ -288,7 +288,10 @@ mod tests {
     fn the_subscription_streams_one_canvas() {
         let q = canvas_stream("canvas-1", "2026-07-31T00:00:00Z");
         assert!(q.contains("nodes_stream"), "{q}");
-        assert!(q.contains("cursor:"), "must be a delta, not a live query: {q}");
+        assert!(
+            q.contains("cursor:"),
+            "must be a delta, not a live query: {q}"
+        );
         assert!(q.contains(r#"parentId: {_eq: "canvas-1"}"#), "{q}");
         assert!(q.contains(r#"mimeId: {_eq: "pixel/pixel"}"#), "{q}");
     }

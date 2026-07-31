@@ -153,6 +153,47 @@ pub fn nodes_changed(where_clause: &str) -> String {
     )
 }
 
+/// Refresh only when a streamed row belongs to YOU.
+///
+/// A change token can only say "something under this filter changed", so every
+/// watcher of a shared scope wakes: one comment in a context refetched the post's
+/// comment list AND every open thread's replies, on every device. A stream
+/// carries the rows, so a watcher can compare `parentId` with its own and ignore
+/// the rest.
+///
+/// The list is still re-fetched rather than merged. That keeps the server as the
+/// single authority on order and contents — hand-applied deltas drift, and a
+/// comment thread is the wrong place to discover that.
+///
+/// Every watcher of the same scope sends the SAME query, so the hub folds them
+/// into one server-side subscription however many are on screen.
+pub fn use_live_children(where_clause: String, mine: String, mut refresh: Signal<u32>) {
+    let since = use_hook(|| {
+        js_sys::Date::new_0()
+            .to_iso_string()
+            .as_string()
+            .unwrap_or_default()
+    });
+    let stream =
+        use_graphql_subscription(crate::graphql::nodes_stream(&where_clause, &since, "parentId"));
+    use_effect(move || {
+        let Some(payload) = stream.read().clone() else {
+            return;
+        };
+        let touched = payload
+            .get("nodes_stream")
+            .and_then(|r| r.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .any(|r| r.get("parentId").and_then(|p| p.as_str()) == Some(mine.as_str()))
+            })
+            .unwrap_or(false);
+        if touched {
+            refresh += 1;
+        }
+    });
+}
+
 /// Bump `refresh` whenever the window regains focus (and the tab is visible), so
 /// data re-fetches on return to the app (#122). The listener is removed when the
 /// component unmounts.

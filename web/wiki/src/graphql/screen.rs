@@ -22,6 +22,7 @@ pub async fn active_node_id(
             ..Default::default()
         }),
         parent_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(context_id.to_string())),
             is_null: None,
         }),
@@ -136,6 +137,7 @@ pub async fn screen_comments_on(
             ..Default::default()
         }),
         parent_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(context_id.to_string())),
             is_null: None,
         }),
@@ -179,6 +181,7 @@ pub async fn screen_feed_on(access_token: Option<&str>, context_id: &str) -> Res
             ..Default::default()
         }),
         parent_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(context_id.to_string())),
             is_null: None,
         }),

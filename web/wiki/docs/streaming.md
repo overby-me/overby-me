@@ -62,7 +62,30 @@ ITS comment and ignore the rest. The list is still re-fetched rather than merged
 the server the way hand-applied deltas can.
 
 That distinction is the general lesson: **a stream is worth having for what it
-tells you changed, not only for what it saves you fetching.**
+tells you changed, not only for what it saves you fetching.** Every conversion
+below keeps the refetch and uses the stream to decide WHETHER to run it, or WHICH
+rows to ask for — so the server stays the authority on contents and order, and
+nothing drifts.
+
+**Comments** (`comments.rs`). The same shape, and the biggest win of the three: a
+post's comment list and EVERY open thread's replies shared one counter, so a
+comment anywhere in the context refetched all of them on every device. Each now
+wakes only for its own children — the section for comments on the post, a thread
+for replies to itself — through one shared subscription, because identical
+queries fold together in the hub.
+
+**The feed** (`feed.rs`). This one deserved converting most and I nearly talked
+myself out of it. The feed already keeps its own accumulated list and a queue of
+staged arrivals, so the "hand-maintained ordered state" objection did not apply:
+that state already existed. What the change token cost was a whole page of rich
+rows fetched on every push, diffed against what was on screen, to discover the
+one row that was new. The stream names the ids; those rows are fetched by id
+through the same query the first page came from, so the row shape stays defined
+in one place and a push costs the rows that actually arrived.
+
+The pattern worth reusing is that last one: **stream the ids, fetch the rows with
+the typed query.** It avoids spelling a rich selection out again inside a
+subscription string, where it would drift from the real one.
 
 ### Deliberately not converted
 
@@ -72,15 +95,9 @@ leaves it quietly wrong, and a wrong number on a ballot is worse than a slow one
 The tally is already one aggregate of 0.15 KB and is self-correcting by
 construction.
 
-**Comments, folder children, the speaker queue, the feed.** All four would trade
-a self-correcting refetch for hand-maintained ordered client state: inserts in
-the right place, renames, soft deletes arriving as updates, reordering. That is
-the class of change that fails quietly and is discovered by a user rather than by
-a test.
-
-Comments carry the largest remaining win — on a busy motion every device
-refetches the whole thread whenever anyone comments anywhere in the context — and
-are the one worth doing next. Not in the fortnight before an assembly.
+**Folder children and the speaker queue.** Both are small lists whose refetch is
+already cheap, and both would need order maintained by hand (index changes,
+renames, soft deletes arriving as updates). The win does not pay for the risk.
 
 ## If you do convert one later
 

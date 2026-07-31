@@ -78,12 +78,13 @@ pub fn FeedList(
     // page, and on the projector it was worse than that: an amendment posted
     // from the floor never reached the screen it was posted at.
     //
-    // The subscription carries ONE id, not the feed. It exists to say "something
-    // landed", and the page is then refetched through the same query the first
-    // page came from — the feed query joins, computes and orders, and running
-    // that as a live query for every reader would be paying continuously for
-    // something that changes a few times an hour.
+    // The subscription STREAMS the ids of what lands, and those rows are then
+    // fetched by id through the same query the first page came from — so the feed
+    // query still joins, computes and orders in one place, while a push costs the
+    // rows that actually arrived rather than a page to find them.
     let live = use_signal(|| 0u32);
+    // Ids the stream has named, waiting to be fetched in the feed's row shape.
+    let arrivals = use_signal(Vec::<String>::new);
     {
         let scope = match &context_id {
             // Everything under this context, which is what the feed itself now
@@ -101,12 +102,39 @@ pub fn FeedList(
             }
         };
         if user_id.is_some() {
-            crate::subscription::use_live(
-                format!(
-                    "subscription {{ nodes(where: {scope}, order_by: [{{createdAt: desc}}], limit: 1) {{ id }} }}"
-                ),
-                live,
+            // STREAMED ids. A change token could only say "something appeared
+            // somewhere in scope", which cost a page fetch to find out what; the
+            // stream names the rows, and they are fetched by id below.
+            let since = use_hook(|| {
+                js_sys::Date::new_0()
+                    .to_iso_string()
+                    .as_string()
+                    .unwrap_or_default()
+            });
+            let stream = crate::subscription::use_graphql_subscription(
+                crate::graphql::nodes_stream(&scope, &since, "id"),
             );
+            let mut live = live;
+            let mut arrivals_sig = arrivals;
+            use_effect(move || {
+                let Some(payload) = stream.read().clone() else {
+                    return;
+                };
+                let ids: Vec<String> = payload
+                    .get("nodes_stream")
+                    .and_then(|r| r.as_array())
+                    .map(|rows| {
+                        rows.iter()
+                            .filter_map(|r| r.get("id")?.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if ids.is_empty() {
+                    return;
+                }
+                arrivals_sig.write().extend(ids);
+                live += 1;
+            });
         }
     }
     // Arrivals waiting to be shown, on a feed someone is reading.
@@ -171,28 +199,38 @@ pub fn FeedList(
             if rev == 0 && data_rev == 0 {
                 return;
             }
-            let Some(uid) = user_id.clone() else { return };
+            if user_id.is_none() {
+                return;
+            }
+            // A DATA_VERSION bump (an edit elsewhere) still has nothing named, so
+            // it falls through to an empty queue and does nothing, which is right:
+            // the feed's own arrivals come from the stream.
             let token = token.clone();
-            let ctx = ctx.clone();
+            let _ = ctx.clone();
+            let mut arrivals = arrivals;
             spawn(async move {
-                let page = graphql::query_recent_nodes(
-                    token.as_deref(),
-                    FEED_PAGE,
-                    0,
-                    &uid,
-                    ctx.as_deref(),
-                )
-                .await;
+                // The stream named the rows; fetch those and no others. This used
+                // to pull a whole page of rich rows on every push and diff it
+                // against what was already on screen, to discover the one that was
+                // new. The `seen` filter stays as the belt: a row can arrive both
+                // from the stream and from a page fetched at the same moment.
+                let arrived: Vec<String> = {
+                    let mut queue = arrivals.write();
+                    std::mem::take(&mut *queue)
+                };
+                if arrived.is_empty() {
+                    return;
+                }
                 let seen: std::collections::HashSet<String> = items
                     .peek()
                     .iter()
                     .map(|n| n.id.0.clone())
                     .chain(pending.peek().iter().map(|n| n.id.0.clone()))
                     .collect();
-                let fresh: Vec<model::ChildNodeFields> = page
-                    .into_iter()
-                    .filter(|n| !seen.contains(&n.id.0))
-                    .collect();
+                let wanted: Vec<String> =
+                    arrived.into_iter().filter(|id| !seen.contains(id)).collect();
+                let fresh: Vec<model::ChildNodeFields> =
+                    graphql::query_nodes_by_ids(token.as_deref(), &wanted).await;
                 if fresh.is_empty() {
                     return;
                 }

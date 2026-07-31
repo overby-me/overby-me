@@ -70,6 +70,7 @@ pub async fn count_user_votes(
         and: Some(vec![
             NodesBoolExp {
                 parent_id: Some(UuidComparisonExp {
+                    in_: None,
                     eq: Some(Uuid(poll_id.to_string())),
                     is_null: None,
                 }),
@@ -84,6 +85,7 @@ pub async fn count_user_votes(
             },
             NodesBoolExp {
                 owner_id: Some(UuidComparisonExp {
+                    in_: None,
                     eq: Some(Uuid(user_id.to_string())),
                     is_null: None,
                 }),
@@ -165,6 +167,7 @@ pub async fn query_permissions(
 ) -> Result<Vec<model::PermissionFields>, String> {
     let where_clause = PermissionsBoolExp {
         context_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(context_id.to_string())),
             is_null: None,
         }),
@@ -202,6 +205,7 @@ pub struct PollSummaryFields {
 pub async fn poll_vote_count(access_token: Option<&str>, poll_id: &str) -> Result<usize, String> {
     let where_clause = NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(poll_id.to_string())),
             is_null: None,
         }),
@@ -352,7 +356,11 @@ mod tally_tests {
     #[test]
     fn a_wrapped_response_is_not_silently_zero() {
         let wrapped = serde_json::json!({"data": {"total": {"aggregate": {"count": 500}}}});
-        assert_eq!(parse_tally(&wrapped, 0).1, 0, "the old shape yields zero, which is why it was invisible");
+        assert_eq!(
+            parse_tally(&wrapped, 0).1,
+            0,
+            "the old shape yields zero, which is why it was invisible"
+        );
     }
 
     /// A poll id is escaped like any other interpolated value.

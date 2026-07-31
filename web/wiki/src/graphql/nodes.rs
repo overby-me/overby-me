@@ -757,6 +757,7 @@ pub(crate) async fn query_root_id(access_token: Option<&str>) -> Result<Option<S
     }
     let where_clause = NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
+            in_: None,
             is_null: Some(true),
             eq: None,
         }),
@@ -1363,6 +1364,7 @@ pub(crate) async fn child_ids(
     use cynic::QueryBuilder;
     let where_clause = NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(parent_id.to_string())),
             is_null: None,
         }),
@@ -1391,6 +1393,7 @@ pub async fn query_context_polls(
         and: Some(vec![
             NodesBoolExp {
                 context_id: Some(UuidComparisonExp {
+                    in_: None,
                     eq: Some(Uuid(context_id.to_string())),
                     is_null: None,
                 }),
@@ -1426,6 +1429,7 @@ pub async fn query_poll_votes(
         and: Some(vec![
             NodesBoolExp {
                 parent_id: Some(UuidComparisonExp {
+                    in_: None,
                     eq: Some(Uuid(poll_id.to_string())),
                     is_null: None,
                 }),
@@ -1545,6 +1549,7 @@ pub(crate) fn visible_to_user(user_id: &str) -> NodesBoolExp {
             },
             NodesBoolExp {
                 owner_id: Some(UuidComparisonExp {
+                    in_: None,
                     eq: Some(Uuid(user_id.to_string())),
                     is_null: None,
                 }),
@@ -1553,6 +1558,7 @@ pub(crate) fn visible_to_user(user_id: &str) -> NodesBoolExp {
             NodesBoolExp {
                 members: Some(MembersBoolExp {
                     node_id: Some(UuidComparisonExp {
+                        in_: None,
                         eq: Some(Uuid(user_id.to_string())),
                         is_null: None,
                     }),
@@ -1591,6 +1597,7 @@ pub(crate) fn children_where_clause(parent_id: &str, user_id: &str) -> NodesBool
         and: Some(vec![
             NodesBoolExp {
                 parent_id: Some(UuidComparisonExp {
+                    in_: None,
                     eq: Some(Uuid(parent_id.to_string())),
                     is_null: None,
                 }),
@@ -1663,6 +1670,7 @@ pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<St
     // every feed row, search result and contribution that someone opened.
     let where_clause = NodesBoolExp {
         id: Some(UuidComparisonExp {
+            in_: None,
             eq: Some(Uuid(id.to_string())),
             is_null: None,
         }),

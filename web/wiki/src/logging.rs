@@ -576,8 +576,14 @@ mod tests {
             join_error_text(Some("SecurityError".into()), Some("Rejected".into())).as_deref(),
             Some("SecurityError: Rejected")
         );
-        assert_eq!(join_error_text(None, Some("Rejected".into())).as_deref(), Some("Rejected"));
-        assert_eq!(join_error_text(Some("Error".into()), None).as_deref(), Some("Error"));
+        assert_eq!(
+            join_error_text(None, Some("Rejected".into())).as_deref(),
+            Some("Rejected")
+        );
+        assert_eq!(
+            join_error_text(Some("Error".into()), None).as_deref(),
+            Some("Error")
+        );
         assert_eq!(join_error_text(None, None), None);
     }
 
@@ -586,6 +592,9 @@ mod tests {
     #[test]
     fn a_missing_stack_stays_missing() {
         assert_eq!(stack_frames(None), serde_json::Value::Null);
-        assert_eq!(stack_frames(Some("   \n  ".to_string())), serde_json::json!([]));
+        assert_eq!(
+            stack_frames(Some("   \n  ".to_string())),
+            serde_json::json!([])
+        );
     }
 }
