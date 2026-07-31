@@ -701,10 +701,10 @@ html {
 	   glow — a bolder, more spatial active cue than a simple scale pop. */
 	width: 64px;
 	height: 40px;
-	background: var(--md-primary-container);
-	color: var(--md-on-primary-container);
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
 	border-radius: var(--md-sys-shape-corner-large-increased);
-	box-shadow: 0 0 14px 0 color-mix(in srgb, var(--md-primary) 30%, transparent);
+	box-shadow: 0 0 14px 0 color-mix(in srgb, var(--md-secondary) 30%, transparent);
 }
 /* Both nav surfaces label the same way (the rail on medium+, the bottom bar on
    compact), so they share one rule rather than the bar going unstyled. */
@@ -816,8 +816,13 @@ html {
 	color: var(--md-on-surface);
 }
 .nav-bar-item.active .nav-bar-indicator {
-	background: var(--md-primary-container);
-	color: var(--md-on-primary-container);
+	/* Secondary, as M3 specifies for a navigation active indicator: "the
+	   selected state of a navigation icon" is the example the roles page gives
+	   for secondary. It also gives the middle tier of the hierarchy something to
+	   do — primary was carrying both the focal actions and the nav state, so the
+	   two competed. */
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
 }
 
 /* ── Modal navigation drawer (tree host on compact/medium) ───────────── */
@@ -846,7 +851,8 @@ html {
 	left: 0;
 	z-index: 201;
 	width: min(360px, 88vw);
-	background: var(--md-surface);
+	/* A navigation surface, not the body it covers. */
+	background: var(--md-surface-container-low);
 	/* DESIGN: a modal drawer is an elevated surface — give it a shadow and a
 	   bolder trailing corner so it clearly floats over the scrim. */
 	border-radius: 0 var(--md-sys-shape-corner-extra-large)
@@ -2758,7 +2764,7 @@ select:focus {
    old wiki's expandable ChangeList row). */
 .amendment-item {
 	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
-	border-bottom: 1px solid var(--md-outline);
+	border-bottom: 1px solid var(--md-outline-variant);
 }
 
 .amendment-item:last-child {
@@ -3987,7 +3993,7 @@ select:focus {
 	max-height: 240px;
 	overflow-y: auto;
 	background: var(--md-surface);
-	border: 1px solid var(--md-outline);
+	border: 1px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-small);
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
@@ -4142,7 +4148,7 @@ select:focus {
 /* Something is denied or unavailable — no voting right, say. */
 .status-banner.is-negative {
 	background: var(--md-error-container);
-	color: var(--md-error);
+	color: var(--md-on-error-container);
 }
 /* Something is happening right now, which the pulsing icon says as well. */
 .status-banner.is-live {
@@ -4418,8 +4424,12 @@ h6,
    replacing the dark toast. */
 .snackbar {
 	position: relative;
-	background: var(--md-surface-container-high);
-	color: var(--md-on-surface);
+	/* The INVERSE roles, which is what makes a snackbar read as a transient
+	   system message rather than as another card: it is deliberately not of the
+	   same family as the surfaces it floats over. These three tokens were
+	   defined for exactly this and then never used. */
+	background: var(--md-snackbar);
+	color: var(--md-on-snackbar);
 	padding: var(--md-sys-spacing-3-5) var(--md-sys-spacing-4-5);
 	border-radius: var(--md-sys-shape-corner-large);
 	z-index: 300;
@@ -4621,7 +4631,7 @@ h6,
 		var(--md-error-container),
 		color-mix(in srgb, var(--md-error) 28%, var(--md-error-container))
 	);
-	color: var(--md-error);
+	color: var(--md-on-error-container);
 }
 .empty-state .error-fallback {
 	width: 100%;
@@ -6075,7 +6085,7 @@ a.list-item:hover {
 	left: 0;
 	right: 0;
 	background: var(--md-surface);
-	border: 1px solid var(--md-outline);
+	border: 1px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-medium);
 	max-height: 300px;
 	overflow-y: auto;
@@ -6229,7 +6239,7 @@ a.list-item:hover {
 	bottom: 100%;
 	right: 0;
 	background: var(--md-surface);
-	border: 1px solid var(--md-outline);
+	border: 1px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-medium);
 	min-width: 240px;
 	max-width: 300px;
@@ -6491,7 +6501,7 @@ a.list-item:hover {
 	gap: var(--md-sys-spacing-2);
 	padding: var(--md-sys-spacing-2);
 	margin-bottom: var(--md-sys-spacing-2);
-	border: 1px solid var(--md-outline);
+	border: 1px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-small);
 	background: var(--md-surface);
 }
@@ -6591,7 +6601,7 @@ a.list-item:hover {
 .rich-editor blockquote {
 	margin: 0 0 0.5em;
 	padding-left: var(--md-sys-spacing-3);
-	border-left: 3px solid var(--md-outline);
+	border-left: 3px solid var(--md-outline-variant);
 	color: var(--md-on-surface-variant);
 }
 
