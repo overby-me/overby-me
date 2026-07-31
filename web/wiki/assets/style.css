@@ -7763,3 +7763,89 @@ a.list-item:hover {
 		opacity: 1;
 	}
 }
+
+/* Pixel canvas (pixel/canvas) ---------------------------------------------- */
+
+.pixel-app {
+	display: flex;
+	flex-direction: column;
+	gap: var(--md-sys-spacing-3);
+	align-items: flex-start;
+}
+
+.pixel-head {
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-2);
+	flex-wrap: wrap;
+}
+
+.pixel-title {
+	font-size: var(--md-sys-typescale-title-large-size);
+	margin: 0;
+}
+
+.pixel-count {
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-label-medium-size);
+}
+
+.pixel-closed {
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface-variant);
+}
+
+/* The board is a bitmap sized in CELLS and magnified by CSS, so the browser does
+   the scaling and a cell stays a crisp square instead of a blurred one. It can
+   overflow its column on a phone: scrolling to a corner beats shrinking a cell
+   below a fingertip. */
+.pixel-board {
+	image-rendering: pixelated;
+	border: 1px solid var(--md-outline-variant);
+	border-radius: var(--md-sys-shape-corner-small);
+	max-width: 100%;
+	cursor: crosshair;
+	/* A tap paints; the page must not also pan under the finger. */
+	touch-action: manipulation;
+	background: var(--md-surface-container-low);
+}
+
+.pixel-palette {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--md-sys-spacing-1-5);
+}
+
+.pixel-swatch {
+	width: var(--md-sys-spacing-8);
+	height: var(--md-sys-spacing-8);
+	border: 2px solid var(--md-outline-variant);
+	border-radius: var(--md-sys-shape-corner-small);
+	padding: 0;
+	cursor: pointer;
+	transition: transform var(--md-sys-motion-duration-short3)
+		var(--md-sys-motion-spring-spatial-default);
+}
+
+.pixel-swatch:hover {
+	transform: scale(1.1);
+}
+
+/* The picked colour is stated by an outline rather than by a tick, so it reads
+   the same on white and on black. */
+.pixel-swatch.is-picked {
+	border-color: var(--md-primary);
+	transform: scale(1.15);
+	box-shadow: 0 0 0 2px var(--md-primary);
+}
+
+.pixel-status {
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-body-medium-size);
+	min-height: var(--md-sys-spacing-6);
+}
+
+.pixel-wait {
+	color: var(--md-primary);
+	font-weight: 600;
+}

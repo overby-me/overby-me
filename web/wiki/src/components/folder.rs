@@ -862,16 +862,25 @@ fn FolderAdd(
     // candidacies, questions, comments, polls) are intentionally omitted.
     const CONTENT_MIMES: &[(&str, &str)] = &[
         ("wiki/document", "mime.document"),
+        ("pixel/canvas", "mime.canvas"),
         ("vote/policy", "mime.policy"),
         ("vote/position", "mime.position"),
         ("wiki/folder", "mime.folder"),
         ("wiki/file", "mime.file"),
     ];
     let insertable = insertable_res.read().clone().unwrap_or_default();
+    // A canvas is offered to a context owner even when the permission is absent:
+    // creating one seeds it (graphql::create_canvas), exactly as a speaker list
+    // does, so a feature can arrive in an existing context without a migration.
+    let is_owner = crate::components::loader::CTX_IS_OWNER
+        .read()
+        .unwrap_or(false);
     let options: Vec<(&str, &str)> = CONTENT_MIMES
         .iter()
         .copied()
-        .filter(|(m, _)| insertable.iter().any(|i| i == m))
+        .filter(|(m, _)| {
+            insertable.iter().any(|i| i == m) || (*m == "pixel/canvas" && is_owner)
+        })
         .collect();
     // Keep the chosen kind valid once permissions load: if the current selection
     // is not among the offered options, snap to the first one so a plain "Add"
@@ -879,10 +888,13 @@ fn FolderAdd(
     // inside the effect so it re-runs when the insertable list actually resolves.
     use_effect(move || {
         let insertable = insertable_res.read().clone().unwrap_or_default();
+        let owner = crate::components::loader::CTX_IS_OWNER
+            .read()
+            .unwrap_or(false);
         let opts: Vec<&str> = CONTENT_MIMES
             .iter()
             .map(|(m, _)| *m)
-            .filter(|m| insertable.iter().any(|i| i == m))
+            .filter(|m| insertable.iter().any(|i| i == m) || (*m == "pixel/canvas" && owner))
             .collect();
         let valid = opts.iter().any(|m| *m == *kind.read());
         if !opts.is_empty() && !valid {
@@ -984,6 +996,31 @@ fn FolderAdd(
             open.set(false);
             let mime_for_nav = mime.clone();
             spawn(async move {
+                if mime == "pixel/canvas" {
+                    // Its own path: the canvas carries geometry and a cooldown,
+                    // and its creation is what grants the context the right to
+                    // hold one at all.
+                    let ctx = context_id
+                        .clone()
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| parent_id.clone());
+                    match crate::graphql::create_canvas(token.as_deref(), &ctx, &name, 64, 64, 60)
+                        .await
+                    {
+                        Ok(inserted) => {
+                            crate::session::bump_data_version();
+                            let mut dest = parent_path.clone();
+                            dest.push(inserted.key);
+                            nav.push(Route::PathPage { segments: dest, app: None });
+                        }
+                        Err(e) => {
+                            pending.write().retain(|p| p.key != key);
+                            log::error!("create canvas failed: {e}");
+                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                        }
+                    }
+                    return;
+                }
                 let input = crate::model::NodesInsertInput {
                     name: Some(name.clone()),
                     // Set by insert_node_named, which spends the clean key first.

@@ -24,6 +24,7 @@ pub mod parent;
 pub mod perm;
 pub mod profile;
 pub mod program;
+pub mod pixel;
 pub mod pull_refresh;
 pub mod redirect;
 pub mod richtext;

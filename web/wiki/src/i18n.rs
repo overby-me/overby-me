@@ -361,6 +361,12 @@ const EN_JSON: &str = r#"{
         "accentColor": "Accent",
         "customColor": "Custom color"
     },
+    "pixel": {
+        "closed": "Closed",
+        "colour": "Colour",
+        "waitSeconds": "You can paint again in",
+        "yourTurn": "Pick a colour, then tap the board"
+    },
     "error": {
         "somethingWentWrong": "Something went wrong!",
         "somethingWentWrongReported": "Something went wrong. It has been reported.",
@@ -633,6 +639,7 @@ const EN_JSON: &str = r#"{
         "event": "Event",
         "folder": "Folder",
         "document": "Document",
+        "canvas": "Pixel canvas",
         "file": "File",
         "person": "Person",
         "policy": "Policy",
@@ -907,6 +914,12 @@ const DA_JSON: &str = r#"{
         "accentColor": "Accent",
         "customColor": "Egen farve"
     },
+    "pixel": {
+        "closed": "Lukket",
+        "colour": "Farve",
+        "waitSeconds": "Du kan male igen om",
+        "yourTurn": "V\u00e6lg en farve, og tryk p\u00e5 pladen"
+    },
     "error": {
         "somethingWentWrong": "Noget gik galt!",
         "somethingWentWrongReported": "Noget gik galt. Det er blevet rapporteret.",
@@ -1179,6 +1192,7 @@ const DA_JSON: &str = r#"{
         "event": "Begivenhed",
         "folder": "Mappe",
         "document": "Dokument",
+        "canvas": "Pixelplade",
         "file": "Fil",
         "person": "Person",
         "policy": "Politik",
