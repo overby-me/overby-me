@@ -870,27 +870,48 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
 
                 // Sticky toolbar (#94): action buttons + formatting controls
                 // stay pinned while scrolling a long document.
-                div { class: "editor-toolbar",
-                    // Action buttons (save / submit).
+                // A docked M3 toolbar (see .m3-toolbar): the standard colour,
+                // since this is a working surface rather than an emphasis one.
+                div { class: "m3-toolbar m3-toolbar-standard editor-toolbar",
+                    // Save, with submit as its related action: an M3 split
+                    // button, which is the shape this pair has always had —
+                    // saving happens constantly while writing, submitting once
+                    // and irreversibly at the end. The confirm dialog still
+                    // guards the second, so the menu is not the safety.
                     div { class: "stack stack-h mb-1",
-                        button {
-                            class: "btn btn-primary",
-                            disabled: *saving.read(),
-                            onclick: {
-                                let save = handle_save.clone();
-                                move |_| save(true)
-                            },
-                            span { class: "material-icons", "save" }
-                            " {t(\"common.save\")}"
+                        if node.mutable {
+                            super::widgets::SplitButton {
+                                label: t("common.save"),
+                                icon: "save".to_string(),
+                                disabled: *saving.read(),
+                                menu_label: t("content.submit"),
+                                on_click: {
+                                    let save = handle_save.clone();
+                                    move |_| save(true)
+                                },
+                                button {
+                                    class: "split-menu-item",
+                                    r#type: "button",
+                                    onclick: move |_| confirm_submit.set(true),
+                                    span { class: "material-icons", "publish" }
+                                    " {t(\"content.submit\")}"
+                                }
+                            }
+                        } else {
+                            // Already submitted: nothing to submit, so the plain
+                            // button rather than a split with an empty menu.
+                            button {
+                                class: "btn btn-primary",
+                                disabled: *saving.read(),
+                                onclick: {
+                                    let save = handle_save.clone();
+                                    move |_| save(true)
+                                },
+                                span { class: "material-icons", "save" }
+                                " {t(\"common.save\")}"
+                            }
                         }
                         if node.mutable {
-                            button {
-                                class: "btn btn-secondary",
-                                disabled: *saving.read(),
-                                onclick: move |_| confirm_submit.set(true),
-                                span { class: "material-icons", "publish" }
-                                " {t(\"content.submit\")}"
-                            }
                             super::widgets::Dialog {
                                 open: confirm_submit(),
                                 on_dismiss: move |_| confirm_submit.set(false),

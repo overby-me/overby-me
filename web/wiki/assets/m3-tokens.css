@@ -52,6 +52,20 @@
 	/* ── Type scale ─────────────────────────────────────────────────────── */
 	/* Each role: font-size / line-height / weight / letter-spacing. The app
        face is Atkinson Hyperlegible (#37); the M3 metrics still apply. */
+	/* ── Emphasized type styles (Expressive) ─────────────────────────────
+       M3's scale carries two sets of 15: baseline and EMPHASIZED. The
+       emphasized set "has a higher weight and other minor adjustments" and is
+       for "selection, actions, headlines, and other editorial treatments" —
+       the two sets are meant to be used together.
+
+       This app ships Atkinson Hyperlegible at 400 and 700 only, so emphasized
+       is the 700 cut with slightly tighter tracking, which is what the weight
+       axis would give at these sizes anyway. Sizes are deliberately NOT
+       duplicated: an emphasized style is the same step of the scale said more
+       firmly, not a bigger one. */
+	--md-sys-typescale-emphasized-weight: 700;
+	--md-sys-typescale-emphasized-tracking: -0.01em;
+
 	--md-sys-typescale-display-large-size: 3.5625rem; /* 57px */
 	--md-sys-typescale-display-large-line: 4rem; /* 64px */
 	--md-sys-typescale-display-medium-size: 2.8125rem; /* 45px */

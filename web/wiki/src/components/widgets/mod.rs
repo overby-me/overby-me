@@ -14,6 +14,7 @@ mod focus;
 mod image;
 mod password_dots;
 mod segmented_button;
+mod split_button;
 mod table;
 mod tabs;
 mod tool_sheet;
@@ -25,6 +26,7 @@ pub use feedback::{EmptyState, ErrorState};
 pub use image::ZoomableImage;
 pub use password_dots::PasswordDots;
 pub use segmented_button::SegmentedButton;
+pub use split_button::SplitButton;
 pub use table::{DataTable, FilterToolbar, PaginatedTable};
 pub use tabs::Tabs;
 // CopyLinkAction is deliberately not re-exported: ToolSheet renders it itself as

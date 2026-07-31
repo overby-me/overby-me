@@ -1,10 +1,16 @@
-//! An M3 single-select segmented button.
+//! An M3 Expressive connected button group (single-select).
+//!
+//! The name is historical: this was a segmented button, which the expressive
+//! update deprecated in favour of the connected button group that replaces it.
+//! The widget keeps its name so no call site churns; what changed is the
+//! behaviour — each button is its own shape and morphs when pressed and when
+//! selected, rather than being a slice of one clipped bar.
 
 use dioxus::prelude::*;
 
-/// An M3 single-select segmented button: a connected row of icon segments with
-/// the selected one filled (secondary-container). Emits the chosen value through
-/// `on_select`. `segments` is a list of `(value, material-icon)` pairs.
+/// A single-select connected button group: a row of icon buttons, the chosen one
+/// filled with secondary-container and shape-morphed. Emits the chosen value
+/// through `on_select`. `segments` is a list of `(value, material-icon)` pairs.
 #[component]
 pub fn SegmentedButton(
     segments: Vec<(String, String)>,

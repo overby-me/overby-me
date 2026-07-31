@@ -204,18 +204,23 @@ pub fn PullToRefresh() -> Element {
         cls.push_str(" hidden");
     }
 
-    let icon = if refreshing {
-        "refresh"
-    } else {
-        "arrow_downward"
-    };
-
     rsx! {
         div {
             class: "{cls}",
             style: "transform: translateX(-50%) translateY({offset}px); opacity: {opacity};",
             div { class: "ptr-spinner",
-                span { class: "material-icons", "{icon}" }
+                if refreshing {
+                    // The M3 Expressive loading indicator, which the spec names
+                    // for exactly this: "loading indicators are used in the
+                    // pull-to-refresh behavior". Contained, because it sits over
+                    // the content it is refreshing rather than in a cleared space.
+                    div { class: "spinner-contained",
+                        div { class: "spinner spinner-sm" }
+                    }
+                } else {
+                    // Still a gesture, not a wait: the arrow says which way.
+                    span { class: "material-icons", "arrow_downward" }
+                }
             }
         }
     }

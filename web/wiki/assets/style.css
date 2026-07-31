@@ -3709,13 +3709,103 @@ select:focus {
 	cursor: pointer;
 }
 
-/* M3 segmented button (widgets::SegmentedButton): a connected outlined row; the
-   selected segment fills with secondary-container. */
+/* M3 Expressive SPLIT BUTTON (widgets::SplitButton): "a common button and a
+   menu icon button". The two are one object with a hairline between them, so
+   the pair reads as one action with a way in rather than two buttons that
+   happen to touch. The menu button "spins and changes shape when activated" —
+   the chevron turns and the button squares off while its menu is open. */
+.m3-split {
+	position: relative;
+	display: inline-flex;
+	align-items: stretch;
+	gap: var(--md-sys-spacing-0-25);
+}
+.m3-split-action {
+	border-start-end-radius: var(--md-sys-shape-corner-small);
+	border-end-end-radius: var(--md-sys-shape-corner-small);
+}
+.m3-split-menu {
+	padding-inline: var(--md-sys-spacing-2-5);
+	border-start-start-radius: var(--md-sys-shape-corner-small);
+	border-end-start-radius: var(--md-sys-shape-corner-small);
+}
+.m3-split-menu .material-icons {
+	transition:
+		transform var(--md-sys-motion-duration-medium1)
+		var(--md-sys-motion-spring-spatial-fast);
+}
+.m3-split-menu.open .material-icons {
+	transform: rotate(180deg);
+}
+/* Squared while open, which is the shape half of "spins and changes shape". */
+.m3-split-menu.open {
+	border-radius: var(--md-sys-shape-corner-medium);
+}
+/* Catches the click that dismisses the menu, without a visible scrim: this is a
+   menu, not a modal. */
+.m3-split-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 190;
+}
+.m3-split-sheet {
+	position: absolute;
+	top: calc(100% + var(--md-sys-spacing-2));
+	inset-inline-end: 0;
+	z-index: 200;
+	min-width: 200px;
+	padding: var(--md-sys-spacing-2);
+	border-radius: var(--md-sys-shape-corner-large);
+	background: var(--md-surface-container);
+	box-shadow: var(--md-sys-elevation-2);
+	animation: m3-split-open var(--md-sys-motion-spring-spatial-fast-duration)
+		var(--md-sys-motion-spring-spatial-fast);
+}
+.split-menu-item {
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-2);
+	width: 100%;
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-3);
+	border: none;
+	border-radius: var(--md-sys-shape-corner-medium);
+	background: transparent;
+	color: var(--md-on-surface);
+	font: inherit;
+	text-align: start;
+	cursor: pointer;
+}
+.split-menu-item:hover {
+	background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+@keyframes m3-split-open {
+	from {
+		opacity: 0;
+		transform: translateY(-6px) scale(0.96);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
+
+/* M3 Expressive CONNECTED BUTTON GROUP (widgets::SegmentedButton).
+   
+   The segmented button is deprecated in the expressive update — "connected
+   button groups replace the segmented button" — and the replacement differs in
+   more than name: a connected group "applies shape morph when pressed and
+   selected" rather than only tinting the chosen segment. Each button keeps its
+   own shape and the group corners are rounded, so pressing one visibly squares
+   it against its neighbours.
+
+   The widget keeps its name so no call site churns; what changed is the
+   behaviour underneath it. */
 .m3-segmented {
 	display: inline-flex;
-	border: 1px solid var(--md-outline-strong);
+	gap: var(--md-sys-spacing-0-5);
+	padding: var(--md-sys-spacing-0-5);
+	border: 1px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-full);
-	overflow: hidden;
 }
 /* DESIGN (springy segmented control): tactile press + a bolder, tonal
    selected segment. */
@@ -3727,7 +3817,9 @@ select:focus {
 	min-height: 36px;
 	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-4);
 	border: none;
-	border-radius: 0;
+	/* Each button carries its own shape; the group no longer clips them into
+	   one bar, which is what makes a shape morph visible at all. */
+	border-radius: var(--md-sys-shape-corner-full);
 	background: transparent;
 	color: var(--md-on-surface-variant);
 	cursor: pointer;
@@ -3738,21 +3830,29 @@ select:focus {
 		color var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-spring-effects-fast),
 		transform var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-spring-spatial-fast);
+		var(--md-sys-motion-spring-spatial-fast),
+		border-radius var(--md-sys-motion-duration-medium2)
+		var(--md-sys-motion-easing-emphasized);
 }
-.m3-segment:not(:last-child) {
-	border-right: 1px solid var(--md-outline-strong);
-}
+/* No dividing rules: the buttons are separate shapes now, not slices of a bar. */
 .m3-segment:hover:not(.selected) {
 	background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
 }
+/* The shape morph: pressed squares off, selected settles at a softer square.
+   Radius eases rather than springs — see the corner-full warning in
+   m3-tokens.css. */
 .m3-segment:active {
 	transform: scale(0.95);
+	border-radius: var(--md-sys-shape-corner-medium);
 }
 .m3-segment.selected {
 	background: var(--md-secondary-container);
 	color: var(--md-on-secondary-container);
-	font-weight: 700;
+	font-weight: var(--md-sys-typescale-emphasized-weight);
+	border-radius: var(--md-sys-shape-corner-large);
+}
+.m3-segment.selected:active {
+	border-radius: var(--md-sys-shape-corner-medium);
 }
 .m3-segment-check {
 	font-size: 1.125rem;
@@ -4129,7 +4229,10 @@ select:focus {
 	border-radius: 14px;
 	background: var(--md-primary-container);
 	color: var(--md-on-primary-container);
-	font-weight: 600;
+	/* The outcome of a vote: the emphasized weight rather than a hand-picked
+	   600, which was not a step on any scale. */
+	font-weight: var(--md-sys-typescale-emphasized-weight);
+	letter-spacing: var(--md-sys-typescale-emphasized-tracking);
 }
 .results-actions {
 	display: flex;
@@ -4508,12 +4611,29 @@ h6,
    its border-radius between organic shapes — the M3 2025 "expressive" loading
    feel, replacing the plain border-spin ring. (prefers-reduced-motion collapses
    it to a static shape via the global rule above.) */
+/* M3 Expressive loading indicator (the component that replaces the indeterminate
+   circular progress indicator for waits under five seconds). It "uses shape and
+   motion to capture attention" — a sequence of shapes rather than a ring, which
+   is what this already was; what it lacked was the CONTAINED variant and a
+   cadence that actually visits distinct shapes rather than wobbling around one.
+   Web has no official implementation, so this is the spec applied by hand. */
 .spinner {
 	width: var(--spinner-size, 44px);
 	height: var(--spinner-size, 44px);
 	background: var(--md-primary);
 	border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
 	animation: m3-morph-spin 2.4s ease-in-out infinite;
+}
+/* Contained: the indicator on its own surface, for when it sits over content
+   rather than in a cleared space (pull-to-refresh, a busy row). */
+.spinner-contained {
+	display: grid;
+	place-items: center;
+	width: calc(var(--spinner-size, 44px) * 1.85);
+	height: calc(var(--spinner-size, 44px) * 1.85);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-surface-container-highest);
+	box-shadow: var(--md-sys-elevation-2);
 }
 
 /* Size modifiers. The bare .spinner is the page/section loader (inside
@@ -5920,10 +6040,30 @@ h6,
 .projector-hero .card {
 	box-shadow: none;
 }
+/* The room's screen is the app's editorial moment: one thing, read from the
+   back of a hall. It is where M3's emphasized styles belong — until now it
+   leaned on size alone, which grows the words without making them any firmer. */
 .projector-hero .title-medium,
 .projector-hero .content-hero-title {
 	font-size: clamp(1.875rem, 3.4vw, 3.75rem);
 	line-height: 1.12;
+	font-weight: var(--md-sys-typescale-emphasized-weight);
+	letter-spacing: var(--md-sys-typescale-emphasized-tracking);
+}
+/* A heading inside projected content is emphasized too: on a wall, a section
+   heading has to win against body text set at 38px. */
+.projector-hero .slate-content h1,
+.projector-hero .slate-content h2,
+.projector-hero .slate-content h3 {
+	font-weight: var(--md-sys-typescale-emphasized-weight);
+	letter-spacing: var(--md-sys-typescale-emphasized-tracking);
+}
+/* The trail's current item, and the speaker with the floor: both are a
+   SELECTION, which is the other thing the emphasized set is named for. */
+.projector-trail-avatar.is-current,
+.speak-projector .speak-current .list-item-primary {
+	font-weight: var(--md-sys-typescale-emphasized-weight);
+	letter-spacing: var(--md-sys-typescale-emphasized-tracking);
 }
 .projector-hero .body-large,
 .projector-hero .body-medium,
@@ -6465,14 +6605,49 @@ a.list-item:hover {
 .card:has(> .card-content > .editor-toolbar) {
 	overflow: clip;
 }
+/* M3 Expressive TOOLBAR, docked variant.
+   
+   The editor's formatting bar was this component before the component existed —
+   a tonal container holding icon buttons — so adopting the spec is mostly
+   naming it and taking the three things it got wrong: a docked toolbar is
+   SHORTER than the bar it replaces, carries NO shadow, and comes in a standard
+   or a vibrant colour. Standard here: this is a working surface someone reads
+   past, not an emphasis moment.
+
+   The spec's one caution — "don't show at the same time as a navigation bar" —
+   is about bottom-docked toolbars. This one is docked to the top of the editing
+   surface, above the content it formats, and the bottom bar is a different
+   thing in a different place. */
+.m3-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--md-sys-spacing-1);
+	padding: var(--md-sys-spacing-1-5) var(--md-sys-spacing-2);
+	border-radius: var(--md-sys-shape-corner-large);
+	/* No shadow: M3 dropped the bottom app bar's elevation for the toolbar that
+	   replaces it, and a sticky bar that casts a shadow onto the text it sits
+	   over reads as a modal layer rather than as part of the editor. */
+	box-shadow: none;
+}
+/* Standard: the neutral working surface. */
+.m3-toolbar-standard {
+	background: var(--md-surface-container);
+	color: var(--md-on-surface-variant);
+}
+/* Vibrant: "use the vibrant color style for greater emphasis". Unused so far —
+   defined because the docked/vibrant pair is the choice the spec asks you to
+   make, and the next toolbar in this app (a projector control bar) is the one
+   that would want it. */
+.m3-toolbar-vibrant {
+	background: var(--md-primary-container);
+	color: var(--md-on-primary-container);
+}
 .editor-toolbar {
 	position: sticky;
 	top: calc(var(--md-sys-spacing-16) + var(--md-sys-spacing-2));
 	z-index: 3;
-	background: var(--md-surface-container);
-	padding: var(--md-sys-spacing-2);
 	margin-bottom: var(--md-sys-spacing-3);
-	border-radius: var(--md-sys-shape-corner-large);
 }
 
 /* Editor area */
@@ -7084,10 +7259,12 @@ a.list-item:hover {
 	transform: rotate(180deg);
 }
 
+/* While refreshing, the indicator carries the loading component and does NOT
+   spin the container: the shape sequence inside is the motion. Spinning both
+   made a rotating icon inside a rotating box. */
 .ptr-indicator.refreshing .ptr-spinner {
 	display: grid;
 	place-items: center;
-	animation: ptr-spin 0.8s linear infinite;
 }
 
 @keyframes ptr-spin {
