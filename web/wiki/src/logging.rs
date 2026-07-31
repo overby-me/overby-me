@@ -118,6 +118,31 @@ fn stack_of(value: &JsValue) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// `name: message` for a thrown Error, which JSON cannot serialise.
+///
+/// `JSON.stringify(new Error("boom"))` is `{}` — `name`, `message` and `stack`
+/// are non-enumerable — so a rejected Error logged as "UNHANDLED REJECTION:"
+/// with nothing after the colon. Read the properties instead.
+fn error_text(value: &JsValue) -> Option<String> {
+    let prop = |key: &str| {
+        js_sys::Reflect::get(value, &JsValue::from_str(key))
+            .ok()
+            .and_then(|v| v.as_string())
+            .filter(|s| !s.is_empty())
+    };
+    join_error_text(prop("name"), prop("message"))
+}
+
+/// The `name`/`message` pair as one line, however much of it exists.
+fn join_error_text(name: Option<String>, message: Option<String>) -> Option<String> {
+    match (name, message) {
+        (Some(name), Some(message)) => Some(format!("{name}: {message}")),
+        (None, Some(message)) => Some(message),
+        (Some(name), None) => Some(name),
+        (None, None) => None,
+    }
+}
+
 /// A stack as one frame per element rather than one string full of `\n`.
 ///
 /// Logtail shows a JSON array as a list; a newline-joined string arrives as a
@@ -444,12 +469,17 @@ fn setup_global_error_handlers() {
             let reason = pre.reason();
             let text = reason
                 .as_string()
+                // An Error is the common case and the one that used to come out
+                // blank: `JSON.stringify(new Error("x"))` is `{}`, because its
+                // fields are not enumerable. Read them directly.
+                .or_else(|| error_text(&reason))
                 .or_else(|| {
                     js_sys::JSON::stringify(&reason)
                         .ok()
                         .and_then(|s| s.as_string())
+                        .filter(|s| s != "{}")
                 })
-                .unwrap_or_else(|| "unhandled rejection".to_string());
+                .unwrap_or_else(|| "unhandled rejection (no reason given)".to_string());
             // A rejected Error carries where it was thrown; the handler does not.
             let stack = stack_of(&reason).or_else(current_stack);
             queue(make_entry_with_stack(
@@ -532,6 +562,23 @@ mod tests {
             ]),
             "blank lines dropped, each frame trimmed"
         );
+    }
+
+    /// A rejected Error must not log as an empty line.
+    ///
+    /// `JSON.stringify(new Error("boom"))` is `{}` — its fields are not
+    /// enumerable — which is how a real report arrived as "UNHANDLED REJECTION:"
+    /// with nothing after the colon, from Googlebot rejecting a service worker
+    /// registration.
+    #[test]
+    fn an_error_reason_reads_as_name_and_message() {
+        assert_eq!(
+            join_error_text(Some("SecurityError".into()), Some("Rejected".into())).as_deref(),
+            Some("SecurityError: Rejected")
+        );
+        assert_eq!(join_error_text(None, Some("Rejected".into())).as_deref(), Some("Rejected"));
+        assert_eq!(join_error_text(Some("Error".into()), None).as_deref(), Some("Error"));
+        assert_eq!(join_error_text(None, None), None);
     }
 
     /// No stack is null, not an empty list: "we never got one" and "it had no

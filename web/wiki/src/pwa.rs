@@ -55,7 +55,20 @@ pub fn setup() {
     // Service worker at the site root, so its scope is `/` and it can serve the
     // whole app offline after a first online visit (see sw.js). In `dx serve` dev
     // `/sw.js` isn't present, so registration simply no-ops there.
-    let _ = window.navigator().service_worker().register(SW_URL);
+    //
+    // The result is AWAITED rather than dropped. `let _ =` silences the Rust
+    // warning but leaves a live JavaScript promise with nothing attached, so a
+    // rejection becomes an unhandled one and ships as an application error. It
+    // rejects routinely and harmlessly: Googlebot's renderer stubs `register` to
+    // reject outright, and private-mode and insecure-context browsers refuse too.
+    // None of that is a fault worth an error entry, but a silent no-op is not
+    // worth having either — offline support is simply off for that visitor.
+    let promise = window.navigator().service_worker().register(SW_URL);
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise).await {
+            log::info!("service worker not registered, continuing without offline support: {e:?}");
+        }
+    });
 }
 
 fn append_link(
