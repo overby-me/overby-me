@@ -196,9 +196,9 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
             ),
         };
         crate::subscription::use_live(
-            format!(
-                "subscription {{ nodes(where: {{ {filter}, mimeId: {{ _eq: \"vote/comment\" }} }}) {{ id }} }}"
-            ),
+            crate::subscription::nodes_changed(&format!(
+                "{filter}, mimeId: {{ _eq: \"vote/comment\" }}"
+            )),
             refresh,
         );
     }
@@ -757,11 +757,30 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
     let current_user_id = session.read().user.as_ref().map(|u| u.id.clone());
     let refresh = use_signal(|| 0u32);
 
-    let sub_id = comment_id.clone();
-    crate::subscription::use_live(
-        format!(
-            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{sub_id}\" }}, mimeId: {{ _eq: \"vote/reaction\" }} }}) {{ id }} }}"
+    // Watch the whole CONTEXT's reactions, not this one comment's.
+    //
+    // Counter-intuitive but much cheaper: every bar on the page then asks the
+    // identical question, and the hub collapses identical questions into a single
+    // server-side subscription. Per-comment filters cannot share, so a document
+    // with forty comments held forty live queries per device — twenty thousand
+    // across a hall — where this holds one. The cost is that a reaction anywhere
+    // in the context refreshes the bars on screen, which is a handful of rows.
+    //
+    // Without a context there is nothing to share on, so it stays per-comment.
+    let scope = match &context_id {
+        Some(ctx) => format!(
+            "contextId: {{ _eq: \"{}\" }}",
+            crate::graphql::gql_escape(ctx)
         ),
+        None => format!(
+            "parentId: {{ _eq: \"{}\" }}",
+            crate::graphql::gql_escape(&comment_id)
+        ),
+    };
+    crate::subscription::use_live(
+        crate::subscription::nodes_changed(&format!(
+            "{scope}, mimeId: {{ _eq: \"vote/reaction\" }}"
+        )),
         refresh,
     );
 

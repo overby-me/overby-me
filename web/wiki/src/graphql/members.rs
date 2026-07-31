@@ -86,7 +86,10 @@ pub struct MembersCountQuery {
 }
 
 #[derive(cynic::QueryFragment, Debug)]
-#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "members_aggregate")]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_aggregate"
+)]
 pub struct MembersAggregate {
     pub aggregate: Option<MembersAggregateFields>,
 }

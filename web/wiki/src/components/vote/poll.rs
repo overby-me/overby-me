@@ -202,9 +202,9 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     // Live results: any vote cast on this poll re-runs the tally / voted checks.
     let sub_poll = crate::graphql::gql_escape(&poll_id);
     crate::subscription::use_live(
-        format!(
-            "subscription {{ nodes(where: {{ parentId: {{ _eq: \"{sub_poll}\" }}, mimeId: {{ _eq: \"vote/vote\" }} }}) {{ id }} }}"
-        ),
+        crate::subscription::nodes_changed(&format!(
+            "parentId: {{ _eq: \"{sub_poll}\" }}, mimeId: {{ _eq: \"vote/vote\" }}"
+        )),
         refresh,
     );
     // React to the poll being opened/closed on its own counter — selecting
@@ -212,9 +212,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     // promptly when the chair closes the poll, without refetching on every vote.
     let poll_refresh = use_signal(|| 0u32);
     crate::subscription::use_live(
-        format!(
-            "subscription {{ nodes(where: {{ id: {{ _eq: \"{sub_poll}\" }} }}) {{ mutable }} }}"
-        ),
+        crate::subscription::nodes_changed(&format!("id: {{ _eq: \"{sub_poll}\" }}")),
         poll_refresh,
     );
 
@@ -229,9 +227,18 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     let av_token = session.read().access_token.clone();
     let av_user = user_id.clone();
     let av_secret = poll_secret;
+    // Having voted is final, so stop asking. Without this every device re-ran the
+    // check on every refresh for the rest of the vote — and on a SECRET poll that
+    // check is a call to our own backend rather than to Hasura, so it is the one
+    // piece of the ballot that lands on a single small server. A delegate votes
+    // early and then watches; this makes those minutes free.
+    let mut voted_latch = use_signal(|| false);
     let already_voted =
         crate::use_data_resource!(|(av_poll, av_token, av_user, av_secret, rev)| async move {
             let _ = rev;
+            if voted_latch() {
+                return true;
+            }
             if av_secret {
                 // Anonymous votes have no owner_id, so ask the backend's has-voted marker.
                 match &av_token {
@@ -247,25 +254,29 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
             }
         });
     let voted = already_voted.read().unwrap_or(false);
+    use_effect(move || {
+        if voted && !voted_latch() {
+            voted_latch.set(true);
+        }
+    });
 
     // Tally of the votes visible to this user (all of them for the poll owner /
     // an admin; just their own otherwise). Counts per option index.
     let ty_poll = poll_id.clone();
     let ty_token = session.read().access_token.clone();
-    let tally = crate::use_data_resource!(|(ty_poll, ty_token, n_opts, rev)| async move {
+    // Counted by the server. A poll that does not show its results still needs
+    // the turnout total for the quorum line, so it asks for that alone rather
+    // than for counts it would not draw.
+    let ty_show = show_results;
+    let tally = crate::use_data_resource!(|(ty_poll, ty_token, n_opts, ty_show, rev)| async move {
         let _ = rev;
-        let votes = graphql::query_poll_votes(ty_token.as_deref(), &ty_poll)
+        let wanted = if ty_show { n_opts } else { 0 };
+        let (counts, total) = graphql::poll_tally(ty_token.as_deref(), &ty_poll, wanted)
             .await
-            .unwrap_or_default();
-        let mut counts = vec![0usize; n_opts];
-        for vote in &votes {
-            for &i in vote {
-                if let Some(c) = counts.get_mut(i) {
-                    *c += 1;
-                }
-            }
-        }
-        (counts, votes.len())
+            .unwrap_or_else(|_| (Vec::new(), 0));
+        let mut counts = counts;
+        counts.resize(n_opts, 0);
+        (counts, total)
     });
     let (counts, total_votes) = tally.read().clone().unwrap_or((vec![], 0));
     // Fold the optimistic cast into the tally + voted state until the refetch
@@ -295,8 +306,12 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     // quorum line the room reads off the projector.
     let el_ctx = context_id.clone();
     let el_token = session.read().access_token.clone();
-    let eligible = crate::use_data_resource!(|(el_ctx, el_token, rev)| async move {
-        let _ = rev;
+    // NOT keyed on `rev`: the electorate is the context's active members, which a
+    // vote does not change. Re-counting it on every ballot cast was one query per
+    // device per vote — 250,000 of them across a 500-person poll — to re-learn a
+    // number that only moves when someone joins or leaves. It still refreshes on
+    // navigation and on focus, which is when membership can have changed.
+    let eligible = crate::use_data_resource!(|(el_ctx, el_token)| async move {
         match el_ctx {
             Some(ctx) => graphql::count_active_members(el_token.as_deref(), &ctx).await,
             None => 0,

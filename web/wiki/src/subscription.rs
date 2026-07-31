@@ -37,12 +37,120 @@ use crate::session::use_session;
 /// dropped while the tab was in the background.
 pub fn use_live(query: String, mut refresh: Signal<u32>) {
     let sub = use_graphql_subscription(query);
-    use_effect(move || {
-        // Reading the subscription signal ties this effect to each push.
-        let _ = sub.read();
-        refresh += 1;
+    let coalescer = use_hook(|| Rc::new(RefCell::new(Coalescer::default())));
+    let timer: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
+    let runtime = Runtime::current();
+
+    use_effect({
+        let coalescer = coalescer.clone();
+        let timer = timer.clone();
+        move || {
+            // Reading the subscription signal ties this effect to each push.
+            let pushed = sub.read().is_some();
+            // The effect also runs once at mount, before anything has arrived.
+            // Refreshing then re-fetches data the view has only just loaded —
+            // two round trips per live view per device, for the same rows.
+            if !pushed {
+                return;
+            }
+            let now = js_sys::Date::now();
+            let Some(delay) = coalescer.borrow_mut().on_push(now, js_sys::Math::random()) else {
+                // A refresh is already pending; this push rides along with it.
+                return;
+            };
+            let coalescer = coalescer.clone();
+            let runtime = runtime.clone();
+            let cb = Closure::once_into_js(move || {
+                coalescer.borrow_mut().on_fire(js_sys::Date::now());
+                let _guard = RuntimeGuard::new(runtime);
+                refresh += 1;
+            });
+            if let Some(win) = web_sys::window() {
+                if let Ok(id) = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    cb.unchecked_ref(),
+                    delay as i32,
+                ) {
+                    if let Some(old) = timer.borrow_mut().replace(id) {
+                        win.clear_timeout_with_handle(old);
+                    }
+                }
+            }
+        }
     });
+
+    use_drop(move || {
+        if let (Some(win), Some(id)) = (web_sys::window(), timer.borrow_mut().take()) {
+            win.clear_timeout_with_handle(id);
+        }
+    });
+
     use_focus_refresh(refresh);
+}
+
+/// A burst of pushes becomes ONE refresh, and no two devices refresh together.
+///
+/// Every push used to re-run each query the view keyed on the counter. That is
+/// fine for a document three people are editing and ruinous for a ballot: with
+/// 500 delegates on one poll, each vote cast pushed to all 500, and each push
+/// re-ran three queries — 750,000 requests for a single vote, all inside the
+/// couple of minutes people are voting, and arriving in synchronised bursts
+/// because the push reaches every device at the same instant.
+///
+/// So pushes inside a window fold into one refresh, and each refresh is spread
+/// over a random slice of the window. The result a voter sees lags by at most
+/// [`COALESCE_MS`] + [`SPREAD_MS`], which is not perceptible on a tally that
+/// changes continuously — and the server meets a trickle instead of a stampede.
+const COALESCE_MS: f64 = 1_500.0;
+
+/// How wide the herd is spread. Jitter matters more than the window: 500 devices
+/// refreshing 1.5 s apart but all at the same moment is still a burst of 500.
+const SPREAD_MS: f64 = 1_000.0;
+
+#[derive(Default)]
+struct Coalescer {
+    /// Earliest time a refresh may fire, so a settled view is not re-queried
+    /// more often than the window allows.
+    next_allowed_ms: f64,
+    /// A refresh is already scheduled; further pushes need no timer of their own.
+    scheduled: bool,
+}
+
+impl Coalescer {
+    /// The delay to schedule a refresh at, or `None` if one is already pending.
+    fn on_push(&mut self, now_ms: f64, rand: f64) -> Option<f64> {
+        if self.scheduled {
+            return None;
+        }
+        self.scheduled = true;
+        let wait = (self.next_allowed_ms - now_ms).max(0.0);
+        Some(wait + rand.clamp(0.0, 1.0) * SPREAD_MS)
+    }
+
+    fn on_fire(&mut self, now_ms: f64) {
+        self.scheduled = false;
+        self.next_allowed_ms = now_ms + COALESCE_MS;
+    }
+}
+
+/// A node subscription that carries a CHANGE TOKEN instead of the rows.
+///
+/// `use_live` ignores the payload — it only needs to know that something under
+/// `where_clause` changed. Hasura, meanwhile, pushes the whole result to every
+/// subscriber whenever it differs, so selecting rows means a poll with 500 votes
+/// shipped 23 KB to every device on every vote cast. Measured against
+/// production: 23,011 bytes as rows, 101 bytes as `count` + `max(updatedAt)` —
+/// which moves on exactly the same events, since an insert changes the count, an
+/// edit changes the timestamp, and a delete in this wiki is an update that does
+/// both.
+///
+/// Only for `nodes`. `relations` and `members` expose no timestamp to aggregate,
+/// so a row EDITED in place (the chair moving the room's active node) would
+/// leave count and max(id) untouched and never reach the projector.
+pub fn nodes_changed(where_clause: &str) -> String {
+    format!(
+        "subscription {{ nodesAggregate(where: {{ {where_clause} }}) \
+         {{ aggregate {{ count max {{ updatedAt }} }} }} }}"
+    )
 }
 
 /// Bump `refresh` whenever the window regains focus (and the tab is visible), so
@@ -87,21 +195,101 @@ pub fn use_graphql_subscription(query: String) -> Signal<Option<serde_json::Valu
     let _session = use_session();
     let data = use_signal(|| None::<serde_json::Value>);
 
-    let id = use_hook(|| Hub::subscribe(query.clone(), data, Runtime::current()));
+    let handle = use_hook(|| Hub::subscribe(query.clone(), data, Runtime::current()));
 
     use_drop(move || {
         // Deregister BEFORE anything else: a frame already in flight for this id
         // must not find a signal whose scope is being torn down.
-        Hub::unsubscribe(&id);
+        Hub::unsubscribe(&handle);
     });
 
     data
 }
 
-/// One registered subscription: what to ask for, and where to put the answers.
-struct Sub {
-    query: String,
-    sink: Signal<Option<serde_json::Value>>,
+/// Which subscriptions exist on the socket, and who is listening to each.
+///
+/// Two components asking the same question cost ONE subscription. Hasura runs a
+/// live query per registration and re-executes it on a timer, so a document with
+/// forty comments — each reaction bar watching the same context — meant forty
+/// live queries per device, and five hundred devices in a hall meant twenty
+/// thousand against one server. Identical queries share, which is exactly what
+/// makes a context-wide watch cheaper than a per-row one rather than the same.
+///
+/// Generic over the sink so the bookkeeping can be tested without a renderer.
+struct Registry<S> {
+    /// Server-side subscription id -> the query and everyone waiting on it.
+    subs: HashMap<String, (String, Vec<(u64, S)>)>,
+    /// Query text -> the id already carrying it.
+    by_query: HashMap<String, String>,
+    next_id: u64,
+    next_sink: u64,
+}
+
+impl<S> Default for Registry<S> {
+    fn default() -> Self {
+        Registry {
+            subs: HashMap::new(),
+            by_query: HashMap::new(),
+            next_id: 0,
+            next_sink: 0,
+        }
+    }
+}
+
+/// One listener's place in the registry.
+#[derive(Clone, Debug, PartialEq)]
+struct Handle {
+    id: String,
+    sink: u64,
+}
+
+impl<S> Registry<S> {
+    /// Add a listener. Returns its handle, and the query to SEND if this is the
+    /// first listener for it — `None` means the socket already carries it.
+    fn register(&mut self, query: String, sink: S) -> (Handle, Option<String>) {
+        self.next_sink += 1;
+        let sink_id = self.next_sink;
+        if let Some(id) = self.by_query.get(&query).cloned() {
+            if let Some((_, sinks)) = self.subs.get_mut(&id) {
+                sinks.push((sink_id, sink));
+                return (Handle { id, sink: sink_id }, None);
+            }
+        }
+        self.next_id += 1;
+        let id = self.next_id.to_string();
+        self.subs
+            .insert(id.clone(), (query.clone(), vec![(sink_id, sink)]));
+        self.by_query.insert(query.clone(), id.clone());
+        (Handle { id, sink: sink_id }, Some(query))
+    }
+
+    /// Remove a listener. Returns the id to send `complete` for once the last
+    /// listener for that query is gone.
+    fn deregister(&mut self, handle: &Handle) -> Option<String> {
+        let (query, empty) = {
+            let (query, sinks) = self.subs.get_mut(&handle.id)?;
+            sinks.retain(|(s, _)| *s != handle.sink);
+            (query.clone(), sinks.is_empty())
+        };
+        if !empty {
+            return None;
+        }
+        self.subs.remove(&handle.id);
+        self.by_query.remove(&query);
+        Some(handle.id.clone())
+    }
+
+    /// Every live (id, query), for re-sending after a reconnect.
+    fn live(&self) -> Vec<(String, String)> {
+        self.subs
+            .iter()
+            .map(|(id, (q, _))| (id.clone(), q.clone()))
+            .collect()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.subs.is_empty()
+    }
 }
 
 /// The single connection, and every subscription riding on it.
@@ -116,8 +304,7 @@ struct HubState {
     attempts: u32,
     /// Handle of a scheduled reconnect, so it can be cancelled.
     timeout: Option<i32>,
-    next_id: u64,
-    subs: HashMap<String, Sub>,
+    subs: Registry<Signal<Option<serde_json::Value>>>,
     runtime: Option<Rc<Runtime>>,
 }
 
@@ -134,40 +321,38 @@ impl Hub {
         HUB.with(|h| f(&mut h.borrow_mut()))
     }
 
-    /// Register a subscription, connecting if this is the first one.
+    /// Register a listener, connecting if this is the first one. A query the
+    /// socket already carries costs nothing but a place in its listener list.
     fn subscribe(
         query: String,
         sink: Signal<Option<serde_json::Value>>,
         runtime: Rc<Runtime>,
-    ) -> String {
-        let (id, send_now) = Self::with(|st| {
+    ) -> Handle {
+        let (handle, to_send, acked) = Self::with(|st| {
             st.runtime.get_or_insert(runtime);
-            st.next_id += 1;
-            let id = st.next_id.to_string();
-            st.subs.insert(
-                id.clone(),
-                Sub {
-                    query: query.clone(),
-                    sink,
-                },
-            );
-            (id, st.acked)
+            let (handle, to_send) = st.subs.register(query, sink);
+            (handle, to_send, st.acked)
         });
-        if send_now {
-            Self::send_subscribe(&id, &query);
-        } else {
-            Self::ensure_connected();
+        match (to_send, acked) {
+            // New to the socket, and the socket is ready for it.
+            (Some(query), true) => Self::send_subscribe(&handle.id, &query),
+            // New, but the socket is not up yet: `connection_ack` sends it.
+            (Some(_), false) => Self::ensure_connected(),
+            // Already carried; the existing subscription feeds this sink too.
+            (None, _) => {}
         }
-        id
+        handle
     }
 
-    /// Deregister a subscription, and close the socket once none are left.
-    fn unsubscribe(id: &str) {
-        let (had, idle) = Self::with(|st| {
-            let had = st.subs.remove(id).is_some();
-            (had, st.subs.is_empty())
+    /// Drop a listener, ending the subscription once its last one goes, and
+    /// closing the socket once no subscriptions are left.
+    fn unsubscribe(handle: &Handle) {
+        let (ended, idle) = Self::with(|st| {
+            let ended = st.subs.deregister(handle);
+            let idle = st.subs.is_empty();
+            (ended, idle)
         });
-        if had {
+        if let Some(id) = ended {
             Self::send(&json!({ "id": id, "type": "complete" }));
         }
         if idle {
@@ -258,10 +443,7 @@ impl Hub {
                     let pending: Vec<(String, String)> = Self::with(|st| {
                         st.acked = true;
                         st.attempts = 0;
-                        st.subs
-                            .iter()
-                            .map(|(id, s)| (id.clone(), s.query.clone()))
-                            .collect()
+                        st.subs.live()
                     });
                     for (id, query) in pending {
                         Self::send_subscribe(&id, &query);
@@ -273,11 +455,20 @@ impl Hub {
                     let Some(d) = msg.get("payload").and_then(|p| p.get("data")) else {
                         return;
                     };
-                    let target =
-                        Self::with(|st| st.subs.get(id).map(|s| s.sink).zip(st.runtime.clone()));
-                    if let Some((mut sink, runtime)) = target {
+                    let target = Self::with(|st| {
+                        let sinks: Vec<_> = st
+                            .subs
+                            .subs
+                            .get(id)
+                            .map(|(_, sinks)| sinks.iter().map(|(_, s)| *s).collect())
+                            .unwrap_or_default();
+                        st.runtime.clone().map(|rt| (sinks, rt))
+                    });
+                    if let Some((sinks, runtime)) = target {
                         let _guard = RuntimeGuard::new(runtime);
-                        sink.set(Some(d.clone()));
+                        for mut sink in sinks {
+                            sink.set(Some(d.clone()));
+                        }
                     }
                 }
                 // A subscription the server refuses or ends. Rare, and previously
@@ -359,7 +550,124 @@ fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::backoff_delay_ms;
+    use super::{backoff_delay_ms, Coalescer, Registry, COALESCE_MS, SPREAD_MS};
+
+    /// A burst of pushes costs one refresh, not one per push.
+    ///
+    /// This is the ballot case: 500 votes cast in two minutes, each pushing to
+    /// every device on the poll. Without folding, each device ran three queries
+    /// per vote.
+    #[test]
+    fn a_burst_of_pushes_schedules_exactly_one_refresh() {
+        let mut c = Coalescer::default();
+        let scheduled: Vec<f64> = (0..100)
+            .filter_map(|i| c.on_push(1_000.0 + i as f64 * 5.0, 0.5))
+            .collect();
+        assert_eq!(scheduled.len(), 1, "a burst must fold into one refresh");
+        // ...and once it fires, the view is live again for the next burst.
+        c.on_fire(2_000.0);
+        assert!(c.on_push(4_000.0, 0.5).is_some());
+    }
+
+    /// Two devices given different random draws refresh at different moments.
+    ///
+    /// The window alone does not help when a push reaches 500 devices at the
+    /// same instant: they would simply burst 1.5 s later, together.
+    #[test]
+    fn refreshes_are_spread_across_the_herd() {
+        let delay = |rand| {
+            Coalescer::default()
+                .on_push(0.0, rand)
+                .expect("first push schedules")
+        };
+        assert_eq!(delay(0.0), 0.0);
+        assert_eq!(delay(1.0), SPREAD_MS);
+        assert!(
+            delay(0.25) < delay(0.75),
+            "the draw must actually spread devices"
+        );
+    }
+
+    /// A refresh always arrives, and always within the promised window.
+    #[test]
+    fn a_refresh_is_never_delayed_beyond_the_window() {
+        let mut c = Coalescer::default();
+        c.on_fire(0.0); // a refresh just happened: the next one waits out the window
+        let d = c
+            .on_push(1.0, 1.0)
+            .expect("a push after a fire still schedules");
+        assert!(d <= COALESCE_MS + SPREAD_MS, "delay {d} exceeds the window");
+        assert!(d >= COALESCE_MS - 1.0, "must respect the cooldown, got {d}");
+    }
+
+    /// The same question asked twice costs one subscription.
+    ///
+    /// Forty reaction bars on one document each watched the same context. Every
+    /// registration is a live query Hasura re-runs on a timer, so sharing is the
+    /// difference between one and forty per device — and between 500 and 20,000
+    /// in a hall.
+    #[test]
+    fn identical_queries_share_one_subscription() {
+        let mut r: Registry<u32> = Registry::default();
+        let (h1, send1) = r.register("sub A".into(), 1);
+        let (h2, send2) = r.register("sub A".into(), 2);
+        assert_eq!(
+            send1.as_deref(),
+            Some("sub A"),
+            "the first must go to the server"
+        );
+        assert_eq!(send2, None, "the second must ride along");
+        assert_eq!(h1.id, h2.id, "both listen to the same subscription");
+        assert_eq!(r.live().len(), 1);
+
+        // Both sinks are fed by the one subscription.
+        let sinks: Vec<u32> = r.subs[&h1.id].1.iter().map(|(_, s)| *s).collect();
+        assert_eq!(sinks, vec![1, 2]);
+
+        // A different question is its own subscription.
+        let (_, send3) = r.register("sub B".into(), 3);
+        assert_eq!(send3.as_deref(), Some("sub B"));
+        assert_eq!(r.live().len(), 2);
+    }
+
+    /// A shared subscription ends only when its LAST listener goes.
+    #[test]
+    fn a_shared_subscription_outlives_its_first_listener() {
+        let mut r: Registry<u32> = Registry::default();
+        let (h1, _) = r.register("sub A".into(), 1);
+        let (h2, _) = r.register("sub A".into(), 2);
+        assert_eq!(
+            r.deregister(&h1),
+            None,
+            "one listener leaving must not end it"
+        );
+        assert!(!r.is_empty());
+        assert_eq!(r.deregister(&h2).as_deref(), Some(h1.id.as_str()));
+        assert!(
+            r.is_empty(),
+            "the socket may close once nothing is listening"
+        );
+        // And the query is free to be registered afresh afterwards.
+        let (_, send) = r.register("sub A".into(), 3);
+        assert_eq!(send.as_deref(), Some("sub A"));
+    }
+
+    /// Deregistering twice (or an unknown handle) is harmless.
+    #[test]
+    fn deregistering_an_unknown_listener_is_a_no_op() {
+        let mut r: Registry<u32> = Registry::default();
+        let (h, _) = r.register("sub A".into(), 1);
+        assert!(r.deregister(&h).is_some());
+        assert_eq!(r.deregister(&h), None);
+    }
+
+    /// A bad random sample cannot produce a negative delay (setTimeout would
+    /// fire immediately, re-creating the stampede it exists to prevent).
+    #[test]
+    fn a_bad_random_draw_is_clamped() {
+        assert_eq!(Coalescer::default().on_push(0.0, -3.0), Some(0.0));
+        assert_eq!(Coalescer::default().on_push(0.0, 9.0), Some(SPREAD_MS));
+    }
 
     #[test]
     fn backoff_doubles_then_caps() {

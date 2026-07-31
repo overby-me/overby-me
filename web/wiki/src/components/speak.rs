@@ -240,15 +240,18 @@ fn SpeakList(
     //
     // The selected fields matter as much as the filter: a subscription re-fires
     // when its RESULT changes, so `{ id }` on a row whose id never changes would
-    // never fire. `mutable` and `data` are what the views actually read.
+    // never fire. `max(updatedAt)` moves whenever any of those rows is touched —
+    // a chair opening the list, starting the clock, or someone joining the queue
+    // — and unlike `data` it does not ship every entry to every device in the
+    // hall each time the clock ticks.
     let sub_list = crate::graphql::gql_escape(&list_id);
     crate::subscription::use_live(
-        format!(
-            "subscription {{ nodes(where: {{ _or: [\
+        crate::subscription::nodes_changed(&format!(
+            "_or: [\
              {{ parentId: {{ _eq: \"{sub_list}\" }}, mimeId: {{ _eq: \"speak/speak\" }} }}, \
              {{ id: {{ _eq: \"{sub_list}\" }} }}\
-             ] }}) {{ id mutable data }} }}"
-        ),
+             ]"
+        )),
         refresh,
     );
 

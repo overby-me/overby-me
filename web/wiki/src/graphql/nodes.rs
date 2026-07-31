@@ -1368,9 +1368,7 @@ pub(crate) async fn child_ids(
         }),
         ..Default::default()
     };
-    let op = ChildIdsQuery::build(NodesWhereVariables {
-        where_clause,
-    });
+    let op = ChildIdsQuery::build(NodesWhereVariables { where_clause });
     let data = execute(access_token, op).await?;
     Ok(data.nodes.into_iter().map(|n| n.id.0).collect())
 }
@@ -1408,9 +1406,7 @@ pub async fn query_context_polls(
         ]),
         ..Default::default()
     };
-    let operation = PollsWhereQuery::build(NodesWhereVariables {
-        where_clause,
-    });
+    let operation = PollsWhereQuery::build(NodesWhereVariables { where_clause });
     let mut result = execute(access_token, operation).await?;
     result.nodes.sort_by(|a, b| {
         let a_ts = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
@@ -1445,9 +1441,7 @@ pub async fn query_poll_votes(
         ]),
         ..Default::default()
     };
-    let operation = VotesWhereQuery::build(NodesWhereVariables {
-        where_clause,
-    });
+    let operation = VotesWhereQuery::build(NodesWhereVariables { where_clause });
     let result = execute(access_token, operation).await?;
     Ok(result
         .nodes
