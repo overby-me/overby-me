@@ -300,7 +300,13 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
                     },
                     Some(Ok(list)) => rsx! {
                         div { class: "comment-thread-list",
-                            for c in list.iter() {
+                            // Newest first, at the TOP level only. What was just
+                            // said about a motion is what the room is discussing,
+                            // and it should not be at the bottom of forty older
+                            // remarks. Replies keep their order (see CommentThread):
+                            // an answer read before the thing it answers is not a
+                            // conversation, it is a puzzle.
+                            for c in list.iter().rev() {
                                 CommentThread {
                                     key: "{c.id.0}",
                                     comment: c.clone(),
@@ -1083,6 +1089,11 @@ fn CommentComposer(
 
     let input_id = use_hook(|| format!("comment-image-{}", (js_sys::Math::random() * 1e9) as u64));
     let attachment = preview.read().clone();
+    // What the box will turn into a link when this is posted. A textarea holds
+    // text rather than markup, so it cannot show a link AS a link — but leaving
+    // the writer to guess whether their pasted address was understood is the
+    // actual complaint, and naming what was found answers it.
+    let links = super::content::detected_links(&text.read());
 
     rsx! {
         div { class: "comment-composer-wrap",
@@ -1120,6 +1131,23 @@ fn CommentComposer(
                     disabled: *posting.read() || *uploading.read(),
                     onclick: post,
                     span { class: "material-icons", "send" }
+                }
+            }
+            if !links.is_empty() {
+                div { class: "comment-links",
+                    for url in links.iter() {
+                        {
+                            // Shown as written: an address, not the mailto: the
+                            // renderer will actually put in the href.
+                            let shown = url.strip_prefix("mailto:").unwrap_or(url).to_string();
+                            rsx! {
+                                div { class: "comment-link-chip", key: "{url}",
+                                    span { class: "material-icons", "link" }
+                                    span { class: "comment-link-url", "{shown}" }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             if let Some(src) = attachment {

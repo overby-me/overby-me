@@ -6641,6 +6641,36 @@ a.list-item:hover {
 	gap: var(--md-sys-spacing-2-5);
 	align-items: flex-end;
 }
+/* What the composer found: a chip per address that will be a link once the
+   comment is posted. Quiet — it is a confirmation, not a control — and it
+   truncates rather than wrapping, since the point is recognition, not reading
+   the whole URL. */
+.comment-links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--md-sys-spacing-2);
+	margin-top: var(--md-sys-spacing-2-5);
+}
+.comment-link-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-1-5);
+	max-width: 100%;
+	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-2-5);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-label-small-size);
+}
+.comment-link-chip .material-icons {
+	font-size: var(--md-sys-typescale-body-medium-size);
+}
+.comment-link-url {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 /* Inside the box, the preview sits under the input with the same gap the row
    uses, and nothing below it — the send button is in the row above. */
 .comment-composer-wrap .comment-attachment {

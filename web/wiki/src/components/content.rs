@@ -991,6 +991,24 @@ enum LinkToken {
     Email(String, String),
 }
 
+/// The links a piece of plain text will turn into once it is rendered.
+///
+/// The comment box is a `<textarea>` — it holds text, not markup, so it cannot
+/// show a link as a link no matter what is typed into it. What it CAN do is say
+/// what it found, which is the part the writer actually wants to know: that the
+/// address they pasted will be a link when they press send, rather than
+/// discovering it afterwards.
+pub(crate) fn detected_links(text: &str) -> Vec<String> {
+    autolink_tokens(text)
+        .into_iter()
+        .filter_map(|t| match t {
+            LinkToken::Url(url, _) => Some(url),
+            LinkToken::Email(addr, _) => Some(format!("mailto:{addr}")),
+            LinkToken::Text(_) => None,
+        })
+        .collect()
+}
+
 /// Split a text run into plain / URL / email tokens, keeping spacing. URLs must
 /// start http(s)://; emails are `local@domain.tld`. Trailing punctuation is kept
 /// out of the link target.
@@ -1185,6 +1203,25 @@ mod tests {
             );
         }
         assert_eq!(safe_href("javascript:alert(1)"), "#");
+    }
+
+    /// What the composer tells the writer it has found. The comment box cannot
+    /// render a link, so it has to name one.
+    #[test]
+    fn detected_links_names_what_will_become_a_link() {
+        assert_eq!(
+            detected_links("see https://github.com/pantsbuild for the code"),
+            vec!["https://github.com/pantsbuild".to_string()]
+        );
+        // Both kinds, in the order they were written.
+        assert_eq!(
+            detected_links("https://a.org and me@b.dk"),
+            vec!["https://a.org".to_string(), "mailto:me@b.dk".to_string()]
+        );
+        // Nothing to announce when there is nothing to link — including for a
+        // scheme that will never become one.
+        assert!(detected_links("just some words").is_empty());
+        assert!(detected_links("javascript:alert(1)").is_empty());
     }
 
     /// The rendered comment splits on newlines before tokenising, so a run never
