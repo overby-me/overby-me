@@ -84,6 +84,10 @@ async fn submit_inner(
         // carries a stack rather than an account of what happened, and reads
         // differently in the feedback app for that reason.
         Some("crash") => "crash",
+        // A failure the app noticed and could only describe to the user as
+        // "something went wrong". Distinct from a crash: the app survived, and
+        // distinct from `bug`, which is a person's account of what they saw.
+        Some("error") => "error",
         _ => "other",
     };
     let path = get("path").unwrap_or_default();
@@ -152,7 +156,10 @@ async fn insert_feedback_node(
     // already there, rather than another row. The node is the durable record —
     // the log sink keeps three days — so "how often" and "how many people" have
     // to survive here or not at all.
-    let digest = (report.kind == "crash").then(|| crash_digest(report.message));
+    // Automatic reports group; a person's account of what happened does not. The
+    // stored field stays `crashDigest` so rows filed before this keep matching.
+    let digest =
+        matches!(report.kind, "crash" | "error").then(|| crash_digest(report.message));
     if let Some(digest) = &digest {
         if let Some((id, data)) = find_crash(cfg, client, &root_id, digest).await? {
             return bump_crash(cfg, client, &id, data, owner_id).await;

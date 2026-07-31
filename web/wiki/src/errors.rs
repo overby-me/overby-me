@@ -110,7 +110,12 @@ pub fn report(failure: Failure) {
     let text = match failure {
         Failure::Refused => return,
         Failure::Offline => t("error.offline"),
-        Failure::Broken => t("error.somethingWentWrong"),
+        // Broken is always a bug, and one that is now filed automatically (see
+        // `graphql::execute`). Saying so is the difference between a dead end and
+        // a message the reader can act on: they know it is known, and they can
+        // quote it. What the app cannot do is explain a schema drift to a
+        // delegate, so it does not try.
+        Failure::Broken => t("error.somethingWentWrongReported"),
     };
     let now = js_sys::Date::now();
     let show = LAST_SHOWN.with(|last| {

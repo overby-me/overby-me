@@ -363,6 +363,7 @@ const EN_JSON: &str = r#"{
     },
     "error": {
         "somethingWentWrong": "Something went wrong!",
+        "somethingWentWrongReported": "Something went wrong. It has been reported.",
         "retry": "Try again",
         "couldNotLoad": "Could not load this",
         "offline": "No connection to the server",
@@ -908,6 +909,7 @@ const DA_JSON: &str = r#"{
     },
     "error": {
         "somethingWentWrong": "Noget gik galt!",
+        "somethingWentWrongReported": "Noget gik galt. Det er blevet rapporteret.",
         "retry": "Pr\u00f8v igen",
         "couldNotLoad": "Kunne ikke indl\u00e6ses",
         "offline": "Ingen forbindelse til serveren",

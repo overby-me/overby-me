@@ -129,7 +129,22 @@ where
         // someone is debugging.
         match failure {
             crate::errors::Failure::Broken => {
-                log::warn!("graphql error [{}]: {e}", short_type_name::<Q>())
+                // `error`, not `warn`: this class is defined as "always a bug",
+                // and it was being filed under the level people filter OUT when
+                // looking for bugs.
+                let summary = format!("graphql error [{}]: {e}", short_type_name::<Q>());
+                log::error!("{summary}");
+                // ...and into the feedback app, not only the log sink. The five
+                // queries broken by one bad variable showed every reader
+                // "something went wrong" and told nobody what; the detail existed
+                // the whole time and only a person reading the logs could see it.
+                let token = access_token.map(str::to_string);
+                let path = web_sys::window()
+                    .and_then(|w| w.location().pathname().ok())
+                    .unwrap_or_default();
+                wasm_bindgen_futures::spawn_local(async move {
+                    crate::backend_api::report_error(token.as_deref(), &summary, &path).await;
+                });
             }
             _ => log::info!(
                 "graphql {} [{}]: {e}",

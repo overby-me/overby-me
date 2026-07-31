@@ -442,3 +442,49 @@ pub async fn member_claim_link(token: &str, member_id: &str) -> Result<String, S
             .to_string())
     }
 }
+
+thread_local! {
+    /// Reports already filed by this tab, so a failure that repeats on every
+    /// render files once.
+    static REPORTED: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+/// The most automatic reports one tab may file, however many things go wrong.
+///
+/// The server merges by digest, so repeats of ONE failure are already a count on
+/// one row rather than many rows. This is the other axis: a build that is broken
+/// in twenty different ways should not have every device narrating all twenty.
+const MAX_AUTO_REPORTS: usize = 5;
+
+/// File a failure the app could only describe to the user as "something went
+/// wrong", so it reaches the feedback app instead of only the log sink.
+///
+/// Deliberately quiet about its own failure: this runs on the error path, and an
+/// error report that reports its own failure to report is a loop, not a feature.
+pub async fn report_error(access_token: Option<&str>, message: &str, path: &str) {
+    let fresh = REPORTED.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        seen.len() < MAX_AUTO_REPORTS && seen.insert(message.to_string())
+    });
+    if !fresh {
+        return;
+    }
+    let ua = web_sys::window()
+        .map(|w| w.navigator().user_agent().unwrap_or_default())
+        .unwrap_or_default();
+    let url = format!(
+        "{BACKEND_URL}/feedback?kind=error&message={}&path={}&app={}&commit={}&ua={}",
+        js_sys::encode_uri_component(message),
+        js_sys::encode_uri_component(path),
+        js_sys::encode_uri_component(env!("CARGO_PKG_VERSION")),
+        js_sys::encode_uri_component(crate::build_info::COMMIT),
+        js_sys::encode_uri_component(&ua),
+    );
+    let client = reqwest::Client::new();
+    let mut req = client.post(&url);
+    if let Some(token) = access_token {
+        req = req.bearer_auth(token);
+    }
+    let _ = req.send().await;
+}
