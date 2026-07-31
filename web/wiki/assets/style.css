@@ -4108,6 +4108,19 @@ select:focus {
 	border-color: var(--md-primary);
 }
 
+/* A status row inside the suggestion panel — searching, or nothing found. Not a
+   button: there is nothing to choose, and it should not look like there is. */
+.author-suggestion.is-status {
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-3);
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-body-small-size);
+	cursor: default;
+	background: transparent;
+}
+
 .author-suggestions {
 	position: absolute;
 	z-index: 5;

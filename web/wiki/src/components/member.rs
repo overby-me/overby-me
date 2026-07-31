@@ -83,6 +83,9 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     // out-of-order search responses don't clobber a newer one.
     let mut user_matches = use_signal(Vec::<model::Author>::new);
     let mut search_seq = use_signal(|| 0u32);
+    // Same reasoning as the author picker: a debounce is silence, and silence
+    // reads as nothing happening.
+    let mut searching_users = use_signal(|| false);
 
     let save_edit = move |_| {
         let Some(id) = edit_id.read().clone() else {
@@ -270,8 +273,10 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                         // '@') falls through to the email-invite button.
                                         if q.trim().is_empty() || q.contains('@') {
                                             user_matches.set(vec![]);
+                                            searching_users.set(false);
                                             return;
                                         }
+                                        searching_users.set(true);
                                         let token = session.read().access_token.clone();
                                         let seq = *search_seq.read() + 1;
                                         search_seq.set(seq);
@@ -289,9 +294,20 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                             let results = graphql::search_users(token.as_deref(), &q).await;
                                             if *search_seq.read() == seq {
                                                 user_matches.set(results);
+                                                searching_users.set(false);
                                             }
                                         });
                                     },
+                                }
+                            }
+                            if *searching_users.read() {
+                                div { class: "list",
+                                    div { class: "list-item",
+                                        div { class: "spinner spinner-xs" }
+                                        div { class: "list-item-text",
+                                            div { class: "list-item-primary", "{t(\"content.searching\")}" }
+                                        }
+                                    }
                                 }
                             }
                             // Matching users — click to invite by node id (binds the user).

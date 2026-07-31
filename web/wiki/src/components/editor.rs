@@ -184,6 +184,10 @@ fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
     let mut suggestions = use_signal(Vec::<model::Author>::new);
     // Monotonic id so out-of-order search responses don't clobber newer ones.
     let mut seq = use_signal(|| 0u32);
+    // Whether a search is on its way. Set the moment typing schedules one — the
+    // debounce is silence otherwise, and silence reads as "nothing happened"
+    // rather than as "working", which is how a faster picker can feel slower.
+    let mut searching = use_signal(|| false);
 
     rsx! {
         div { class: "author-field mb-2",
@@ -227,8 +231,10 @@ fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
                         // least useful answer. Wait for a second character.
                         if val.trim().chars().count() < 2 {
                             suggestions.set(vec![]);
+                            searching.set(false);
                             return;
                         }
+                        searching.set(true);
                         let token = session.read().access_token.clone();
                         spawn(async move {
                             // Debounce: search the pause, not the keystroke. Typing
@@ -239,11 +245,13 @@ fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
                             // earlier answer from landing on top of a later one.
                             gloo_timers::future::TimeoutFuture::new(AUTHOR_SEARCH_DEBOUNCE_MS).await;
                             if *seq.peek() != my {
+                                // A later keystroke owns the indicator now.
                                 return;
                             }
                             let res = graphql::search_authors(token.as_deref(), &val).await;
                             if *seq.read() == my {
                                 suggestions.set(res);
+                                searching.set(false);
                             }
                         });
                     },
@@ -255,7 +263,14 @@ fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
                         }
                     },
                 }
-                if !suggestions.read().is_empty() {
+                if *searching.read() {
+                    div { class: "author-suggestions",
+                        div { class: "author-suggestion is-status",
+                            div { class: "spinner spinner-xs" }
+                            span { "{t(\"content.searching\")}" }
+                        }
+                    }
+                } else if !suggestions.read().is_empty() {
                     div { class: "author-suggestions",
                         for s in suggestions.read().iter() {
                             {
@@ -272,6 +287,17 @@ fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
                                     }
                                 }
                             }
+                        }
+                    }
+                } else if input.read().trim().chars().count() >= 2 {
+                    // A finished search that matched nobody. An empty panel and
+                    // no panel look identical, and the reader is left wondering
+                    // whether it is still thinking — so say the answer, and say
+                    // what to do with it: Enter puts the name in as written.
+                    div { class: "author-suggestions",
+                        div { class: "author-suggestion is-status",
+                            span { class: "material-icons", "person_search" }
+                            span { "{t(\"content.noAuthorMatch\")}" }
                         }
                     }
                 }
