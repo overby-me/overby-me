@@ -161,7 +161,10 @@ pub struct ContextNodeFields {
     pub parent_id: Option<Uuid>,
     pub created_at: Option<Timestamptz>,
     // A file's content `type`, so orphan file nodes (missing-parents app) show a
-    // format-specific icon instead of the generic file glyph.
+    // format-specific icon instead of the generic file glyph. Selected by path:
+    // the icon is the ONLY thing read from a context row's data, and the whole
+    // document would otherwise ride along for nothing.
+    #[arguments(path: "type")]
     pub data: Option<Jsonb>,
 }
 
@@ -217,6 +220,9 @@ pub struct DrawerChildFields {
     pub key: String,
     pub mime_id: Option<String>,
     pub mutable: bool,
+    // Only the file-type icon is read from a drawer row, so only that is asked
+    // for: on a 48-child folder the whole-document form was 54 KB, this is 11 KB.
+    #[arguments(path: "type")]
     pub data: Option<Jsonb>,
     #[cynic(rename = "children_aggregate")]
     #[arguments(where: $child_visible)]

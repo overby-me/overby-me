@@ -80,12 +80,32 @@ pub struct MembersCountVariables {
     variables = "MembersCountVariables"
 )]
 pub struct MembersCountQuery {
+    #[cynic(rename = "membersAggregate")]
     #[arguments(where: $where_clause)]
-    pub members: Vec<MemberIdRef>,
+    pub members_aggregate: MembersAggregate,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "members_aggregate")]
+pub struct MembersAggregate {
+    pub aggregate: Option<MembersAggregateFields>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_aggregate_fields"
+)]
+pub struct MembersAggregateFields {
+    pub count: i32,
 }
 
 /// Count the active members of a context (its eligible voters), for poll turnout.
-/// The schema exposes no `members_aggregate`, so this fetches ids and counts them.
+///
+/// Asks the server for a number rather than for the rows. The earlier form
+/// selected every member id and took `.len()`, which on the largest context here
+/// (1001 members) meant 46 KB over the wire to learn one integer; the aggregate
+/// is 0.1 KB. Turnout is shown on every poll, so this runs on a hot path.
 pub async fn count_active_members(access_token: Option<&str>, context_id: &str) -> usize {
     use cynic::QueryBuilder;
     let op = MembersCountQuery::build(MembersCountVariables {
@@ -100,7 +120,9 @@ pub async fn count_active_members(access_token: Option<&str>, context_id: &str) 
     });
     execute(access_token, op)
         .await
-        .map(|r| r.members.len())
+        .ok()
+        .and_then(|r| r.members_aggregate.aggregate)
+        .map(|a| a.count.max(0) as usize)
         .unwrap_or(0)
 }
 
@@ -688,4 +710,32 @@ pub async fn set_node_authors(
         execute(access_token, op).await?;
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Turnout asks the server for a number, not for the members.
+    ///
+    /// The earlier form selected every member id and took `.len()`. On the
+    /// largest context in production — 1001 members — that was 46 KB over the
+    /// wire to learn one integer, on a query that runs for every poll shown.
+    #[test]
+    fn the_member_count_is_an_aggregate_and_selects_no_rows() {
+        use cynic::QueryBuilder;
+        let op = MembersCountQuery::build(MembersCountVariables {
+            where_clause: MembersBoolExp::default(),
+        });
+        assert!(
+            op.query.contains("membersAggregate"),
+            "must count server-side: {}",
+            op.query
+        );
+        assert!(
+            !op.query.contains("nodes {"),
+            "an aggregate must not drag rows along: {}",
+            op.query
+        );
+    }
 }

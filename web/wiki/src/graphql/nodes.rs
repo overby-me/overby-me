@@ -152,6 +152,17 @@ impl From<NodeFields> for model::NodeFields {
         }
     }
 }
+/// Put a `data(path: "type")` value back under the key the icon helper reads.
+///
+/// The fragments that only ever draw an icon ask the server for the value at
+/// `$.type` instead of the whole document. What comes back is that value — a
+/// bare string like `"application/pdf"`, or null — so it is wrapped again here.
+/// The point is that every row shape then feeds the SAME `node_icon_mime_id`,
+/// and a search hit, a drawer row and a folder row cannot drift apart.
+fn icon_data(value: Option<Jsonb>) -> Option<model::Jsonb> {
+    value.map(|t| model::Jsonb(serde_json::json!({ "type": t.0 })))
+}
+
 impl From<ContextNodeFields> for model::ContextNodeFields {
     fn from(c: ContextNodeFields) -> Self {
         model::ContextNodeFields {
@@ -161,7 +172,7 @@ impl From<ContextNodeFields> for model::ContextNodeFields {
             mime_id: c.mime_id,
             parent_id: c.parent_id.map(Into::into),
             created_at: c.created_at.map(Into::into),
-            data: c.data.map(Into::into),
+            data: icon_data(c.data),
         }
     }
 }
@@ -179,7 +190,7 @@ impl From<DrawerChildFields> for model::DrawerChildFields {
             key: d.key,
             mime_id: d.mime_id,
             mutable: d.mutable,
-            data: d.data.map(Into::into),
+            data: icon_data(d.data),
             child_count,
         }
     }
@@ -404,12 +415,7 @@ impl From<SearchNodeFields> for model::NodeFields {
             mutable: n.mutable,
             index: n.index,
             get_index: n.get_index,
-            // `data` here is the VALUE at `$.type`, not the document. Put it back
-            // under the key the icon helper reads, so a search result and a
-            // folder row pick the same glyph from the same code.
-            data: n
-                .data
-                .map(|t| model::Jsonb(serde_json::json!({ "type": t.0 }))),
+            data: icon_data(n.data),
             mime: n.mime.map(Into::into),
             is_owner: n.is_owner,
             is_context_owner: n.is_context_owner,
@@ -1668,4 +1674,62 @@ pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<St
         .map(|p| p.split('/').map(str::to_string).collect())
         .unwrap_or_default();
     Ok(segments)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The rows that only draw an icon must ask for the icon, not the document.
+    ///
+    /// A drawer row and a home-screen row read exactly one thing out of `data`:
+    /// a file's content type, for the glyph. Selecting the whole jsonb sent the
+    /// entire Slate document of every sibling — measured on the widest folder in
+    /// production (48 children), 54 KB where 11 KB carries the same screen. The
+    /// argument is one token and easy to drop in a refactor, so it is asserted
+    /// on the operation as actually built.
+    #[test]
+    fn the_icon_only_queries_select_inside_the_document() {
+        use cynic::QueryBuilder;
+
+        let drawer = DrawerChildrenQuery::build(DrawerChildrenVariables {
+            where_clause: NodesBoolExp::default(),
+            order_by: None,
+            child_visible: NodesBoolExp::default(),
+        });
+        assert!(
+            drawer.query.contains(r#"data(path: "type")"#),
+            "the drawer must not fetch whole documents: {}",
+            drawer.query
+        );
+
+        let contexts = ContextsWhereQuery::build(NodesWhereVariables {
+            where_clause: NodesBoolExp::default(),
+            limit: None,
+        });
+        assert!(
+            contexts.query.contains(r#"data(path: "type")"#),
+            "the context list must not fetch whole documents: {}",
+            contexts.query
+        );
+    }
+
+    /// What comes back from `data(path: "type")` is the VALUE, so it has to be
+    /// wrapped again for the icon helper — which is the whole point of doing it:
+    /// one glyph rule for search hits, drawer rows and folder rows alike.
+    #[test]
+    fn a_path_selected_type_is_rewrapped_for_the_icon_helper() {
+        let wrapped = icon_data(Some(Jsonb(serde_json::json!("application/pdf"))))
+            .expect("a present type stays present");
+        assert_eq!(
+            crate::components::loader::node_icon_mime_id("wiki/file", Some(&wrapped.0)),
+            "application/pdf"
+        );
+        // A node with no type at all keeps its own mime as the icon.
+        assert!(icon_data(None).is_none());
+        assert_eq!(
+            crate::components::loader::node_icon_mime_id("wiki/file", None),
+            "wiki/file"
+        );
+    }
 }
