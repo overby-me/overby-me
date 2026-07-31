@@ -79,7 +79,12 @@ pub fn ContentApp(
     // Owner-only actions (mirrors the React ContentToolbar gating): a node/context
     // owner may delete; editing also requires the node to still be mutable.
     let can_manage = node.is_owner.unwrap_or(false) || node.is_context_owner.unwrap_or(false);
-    let can_edit = can_manage && node.mutable;
+    // A context owner may edit even a submitted node; its author may not.
+    let can_edit = super::loader::can_edit_node(
+        node.is_owner.unwrap_or(false),
+        node.is_context_owner.unwrap_or(false),
+        node.mutable,
+    );
     // Still mutable means not yet submitted: the header avatar carries the same
     // badge the node's row carries in a list.
     let is_mutable = node.mutable;

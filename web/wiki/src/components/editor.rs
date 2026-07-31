@@ -870,6 +870,17 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
 
                 // Sticky toolbar (#94): action buttons + formatting controls
                 // stay pinned while scrolling a long document.
+                // Editing something already submitted is a context owner's
+                // privilege, and it should never be a surprise: autosave stays
+                // off for a submitted node (see the guard above), so say both
+                // things rather than let a chair discover the second by losing
+                // a paragraph.
+                if !is_mutable {
+                    div { class: "status-banner is-notice",
+                        span { class: "material-icons", "lock" }
+                        span { "{t(\"content.editingSubmitted\")}" }
+                    }
+                }
                 // A docked M3 toolbar (see .m3-toolbar): the standard colour,
                 // since this is a working surface rather than an emphasis one.
                 div { class: "m3-toolbar m3-toolbar-standard editor-toolbar",

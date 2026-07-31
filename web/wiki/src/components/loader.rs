@@ -1025,6 +1025,25 @@ pub fn slugify(name: &str) -> String {
     }
 }
 
+/// Whether this viewer may edit this node.
+///
+/// Two different powers, deliberately not the same:
+///
+/// - The node's OWNER may edit it while it is still a draft. Submitting makes it
+///   immutable, and that is the point — a resolution the room is about to vote
+///   on must not change under them, and its author is exactly who might change
+///   it.
+/// - A CONTEXT owner may edit regardless. They answer for the whole meeting: the
+///   welcome text on the event page, a typo in a submitted motion, a folder
+///   description. The database has always allowed this — the `nodes` update
+///   permission lets a context owner write any node in their context — and only
+///   the interface was withholding it, which left a chair looking at their own
+///   front page with no way to correct it. Every folder and event in the current
+///   congress is immutable, so this was every page they own.
+pub fn can_edit_node(is_owner: bool, is_context_owner: bool, mutable: bool) -> bool {
+    is_context_owner || (is_owner && mutable)
+}
+
 /// Return a node's children the way the React folder/list views show them:
 /// hidden-mime entries dropped, ordered by `index` then creation time. Row-level
 /// permissions are already applied by Hasura, so only the hidden filter and the
@@ -1110,6 +1129,26 @@ mod tests {
         assert_eq!(super::slug_base("Klima- "), "klima");
         assert_eq!(super::slug_base("--"), "");
         assert_eq!(super::slug_base("- Leading"), "leading");
+    }
+
+    #[test]
+    fn a_context_owner_may_edit_a_submitted_node() {
+        // The chair's own event page: immutable, and theirs to maintain.
+        assert!(can_edit_node(false, true, false));
+        assert!(can_edit_node(true, true, false));
+    }
+
+    #[test]
+    fn an_author_may_not_rewrite_what_they_submitted() {
+        // The whole point of submitting: the room votes on what was submitted.
+        assert!(can_edit_node(true, false, true), "a draft is theirs");
+        assert!(!can_edit_node(true, false, false), "a submitted one is not");
+    }
+
+    #[test]
+    fn a_stranger_may_edit_nothing() {
+        assert!(!can_edit_node(false, false, true));
+        assert!(!can_edit_node(false, false, false));
     }
 
     #[test]

@@ -133,7 +133,12 @@ pub fn FolderApp(
     // owner may manage; editing also requires the node to still be mutable. The
     // projector context is the node's context (or itself when it is its own).
     let can_manage = node.is_owner.unwrap_or(false) || is_context_owner;
-    let can_edit = can_manage && node.mutable;
+    // A context owner may edit even a submitted node; its author may not.
+    let can_edit = super::loader::can_edit_node(
+        node.is_owner.unwrap_or(false),
+        node.is_context_owner.unwrap_or(false),
+        node.mutable,
+    );
     let node_context = node
         .context_id
         .as_ref()

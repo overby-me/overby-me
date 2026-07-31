@@ -4277,6 +4277,13 @@ select:focus {
 	background: var(--md-error-container);
 	color: var(--md-on-error-container);
 }
+/* A statement of fact rather than a warning or an alarm: this node is
+   submitted, and the editor is open anyway because a context owner asked. */
+.status-banner.is-notice {
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface-variant);
+	font-weight: 400;
+}
 /* Something is happening right now, which the pulsing icon says as well. */
 .status-banner.is-live {
 	background: var(--md-secondary-container);
