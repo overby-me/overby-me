@@ -175,12 +175,25 @@
        control flashes fully square mid-press. Use easing-emphasized for radius,
        which is monotonic, and keep the springs for transform, where the
        overshoot is the point and the range is small. */
-	--md-sys-motion-spring-spatial-fast: cubic-bezier(0.3, 1.3, 0.5, 1);
-	--md-sys-motion-spring-spatial-default: cubic-bezier(0.34, 1.5, 0.5, 1);
-	--md-sys-motion-spring-spatial-slow: cubic-bezier(0.36, 1.66, 0.55, 1);
-	--md-sys-motion-spring-effects-fast: cubic-bezier(0.31, 0.94, 0.6, 1);
-	--md-sys-motion-spring-effects-default: cubic-bezier(0.34, 0.8, 0.64, 1);
-	--md-sys-motion-spring-effects-slow: cubic-bezier(0.4, 0.7, 0.7, 1);
+	/* The curves and durations are M3's OWN spring-to-curve conversion table
+	   (Motion > Specs > "Web: Convert springs to curves"), not an approximation
+	   of one. These were hand-fitted before that table was read, and three of
+	   the six were noticeably off — the spatial ones overshot harder and settled
+	   later than the system intends. */
+	--md-sys-motion-spring-spatial-fast: cubic-bezier(0.42, 1.67, 0.21, 0.9);
+	--md-sys-motion-spring-spatial-default: cubic-bezier(0.38, 1.21, 0.22, 1);
+	--md-sys-motion-spring-spatial-slow: cubic-bezier(0.39, 1.29, 0.35, 0.98);
+	--md-sys-motion-spring-effects-fast: cubic-bezier(0.31, 0.94, 0.34, 1);
+	--md-sys-motion-spring-effects-default: cubic-bezier(0.34, 0.8, 0.34, 1);
+	--md-sys-motion-spring-effects-slow: cubic-bezier(0.34, 0.88, 0.34, 1);
+	/* Each spring has a duration it is fitted to; using one with any other
+	   duration is using a different curve than the system specifies. */
+	--md-sys-motion-spring-spatial-fast-duration: 350ms;
+	--md-sys-motion-spring-spatial-default-duration: 500ms;
+	--md-sys-motion-spring-spatial-slow-duration: 650ms;
+	--md-sys-motion-spring-effects-fast-duration: 150ms;
+	--md-sys-motion-spring-effects-default-duration: 200ms;
+	--md-sys-motion-spring-effects-slow-duration: 300ms;
 }
 
 /* Upgrade the springs (and fix the emphasized easing, which was wrongly a copy
@@ -270,4 +283,3 @@
 		);
 	}
 }
-

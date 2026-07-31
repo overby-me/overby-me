@@ -126,7 +126,7 @@ html[data-theme="dark"] {
 	opacity: 0;
 	pointer-events: none;
 	transition: opacity var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .state-layer:hover::before {
 	opacity: var(--md-sys-state-hover-opacity);
@@ -510,9 +510,9 @@ html {
 	pointer-events: none;
 	transition:
 		opacity var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		transform var(--md-sys-motion-duration-medium1)
-			var(--md-sys-motion-spring-spatial-default);
+		var(--md-sys-motion-spring-spatial-default);
 }
 .back-to-top.visible {
 	opacity: 1;
@@ -682,15 +682,15 @@ html {
 	/* Spring the shape/size on activation; standard-ease the colour + glow. */
 	transition:
 		width var(--md-sys-motion-duration-medium1)
-			var(--md-sys-motion-spring-spatial-default),
+		var(--md-sys-motion-spring-spatial-default),
 		height var(--md-sys-motion-duration-medium1)
-			var(--md-sys-motion-spring-spatial-default),
+		var(--md-sys-motion-spring-spatial-default),
 		border-radius var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-easing-emphasized),
+		var(--md-sys-motion-easing-emphasized),
 		background-color var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		box-shadow var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .nav-rail-item.active {
 	color: var(--md-on-surface);
@@ -704,7 +704,8 @@ html {
 	background: var(--md-secondary-container);
 	color: var(--md-on-secondary-container);
 	border-radius: var(--md-sys-shape-corner-large-increased);
-	box-shadow: 0 0 14px 0 color-mix(in srgb, var(--md-secondary) 30%, transparent);
+	box-shadow: 0 0 14px 0
+		color-mix(in srgb, var(--md-secondary) 30%, transparent);
 }
 /* Both nav surfaces label the same way (the rail on medium+, the bottom bar on
    compact), so they share one rule rather than the bar going unstyled. */
@@ -759,7 +760,7 @@ html {
 	opacity: 0;
 	pointer-events: none;
 	transition: opacity var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-default);
 }
 .nav-rail-scrim.open {
 	opacity: 1;
@@ -810,7 +811,7 @@ html {
 	height: 32px;
 	border-radius: var(--md-sys-shape-corner-full);
 	transition: background-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .nav-bar-item.active {
 	color: var(--md-on-surface);
@@ -835,14 +836,14 @@ html {
 	visibility: hidden;
 	transition:
 		opacity var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-slow),
 		visibility 0s linear var(--md-sys-motion-duration-medium2);
 }
 .nav-drawer-scrim.open {
 	opacity: 0.4;
 	visibility: visible;
 	transition: opacity var(--md-sys-motion-duration-medium2)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-slow);
 }
 .nav-drawer {
 	position: fixed;
@@ -950,9 +951,9 @@ html {
 	border-radius: var(--md-sys-shape-corner-large);
 	transition:
 		margin-left var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default),
+		var(--md-sys-motion-spring-spatial-default),
 		margin-right var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default);
+		var(--md-sys-motion-spring-spatial-default);
 }
 .app-shell:not([data-size-class="compact"]) .top-app-bar {
 	left: var(--md-sys-rail-width);
@@ -985,9 +986,9 @@ html {
 	   content well slides with the drawer and app bar instead of snapping. */
 	transition:
 		margin-left var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default),
+		var(--md-sys-motion-spring-spatial-default),
 		margin-right var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default);
+		var(--md-sys-motion-spring-spatial-default);
 }
 /* End the app bar at the docked tools sheet's left edge so the full-height sheet
    owns the top-right corner. The bar keeps its symmetric padding, so its centred
@@ -996,9 +997,9 @@ html {
 	right: var(--md-sys-tools-width);
 	transition:
 		left var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default),
+		var(--md-sys-motion-spring-spatial-default),
 		right var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default);
+		var(--md-sys-motion-spring-spatial-default);
 }
 .app-shell[data-tools-docked="true"] .fab {
 	right: calc(var(--md-sys-tools-width) + 24px);
@@ -1009,10 +1010,16 @@ html {
    gutter beside the content it acts on. Not applied while the tools sheet is
    docked — there the rule above already pulls it inboard of that pane, which is
    its own correct answer. */
-.app-shell:not([data-size-class="compact"]):not([data-tools-docked="true"]) .fab {
+.app-shell:not([data-size-class="compact"]):not([data-tools-docked="true"])
+.fab {
 	right: auto;
 	left: min(
-		calc(var(--content-left) + var(--md-sys-margin) + var(--md-sys-body-max) - 56px),
+		calc(
+			var(--content-left) +
+			var(--md-sys-margin) +
+			var(--md-sys-body-max) -
+			56px
+		),
 		calc(100vw - 56px - 24px)
 	);
 }
@@ -1084,7 +1091,8 @@ html {
 	height: var(--dock-tier);
 	background: transparent;
 	/* A hairline splits the two functions without breaking the single surface. */
-	border-top: 1px solid color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
+	border-top: 1px solid
+		color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
 }
 .app-shell[data-size-class="compact"] .compact-dock .nav-bar-item {
 	padding: var(--md-sys-spacing-1) 0;
@@ -1134,7 +1142,8 @@ html {
 	   from the tree list by a separator, so both side-panel headers match. The
 	   avatar's left edge still lines up with the tree rows' avatars below. */
 	gap: var(--md-sys-spacing-3);
-	padding: var(--md-sys-spacing-4) var(--md-sys-spacing-3) var(--md-sys-spacing-4) var(--md-sys-spacing-5);
+	padding: var(--md-sys-spacing-4) var(--md-sys-spacing-3)
+		var(--md-sys-spacing-4) var(--md-sys-spacing-5);
 	text-decoration: none;
 	margin-bottom: var(--md-sys-spacing-2);
 	/* No tonal fill — a header on the same surface. Overrides the .bar class's
@@ -1145,7 +1154,7 @@ html {
 	color: var(--md-on-surface);
 	border-bottom: 1px solid var(--md-outline-variant);
 	transition: background-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 /* ...and in the tree pane that separator must run the pane's full width, like
    the docked Actions header's does. The scroll container insets its children by
@@ -1239,7 +1248,7 @@ html {
 	/* Only shadow transition — NEVER transform/opacity on the card (that would trap
 	   the fixed FAB, tool sheets, dialogs and their scrims). */
 	transition: box-shadow var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-default);
 }
 .card:hover {
 	box-shadow: var(--md-sys-elevation-3);
@@ -1269,7 +1278,8 @@ html {
 .card-header {
 	display: flex;
 	align-items: center;
-	padding: var(--md-sys-spacing-4-5) var(--md-sys-spacing-5) var(--md-sys-spacing-3-5);
+	padding: var(--md-sys-spacing-4-5) var(--md-sys-spacing-5)
+		var(--md-sys-spacing-3-5);
 	gap: var(--md-sys-spacing-3-5);
 	/* Faint accent wash: tints the identity zone from the accent, fading into the
 	   body — a soft brow instead of a hard divider. */
@@ -1304,7 +1314,8 @@ html {
 	margin-bottom: var(--md-sys-spacing-2-5);
 }
 .app-shell[data-density="compact"] .card-header {
-	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4) var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4)
+		var(--md-sys-spacing-2);
 }
 .app-shell[data-density="compact"] .card-content {
 	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
@@ -1376,7 +1387,8 @@ html {
    map/graph media, so the viewport reads as a deliberate stage. */
 .viewport-frame {
 	position: relative;
-	margin: var(--md-sys-spacing-1) var(--md-sys-spacing-4) var(--md-sys-spacing-4);
+	margin: var(--md-sys-spacing-1) var(--md-sys-spacing-4)
+		var(--md-sys-spacing-4);
 	padding: var(--md-sys-spacing-2);
 	border-radius: var(--md-sys-shape-corner-large);
 	overflow: hidden;
@@ -1410,7 +1422,8 @@ html {
 	display: flex;
 	align-items: center;
 	gap: var(--md-sys-spacing-4);
-	padding: var(--md-sys-spacing-7) var(--md-sys-spacing-6) var(--md-sys-spacing-5);
+	padding: var(--md-sys-spacing-7) var(--md-sys-spacing-6)
+		var(--md-sys-spacing-5);
 	background: linear-gradient(
 		135deg,
 		color-mix(in srgb, var(--md-primary) 22%, transparent),
@@ -1594,7 +1607,11 @@ html {
 	background: linear-gradient(
 		135deg,
 		var(--md-secondary-container),
-		color-mix(in srgb, var(--md-secondary-container) 40%, var(--md-surface-container-high))
+		color-mix(
+			in srgb,
+			var(--md-secondary-container) 40%,
+			var(--md-surface-container-high)
+		)
 	);
 }
 .context-header.has-cover {
@@ -1812,7 +1829,7 @@ html {
 		border-radius var(--md-sys-motion-duration-medium2)
 		var(--md-sys-motion-easing-emphasized),
 		box-shadow var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-default);
 }
 
 /* Hide the focal FAB while any modal sheet (tools or the apps switcher) is open:
@@ -2040,9 +2057,9 @@ html {
 	letter-spacing: var(--md-sys-typescale-label-large-tracking);
 	transition:
 		background-color var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-default),
 		box-shadow var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-default),
 		transform var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-spring-spatial-fast),
 		border-radius var(--md-sys-motion-duration-medium2)
@@ -2222,7 +2239,7 @@ html {
 	justify-content: center;
 	color: var(--md-on-surface);
 	transition: background-color var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-default);
 }
 
 /* Icon-button glyphs are intentionally a touch smaller than the 22px default, so
@@ -2251,11 +2268,11 @@ html {
 	border-radius: var(--md-sys-shape-corner-large);
 	transition:
 		background-color var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-default),
 		border-radius var(--md-sys-motion-duration-medium2)
 		var(--md-sys-motion-easing-emphasized),
 		box-shadow var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-default),
 		transform var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-spring-spatial-fast);
 }
@@ -2357,11 +2374,11 @@ a.folder-item:focus-visible {
 	outline: none;
 	transition:
 		border-color var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		background-color var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		border-radius var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-easing-emphasized);
+		var(--md-sys-motion-easing-emphasized);
 }
 
 /* DESIGN (expressive text field): focus morphs the corner larger, thickens
@@ -2439,9 +2456,9 @@ a.folder-item:focus-visible {
 	cursor: pointer;
 	transition:
 		border-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		background-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .file-upload:hover {
 	border-color: var(--md-primary);
@@ -2520,7 +2537,8 @@ a.folder-item:focus-visible {
 	position: absolute;
 	inset-inline: 0;
 	bottom: 0;
-	padding: var(--md-sys-spacing-6) var(--md-sys-spacing-3) var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-6) var(--md-sys-spacing-3)
+		var(--md-sys-spacing-2);
 	background: linear-gradient(
 		transparent,
 		color-mix(in srgb, var(--md-sys-color-scrim) 76%, transparent)
@@ -2538,7 +2556,8 @@ a.folder-item:focus-visible {
 /* Native <select> styled to match the text inputs (shadcn-ish), with a custom
  * chevron so it doesn't fall back to the browser's default look. */
 select {
-	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-9) var(--md-sys-spacing-2-5) var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-9)
+		var(--md-sys-spacing-2-5) var(--md-sys-spacing-3);
 	border: 1px solid var(--md-outline);
 	border-radius: var(--md-sys-shape-corner-small);
 	font-size: var(--md-sys-typescale-body-large-size);
@@ -2821,7 +2840,7 @@ select:focus {
 	opacity: 0;
 	pointer-events: none;
 	transition: opacity var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .list-item:hover::before {
 	opacity: var(--md-sys-state-hover-opacity);
@@ -2858,7 +2877,8 @@ select:focus {
 	display: flex;
 	flex-direction: column;
 	gap: var(--md-sys-spacing-2-5);
-	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-4) var(--md-sys-spacing-1-5);
+	padding: var(--md-sys-spacing-2-5) var(--md-sys-spacing-4)
+		var(--md-sys-spacing-1-5);
 }
 
 .menu-color-title {
@@ -3061,8 +3081,9 @@ select:focus {
    ever was. */
 .content-measure:has(.m3-supporting-pane) {
 	max-width: calc(
-		var(--md-sys-body-max) + var(--md-sys-list-pane-width) +
-			var(--md-sys-pane-spacer)
+		var(--md-sys-body-max) +
+		var(--md-sys-list-pane-width) +
+		var(--md-sys-pane-spacer)
 	);
 	container-type: inline-size;
 }
@@ -3201,7 +3222,8 @@ select:focus {
 	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--md-sys-spacing-3);
-	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4) var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4)
+		var(--md-sys-spacing-3);
 }
 /* Pill search field: surface-container-highest with a leading icon. */
 .search-field {
@@ -3216,7 +3238,7 @@ select:focus {
 	border-radius: var(--md-sys-shape-corner-full);
 	color: var(--md-on-surface-variant);
 	transition: box-shadow var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .search-field:focus-within {
 	box-shadow: inset 0 0 0 2px var(--md-primary);
@@ -3283,11 +3305,11 @@ select:focus {
 	/* DESIGN (expressive roster): actions rest quiet and fade in on row hover. */
 	opacity: 0.4;
 	transition: opacity var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .paginated-table tbody tr {
 	transition: background-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .paginated-table tbody tr:hover {
 	background: color-mix(in srgb, var(--md-primary) 6%, transparent);
@@ -3363,7 +3385,7 @@ select:focus {
 	opacity: 0;
 	pointer-events: none;
 	transition: opacity var(--md-sys-motion-duration-short4)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-default);
 }
 .sheet-scrim.open {
 	opacity: 1;
@@ -3536,11 +3558,11 @@ select:focus {
 	border-radius: var(--md-sys-shape-corner-small);
 	transition:
 		transform var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-spring-spatial-default),
+		var(--md-sys-motion-spring-spatial-default),
 		border-radius var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-emphasized),
+		var(--md-sys-motion-easing-emphasized),
 		background-color var(--md-sys-motion-duration-short4)
-			var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-default);
 }
 .sheet-quick-group > .sheet-quick-action:first-child {
 	border-start-start-radius: var(--md-sys-shape-corner-full);
@@ -3584,7 +3606,8 @@ select:focus {
 	margin-top: var(--md-sys-spacing-2);
 }
 .sheet-group-title {
-	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4) var(--md-sys-spacing-0-5);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-4)
+		var(--md-sys-spacing-0-5);
 	color: var(--md-on-surface-variant);
 	font-size: var(--md-sys-typescale-label-large-size);
 	font-weight: 600;
@@ -3711,11 +3734,11 @@ select:focus {
 	font-weight: 500;
 	transition:
 		background-color var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		color var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		transform var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-spring-spatial-fast);
+		var(--md-sys-motion-spring-spatial-fast);
 }
 .m3-segment:not(:last-child) {
 	border-right: 1px solid var(--md-outline-strong);
@@ -3746,7 +3769,8 @@ select:focus {
 /* The author-chip row that follows a card header or hero: inset to the card's
    own content padding, so the chips line up with the text below them. */
 .chip-row-authors {
-	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4) var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4)
+		var(--md-sys-spacing-2);
 }
 /* Outlined "secondary" chip, matching the old wiki's MUI
  * <Chip color="secondary" variant="outlined"> (author chips etc.): a pill with
@@ -3768,9 +3792,9 @@ select:focus {
 	max-width: 100%;
 	transition:
 		background-color var(--md-sys-motion-duration-short4)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-default),
 		transform var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-spring-spatial-fast);
+		var(--md-sys-motion-spring-spatial-fast);
 }
 
 .chip:hover {
@@ -4065,11 +4089,11 @@ select:focus {
 	background: var(--md-surface-container-low);
 	transition:
 		border-color var(--md-sys-motion-duration-short4)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-default),
 		background-color var(--md-sys-motion-duration-short4)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-default),
 		box-shadow var(--md-sys-motion-duration-short4)
-			var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-default);
 }
 .ballot-option:hover {
 	border-color: var(--md-outline);
@@ -4497,7 +4521,9 @@ h6,
    toolbar takes an ICON footprint instead, so it occupies the slot the glyph it
    replaces would have. */
 .spinner-sm {
-	--spinner-size: var(--md-sys-typescale-title-large-size); /* 22px, one icon slot */
+	--spinner-size: var(
+		--md-sys-typescale-title-large-size
+	); /* 22px, one icon slot */
 }
 
 .spinner-xs {
@@ -4770,7 +4796,6 @@ h6,
 	scrollbar-width: none;
 }
 
-
 .breadcrumbs::-webkit-scrollbar {
 	display: none;
 }
@@ -4830,11 +4855,11 @@ h6,
 	   here — crumbs hold no position:fixed descendants. */
 	transition:
 		background-color var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		box-shadow var(--md-sys-motion-duration-short4)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-default),
 		transform var(--md-sys-motion-duration-medium1)
-			var(--md-sys-motion-spring-spatial-fast);
+		var(--md-sys-motion-spring-spatial-fast);
 }
 .crumb:hover {
 	background: var(--md-surface-container-highest);
@@ -4925,7 +4950,8 @@ h6,
 /* DESIGN (expressive reading): long-form content gets a slightly larger,
    airier measure than UI chrome for comfortable reading. */
 .slate-content {
-	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-5) var(--md-sys-spacing-5);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-5)
+		var(--md-sys-spacing-5);
 	font-size: 1.05rem;
 	line-height: 1.7;
 	color: var(--md-on-surface);
@@ -5275,7 +5301,7 @@ h6,
 	cursor: pointer;
 	border-radius: var(--md-sys-shape-corner-large);
 	transition: background-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 
 .program-item:hover {
@@ -5457,7 +5483,8 @@ h6,
 	scroll-snap-type: x mandatory;
 	scroll-behavior: smooth;
 	overscroll-behavior-x: contain;
-	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-4) var(--md-sys-spacing-4);
+	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-4)
+		var(--md-sys-spacing-4);
 	scrollbar-width: none;
 }
 .m3-carousel::-webkit-scrollbar {
@@ -5483,9 +5510,9 @@ h6,
 	box-shadow: var(--md-sys-elevation-1);
 	transition:
 		transform var(--md-sys-motion-duration-medium1)
-			var(--md-sys-motion-spring-spatial-default),
+		var(--md-sys-motion-spring-spatial-default),
 		box-shadow var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 /* DESIGN (expressive carousel): a wider hero lead tile, a hover grow with a
    Ken-Burns image zoom, and a press squish. */
@@ -5533,7 +5560,8 @@ h6,
 	left: 0;
 	right: 0;
 	bottom: 0;
-	padding: var(--md-sys-spacing-7) var(--md-sys-spacing-3-5) var(--md-sys-spacing-3);
+	padding: var(--md-sys-spacing-7) var(--md-sys-spacing-3-5)
+		var(--md-sys-spacing-3);
 	background: linear-gradient(
 		transparent,
 		color-mix(in srgb, var(--md-sys-color-scrim) 72%, transparent)
@@ -5564,9 +5592,9 @@ h6,
 	border-radius: var(--md-sys-shape-corner-large);
 	transition:
 		background-color var(--md-sys-motion-duration-short3)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		transform var(--md-sys-motion-duration-medium1)
-			var(--md-sys-motion-spring-spatial-fast);
+		var(--md-sys-motion-spring-spatial-fast);
 }
 
 .folder-item:hover {
@@ -5622,9 +5650,9 @@ h6,
 	cursor: pointer;
 	transition:
 		background-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		box-shadow var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-fast),
 		transform var(--md-sys-motion-duration-short3)
 		var(--md-sys-motion-spring-spatial-fast);
 }
@@ -5791,7 +5819,12 @@ h6,
 /* Spacing utilities routed through the --md-sys-spacing scale so a global spacing
    change is one token edit, not a find-and-replace. NB the utility numeral is a
    size STEP, not the token index: `-1` == one 8px step == spacing-2, `-2` == 16px
-   == spacing-4. The dead p-*/m-*/w-full utilities were removed (0 call sites). */
+   == spacing-4. The dead padding, margin and width utilities were removed (0
+   call sites). Their names are spelled out rather than glob-abbreviated because
+   the abbreviation contained a `*` followed by a `/`, which ENDS a CSS comment:
+   everything after it was parsed as a selector, and it swallowed the .mt-1 rule
+   below — a class used on 17 elements across ten screens, silently doing
+   nothing in every browser. */
 .mt-1 {
 	margin-top: var(--md-sys-spacing-2);
 }
@@ -6106,8 +6139,11 @@ a.list-item:hover {
 	/* Sits above the dock, so it has to clear the keyboard by the same amount —
 	   otherwise the results appear behind it while you are typing at them. */
 	bottom: calc(
-		var(--dock-tier) * 2 + var(--md-sys-spacing-2) * 2 +
-			var(--md-sys-keyboard-inset)
+		var(--dock-tier) *
+		2 +
+		var(--md-sys-spacing-2) *
+		2 +
+		var(--md-sys-keyboard-inset)
 	);
 	margin-bottom: 0;
 }
@@ -6752,7 +6788,7 @@ a.list-item:hover {
 	border-radius: var(--md-sys-shape-corner-medium);
 	padding: var(--md-sys-spacing-3);
 	transition: background-color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .comment-main:hover {
 	background: var(--md-surface-container);
@@ -7225,7 +7261,7 @@ a.list-item:hover {
 	border-radius: var(--md-sys-shape-corner-medium)
 		var(--md-sys-shape-corner-medium) 0 0;
 	transition: color var(--md-sys-motion-duration-short3)
-		var(--md-sys-motion-easing-standard);
+		var(--md-sys-motion-spring-effects-fast);
 }
 .m3-tab.selected {
 	color: var(--md-primary);
@@ -7257,8 +7293,8 @@ a.list-item:hover {
 	position: absolute;
 	inset: 0 25%;
 	background: var(--md-primary);
-	border-radius: var(--md-sys-shape-corner-full)
-		var(--md-sys-shape-corner-full) 0 0;
+	border-radius: var(--md-sys-shape-corner-full) var(--md-sys-shape-corner-full)
+		0 0;
 }
 @media (prefers-reduced-motion: reduce) {
 	.m3-tab-indicator {
@@ -7373,9 +7409,9 @@ a.list-item:hover {
 	transform: translateY(8px) scale(0.9);
 	transition:
 		opacity var(--md-sys-motion-duration-short4)
-			var(--md-sys-motion-easing-standard),
+		var(--md-sys-motion-spring-effects-default),
 		transform var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default);
+		var(--md-sys-motion-spring-spatial-default);
 }
 .speak-join-items.open .speak-join-item {
 	opacity: 1;
@@ -7408,8 +7444,10 @@ a.list-item:hover {
 	right: auto;
 	left: min(
 		calc(
-			var(--content-left) + var(--md-sys-margin) + var(--md-sys-body-max) -
-				var(--fab-size)
+			var(--content-left) +
+			var(--md-sys-margin) +
+			var(--md-sys-body-max) -
+			var(--fab-size)
 		),
 		calc(100vw - var(--fab-size) - 24px)
 	);
@@ -7471,7 +7509,7 @@ a.list-item:hover {
 	   rather than watched, on a screen where people are typing a secret. */
 	animation:
 		pw-dot-in var(--md-sys-motion-duration-medium2)
-			var(--md-sys-motion-spring-spatial-default) backwards,
+		var(--md-sys-motion-spring-spatial-default) backwards,
 		pw-dot-sway 2.8s ease-in-out infinite;
 	animation-delay: 0ms, calc(var(--dot-i) * -260ms);
 }
