@@ -150,6 +150,29 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         }
     });
 
+    // How long this device must still wait, asked of the server. A refusal from
+    // the trigger does not carry a readable reason outside dev mode, and a fresh
+    // tab has no memory of a placement made a minute ago, so the wait is derived
+    // from when this person last painted rather than from an error.
+    let wait_id = canvas_id.clone();
+    let wait_token = session.read().access_token.clone();
+    let wait_user = session.read().user.as_ref().map(|u| u.id.clone());
+    let last_paint = crate::use_data_resource!(|(wait_id, wait_token, wait_user)| async move {
+        let uid = wait_user?;
+        graphql::my_last_paint(wait_token.as_deref(), &wait_id, &uid).await
+    });
+    use_effect(move || {
+        let Some(Some(iso)) = last_paint.read().clone() else {
+            return;
+        };
+        let then = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&iso)).get_time();
+        let elapsed = (js_sys::Date::now() - then) / 1000.0;
+        let left = (cooldown as f64 - elapsed).max(0.0) as u32;
+        if left > 0 {
+            cooling.set(left);
+        }
+    });
+
     // Only what changed, as it changes. A stream carries nothing until something
     // happens, so the cursor starts at mount: the load above covers the past.
     let since = use_hook(|| {
@@ -240,8 +263,13 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     // A refusal that knows when is not a failure to report; it is
                     // an instruction. Anything else is a real error and is already
                     // logged and filed by `execute_raw_vars`.
-                    if let Some(secs) = retry_after_seconds(&e) {
-                        cooling.set(secs);
+                    match retry_after_seconds(&e) {
+                        Some(secs) => cooling.set(secs),
+                        // Unreadable, and the overwhelmingly likely cause is the
+                        // cooldown: the client only offers the board when its own
+                        // countdown is done, so the disagreement is the server
+                        // knowing about a placement this tab does not.
+                        None => cooling.set(cooldown),
                     }
                 }
             }

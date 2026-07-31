@@ -123,6 +123,36 @@ fn affected_rows(data: &serde_json::Value) -> u64 {
         .unwrap_or(0)
 }
 
+/// When this person last painted here, as an ISO timestamp.
+///
+/// The cooldown is enforced by the database, and the database's refusal does not
+/// reliably reach the client: Hasura puts the trigger's `retry_after_ms` in
+/// `extensions.internal`, which it omits outside dev mode. So the countdown is
+/// derived from a fact the client can always fetch instead. It also survives a
+/// reload, which parsing an error never could.
+pub async fn my_last_paint(
+    access_token: Option<&str>,
+    canvas_id: &str,
+    user_id: &str,
+) -> Option<String> {
+    let data = execute_raw_vars(
+        access_token,
+        "query($p: uuid!, $u: uuid!) { \
+           nodesAggregate(where: {parentId: {_eq: $p}, mimeId: {_eq: \"pixel/pixel\"}, \
+                                  ownerId: {_eq: $u}}) \
+           { aggregate { max { updatedAt } } } }",
+        serde_json::json!({ "p": canvas_id, "u": user_id }),
+    )
+    .await
+    .ok()?;
+    data.get("nodesAggregate")?
+        .get("aggregate")?
+        .get("max")?
+        .get("updatedAt")?
+        .as_str()
+        .map(str::to_string)
+}
+
 /// Everything painted on this canvas since `since`, pushed as it happens.
 ///
 /// A STREAMING subscription, not a live query: it delivers only rows newer than
