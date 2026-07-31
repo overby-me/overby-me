@@ -584,6 +584,13 @@ pub fn use_file_object_url(file_id: String) -> Option<String> {
 pub fn bsky_logo() -> Element {
     rsx! {
         svg {
+            // Inline in HTML the namespace is implied, so this looks redundant.
+            // It is not: the moment anything serialises the element and re-parses
+            // it as a STANDALONE image — which some browsers do on their own,
+            // and Firefox on iOS was seen doing to this very mark ("Unable to
+            // load image data:image/svg+xml;base64,…") — a missing xmlns makes it
+            // an invalid SVG document that will not load.
+            xmlns: "http://www.w3.org/2000/svg",
             class: "bsky-logo",
             view_box: "0 0 568 501",
             "aria-hidden": "true",

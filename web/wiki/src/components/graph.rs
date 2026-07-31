@@ -48,6 +48,9 @@ pub fn GraphApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                     // DESIGN: frame the graph like the map's viewport.
                     div { class: "viewport-frame",
                     svg {
+                        // See `bsky_logo`: implied inline, required the moment
+                        // anything treats the element as a standalone image.
+                        xmlns: "http://www.w3.org/2000/svg",
                         class: "graph-svg",
                         width: "100%",
                         view_box: "0 0 {width} {height}",
