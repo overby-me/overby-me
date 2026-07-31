@@ -426,26 +426,25 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
         .filter(|id| canvases.iter().any(|c| &c.id.0 == id))
         .or_else(|| (canvases.len() == 1).then(|| canvases[0].id.0.clone()));
 
-    let board = use_signal(|| None::<NodeWithChildren>);
-    let mut board_sig = board;
-    let load_token = session.read().access_token.clone();
-    let showing_for_load = showing.clone();
-    use_effect(move || {
-        let (Some(id), token) = (showing_for_load.clone(), load_token.clone()) else {
-            return;
-        };
-        spawn(async move {
-            // The board needs the canvas NODE (its geometry and open state), which
-            // the context's child list does not carry.
-            if let Ok(Some(n)) = graphql::query_node_by_id(token.as_deref(), &id).await {
-                board_sig.set(Some(n));
-            }
-        });
+    // The board needs the canvas NODE (its geometry and open state), which the
+    // context's child list does not carry.
+    //
+    // A resource keyed on `showing`, NOT an effect: an effect that reads no signal
+    // runs once at mount, and at mount the focus has not resolved yet, so the
+    // board never loaded and an owner saw an empty app with a list under it.
+    let board_dep = showing.clone();
+    let board_token = session.read().access_token.clone();
+    let board = crate::use_data_resource!(|(board_dep, board_token)| async move {
+        let id = board_dep?;
+        graphql::query_node_by_id(board_token.as_deref(), &id)
+            .await
+            .ok()
+            .flatten()
     });
 
     rsx! {
         div { class: "stack stack-v",
-            if let Some(canvas) = board.read().clone() {
+            if let Some(canvas) = board.read().clone().flatten() {
                 PixelApp { key: "{canvas.id.0}", node: canvas }
             } else if !is_owner {
                 div { class: "card",
