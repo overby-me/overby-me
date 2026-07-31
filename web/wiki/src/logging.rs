@@ -382,7 +382,15 @@ fn setup_panic_hook() {
     // The console output and the crash overlay come from `crash`; this only adds
     // the shipping. Synchronous, so the report is away before the app tears down.
     crate::crash::install_hook(|info| {
-        PANICKED.store(true, std::sync::atomic::Ordering::Relaxed);
+        // Only the FIRST panic is the cause; anything after it describes the
+        // corpse. Nothing unwinds here — `panic = "abort"` — so a borrow held
+        // when the panic struck is never released, and the next thing to touch
+        // the runtime panics again with "RefCell already borrowed" from inside a
+        // dependency. Reported second, that reads like the failure and buries the
+        // line that actually broke.
+        if PANICKED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         ship_sync(make_entry("error", format!("PANIC: {info}")));
     });
 }
