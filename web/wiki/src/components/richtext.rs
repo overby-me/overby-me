@@ -1100,7 +1100,6 @@ mod tests {
         assert!(split_link_word("main.rs").is_none());
     }
 
-    #[test]
     /// A pasted address must become a link in the EDITOR, not only in what the
     /// editor saves. The stored model has always autolinked on the way out, so a
     /// pasted URL was a link everywhere it was read while showing as plain text
@@ -1143,6 +1142,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn autolink_segments_preserve_surrounding_text() {
         // A URL mid-sentence splits into plain / link / plain, verbatim around it.
         let segs = link_segments("see https://x.io now");
