@@ -300,3 +300,48 @@ mod tests {
         assert_eq!(0u32.clamp(1, MAX_CANVAS_SIDE), 1);
     }
 }
+
+/// The canvas a context is currently showing, if its owner chose one.
+///
+/// Stored as a `pixel` relation on the context, the same mechanism the projector
+/// uses for its active node: `(parent_id, name)` is unique, so choosing one
+/// replaces the previous choice rather than accumulating.
+pub async fn focused_canvas(access_token: Option<&str>, context_id: &str) -> Option<String> {
+    let data = execute_raw_vars(
+        access_token,
+        "query($p: uuid!) { \
+           relations(where: {parentId: {_eq: $p}, name: {_eq: \"pixel\"}}) { nodeId } }",
+        serde_json::json!({ "p": context_id }),
+    )
+    .await
+    .ok()?;
+    data.get("relations")?
+        .as_array()?
+        .iter()
+        .find_map(|r| r.get("nodeId")?.as_str().map(str::to_string))
+}
+
+/// Choose the canvas this context shows, or clear it with `None`.
+///
+/// Owner-only by the permission on `relations`; the relation table has a real
+/// unique constraint, so unlike a node this genuinely can be upserted.
+pub async fn set_focused_canvas(
+    access_token: Option<&str>,
+    context_id: &str,
+    canvas_id: Option<&str>,
+) -> Result<(), String> {
+    execute_raw_vars(
+        access_token,
+        "mutation($o: relations_insert_input!) { \
+           insertRelation(object: $o, on_conflict: { \
+             constraint: relations_parent_id_name_key, update_columns: [nodeId] \
+           }) { id } }",
+        serde_json::json!({ "o": {
+            "parentId": context_id,
+            "name": "pixel",
+            "nodeId": canvas_id,
+        }}),
+    )
+    .await
+    .map(|_| ())
+}

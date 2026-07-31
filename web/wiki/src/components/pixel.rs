@@ -391,25 +391,19 @@ mod tests {
 
 /// The canvases of a context, reached from the app rail (`?app=pixel`).
 ///
-/// A canvas is a hidden mime, so it does not sit in the folder listing among the
-/// documents; this is the way in, exactly as the speaker list app is the way to a
-/// `speak/list`. Opening one navigates to its own path, where the mime dispatch
-/// renders the board.
+/// The context owner chooses which canvas the room is on, the way the chair
+/// chooses what the projector shows, and everyone else simply gets that one. A
+/// canvas is a hidden mime, so this is the way in; the list below it is the
+/// owner's, for switching, adding and clearing away.
 #[component]
 pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
-    let nav = use_navigator();
+    let session = use_session();
     let is_owner = node.is_context_owner.unwrap_or(false) || node.is_owner.unwrap_or(false);
     let context_id = node
         .context_id
         .clone()
         .map(|c| c.0)
         .unwrap_or_else(|| node.id.0.clone());
-    let base_path: Vec<String> = node
-        .path
-        .clone()
-        .filter(|p| !p.is_empty())
-        .map(|p| p.split('/').map(str::to_string).collect())
-        .unwrap_or_default();
 
     let canvases: Vec<_> = node
         .children
@@ -418,14 +412,42 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
         .cloned()
         .collect();
 
+    // Which one the owner put the room on.
+    let focus_ctx = context_id.clone();
+    let focus_token = session.read().access_token.clone();
+    let focused = crate::use_data_resource!(|(focus_ctx, focus_token)| async move {
+        graphql::focused_canvas(focus_token.as_deref(), &focus_ctx).await
+    });
+    let focused_id = focused.read().clone().flatten();
+    // Falling back to the only canvas there is: a context with one canvas and no
+    // choice made should show it rather than an empty screen and a shrug.
+    let showing = focused_id
+        .clone()
+        .filter(|id| canvases.iter().any(|c| &c.id.0 == id))
+        .or_else(|| (canvases.len() == 1).then(|| canvases[0].id.0.clone()));
+
+    let board = use_signal(|| None::<NodeWithChildren>);
+    let mut board_sig = board;
+    let load_token = session.read().access_token.clone();
+    let showing_for_load = showing.clone();
+    use_effect(move || {
+        let (Some(id), token) = (showing_for_load.clone(), load_token.clone()) else {
+            return;
+        };
+        spawn(async move {
+            // The board needs the canvas NODE (its geometry and open state), which
+            // the context's child list does not carry.
+            if let Ok(Some(n)) = graphql::query_node_by_id(token.as_deref(), &id).await {
+                board_sig.set(Some(n));
+            }
+        });
+    });
+
     rsx! {
         div { class: "stack stack-v",
-            if is_owner {
-                div { class: "stack stack-h stack-end",
-                    AddCanvasButton { context_id: context_id.clone() }
-                }
-            }
-            if canvases.is_empty() {
+            if let Some(canvas) = board.read().clone() {
+                PixelApp { key: "{canvas.id.0}", node: canvas }
+            } else if !is_owner {
                 div { class: "card",
                     div { class: "empty-state empty-state-sm",
                         div { class: "empty-state-orb empty-state-orb-sm",
@@ -434,28 +456,118 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
                         p { class: "empty-state-body", "{t(\"pixel.noCanvases\")}" }
                     }
                 }
-            } else {
-                div { class: "list",
-                    for canvas in canvases {
-                        button {
-                            class: "list-item",
-                            key: "{canvas.id.0}",
-                            r#type: "button",
-                            onclick: {
-                                let mut dest = base_path.clone();
-                                dest.push(canvas.key.clone());
-                                move |_| {
-                                    nav.push(crate::route::Route::PathPage {
-                                        segments: dest.clone(),
-                                        app: None,
-                                    });
-                                }
-                            },
-                            span { class: "material-icons", "grid_on" }
-                            span { "{canvas.name}" }
+            }
+
+            if is_owner {
+                div { class: "stack stack-h stack-end",
+                    AddCanvasButton { context_id: context_id.clone() }
+                }
+                if !canvases.is_empty() {
+                    div { class: "list",
+                        for canvas in canvases {
+                            CanvasRow {
+                                key: "{canvas.id.0}",
+                                canvas_id: canvas.id.0.clone(),
+                                name: canvas.name.clone(),
+                                context_id: context_id.clone(),
+                                is_showing: showing.as_deref() == Some(canvas.id.0.as_str()),
+                            }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// One canvas in the owner's list: show it to the room, or clear it away.
+#[component]
+fn CanvasRow(canvas_id: String, name: String, context_id: String, is_showing: bool) -> Element {
+    let session = use_session();
+    let mut confirm = use_signal(|| false);
+    let mut busy = use_signal(|| false);
+
+    let show_id = canvas_id.clone();
+    let show_ctx = context_id.clone();
+    let on_show = move |_| {
+        let (id, ctx) = (show_id.clone(), show_ctx.clone());
+        let token = session.read().access_token.clone();
+        spawn(async move {
+            if let Err(e) = graphql::set_focused_canvas(token.as_deref(), &ctx, Some(&id)).await {
+                log::error!("focus canvas failed: {e}");
+                return;
+            }
+            crate::session::bump_data_version();
+        });
+    };
+
+    let del_id = canvas_id.clone();
+    let on_delete = move |_| {
+        if busy() {
+            return;
+        }
+        busy.set(true);
+        let id = del_id.clone();
+        let token = session.read().access_token.clone();
+        let actor = session.read().user.as_ref().map(|u| u.id.clone());
+        spawn(async move {
+            // The bin, not a hard delete: a canvas is recoverable like any other
+            // content, and its cells go with it.
+            match graphql::bin_node(token.as_deref(), &id, None, actor.as_deref()).await {
+                Ok(_) => {
+                    crate::session::bump_data_version();
+                    busy.set(false);
+                    confirm.set(false);
+                }
+                Err(e) => {
+                    busy.set(false);
+                    log::error!("delete canvas failed: {e}");
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                }
+            }
+        });
+    };
+
+    rsx! {
+        div { class: "list-item",
+            span { class: "material-icons", "grid_on" }
+            span { class: "list-item-title", "{name}" }
+            if is_showing {
+                span { class: "chip", "{t(\"pixel.showing\")}" }
+            } else {
+                button {
+                    class: "btn btn-text",
+                    r#type: "button",
+                    onclick: on_show,
+                    "{t(\"pixel.show\")}"
+                }
+            }
+            button {
+                class: "btn-icon",
+                r#type: "button",
+                aria_label: "{t(\"common.delete\")}",
+                onclick: move |_| confirm.set(true),
+                span { class: "material-icons", "delete" }
+            }
+            crate::components::widgets::Dialog {
+                open: confirm(),
+                on_dismiss: move |_| confirm.set(false),
+                headline: t("pixel.deleteCanvas"),
+                icon: "delete".to_string(),
+                actions: rsx! {
+                    button {
+                        class: "btn btn-outlined",
+                        onclick: move |_| confirm.set(false),
+                        "{t(\"common.cancel\")}"
+                    }
+                    button {
+                        class: "btn btn-primary",
+                        disabled: busy(),
+                        onclick: on_delete,
+                        "{t(\"common.delete\")}"
+                    }
+                },
+                p { "{t(\"pixel.deleteExplain\")}" }
             }
         }
     }
