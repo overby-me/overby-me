@@ -75,6 +75,15 @@
 
 #### Rust
 
+Two kinds of work, kept apart because they answer different questions. A
+rewrite has an upstream to be measured against — it either passes that
+program's tests and accepts its flags, or it does not. Something new has no
+such yardstick, and is judged on whether it does the job at all.
+
+##### Rewrites
+
+Replacing an existing program in Rust, compatible with what it replaced.
+
 | Project | Description |
 |-|-|
 | [Awk-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/awk) | GNU awk-compatible pattern processing tool |
@@ -87,21 +96,14 @@
 | [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/curl) | curl-compatible HTTP client using Rustls |
 | [Diffutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/diffutils) | GNU diffutils-compatible file comparison tools |
 | [Direnv-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/direnv) | Direnv reimplementation |
-| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
 | [File-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/file) | GNU file-compatible file type detection tool |
 | [Flatpak-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/flatpak) | Flatpak-compatible application sandboxing and distribution tool |
 | [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gcc) | GCC-compatible C compiler written in Rust |
 | [Grep-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/grep) | GNU grep-compatible pattern matching tool |
 | [Gzip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gzip) | gzip-compatible compression tool |
-| [H264-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h264-decoder) | Pure Rust H.264 decoder library and CLI |
-| [H265-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h265-decoder) | Pure Rust H.265/HEVC decoder library |
-| [H26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h26xtoav1) | CLI tool for transcoding H.264/H.265 video to AV1 |
 | [Help2man-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/help2man) | GNU help2man-compatible man page generator |
-| [Libc-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
 | [Make-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/make) | GNU Make-compatible build system driver |
 | [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/meson) | Meson build system compatible implementation |
-| [NixOS-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixos) | NixOS distribution with Rust user space |
-| [Nixpkgs-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
 | [Patch-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patch) | GNU patch-compatible patch application tool |
 | [Patchelf-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patchelf) | patchelf-compatible ELF binary patching tool |
 | [Pipewire-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pipewire) | PipeWire-compatible multimedia tools and protocol client |
@@ -110,8 +112,23 @@
 | [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | Systemd replacement |
 | [Tar-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/tar) | GNU tar-compatible tape archive tool |
 | [Texinfo-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/texinfo) | GNU makeinfo-compatible Texinfo processor |
-| [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/wclip) | Wayland clipboard tool with an xclip-style CLI |
 | [Xz-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/xz) | xz-compatible compression tool |
+
+##### New
+
+No upstream being reimplemented: a standard implemented directly, a tool that
+did not exist, or a substrate assembled from parts.
+
+| Project | Description |
+|-|-|
+| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
+| [H264-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h264-decoder) | Pure Rust H.264 decoder library and CLI |
+| [H265-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h265-decoder) | Pure Rust H.265/HEVC decoder library |
+| [H26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h26xtoav1) | CLI tool for transcoding H.264/H.265 video to AV1 |
+| [Libc-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/libc) | All-Rust libc substrate (vendored Eyra/origin/c-ward lineage) |
+| [NixOS-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixos) | NixOS distribution with Rust user space |
+| [Nixpkgs-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
+| [Wclip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/wclip) | Wayland clipboard tool with an xclip-style CLI |
 
 #### Mojo
 
