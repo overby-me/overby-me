@@ -276,6 +276,16 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                         let seq = *search_seq.read() + 1;
                                         search_seq.set(seq);
                                         spawn(async move {
+                                            // Same debounce as the author picker: a
+                                            // roster search per keystroke is a request
+                                            // per keystroke, all but the last wasted.
+                                            gloo_timers::future::TimeoutFuture::new(
+                                                super::editor::AUTHOR_SEARCH_DEBOUNCE_MS,
+                                            )
+                                            .await;
+                                            if *search_seq.peek() != seq {
+                                                return;
+                                            }
                                             let results = graphql::search_users(token.as_deref(), &q).await;
                                             if *search_seq.read() == seq {
                                                 user_matches.set(results);

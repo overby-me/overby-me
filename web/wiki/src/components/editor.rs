@@ -15,6 +15,12 @@ use crate::snackbar::show_snackbar;
 /// the name inputs (editor title, add-content form).
 pub const NODE_NAME_MAXLEN: usize = 120;
 
+/// How long the author search waits for typing to stop.
+///
+/// 220ms is about the gap between letters at speed, so a name typed straight
+/// through costs ONE search rather than one per letter.
+pub(crate) const AUTHOR_SEARCH_DEBOUNCE_MS: u32 = 220;
+
 /// DOM id of the `contenteditable` editing surface.
 const EDITOR_ID: &str = "rich-editor";
 
@@ -216,12 +222,25 @@ fn AuthorField(authors: Signal<Vec<model::Author>>) -> Element {
                         input.set(val.clone());
                         let my = *seq.read() + 1;
                         seq.set(my);
-                        if val.trim().is_empty() {
+                        // One letter matches most of the register — 195 of 309
+                        // people for "s" — which is the slowest query and the
+                        // least useful answer. Wait for a second character.
+                        if val.trim().chars().count() < 2 {
                             suggestions.set(vec![]);
                             return;
                         }
                         let token = session.read().access_token.clone();
                         spawn(async move {
+                            // Debounce: search the pause, not the keystroke. Typing
+                            // a name used to fire one search per letter, each of
+                            // them two round trips, so the list was always a word
+                            // behind the typing and every request but the last was
+                            // wasted. The sequence guard stays: it is what keeps an
+                            // earlier answer from landing on top of a later one.
+                            gloo_timers::future::TimeoutFuture::new(AUTHOR_SEARCH_DEBOUNCE_MS).await;
+                            if *seq.peek() != my {
+                                return;
+                            }
                             let res = graphql::search_authors(token.as_deref(), &val).await;
                             if *seq.read() == my {
                                 suggestions.set(res);

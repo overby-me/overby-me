@@ -161,8 +161,26 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
         return vec![];
     }
     let mut out: Vec<Author> = Vec::new();
+    // The two searches are independent, so they go together rather than one
+    // after the other. Awaited in sequence they cost the SUM of two round trips
+    // on every keystroke — about a second from Denmark — for no reason beyond
+    // the order they were written in.
+    use cynic::QueryBuilder;
+    let users_op = UsersSearchQuery::build(UsersSearchVariables {
+        where_clause: UsersBoolExp {
+            display_name: Some(StringComparisonExp {
+                ilike: Some(format!("%{query}%")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    });
+    let (nodes_res, users_res) = futures_util::join!(
+        search_nodes(access_token, query, None),
+        execute(access_token, users_op)
+    );
     // Groups can author content.
-    if let Ok(nodes) = search_nodes(access_token, query, None).await {
+    if let Ok(nodes) = nodes_res {
         for n in nodes
             .into_iter()
             .filter(|n| n.mime_id.as_deref() == Some("wiki/group"))
@@ -177,17 +195,7 @@ pub async fn search_authors(access_token: Option<&str>, query: &str) -> Vec<Auth
         }
     }
     // Users.
-    use cynic::QueryBuilder;
-    let op = UsersSearchQuery::build(UsersSearchVariables {
-        where_clause: UsersBoolExp {
-            display_name: Some(StringComparisonExp {
-                ilike: Some(format!("%{query}%")),
-                ..Default::default()
-            }),
-            ..Default::default()
-        },
-    });
-    if let Ok(r) = execute(access_token, op).await {
+    if let Ok(r) = users_res {
         for u in r.users.into_iter().take(10) {
             out.push(Author {
                 name: u.display_name,
