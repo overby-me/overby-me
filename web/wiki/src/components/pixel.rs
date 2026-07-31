@@ -59,7 +59,7 @@ fn draw_cell(ctx: &web_sys::CanvasRenderingContext2d, x: u32, y: u32, colour: u8
 }
 
 /// Paint the whole board, for the initial load and for a tab returning to life.
-fn draw_all(dom_id: &str, cols: u32, rows: u32, cells: &HashMap<(u32, u32), u8>) {
+pub(crate) fn draw_all_of(dom_id: &str, cols: u32, rows: u32, cells: &HashMap<(u32, u32), u8>) {
     let Some(ctx) = board_context(dom_id) else {
         return;
     };
@@ -146,7 +146,7 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     map.insert((x, y), c);
                 }
             }
-            draw_all(&draw_id, cols, rows_n, &cells.read());
+            draw_all_of(&draw_id, cols, rows_n, &cells.read());
         }
     });
 
@@ -226,6 +226,7 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     let can_paint = session.read().is_authenticated() && open && !projector;
     let paint_canvas = canvas_id.clone();
     let click_id = dom_id.clone();
+    let undo_id = dom_id.clone();
     let paint_ctx = context_id.clone();
 
     let on_click = move |evt: Event<MouseData>| {
@@ -254,12 +255,26 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         busy.set(true);
         let token = session.read().access_token.clone();
         let (cv, ctx) = (paint_canvas.clone(), paint_ctx.clone());
+        let undo = undo_id.clone();
         spawn(async move {
             let result = graphql::paint_cell(token.as_deref(), &cv, &ctx, x, y, c).await;
             busy.set(false);
             match result {
-                Ok(()) => cooling.set(cooldown),
+                Ok(()) => {
+                    log::info!("painted {x},{y}");
+                    cooling.set(cooldown)
+                }
                 Err(e) => {
+                    // The overwhelmingly common refusal is the cooldown, and the
+                    // database does not get to explain itself: Hasura answers
+                    // "database query error" and hides the reason outside dev
+                    // mode. So a refused placement is undone rather than reported
+                    // as a fault, and the countdown starts. It is logged, not
+                    // filed, because "you were too quick" is not a bug.
+                    log::info!("paint {x},{y} refused: {e}");
+                    // Take the optimistic cell back: it is not on the board.
+                    cells.write().remove(&(x, y));
+                    draw_all_of(&undo, cols, rows_n, &cells.read());
                     // A refusal that knows when is not a failure to report; it is
                     // an instruction. Anything else is a real error and is already
                     // logged and filed by `execute_raw_vars`.
@@ -371,5 +386,148 @@ mod tests {
         assert_eq!(board_px(1), 120);
         assert_eq!(board_px(64), 768);
         assert_eq!(board_px(1000), 1536);
+    }
+}
+
+/// The canvases of a context, reached from the app rail (`?app=pixel`).
+///
+/// A canvas is a hidden mime, so it does not sit in the folder listing among the
+/// documents; this is the way in, exactly as the speaker list app is the way to a
+/// `speak/list`. Opening one navigates to its own path, where the mime dispatch
+/// renders the board.
+#[component]
+pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
+    let nav = use_navigator();
+    let is_owner = node.is_context_owner.unwrap_or(false) || node.is_owner.unwrap_or(false);
+    let context_id = node
+        .context_id
+        .clone()
+        .map(|c| c.0)
+        .unwrap_or_else(|| node.id.0.clone());
+    let base_path: Vec<String> = node
+        .path
+        .clone()
+        .filter(|p| !p.is_empty())
+        .map(|p| p.split('/').map(str::to_string).collect())
+        .unwrap_or_default();
+
+    let canvases: Vec<_> = node
+        .children
+        .iter()
+        .filter(|c| c.mime_id.as_deref() == Some("pixel/canvas"))
+        .cloned()
+        .collect();
+
+    rsx! {
+        div { class: "stack stack-v",
+            if is_owner {
+                div { class: "stack stack-h stack-end",
+                    AddCanvasButton { context_id: context_id.clone() }
+                }
+            }
+            if canvases.is_empty() {
+                div { class: "card",
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            span { class: "material-icons", "grid_on" }
+                        }
+                        p { class: "empty-state-body", "{t(\"pixel.noCanvases\")}" }
+                    }
+                }
+            } else {
+                div { class: "list",
+                    for canvas in canvases {
+                        button {
+                            class: "list-item",
+                            key: "{canvas.id.0}",
+                            r#type: "button",
+                            onclick: {
+                                let mut dest = base_path.clone();
+                                dest.push(canvas.key.clone());
+                                move |_| {
+                                    nav.push(crate::route::Route::PathPage {
+                                        segments: dest.clone(),
+                                        app: None,
+                                    });
+                                }
+                            },
+                            span { class: "material-icons", "grid_on" }
+                            span { "{canvas.name}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Owner-only: create a canvas in this context, the way a speaker list is made.
+#[component]
+fn AddCanvasButton(context_id: String) -> Element {
+    let session = use_session();
+    let mut open = use_signal(|| false);
+    let mut name = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+
+    let submit = move |_| {
+        let title = name.read().trim().to_string();
+        if title.is_empty() || *busy.read() {
+            return;
+        }
+        let ctx = context_id.clone();
+        let token = session.read().access_token.clone();
+        busy.set(true);
+        spawn(async move {
+            match graphql::create_canvas(token.as_deref(), &ctx, &title, 64, 64, 60).await {
+                Ok(_) => {
+                    crate::session::bump_data_version();
+                    busy.set(false);
+                    open.set(false);
+                    name.set(String::new());
+                }
+                Err(e) => {
+                    busy.set(false);
+                    log::error!("create canvas failed: {e}");
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                }
+            }
+        });
+    };
+
+    rsx! {
+        button {
+            class: "btn btn-tonal",
+            onclick: move |_| open.set(true),
+            span { class: "material-icons", "add" }
+            " {t(\"pixel.newCanvas\")}"
+        }
+        crate::components::widgets::Dialog {
+            open: open(),
+            on_dismiss: move |_| open.set(false),
+            headline: t("pixel.newCanvas"),
+            form: true,
+            icon: "grid_on".to_string(),
+            actions: rsx! {
+                button {
+                    class: "btn btn-outlined",
+                    onclick: move |_| open.set(false),
+                    "{t(\"common.cancel\")}"
+                }
+                button {
+                    class: "btn btn-primary",
+                    disabled: busy(),
+                    onclick: submit,
+                    "{t(\"common.create\")}"
+                }
+            },
+            div { class: "field",
+                input {
+                    class: "input",
+                    value: "{name}",
+                    placeholder: t("pixel.canvasName"),
+                    oninput: move |e| name.set(e.value()),
+                }
+            }
+        }
     }
 }

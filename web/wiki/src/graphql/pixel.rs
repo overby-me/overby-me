@@ -87,7 +87,7 @@ pub async fn paint_cell(
     colour: u8,
 ) -> Result<(), String> {
     let key = cell_key(x, y);
-    let updated = execute_raw_vars(
+    let updated = execute_raw_vars_quiet(
         access_token,
         "mutation($p: uuid!, $k: String!, $d: jsonb!) { \
            updateNodes(where: {parentId: {_eq: $p}, key: {_eq: $k}}, _set: {data: $d}) \
@@ -98,7 +98,7 @@ pub async fn paint_cell(
     if affected_rows(&updated) > 0 {
         return Ok(());
     }
-    execute_raw_vars(
+    execute_raw_vars_quiet(
         access_token,
         "mutation($o: nodes_insert_input!) { insertNode(object: $o) { id } }",
         serde_json::json!({ "o": {

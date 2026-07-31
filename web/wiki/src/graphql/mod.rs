@@ -208,10 +208,41 @@ pub async fn execute_raw(
         },
         other => other,
     };
-    if let Err(e) = &result {
-        log::warn!("graphql error (raw): {e}");
-    }
+    report_raw_failure(access_token, &result, "raw");
     result
+}
+
+/// What `execute` does for a typed operation, for the raw ones.
+///
+/// These carry the feedback insert, the permission seeding, the tally and the
+/// canvas, and they only ever logged at `warn` with no operation name and no
+/// report — so a raw mutation that failed did so in silence. A canvas that would
+/// not save a single cell produced no error entry anywhere, which is how this
+/// came to be written.
+fn report_raw_failure(
+    access_token: Option<&str>,
+    result: &Result<serde_json::Value, String>,
+    what: &str,
+) {
+    let Err(e) = result else {
+        return;
+    };
+    let failure = crate::errors::classify(e);
+    match failure {
+        crate::errors::Failure::Broken => {
+            let summary = format!("graphql error ({what}): {e}");
+            log::error!("{summary}");
+            let token = access_token.map(str::to_string);
+            let path = web_sys::window()
+                .and_then(|w| w.location().pathname().ok())
+                .unwrap_or_default();
+            wasm_bindgen_futures::spawn_local(async move {
+                crate::backend_api::report_error(token.as_deref(), &summary, &path).await;
+            });
+        }
+        _ => log::info!("graphql {} ({what}): {e}", failure.label()),
+    }
+    crate::errors::report(failure);
 }
 
 async fn execute_raw_vars_once(
@@ -241,6 +272,31 @@ pub async fn execute_raw_vars(
     query: &str,
     variables: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    execute_raw_vars_inner(access_token, query, variables, true).await
+}
+
+/// [`execute_raw_vars`] without the reporting, for an operation whose failure is
+/// EXPECTED and handled by its caller.
+///
+/// Painting a pixel is the case: the database refuses a placement inside the
+/// cooldown, and Hasura reports that as "database query error" with the reason
+/// buried in `extensions.internal`, which it omits outside dev mode. Routed
+/// through the reporting path, every cooldown would file a bug report and show
+/// the user an error, when the truth is "not yet".
+pub async fn execute_raw_vars_quiet(
+    access_token: Option<&str>,
+    query: &str,
+    variables: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    execute_raw_vars_inner(access_token, query, variables, false).await
+}
+
+async fn execute_raw_vars_inner(
+    access_token: Option<&str>,
+    query: &str,
+    variables: serde_json::Value,
+    report: bool,
+) -> Result<serde_json::Value, String> {
     let result = match execute_raw_vars_once(access_token, query, &variables).await {
         Err(msg) if is_jwt_error(&msg) => match crate::session::ensure_fresh_token().await {
             Some(fresh) if Some(fresh.as_str()) != access_token => {
@@ -250,8 +306,8 @@ pub async fn execute_raw_vars(
         },
         other => other,
     };
-    if let Err(e) = &result {
-        log::warn!("graphql error (raw vars): {e}");
+    if report {
+        report_raw_failure(access_token, &result, "raw vars");
     }
     result
 }

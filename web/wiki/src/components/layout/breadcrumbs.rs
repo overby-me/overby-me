@@ -591,13 +591,15 @@ pub(super) fn context_apps(
         // confirmed). Their deep links still resolve for everyone; the apps
         // gate their admin controls themselves.
         let is_ctx_owner = crate::components::loader::CTX_IS_OWNER().unwrap_or(false);
-        for (app, label) in [("speak", t("mime.speak")), ("vote", t("mime.vote"))] {
+        for (app, icon, label) in [
+            ("speak", "app/speak", t("mime.speak")),
+            ("vote", "app/vote", t("mime.vote")),
+            // A canvas is reached through its app, like a speaker list, rather
+            // than sitting in the folder listing among the documents.
+            ("pixel", "app/pixel", t("mime.canvas")),
+        ] {
             apps.push((
-                if app == "speak" {
-                    "app/speak"
-                } else {
-                    "app/vote"
-                },
+                icon,
                 label,
                 Route::PathPage {
                     segments: ctx_path.clone(),

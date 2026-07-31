@@ -363,6 +363,9 @@ const EN_JSON: &str = r#"{
     },
     "pixel": {
         "closed": "Closed",
+        "noCanvases": "No canvases here yet",
+        "newCanvas": "New canvas",
+        "canvasName": "Name",
         "colour": "Colour",
         "waitSeconds": "You can paint again in",
         "yourTurn": "Pick a colour, then tap the board"
@@ -916,6 +919,9 @@ const DA_JSON: &str = r#"{
     },
     "pixel": {
         "closed": "Lukket",
+        "noCanvases": "Ingen plader her endnu",
+        "newCanvas": "Ny plade",
+        "canvasName": "Navn",
         "colour": "Farve",
         "waitSeconds": "Du kan male igen om",
         "yourTurn": "V\u00e6lg en farve, og tryk p\u00e5 pladen"
