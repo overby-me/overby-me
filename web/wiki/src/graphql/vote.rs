@@ -262,16 +262,26 @@ pub async fn poll_tally(
 ) -> Result<(Vec<usize>, usize), String> {
     let query = poll_tally_query(poll_id, options);
     let data = execute_raw(access_token, &query).await?;
+    Ok(parse_tally(&data, options))
+}
+
+/// The aliased aggregates back into `(per option, total)`.
+///
+/// Separate and pure because the shape is easy to get wrong and impossible to
+/// notice: `execute_raw` returns the `data` OBJECT, not the whole response, and
+/// reaching for `data.data.o0` silently yielded zero for every option. The query
+/// was verified against production and the parsing was not, so a poll would have
+/// shown an empty result with no error anywhere.
+fn parse_tally(data: &serde_json::Value, options: usize) -> (Vec<usize>, usize) {
     let count_at = |key: &str| -> usize {
-        data.get("data")
-            .and_then(|d| d.get(key))
+        data.get(key)
             .and_then(|a| a.get("aggregate"))
             .and_then(|a| a.get("count"))
             .and_then(|c| c.as_u64())
             .unwrap_or(0) as usize
     };
     let counts = (0..options).map(|i| count_at(&format!("o{i}"))).collect();
-    Ok((counts, count_at("total")))
+    (counts, count_at("total"))
 }
 
 /// The tally query: one aliased aggregate per option, plus the total.
@@ -320,6 +330,29 @@ mod tally_tests {
         let q = poll_tally_query("poll-1", 0);
         assert!(q.contains("total: nodesAggregate"), "{q}");
         assert!(!q.contains("o0:"), "{q}");
+    }
+
+    /// The shape `execute_raw` actually returns, captured from production.
+    ///
+    /// This is the test that was missing when the tally shipped counting zero.
+    #[test]
+    fn a_real_tally_response_is_parsed() {
+        let data = serde_json::json!({
+            "o0": {"aggregate": {"count": 166}},
+            "o1": {"aggregate": {"count": 167}},
+            "o2": {"aggregate": {"count": 167}},
+            "total": {"aggregate": {"count": 500}}
+        });
+        assert_eq!(parse_tally(&data, 3), (vec![166, 167, 167], 500));
+        // A hidden poll asks for the total alone.
+        assert_eq!(parse_tally(&data, 0), (vec![], 500));
+    }
+
+    /// A response wrapped one level too deep must not read as "no votes".
+    #[test]
+    fn a_wrapped_response_is_not_silently_zero() {
+        let wrapped = serde_json::json!({"data": {"total": {"aggregate": {"count": 500}}}});
+        assert_eq!(parse_tally(&wrapped, 0).1, 0, "the old shape yields zero, which is why it was invisible");
     }
 
     /// A poll id is escaped like any other interpolated value.
