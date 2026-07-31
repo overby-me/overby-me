@@ -92,7 +92,7 @@ pub async fn count_user_votes(
         ]),
         ..Default::default()
     };
-    let operation = NodesWhereQuery::build(NodesWhereVariables {
+    let operation = NodesWhereQuery::build(NodesLimitVariables {
         where_clause,
         limit: None,
     });

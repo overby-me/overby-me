@@ -106,7 +106,7 @@ pub async fn search_nodes(
     // A search box shows a page of hits, not every hit: unbounded, this answered
     // 407 rows and 1.5 MB for three letters, because each row carries its whole
     // document. Thirty is more than anyone reads before retyping.
-    let operation = NodesSearchQuery::build(NodesWhereVariables {
+    let operation = NodesSearchQuery::build(NodesLimitVariables {
         where_clause,
         limit: Some(30),
     });
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn the_search_query_selects_only_the_file_type_and_caps_its_results() {
         use cynic::QueryBuilder;
-        let op = NodesSearchQuery::build(NodesWhereVariables {
+        let op = NodesSearchQuery::build(NodesLimitVariables {
             where_clause: NodesBoolExp::default(),
             limit: Some(30),
         });

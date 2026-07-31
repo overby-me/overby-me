@@ -453,3 +453,121 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod variable_tests {
+    use super::*;
+    use cynic::QueryBuilder;
+
+    /// Names every variable the operation SENDS but does not DECLARE.
+    ///
+    /// cynic declares only the variables an operation actually uses, while
+    /// serialising every field of the struct it was handed. Hasura rejects an
+    /// undeclared variable outright — the whole query fails — so the two must
+    /// agree, and nothing in the type system makes them.
+    fn undeclared<Q, V: serde::Serialize>(op: &cynic::Operation<Q, V>) -> Vec<String> {
+        let json = serde_json::to_value(&op.variables).unwrap_or(serde_json::Value::Null);
+        json.as_object()
+            .map(|o| {
+                o.keys()
+                    .filter(|k| !op.query.contains(&format!("${k}")))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    macro_rules! assert_declared {
+        ($($op:expr),+ $(,)?) => {
+            $({
+                let op = $op;
+                let extra = undeclared(&op);
+                assert!(
+                    extra.is_empty(),
+                    "sends undeclared variable(s) {:?}:\n{}",
+                    extra, op.query
+                );
+            })+
+        };
+    }
+
+    /// Every operation must declare every variable it sends.
+    ///
+    /// This is the test that was missing. A shared `NodesWhereVariables` gained
+    /// an optional `limit` for the search box; the five other queries built from
+    /// it — votes, polls, the home context list, the subtree walk, the feed
+    /// count — kept sending it without declaring it, and Hasura failed all five
+    /// in production ("unexpected variables in variableValues: limit"). The
+    /// existing tests asserted the query TEXT and never the variables beside it,
+    /// so nothing noticed. Assert the pair, for every shape the app sends.
+    #[test]
+    fn no_operation_sends_a_variable_it_does_not_declare() {
+        let node_where = || NodesBoolExp::default();
+        assert_declared!(
+            // The two that legitimately carry a cap...
+            NodesWhereQuery::build(NodesLimitVariables {
+                where_clause: node_where(),
+                limit: Some(30),
+            }),
+            NodesSearchQuery::build(NodesLimitVariables {
+                where_clause: node_where(),
+                limit: Some(30),
+            }),
+            NodePickerQuery::build(NodePickerVariables {
+                where_clause: node_where(),
+                limit: Some(10),
+            }),
+            // ...and the five that must not.
+            ContextsWhereQuery::build(NodesWhereVariables {
+                where_clause: node_where(),
+            }),
+            ChildIdsQuery::build(NodesWhereVariables {
+                where_clause: node_where(),
+            }),
+            NodesCountQuery::build(NodesWhereVariables {
+                where_clause: node_where(),
+            }),
+            VotesWhereQuery::build(NodesWhereVariables {
+                where_clause: node_where(),
+            }),
+            PollsWhereQuery::build(NodesWhereVariables {
+                where_clause: node_where(),
+            }),
+            // The rest of the read path, so the next shared struct cannot repeat it.
+            ChildrenQuery::build(ChildrenVariables {
+                where_clause: node_where(),
+                order_by: None,
+            }),
+            DrawerChildrenQuery::build(DrawerChildrenVariables {
+                where_clause: node_where(),
+                order_by: None,
+                child_visible: node_where(),
+            }),
+            RecentNodesQuery::build(RecentNodesVariables {
+                where_clause: node_where(),
+                order_by: None,
+                limit: Some(20),
+                offset: Some(0),
+            }),
+            RelationsQuery::build(RelationsWhereVariables {
+                where_clause: RelationsBoolExp::default(),
+            }),
+            MembersCountQuery::build(MembersCountVariables {
+                where_clause: MembersBoolExp::default(),
+            }),
+            MembersExistQuery::build(MembersExistVariables {
+                where_clause: MembersBoolExp::default(),
+            }),
+            InvitationsQuery::build(MembersWhereVariables {
+                where_clause: MembersBoolExp::default(),
+            }),
+            UsersSearchQuery::build(UsersSearchVariables {
+                where_clause: UsersBoolExp::default(),
+            }),
+            DeletedNodesQuery::build(DeletedNodesVariables {
+                where_clause: DeletedNodesBoolExp::default(),
+                order_by: None,
+            }),
+        );
+    }
+}

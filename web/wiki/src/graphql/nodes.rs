@@ -339,8 +339,22 @@ pub struct InsertMime {
 #[derive(cynic::QueryVariables, Debug)]
 pub struct NodesWhereVariables {
     pub where_clause: NodesBoolExp,
-    /// Unset means every match, which is right for "all children of X" and
-    /// wrong for a search box — see the picker query above.
+}
+
+/// The same filter, plus a cap — for the queries that declare `limit: $limit`.
+///
+/// Deliberately a SEPARATE struct rather than an `Option<i32>` on the one above.
+/// cynic declares only the variables an operation actually uses, but serialises
+/// every field of the struct it was given, so a shared optional `limit` rode
+/// along in the JSON of five queries that never mentioned it — and Hasura
+/// rejects an undeclared variable outright ("unexpected variables in
+/// variableValues: limit"), failing the whole query rather than ignoring it.
+/// Votes, polls, the home context list, the subtree walk and the feed count all
+/// stopped answering in production. One struct per operation shape means the
+/// compiler, not a reviewer, keeps the two in step.
+#[derive(cynic::QueryVariables, Debug)]
+pub struct NodesLimitVariables {
+    pub where_clause: NodesBoolExp,
     pub limit: Option<i32>,
 }
 
@@ -348,7 +362,7 @@ pub struct NodesWhereVariables {
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "query_root",
-    variables = "NodesWhereVariables"
+    variables = "NodesLimitVariables"
 )]
 pub struct NodesWhereQuery {
     #[arguments(where: $where_clause, limit: $limit)]
@@ -394,7 +408,7 @@ pub struct NodePickerQuery {
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "query_root",
-    variables = "NodesWhereVariables"
+    variables = "NodesLimitVariables"
 )]
 pub struct NodesSearchQuery {
     #[arguments(where: $where_clause, limit: $limit)]
@@ -748,7 +762,7 @@ pub(crate) async fn query_root_id(access_token: Option<&str>) -> Result<Option<S
         }),
         ..Default::default()
     };
-    let operation = NodesWhereQuery::build(NodesWhereVariables {
+    let operation = NodesWhereQuery::build(NodesLimitVariables {
         where_clause,
         limit: None,
     });
@@ -791,7 +805,7 @@ pub async fn resolve_path(
         }),
         ..Default::default()
     };
-    let op = NodesWhereQuery::build(NodesWhereVariables {
+    let op = NodesWhereQuery::build(NodesLimitVariables {
         where_clause,
         limit: None,
     });
@@ -843,7 +857,7 @@ pub async fn path_crumbs(
         }),
         ..Default::default()
     };
-    let op = NodesWhereQuery::build(NodesWhereVariables {
+    let op = NodesWhereQuery::build(NodesLimitVariables {
         where_clause,
         limit: None,
     });
@@ -1356,7 +1370,6 @@ pub(crate) async fn child_ids(
     };
     let op = ChildIdsQuery::build(NodesWhereVariables {
         where_clause,
-        limit: None,
     });
     let data = execute(access_token, op).await?;
     Ok(data.nodes.into_iter().map(|n| n.id.0).collect())
@@ -1397,7 +1410,6 @@ pub async fn query_context_polls(
     };
     let operation = PollsWhereQuery::build(NodesWhereVariables {
         where_clause,
-        limit: None,
     });
     let mut result = execute(access_token, operation).await?;
     result.nodes.sort_by(|a, b| {
@@ -1435,7 +1447,6 @@ pub async fn query_poll_votes(
     };
     let operation = VotesWhereQuery::build(NodesWhereVariables {
         where_clause,
-        limit: None,
     });
     let result = execute(access_token, operation).await?;
     Ok(result
@@ -1663,7 +1674,7 @@ pub async fn path_from_id(access_token: Option<&str>, id: &str) -> Result<Vec<St
         }),
         ..Default::default()
     };
-    let op = NodesWhereQuery::build(NodesWhereVariables {
+    let op = NodesWhereQuery::build(NodesLimitVariables {
         where_clause,
         limit: None,
     });
@@ -1705,7 +1716,6 @@ mod tests {
 
         let contexts = ContextsWhereQuery::build(NodesWhereVariables {
             where_clause: NodesBoolExp::default(),
-            limit: None,
         });
         assert!(
             contexts.query.contains(r#"data(path: "type")"#),
