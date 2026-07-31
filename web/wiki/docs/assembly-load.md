@@ -93,12 +93,14 @@ traffic is small requests, and the DB work behind each is under a millisecond.
 
 ## What is NOT fixed, in the order I would worry about it
 
-1. **The cold load.** Each device downloads a 3.9 MB wasm bundle (4.4 MB total)
-   the first time. 500 devices at the door is ~2.2 GB through the venue uplink in
-   a few minutes. It is served by the CDN, not by Hasura, so nothing breaks — but
-   it will feel slow, and it is the first impression. **Ask people to open
+1. **The cold load.** 4.4 MB of assets, but the server compresses: a device
+   actually downloads **~1.7 MB** on a first visit, so 500 devices at the door is
+   ~860 MB through the venue uplink rather than the 2.2 GB an earlier draft of
+   this file claimed. It is served by the CDN, not by Hasura, so nothing breaks —
+   but it will feel slow, and it is the first impression. **Ask people to open
    radikal.wiki once before they arrive**, or on mobile data; the service worker
-   then serves it from cache.
+   then serves it from cache. `docs/bundle-size.md` measures where those bytes go
+   and what can be cut (down to ~0.95 MB).
 2. **The login storm.** 500 sign-ins in the same ten minutes is untested. Same
    mitigation: get people signed in before the session starts.
 3. **Postgres allows 100 connections.** Hasura pools, so 500 devices do not mean

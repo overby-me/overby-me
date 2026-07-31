@@ -106,7 +106,7 @@ web = ["dioxus/router", "dioxus/web"]
 # meaningfully on top of `opt-level = "s"` before gzip/brotli.
 [profile.wasm-release]
 inherits = "release"
-opt-level = "s"
+opt-level = "z"
 # Keep DWARF line tables so a crash can be traced to a source line. They do NOT
 # ship: scripts/split-symbols.nu moves them into a sidecar after the build, and
 # the backend resolves reported offsets against it. Line tables only, since the
