@@ -197,7 +197,15 @@ fn author_face(a: &model::Author) -> Element {
         } else {
             initials
         };
-        super::loader::user_avatar(&a.avatar_url, rsx! { "{initials}" })
+        // The circle is what sizes the picture: `.avatar-img` is width/height
+        // 100%, so without this parent it renders at its natural size — which is
+        // how a linked Bluesky photo filled the whole chip. It also gives the
+        // initials the same round tile they have everywhere else in the app.
+        rsx! {
+            div { class: "avatar small",
+                {super::loader::user_avatar(&a.avatar_url, rsx! { "{initials}" })}
+            }
+        }
     } else if a.node_id.is_some() {
         rsx! {
             span { class: "material-icons", "groups" }

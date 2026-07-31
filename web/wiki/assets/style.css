@@ -3907,6 +3907,24 @@ select:focus {
 	color: var(--md-primary);
 }
 
+/* Safety net: `.avatar-img` is sized by the `.avatar` circle around it (100% of
+   the parent), so one emitted without that parent takes its natural size — a
+   linked profile photo filling an entire author chip. Anywhere a face sits in a
+   row of text rather than in a circle, bound it to the icon slot. */
+.chip .avatar-img,
+.author-suggestion .avatar-img {
+	width: 24px;
+	height: 24px;
+	flex: 0 0 auto;
+}
+
+/* And the circle itself keeps its size in a flex row: a long author name must
+   squeeze the text, never the face. */
+.chip .avatar,
+.author-suggestion .avatar {
+	flex: 0 0 auto;
+}
+
 /* A profile picture leading a chip (e.g. an author's linked Bluesky avatar):
    a small round image in the icon slot. */
 .chip .chip-avatar {
