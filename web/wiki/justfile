@@ -86,3 +86,9 @@ test:
 # Set WIKI_EMAIL / WIKI_PASSWORD to also run the authenticated tests.
 test-browser *ARGS:
     nu test-browser.nu {{ARGS}}
+
+# Post-deploy check: does the LIVE site still serve content to a signed-out
+# visitor? Points at a URL rather than building anything, so it is what to run
+# after `just build` + upload. `just test-browser` is the pre-merge suite.
+smoke *ARGS:
+    nu scripts/smoke.nu {{ARGS}}

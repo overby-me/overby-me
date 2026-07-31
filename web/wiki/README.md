@@ -30,7 +30,8 @@ ships with a built-in WebDriver server, so no external driver binary is needed â
 `test-browser.nu` orchestrates everything from nushell + `curl` + `jq`.
 
 ```bash
-just test-browser              # unauthenticated smoke tests
+just test-browser              # unauthenticated smoke tests (builds its own dev server)
+just smoke [URL]               # post-deploy: does the LIVE site serve content signed out?
 just test-browser -- --verbose # + print Servo's stderr at the end
 just test-browser -- --keep    # leave dx serve + Servo running afterwards
 
