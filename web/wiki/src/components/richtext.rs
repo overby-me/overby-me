@@ -828,7 +828,69 @@ mod dom {
                 }
             }
         }
+        // Bare addresses inside the pasted HTML become real links, the same ones
+        // the model would have made on save. Chrome puts `text/html` on the
+        // clipboard even when what you copied was a plain URL, so this branch —
+        // not the plain-text one below — is what a pasted link actually goes
+        // through, and it used to leave the address as a word.
+        linkify_bare_text(&doc, container.unchecked_ref());
         Some(container.inner_html())
+    }
+
+    /// Turn URLs and emails in a subtree's TEXT into anchors, leaving text that
+    /// is already inside a link alone (or a pasted anchor would be nested in a
+    /// second one, which is not a thing HTML can mean).
+    fn linkify_bare_text(doc: &web_sys::Document, root: &Node) {
+        // Collected first: replacing a text node while walking its parent's live
+        // child list would skip the node after it.
+        let mut targets: Vec<Node> = Vec::new();
+        collect_bare_text(root, false, &mut targets);
+        for node in targets {
+            let Some(text) = node.text_content() else {
+                continue;
+            };
+            let segments = link_segments(&text);
+            if !segments.iter().any(|(_, href)| href.is_some()) {
+                continue;
+            }
+            let Some(parent) = node.parent_node() else {
+                continue;
+            };
+            for (seg, href) in segments {
+                let piece: Node = match href {
+                    Some(url) => {
+                        let Ok(a) = doc.create_element("a") else {
+                            continue;
+                        };
+                        let _ = a.set_attribute("href", &url);
+                        a.set_text_content(Some(&seg));
+                        a.unchecked_into()
+                    }
+                    None => doc.create_text_node(&seg).unchecked_into(),
+                };
+                let _ = parent.insert_before(&piece, Some(&node));
+            }
+            let _ = parent.remove_child(&node);
+        }
+    }
+
+    /// Every text node under `root` that is not already inside an anchor.
+    fn collect_bare_text(node: &Node, in_link: bool, out: &mut Vec<Node>) {
+        let kids = node.child_nodes();
+        for i in 0..kids.length() {
+            let Some(child) = kids.get(i) else { continue };
+            match child.node_type() {
+                Node::TEXT_NODE if !in_link => out.push(child),
+                Node::ELEMENT_NODE => {
+                    let is_link = child
+                        .dyn_ref::<Element>()
+                        .map(|e| e.tag_name().eq_ignore_ascii_case("a"))
+                        .unwrap_or(false);
+                    collect_bare_text(&child, in_link || is_link, out);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Intercept paste on the editor and insert sanitized HTML instead of the raw
@@ -1043,6 +1105,23 @@ mod tests {
     /// editor saves. The stored model has always autolinked on the way out, so a
     /// pasted URL was a link everywhere it was read while showing as plain text
     /// in the surface that had just received it.
+    /// The exact address that was reported as not linking: a bare domain, no
+    /// path, a two-letter-ish TLD.
+    #[test]
+    fn a_bare_domain_with_no_path_is_a_link() {
+        assert_eq!(
+            link_segments("https://niclasoverby.me"),
+            vec![(
+                "https://niclasoverby.me".to_string(),
+                Some("https://niclasoverby.me".to_string())
+            )]
+        );
+        assert_eq!(
+            plain_text_to_html("https://niclasoverby.me"),
+            r#"<a href="https://niclasoverby.me">https://niclasoverby.me</a>"#
+        );
+    }
+
     #[test]
     fn pasted_plain_text_becomes_the_editors_html() {
         let html = plain_text_to_html("see https://radikal.wiki/hb1 now");

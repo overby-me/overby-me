@@ -6627,14 +6627,24 @@ a.list-item:hover {
 }
 
 /* DESIGN (conversational thread): an inviting tertiary-tinted composer well. */
-.comment-composer {
-	display: flex;
-	gap: var(--md-sys-spacing-2-5);
-	align-items: flex-end;
+/* The composer's tinted box now belongs to the WRAP, not to the input row, so an
+   attached image previews INSIDE it rather than floating below it as a second,
+   unexplained thing. The row keeps only its own layout. */
+.comment-composer-wrap {
 	margin-bottom: var(--md-sys-spacing-4);
 	background: color-mix(in srgb, var(--md-tertiary) 7%, transparent);
 	padding: var(--md-sys-spacing-3);
 	border-radius: var(--md-sys-shape-corner-large);
+}
+.comment-composer {
+	display: flex;
+	gap: var(--md-sys-spacing-2-5);
+	align-items: flex-end;
+}
+/* Inside the box, the preview sits under the input with the same gap the row
+   uses, and nothing below it — the send button is in the row above. */
+.comment-composer-wrap .comment-attachment {
+	margin: var(--md-sys-spacing-3) 0 0;
 }
 
 .comment-input {
