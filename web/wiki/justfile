@@ -87,6 +87,12 @@ test:
 test-browser *ARGS:
     nu test-browser.nu {{ARGS}}
 
+# Drive assets/sw.js against stubbed Cache/fetch and assert every path answers
+# with a Response. The service worker only matters when the network is failing,
+# which is exactly when nobody is watching it.
+test-sw:
+    deno run --allow-read scripts/sw-test.ts
+
 # Post-deploy check: does the LIVE site still serve content to a signed-out
 # visitor? Points at a URL rather than building anything, so it is what to run
 # after `just build` + upload. `just test-browser` is the pre-merge suite.

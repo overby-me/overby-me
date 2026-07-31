@@ -46,24 +46,39 @@ self.addEventListener("fetch", (event) => {
 	// cache-buster, so caching them would only grow the cache forever.
 	if (url.pathname === "/version.json") return;
 
+	// Every path below must resolve to a Response. `respondWith` given anything
+	// else — including the `undefined` that `caches.match` returns on a miss —
+	// throws "Failed to convert value to 'Response'", which is what the deployed
+	// worker did whenever a fetch failed before anything had been cached: a bad
+	// connection on a first visit, precisely when the fallback is the point.
+	const offline = () =>
+		new Response("", { status: 503, statusText: "Offline" });
+
 	// Content-hashed assets never change for a given URL: cache-first.
 	if (url.pathname.startsWith("/assets/")) {
 		event.respondWith(
 			caches
 				.match(req)
-				.then((hit) => hit || fetch(req).then((res) => cachePut(req, res))),
+				.then((hit) => hit || fetch(req).then((res) => cachePut(req, res)))
+				.catch(offline),
 		);
 		return;
 	}
 
 	// App shell + wasm: stale-while-revalidate.
 	event.respondWith(
-		caches.match(req).then((hit) => {
-			const network = fetch(req)
-				.then((res) => cachePut(req, res))
-				.catch(() => hit || caches.match("/"));
-			return hit || network;
-		}),
+		caches
+			.match(req)
+			.then((hit) => {
+				const network = fetch(req)
+					.then((res) => cachePut(req, res))
+					// Nothing from the network: the cached copy of this URL if there
+					// is one, else the app shell, else a plain offline response. The
+					// last step is what was missing.
+					.catch(async () => hit || (await caches.match("/")) || offline());
+				return hit || network;
+			})
+			.catch(offline),
 	);
 });
 
