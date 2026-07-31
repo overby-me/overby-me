@@ -106,6 +106,35 @@ fn current_stack() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The `stack` property of a thrown JavaScript value, if it has one.
+///
+/// For an uncaught error this is the ONLY true stack: [`current_stack`] runs in
+/// the event handler and describes the handler, not the throw.
+fn stack_of(value: &JsValue) -> Option<String> {
+    js_sys::Reflect::get(value, &JsValue::from_str("stack"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// A stack as one frame per element rather than one string full of `\n`.
+///
+/// Logtail shows a JSON array as a list; a newline-joined string arrives as a
+/// single unreadable line, which is what these reports looked like.
+fn stack_frames(stack: Option<String>) -> Value {
+    match stack {
+        Some(s) => Value::Array(
+            s.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(|l| Value::String(l.to_string()))
+                .collect(),
+        ),
+        None => Value::Null,
+    }
+}
+
 /// One structured log entry with the standard enrichment, so Logtail can filter
 /// and group by any field:
 /// - who: `user_id` / `user_name`, plus a per-tab `session_id`
@@ -114,6 +143,15 @@ fn current_stack() -> Option<String> {
 /// - what they did: `breadcrumbs` (the recent navigation + click/change/submit
 ///   trail, newest last)
 fn make_entry(level: &str, message: String) -> Value {
+    make_entry_with_stack(level, message, current_stack())
+}
+
+/// [`make_entry`], but with the stack supplied rather than sampled here.
+///
+/// An uncaught error must pass the stack of the THROW. Sampling one in the
+/// handler produces a trace of the logger, which is worse than none: it names
+/// real functions that had nothing to do with the failure.
+fn make_entry_with_stack(level: &str, message: String, stack: Option<String>) -> Value {
     let (user_id, user_name) = current_user();
     let session_id = SESSION_ID.with(|s| s.borrow().clone());
     json!({
@@ -128,7 +166,7 @@ fn make_entry(level: &str, message: String) -> Value {
         // Which build, so a stack can be read against the code that produced it
         // — and so an error from a bundle nobody runs any more is recognisable.
         "commit": crate::build_info::COMMIT,
-        "stack": current_stack(),
+        "stack": stack_frames(stack),
         "user_agent": web_sys::window()
             .and_then(|w| w.navigator().user_agent().ok()),
         "breadcrumbs": breadcrumbs(),
@@ -371,8 +409,23 @@ fn setup_global_error_handlers() {
             if msg.trim().is_empty() {
                 return;
             }
-            let at = format!("{}:{}:{}", ee.filename(), ee.lineno(), ee.colno());
-            queue(make_entry("error", format!("UNCAUGHT: {msg} @ {at}")));
+            // The thrown value, when the browser lets us see it. Its `stack` is
+            // the only true one here.
+            let thrown = ee.error();
+            let stack = stack_of(&thrown);
+            // "Script error." with no file, line or column is the browser
+            // REFUSING to describe an error it considers cross-origin — often
+            // not our code at all, but an extension or a browser-injected
+            // script. Say so, rather than leaving a report that looks like a
+            // failure in the app and cannot be chased.
+            let opaque = stack.is_none() && ee.filename().is_empty() && ee.lineno() == 0;
+            let message = if opaque {
+                format!("UNCAUGHT (opaque, no detail from the browser): {msg}")
+            } else {
+                let at = format!("{}:{}:{}", ee.filename(), ee.lineno(), ee.colno());
+                format!("UNCAUGHT: {msg} @ {at}")
+            };
+            queue(make_entry_with_stack("error", message, stack));
         }
     });
     add_listener(et, "unhandledrejection", |ev| {
@@ -389,7 +442,13 @@ fn setup_global_error_handlers() {
                         .and_then(|s| s.as_string())
                 })
                 .unwrap_or_else(|| "unhandled rejection".to_string());
-            queue(make_entry("error", format!("UNHANDLED REJECTION: {text}")));
+            // A rejected Error carries where it was thrown; the handler does not.
+            let stack = stack_of(&reason).or_else(current_stack);
+            queue(make_entry_with_stack(
+                "error",
+                format!("UNHANDLED REJECTION: {text}"),
+                stack,
+            ));
         }
     });
 }
@@ -441,5 +500,37 @@ pub fn init() {
         log::info!("remote logging built in, but BETTERSTACK_SOURCE_TOKEN is unset: console only");
     } else {
         log::info!("remote logging active");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stack ships as one frame per element, not as one line with `\n` in it.
+    ///
+    /// Logtail renders an array as a list and a string as a single line, so a
+    /// newline-joined stack arrived as an unreadable wall of text.
+    #[test]
+    fn a_stack_is_a_list_of_frames() {
+        let raw = "  at foo (src/a.rs:1)\nat bar (src/b.rs:2)\n\n  \n at baz (src/c.rs:3)  ";
+        let frames = stack_frames(Some(raw.to_string()));
+        assert_eq!(
+            frames,
+            serde_json::json!([
+                "at foo (src/a.rs:1)",
+                "at bar (src/b.rs:2)",
+                "at baz (src/c.rs:3)",
+            ]),
+            "blank lines dropped, each frame trimmed"
+        );
+    }
+
+    /// No stack is null, not an empty list: "we never got one" and "it had no
+    /// frames" are different things to read in a log.
+    #[test]
+    fn a_missing_stack_stays_missing() {
+        assert_eq!(stack_frames(None), serde_json::Value::Null);
+        assert_eq!(stack_frames(Some("   \n  ".to_string())), serde_json::json!([]));
     }
 }

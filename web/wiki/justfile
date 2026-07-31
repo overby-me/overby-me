@@ -81,6 +81,9 @@ clippy:
 # Unit tests (host target — GraphQL serialization, path helpers, etc.)
 test:
     cargo test
+    # `logging.rs` exists only under `remote-logging`, and that is the build every
+    # deploy ships — so its tests never ran in the default run.
+    cargo test --features remote-logging
 
 # Browser smoke tests: build, serve, and drive the app in headless Servo.
 # Set WIKI_EMAIL / WIKI_PASSWORD to also run the authenticated tests.
