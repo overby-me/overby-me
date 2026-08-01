@@ -293,7 +293,14 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     }
                 }
             }
-            draw_all_of(&draw_id, cols, rows_n, &cells.read());
+            // `peek`, NOT `read`: reading a signal inside an effect subscribes
+            // the effect to it, and this effect writes `cells`. Reading it here
+            // made every placement re-run the effect, which re-applied the rows
+            // from the ORIGINAL load — so painting over an existing cell put the
+            // old colour straight back on top of the new one. A cell that was
+            // not in the load had nothing to be overwritten by, which is why
+            // this only ever happened on top of somebody else's pixel.
+            draw_all_of(&draw_id, cols, rows_n, &cells.peek());
         }
     });
 
