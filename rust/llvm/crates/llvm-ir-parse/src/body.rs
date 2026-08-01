@@ -1515,9 +1515,9 @@ impl Parser {
 
     /// Adds the declarations the calls implied, after everything the module
     /// writes, which is where upstream puts them. The attributes upstream
-    /// gives an intrinsic are not here: they come from a per-intrinsic table
-    /// LangRef does not document, so the declaration is printed back without
-    /// them rather than with a guess at them.
+    /// gives an intrinsic go on afterwards, in `apply_intrinsic_attributes`,
+    /// which is the same pass that puts them on a declaration the module
+    /// wrote out itself.
     pub(crate) fn add_implied_intrinsics(&mut self) {
         for name in self.implied_intrinsics.clone() {
             let Some((return_type, params)) = self.implied_signatures.get(&name).cloned() else {

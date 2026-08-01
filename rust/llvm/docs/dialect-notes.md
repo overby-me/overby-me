@@ -152,6 +152,25 @@ suffix together, so `call void @llvm.made.up.name.i32(i32 1, i32 2)`
 against a one-argument declaration names something that does not exist,
 and upstream says so.
 
+## Replaced rather than carried
+
+**An intrinsic's attributes are the intrinsic's, not the module's.**
+Upstream reads whatever a declaration was written with and puts the
+intrinsic's own set there instead, parameter attributes included, so
+`declare void @llvm.assume(i1 nonnull) #7` comes back
+`declare void @llvm.assume(i1 noundef)` with `#7`'s contents gone. So does
+this, from the table `corpus/intrinsic-attributes.nu` measures by writing
+each `declare` line LangRef documents and reading back what upstream
+replaced it with.
+
+Two limits are deliberate, and both err towards writing nothing rather than
+writing something upstream would not. A declaration whose types are not the
+intrinsic's is not that intrinsic, and upstream leaves it alone: this leaves
+it alone too, but can only check the argument positions LangRef pins, so
+where the fit cannot be told the attributes are left off. And a variadic
+intrinsic is skipped entirely, there being no arity to check a declaration
+against. That is four intrinsics.
+
 ## Preserved rather than regenerated
 
 **The ThinLTO summary index prints back what was written.** `llvm-dis`

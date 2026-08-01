@@ -91,6 +91,9 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         );
     }
     parser.add_implied_intrinsics();
+    // After the declarations the calls implied, so that those get the
+    // attributes too: upstream materialises one with them already on.
+    parser.apply_intrinsic_attributes()?;
     parser.upgrade_module_flags();
     parser.upgrade_objc_module_flags();
     parser.drop_invalid_debug_info();

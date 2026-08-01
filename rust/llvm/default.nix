@@ -137,7 +137,7 @@ in {
     # that had nothing to do with what those files test, which is what the
     # second bound is for. Folding typed pointers took it back to 449.
     llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 464 5;
-    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 311 0;
+    llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 314 0;
 
     # Not whether we accept the same files, but whether we print the same
     # text. The corpus pins the printer against upstream's own output; this
@@ -146,10 +146,10 @@ in {
     # performs. Measuring against `llvm-as | llvm-dis` instead counted the
     # bitcode reader's compatibility upgrades as print differences, which is
     # what thirteen of them were.
-    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 188;
-    llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 65;
-    llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 205;
-    llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 135;
+    llvm-opt-differential = pkgs: differentialCheck pkgs "Assembler" 189;
+    llvm-opt-differential-feature = pkgs: differentialCheck pkgs "Feature" 67;
+    llvm-opt-differential-linker = pkgs: differentialCheck pkgs "Linker" 207;
+    llvm-opt-differential-other = pkgs: differentialCheck pkgs "Other" 140;
 
     # Ten thousand pass tests, none of them written with a parser in mind,
     # and fourteen hundred analysis tests that are older on average and use

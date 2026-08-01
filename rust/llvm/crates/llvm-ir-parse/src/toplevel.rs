@@ -6,8 +6,10 @@ use crate::{ParseError, Parser};
 use llvm_ir::TypeId;
 use llvm_ir::constant::Constant;
 use llvm_ir::global::{Comdat, ComdatKind};
+use llvm_ir::intrinsic::table::Parameter;
 use llvm_ir::metadata::{MdField, MdOperand, Metadata, NamedMetadata, SpecializedArgs};
 use llvm_ir::summary::{SummaryEntry, SummaryField, SummaryValue};
+use llvm_ir::types::TypeKind;
 use llvm_ir::value::{GlobalRef, MdId, Name, Value};
 use llvm_support::{ApInt, DataLayout, Triple};
 
@@ -493,6 +495,92 @@ const REWRITTEN_BEHAVIOUR: &[(&str, u64)] = &[
 ];
 
 impl Parser {
+    /// The attributes upstream gives an intrinsic, put on every declaration
+    /// of one.
+    ///
+    /// They are the intrinsic's rather than the module's: upstream reads
+    /// whatever was written and puts its own set there instead, parameter
+    /// attributes included, so `declare void @llvm.assume(i1 nonnull) #7`
+    /// and a bare `declare void @llvm.assume(i1)` both come back as
+    /// `declare void @llvm.assume(i1 noundef)` with the same five function
+    /// attributes. `corpus/intrinsic-attributes.nu` measures the table.
+    ///
+    /// The declaration has to be one upstream recognises, which is where
+    /// this is narrower than upstream. A name whose types do not fit is left
+    /// alone entirely: `declare void @llvm.assume(i32)` keeps its own
+    /// attributes and its own name. Only the positions LangRef pins can be
+    /// checked here, so where the fit cannot be told the attributes are left
+    /// off rather than guessed at, which leaves a difference where upstream
+    /// would have written one and never writes one upstream would not.
+    pub(crate) fn apply_intrinsic_attributes(&mut self) -> Result<(), ParseError> {
+        for index in 0..self.module.functions.len() {
+            let Name::Named(name) = self.module.functions[index].name.clone() else {
+                continue;
+            };
+            let Some(wanted) = llvm_ir::intrinsic::attributes::attributes(&name) else {
+                continue;
+            };
+            if !self.intrinsic_declaration_fits(index, wanted.params.len()) {
+                continue;
+            }
+            let function = self.attribute_set_from_text(wanted.function, true)?;
+            let ret = self.attribute_set_from_text(wanted.ret, false)?;
+            let mut params = Vec::with_capacity(wanted.params.len());
+            for text in wanted.params {
+                params.push(self.attribute_set_from_text(text, false)?);
+            }
+            let target = &mut self.module.functions[index];
+            target.attrs = function;
+            target.return_attrs = ret;
+            for (param, attrs) in target.params.iter_mut().zip(params) {
+                param.attrs = attrs;
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a declaration is one upstream would recognise as the
+    /// intrinsic its name begins with, which is what decides whether the
+    /// attributes are attached at all.
+    ///
+    /// Arity has to match, an extra argument being enough for upstream to
+    /// leave the declaration alone, and so does every position whose type
+    /// LangRef states the same way in every instantiation. A position it
+    /// leaves open is open here too.
+    fn intrinsic_declaration_fits(&self, index: usize, arity: usize) -> bool {
+        let function = &self.module.functions[index];
+        if function.is_var_arg || function.params.len() != arity {
+            return false;
+        }
+        let Name::Named(name) = &function.name else {
+            return false;
+        };
+        let Some(documented) = llvm_ir::intrinsic::table::signature(name) else {
+            // No signature to check against is not a reason to refuse: the
+            // arity came from the attribute table, which is measured against
+            // the same `declare` lines.
+            return true;
+        };
+        if documented.len() != arity {
+            return false;
+        }
+        documented
+            .iter()
+            .zip(function.params.iter())
+            .all(|(wanted, param)| {
+                let kind = self.module.ctx.type_kind(param.ty);
+                match wanted {
+                    Parameter::Any => true,
+                    Parameter::Int(bits) => {
+                        matches!(kind, TypeKind::Integer(width) if width == bits)
+                    }
+                    Parameter::Pointer => matches!(kind, TypeKind::Pointer { .. }),
+                    Parameter::Metadata => matches!(kind, TypeKind::Metadata),
+                    Parameter::Float => matches!(kind, TypeKind::Float(_)),
+                }
+            })
+    }
+
     /// Applies that rewrite, after the whole module, `!llvm.module.flags`
     /// being able to name a node the text has not reached yet.
     /// Debug info a reader of this version cannot make sense of, taken out.

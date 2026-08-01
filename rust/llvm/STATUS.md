@@ -4,7 +4,7 @@ What exists, what is a stub, and what claim is *not* being made yet. Written in
 the register [rust/fe-c](../fe-c/STATUS.md) uses: a sentence here is either
 backed by a check that passes or is marked unmeasured.
 
-**Last updated:** 2026-07-27.
+**Last updated:** 2026-08-02.
 **Tier:** T0 (PLAN.md §8), in progress.
 
 ## Pins
@@ -42,6 +42,7 @@ and each row names the check that backs it.
 | Verifier: placement rules for `!range`, `!align`, `!nonnull`, `!prof`, scope lists | done | `llvm-upstream-verifier` |
 | `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
 | Builder API: types inferred, alignments filled in | done for the common instructions, unwinding, attributes and metadata | `llvm-builder-smoke` |
+| Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 369 intrinsics LangRef gives a signature for | `llvm-opt-differential`, `llvm-upstream-verifier` |
 
 ## The round trip
 
@@ -78,7 +79,7 @@ skipped, so the denominator is the whole suite.
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
 | `llvm/test/Assembler` | 464 | 483 | 5 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 311 | 328 | 0 | `llvm-upstream-verifier` |
+| `llvm/test/Verifier` | 314 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 
@@ -120,9 +121,11 @@ and the `u0x` and `s0x` forms for an integer too wide to write in decimal.
 The gap after those was one thing: 375 of the 452 remaining files called an
 intrinsic without declaring it. That is now read the way upstream reads it,
 by building the declaration from the call for any `llvm.*` name LangRef
-documents, and appending it after everything the module writes. What is not
-built is the attributes upstream gives an intrinsic, which come from a table
-LangRef does not document, so those declarations print back without them.
+documents, and appending it after everything the module writes. The
+attributes upstream gives an intrinsic go on it too, from a table LangRef
+does not document and the assembler does: `corpus/intrinsic-attributes.nu`
+writes out each `declare` line and reads back the set upstream replaced it
+with, 369 intrinsics of them.
 Doing it exposed four verifier rules that had been unreachable, and all four
 are real, which is why both suite ratchets ended up better than they started
 rather than worse.
@@ -143,7 +146,8 @@ each, and agreement is a floor that may only rise.
 
 Most of what is left on the second count is one thing: upstream knows what
 each intrinsic means and we know only what LangRef's `declare` lines say
-it takes. Both halves of that were built and measured.
+it takes, plus what the assembler will say when asked. All three halves of
+that were built and measured.
 `corpus/intrinsic-names.nu` harvests the 419 base names LangRef documents;
 auto-declaring an undeclared intrinsic on that basis fixes three of the
 modules we refuse and costs eight new wrong acceptances, because the parse
@@ -151,6 +155,9 @@ error it removes was standing in for the signature check, so it is a
 script and not a table. `corpus/intrinsic-signatures.nu` harvests the
 signatures from the same lines, 314 intrinsics, recording a position only
 where its type is the same in every documented instantiation.
+`corpus/intrinsic-attributes.nu` asks the assembler rather than LangRef,
+writing each of those `declare` lines out and reading back the attributes
+upstream replaced them with, 369 intrinsics.
 
 That table moves neither ratchet and is in the tree anyway. What it
 catches is a module that declares an intrinsic *consistently* wrongly, so
@@ -188,6 +195,16 @@ rather than reasoned about: `corpus/md-required-fields.nu` says which fields
 a node cannot be written without, and `corpus/md-field-defaults.nu` says
 which are dropped when written at their default.
 
+A third asks the assembler about the intrinsics rather than the metadata.
+`corpus/intrinsic-attributes.nu` writes out every `declare` line LangRef
+documents and reads back what upstream replaced it with, which is the whole
+per-intrinsic attribute set: 369 intrinsics, 22 distinct function attribute
+sets, and the `immarg` positions that had been a separate blocker. The
+derivation had been recorded as impossible four times, on the grounds that
+LangRef writes an attribute on only fourteen of its eight hundred `declare`
+lines. That is true and it is the wrong question: LangRef has to supply the
+signature, and the oracle supplies the attributes.
+
 The oracle is `llvm-as`'s exit code, not its output. Those differ: some
 verifier checks print a diagnostic and still return zero, so `set1.ll`
 prints "invalid set base type" and is a module upstream reads. Reading the
@@ -207,10 +224,10 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against upstream's own `opt -S`, and **188 of 221** are identical, with
-three more suites measured the same way: **65 of 71** in `Feature`, **205 of
-220** in `Linker` and **135 of 144** in `Other`. Fourteen of the
-forty-eight remaining differences are ones where we already match
+against upstream's own `opt -S`, and **189 of 221** are identical, with
+three more suites measured the same way: **67 of 71** in `Feature`, **207 of
+220** in `Linker` and **140 of 144** in `Other`. Fourteen of the
+remaining differences are ones where we already match
 `llvm-as | llvm-dis` and `opt -S` does something else, so the attainable
 maximum is 641 rather than 655. ODR type uniquing is most of them; the
 clearest is `!DIObjCProperty`, where `opt -S` prints the setter and the
@@ -260,11 +277,15 @@ a compiler project's README:
   `llvm-dis` do not exist because their contract is bitcode.
 - **No rustc backend.** `rustc_codegen_llvm` is not vendored, and no Rust
   program compiles through this project.
-- **No debug info modelling.** Debug-info nodes round-trip as written, but
-  nothing knows what a `DICompileUnit` field means, so a field left at its
-  default is printed back rather than omitted the way upstream omits it.
-  That is the largest remaining cause of print differences and it wants the
-  `llvm-debuginfo` crate at T1, not a table of defaults.
+- **No debug info modelling.** Debug-info nodes are modelled syntactically
+  and nothing knows what a `DICompileUnit` field *means*. What that costs is
+  narrower than it was: which fields drop at their default, which are stored
+  even when they drop, the order they print in and the DWARF vocabularies
+  behind them are all measured against upstream rather than reasoned about,
+  so the nodes print back the way upstream prints them. What is still
+  missing is everything that needs the semantics: rewriting `DIExpression`
+  opcode sequences, and filling a compile unit's file in from a subprogram
+  that names it. Both want the `llvm-debuginfo` crate at T1.
 - **No unwinding, no LTO, no PGO, no coverage.**
 - **No C ABI.** `llvm-c-abi` is T5.
 

@@ -5,8 +5,16 @@
 //! declaration for or a symbol that does not exist. [`table`] is the subset
 //! of those whose signature LangRef states consistently enough to check.
 //!
-//! Both come from `corpus/intrinsic-names.nu` and
-//! `corpus/intrinsic-signatures.nu`, which explain their derivations.
+//! [`attributes`] is what upstream gives each of them, which is neither of
+//! those things: an intrinsic carries attributes nothing in the text says,
+//! and upstream replaces whatever a declaration was written with by them.
+//! LangRef documents fourteen of those out of eight hundred `declare` lines,
+//! which is why this one is measured against the assembler rather than read.
+//!
+//! All three come from `corpus/intrinsic-names.nu`,
+//! `corpus/intrinsic-signatures.nu` and `corpus/intrinsic-attributes.nu`,
+//! which explain their derivations.
 
+pub mod attributes;
 pub mod names;
 pub mod table;

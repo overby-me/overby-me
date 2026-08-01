@@ -1503,6 +1503,66 @@ are the use-list order tests that need the def-use chains PLAN 4.2 is
 waiting on; the other four are the per-intrinsic signature, `immarg`
 positions, `DIExpression` opcodes and the target extension type table,
 each recorded already.
+The next pass took the per-intrinsic attributes, which had been recorded as
+impossible four times and are not. The reasoning each time was that LangRef
+writes an attribute on fourteen of its eight hundred `declare` lines and
+fourteen is too few to harvest from. That is true, and it is the wrong
+question, the same shape of wrong question the DWARF vocabulary was: what
+LangRef has to supply is the *signature*, and the oracle supplies the
+attributes. A declaration written bare comes back carrying them, so writing
+out each `declare` line LangRef documents and reading it back is the whole
+derivation. `corpus/intrinsic-attributes.nu`, and 369 intrinsics in 22
+distinct function attribute sets.
+Four things had to be measured before the table was right, and each was a
+probe rather than an argument. Upstream *replaces* what the module wrote
+rather than adding to it, parameter attributes included, so
+`declare void @llvm.assume(i1 nonnull) #7` comes back `(i1 noundef)` with
+`#7`'s contents gone. A declaration whose types are not the intrinsic's is
+left alone entirely, which is what tells a probe that found nothing from an
+intrinsic that carries nothing, and is why the wrong guesses in a sweep cost
+nothing. Every instantiation of one base name agrees, so the table keys on
+the base name; the two that do not are `llvm.scmp` and `llvm.ucmp`, whose
+`range` follows the result width, and they are reported and left out rather
+than having one of their answers picked.
+Harvesting LangRef was most of the work and none of the insight. A long
+declaration is wrapped across lines with the return type on one of its own,
+so `declare <ty2>` is not a declaration and neither is the argument list
+under it; thirty-seven write their function attributes after the argument
+list, `declare void @llvm.trap() cold noreturn nounwind`, which cost
+`llvm.trap` and the `memcpy` family; and the ones written schematically are
+instantiated rather than dropped, `<ty2>` filled in with each of four
+concrete types and the return type substituted apart from the arguments,
+because a conversion takes one kind and produces another. The candidates go
+in rounds of one per name, LangRef writing no mangling suffix where the type
+is a placeholder, so a batch of them would be fifteen redefinitions out of
+sixteen.
+One limit is deliberate and recorded rather than worked around: a variadic
+intrinsic is left alone, there being no arity to check a declaration against
+when the declaration's own is open. That is four intrinsics.
+The `immarg` positions came with it, having been a blocker of their own, and
+that is what moved the Verifier: 311 to 314, with the modules we wrongly
+accept seventeen to fourteen. Assembler 188 to 189, Feature 65 to 67, Linker
+205 to 207 and Other 135 to 140, which is 593 to 603 across the four print
+suites.
+Measured on the way and not done: upstream recomputes an intrinsic's
+mangling suffix from the types rather than reading it off the name, so
+`llvm.ctlz` and `llvm.ctlz.i64` both come back `llvm.ctlz.i32`. That is the
+recorded intrinsic-name-upgrade blocker and it is now reachable the same
+way, wanting the overloaded positions per intrinsic, which the same sweep
+could ask for. The target intrinsics are still blocked, `llvm.aarch64.*`
+being names no specification this project may read enumerates.
+With the attributes in, the print differential is at its floor for this
+tier, and the remaining fifty-odd files were sorted to say so rather than
+assumed to be. Fourteen are those aarch64 target intrinsics, thirteen the
+`opt`-versus-`llvm-dis` ceiling (seven ODR type uniquing, six the ThinLTO
+summary index `opt -S` drops and `llvm-dis` keeps), five the data layout
+upstream supplies from a triple, and the rest debug-info one-offs.
+The three that looked like closable one-offs were each measured and each is
+blocked. `asm-path-writer.ll` is the summary index, `ifunc-asm.ll` the data
+layout, and `target-types.ll` wants an alignment per target extension type:
+`spirv.Event`, `spirv.DeviceEvent` and `spirv.Image` are eight,
+`aarch64.svcount` is two and `x86.AMX` has no size at all, so there is no
+default to fall back on and it is the same table the type parameters want.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

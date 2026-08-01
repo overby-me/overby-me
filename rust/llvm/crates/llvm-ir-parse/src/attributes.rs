@@ -1,7 +1,7 @@
 //! Attribute parsing, including the spellings that differ inside a group.
 
 use crate::globals::{MAXIMUM_ALIGNMENT, MAXIMUM_STACK_ALIGNMENT};
-use crate::lexer::Token;
+use crate::lexer::{Lexer, Token};
 use crate::{ParseError, Parser};
 use llvm_ir::TypeId;
 use llvm_ir::attribute::{Attribute, AttributeSet, EnumAttr, IntAttr, StructuredAttr, TypeAttr};
@@ -300,6 +300,30 @@ impl Parser {
         in_group: bool,
     ) -> Result<AttributeSet, ParseError> {
         self.parse_attribute_set_where(in_group, false)
+    }
+
+    /// A run of attributes read out of a fragment of text rather than out of
+    /// the module being parsed, which is how the intrinsic table is applied.
+    ///
+    /// The table holds the words upstream prints, and reading them back here
+    /// puts them through the same parser a module's own attributes go
+    /// through, so a table entry and a module writing the same words cannot
+    /// come out as different attributes.
+    pub(crate) fn attribute_set_from_text(
+        &mut self,
+        text: &str,
+        in_group: bool,
+    ) -> Result<AttributeSet, ParseError> {
+        if text.is_empty() {
+            return Ok(AttributeSet::default());
+        }
+        let (tokens, _) = Lexer::new(text).tokenize()?;
+        let outer_tokens = std::mem::replace(&mut self.tokens, tokens);
+        let outer_index = std::mem::replace(&mut self.index, 0);
+        let set = self.parse_attribute_set(in_group);
+        self.tokens = outer_tokens;
+        self.index = outer_index;
+        set
     }
 
     /// The same, in a position where the pre-`memory(...)` spellings mean

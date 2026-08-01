@@ -343,6 +343,77 @@ fn dropping_a_default_uniques_two_nodes() {
     );
 }
 
+/// An intrinsic's attributes are the intrinsic's, so a declaration written
+/// bare comes back carrying them.
+#[test]
+fn an_intrinsic_declaration_takes_the_attributes_upstream_gives_it() {
+    let text = "declare void @llvm.assume(i1)\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("declare void @llvm.assume(i1 noundef) #0"),
+        "the parameter attribute should have been added\n--- printed ---\n{printed}"
+    );
+    assert!(
+        printed.contains(
+            "attributes #0 = { nocallback nofree nosync nounwind willreturn memory(inaccessiblemem: write) }"
+        ),
+        "the function attributes should have been added\n--- printed ---\n{printed}"
+    );
+}
+
+/// And they replace whatever the module wrote, rather than joining it.
+#[test]
+fn an_intrinsic_declarations_own_attributes_are_replaced() {
+    let text = "declare void @llvm.assume(i1 nonnull) #0\n\nattributes #0 = { noinline }\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("declare void @llvm.assume(i1 noundef) #0"),
+        "`nonnull` should have been replaced by `noundef`\n--- printed ---\n{printed}"
+    );
+    assert!(
+        !printed.contains("noinline"),
+        "the module's own function attribute should be gone\n--- printed ---\n{printed}"
+    );
+}
+
+/// The other direction: a declaration whose types are not the intrinsic's is
+/// not that intrinsic, so upstream leaves it alone and so does this. Both
+/// halves were measured against `llvm-as`, which keeps the `noinline` here
+/// and replaces it in the test above.
+#[test]
+fn a_declaration_that_is_not_the_intrinsic_keeps_what_it_wrote() {
+    let text = "declare void @llvm.assume(i32) #0\n\nattributes #0 = { noinline }\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("declare void @llvm.assume(i32) #0"),
+        "the declaration should be untouched\n--- printed ---\n{printed}"
+    );
+    assert!(
+        printed.contains("attributes #0 = { noinline }"),
+        "the module's own attributes should have survived\n--- printed ---\n{printed}"
+    );
+}
+
+/// A declaration the parser materialises from a call gets them too, which is
+/// where upstream puts them for a module that never wrote a `declare`.
+#[test]
+fn a_materialised_intrinsic_declaration_takes_them_too() {
+    let text = "define void @f(i1 %c) {\nentry:\n  call void @llvm.assume(i1 %c)\n  ret void\n}\n";
+    let module =
+        llvm_ir_parse::parse_module(text).unwrap_or_else(|error| panic!("did not parse: {error}"));
+    let printed = llvm_ir_print::print_module(&module);
+    assert!(
+        printed.contains("declare void @llvm.assume(i1 noundef) #0"),
+        "the built declaration should carry them\n--- printed ---\n{printed}"
+    );
+}
+
 /// A run of function attributes that starts with a quoted key is the same
 /// run: it may name a group and it may hold the older memory spellings.
 #[test]
