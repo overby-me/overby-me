@@ -32,6 +32,77 @@ enum OfficeLink {
     Refused,
 }
 
+/// Who renders a Word, Excel or PowerPoint file.
+///
+/// Neither is us: this app cannot render OpenXML, so a preview means handing the
+/// document to somebody who can. Both fetch it from the signed backend link, so
+/// the choice is only WHICH third party sees it — worth being able to answer,
+/// since the answer used to be "Microsoft, always".
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum OfficeViewer {
+    Microsoft,
+    Google,
+}
+
+impl OfficeViewer {
+    fn key(self) -> &'static str {
+        match self {
+            OfficeViewer::Microsoft => "microsoft",
+            OfficeViewer::Google => "google",
+        }
+    }
+
+    fn from_key(key: &str) -> Self {
+        match key {
+            "google" => OfficeViewer::Google,
+            // Microsoft is what everybody had before the choice existed, so an
+            // unset or unreadable preference keeps what they were used to.
+            _ => OfficeViewer::Microsoft,
+        }
+    }
+}
+
+/// Where the chosen viewer is asked to render `encoded_src`, which is the signed
+/// backend link, URI-component encoded.
+///
+/// Pure and separate from the component so the two URL shapes can be tested; a
+/// wrong parameter name here is a viewer that shows an error page, and neither
+/// service tells you which parameter it wanted.
+pub fn viewer_embed_url(viewer: OfficeViewer, encoded_src: &str) -> String {
+    match viewer {
+        OfficeViewer::Microsoft => {
+            format!("https://view.officeapps.live.com/op/embed.aspx?src={encoded_src}")
+        }
+        // `gview` is the free one, and the reason this choice exists. It wants
+        // `url`, not `src`, and `embedded=true` or it serves a full page with
+        // Google chrome around it.
+        OfficeViewer::Google => {
+            format!("https://docs.google.com/gview?embedded=true&url={encoded_src}")
+        }
+    }
+}
+
+/// The chosen viewer, remembered per device.
+///
+/// A device preference rather than an account one: it is about which service you
+/// are willing to send a document to on the machine in front of you, and storing
+/// it on the account would need a schema and a migration to say less.
+pub static OFFICE_VIEWER: GlobalSignal<OfficeViewer> = Signal::global(|| {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item("wiki_office_viewer").ok().flatten())
+        .map(|v| OfficeViewer::from_key(&v))
+        .unwrap_or(OfficeViewer::Microsoft)
+});
+
+/// Choose a viewer, and remember it.
+pub fn set_office_viewer(viewer: OfficeViewer) {
+    *OFFICE_VIEWER.write() = viewer;
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item("wiki_office_viewer", viewer.key());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_office_mime;
@@ -57,6 +128,53 @@ mod tests {
     fn non_office_mimes_are_not() {
         for m in ["application/pdf", "image/png", "text/plain", ""] {
             assert!(!is_office_mime(m));
+        }
+    }
+
+    /// Both viewers, spelled the way each service actually wants. Microsoft
+    /// takes `src`; Google takes `url` and needs `embedded=true` or it returns a
+    /// whole Google page rather than the document.
+    #[test]
+    fn each_viewer_gets_the_parameters_it_wants() {
+        use super::{viewer_embed_url, OfficeViewer};
+        let src = "https%3A%2F%2Fapi.example%2Foffice%2Ffile%3Ff%3D1%26s%3Dabc";
+        let ms = viewer_embed_url(OfficeViewer::Microsoft, src);
+        assert!(
+            ms.starts_with("https://view.officeapps.live.com/op/embed.aspx?src="),
+            "{ms}"
+        );
+        assert!(ms.ends_with(src), "the signed link travels whole: {ms}");
+
+        let g = viewer_embed_url(OfficeViewer::Google, src);
+        assert!(g.starts_with("https://docs.google.com/gview?"), "{g}");
+        assert!(g.contains("embedded=true"), "or it is not an embed: {g}");
+        assert!(g.ends_with(&format!("url={src}")), "{g}");
+        assert!(
+            !g.contains("src="),
+            "gview ignores src, which would render nothing: {g}"
+        );
+    }
+
+    /// The stored preference round-trips, and anything else is Microsoft — which
+    /// is what every reader had before this choice existed, so an unset or
+    /// corrupt value must not change what they see.
+    #[test]
+    fn an_unknown_preference_falls_back_to_what_people_had() {
+        use super::OfficeViewer;
+        assert_eq!(
+            OfficeViewer::from_key(OfficeViewer::Google.key()),
+            OfficeViewer::Google
+        );
+        assert_eq!(
+            OfficeViewer::from_key(OfficeViewer::Microsoft.key()),
+            OfficeViewer::Microsoft
+        );
+        for junk in ["", "libreoffice", "GOOGLE", "null"] {
+            assert_eq!(
+                OfficeViewer::from_key(junk),
+                OfficeViewer::Microsoft,
+                "{junk:?}"
+            );
         }
     }
 }
@@ -200,6 +318,30 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                         }
                                     }
                                 },
+                                // Who renders it. Only for the mimes that go
+                                // through a third party at all — offering it on
+                                // a PDF or an image would be offering a choice
+                                // that changes nothing.
+                                if is_office_mime(file_mime) {
+                                    super::widgets::SheetGroup {
+                                        div { class: "sheet-label", "{t(\"file.renderedBy\")}" }
+                                        for (viewer , label) in [
+                                            (OfficeViewer::Microsoft, t("file.viewerMicrosoft")),
+                                            (OfficeViewer::Google, t("file.viewerGoogle")),
+                                        ] {
+                                            button {
+                                                key: "{viewer.key()}",
+                                                class: if OFFICE_VIEWER() == viewer { "sheet-action selected" } else { "sheet-action" },
+                                                "aria-pressed": if OFFICE_VIEWER() == viewer { "true" } else { "false" },
+                                                onclick: move |_| set_office_viewer(viewer),
+                                                span { class: "material-icons",
+                                                    if OFFICE_VIEWER() == viewer { "radio_button_checked" } else { "radio_button_unchecked" }
+                                                }
+                                                "{label}"
+                                            }
+                                        }
+                                    }
+                                }
                                 if can_manage && !segments.is_empty() {
                                     super::widgets::SheetGroup { danger: true,
                                         button {
@@ -320,10 +462,16 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 },
                                 OfficeLink::Ready(url) => {
                                     let encoded = String::from(&js_sys::encode_uri_component(&url));
+                                    let embed = viewer_embed_url(OFFICE_VIEWER(), &encoded);
                                     rsx! {
                                         div { class: "viewport-frame",
                                             iframe {
-                                                src: "https://view.officeapps.live.com/op/embed.aspx?src={encoded}",
+                                                // Keyed on the viewer: swapping
+                                                // service must reload the frame,
+                                                // and a changed `src` alone does
+                                                // not reliably do that.
+                                                key: "{OFFICE_VIEWER().key()}",
+                                                src: "{embed}",
                                                 title: "{name}",
                                             }
                                         }

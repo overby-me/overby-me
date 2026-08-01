@@ -3712,6 +3712,14 @@ select:focus {
 .sheet-action .material-icons {
 	color: var(--md-on-surface-variant);
 }
+/* A heading inside a tools group, for a group that offers a CHOICE rather than
+   a set of commands: without it, two radio rows read as two more buttons. */
+.sheet-label {
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3) 0;
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-label-medium-size);
+}
+
 .sheet-action.danger {
 	color: var(--md-error);
 }

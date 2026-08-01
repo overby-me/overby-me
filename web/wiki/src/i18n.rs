@@ -645,6 +645,11 @@ const EN_JSON: &str = r#"{
         "collapseAll": "Collapse all",
         "focusNoSections": "This item has no sections to focus."
     },
+    "file": {
+        "renderedBy": "Rendered by",
+        "viewerMicrosoft": "Microsoft",
+        "viewerGoogle": "Google"
+    },
     "mime": {
         "group": "Group",
         "event": "Event",
@@ -1208,6 +1213,11 @@ const DA_JSON: &str = r#"{
         "feedOnScreenStop": "Stop feed",
         "collapseAll": "Fold alle sammen",
         "focusNoSections": "Dette element har ingen sektioner at fokusere på."
+    },
+    "file": {
+        "renderedBy": "Vises af",
+        "viewerMicrosoft": "Microsoft",
+        "viewerGoogle": "Google"
     },
     "mime": {
         "group": "Gruppe",
