@@ -1597,6 +1597,48 @@ into a shorter one that is a prefix of it.
 `table::signature` and `table::base_name` still use the loose reading. That
 is recorded rather than changed here: it is the same bug, and moving it
 moves numbers that want their own measurement.
+The pass after it did that measurement, and the first answer was wrong in
+the direction that matters. Reducing a name with `strip_mangling` alone
+left the suites, the corpus and all four print differentials unmoved, which
+looked like the loose reading having bought nothing; the trees then said it
+had bought fifty-four modules, CodeGen 22,369 to 22,352, Transforms 10,223
+to 10,217 and Analysis 1,394 to 1,363. Only the trees could say so, the
+suites having no instantiation of the kind at stake.
+What they were buying was the shapes `mangled` did not know. It was a list
+of prefixes, `nxv` and `v` and `p` and `i` and `f` and `a`, which is the
+right idea written in a form that has to be kept current and was not: it
+knew `f128` and not `fp128`, and no spelling of `bfloat` at all, so
+`llvm.fabs.bf16` and `llvm.sqrt.fp128` stopped being intrinsics.
+The rule is a property rather than a list now. A mangled type carries the
+width or the count of what it describes, so it has a digit in it. A
+component with no digit is a word and a word belongs to the name, which is
+what `elts` is.
+That took two goes as well, and the tree said so again: the digit alone
+left Transforms one short, at `llvm.is.fpclass.half`, because the types the
+IR spells out carry no width to write down. So the property has a closed
+set beside it, and a measured one rather than a guessed one: every
+digit-free type spelling that follows a documented name anywhere in
+`llvm/test` is in it, which is `half` on twenty-three names, then `ptr`,
+`void`, `token`, `bfloat`, `metadata`, `float`, `double` and `isVoid`.
+Everything else digit-free stays a word.
+That alone would break the other direction, because a name can end in
+something shaped exactly like a type and still be a name: LangRef documents
+`llvm.convert.to.fp16`. So the reduction is a sequence rather than a single
+answer. `intrinsic::candidates` offers the whole name first and then drops
+trailing mangled types one at a time, stopping at the first word, and each
+table takes the first candidate it holds.
+It lives in `intrinsic/mod.rs` rather than in a generated file, which is
+the second thing this pass found: `base_name` and `strip_mangling` had been
+hand-written into `table.rs`, which `corpus/intrinsic-signatures.nu`
+generates and does not emit them, so regenerating that table would have
+deleted them without a word. Nothing had regenerated it since they were
+added.
+The earlier regression's recorded reason was corrected too.
+`llvm.vp.cttz.elts` has entries of its own in the signature and attribute
+tables, so the loose reading gave a wrong answer only where a name is
+missing from the table being asked, which the tied-position table is. The
+unit tests pin each table separately for that reason rather than asserting
+the same thing three times.
 Assembler 464 to 465 and Verifier 314 to 316, with the modules we wrongly
 accept fourteen to thirteen and seventeen to twelve. The eleven trees are
 back where they were.

@@ -359,7 +359,7 @@ impl Verifier<'_> {
         returns_next: bool,
         where_: &str,
     ) {
-        let base = crate::intrinsic::table::base_name(name);
+        let base = crate::intrinsic::base_name(name);
         let element = |verifier: &Self, ty: TypeId| verifier.innermost_element(ty);
         match base {
             // A three-way compare answers lane by lane, in a result wide

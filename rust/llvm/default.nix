@@ -155,8 +155,8 @@ in {
     # and fourteen hundred analysis tests that are older on average and use
     # the implicit numbering more.
     llvm-tree-transforms = pkgs: treeCheck pkgs "Transforms" 10223;
-    llvm-tree-analysis = pkgs: treeCheck pkgs "Analysis" 1394;
-    llvm-tree-codegen = pkgs: treeCheck pkgs "CodeGen" 22369;
+    llvm-tree-analysis = pkgs: treeCheck pkgs "Analysis" 1395;
+    llvm-tree-codegen = pkgs: treeCheck pkgs "CodeGen" 22371;
     llvm-tree-debuginfo = pkgs: treeCheck pkgs "DebugInfo" 1101;
     llvm-tree-instrumentation = pkgs: treeCheck pkgs "Instrumentation" 505;
     llvm-tree-linker = pkgs: treeCheck pkgs "Linker" 338;

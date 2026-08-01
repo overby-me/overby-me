@@ -93,9 +93,9 @@ right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/CodeGen` | 22,369 | 22,785 | `llvm-tree-codegen` |
+| `llvm/test/CodeGen` | 22,371 | 22,785 | `llvm-tree-codegen` |
 | `llvm/test/Transforms` | 10,223 | 10,305 | `llvm-tree-transforms` |
-| `llvm/test/Analysis` | 1,394 | 1,403 | `llvm-tree-analysis` |
+| `llvm/test/Analysis` | 1,395 | 1,403 | `llvm-tree-analysis` |
 | `llvm/test/DebugInfo` | 1,101 | 1,101 | `llvm-tree-debuginfo` |
 | `llvm/test/Instrumentation` | 505 | 508 | `llvm-tree-instrumentation` |
 | `llvm/test/Linker` | 338 | 338 | `llvm-tree-linker` |
@@ -105,7 +105,7 @@ right in every case.
 | `llvm/test/Bitcode` | 232 | 232 | `llvm-tree-bitcode` |
 | `llvm/test/Feature` | 82 | 82 | `llvm-tree-feature` |
 
-That is 36,824 of the 37,334 modules llvm-as reads across eleven trees.
+That is 36,827 of the 37,334 modules llvm-as reads across eleven trees.
 What is left is dominated by one thing: a target intrinsic no LangRef line
 names cannot be auto-declared, which is most of what CodeGen still refuses.
 The intrinsic name table is honest about why, and the number moves only if

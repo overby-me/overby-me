@@ -116,11 +116,9 @@ impl Parser {
             // Either table will do: LangRef names 419 intrinsics in its
             // `declare` lines and gives a usable signature for fewer, and
             // recognising the name is all that is needed to build the
-            // declaration from the call.
-            let base = llvm_ir::intrinsic::table::base_name(text);
-            if llvm_ir::intrinsic::names::is_documented(base)
-                || llvm_ir::intrinsic::table::signature(base).is_some()
-            {
+            // declaration from the call. `is_documented` asks both, at the
+            // whole name and at the one it instantiates.
+            if llvm_ir::intrinsic::is_documented(text) {
                 implied.push(name);
             }
         }

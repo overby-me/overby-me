@@ -683,7 +683,5 @@ pub(crate) fn unknown_intrinsic(function: &Function) -> bool {
         return false;
     }
     // Either table will do, the same way the parser's gate takes either.
-    let base = llvm_ir::intrinsic::table::base_name(name);
-    !llvm_ir::intrinsic::names::is_documented(base)
-        && llvm_ir::intrinsic::table::signature(base).is_none()
+    !llvm_ir::intrinsic::is_documented(name)
 }

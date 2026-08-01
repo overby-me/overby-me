@@ -141,19 +141,23 @@ pub enum Parameter {
     Float,
 }
 
-/// The signature LangRef documents for a base name, or `None` when it
-/// documents none or documents inconsistent arities.
+/// The signature documented under exactly this name, with no reduction.
+pub fn signature_exact(name: &str) -> Option<&'static [Parameter]> {
+    let index = SIGNATURES
+        .binary_search_by_key(&name, |(name, _)| *name)
+        .ok()?;
+    Some(SIGNATURES[index].1)
+}
+
+/// The signature LangRef documents for this name or for the one it
+/// instantiates, or `None` when it documents none or documents inconsistent
+/// arities.
+///
+/// The reduction is `super::candidates`, which drops trailing mangled types
+/// and stops at the first component that is a word, so a name cannot reach a
+/// shorter one that is merely a prefix of it.
 pub fn signature(name: &str) -> Option<&'static [Parameter]> {
-    let mut candidate = name;
-    loop {
-        if let Ok(index) = SIGNATURES.binary_search_by_key(&candidate, |(name, _)| *name) {
-            return Some(SIGNATURES[index].1);
-        }
-        match candidate.rsplit_once('.') {
-            Some((rest, _)) if rest.matches('.').count() >= 1 => candidate = rest,
-            _ => return None,
-        }
-    }
+    super::candidates(name).find_map(signature_exact)
 }
 
 /// Sorted, so the lookup can be a binary search.

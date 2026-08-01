@@ -1724,6 +1724,11 @@ const VERIFIES: &[&str] = &[
     // a module upstream reads, the verifier never reaching a declaration
     // nobody uses. Only the call is refused.
     "declare i8 @llvm.umax.i8(i8, i16)\n",
+    // A name is reduced by dropping mangling-shaped components only.
+    // `llvm.vp.cttz.elts` counts into an `i32` where `llvm.vp.cttz` returns
+    // its operand's type, and reading the first as the second refused this,
+    // which is what a CodeGen file caught.
+    "define void @t(<vscale x 16 x i1> %m, <vscale x 16 x i1> %k, i32 %n) {\nentry:\n  %r = call i32 @llvm.vp.cttz.elts.i32.nxv16i1(<vscale x 16 x i1> %m, i1 false, <vscale x 16 x i1> %k, i32 %n)\n  ret void\n}\n",
     // The other direction of the tied-position rule. Agreeing is fine at
     // any type, including a vector, and a position that is fixed rather
     // than tied is not asked to agree with anything: `llvm.ctlz` returns

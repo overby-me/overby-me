@@ -171,16 +171,20 @@ type Entry = (&'static str, usize, &'static [&'static [usize]]);
 /// were measured at, or `None` when LangRef documents it once or never
 /// varies it.
 ///
-/// The name is reduced by dropping mangling-shaped components only, rather
-/// than by dropping trailing components until something matches. The loose
-/// reading walks past a name into a shorter one that is a prefix of it:
-/// `llvm.vp.cttz.elts.i32.nxv16i1` reduces to `llvm.vp.cttz`, whose result
+/// The reduction is `super::candidates`, which tries the whole name first
+/// and then drops trailing mangled types, stopping at the first component
+/// that is a word. Dropping any trailing component instead walks past a name
+/// into a shorter one that is merely a prefix of it:
+/// `llvm.vp.cttz.elts.i32.nxv16i1` would reach `llvm.vp.cttz`, whose result
 /// is its operand's type where `vp.cttz.elts` counts into an `i32`, and
 /// tying those refuses a module upstream reads.
 pub fn tied(name: &str) -> Option<(usize, &'static [&'static [usize]])> {
-    let base = crate::intrinsic::table::strip_mangling(name);
-    let index = TIED.binary_search_by_key(&base, |(name, _, _)| *name).ok()?;
-    Some((TIED[index].1, TIED[index].2))
+    super::candidates(name).find_map(|candidate| {
+        let index = TIED
+            .binary_search_by_key(&candidate, |(name, _, _)| *name)
+            .ok()?;
+        Some((TIED[index].1, TIED[index].2))
+    })
 }
 
 /// Sorted, so the lookup can be a binary search.
