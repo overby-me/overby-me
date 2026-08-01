@@ -132,6 +132,73 @@ pub fn renders_natively(mime: &str) -> bool {
     )
 }
 
+/// A short, readable name for a file's type.
+///
+/// The chip used to show the mime SUBTYPE in capitals, which for the OpenXML
+/// family is
+/// `VND.OPENXMLFORMATS-OFFICEDOCUMENT.WORDPROCESSINGML.DOCUMENT` — forty
+/// characters of registry plumbing where the reader wanted the word "Word".
+///
+/// The names are deliberately not translated: they are product names (Word,
+/// Excel) or acronyms (PDF, ZIP), which stay as they are in Danish too. A word
+/// that WOULD need translating is a sign the label is trying to say too much.
+///
+/// Falls back to the file's own extension before it falls back to the mime,
+/// because a name a person chose beats a registry string every time.
+pub fn type_label(mime: &str, file_name: &str) -> String {
+    let known = match mime {
+        "application/pdf" => Some("PDF"),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        | "application/msword" => Some("Word"),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        | "application/vnd.ms-excel" => Some("Excel"),
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        | "application/vnd.ms-powerpoint" => Some("PowerPoint"),
+        ODT => Some("ODT"),
+        ODS => Some("ODS"),
+        ODP => Some("ODP"),
+        "application/zip" => Some("ZIP"),
+        "text/plain" => Some("Text"),
+        "text/csv" => Some("CSV"),
+        "image/jpeg" => Some("JPEG"),
+        "image/png" => Some("PNG"),
+        "image/webp" => Some("WebP"),
+        "image/heic" | "image/heif" => Some("HEIC"),
+        "image/gif" => Some("GIF"),
+        "image/svg+xml" => Some("SVG"),
+        "audio/midi" | "audio/x-midi" => Some("MIDI"),
+        "video/mp4" => Some("MP4"),
+        _ => None,
+    };
+    if let Some(label) = known {
+        return label.to_string();
+    }
+
+    // The extension the person actually named the file with, when it is short
+    // enough to be one.
+    if let Some(ext) = file_name.rsplit_once('.').map(|(_, e)| e) {
+        if (1..=5).contains(&ext.chars().count()) && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        {
+            return ext.to_uppercase();
+        }
+    }
+
+    // Last resort: the mime's subtype, with the registry noise trimmed off.
+    // `vnd.oasis.opendocument.graphics` becomes GRAPHICS, not the whole tree,
+    // and the `x-` of an unregistered type goes the same way as the `vnd.` of a
+    // vendor one — both say where the name was minted, not what the file is.
+    let subtype = mime.rsplit('/').next().unwrap_or("");
+    let subtype = subtype.strip_prefix("x-").unwrap_or(subtype);
+    let trimmed = subtype
+        .split('+')
+        .next()
+        .unwrap_or("")
+        .rsplit('.')
+        .next()
+        .unwrap_or("");
+    trimmed.to_uppercase()
+}
+
 /// The viewers worth offering for `mime`, in the order they should appear.
 ///
 /// Microsoft's viewer renders OOXML and the old binary formats; it does NOT
@@ -236,6 +303,119 @@ mod tests {
             !g.contains("src="),
             "gview ignores src, which would render nothing: {g}"
         );
+    }
+
+    /// The chip the report was about. Forty characters of registry plumbing
+    /// where the reader wanted one word.
+    #[test]
+    fn office_files_are_named_not_spelled_out() {
+        use super::type_label;
+        let cases = [
+            (
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "Word",
+            ),
+            (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "Excel",
+            ),
+            (
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "PowerPoint",
+            ),
+            ("application/msword", "Word"),
+            ("application/vnd.ms-excel", "Excel"),
+            ("application/pdf", "PDF"),
+            ("image/jpeg", "JPEG"),
+            ("image/svg+xml", "SVG"),
+            (super::ODT, "ODT"),
+        ];
+        for (mime, want) in cases {
+            assert_eq!(type_label(mime, "whatever.bin"), want, "{mime}");
+        }
+    }
+
+    /// An unknown type falls back to the name the person gave the file before
+    /// it falls back to the registry.
+    #[test]
+    fn an_unknown_type_uses_the_files_own_extension() {
+        use super::type_label;
+        assert_eq!(type_label("application/x-thing", "notes.md"), "MD");
+        assert_eq!(type_label("application/octet-stream", "archive.tar"), "TAR");
+        // No usable extension: the subtype, with the registry tree trimmed.
+        assert_eq!(
+            type_label("application/vnd.oasis.opendocument.graphics", "drawing"),
+            "GRAPHICS"
+        );
+        assert_eq!(
+            type_label("application/x-thing", "no-extension-here"),
+            "THING"
+        );
+        // A "." in a name that is not an extension must not become the label.
+        assert_eq!(
+            type_label("application/x-thing", "Referat af HB-mødet 15. marts"),
+            "THING",
+            "a date is not a file extension"
+        );
+    }
+
+    /// Every type actually attached in this wiki, from a census of production
+    /// on 2026-08-01. A label nobody's files reach is decoration; these are the
+    /// ones people will see.
+    #[test]
+    fn every_type_in_the_wiki_gets_a_readable_label() {
+        use super::type_label;
+        let census = [
+            ("image/jpeg", 204, "JPEG"),
+            ("application/pdf", 200, "PDF"),
+            (
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                183,
+                "Word",
+            ),
+            ("image/png", 35, "PNG"),
+            (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                17,
+                "Excel",
+            ),
+            ("image/webp", 10, "WebP"),
+            (
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                3,
+                "PowerPoint",
+            ),
+            ("image/heic", 3, "HEIC"),
+            ("application/zip", 2, "ZIP"),
+            ("audio/ogg", 1, "OGG"),
+            ("audio/midi", 1, "MIDI"),
+            ("video/mp4", 1, "MP4"),
+        ];
+        for (mime, count, want) in census {
+            // Named without help from the filename: the chip must be right even
+            // for a node whose name carries no extension.
+            assert_eq!(
+                type_label(mime, "Referat af HB-mødet"),
+                want,
+                "{mime} ({count} files)"
+            );
+        }
+    }
+
+    /// Whatever comes out is short enough to sit in a chip.
+    #[test]
+    fn a_label_is_always_short() {
+        use super::type_label;
+        let monsters = [
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.oasis.opendocument.text",
+            "application/vnd.some.very.long.registry.name.indeed",
+            "",
+        ];
+        for mime in monsters {
+            let label = type_label(mime, "file.bin");
+            assert!(label.chars().count() <= 12, "{mime} -> {label:?}");
+        }
     }
 
     /// Microsoft cannot render OpenDocument, so it is not offered for one.
@@ -671,14 +851,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     } else {
         ""
     };
-    let type_label = file_mime
-        .rsplit('/')
-        .next()
-        .unwrap_or("")
-        .split('+')
-        .next()
-        .unwrap_or("")
-        .to_uppercase();
+    let type_label = type_label(file_mime, name);
 
     // Presigned, not a bare storage URL: this feeds an <iframe>, <video>, <audio>
     // and a download <a>, none of which can send the Authorization header the
