@@ -1837,7 +1837,7 @@ html {
 	left: 50%;
 	transform: translate(-50%, -50%);
 	font-weight: 700;
-	font-size: 0.625rem;
+	font-size: 0.75rem;
 	/* The folder glyph is drawn in the avatar's on-primary colour (white in
        light mode, dark in dark mode). The primary-container "on" colour is its
        natural counterpart, so the letter always contrasts with the glyph it sits
@@ -1848,7 +1848,7 @@ html {
 
 .avatar.small .folder-letter,
 .node-icon .folder-letter {
-	font-size: 0.5rem;
+	font-size: 0.625rem;
 }
 
 /* Bare (`.node-icon`, the drawer's node tree) the folder glyph is NOT drawn in
