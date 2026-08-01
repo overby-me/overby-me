@@ -63,7 +63,7 @@ fn object_url(bytes: &[u8], content_type: &str) -> Option<String> {
     let array = js_sys::Uint8Array::from(bytes);
     let parts = js_sys::Array::new();
     parts.push(&array.buffer());
-    let mut opts = web_sys::BlobPropertyBag::new();
+    let opts = web_sys::BlobPropertyBag::new();
     opts.set_type(content_type);
     let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).ok()?;
     web_sys::Url::create_object_url_with_blob(&blob).ok()

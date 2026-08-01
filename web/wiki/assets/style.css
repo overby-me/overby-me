@@ -6031,6 +6031,11 @@ h6,
 	margin-bottom: var(--md-sys-spacing-4);
 	flex-wrap: wrap;
 }
+/* A crumb owns its separator so the pair has one keyed root; `contents` keeps
+   both as direct flex children of the trail, so the gap still applies to them. */
+.projector-trail-item {
+	display: contents;
+}
 .projector-trail-avatar {
 	width: 64px;
 	height: 64px;

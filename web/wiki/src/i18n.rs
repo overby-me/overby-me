@@ -1261,7 +1261,7 @@ mod tests {
                 "mime.vote",
             ] {
                 assert!(
-                    lookup_key(&map, key).is_some(),
+                    lookup_key(map, key).is_some(),
                     "{lang} missing translation for {key}"
                 );
             }
@@ -1288,8 +1288,8 @@ mod tests {
             }
             out
         }
-        let en = leaf_keys(&en_translations());
-        let da = leaf_keys(&da_translations());
+        let en = leaf_keys(en_translations());
+        let da = leaf_keys(da_translations());
         let en_only: Vec<_> = en.difference(&da).collect();
         let da_only: Vec<_> = da.difference(&en).collect();
         assert!(

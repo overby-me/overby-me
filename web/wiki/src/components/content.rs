@@ -968,18 +968,23 @@ fn SlateInline(node: serde_json::Value) -> Element {
 pub(crate) fn AutoLinked(text: String) -> Element {
     rsx! {
         for (line_no , line) in text.split('\n').enumerate() {
-            if line_no > 0 {
-                br {}
-            }
-            AutoLinkedLine { key: "{line_no}", text: line.to_string() }
+            AutoLinkedLine { key: "{line_no}", leading_break: line_no > 0, text: line.to_string() }
         }
     }
 }
 
-/// One line of a text run: the links in it, and nothing about breaks.
+/// One line of a text run: the links in it, and the break that precedes it.
+///
+/// The break belongs to the line rather than sitting beside it in the loop so
+/// that each iteration has a single root, which is the only node a `key` binds
+/// to — with the `br` as a sibling the key was silently dropped and the lines
+/// diffed by position.
 #[component]
-fn AutoLinkedLine(text: String) -> Element {
+fn AutoLinkedLine(text: String, leading_break: bool) -> Element {
     rsx! {
+        if leading_break {
+            br {}
+        }
         for (i , token) in autolink_tokens(&text).into_iter().enumerate() {
             match token {
                 LinkToken::Text(s) => rsx! { "{s}" },

@@ -227,50 +227,6 @@ pub async fn create_canvas(
     .ok_or_else(|| "canvas not created".to_string())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_cell_key_round_trips() {
-        assert_eq!(cell_key(0, 0), "p_0_0");
-        assert_eq!(parse_key(&cell_key(12, 34)), Some((12, 34)));
-        // Anything that is not a cell is ignored rather than guessed at.
-        assert_eq!(parse_key("p_12"), None);
-        assert_eq!(parse_key("12_34"), None);
-        assert_eq!(parse_key("p_x_1"), None);
-    }
-
-    #[test]
-    fn a_row_becomes_a_coloured_cell() {
-        let row = serde_json::json!({"key": "p_3_4", "data": {"c": 7}});
-        assert_eq!(parse_cell(&row), Some(((3, 4), 7)));
-        // A row without a colour is not a cell; better to skip it than to paint
-        // an arbitrary one.
-        assert_eq!(parse_cell(&serde_json::json!({"key": "p_3_4"})), None);
-        assert_eq!(parse_cell(&serde_json::json!({"data": {"c": 1}})), None);
-    }
-
-    /// A repaint is an update; only an untouched cell is inserted.
-    #[test]
-    fn a_painted_cell_is_updated_rather_than_inserted() {
-        let updated = serde_json::json!({"updateNodes": {"affected_rows": 1}});
-        assert_eq!(affected_rows(&updated), 1);
-        let missing = serde_json::json!({"updateNodes": {"affected_rows": 0}});
-        assert_eq!(affected_rows(&missing), 0, "zero means insert it");
-        // A shape we do not recognise must not be read as "already painted", or
-        // the cell would silently never appear.
-        assert_eq!(affected_rows(&serde_json::json!({})), 0);
-    }
-
-    /// A mistyped size cannot ask the database for a million rows.
-    #[test]
-    fn a_canvas_side_is_capped() {
-        assert_eq!(1000u32.clamp(1, MAX_CANVAS_SIDE), MAX_CANVAS_SIDE);
-        assert_eq!(0u32.clamp(1, MAX_CANVAS_SIDE), 1);
-    }
-}
-
 /// The canvas a context is currently showing, if its owner chose one.
 ///
 /// Stored as a `pixel` relation on the context, the same mechanism the projector
@@ -314,4 +270,48 @@ pub async fn set_focused_canvas(
     )
     .await
     .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cell_key_round_trips() {
+        assert_eq!(cell_key(0, 0), "p_0_0");
+        assert_eq!(parse_key(&cell_key(12, 34)), Some((12, 34)));
+        // Anything that is not a cell is ignored rather than guessed at.
+        assert_eq!(parse_key("p_12"), None);
+        assert_eq!(parse_key("12_34"), None);
+        assert_eq!(parse_key("p_x_1"), None);
+    }
+
+    #[test]
+    fn a_row_becomes_a_coloured_cell() {
+        let row = serde_json::json!({"key": "p_3_4", "data": {"c": 7}});
+        assert_eq!(parse_cell(&row), Some(((3, 4), 7)));
+        // A row without a colour is not a cell; better to skip it than to paint
+        // an arbitrary one.
+        assert_eq!(parse_cell(&serde_json::json!({"key": "p_3_4"})), None);
+        assert_eq!(parse_cell(&serde_json::json!({"data": {"c": 1}})), None);
+    }
+
+    /// A repaint is an update; only an untouched cell is inserted.
+    #[test]
+    fn a_painted_cell_is_updated_rather_than_inserted() {
+        let updated = serde_json::json!({"updateNodes": {"affected_rows": 1}});
+        assert_eq!(affected_rows(&updated), 1);
+        let missing = serde_json::json!({"updateNodes": {"affected_rows": 0}});
+        assert_eq!(affected_rows(&missing), 0, "zero means insert it");
+        // A shape we do not recognise must not be read as "already painted", or
+        // the cell would silently never appear.
+        assert_eq!(affected_rows(&serde_json::json!({})), 0);
+    }
+
+    /// A mistyped size cannot ask the database for a million rows.
+    #[test]
+    fn a_canvas_side_is_capped() {
+        assert_eq!(1000u32.clamp(1, MAX_CANVAS_SIDE), MAX_CANVAS_SIDE);
+        assert_eq!(0u32.clamp(1, MAX_CANVAS_SIDE), 1);
+    }
 }

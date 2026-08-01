@@ -26,6 +26,10 @@ pub use feedback::{EmptyState, ErrorState};
 pub use image::ZoomableImage;
 pub use password_dots::PasswordDots;
 pub use segmented_button::SegmentedButton;
+// Kept exported with no caller on purpose: the editor tried a split button for
+// Save/Submit and reverted it days before a deadline (see `editor.rs`), and the
+// widget waits in the library for a calmer surface rather than being rewritten.
+#[allow(unused_imports)]
 pub use split_button::SplitButton;
 pub use table::{DataTable, FilterToolbar, PaginatedTable};
 pub use tabs::Tabs;

@@ -236,6 +236,10 @@ pub fn use_graphql_subscription(wire: crate::graphql::Wire) -> Signal<Option<ser
     data
 }
 
+/// One live subscription: the query text, the variables it was started with, and
+/// every listener waiting on it paired with its own id.
+type LiveSub<S> = (String, serde_json::Value, Vec<(u64, S)>);
+
 /// Which subscriptions exist on the socket, and who is listening to each.
 ///
 /// Two components asking the same question cost ONE subscription. Hasura runs a
@@ -249,7 +253,7 @@ pub fn use_graphql_subscription(wire: crate::graphql::Wire) -> Signal<Option<ser
 struct Registry<S> {
     /// Server-side subscription id -> the query, its variables, and everyone
     /// waiting on it.
-    subs: HashMap<String, (String, serde_json::Value, Vec<(u64, S)>)>,
+    subs: HashMap<String, LiveSub<S>>,
     /// Query text AND variables -> the id already carrying it. Both, because two
     /// components can now send the same query for different rows: one canvas and
     /// another are the same operation with a different id in the variables, and

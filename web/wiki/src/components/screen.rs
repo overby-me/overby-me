@@ -164,21 +164,26 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
                 if !show_feed && trail.len() > 1 {
                     div { class: "projector-trail",
                         for (i, crumb) in trail.iter().enumerate() {
-                            if i > 0 {
-                                span { class: "projector-trail-sep", "·" }
-                            }
-                            div {
-                                key: "{crumb.key}",
-                                class: if i + 1 == trail.len() { "avatar projector-trail-avatar is-current" } else { "avatar projector-trail-avatar" },
-                                title: "{crumb.name}",
-                                {super::loader::node_avatar(
-                                    &super::loader::node_icon_mime_id(
-                                        crumb.mime_id.as_deref().unwrap_or(""),
-                                        crumb.data.as_ref().map(|d| &d.0),
-                                    ),
-                                    &crumb.name,
-                                    crumb.ordinal,
-                                )}
+                            // One root per crumb, so the key binds (a key on the
+                            // second node of a block is dropped). `display:
+                            // contents` keeps the separator and the avatar as
+                            // direct flex children of the trail, as before.
+                            div { key: "{crumb.key}", class: "projector-trail-item",
+                                if i > 0 {
+                                    span { class: "projector-trail-sep", "·" }
+                                }
+                                div {
+                                    class: if i + 1 == trail.len() { "avatar projector-trail-avatar is-current" } else { "avatar projector-trail-avatar" },
+                                    title: "{crumb.name}",
+                                    {super::loader::node_avatar(
+                                        &super::loader::node_icon_mime_id(
+                                            crumb.mime_id.as_deref().unwrap_or(""),
+                                            crumb.data.as_ref().map(|d| &d.0),
+                                        ),
+                                        &crumb.name,
+                                        crumb.ordinal,
+                                    )}
+                                }
                             }
                         }
                     }
