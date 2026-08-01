@@ -376,7 +376,8 @@ const EN_JSON: &str = r#"{
         "painterIs": "{x}, {y} \u00b7 painted by {name}",
         "painterUnknown": "someone",
         "cellEmpty": "{x}, {y} \u00b7 not painted yet",
-        "holdToSee": "Hover or hold a cell to see who painted it"
+        "holdToSee": "Hover or hold a cell to see who painted it",
+        "manageCanvases": "Manage canvases"
     },
     "error": {
         "somethingWentWrong": "Something went wrong!",
@@ -940,7 +941,8 @@ const DA_JSON: &str = r#"{
         "painterIs": "{x}, {y} \u00b7 malet af {name}",
         "painterUnknown": "en anden",
         "cellEmpty": "{x}, {y} \u00b7 ikke malet endnu",
-        "holdToSee": "Peg p\u00e5 eller hold et felt for at se, hvem der har malet det"
+        "holdToSee": "Peg p\u00e5 eller hold et felt for at se, hvem der har malet det",
+        "manageCanvases": "Administrer plader"
     },
     "error": {
         "somethingWentWrong": "Noget gik galt!",

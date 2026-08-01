@@ -18,6 +18,7 @@ use wasm_bindgen::JsCast;
 use crate::graphql;
 use crate::i18n::t;
 use crate::model::NodeWithChildren;
+use crate::route::Route;
 use crate::session::use_session;
 
 /// How many cells a new canvas is across and down.
@@ -165,6 +166,48 @@ pub fn painter_says(
     Some(("pixel.painterIs", named))
 }
 
+/// Where to put the tooltip for a cell, as an inline style.
+///
+/// Everything is a PERCENTAGE of the board, so the tip lands on its cell at any
+/// width — a phone's scaled board, a desktop's full one, a pinch zoom — without
+/// measuring anything in JavaScript. Two decisions beyond that:
+///
+/// * It sits ABOVE the cell, except in the top fifth of the board, where there
+///   is nothing above to sit in and it flips below.
+/// * Near an edge it stops centring and aligns its own edge instead, so a tip on
+///   the leftmost column does not hang off the side of the board. Three
+///   positions rather than a clamp, because the tip's width is not known here
+///   and a translate needs no measurement.
+pub fn tip_style(cell: (u32, u32), cols: u32, rows: u32) -> String {
+    let (x, y) = cell;
+    let (cols, rows) = (cols.max(1) as f64, rows.max(1) as f64);
+    let cx = (x as f64 + 0.5) / cols;
+    let below = (y as f64 / rows) < 0.2;
+    // The edge the tip aligns to, and the vertical anchor it grows from.
+    let tx = if cx < 0.2 {
+        "0"
+    } else if cx > 0.8 {
+        "-100%"
+    } else {
+        "-50%"
+    };
+    let (top, ty) = if below {
+        // Under the cell, growing downward from its bottom edge.
+        (((y + 1) as f64 / rows) * 100.0, "var(--md-sys-spacing-2)")
+    } else {
+        // Above the cell, growing upward from its top edge.
+        (
+            (y as f64 / rows) * 100.0,
+            "calc(-100% - var(--md-sys-spacing-2))",
+        )
+    };
+    format!(
+        "left: {:.3}%; top: {:.3}%; transform: translate({tx}, {ty});",
+        cx * 100.0,
+        top
+    )
+}
+
 /// [`painter_says`], worded.
 pub fn painter_label(
     cell: Option<(u32, u32)>,
@@ -205,9 +248,11 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     let open = node.mutable;
 
     let mut cells = use_signal(HashMap::<(u32, u32), u8>::new);
-    // Who painted each cell, as user ids. Separate from `cells` so the drawing
-    // path stays a map of colours: the board is redrawn from it on every undo.
+    // Who painted each cell, as user ids, and when. Separate from `cells` so the
+    // drawing path stays a map of colours: the board is redrawn from it on every
+    // undo.
     let mut owners = use_signal(HashMap::<(u32, u32), String>::new);
+    let mut painted_at = use_signal(HashMap::<(u32, u32), String>::new);
     let mut colour = use_signal(|| 3u8);
     let mut cooling = use_signal(|| 0u32);
     let mut busy = use_signal(|| false);
@@ -218,6 +263,9 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     let mut held = use_signal(|| false);
     // Whether a finger is down right now, which is what the hold timer checks.
     let mut pressing = use_signal(|| false);
+    // Whether the pointer is inside the tooltip. It holds a link, so leaving the
+    // board towards it must not close the thing being reached for.
+    let mut over_tip = use_signal(|| false);
 
     // The board as it stands, once. Everything after this arrives as a delta.
     let load_id = canvas_id.clone();
@@ -234,10 +282,14 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             {
                 let mut map = cells.write();
                 let mut who = owners.write();
+                let mut when = painted_at.write();
                 for cell in rows {
                     map.insert(cell.at, cell.colour);
                     if let Some(owner) = cell.owner {
                         who.insert(cell.at, owner);
+                    }
+                    if let Some(at) = cell.when {
+                        when.insert(cell.at, at);
                     }
                 }
             }
@@ -296,10 +348,19 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         let ctx = board_context(&stream_id);
         let mut map = cells.write();
         let mut who = owners.write();
+        let mut when = painted_at.write();
         for row in rows.iter() {
             if let Some(cell) = graphql::parse_cell_full(row) {
                 let ((x, y), c) = (cell.at, cell.colour);
                 map.insert((x, y), c);
+                match cell.when {
+                    Some(at) => {
+                        when.insert((x, y), at);
+                    }
+                    None => {
+                        when.remove(&(x, y));
+                    }
+                }
                 match cell.owner {
                     Some(owner) => {
                         who.insert((x, y), owner);
@@ -332,10 +393,10 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         }
     });
 
-    // Names for the people on the board, resolved ONCE for the whole canvas
-    // rather than per cell: a thousand cells are a handful of painters, and the
-    // rows carry ids. Re-runs only when a painter appears who was not there
-    // before, so a busy board does not re-ask on every placement.
+    // The people on the board, resolved ONCE for the whole canvas rather than
+    // per cell: a thousand cells are a handful of painters, and the rows carry
+    // ids. Re-runs only when a painter appears who was not there before, so a
+    // busy board does not re-ask on every placement.
     let name_token = session.read().access_token.clone();
     let painter_ids = {
         let mut ids: Vec<String> = owners.read().values().cloned().collect();
@@ -343,19 +404,19 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         ids.dedup();
         ids.join(",")
     };
-    let names_res = crate::use_data_resource!(|(name_token, painter_ids)| async move {
+    let people_res = crate::use_data_resource!(|(name_token, painter_ids)| async move {
         let ids: Vec<String> = painter_ids
             .split(',')
             .filter(|s| !s.is_empty())
             .map(str::to_string)
             .collect();
         if ids.is_empty() {
-            return HashMap::<String, String>::new();
+            return HashMap::<String, crate::model::Author>::new();
         }
         graphql::query_users_by_ids(name_token.as_deref(), &ids)
             .await
             .into_iter()
-            .filter_map(|a| Some((a.user_id?, a.name)))
+            .filter_map(|a| Some((a.user_id.clone()?, a)))
             .collect()
     });
 
@@ -425,7 +486,15 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     let on_leave = move |_evt: Event<PointerData>| {
         pressing.set(false);
         held.set(false);
-        asking.set(None);
+        // A short grace period: the pointer leaving the board is usually the end
+        // of looking, but it is also how it reaches the tooltip's profile link,
+        // which sits just outside the cell it describes.
+        spawn(async move {
+            gloo_timers::future::TimeoutFuture::new(120).await;
+            if !*over_tip.peek() {
+                asking.set(None);
+            }
+        });
     };
 
     let on_click = move |evt: Event<MouseData>| {
@@ -458,10 +527,18 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         }
         busy.set(true);
         let token = session.read().access_token.clone();
+        // Who is painting, so a repaint takes the cell over rather than leaving
+        // the previous painter's name on somebody else's colour.
+        let me = session
+            .read()
+            .user
+            .as_ref()
+            .map(|u| u.id.clone())
+            .unwrap_or_default();
         let (cv, ctx) = (paint_canvas.clone(), paint_ctx.clone());
         let undo = undo_id.clone();
         spawn(async move {
-            let result = graphql::paint_cell(token.as_deref(), &cv, &ctx, x, y, c).await;
+            let result = graphql::paint_cell(token.as_deref(), &cv, &ctx, &me, x, y, c).await;
             busy.set(false);
             match result {
                 Ok(()) => {
@@ -498,60 +575,119 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     let cells_now = cells.read().clone();
     let painted = cells_now.len();
 
-    // What the line under the board says right now.
+    // What the tooltip says about the cell being pointed at right now.
     let at = asking();
     let owner_id = at.and_then(|c| owners.read().get(&c).cloned());
-    let painter = painter_label(
-        at,
-        owner_id.as_deref(),
-        owner_id
-            .as_deref()
-            .and_then(|id| names_res.read().as_ref()?.get(id).cloned())
-            .as_deref(),
-        at.map(|c| cells_now.contains_key(&c)).unwrap_or(false),
-    );
+    let author = owner_id
+        .as_deref()
+        .and_then(|id| people_res.read().as_ref()?.get(id).cloned());
+    let when = at.and_then(|c| painted_at.read().get(&c).cloned());
+    let is_painted = at.map(|c| cells_now.contains_key(&c)).unwrap_or(false);
+    // The sentence, for a cell with nobody to link to: blank, or painted by
+    // somebody this reader cannot see.
+    let plain = (author.is_none())
+        .then(|| {
+            painter_label(
+                at,
+                owner_id.as_deref(),
+                author.as_ref().map(|a| a.name.as_str()),
+                is_painted,
+            )
+        })
+        .flatten();
 
     rsx! {
-        div { class: "pixel-app",
-            div { class: "pixel-head",
-                h2 { class: "pixel-title", "{node.name}" }
-                span { class: "pixel-count", "{painted} / {cols * rows_n}" }
+        // A card with the header every other app uses: the avatar and glyph of
+        // what this is, its name, and what kind of thing it is underneath. This
+        // was a bare heading of its own invention, which read as a different
+        // product from the speaker list sitting next to it in the rail.
+        div { class: "card pixel-app",
+            div { class: "card-header",
+                div {
+                    class: if open { "avatar secondary" } else { "avatar" },
+                    span { class: "material-icons", "grid_on" }
+                }
+                div {
+                    h3 { class: "title-medium", "{node.name}" }
+                    p { class: "body-medium text-muted", "{t(\"mime.canvas\")}" }
+                }
+                div { class: "flex-grow" }
+                span { class: "body-small text-muted", "{painted} / {cols * rows_n}" }
                 if !open {
-                    span { class: "chip pixel-closed", "{t(\"pixel.closed\")}" }
+                    span { class: "chip", "{t(\"pixel.closed\")}" }
+                }
+            }
+            div { class: "card-content",
+
+            // The board, with the tooltip positioned inside it. The wrapper is
+            // the coordinate system: the tip is placed as a PERCENTAGE of the
+            // board, so it lands on the right cell at any width — a phone's
+            // scaled-down board, a desktop's full one, or a pinch zoom — with
+            // nothing measured in JavaScript.
+            div { class: "pixel-board-wrap", style: "max-width: {board_px(cols)}px;",
+                // Sized by CSS, not by a fixed pixel count: the canvas element's
+                // own width/height attributes are the CELL grid, so the browser
+                // keeps the aspect ratio and a phone gets the whole board scaled
+                // to fit rather than a corner of it.
+                canvas {
+                    id: "{dom_id}",
+                    class: "pixel-board",
+                    width: "{cols}",
+                    height: "{rows_n}",
+                    onclick: on_click,
+                    onpointermove: on_move,
+                    onpointerdown: on_down,
+                    onpointerup: on_up,
+                    onpointerleave: on_leave,
+                    onpointercancel: on_leave,
+                }
+                if let Some(cell) = at {
+                    div {
+                        class: "pixel-tip",
+                        style: "{tip_style(cell, cols, rows_n)}",
+                        role: "tooltip",
+                        aria_live: "polite",
+                        // The pointer may travel INTO the tip to reach the
+                        // profile link, so the tip keeps itself open while it is
+                        // under the pointer and closes when it is left.
+                        onpointerenter: move |_| over_tip.set(true),
+                        onpointerleave: move |_| {
+                            over_tip.set(false);
+                            asking.set(None);
+                        },
+                        if let Some(author) = author.clone() {
+                            // A person to go and look at, so the whole line is a
+                            // link: avatar, name, and the cell it is about.
+                            Link {
+                                class: "pixel-tip-who",
+                                to: Route::UserProfile {
+                                    id: author.user_id.clone().unwrap_or_default(),
+                                },
+                                span { class: "avatar small",
+                                    {crate::components::loader::user_avatar(
+                                        &author.avatar_url,
+                                        rsx! { span { class: "material-icons", "person" } },
+                                    )}
+                                }
+                                span { class: "pixel-tip-name", "{author.name}" }
+                            }
+                            if let Some(when) = when.clone() {
+                                span { class: "pixel-tip-when",
+                                    {crate::components::loader::relative_time(&when)}
+                                }
+                            }
+                        } else if let Some(text) = plain.clone() {
+                            span { class: "pixel-tip-plain", "{text}" }
+                        }
+                    }
                 }
             }
 
-            // The board. Sized in cells, scaled by CSS: see the module comment.
-            // Sized by CSS, not by a fixed pixel count: the canvas element's own
-            // width/height attributes are the CELL grid, so the browser keeps the
-            // aspect ratio and a phone gets the whole board scaled to fit rather
-            // than a corner of it.
-            canvas {
-                id: "{dom_id}",
-                class: "pixel-board",
-                width: "{cols}",
-                height: "{rows_n}",
-                style: "max-width: {board_px(cols)}px;",
-                onclick: on_click,
-                onpointermove: on_move,
-                onpointerdown: on_down,
-                onpointerup: on_up,
-                onpointerleave: on_leave,
-                onpointercancel: on_leave,
-            }
-
-            // Who painted the cell being pointed at. A fixed line under the
-            // board rather than a tooltip that follows the cursor: it reads the
-            // same on a phone, where there is no cursor to follow, and it never
-            // covers the cell it is describing.
-            div {
-                // Nothing pointed at yet says how to ask. Holding a cell is not
-                // a gesture anyone guesses, and the line is the only place with
-                // room to say so — it is replaced by the answer on the first
-                // hover or hold, so it costs nothing after the first time.
-                class: if painter.is_some() { "pixel-painter" } else { "pixel-painter is-hint" },
-                aria_live: "polite",
-                {painter.clone().unwrap_or_else(|| t("pixel.holdToSee"))}
+            // How to ask, for as long as nobody has. Holding a cell is not a
+            // gesture anyone guesses, and on a touch screen there is no hover to
+            // stumble into it with.
+            if at.is_none() {
+                div { class: "pixel-hint", "{t(\"pixel.holdToSee\")}" }
             }
 
             if can_paint {
@@ -574,6 +710,7 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                         span { "{t(\"pixel.yourTurn\")}" }
                     }
                 }
+            }
             }
         }
     }
@@ -687,6 +824,62 @@ mod tests {
             );
         }
     }
+
+    /// The tip is placed in percentages of the board, so it lands on its cell
+    /// whatever the board is scaled to.
+    #[test]
+    fn the_tip_lands_on_its_cell() {
+        // Middle of a 10-wide board: the 5th column's centre is 55%.
+        assert!(
+            tip_style((5, 5), 10, 10).contains("left: 55.000%"),
+            "{}",
+            tip_style((5, 5), 10, 10)
+        );
+        // And it hangs above the cell it describes.
+        assert!(tip_style((5, 5), 10, 10).contains("top: 50.000%"));
+    }
+
+    /// A tip on the top row has nothing above it to sit in, so it flips below.
+    #[test]
+    fn a_tip_at_the_top_flips_below() {
+        let top = tip_style((5, 0), 10, 10);
+        assert!(
+            top.contains("top: 10.000%"),
+            "anchored to the cell's BOTTOM: {top}"
+        );
+        assert!(!top.contains("-100%"), "and grows downward: {top}");
+        let lower = tip_style((5, 9), 10, 10);
+        assert!(
+            lower.contains("calc(-100%"),
+            "elsewhere it grows upward: {lower}"
+        );
+    }
+
+    /// Near a side it aligns its own edge rather than centring, so it cannot
+    /// hang off the board.
+    #[test]
+    fn a_tip_at_the_edge_aligns_inward() {
+        assert!(
+            tip_style((0, 5), 10, 10).contains("translate(0,"),
+            "left edge"
+        );
+        assert!(
+            tip_style((9, 5), 10, 10).contains("translate(-100%,"),
+            "right edge"
+        );
+        assert!(
+            tip_style((5, 5), 10, 10).contains("translate(-50%,"),
+            "middle stays centred"
+        );
+    }
+
+    /// A degenerate board must not divide by zero.
+    #[test]
+    fn a_board_with_no_cells_does_not_divide_by_zero() {
+        let style = tip_style((0, 0), 0, 0);
+        assert!(style.contains('%'), "{style}");
+        assert!(!style.contains("NaN") && !style.contains("inf"), "{style}");
+    }
 }
 
 /// The canvases of a context, reached from the app rail (`?app=canvas`).
@@ -757,19 +950,31 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
                 }
             }
 
+            // The owner's panel, framed like every other app's: a card with a
+            // header saying what it is. It used to be a loose button above a
+            // loose list, floating on the page background with nothing to say
+            // that the two belonged together or to whom.
             if is_owner {
-                div { class: "stack stack-h stack-end",
-                    AddCanvasButton { context_id: context_id.clone() }
-                }
-                if !canvases.is_empty() {
-                    div { class: "list",
-                        for canvas in canvases {
-                            CanvasRow {
-                                key: "{canvas.id.0}",
-                                canvas_id: canvas.id.0.clone(),
-                                name: canvas.name.clone(),
-                                context_id: context_id.clone(),
-                                is_showing: showing.as_deref() == Some(canvas.id.0.as_str()),
+                div { class: "card",
+                    div { class: "card-header",
+                        h3 { class: "title-medium", "{t(\"pixel.manageCanvases\")}" }
+                        div { class: "flex-grow" }
+                        AddCanvasButton { context_id: context_id.clone() }
+                    }
+                    div { class: "card-content",
+                        if canvases.is_empty() {
+                            p { class: "body-medium text-muted", "{t(\"pixel.noCanvases\")}" }
+                        } else {
+                            div { class: "list",
+                                for canvas in canvases {
+                                    CanvasRow {
+                                        key: "{canvas.id.0}",
+                                        canvas_id: canvas.id.0.clone(),
+                                        name: canvas.name.clone(),
+                                        context_id: context_id.clone(),
+                                        is_showing: showing.as_deref() == Some(canvas.id.0.as_str()),
+                                    }
+                                }
                             }
                         }
                     }
@@ -940,11 +1145,15 @@ fn AddCanvasButton(context_id: String) -> Element {
                     "{t(\"common.create\")}"
                 }
             },
-            div { class: "field",
+            // The app's own field, label and all — this was a bare `input` of
+            // its own class, which is why it did not look like the box every
+            // other dialog asks a question with.
+            div { class: "text-field",
+                label { "{t(\"pixel.canvasName\")}" }
                 input {
-                    class: "input",
+                    r#type: "text",
+                    maxlength: "{crate::components::editor::NODE_NAME_MAXLEN}",
                     value: "{name}",
-                    placeholder: t("pixel.canvasName"),
                     oninput: move |e| name.set(e.value()),
                 }
             }

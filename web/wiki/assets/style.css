@@ -7843,33 +7843,15 @@ a.list-item:hover {
 
 /* Pixel canvas (pixel/canvas) ---------------------------------------------- */
 
-.pixel-app {
+/* The board and its controls stack inside the card's content. The heading, the
+   count and the closed chip are the shared card header now, so the bespoke
+   .pixel-head / .pixel-title / .pixel-count / .pixel-closed rules that made this
+   app look like a different product are gone with them. */
+.pixel-app .card-content {
 	display: flex;
 	flex-direction: column;
 	gap: var(--md-sys-spacing-3);
 	align-items: flex-start;
-}
-
-.pixel-head {
-	display: flex;
-	align-items: center;
-	gap: var(--md-sys-spacing-2);
-	flex-wrap: wrap;
-}
-
-.pixel-title {
-	font-size: var(--md-sys-typescale-title-large-size);
-	margin: 0;
-}
-
-.pixel-count {
-	color: var(--md-on-surface-variant);
-	font-size: var(--md-sys-typescale-label-medium-size);
-}
-
-.pixel-closed {
-	background: var(--md-surface-container-high);
-	color: var(--md-on-surface-variant);
 }
 
 /* The board is a bitmap sized in CELLS and magnified by CSS, so the browser does
@@ -7931,22 +7913,68 @@ a.list-item:hover {
 	font-weight: 600;
 }
 
-/* Who painted the cell under the pointer. Keeps its height whether or not it
-   says anything, so pointing at the board does not shunt the palette up and
-   down under the finger that is aiming at it. */
-.pixel-painter {
+/* The board and its tooltip share a coordinate system: the tip is positioned as
+   a percentage of this box, so it lands on its cell at any board width. */
+.pixel-board-wrap {
+	position: relative;
+	width: 100%;
+}
+
+/* A rich tooltip (M3): it holds a link and an avatar, so it takes a surface
+   rather than the inverse-surface a plain tooltip gets, and it stays clickable
+   rather than being inert. Raised above the board, which is the point of it. */
+.pixel-tip {
+	position: absolute;
+	z-index: 2;
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-2);
+	max-width: 90%;
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
+	border-radius: var(--md-sys-shape-corner-medium);
+	background: var(--md-surface-container-high);
+	color: var(--md-on-surface);
+	box-shadow: var(--md-sys-elevation-2);
+	font-size: var(--md-sys-typescale-body-small-size);
+	line-height: var(--md-sys-typescale-body-small-line);
+	white-space: nowrap;
+}
+
+/* The painter, as one target: the avatar and the name go to their profile
+   together, because half a link is a smaller thing to hit than a whole one. */
+.pixel-tip-who {
+	display: flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-2);
+	color: inherit;
+	text-decoration: none;
+	min-width: 0;
+}
+.pixel-tip-who:hover .pixel-tip-name,
+.pixel-tip-who:focus-visible .pixel-tip-name {
+	text-decoration: underline;
+}
+.pixel-tip-name {
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* When it was painted, and the sentence for a cell with nobody to link to:
+   both are context rather than the subject, so they sit back. */
+.pixel-tip-when,
+.pixel-tip-plain {
+	color: var(--md-on-surface-variant);
+}
+
+/* How to ask, shown until somebody has. */
+.pixel-hint {
 	min-height: var(--md-sys-spacing-6);
 	margin-top: var(--md-sys-spacing-2);
 	color: var(--md-on-surface-variant);
 	font-size: var(--md-sys-typescale-body-small-size);
-	font-variant-numeric: tabular-nums;
-	transition: opacity var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
-}
-
-/* The resting state is an instruction, not an answer, so it sits back. */
-.pixel-painter.is-hint {
-	opacity: 0.7;
 	font-style: italic;
+	opacity: 0.7;
 }
 
 /* Search scope chip -------------------------------------------------------- */

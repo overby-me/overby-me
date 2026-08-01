@@ -29,7 +29,7 @@ pub async fn load_canvas(access_token: Option<&str>, canvas_id: &str) -> Result<
         access_token,
         "query($p: uuid!) { \
            nodes(where: {parentId: {_eq: $p}, mimeId: {_eq: \"canvas/pixel\"}}) \
-             { key data ownerId } \
+             { key data ownerId updatedAt } \
          }",
         serde_json::json!({ "p": canvas_id }),
     )
@@ -53,6 +53,10 @@ pub struct Cell {
     pub at: (u32, u32),
     pub colour: u8,
     pub owner: Option<String>,
+    /// When it was last painted, as an ISO timestamp. `updated_at` rather than
+    /// `created_at`: a repainted cell is the new painter's, and the question the
+    /// tooltip answers is who put THIS colour here, not who was first.
+    pub when: Option<String>,
 }
 
 /// One `{ key, data, ownerId }` row as a [`Cell`], or `None` if it is not one.
@@ -62,15 +66,17 @@ pub fn parse_cell_full(row: &serde_json::Value) -> Option<Cell> {
     let ((x, y), colour) = parse_cell(row)?;
     // Missing rather than empty: a row whose owner this reader may not see is
     // unattributed, which is different from being painted by nobody.
-    let owner = row
-        .get("ownerId")
-        .and_then(|o| o.as_str())
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
+    let text = |key: &str| {
+        row.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
     Some(Cell {
         at: (x, y),
         colour,
-        owner,
+        owner: text("ownerId"),
+        when: text("updatedAt"),
     })
 }
 
@@ -111,17 +117,23 @@ pub async fn paint_cell(
     access_token: Option<&str>,
     canvas_id: &str,
     context_id: &str,
+    painter_id: &str,
     x: u32,
     y: u32,
     colour: u8,
 ) -> Result<(), String> {
     let key = cell_key(x, y);
+    // The repaint takes the cell over: `ownerId` as well as the colour. Hasura
+    // presets the owner on INSERT only, so without this a repainted cell kept
+    // the first painter's name — and the board would credit the wrong person
+    // for a colour they did not choose. `updatedAt` follows from the trigger.
     let updated = execute_raw_vars_quiet(
         access_token,
-        "mutation($p: uuid!, $k: String!, $d: jsonb!) { \
-           updateNodes(where: {parentId: {_eq: $p}, key: {_eq: $k}}, _set: {data: $d}) \
+        "mutation($p: uuid!, $k: String!, $d: jsonb!, $u: uuid!) { \
+           updateNodes(where: {parentId: {_eq: $p}, key: {_eq: $k}}, \
+                       _set: {data: $d, ownerId: $u}) \
            { affected_rows } }",
-        serde_json::json!({ "p": canvas_id, "k": key, "d": { "c": colour } }),
+        serde_json::json!({ "p": canvas_id, "k": key, "d": { "c": colour }, "u": painter_id }),
     )
     .await?;
     if affected_rows(&updated) > 0 {
