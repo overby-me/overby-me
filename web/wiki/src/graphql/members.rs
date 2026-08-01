@@ -43,7 +43,7 @@ impl MemberFields {
     }
 }
 
-#[derive(cynic::InputObject, Debug, Default)]
+#[derive(cynic::InputObject, Debug, Default, Clone)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "members_bool_exp"

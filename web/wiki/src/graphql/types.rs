@@ -251,7 +251,7 @@ pub struct NodeIdFields {
 
 // --- Input types ---
 
-#[derive(cynic::InputObject, Debug, Default)]
+#[derive(cynic::InputObject, Debug, Default, Clone)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "nodes_bool_exp"
@@ -308,7 +308,7 @@ pub struct NodesBoolExp {
     pub parent: Option<Box<NodesBoolExp>>,
 }
 
-#[derive(cynic::InputObject, Debug, Default)]
+#[derive(cynic::InputObject, Debug, Default, Clone)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "mimes_bool_exp"
@@ -320,7 +320,7 @@ pub struct MimesBoolExp {
     pub context: Option<BooleanComparisonExp>,
 }
 
-#[derive(cynic::InputObject, Debug, Default)]
+#[derive(cynic::InputObject, Debug, Default, Clone)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "String_comparison_exp"
@@ -336,7 +336,7 @@ pub struct StringComparisonExp {
     pub is_null: Option<bool>,
 }
 
-#[derive(cynic::InputObject, Debug, Default)]
+#[derive(cynic::InputObject, Debug, Default, Clone)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "uuid_comparison_exp"
@@ -354,7 +354,7 @@ pub struct UuidComparisonExp {
 
 /// Comparison on a `uuid[]` column. Only containment is used: "is x among this
 /// node's ancestors", which is the subtree test the feed rolls a group up with.
-#[derive(cynic::InputObject, Debug, Default)]
+#[derive(cynic::InputObject, Debug, Default, Clone)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "uuid_array_comparison_exp"
@@ -364,7 +364,7 @@ pub struct UuidArrayComparisonExp {
     pub contains: Option<Vec<Uuid>>,
 }
 
-#[derive(cynic::InputObject, Debug, Default)]
+#[derive(cynic::InputObject, Debug, Default, Clone)]
 #[cynic(
     schema_path = "graphql/schema.graphql",
     graphql_type = "Boolean_comparison_exp"

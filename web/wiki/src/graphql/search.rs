@@ -36,29 +36,38 @@ pub async fn search_nodes(
             terms.iter().map(|t| format!("%{t}%")).collect()
         }
     };
-    let mut filters: Vec<NodesBoolExp> = patterns
-        .into_iter()
-        .map(|like| NodesBoolExp {
-            // This term must appear in the title OR the extracted body content_text.
-            or: Some(vec![
-                NodesBoolExp {
+    let term_filters = |titles_only: bool| -> Vec<NodesBoolExp> {
+        patterns
+            .iter()
+            .map(|like| {
+                let in_name = NodesBoolExp {
                     name: Some(StringComparisonExp {
                         ilike: Some(like.clone()),
                         ..Default::default()
                     }),
                     ..Default::default()
-                },
+                };
+                if titles_only {
+                    return in_name;
+                }
+                // This term must appear in the title OR the extracted body.
                 NodesBoolExp {
-                    content_text: Some(StringComparisonExp {
-                        ilike: Some(like),
-                        ..Default::default()
-                    }),
+                    or: Some(vec![
+                        in_name,
+                        NodesBoolExp {
+                            content_text: Some(StringComparisonExp {
+                                ilike: Some(like.clone()),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                    ]),
                     ..Default::default()
-                },
-            ]),
-            ..Default::default()
-        })
-        .collect();
+                }
+            })
+            .collect()
+    };
+    let mut filters: Vec<NodesBoolExp> = Vec::new();
     // Exclude orphan/root nodes (no parent), matching React's search.
     filters.push(NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
@@ -100,27 +109,59 @@ pub async fn search_nodes(
             ..Default::default()
         });
     }
-    let where_clause = NodesBoolExp {
-        and: Some(filters),
-        ..Default::default()
+    // The shared half — not an orphan, not a hidden mime, inside the scope — is
+    // the same for both searches below.
+    let common = filters;
+    let clause = |titles_only: bool| {
+        let mut all = term_filters(titles_only);
+        all.extend(common.iter().cloned());
+        NodesBoolExp {
+            and: Some(all),
+            ..Default::default()
+        }
     };
 
     // A search box shows a page of hits, not every hit: unbounded, this answered
     // 407 rows and 1.5 MB for three letters, because each row carries its whole
     // document. Thirty is more than anyone reads before retyping.
-    let operation = NodesSearchQuery::build(NodesLimitVariables {
-        where_clause,
+    // TWO searches, not one, and the reason is selection rather than order.
+    // Hasura applies the cap with no ordering, so among many body matches a
+    // TITLE match could simply not be in the thirty that came back — searching
+    // "Uddan" found a candidate whose text mentions Uddannelsesordfører while the
+    // node actually called Uddannelsesordfører was missing. Asking for titles
+    // separately guarantees them a place; both are indexed (name and content_text
+    // each have a trigram index), and they run at the same time.
+    let titles_op = NodesSearchQuery::build(NodesLimitVariables {
+        where_clause: clause(true),
         limit: Some(30),
     });
-    let result = execute(access_token, operation).await?;
-    // The search query sets no order_by (it shares NodesWhereVariables), so order
-    // the hits newest-first here — more useful than Hasura's arbitrary order.
-    let mut nodes = result.nodes;
-    nodes.sort_by(|a, b| {
-        let at = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
-        let bt = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
-        bt.cmp(at)
+    let all_op = NodesSearchQuery::build(NodesLimitVariables {
+        where_clause: clause(false),
+        limit: Some(30),
     });
+    let (titles, all) = futures_util::join!(
+        execute(access_token, titles_op),
+        execute(access_token, all_op)
+    );
+    let mut nodes = titles?.nodes;
+    let mut seen: std::collections::HashSet<String> =
+        nodes.iter().map(|n| n.id.0.clone()).collect();
+    for node in all?.nodes {
+        if seen.insert(node.id.0.clone()) {
+            nodes.push(node);
+        }
+    }
+    // Rank by WHERE the match is, then by recency inside each rank. A title is
+    // what a thing is called; a body mention is a thing that talks about it.
+    nodes.sort_by(|a, b| {
+        let rank = name_rank(&a.name, query).cmp(&name_rank(&b.name, query));
+        rank.then_with(|| {
+            let at = a.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+            let bt = b.created_at.as_ref().map(|t| t.0.as_str()).unwrap_or("");
+            bt.cmp(at)
+        })
+    });
+    nodes.truncate(30);
     Ok(nodes.into_iter().map(Into::into).collect())
 }
 
@@ -385,5 +426,78 @@ mod tests {
             "the parent is only a name here: {}",
             op.query
         );
+    }
+}
+
+/// Where a query matched in a node's title, as a sort key: lower is better.
+///
+/// A title is what a thing is CALLED; a body mention is a thing that talks about
+/// it. Searching "Uddan" should find the node named Uddannelsesordfører before a
+/// candidate whose statement mentions the role, and before this the hits were
+/// ordered by date alone, so the newest body match won.
+///
+/// Pure, and the whole of the ranking: everything the search knows about
+/// relevance is here, where it can be read and tested.
+pub(crate) fn name_rank(name: &str, query: &str) -> u8 {
+    let name = name.trim().to_lowercase();
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return 4;
+    }
+    if name == query {
+        return 0;
+    }
+    if name.starts_with(&query) {
+        return 1;
+    }
+    // The start of any word in the title: "ordfører" should find
+    // "Uddannelsesordfører" less strongly than "Uddan" does, but still ahead of
+    // anything that only mentions it in passing.
+    if name
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| w.starts_with(&query))
+    {
+        return 2;
+    }
+    if name.contains(&query) {
+        return 3;
+    }
+    // No title match at all: the hit came from the body.
+    4
+}
+
+#[cfg(test)]
+mod rank_tests {
+    use super::*;
+
+    /// The case that was reported: a title beats a body mention.
+    #[test]
+    fn a_title_outranks_a_body_mention() {
+        // The node actually called this.
+        assert_eq!(name_rank("Uddannelsesordfører", "Uddan"), 1);
+        // A candidate whose statement mentions the role; its own title says
+        // nothing about it, so it ranks last whatever its date.
+        assert_eq!(name_rank("Asger Holm Ørskov", "Uddan"), 4);
+        assert!(
+            name_rank("Uddannelsesordfører", "Uddan") < name_rank("Asger Holm Ørskov", "Uddan")
+        );
+    }
+
+    /// Closer matches come first among titles.
+    #[test]
+    fn a_closer_title_match_ranks_higher() {
+        assert_eq!(name_rank("Budget", "budget"), 0, "exact");
+        assert_eq!(name_rank("Budget 2026", "budget"), 1, "starts with");
+        assert_eq!(name_rank("Klima og budget", "budget"), 2, "starts a word");
+        assert_eq!(name_rank("Rambudgettering", "budget"), 3, "inside a word");
+        assert_eq!(name_rank("Klimapolitik", "budget"), 4, "not in the title");
+    }
+
+    /// Danish letters and case are not a special case.
+    #[test]
+    fn matching_ignores_case_and_keeps_danish_letters() {
+        assert_eq!(name_rank("Ørskov", "ørskov"), 0);
+        assert_eq!(name_rank("Landsmøde 2026", "LANDSMØDE"), 1);
+        assert_eq!(name_rank("Årsmøde", "års"), 1);
     }
 }
