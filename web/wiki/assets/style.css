@@ -1510,6 +1510,10 @@ html {
    content. The parent .card already clips (overflow: hidden) to its rounded
    corners, so the hero fills the card's top edge-to-edge. */
 .content-hero {
+	/* Set per element in content.rs, to the photo's runtime blob: URL. Declared
+	   here so the stylesheet stands on its own — and so a hero without a photo
+	   draws no backdrop rather than inheriting somebody else's. */
+	--hero-image: none;
 	position: relative;
 	width: 100%;
 	aspect-ratio: 16 / 9;
@@ -1529,6 +1533,26 @@ html {
 	max-height: min(80dvh, 760px);
 }
 
+/* The photo's own blur, filling what `contain` leaves empty.
+   A tall photo in a 3:4 frame leaves a band either side, and flat surface colour
+   there reads as a mistake. The same image, scaled to cover and blurred, reads as
+   depth instead — the trick every photo viewer uses. Scaled up as well as
+   blurred, because a blur samples past its own edge and would otherwise show a
+   pale rim.
+   Decorative and inert: it sits under the real photo, and takes no clicks, so the
+   zoom lightbox still belongs to the image itself. */
+.content-hero.is-portrait::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background-image: var(--hero-image);
+	background-size: cover;
+	background-position: center;
+	filter: blur(28px) saturate(1.3) brightness(0.9);
+	transform: scale(1.25);
+	pointer-events: none;
+}
+
 /* Show a candidate WHOLE, rather than cropping to a band of them.
    Cropping cannot win here, because candidate photos arrive at every proportion.
    Measured on a 3:4 frame with a 400x1600 photo: anchored at 15% it showed
@@ -1542,6 +1566,9 @@ html {
 .content-hero.is-portrait .image-error {
 	object-fit: contain;
 	object-position: center;
+	/* Above the blurred backdrop, which is a ::before on the frame. */
+	position: absolute;
+	z-index: 1;
 }
 /* The hero image is a ZoomableImage; fill the hero as a cover crop (overriding the
    contained-thumbnail defaults of .zoomable) while keeping its click-to-expand. */

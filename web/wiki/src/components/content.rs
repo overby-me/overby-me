@@ -189,7 +189,14 @@ pub fn ContentApp(
             // cover hero with the title/date overlaid on a legibility scrim, so the
             // image frames the document instead of sitting as a plain block above it.
             if let Some(url) = image_url {
-                div { class: if portrait_hero { "content-hero is-portrait" } else { "content-hero" },
+                div {
+                    class: if portrait_hero { "content-hero is-portrait" } else { "content-hero" },
+                    // The photo again, for the blurred backdrop behind it (see
+                    // `.content-hero::before`). Handed to CSS as a custom property
+                    // because the URL is a blob: made at runtime — the stylesheet
+                    // cannot know it, and a second <img> would be a second
+                    // zoomable thing in the way of the first.
+                    style: "--hero-image: url(\"{url}\");",
                     // ZoomableImage keeps the click-to-expand lightbox; the veil above
                     // is click-through so the image underneath still receives it.
                     super::widgets::ZoomableImage { src: url.clone(), alt: t("content.imageAlt") }
