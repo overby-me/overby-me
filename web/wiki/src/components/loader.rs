@@ -503,6 +503,15 @@ pub fn feedback_glyph() -> Element {
     rsx! {
         svg {
             view_box: "0 0 24 24",
+            // Sized on the ELEMENT, not only in the stylesheet. An inline svg
+            // has no intrinsic size, so until the stylesheet arrives it falls
+            // back to the 300x150 a replaced element gets — and inside the
+            // rail's anchor `currentColor` is the browser's default link blue,
+            // so a refresh flashed an enormous blue bubble across the page
+            // before the CSS landed. The rule in the stylesheet still wins
+            // wherever a container sizes its icons differently.
+            width: "1em",
+            height: "1em",
             fill: "currentColor",
             "aria-hidden": "true",
             "focusable": "false",
