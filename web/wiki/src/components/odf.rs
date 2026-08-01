@@ -119,7 +119,7 @@ fn runs_of(node: roxmltree::Node, styles: &HashMap<String, (bool, bool)>) -> Vec
 fn paragraph_of(
     node: roxmltree::Node,
     styles: &HashMap<String, (bool, bool)>,
-    numbering: Option<Numbering>,
+    numbering: Option<Box<Numbering>>,
 ) -> Paragraph {
     // ODF counts outline levels from 1; the Word model counts from 0, where 0
     // is Heading 1. A `<text:p>` has no level and is body text.
@@ -206,11 +206,11 @@ pub fn blocks_from_content(xml: &str) -> Result<Vec<Block>, String> {
                     let s = s.to_ascii_lowercase();
                     s.contains("number") || s.contains("ordered")
                 });
-                let numbering = Some(Numbering {
+                let numbering = Some(Box::new(Numbering {
                     format: Some(if ordered { "decimal" } else { "bullet" }.to_string()),
                     level: Some(0),
                     ..Default::default()
-                });
+                }));
                 for item in node.children().filter(|n| {
                     n.tag_name().namespace() == Some(NS_TEXT) && n.tag_name().name() == "list-item"
                 }) {

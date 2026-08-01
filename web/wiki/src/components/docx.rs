@@ -53,14 +53,38 @@ pub struct Paragraph {
     pub outline_level: Option<i64>,
     #[serde(default)]
     pub alignment: Option<String>,
+    /// Boxed because it is by far the largest thing a paragraph carries, and a
+    /// paragraph is one variant of [`Block`]: unboxed it made that enum as big
+    /// as its biggest member for every block in a document, tables included.
     #[serde(default)]
-    pub numbering: Option<Numbering>,
+    pub numbering: Option<Box<Numbering>>,
     #[serde(default)]
     pub indent_left: Option<f64>,
     /// The FIRST line's extra indent, separate from `indent_left` and usually
     /// negative: a hanging indent. See [`paragraph_style`].
     #[serde(default)]
     pub indent_first: Option<f64>,
+    /// Space above and below the paragraph, in points, as the document asks for
+    /// it. Often zero: a document that separates its paragraphs with blank ones
+    /// wants no space at all, and adding some doubles every gap it has.
+    #[serde(default)]
+    pub space_before: Option<f64>,
+    #[serde(default)]
+    pub space_after: Option<f64>,
+    #[serde(default)]
+    pub line_spacing: Option<LineSpacing>,
+}
+
+/// A paragraph's line spacing.
+#[derive(Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LineSpacing {
+    /// A multiplier when `rule` is `auto`; a measurement in points otherwise.
+    #[serde(default)]
+    pub value: f64,
+    /// `auto`, `exact` or `atLeast`.
+    #[serde(default)]
+    pub rule: String,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Default)]
@@ -520,6 +544,37 @@ pub fn paragraph_style(p: &Paragraph) -> String {
     }
     if first.abs() > 0.01 {
         css.push_str(&format!("text-indent:{:.2}rem;", first / 16.0));
+    }
+
+    // Space above and below, when the document says. It usually does — all 44
+    // paragraphs of the document this was reported from — and what it usually
+    // says here is ZERO, because it separates its paragraphs with blank ones
+    // instead. The stylesheet's own comfortable margin is then a SECOND gap on
+    // top of the blank line, and every space in the document is twice what it
+    // should be. A document that says nothing keeps the stylesheet's margin.
+    //
+    // Headings are left out of this on purpose. A heading is not rendered as
+    // itself: it becomes an `<h1>`-`<h6>` in the app's own type scale, and its
+    // rhythm belongs to that scale rather than to points from a Word template.
+    // The document this came from asks for zero space around its Heading 1,
+    // which in Word sits under a blank paragraph and here would sit flush
+    // against the text above it.
+    let is_heading = heading_level(p.style_id.as_deref(), p.outline_level).is_some();
+    if !is_heading {
+        if let Some(pt) = p.space_before.filter(|v| *v >= 0.0) {
+            css.push_str(&format!("margin-top:{:.2}rem;", pt / 16.0));
+        }
+        if let Some(pt) = p.space_after.filter(|v| *v >= 0.0) {
+            css.push_str(&format!("margin-bottom:{:.2}rem;", pt / 16.0));
+        }
+    }
+    // Line spacing, but only the multiplier form. `exact` and `atLeast` are
+    // measurements for a fixed page; honouring them in a reflowing column would
+    // clip a line that wraps differently than Word intended.
+    if let Some(ls) = p.line_spacing.as_ref() {
+        if ls.rule == "auto" && ls.value > 0.0 {
+            css.push_str(&format!("line-height:{:.2};", ls.value));
+        }
     }
     css
 }
@@ -1074,12 +1129,12 @@ mod tests {
     #[test]
     fn a_bullet_picture_is_collected_and_attached() {
         let mut blocks = vec![Block::Paragraph(Paragraph {
-            numbering: Some(Numbering {
+            numbering: Some(Box::new(Numbering {
                 format: Some("bullet".into()),
                 pic_bullet_image_path: Some("word/media/image1.jpeg".into()),
                 pic_bullet_mime_type: Some("image/jpeg".into()),
                 ..Default::default()
-            }),
+            })),
             runs: vec![words("Arbejde mod at blive en grønnere forening.")],
             ..Default::default()
         })];
@@ -1349,6 +1404,95 @@ mod tests {
     /// first line of every one of them starts in the same place, and rendering
     /// only `indentLeft` moved four of them 18pt right. These are the values
     /// the parser gave for `Strategi 2030.docx`.
+    /// Reported: too much space between the bullets. The document sets
+    /// `spaceAfter` to zero on all 44 of its paragraphs and separates them with
+    /// blank ones instead, so the stylesheet's own margin was a second gap on
+    /// top of every blank line. These are its real values.
+    #[test]
+    fn the_document_decides_the_space_between_its_paragraphs() {
+        let tight = Paragraph {
+            space_before: Some(0.05),
+            space_after: Some(0.0),
+            ..Default::default()
+        };
+        let css = paragraph_style(&tight);
+        assert!(css.contains("margin-top:0.00rem;"), "{css}");
+        assert!(css.contains("margin-bottom:0.00rem;"), "{css}");
+
+        let roomy = Paragraph {
+            space_before: Some(16.35),
+            space_after: Some(8.0),
+            ..Default::default()
+        };
+        let css = paragraph_style(&roomy);
+        assert!(css.contains("margin-top:1.02rem;"), "{css}");
+        assert!(css.contains("margin-bottom:0.50rem;"), "{css}");
+
+        // A paragraph that says nothing keeps the stylesheet's own margin.
+        assert!(!paragraph_style(&Paragraph::default()).contains("margin-top"));
+        assert!(!paragraph_style(&Paragraph::default()).contains("margin-bottom"));
+    }
+
+    /// A heading is rendered in the app's type scale, so its rhythm is the
+    /// scale's. This document's Heading 1 asks for zero space on both sides.
+    #[test]
+    fn a_heading_keeps_the_apps_rhythm_not_words_points() {
+        let heading = Paragraph {
+            style_id: Some("Overskrift1".into()),
+            outline_level: Some(0),
+            space_before: Some(0.0),
+            space_after: Some(0.0),
+            ..Default::default()
+        };
+        let css = paragraph_style(&heading);
+        assert!(!css.contains("margin-top"), "{css}");
+        assert!(!css.contains("margin-bottom"), "{css}");
+    }
+
+    #[test]
+    fn line_spacing_carries_over_only_as_a_multiplier() {
+        let one_and_a_half = Paragraph {
+            line_spacing: Some(LineSpacing {
+                value: 1.5,
+                rule: "auto".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(paragraph_style(&one_and_a_half).contains("line-height:1.50;"));
+
+        // `exact` is a measurement for a fixed page. A line that wraps
+        // differently here would be clipped by it.
+        let exact = Paragraph {
+            line_spacing: Some(LineSpacing {
+                value: 12.0,
+                rule: "exact".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(!paragraph_style(&exact).contains("line-height"));
+    }
+
+    /// Paragraph spacing as the parser writes it, from the reported document.
+    #[test]
+    fn real_paragraph_spacing_deserialises() {
+        let json = r#"{
+            "type": "paragraph",
+            "spaceBefore": 0.05,
+            "spaceAfter": 0.0,
+            "lineSpacing": {"explicit": true, "rule": "auto", "value": 1.5},
+            "styleId": "Brdtekst",
+            "runs": []
+        }"#;
+        let block: Block = serde_json::from_str(json).expect("the parser's own output");
+        let Block::Paragraph(p) = &block else {
+            panic!()
+        };
+        assert_eq!(p.space_after, Some(0.0));
+        assert_eq!(p.space_before, Some(0.05));
+        assert_eq!(p.line_spacing.as_ref().unwrap().rule, "auto");
+        assert_eq!(p.line_spacing.as_ref().unwrap().value, 1.5);
+    }
+
     #[test]
     fn a_hanging_indent_leaves_the_first_line_where_its_neighbours_are() {
         let hanging = Paragraph {
@@ -1458,20 +1602,20 @@ mod tests {
     #[test]
     fn a_bullet_is_unordered_and_everything_else_counts() {
         let bullet = Paragraph {
-            numbering: Some(Numbering {
+            numbering: Some(Box::new(Numbering {
                 format: Some("bullet".into()),
                 level: Some(0),
                 ..Default::default()
-            }),
+            })),
             ..Default::default()
         };
         assert_eq!(list_kind(&bullet), Some(false));
         let decimal = Paragraph {
-            numbering: Some(Numbering {
+            numbering: Some(Box::new(Numbering {
                 format: Some("decimal".into()),
                 level: Some(0),
                 ..Default::default()
-            }),
+            })),
             ..Default::default()
         };
         assert_eq!(list_kind(&decimal), Some(true));

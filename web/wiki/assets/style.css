@@ -8064,9 +8064,16 @@ a.list-item:hover {
 	line-height: var(--md-sys-typescale-body-large-line);
 }
 /* An empty paragraph is a deliberate blank line in Word, and collapsing it to
-   nothing would run two blocks together. */
+   nothing would run two blocks together. One LINE, though, and nothing else: it
+   used to take a blank line's height AND a paragraph's bottom margin, so a
+   document that spaces itself with blank paragraphs — which is how the ones in
+   this wiki do it — got roughly twice the gap it asked for. `1lh` is exactly
+   one line of this paragraph, which is exactly what an empty one is. */
 .docx-p:empty {
-	min-height: var(--md-sys-spacing-4);
+	margin-top: 0;
+	margin-bottom: 0;
+	min-height: 1.25rem;
+	min-height: 1lh;
 }
 .docx-h {
 	margin: var(--md-sys-spacing-5) 0 var(--md-sys-spacing-2);
