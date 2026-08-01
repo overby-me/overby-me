@@ -8083,6 +8083,52 @@ a.list-item:hover {
 	margin-bottom: var(--md-sys-spacing-1);
 }
 
+/* A picture out of the document. The size Word recorded arrives inline, in
+   points; this is what is true of every picture whatever its size.
+
+   `vertical-align: middle` because a picture used as a bullet or an inline icon
+   sits on the text baseline by default, which drops it below the line it leads.
+   The size floor keeps a decorative hairline from vanishing entirely. */
+.docx-img {
+	display: inline-block;
+	vertical-align: middle;
+	min-width: 2px;
+	min-height: 2px;
+	/* Rotation and mirroring come from the document, and turn about the middle. */
+	transform-origin: center;
+}
+/* A picture on its own line is a figure, not an icon: give it room and let it
+   use the full width if it needs to. */
+.docx-p > .docx-img:only-child {
+	display: block;
+	margin: var(--md-sys-spacing-2) 0;
+}
+
+/* A list whose bullet is a picture (Word's numPicBullet). The browser's own
+   marker is turned off and the picture takes its place, laid out as a row so a
+   wrapping item stays indented under its text rather than under the bullet. */
+.docx-li-pic {
+	list-style: none;
+	display: flex;
+	align-items: baseline;
+	gap: var(--md-sys-spacing-2);
+}
+.docx-bullet {
+	flex: none;
+	/* Word sizes a picture bullet independently of the file, and can ask for one
+	   far larger than the text it leads. Cap it at the line so it stays a
+	   bullet. */
+	max-height: 1.1em;
+	width: auto;
+	/* Baseline, NOT centred: an item that wraps to three lines is still one
+	   item, and its bullet belongs beside the FIRST line rather than halfway
+	   down the block. */
+	align-self: baseline;
+}
+.docx-li-body {
+	min-width: 0;
+}
+
 /* A wide table scrolls inside itself rather than widening the document, which
    on a phone would push every paragraph sideways too. */
 .docx-table-wrap {

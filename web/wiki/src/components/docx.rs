@@ -67,6 +67,53 @@ pub struct Numbering {
     pub format: Option<String>,
     #[serde(default)]
     pub level: Option<i64>,
+
+    /// A list whose bullet is a picture rather than a character. Word calls it
+    /// `numPicBullet`; the browser's own disc is not it.
+    #[serde(default)]
+    pub pic_bullet_image_path: Option<String>,
+    #[serde(default)]
+    pub pic_bullet_mime_type: Option<String>,
+    #[serde(default)]
+    pub pic_bullet_width_pt: Option<f64>,
+    #[serde(default)]
+    pub pic_bullet_height_pt: Option<f64>,
+    /// Filled in by [`attach_images`], like [`Run::src`].
+    #[serde(skip)]
+    pub src: Option<std::rc::Rc<str>>,
+}
+
+impl Numbering {
+    /// The picture this list uses for its bullet, and its format.
+    pub fn picture(&self) -> Option<(&str, &str)> {
+        let path = self
+            .pic_bullet_image_path
+            .as_deref()
+            .filter(|p| !p.is_empty())?;
+        Some((path, self.pic_bullet_mime_type.as_deref().unwrap_or("")))
+    }
+
+    /// How to draw that bullet: the size Word recorded for it, which lives in
+    /// the numbering definition and is unrelated to the size of the file.
+    ///
+    /// Driven from the HEIGHT rather than the width, with the width following
+    /// from the ratio, because the stylesheet caps a bullet to the line it
+    /// leads — Word will happily ask for an 18pt bullet beside 11pt text — and
+    /// a cap on the height must be free to take the width down with it.
+    pub fn bullet_style(&self) -> String {
+        let (w, h) = (
+            self.pic_bullet_width_pt.filter(|w| *w > 0.0),
+            self.pic_bullet_height_pt.filter(|h| *h > 0.0),
+        );
+        match (w, h) {
+            (Some(w), Some(h)) => {
+                format!("height:{h:.2}pt;aspect-ratio:{w:.2}/{h:.2};width:auto;")
+            }
+            (None, Some(h)) => format!("height:{h:.2}pt;width:auto;"),
+            (Some(w), None) => format!("width:{w:.2}pt;"),
+            (None, None) => String::new(),
+        }
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Default)]
@@ -93,6 +140,40 @@ pub struct Run {
     pub vert_align: Option<String>,
     #[serde(default)]
     pub hyperlink: Option<String>,
+
+    // --- pictures ---
+    /// Zip path of the raster the run draws, `word/media/image1.png`. A run
+    /// either has this or has text; the parser writes one node per picture.
+    #[serde(default)]
+    pub image_path: Option<String>,
+    /// The vector original, when Word kept one beside the raster fallback.
+    /// Preferred: it scales to the reader's screen instead of blurring.
+    #[serde(default)]
+    pub svg_image_path: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    /// The size Word gives the picture, in points. Points are a CSS unit too,
+    /// and the same one, so these carry across untouched.
+    #[serde(default)]
+    pub width_pt: Option<f64>,
+    #[serde(default)]
+    pub height_pt: Option<f64>,
+    #[serde(default)]
+    pub rotation: Option<f64>,
+    #[serde(default)]
+    pub flip_h: bool,
+    #[serde(default)]
+    pub flip_v: bool,
+
+    /// The picture itself, as a `data:` url, filled in by [`attach_images`]
+    /// after parsing. Not from the document: the model carries a path into the
+    /// zip, and the bytes have to be fetched out of it separately.
+    ///
+    /// `Rc` because one picture is often drawn many times — a bullet glyph, a
+    /// logo in a header — and a megabyte of base64 should be stored once
+    /// however many runs point at it.
+    #[serde(skip)]
+    pub src: Option<std::rc::Rc<str>>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Default)]
@@ -128,6 +209,192 @@ pub struct Cell {
 
 fn one() -> u32 {
     1
+}
+
+/// Pictures the document embeds, keyed by their path inside the package.
+pub type Images = std::collections::HashMap<String, std::rc::Rc<str>>;
+
+/// Formats a browser will draw.
+///
+/// Word embeds whatever it was given, and two of the things it is given
+/// regularly — EMF and WMF, Windows' own vector formats — no browser has ever
+/// displayed. Those are left for [`render_gaps`](super::render_gaps) to report
+/// rather than turned into a broken image icon. Every picture in this wiki's
+/// documents is a PNG or a JPEG, but that is a fact about today's documents.
+pub fn is_drawable(mime: &str) -> bool {
+    matches!(
+        mime.trim().to_ascii_lowercase().as_str(),
+        "image/png"
+            | "image/jpeg"
+            | "image/jpg"
+            | "image/gif"
+            | "image/webp"
+            | "image/avif"
+            | "image/bmp"
+            | "image/svg+xml"
+    )
+}
+
+/// Which picture a run draws, and in what format: the vector original when Word
+/// kept one, otherwise the raster.
+///
+/// The SVG sibling has no `mimeType` of its own in the model — the field
+/// describes the raster fallback — so it is named here.
+pub fn picture_of(run: &Run) -> Option<(&str, &str)> {
+    if let Some(svg) = run.svg_image_path.as_deref().filter(|p| !p.is_empty()) {
+        return Some((svg, "image/svg+xml"));
+    }
+    let path = run.image_path.as_deref().filter(|p| !p.is_empty())?;
+    Some((path, run.mime_type.as_deref().unwrap_or("")))
+}
+
+/// Read every picture the document draws out of the package, once each.
+///
+/// Deduplicated on the way in: a bullet glyph is one file referenced from every
+/// list item, and a document here draws the same two 1 KB JPEGs fifteen times.
+/// Undrawable formats are skipped rather than embedded as bytes no browser can
+/// decode; so is anything the package turns out not to contain.
+pub fn collect_images(blocks: &[Block], package: &[u8]) -> Images {
+    let mut wanted: Vec<(String, String)> = Vec::new();
+    let mut want = |picture: Option<(&str, &str)>| {
+        if let Some((path, mime)) = picture {
+            if is_drawable(mime) && !wanted.iter().any(|(p, _)| p == path) {
+                wanted.push((path.to_string(), mime.to_string()));
+            }
+        }
+    };
+    for_each_paragraph(blocks, &mut |p| {
+        // A list's bullet is a picture too, and it is named on the paragraph
+        // rather than in its runs.
+        want(p.numbering.as_ref().and_then(|n| n.picture()));
+        p.runs.iter().for_each(|run| want(picture_of(run)));
+    });
+    if wanted.is_empty() {
+        return Images::new();
+    }
+
+    // One archive for all of them: opening the zip per picture would re-scan the
+    // central directory each time.
+    let Ok(mut zip) = zip::ZipArchive::new(std::io::Cursor::new(package)) else {
+        return Images::new();
+    };
+    let mut out = Images::new();
+    for (path, mime) in wanted {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        let read = zip
+            .by_name(&path)
+            .map(|mut entry| entry.read_to_end(&mut bytes))
+            .is_ok();
+        if read && !bytes.is_empty() {
+            out.insert(path, data_url(&mime, &bytes).into());
+        }
+    }
+    out
+}
+
+/// A `data:` url for one picture.
+fn data_url(mime: &str, bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
+
+/// Give every picture run the bytes it draws.
+///
+/// Separate from parsing because the two come from different places: the model
+/// carries a path into the package, and the package is the bytes that were
+/// parsed. A run whose picture is missing or undrawable keeps `src: None`, which
+/// renders as nothing at all rather than as a broken image.
+pub fn attach_images(blocks: &mut [Block], images: &Images) {
+    for_each_paragraph_mut(blocks, &mut |p| {
+        if let Some(n) = p.numbering.as_mut() {
+            if let Some(path) = n.pic_bullet_image_path.clone() {
+                n.src = images.get(&path).cloned();
+            }
+        }
+        for run in &mut p.runs {
+            if let Some((path, _)) = picture_of(run) {
+                run.src = images.get(path).cloned();
+            }
+        }
+    });
+}
+
+/// Every paragraph in the tree, table cells included.
+fn for_each_paragraph(blocks: &[Block], f: &mut impl FnMut(&Paragraph)) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(p) => f(p),
+            Block::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        for_each_paragraph(&cell.content, f);
+                    }
+                }
+            }
+            Block::Unknown => {}
+        }
+    }
+}
+
+fn for_each_paragraph_mut(blocks: &mut [Block], f: &mut impl FnMut(&mut Paragraph)) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(p) => f(p),
+            Block::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        for_each_paragraph_mut(&mut cell.content, f);
+                    }
+                }
+            }
+            Block::Unknown => {}
+        }
+    }
+}
+
+/// How to draw one picture.
+///
+/// Word's size is in points, which is a CSS unit and the same one, so it
+/// carries across exactly. Two things are added:
+///
+/// * `max-width: 100%` and a matching `aspect-ratio`, so a picture wider than a
+///   phone shrinks instead of pushing the document sideways — and shrinks in
+///   proportion, which setting both a width and a height in points would not.
+/// * the rotation and mirroring Word recorded, as one transform.
+pub fn image_style(run: &Run) -> String {
+    let mut css = String::from("max-width:100%;");
+    let (w, h) = (
+        run.width_pt.filter(|w| *w > 0.0),
+        run.height_pt.filter(|h| *h > 0.0),
+    );
+    if let Some(w) = w {
+        css.push_str(&format!("width:{w:.2}pt;"));
+    }
+    match (w, h) {
+        // The ratio does the work of the height: it survives the shrink.
+        (Some(w), Some(h)) => css.push_str(&format!("aspect-ratio:{w:.2}/{h:.2};height:auto;")),
+        (None, Some(h)) => css.push_str(&format!("height:{h:.2}pt;")),
+        _ => {}
+    }
+
+    let mut transform = String::new();
+    if let Some(deg) = run.rotation.filter(|d| d.abs() > 0.01) {
+        transform.push_str(&format!("rotate({deg:.2}deg) "));
+    }
+    // Two mirrors are a rotation, and scale(-1,-1) says so; no special case.
+    if run.flip_h || run.flip_v {
+        let x = if run.flip_h { -1 } else { 1 };
+        let y = if run.flip_v { -1 } else { 1 };
+        transform.push_str(&format!("scale({x},{y})"));
+    }
+    if !transform.trim().is_empty() {
+        css.push_str(&format!("transform:{};", transform.trim()));
+    }
+    css
 }
 
 /// Which heading a paragraph is, if any.
@@ -291,13 +558,13 @@ pub fn DocxBody(blocks: Vec<Block>) -> Element {
                         if ordered {
                             ol { key: "l{i}", class: "docx-list",
                                 for (j , item) in items.into_iter().enumerate() {
-                                    li { key: "i{j}", {runs_of(&item)} }
+                                    ListItem { key: "i{j}", item }
                                 }
                             }
                         } else {
                             ul { key: "l{i}", class: "docx-list",
                                 for (j , item) in items.into_iter().enumerate() {
-                                    li { key: "i{j}", {runs_of(&item)} }
+                                    ListItem { key: "i{j}", item }
                                 }
                             }
                         }
@@ -315,6 +582,33 @@ enum Group {
         ordered: bool,
         items: Vec<Paragraph>,
     },
+}
+
+/// One item in a list.
+///
+/// Word lists can use a picture as their bullet — `numPicBullet` — and a
+/// browser's own disc is not it. Where the document supplies one, the marker is
+/// turned off and the picture is drawn in its place, at the size the numbering
+/// definition gives it.
+#[component]
+fn ListItem(item: Paragraph) -> Element {
+    let bullet = item
+        .numbering
+        .as_ref()
+        .filter(|n| n.picture().is_some())
+        .and_then(|n| n.src.clone().map(|src| (src, n.bullet_style())));
+
+    match bullet {
+        Some((src, style)) => rsx! {
+            li { class: "docx-li-pic",
+                img { class: "docx-bullet", src: "{src}", style: "{style}", alt: "" }
+                span { class: "docx-li-body", {runs_of(&item)} }
+            }
+        },
+        None => rsx! {
+            li { {runs_of(&item)} }
+        },
+    }
 }
 
 /// One block: a heading, a paragraph, or a table.
@@ -370,21 +664,83 @@ fn DocxBlock(block: Block) -> Element {
     }
 }
 
+/// Whether a paragraph is really several bulleted items written as one.
+///
+/// A document in this wiki draws its bullets as little pictures rather than
+/// using a Word list, and then puts two of those items in a single paragraph:
+/// picture, text, picture, text. Word breaks the line between them only because
+/// its page has a fixed width and the first item happens to fill it. This
+/// renderer reflows, so on a wide screen the two items run together into one
+/// sentence — which is wrong at any width, since the wrap point would otherwise
+/// land mid-sentence.
+///
+/// The pattern is what identifies it, not the position: two or more pictures in
+/// one paragraph, each followed by text. A single picture in a sentence is a
+/// picture in a sentence, and a row of pictures with nothing between them is a
+/// row of pictures; neither is touched. Checked in document order because the
+/// FIRST picture keeps its place — it is the paragraph's own bullet.
+fn picture_bulleted(p: &Paragraph) -> bool {
+    let mut bullets = 0;
+    for (i, run) in p.runs.iter().enumerate() {
+        if run.src.is_none() {
+            continue;
+        }
+        let followed_by_text = p.runs[i + 1..]
+            .iter()
+            .find(|r| r.src.is_some() || !r.text.trim().is_empty())
+            .is_some_and(|r| r.src.is_none());
+        if !followed_by_text {
+            return false;
+        }
+        bullets += 1;
+    }
+    bullets >= 2
+}
+
 /// A paragraph's runs, as inline elements.
 ///
 /// Bold and italic become `<strong>`/`<em>` rather than CSS: they are meaning,
 /// not decoration, and a screen reader announces them.
 fn runs_of(p: &Paragraph) -> Element {
     let runs = p.runs.clone();
+    let split = picture_bulleted(p);
+    let mut seen_picture = false;
     rsx! {
         for (i , run) in runs.into_iter().enumerate() {
-            RunSpan { key: "r{i}", run }
+            if split && run.src.is_some() && std::mem::replace(&mut seen_picture, true) {
+                // Not the first: a new item, so a new line. Wrapped so the
+                // iteration keeps a single root and its key.
+                span { key: "r{i}",
+                    br {}
+                    RunSpan { run }
+                }
+            } else {
+                RunSpan { key: "r{i}", run }
+            }
         }
     }
 }
 
 #[component]
 fn RunSpan(run: Run) -> Element {
+    // A picture is a whole run, never text with a picture in it.
+    if let Some(src) = run.src.clone() {
+        let style = image_style(&run);
+        return rsx! {
+            img {
+                class: "docx-img",
+                src: "{src}",
+                style: "{style}",
+                // No alt text to give: OOXML can carry a description, and this
+                // parser does not surface one. An empty alt at least keeps a
+                // screen reader from reading out "image1.png".
+                alt: "",
+                loading: "lazy",
+                decoding: "async",
+            }
+        };
+    }
+
     let style = run_style(&run);
     let text = run.text.clone();
     // Word writes a hyperlink as an ordinary run carrying a target, so the
@@ -544,6 +900,407 @@ mod tests {
         assert_eq!(run_style(&struck), "text-decoration:line-through;");
     }
 
+    /// The shapes here are copied from what the parser produced for a real
+    /// document in the wiki: fifteen picture runs, two distinct files, each
+    /// 9pt square and used as the bullet leading a list item.
+    fn bullet_run(path: &str) -> Run {
+        Run {
+            image_path: Some(path.into()),
+            mime_type: Some("image/jpeg".into()),
+            width_pt: Some(9.0),
+            height_pt: Some(8.99984251968504),
+            ..Default::default()
+        }
+    }
+
+    /// The exact json the parser produced for a picture run in
+    /// `Strategi 2030.docx`, pasted whole. The field names are the contract
+    /// between the parser and this renderer, and a rename on either side would
+    /// otherwise fail silently: every field would deserialise to `None` and the
+    /// pictures would simply not appear.
+    fn picture(path: &str) -> Run {
+        Run {
+            src: Some(std::rc::Rc::from("data:image/jpeg;base64,AAAA")),
+            image_path: Some(path.into()),
+            ..Default::default()
+        }
+    }
+    fn words(text: &str) -> Run {
+        Run {
+            text: text.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Reported from `Strategi 2030.docx`: two bulleted items written as one
+    /// paragraph, with no break between them anywhere in the file. Word wraps
+    /// because its page is a fixed width; this renderer reflows, so on a wide
+    /// screen the two items ran together into one sentence.
+    #[test]
+    fn two_picture_bullets_in_one_paragraph_are_two_items() {
+        let two = Paragraph {
+            runs: vec![
+                picture("word/media/image1.jpeg"),
+                words(" "),
+                words("Understøtte og gribe medlemmernes idéer."),
+                picture("word/media/image2.jpeg"),
+                words(" "),
+                words("Undersøge muligheden for bedre faciliteter."),
+            ],
+            ..Default::default()
+        };
+        assert!(picture_bulleted(&two));
+    }
+
+    #[test]
+    fn an_ordinary_picture_is_left_where_it_is() {
+        // One bullet leading one item: nothing to split.
+        let one = Paragraph {
+            runs: vec![picture("word/media/image1.jpeg"), words(" Udarbejde.")],
+            ..Default::default()
+        };
+        assert!(!picture_bulleted(&one), "a single bullet is not a list");
+
+        // A picture inside a sentence, which must not start a new line.
+        let inline = Paragraph {
+            runs: vec![
+                words("As shown in "),
+                picture("word/media/figure.png"),
+                words(" the numbers rose, see "),
+                picture("word/media/figure2.png"),
+            ],
+            ..Default::default()
+        };
+        assert!(
+            !picture_bulleted(&inline),
+            "the last picture ends the paragraph, so this is not the pattern"
+        );
+
+        // Pictures in a row with nothing between them are a row of pictures.
+        let strip = Paragraph {
+            runs: vec![
+                picture("word/media/a.png"),
+                picture("word/media/b.png"),
+                picture("word/media/c.png"),
+                words(" Three photos."),
+            ],
+            ..Default::default()
+        };
+        assert!(!picture_bulleted(&strip));
+
+        // And a paragraph with no pictures at all is never touched.
+        assert!(!picture_bulleted(&Paragraph {
+            runs: vec![words("Plain text.")],
+            ..Default::default()
+        }));
+    }
+
+    /// Reported: the bullet before "Arbejde mod at blive en grønnere forening"
+    /// was a browser disc. It is a real Word list, and its numbering names a
+    /// picture — these are the values the parser gave for it.
+    #[test]
+    fn a_list_can_have_a_picture_for_its_bullet() {
+        let n = Numbering {
+            format: Some("bullet".into()),
+            level: Some(0),
+            pic_bullet_image_path: Some("word/media/image1.jpeg".into()),
+            pic_bullet_mime_type: Some("image/jpeg".into()),
+            pic_bullet_width_pt: Some(18.0),
+            pic_bullet_height_pt: Some(18.75),
+            src: None,
+        };
+        assert_eq!(n.picture(), Some(("word/media/image1.jpeg", "image/jpeg")));
+        // Driven from the height so the stylesheet's cap can take the width
+        // down with it: an 18pt bullet beside 11pt text is Word being Word.
+        let css = n.bullet_style();
+        assert!(css.contains("height:18.75pt;"), "{css}");
+        assert!(css.contains("aspect-ratio:18.00/18.75;"), "{css}");
+        assert!(css.contains("width:auto;"), "{css}");
+
+        // An ordinary character bullet has no picture and no style.
+        let plain = Numbering {
+            format: Some("bullet".into()),
+            level: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(plain.picture(), None);
+        assert_eq!(plain.bullet_style(), "");
+    }
+
+    /// The bullet picture is named on the paragraph, not in its runs, so the
+    /// collector has to look there too or the bullet never gets its bytes.
+    #[test]
+    fn a_bullet_picture_is_collected_and_attached() {
+        let mut blocks = vec![Block::Paragraph(Paragraph {
+            numbering: Some(Numbering {
+                format: Some("bullet".into()),
+                pic_bullet_image_path: Some("word/media/image1.jpeg".into()),
+                pic_bullet_mime_type: Some("image/jpeg".into()),
+                ..Default::default()
+            }),
+            runs: vec![words("Arbejde mod at blive en grønnere forening.")],
+            ..Default::default()
+        })];
+
+        let mut images = Images::new();
+        images.insert(
+            "word/media/image1.jpeg".into(),
+            std::rc::Rc::from("data:image/jpeg;base64,BBBB"),
+        );
+        attach_images(&mut blocks, &images);
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!()
+        };
+        assert_eq!(
+            p.numbering.as_ref().unwrap().src.as_deref(),
+            Some("data:image/jpeg;base64,BBBB")
+        );
+    }
+
+    /// The numbering shape as the parser actually wrote it, fields and all.
+    #[test]
+    fn a_real_picture_bullet_deserialises() {
+        let json = r#"{
+            "fontFamily": "Symbol",
+            "format": "bullet",
+            "indentLeft": 32.15,
+            "jc": "left",
+            "level": 0,
+            "numId": 1,
+            "picBulletHeightPt": 18.75,
+            "picBulletImagePath": "word/media/image1.jpeg",
+            "picBulletMimeType": "image/jpeg",
+            "picBulletWidthPt": 18.0,
+            "suff": "tab",
+            "tab": 18.0,
+            "text": ""
+        }"#;
+        let n: Numbering = serde_json::from_str(json).expect("the parser's own output");
+        assert_eq!(n.format.as_deref(), Some("bullet"));
+        assert_eq!(n.picture(), Some(("word/media/image1.jpeg", "image/jpeg")));
+        assert_eq!(n.pic_bullet_width_pt, Some(18.0));
+    }
+
+    #[test]
+    fn a_real_picture_run_deserialises() {
+        let json = r#"{
+            "allowOverlap": true,
+            "anchor": false,
+            "anchorXFromMargin": false,
+            "anchorXPt": 0.0,
+            "anchorYFromPara": false,
+            "anchorYPt": 0.0,
+            "colorReplaceFrom": null,
+            "heightPt": 8.99984251968504,
+            "imagePath": "word/media/image2.jpeg",
+            "mimeType": "image/jpeg",
+            "type": "image",
+            "widthPt": 9.0
+        }"#;
+        let run: Run = serde_json::from_str(json).expect("the parser's own output");
+        assert_eq!(run.image_path.as_deref(), Some("word/media/image2.jpeg"));
+        assert_eq!(run.mime_type.as_deref(), Some("image/jpeg"));
+        assert_eq!(run.width_pt, Some(9.0));
+        assert_eq!(
+            picture_of(&run),
+            Some(("word/media/image2.jpeg", "image/jpeg"))
+        );
+        assert!(run.src.is_none(), "the bytes are attached separately");
+        // 9pt is 12px: a bullet, and it must not be rounded away to nothing.
+        assert!(image_style(&run).contains("width:9.00pt;"));
+        // Unknown fields do not derail the run, and no text is not a problem.
+        assert_eq!(run.text, "");
+    }
+
+    /// And the paragraph around it, so the picture is reached the way the
+    /// renderer reaches it: a run inside a body block.
+    #[test]
+    fn a_real_bulleted_paragraph_carries_its_picture() {
+        let json = r#"{
+            "type": "paragraph",
+            "alignment": "left",
+            "runs": [
+                {"type":"image","imagePath":"word/media/image1.jpeg","mimeType":"image/jpeg",
+                 "widthPt":9.0,"heightPt":9.0},
+                {"type":"text","text":" Udarbejde et nyt principprogram. "}
+            ]
+        }"#;
+        let block: Block = serde_json::from_str(json).unwrap();
+        let Block::Paragraph(p) = &block else {
+            panic!("expected a paragraph")
+        };
+        assert_eq!(p.runs.len(), 2);
+        assert!(picture_of(&p.runs[0]).is_some(), "the bullet");
+        assert!(picture_of(&p.runs[1]).is_none(), "the text after it");
+        assert_eq!(paragraph_style(p), "text-align:left;");
+    }
+
+    #[test]
+    fn a_picture_is_sized_as_the_document_says() {
+        let css = image_style(&bullet_run("word/media/image2.jpeg"));
+        assert!(css.contains("width:9.00pt;"), "{css}");
+        // The height rides in the ratio, so shrinking on a narrow screen keeps
+        // the shape instead of squashing it.
+        assert!(css.contains("aspect-ratio:9.00/9.00;"), "{css}");
+        assert!(css.contains("height:auto;"), "{css}");
+        assert!(css.contains("max-width:100%;"), "{css}");
+        assert!(!css.contains("transform"), "nothing to rotate: {css}");
+    }
+
+    #[test]
+    fn rotation_and_mirroring_survive() {
+        let mut run = bullet_run("word/media/image1.png");
+        run.rotation = Some(90.0);
+        run.flip_h = true;
+        let css = image_style(&run);
+        assert!(
+            css.contains("transform:rotate(90.00deg) scale(-1,1);"),
+            "{css}"
+        );
+
+        // A rotation Word wrote as zero is not a transform.
+        let mut flat = bullet_run("word/media/image1.png");
+        flat.rotation = Some(0.0);
+        assert!(!image_style(&flat).contains("transform"));
+    }
+
+    #[test]
+    fn the_vector_original_is_preferred_over_the_raster_fallback() {
+        let mut run = bullet_run("word/media/image1.png");
+        run.mime_type = Some("image/png".into());
+        run.svg_image_path = Some("word/media/image1.svg".into());
+        assert_eq!(
+            picture_of(&run),
+            Some(("word/media/image1.svg", "image/svg+xml")),
+            "the svg scales, the png blurs"
+        );
+    }
+
+    #[test]
+    fn only_formats_a_browser_can_decode_are_drawn() {
+        assert!(is_drawable("image/png"));
+        assert!(is_drawable("IMAGE/JPEG"));
+        assert!(is_drawable("image/svg+xml"));
+        // Word embeds these from Windows, and no browser has ever shown one.
+        assert!(!is_drawable("image/x-emf"));
+        assert!(!is_drawable("image/x-wmf"));
+        assert!(!is_drawable("image/tiff"));
+        assert!(!is_drawable(""));
+    }
+
+    /// One file, many runs: the bytes are stored once and shared, not copied
+    /// per reference. A megabyte logo drawn on twenty pages is a megabyte.
+    #[test]
+    fn a_repeated_picture_is_stored_once() {
+        let mut blocks = vec![
+            Block::Paragraph(Paragraph {
+                runs: vec![bullet_run("word/media/image1.jpeg"), Run::default()],
+                ..Default::default()
+            }),
+            Block::Table(Table {
+                rows: vec![Row {
+                    cells: vec![Cell {
+                        content: vec![Block::Paragraph(Paragraph {
+                            runs: vec![bullet_run("word/media/image1.jpeg")],
+                            ..Default::default()
+                        })],
+                        col_span: 1,
+                        v_merge: None,
+                    }],
+                    is_header: false,
+                }],
+            }),
+        ];
+
+        let mut images = Images::new();
+        images.insert(
+            "word/media/image1.jpeg".into(),
+            std::rc::Rc::from("data:image/jpeg;base64,AAAA"),
+        );
+        attach_images(&mut blocks, &images);
+
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!()
+        };
+        let Block::Table(t) = &blocks[1] else {
+            panic!()
+        };
+        let Block::Paragraph(nested) = &t.rows[0].cells[0].content[0] else {
+            panic!()
+        };
+        // Reached inside a table cell, which is where the walk has to recurse.
+        assert_eq!(
+            nested.runs[0].src.as_deref(),
+            Some("data:image/jpeg;base64,AAAA")
+        );
+        assert!(
+            std::rc::Rc::ptr_eq(
+                p.runs[0].src.as_ref().unwrap(),
+                nested.runs[0].src.as_ref().unwrap()
+            ),
+            "both references share one buffer"
+        );
+        // A run that draws no picture is untouched.
+        assert!(p.runs[1].src.is_none());
+    }
+
+    /// A picture the package does not contain, or one in a format that cannot
+    /// be drawn, leaves `src` empty and renders as nothing. Better than a
+    /// broken-image icon, and the gap notice says what is absent.
+    #[test]
+    fn a_missing_or_undrawable_picture_is_left_empty() {
+        let mut blocks = vec![Block::Paragraph(Paragraph {
+            runs: vec![bullet_run("word/media/gone.jpeg")],
+            ..Default::default()
+        })];
+        attach_images(&mut blocks, &Images::new());
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!()
+        };
+        assert!(p.runs[0].src.is_none());
+    }
+
+    /// Reading pictures out of a real zip, built here so the test owns its input.
+    #[test]
+    fn pictures_are_read_out_of_the_package() {
+        use std::io::Write;
+        // A one-pixel PNG, so the bytes are a real image and not a placeholder.
+        const PNG: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89,
+        ];
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default();
+            zip.start_file("word/media/image1.png", opts).unwrap();
+            zip.write_all(PNG).unwrap();
+            zip.start_file("word/media/logo.emf", opts).unwrap();
+            zip.write_all(b"not a browser format").unwrap();
+            zip.finish().unwrap();
+        }
+        let package = buf.into_inner();
+
+        let mut png = bullet_run("word/media/image1.png");
+        png.mime_type = Some("image/png".into());
+        let mut emf = bullet_run("word/media/logo.emf");
+        emf.mime_type = Some("image/x-emf".into());
+        let blocks = vec![Block::Paragraph(Paragraph {
+            // The same png twice: it must be read and encoded once.
+            runs: vec![png.clone(), png, emf],
+            ..Default::default()
+        })];
+
+        let images = collect_images(&blocks, &package);
+        assert_eq!(images.len(), 1, "the emf is not embedded: {images:?}");
+        let url = images.get("word/media/image1.png").unwrap();
+        assert!(
+            url.starts_with("data:image/png;base64,iVBORw0KGgo"),
+            "{url}"
+        );
+    }
+
     #[test]
     fn alignment_and_indent_carry_over() {
         let centred = Paragraph {
@@ -588,6 +1345,7 @@ mod tests {
             numbering: Some(Numbering {
                 format: Some("bullet".into()),
                 level: Some(0),
+                ..Default::default()
             }),
             ..Default::default()
         };
@@ -596,6 +1354,7 @@ mod tests {
             numbering: Some(Numbering {
                 format: Some("decimal".into()),
                 level: Some(0),
+                ..Default::default()
             }),
             ..Default::default()
         };

@@ -123,6 +123,17 @@ fn count_typed(value: &Value, wanted: &[&str]) -> usize {
     }
 }
 
+/// Walk a JSON tree, counting nodes a predicate accepts.
+fn count_where(value: &Value, want: &dyn Fn(&Value) -> bool) -> usize {
+    match value {
+        Value::Array(items) => items.iter().map(|v| count_where(v, want)).sum(),
+        Value::Object(map) => {
+            want(value) as usize + map.values().map(|v| count_where(v, want)).sum::<usize>()
+        }
+        _ => 0,
+    }
+}
+
 fn len_of(value: &Value, key: &str) -> usize {
     value
         .get(key)
@@ -177,9 +188,27 @@ pub fn docx_gaps(model: &Value) -> GapReport {
     let body = model.get("body").cloned().unwrap_or(Value::Null);
     let mut gaps = Vec::new();
 
-    // The parser tags a picture run `image`, and the frame an anchored (floating)
-    // one hangs from `anchorHost`. Both draw nothing here.
-    let images = count_typed(&body, &["image", "anchorHost"]);
+    // Pictures ARE drawn now, so only the ones that cannot be are counted:
+    // a format no browser decodes (Word embeds EMF and WMF), or an effect that
+    // would need the pixels reworked before drawing. An image shown uncropped
+    // or un-recoloured is shown wrong, and that is worth saying.
+    let images = count_where(&body, &|node| {
+        if node.get("type").and_then(|t| t.as_str()) != Some("image") {
+            return false;
+        }
+        let vector = node
+            .get("svgImagePath")
+            .and_then(|p| p.as_str())
+            .is_some_and(|p| !p.is_empty());
+        let drawable = vector
+            || super::docx::is_drawable(
+                node.get("mimeType").and_then(|m| m.as_str()).unwrap_or(""),
+            );
+        let reworked = ["srcRect", "duotone", "colorReplaceFrom", "alpha"]
+            .iter()
+            .any(|k| node.get(*k).is_some_and(|v| !v.is_null()));
+        !drawable || reworked
+    });
     if images > 0 {
         gaps.push(Gap::Image(images));
     }
@@ -289,29 +318,63 @@ mod tests {
         assert_eq!(report.text_blocks, 2);
     }
 
-    /// The real shape: the parser tags picture runs `image`, and an anchored
-    /// one hangs off an `anchorHost`. Counted from a nested walk, because a run
-    /// lives inside a paragraph inside the body — and inside table cells too.
+    /// Pictures are drawn now, so a picture is not a gap. Only one that cannot
+    /// be drawn is: a format no browser decodes. Counted from a nested walk,
+    /// because a run lives inside a paragraph inside the body — and inside
+    /// table cells too.
     #[test]
-    fn images_are_found_wherever_they_are_nested() {
+    fn only_undrawable_images_are_counted_wherever_they_are_nested() {
+        // Field names as the parser writes them.
         let model = json!({
             "body": [
                 {"type":"paragraph","runs":[
                     {"type":"text","text":"See figure"},
-                    {"type":"image","path":"media/image1.png"}
+                    {"type":"image","imagePath":"word/media/image1.png","mimeType":"image/png"}
                 ]},
                 {"type":"table","rows":[{"cells":[{"content":[
-                    {"type":"paragraph","runs":[{"type":"anchorHost"}]}
+                    {"type":"paragraph","runs":[
+                        {"type":"image","imagePath":"word/media/logo.emf","mimeType":"image/x-emf"}
+                    ]}
                 ]}]}]}
             ]
         });
         let report = docx_gaps(&model);
         assert_eq!(
             report.gaps,
-            vec![Gap::Image(2)],
-            "one nested in a table cell"
+            vec![Gap::Image(1)],
+            "the png draws; the emf, nested in a table cell, does not"
         );
         assert_eq!(report.text_blocks, 3, "two paragraphs and a table");
+    }
+
+    /// A picture that draws but draws WRONG is still worth saying. Word can ask
+    /// for a crop or a recolour, and this renderer hands the browser the whole
+    /// original: right pixels, wrong picture.
+    #[test]
+    fn a_picture_needing_rework_is_still_a_gap() {
+        let cropped = json!({"body": [{"type":"paragraph","runs":[
+            {"type":"image","imagePath":"word/media/image1.png","mimeType":"image/png",
+             "srcRect":{"l":0.1,"t":0.0,"r":0.1,"b":0.0}}
+        ]}]});
+        assert_eq!(docx_gaps(&cropped).gaps, vec![Gap::Image(1)]);
+
+        // The same fields present and null are the ordinary case, not a gap.
+        let plain = json!({"body": [{"type":"paragraph","runs":[
+            {"type":"image","imagePath":"word/media/image1.png","mimeType":"image/png",
+             "srcRect":null,"duotone":null,"colorReplaceFrom":null,"alpha":null}
+        ]}]});
+        assert!(docx_gaps(&plain).is_empty(), "{:?}", docx_gaps(&plain).gaps);
+    }
+
+    /// The vector original wins, and it is drawable even when the raster
+    /// fallback beside it is an EMF.
+    #[test]
+    fn an_svg_original_rescues_an_undrawable_fallback() {
+        let model = json!({"body": [{"type":"paragraph","runs":[
+            {"type":"image","imagePath":"word/media/image1.emf","mimeType":"image/x-emf",
+             "svgImagePath":"word/media/image1.svg"}
+        ]}]});
+        assert!(docx_gaps(&model).is_empty());
     }
 
     #[test]

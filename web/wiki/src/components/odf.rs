@@ -209,6 +209,7 @@ pub fn blocks_from_content(xml: &str) -> Result<Vec<Block>, String> {
                 let numbering = Some(Numbering {
                     format: Some(if ordered { "decimal" } else { "bullet" }.to_string()),
                     level: Some(0),
+                    ..Default::default()
                 });
                 for item in node.children().filter(|n| {
                     n.tag_name().namespace() == Some(NS_TEXT) && n.tag_name().name() == "list-item"

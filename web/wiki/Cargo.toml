@@ -6,6 +6,9 @@ edition = "2021"
 [dependencies]
 # (xlsx roster parsing moved to the backend to keep calamine/zip/inflate out of
 # the wasm bundle — see nhost::parse_roster / backend roster.rs.)
+# Pictures embedded in a Word document become `data:` urls, which is base64.
+# Already in the tree (transitively), so naming it costs no bundle size.
+base64 = "0.22"
 console_error_panic_hook = "0.1"
 cynic = { version = "3", features = ["http-reqwest"] }
 dioxus = { version = "0.7.9" }
