@@ -194,10 +194,14 @@ pub fn run_css(
 /// The CSS for a paragraph: how it is aligned, and how far its level indents it.
 pub fn paragraph_css(paragraph: &TextParagraph, deck: &Deck) -> String {
     let mut css = String::new();
+    // `l` is emitted rather than skipped: the file viewer around a slide
+    // centres its contents, so a left-aligned run that says nothing inherits
+    // centre. See the same note in components::docx.
     match paragraph.alignment.as_deref() {
         Some("ctr") => css.push_str("text-align:center;"),
         Some("r") => css.push_str("text-align:right;"),
         Some("just") => css.push_str("text-align:justify;"),
+        Some("l") => css.push_str("text-align:left;"),
         _ => {}
     }
     // Each outline level steps in by a third of an inch, in the same scaling
@@ -381,6 +385,23 @@ mod tests {
             18.0,
             "PowerPoint's own body default"
         );
+    }
+
+    /// The same reported bug, in the deck renderer: `l` used to emit nothing
+    /// and inherit the file viewer's centring.
+    #[test]
+    fn left_alignment_is_stated_in_a_slide_too() {
+        let d = deck();
+        let left = TextParagraph {
+            alignment: Some("l".into()),
+            ..Default::default()
+        };
+        assert!(paragraph_css(&left, &d).contains("text-align:left;"));
+        let centred = TextParagraph {
+            alignment: Some("ctr".into()),
+            ..Default::default()
+        };
+        assert!(paragraph_css(&centred, &d).contains("text-align:center;"));
     }
 
     #[test]

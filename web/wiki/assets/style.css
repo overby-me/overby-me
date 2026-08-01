@@ -8053,6 +8053,11 @@ a.list-item:hover {
 	max-width: 70ch;
 	margin: 0 auto;
 	color: var(--md-on-surface);
+	/* The file viewer around this centres its contents, which is right for an
+	   image and wrong for a document: without this a left-aligned document
+	   inherits centre and every paragraph is centred. `start` rather than
+	   `left` so a right-to-left document is not forced the wrong way. */
+	text-align: start;
 }
 .docx-p {
 	margin: 0 0 var(--md-sys-spacing-3);
@@ -8111,6 +8116,8 @@ a.list-item:hover {
 .xlsx-doc {
 	/* A grid is wide by nature; it gets the whole width it can have. */
 	width: 100%;
+	/* Not the centring the file viewer would otherwise hand down. */
+	text-align: start;
 }
 
 /* Sheet tabs, shown only when a workbook has more than one. */
@@ -8191,6 +8198,9 @@ a.list-item:hover {
 	display: flex;
 	flex-direction: column;
 	gap: var(--md-sys-spacing-4);
+	/* Not the centring the file viewer would otherwise hand down: a slide
+	   places its own text, and inheriting centre moves every shape's contents. */
+	text-align: start;
 }
 
 /* Each slide keeps the deck's aspect ratio and takes the width it is given.

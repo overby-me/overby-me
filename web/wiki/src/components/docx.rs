@@ -216,11 +216,16 @@ pub fn run_style(run: &Run) -> String {
 /// change how a document READS rather than merely how it looks.
 pub fn paragraph_style(p: &Paragraph) -> String {
     let mut css = String::new();
+    // `left` is emitted, not skipped. It was skipped as "the default", but a
+    // document does not render in a vacuum: the file viewer around it centres
+    // its contents (for a centred image, and for the no-preview state), so a
+    // left-aligned paragraph that says nothing INHERITS centre. Reported from a
+    // left-aligned document that rendered centred.
     match p.alignment.as_deref() {
-        // `left` is the default; emitting it would just be noise.
         Some("center") => css.push_str("text-align:center;"),
         Some("right") => css.push_str("text-align:right;"),
         Some("both") | Some("justify") => css.push_str("text-align:justify;"),
+        Some("left") | Some("start") => css.push_str("text-align:left;"),
         _ => {}
     }
     // Points to rem against a 16px root, so an indent scales with the reader's
@@ -546,17 +551,35 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(paragraph_style(&centred), "text-align:center;");
-        // Left is the default and would be noise.
-        let left = Paragraph {
-            alignment: Some("left".into()),
+        let right = Paragraph {
+            alignment: Some("right".into()),
             ..Default::default()
         };
-        assert_eq!(paragraph_style(&left), "");
+        assert_eq!(paragraph_style(&right), "text-align:right;");
         let indented = Paragraph {
             indent_left: Some(32.0),
             ..Default::default()
         };
         assert_eq!(paragraph_style(&indented), "margin-left:2.00rem;");
+    }
+
+    /// Reported: a left-aligned document rendered centred. Left used to emit
+    /// nothing, on the theory that it was the default — but the file viewer
+    /// around the document centres its contents, so saying nothing meant
+    /// inheriting centre. An explicit alignment is now always explicit.
+    #[test]
+    fn left_alignment_is_stated_rather_than_assumed() {
+        for value in ["left", "start"] {
+            let p = Paragraph {
+                alignment: Some(value.into()),
+                ..Default::default()
+            };
+            assert_eq!(paragraph_style(&p), "text-align:left;", "{value}");
+        }
+        // A paragraph that says nothing still says nothing: the container's
+        // `text-align: start` is what saves it, and inline noise on every
+        // paragraph of every document is not worth the bytes.
+        assert_eq!(paragraph_style(&Paragraph::default()), "");
     }
 
     #[test]
