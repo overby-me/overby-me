@@ -20,6 +20,15 @@ use crate::i18n::t;
 use crate::model::NodeWithChildren;
 use crate::session::use_session;
 
+/// How many cells a new canvas is across and down.
+///
+/// Thirty-two, not sixty-four, because a board scales to the width of a phone: at
+/// 64 a cell is about five pixels on a 360px screen, which is not something a
+/// finger can aim at. A canvas can still be made larger — the size lives in the
+/// node's `data` — but the default should be paintable on the device most people
+/// will have in the hall.
+pub const DEFAULT_SIDE: u32 = 32;
+
 /// The palette, as CSS colours. The stored value is the INDEX, so a cell costs a
 /// single digit in the database and the palette can be restyled later without
 /// rewriting every row.
@@ -49,6 +58,17 @@ fn board_context(dom_id: &str) -> Option<web_sys::CanvasRenderingContext2d> {
         .ok()??
         .dyn_into::<web_sys::CanvasRenderingContext2d>()
         .ok()
+}
+
+/// The board's size on screen, in CSS pixels.
+///
+/// Not the cell count times a constant: the stylesheet scales the board down to
+/// fit a phone, and a click mapped against the unscaled size would paint a cell
+/// up to twice as far across as the one under the finger.
+fn board_size(dom_id: &str) -> Option<(f64, f64)> {
+    let el = web_sys::window()?.document()?.get_element_by_id(dom_id)?;
+    let rect = el.get_bounding_client_rect();
+    (rect.width() > 0.0 && rect.height() > 0.0).then(|| (rect.width(), rect.height()))
 }
 
 /// Paint one cell into the bitmap. The canvas is sized in CELLS, so a cell is
@@ -83,8 +103,8 @@ fn geometry(node: &NodeWithChildren) -> (u32, u32, u32) {
             .unwrap_or(fallback as u64) as u32
     };
     (
-        read("w", 64).clamp(1, graphql::MAX_CANVAS_SIDE),
-        read("h", 64).clamp(1, graphql::MAX_CANVAS_SIDE),
+        read("w", DEFAULT_SIDE).clamp(1, graphql::MAX_CANVAS_SIDE),
+        read("h", DEFAULT_SIDE).clamp(1, graphql::MAX_CANVAS_SIDE),
         read("cooldown", 60),
     )
 }
@@ -239,16 +259,16 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         if !can_paint || cooling() > 0 || busy() {
             return;
         }
-        // The click arrives in element space, and the element IS the board.
+        // The click arrives in element space, and the element IS the board — but
+        // its size on screen is whatever CSS gave it, which on a phone is not the
+        // number of cells times twelve. Asking the element means a tap lands on
+        // the cell under the finger at any width, including after a pinch zoom.
         let coords = evt.data().element_coordinates();
-        let Some((x, y)) = cell_at(
-            coords.x,
-            coords.y,
-            board_px(cols) as f64,
-            board_px(rows_n) as f64,
-            cols,
-            rows_n,
-        ) else {
+        let (box_w, box_h) = match board_size(&click_id) {
+            Some(size) => size,
+            None => (board_px(cols) as f64, board_px(rows_n) as f64),
+        };
+        let Some((x, y)) = cell_at(coords.x, coords.y, box_w, box_h, cols, rows_n) else {
             return;
         };
         let c = colour();
@@ -311,12 +331,16 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             }
 
             // The board. Sized in cells, scaled by CSS: see the module comment.
+            // Sized by CSS, not by a fixed pixel count: the canvas element's own
+            // width/height attributes are the CELL grid, so the browser keeps the
+            // aspect ratio and a phone gets the whole board scaled to fit rather
+            // than a corner of it.
             canvas {
                 id: "{dom_id}",
                 class: "pixel-board",
                 width: "{cols}",
                 height: "{rows_n}",
-                style: "width: {board_px(cols)}px; height: {board_px(rows_n)}px;",
+                style: "max-width: {board_px(cols)}px;",
                 onclick: on_click,
             }
 
@@ -345,12 +369,14 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     }
 }
 
-/// The board's on-screen size for a given number of cells.
+/// The widest the board is allowed to draw, for a given number of cells.
 ///
-/// Kept modest so a 128-wide board still fits a phone with the page zoomed out;
-/// the CSS lets it scroll rather than shrinking a cell below a fingertip.
+/// A ceiling, not a size: the board is `width: 100%` and shrinks to whatever it
+/// is given, so this only stops a small canvas from being blown up across a
+/// desktop monitor. Sixteen pixels a cell keeps a 32-cell board a comfortable
+/// 512px there, while the same board fills the width of a phone.
 fn board_px(cells: u32) -> u32 {
-    (cells * 12).clamp(120, 1536)
+    (cells * 16).clamp(240, 1024)
 }
 
 #[cfg(test)]
@@ -365,6 +391,14 @@ mod tests {
         assert_eq!(cell_at(9.9, 0.0, 640.0, 640.0, 64, 64), Some((0, 0)));
         assert_eq!(cell_at(10.0, 0.0, 640.0, 640.0, 64, 64), Some((1, 0)));
         assert_eq!(cell_at(639.9, 639.9, 640.0, 640.0, 64, 64), Some((63, 63)));
+        // The SAME board on a phone, scaled by CSS to 320px: five pixels a cell,
+        // and a tap still lands where the finger is. Mapping against the unscaled
+        // width would have painted roughly twice as far across.
+        assert_eq!(cell_at(0.0, 0.0, 320.0, 320.0, 64, 64), Some((0, 0)));
+        assert_eq!(cell_at(4.9, 4.9, 320.0, 320.0, 64, 64), Some((0, 0)));
+        assert_eq!(cell_at(5.0, 0.0, 320.0, 320.0, 64, 64), Some((1, 0)));
+        assert_eq!(cell_at(160.0, 160.0, 320.0, 320.0, 64, 64), Some((32, 32)));
+        assert_eq!(cell_at(319.9, 319.9, 320.0, 320.0, 64, 64), Some((63, 63)));
         // Outside the board paints nothing at all.
         assert_eq!(cell_at(-1.0, 5.0, 640.0, 640.0, 64, 64), None);
         assert_eq!(cell_at(640.0, 5.0, 640.0, 640.0, 64, 64), None);
@@ -389,9 +423,10 @@ mod tests {
     /// The board never asks the browser for a size it cannot draw.
     #[test]
     fn the_board_stays_a_sane_size() {
-        assert_eq!(board_px(1), 120);
-        assert_eq!(board_px(64), 768);
-        assert_eq!(board_px(1000), 1536);
+        assert_eq!(board_px(1), 240, "a tiny canvas is still worth looking at");
+        assert_eq!(board_px(DEFAULT_SIDE), 512);
+        assert_eq!(board_px(64), 1024);
+        assert_eq!(board_px(1000), 1024, "and never wider than a screen");
     }
 }
 
@@ -595,7 +630,7 @@ fn AddCanvasButton(context_id: String) -> Element {
         let token = session.read().access_token.clone();
         busy.set(true);
         spawn(async move {
-            match graphql::create_canvas(token.as_deref(), &ctx, &title, 64, 64, 60).await {
+            match graphql::create_canvas(token.as_deref(), &ctx, &title, DEFAULT_SIDE, DEFAULT_SIDE, 60).await {
                 Ok(_) => {
                     crate::session::bump_data_version();
                     busy.set(false);

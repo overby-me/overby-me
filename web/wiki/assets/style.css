@@ -7801,9 +7801,13 @@ a.list-item:hover {
    below a fingertip. */
 .pixel-board {
 	image-rendering: pixelated;
+	/* The element's width/height attributes are the CELL grid, so height: auto
+	   keeps the board square-ish at whatever width it is given. A phone shows the
+	   whole board rather than a corner of it. */
+	width: 100%;
+	height: auto;
 	border: 1px solid var(--md-outline-variant);
 	border-radius: var(--md-sys-shape-corner-small);
-	max-width: 100%;
 	cursor: crosshair;
 	/* A tap paints; the page must not also pan under the finger. */
 	touch-action: manipulation;
