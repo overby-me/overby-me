@@ -45,6 +45,35 @@ pub fn file_url(file_id: &str) -> String {
     format!("{}/files/{file_id}", crate::nhost::storage_url())
 }
 
+/// The bytes of a stored file, fetched with the session token in the header.
+///
+/// For the readers that parse a file in Rust rather than hand a URL to an
+/// element: they can send an `Authorization` header, so they should, and then
+/// there is no URL to expire and no token in the DOM.
+///
+/// Deliberately NOT a presigned URL. One of those lasts thirty seconds, which is
+/// fine for a fetch that happens now and wrong for anything that might happen
+/// again — a reader remounted after a detour through another viewer would find
+/// its link already dead.
+pub async fn file_bytes(file_id: &str, token: &str) -> Result<Vec<u8>, String> {
+    if file_id.is_empty() {
+        return Err("no file".into());
+    }
+    let resp = reqwest::Client::new()
+        .get(file_url(file_id))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("storage said {}", resp.status()));
+    }
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| e.to_string())
+}
+
 /// A backend-hosted URL for a document, for the Microsoft Office web viewer.
 ///
 /// That viewer fetches the document from MICROSOFT'S servers, so neither a

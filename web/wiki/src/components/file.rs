@@ -562,20 +562,10 @@ fn GapNotice(report: super::render_gaps::GapReport, urgent: bool) -> Element {
 /// renderer draws (see `components::odf`), so headings, lists, tables and styled
 /// runs all work exactly as they do for a `.docx`.
 #[component]
-fn NativeOdt(file_url: String, name: String) -> Element {
-    let url = file_url.clone();
-    let parsed = crate::use_data_resource!(|(url)| async move {
-        if url.is_empty() {
-            return Err(String::new());
-        }
-        let bytes = reqwest::Client::new()
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .bytes()
-            .await
-            .map_err(|e| e.to_string())?;
+fn NativeOdt(file_id: String, name: String) -> Element {
+    let token = crate::session::use_session().read().access_token.clone();
+    let parsed = crate::use_data_resource!(|(file_id, token)| async move {
+        let bytes = crate::backend_api::file_bytes(&file_id, &token.unwrap_or_default()).await?;
         super::odf::parse_odt(&bytes)
     });
     let state = parsed.read().clone();
@@ -601,25 +591,17 @@ fn NativeOdt(file_url: String, name: String) -> Element {
 
 /// A Word file rendered here: fetch the bytes, parse them, show the document.
 ///
-/// The bytes come from the presigned STORAGE url, not the signed backend link
-/// the embedded viewers use. The backend link exists so a third party can fetch
-/// the document; nothing third-party is involved here, and the presigned url is
-/// the one the browser can already read.
+/// The bytes are fetched from storage with the session token in the header, not
+/// through a presigned url and not through the signed backend link the embedded
+/// viewers use. The backend link exists so a THIRD PARTY can fetch the document,
+/// and nothing third-party is involved here; a presigned url would work once and
+/// then expire thirty seconds later, which is exactly long enough to look at
+/// another viewer and come back to a reader that will not load.
 #[component]
-fn NativeDocx(file_url: String, name: String) -> Element {
-    let url = file_url.clone();
-    let parsed = crate::use_data_resource!(|(url)| async move {
-        if url.is_empty() {
-            return Err(String::new());
-        }
-        let bytes = reqwest::Client::new()
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .bytes()
-            .await
-            .map_err(|e| e.to_string())?;
+fn NativeDocx(file_id: String, name: String) -> Element {
+    let token = crate::session::use_session().read().access_token.clone();
+    let parsed = crate::use_data_resource!(|(file_id, token)| async move {
+        let bytes = crate::backend_api::file_bytes(&file_id, &token.unwrap_or_default()).await?;
         // The parser hands back the document model as JSON; only the parts this
         // renders are deserialised (see components::docx).
         let json = docx_parser::parse_docx_native(&bytes)?;
@@ -627,9 +609,13 @@ fn NativeDocx(file_url: String, name: String) -> Element {
         // Counted from the RAW model: the render model drops what it cannot
         // draw, so by the time this is a Vec<Block> the evidence is gone.
         let gaps = super::render_gaps::docx_gaps(&doc);
-        let blocks: Vec<super::docx::Block> =
+        let mut blocks: Vec<super::docx::Block> =
             serde_json::from_value(doc.get("body").cloned().unwrap_or_default())
                 .map_err(|e| e.to_string())?;
+        // The model names its pictures by their path inside the package; the
+        // bytes are still in the package that was just parsed.
+        let images = super::docx::collect_images(&blocks, &bytes);
+        super::docx::attach_images(&mut blocks, &images);
         Ok::<_, String>((blocks, gaps))
     });
 
@@ -666,21 +652,11 @@ fn NativeDocx(file_url: String, name: String) -> Element {
 /// own. Only the first sheet is parsed up front — a workbook with twenty sheets
 /// should not cost twenty parses to show the one somebody opened.
 #[component]
-fn NativeXlsx(file_url: String, name: String) -> Element {
+fn NativeXlsx(file_id: String, name: String) -> Element {
     let mut sheet_no = use_signal(|| 0usize);
-    let url = file_url.clone();
-    let parsed = crate::use_data_resource!(|(url)| async move {
-        if url.is_empty() {
-            return Err(String::new());
-        }
-        let bytes = reqwest::Client::new()
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .bytes()
-            .await
-            .map_err(|e| e.to_string())?;
+    let token = crate::session::use_session().read().access_token.clone();
+    let parsed = crate::use_data_resource!(|(file_id, token)| async move {
+        let bytes = crate::backend_api::file_bytes(&file_id, &token.unwrap_or_default()).await?;
         let wb_json = xlsx_parser::parse_workbook_native(&bytes)?;
         let wb_value: serde_json::Value =
             serde_json::from_str(&wb_json).map_err(|e| e.to_string())?;
@@ -758,20 +734,10 @@ fn NativeXlsx(file_url: String, name: String) -> Element {
 
 /// A slide deck rendered here.
 #[component]
-fn NativePptx(file_url: String, name: String) -> Element {
-    let url = file_url.clone();
-    let parsed = crate::use_data_resource!(|(url)| async move {
-        if url.is_empty() {
-            return Err(String::new());
-        }
-        let bytes = reqwest::Client::new()
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .bytes()
-            .await
-            .map_err(|e| e.to_string())?;
+fn NativePptx(file_id: String, name: String) -> Element {
+    let token = crate::session::use_session().read().access_token.clone();
+    let parsed = crate::use_data_resource!(|(file_id, token)| async move {
+        let bytes = crate::backend_api::file_bytes(&file_id, &token.unwrap_or_default()).await?;
         let json = pptx_parser::parse_pptx_native(&bytes)?;
         let raw: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         let gaps = super::render_gaps::pptx_gaps(&raw);
@@ -1075,19 +1041,19 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 },
                                 OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && file_mime == ODT => rsx! {
-                                    NativeOdt { file_url: file_url.clone(), name: name.to_string() }
+                                    NativeOdt { file_id: file_id.to_string(), name: name.to_string() }
                                 },
                                 OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && is_presentation(file_mime) => rsx! {
-                                    NativePptx { file_url: file_url.clone(), name: name.to_string() }
+                                    NativePptx { file_id: file_id.to_string(), name: name.to_string() }
                                 },
                                 OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && is_spreadsheet(file_mime) => rsx! {
-                                    NativeXlsx { file_url: file_url.clone(), name: name.to_string() }
+                                    NativeXlsx { file_id: file_id.to_string(), name: name.to_string() }
                                 },
                                 OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && renders_natively(file_mime) => rsx! {
-                                    NativeDocx { file_url: file_url.clone(), name: name.to_string() }
+                                    NativeDocx { file_id: file_id.to_string(), name: name.to_string() }
                                 },
                                 OfficeLink::Ready(url) => {
                                     let encoded = String::from(&js_sys::encode_uri_component(&url));
