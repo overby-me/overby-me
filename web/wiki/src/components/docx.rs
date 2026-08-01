@@ -57,6 +57,10 @@ pub struct Paragraph {
     pub numbering: Option<Numbering>,
     #[serde(default)]
     pub indent_left: Option<f64>,
+    /// The FIRST line's extra indent, separate from `indent_left` and usually
+    /// negative: a hanging indent. See [`paragraph_style`].
+    #[serde(default)]
+    pub indent_first: Option<f64>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Default)]
@@ -496,9 +500,25 @@ pub fn paragraph_style(p: &Paragraph) -> String {
         _ => {}
     }
     // Points to rem against a 16px root, so an indent scales with the reader's
-    // font size instead of being pinned to Word's.
-    if let Some(pt) = p.indent_left.filter(|v| *v > 0.0) {
-        css.push_str(&format!("margin-left:{:.2}rem;", pt / 16.0));
+    // font size instead of being pinned to Word's. Both indents go through the
+    // same scale, or the hanging indent below would not line up.
+    let left = p.indent_left.unwrap_or(0.0).max(0.0);
+    // A first-line indent, which Word writes as a SEPARATE number and which is
+    // usually NEGATIVE: that is a hanging indent, and it is how a bulleted
+    // paragraph is written without being a list. `indentLeft` is then where the
+    // WRAPPED lines go, and the first line is pulled back to sit under the
+    // bullet. Rendering only `indentLeft` puts such a paragraph 18pt to the
+    // right of its neighbours — reported from a document whose bullets were all
+    // at one level and rendered at two.
+    //
+    // CSS says this in one property. Clamped so a first line can never escape
+    // to the left of the document and be clipped.
+    let first = p.indent_first.unwrap_or(0.0).max(-left);
+    if left > 0.0 {
+        css.push_str(&format!("margin-left:{:.2}rem;", left / 16.0));
+    }
+    if first.abs() > 0.01 {
+        css.push_str(&format!("text-indent:{:.2}rem;", first / 16.0));
     }
     css
 }
@@ -1299,6 +1319,80 @@ mod tests {
             url.starts_with("data:image/png;base64,iVBORw0KGgo"),
             "{url}"
         );
+    }
+
+    /// Reported: six bullets that sit at one level in the document rendered at
+    /// two. Four of them carry a hanging indent — `indentLeft` 32.75 with
+    /// `indentFirst` -18.05 — and the other two are written flat at 14.75. The
+    /// first line of every one of them starts in the same place, and rendering
+    /// only `indentLeft` moved four of them 18pt right. These are the values
+    /// the parser gave for `Strategi 2030.docx`.
+    #[test]
+    fn a_hanging_indent_leaves_the_first_line_where_its_neighbours_are() {
+        let hanging = Paragraph {
+            indent_left: Some(32.75),
+            indent_first: Some(-18.05),
+            ..Default::default()
+        };
+        let flat = Paragraph {
+            indent_left: Some(14.75),
+            ..Default::default()
+        };
+        let css = paragraph_style(&hanging);
+        assert!(css.contains("margin-left:2.05rem;"), "{css}");
+        assert!(css.contains("text-indent:-1.13rem;"), "{css}");
+
+        // The point of the whole fix: both first lines land together.
+        let start_of =
+            |p: &Paragraph| (p.indent_left.unwrap_or(0.0) + p.indent_first.unwrap_or(0.0)) / 16.0;
+        assert!(
+            (start_of(&hanging) - start_of(&flat)).abs() < 0.01,
+            "{} vs {}",
+            start_of(&hanging),
+            start_of(&flat)
+        );
+        assert_eq!(paragraph_style(&flat), "margin-left:0.92rem;");
+    }
+
+    #[test]
+    fn a_first_line_indent_can_also_be_positive_and_never_escapes_left() {
+        // Ordinary prose: the first line pushed in, the rest flush.
+        let prose = Paragraph {
+            indent_first: Some(16.0),
+            ..Default::default()
+        };
+        assert_eq!(paragraph_style(&prose), "text-indent:1.00rem;");
+
+        // A hanging indent deeper than the margin would put the first line
+        // outside the document, where it would be clipped.
+        let overhang = Paragraph {
+            indent_left: Some(8.0),
+            indent_first: Some(-40.0),
+            ..Default::default()
+        };
+        let css = paragraph_style(&overhang);
+        assert!(css.contains("margin-left:0.50rem;"), "{css}");
+        assert!(css.contains("text-indent:-0.50rem;"), "clamped: {css}");
+    }
+
+    /// The paragraph shape as the parser writes it, indents included.
+    #[test]
+    fn a_real_hanging_paragraph_deserialises() {
+        let json = r#"{
+            "type": "paragraph",
+            "alignment": "left",
+            "indentFirst": -18.05,
+            "indentLeft": 32.75,
+            "indentRight": 4.0,
+            "runs": [{"type":"text","text":"Have mindst 15 sunde lokalforeninger."}]
+        }"#;
+        let block: Block = serde_json::from_str(json).expect("the parser's own output");
+        let Block::Paragraph(p) = &block else {
+            panic!("expected a paragraph")
+        };
+        assert_eq!(p.indent_left, Some(32.75));
+        assert_eq!(p.indent_first, Some(-18.05));
+        assert!(paragraph_style(p).contains("text-indent:-1.13rem;"));
     }
 
     #[test]
