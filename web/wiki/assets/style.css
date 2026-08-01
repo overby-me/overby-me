@@ -7966,17 +7966,6 @@ a.list-item:hover {
 .pixel-tip-plain {
 	color: var(--md-on-surface-variant);
 }
-
-/* How to ask, shown until somebody has. */
-.pixel-hint {
-	min-height: var(--md-sys-spacing-6);
-	margin-top: var(--md-sys-spacing-2);
-	color: var(--md-on-surface-variant);
-	font-size: var(--md-sys-typescale-body-small-size);
-	font-style: italic;
-	opacity: 0.7;
-}
-
 /* Search scope chip -------------------------------------------------------- */
 
 /* What the search is looking inside, as a chip in front of the field — the

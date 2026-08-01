@@ -683,12 +683,6 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                 }
             }
 
-            // How to ask, for as long as nobody has. Holding a cell is not a
-            // gesture anyone guesses, and on a touch screen there is no hover to
-            // stumble into it with.
-            if at.is_none() {
-                div { class: "pixel-hint", "{t(\"pixel.holdToSee\")}" }
-            }
 
             if can_paint {
                 div { class: "pixel-palette",
@@ -957,6 +951,9 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
             if is_owner {
                 div { class: "card",
                     div { class: "card-header",
+                        div { class: "avatar small",
+                            span { class: "material-icons", "grid_on" }
+                        }
                         h3 { class: "title-medium", "{t(\"pixel.manageCanvases\")}" }
                         div { class: "flex-grow" }
                         AddCanvasButton { context_id: context_id.clone() }
