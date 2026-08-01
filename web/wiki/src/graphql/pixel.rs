@@ -153,26 +153,6 @@ pub async fn my_last_paint(
         .map(str::to_string)
 }
 
-/// Everything painted on this canvas since `since`, pushed as it happens.
-///
-/// A STREAMING subscription, not a live query: it delivers only rows newer than
-/// the cursor, so a placement is one small frame rather than the whole canvas
-/// re-sent to everybody. Verified against this deployment before the app was
-/// built. Scoped by `parentId`, so watching one canvas never carries another's
-/// traffic.
-pub fn canvas_stream(canvas_id: &str, since: &str) -> String {
-    format!(
-        "subscription {{ \
-           nodes_stream(batch_size: 200, \
-                        cursor: {{initial_value: {{updatedAt: \"{since}\"}}, ordering: ASC}}, \
-                        where: {{parentId: {{_eq: \"{canvas}\"}}, \
-                                 mimeId: {{_eq: \"pixel/pixel\"}}}}) \
-           {{ key data }} }}",
-        since = gql_escape(since),
-        canvas = gql_escape(canvas_id),
-    )
-}
-
 /// Create a canvas under `context_id`, granting the two permissions it needs if
 /// this context has never had one.
 ///
@@ -283,19 +263,6 @@ mod tests {
         assert_eq!(affected_rows(&serde_json::json!({})), 0);
     }
 
-    /// The stream must ask for a delta, scoped to one canvas.
-    #[test]
-    fn the_subscription_streams_one_canvas() {
-        let q = canvas_stream("canvas-1", "2026-07-31T00:00:00Z");
-        assert!(q.contains("nodes_stream"), "{q}");
-        assert!(
-            q.contains("cursor:"),
-            "must be a delta, not a live query: {q}"
-        );
-        assert!(q.contains(r#"parentId: {_eq: "canvas-1"}"#), "{q}");
-        assert!(q.contains(r#"mimeId: {_eq: "pixel/pixel"}"#), "{q}");
-    }
-
     /// A mistyped size cannot ask the database for a million rows.
     #[test]
     fn a_canvas_side_is_capped() {
@@ -347,39 +314,4 @@ pub async fn set_focused_canvas(
     )
     .await
     .map(|_| ())
-}
-
-/// One node's live state, pushed when it changes.
-///
-/// A stream rather than a change token: the row that arrives IS the new state, so
-/// nothing has to be fetched to find out what changed. Used for a poll's
-/// open/closed flag, where the alternative was re-fetching the whole node (with
-/// its children and members) to read one boolean.
-///
-/// `fields` is the selection, and must include a field that actually changes, or
-/// the stream has nothing to carry.
-pub fn node_state_stream(node_id: &str, since: &str, fields: &str) -> String {
-    format!(
-        "subscription {{ \
-           nodes_stream(batch_size: 10, \
-                        cursor: {{initial_value: {{updatedAt: \"{since}\"}}, ordering: ASC}}, \
-                        where: {{id: {{_eq: \"{id}\"}}}}) {{ {fields} }} }}",
-        since = gql_escape(since),
-        id = gql_escape(node_id),
-    )
-}
-
-/// Nodes matching `where_clause`, streamed as they change, carrying `fields`.
-///
-/// The general form of [`canvas_stream`]. A stream says WHICH rows changed, which
-/// a change token cannot: a context-wide token wakes every watcher, while these
-/// rows let a watcher decide whether the change was any of its business.
-pub fn nodes_stream(where_clause: &str, since: &str, fields: &str) -> String {
-    format!(
-        "subscription {{ \
-           nodes_stream(batch_size: 100, \
-                        cursor: {{initial_value: {{updatedAt: \"{since}\"}}, ordering: ASC}}, \
-                        where: {{ {where_clause} }}) {{ {fields} }} }}",
-        since = gql_escape(since),
-    )
 }

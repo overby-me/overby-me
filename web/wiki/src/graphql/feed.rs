@@ -203,38 +203,7 @@ pub(crate) fn recent_where_clause(user_id: &str, context_id: Option<&str>) -> No
             // Scope: one context's own content, or (unscoped) everything in a
             // context the user belongs to. Inside a context the membership test
             // is redundant — you are reading its page — so the id alone stands.
-            match context_id {
-                // Everything that happened UNDER this context, not only what
-                // carries it as its own. A group holds events, an event's content
-                // belongs to the event, so a group's feed — filtered on the id
-                // alone — was blind to the meetings that are the reason the group
-                // exists: 52 items where 2924 had happened, at the time this was
-                // written. The id test stays alongside, for anything filed with
-                // this context but sitting elsewhere in the tree.
-                Some(id) => NodesBoolExp {
-                    or: Some(vec![
-                        NodesBoolExp {
-                            context_id: Some(UuidComparisonExp {
-                                in_: None,
-                                eq: Some(Uuid(id.to_string())),
-                                is_null: None,
-                            }),
-                            ..Default::default()
-                        },
-                        NodesBoolExp {
-                            ancestors: Some(UuidArrayComparisonExp {
-                                contains: Some(vec![Uuid(id.to_string())]),
-                            }),
-                            ..Default::default()
-                        },
-                    ]),
-                    ..Default::default()
-                },
-                None => NodesBoolExp {
-                    context: Some(Box::new(belongs_to_user(user_id))),
-                    ..Default::default()
-                },
-            },
+            feed_scope(context_id, user_id),
             // Its parent must still exist. An orphan (see `query_orphans`) has
             // nowhere to open — the row would quote a comment that is gone, or
             // resolve to no path at all.
@@ -439,29 +408,41 @@ pub async fn query_nodes_by_ids(
     }
 }
 
-/// The feed's live scope as a `nodes_bool_exp` BODY, without the enclosing
-/// braces.
+/// What the feed counts as "in scope", as a typed filter.
 ///
-/// Without braces on purpose: the callers that compose it add their own, and a
-/// string that carried its own produced `where: { {_or: …} }` — which the server
-/// rejects as "not a valid graphql query", live, on every reader who opened the
-/// feed. Hand-built GraphQL has no compiler; the shape has to be pinned by a
-/// test instead.
-pub fn feed_scope(context_id: Option<&str>, user_id: &str) -> String {
+/// Shared by the feed QUERY and its live subscription, so the two cannot drift:
+/// they were separate before, one typed and one a hand-built string, and the
+/// string carried its own braces — which composed into `where: { {_or: …} }` and
+/// silently cost every reader their live updates.
+pub fn feed_scope(context_id: Option<&str>, user_id: &str) -> NodesBoolExp {
     match context_id {
-        // Everything under this context, matching what the feed itself asks for
-        // (see `recent_where_clause`).
-        Some(id) => {
-            let id = gql_escape(id);
-            format!(
-                r#"_or: [{{contextId: {{_eq: "{id}"}}}}, {{ancestors: {{_contains: ["{id}"]}}}}]"#
-            )
-        }
+        // Everything that happened UNDER this context, not only what carries it
+        // as its own: a group holds events, and an event's content belongs to the
+        // event, so filtering on the id alone made a group's feed blind to the
+        // meetings that are the reason the group exists.
+        Some(id) => NodesBoolExp {
+            or: Some(vec![
+                NodesBoolExp {
+                    context_id: Some(UuidComparisonExp {
+                        eq: Some(Uuid(id.to_string())),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                NodesBoolExp {
+                    ancestors: Some(UuidArrayComparisonExp {
+                        contains: Some(vec![Uuid(id.to_string())]),
+                    }),
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        },
         // Unscoped: the contexts this reader belongs to.
-        None => {
-            let uid = gql_escape(user_id);
-            format!(r#"context: {{members: {{nodeId: {{_eq: "{uid}"}}}}}}"#)
-        }
+        None => NodesBoolExp {
+            context: Some(Box::new(belongs_to_user(user_id))),
+            ..Default::default()
+        },
     }
 }
 
@@ -469,40 +450,25 @@ pub fn feed_scope(context_id: Option<&str>, user_id: &str) -> String {
 mod scope_tests {
     use super::*;
 
-    /// The composed subscription must be a single well-formed filter.
-    ///
-    /// This is the test that was missing: the scope carried its own braces and
-    /// the composer added another pair, so every feed reader's subscription was
-    /// rejected. Nothing in Rust checks a GraphQL string, so check it here.
-    #[test]
-    fn the_feed_scope_composes_into_one_filter() {
-        for scope in [feed_scope(Some("ctx-1"), "u-1"), feed_scope(None, "u-1")] {
-            let q = crate::graphql::nodes_stream(&scope, "2026-01-01T00:00:00Z", "id");
-            assert!(
-                !q.contains("{ {") && !q.contains("{{"),
-                "double-wrapped filter: {q}"
-            );
-            assert_eq!(
-                q.matches('{').count(),
-                q.matches('}').count(),
-                "unbalanced braces: {q}"
-            );
-            assert!(q.contains("nodes_stream"), "{q}");
-        }
-        // And the shape that actually shipped is caught: a scope carrying its own
-        // braces double-wraps, which is what the server called "not a valid
-        // graphql query".
-        let bad = crate::graphql::nodes_stream(r#"{_or: [{contextId: {_eq: "x"}}]}"#, "t", "id");
-        assert!(bad.contains("{ {"), "the guard must catch the double wrap: {bad}");
-    }
-
-    /// A context scope covers the context AND everything beneath it, which is
-    /// what makes a group's feed show what happened in its events.
+    /// The feed's live scope and its query scope are the same value, so they
+    /// cannot drift. Previously one was typed and the other a string, and the
+    /// string is what broke.
     #[test]
     fn a_context_scope_rolls_up_the_subtree() {
-        let s = feed_scope(Some("ctx-1"), "u-1");
-        assert!(s.contains(r#"contextId: {_eq: "ctx-1"}"#), "{s}");
-        assert!(s.contains(r#"ancestors: {_contains: ["ctx-1"]}"#), "{s}");
-        assert!(!s.starts_with('{'), "the caller adds the braces: {s}");
+        let scope = feed_scope(Some("ctx-1"), "u-1");
+        let json = serde_json::to_string(&scope).expect("serialize");
+        assert!(json.contains(r#""contextId":{"_eq":"ctx-1"}"#), "{json}");
+        assert!(
+            json.contains(r#""ancestors":{"_contains":["ctx-1"]}"#),
+            "{json}"
+        );
+    }
+
+    /// Unscoped, the feed is the contexts this reader belongs to.
+    #[test]
+    fn an_unscoped_feed_follows_membership() {
+        let json = serde_json::to_string(&feed_scope(None, "u-1")).expect("serialize");
+        assert!(json.contains("context"), "{json}");
+        assert!(json.contains("u-1"), "{json}");
     }
 }

@@ -51,9 +51,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     let refresh = use_signal(|| 0u32);
     let sub_ctx = crate::graphql::gql_escape(&context_id);
     crate::subscription::use_live(
-        format!(
-            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _eq: \"active\" }} }}) {{ nodeId }} }}"
-        ),
+        crate::graphql::relations_changed(crate::graphql::relation_named(&sub_ctx, "active")),
         refresh,
     );
     let rev = *refresh.read();

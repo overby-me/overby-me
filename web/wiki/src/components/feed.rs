@@ -86,10 +86,12 @@ pub fn FeedList(
     // Ids the stream has named, waiting to be fetched in the feed's row shape.
     let arrivals = use_signal(Vec::<String>::new);
     {
-        let scope = crate::graphql::feed_scope(
-            context_id.as_deref(),
-            user_id.as_deref().unwrap_or_default(),
-        );
+        let scope = || {
+            crate::graphql::feed_scope(
+                context_id.as_deref(),
+                user_id.as_deref().unwrap_or_default(),
+            )
+        };
         if user_id.is_some() {
             // STREAMED ids. A change token could only say "something appeared
             // somewhere in scope", which cost a page fetch to find out what; the
@@ -100,9 +102,11 @@ pub fn FeedList(
                     .as_string()
                     .unwrap_or_default()
             });
-            let stream = crate::subscription::use_graphql_subscription(
-                crate::graphql::nodes_stream(&scope, &since, "id"),
-            );
+            let stream = crate::subscription::use_graphql_subscription(crate::graphql::id_stream(
+                scope(),
+                &since,
+                100,
+            ));
             let mut live = live;
             let mut arrivals_sig = arrivals;
             use_effect(move || {
@@ -216,8 +220,10 @@ pub fn FeedList(
                     .map(|n| n.id.0.clone())
                     .chain(pending.peek().iter().map(|n| n.id.0.clone()))
                     .collect();
-                let wanted: Vec<String> =
-                    arrived.into_iter().filter(|id| !seen.contains(id)).collect();
+                let wanted: Vec<String> = arrived
+                    .into_iter()
+                    .filter(|id| !seen.contains(id))
+                    .collect();
                 let fresh: Vec<model::ChildNodeFields> =
                     graphql::query_nodes_by_ids(token.as_deref(), &wanted).await;
                 if fresh.is_empty() {

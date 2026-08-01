@@ -205,7 +205,7 @@ pub fn FolderApp(
     let refresh = use_signal(|| 0u32);
     let sub_node = crate::graphql::gql_escape(&node_id);
     crate::subscription::use_live(
-        crate::subscription::nodes_changed(&format!("parentId: {{ _eq: \"{sub_node}\" }}")),
+        crate::graphql::nodes_changed_typed(crate::graphql::children_of(&sub_node)),
         refresh,
     );
     // Sort the resolver-provided children once per mount rather than re-cloning +

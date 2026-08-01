@@ -246,12 +246,13 @@ fn SpeakList(
     // hall each time the clock ticks.
     let sub_list = crate::graphql::gql_escape(&list_id);
     crate::subscription::use_live(
-        crate::subscription::nodes_changed(&format!(
-            "_or: [\
-             {{ parentId: {{ _eq: \"{sub_list}\" }}, mimeId: {{ _eq: \"speak/speak\" }} }}, \
-             {{ id: {{ _eq: \"{sub_list}\" }} }}\
-             ]"
-        )),
+        crate::graphql::nodes_changed_typed(crate::graphql::NodesBoolExp {
+            or: Some(vec![
+                crate::graphql::children_of_mime(&sub_list, "speak/speak"),
+                crate::graphql::node_is(&sub_list),
+            ]),
+            ..Default::default()
+        }),
         refresh,
     );
 

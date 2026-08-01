@@ -18,6 +18,7 @@ mod pixel;
 mod screen;
 mod search;
 mod social;
+mod subscriptions;
 mod types;
 mod vote;
 
@@ -29,6 +30,7 @@ pub use pixel::*;
 pub use screen::*;
 pub use search::*;
 pub use social::*;
+pub use subscriptions::*;
 pub use types::*;
 pub use vote::*;
 

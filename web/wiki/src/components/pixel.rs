@@ -209,8 +209,10 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             .unwrap_or_default()
     });
     let stream_id = dom_id.clone();
-    let stream =
-        crate::subscription::use_graphql_subscription(graphql::canvas_stream(&canvas_id, &since));
+    let stream = crate::subscription::use_graphql_subscription(graphql::cell_stream(
+        graphql::children_of_mime(&canvas_id, "pixel/pixel"),
+        &since,
+    ));
     use_effect(move || {
         let Some(payload) = stream.read().clone() else {
             return;
@@ -630,7 +632,16 @@ fn AddCanvasButton(context_id: String) -> Element {
         let token = session.read().access_token.clone();
         busy.set(true);
         spawn(async move {
-            match graphql::create_canvas(token.as_deref(), &ctx, &title, DEFAULT_SIDE, DEFAULT_SIDE, 60).await {
+            match graphql::create_canvas(
+                token.as_deref(),
+                &ctx,
+                &title,
+                DEFAULT_SIDE,
+                DEFAULT_SIDE,
+                60,
+            )
+            .await
+            {
                 Ok(_) => {
                     crate::session::bump_data_version();
                     busy.set(false);

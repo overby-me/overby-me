@@ -46,9 +46,10 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
     let refresh = use_signal(|| 0u32);
     let sub_ctx = crate::graphql::gql_escape(&context_id);
     crate::subscription::use_live(
-        format!(
-            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _in: [\"active\", \"screenComments\", \"screenFeed\"] }} }}) {{ nodeId name }} }}"
-        ),
+        crate::graphql::relations_changed(crate::graphql::relations_named(
+            &sub_ctx,
+            &["active", "screenComments", "screenFeed"],
+        )),
         refresh,
     );
     let rev = *refresh.read();
@@ -117,9 +118,7 @@ pub fn ScreenApp(node: NodeWithChildren) -> Element {
     // view on the projector when it (or the active node) changes.
     let focus_refresh = use_signal(|| 0u32);
     crate::subscription::use_live(
-        format!(
-            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _like: \"focus:%\" }} }}) {{ name }} }}"
-        ),
+        crate::graphql::relations_changed(crate::graphql::relations_like(&sub_ctx, "focus:%")),
         focus_refresh,
     );
     let frev = *focus_refresh.read();
@@ -251,9 +250,7 @@ pub fn FollowApp(node: NodeWithChildren) -> Element {
     let refresh = use_signal(|| 0u32);
     let sub_ctx = crate::graphql::gql_escape(&context_id);
     crate::subscription::use_live(
-        format!(
-            "subscription {{ relations(where: {{ parentId: {{ _eq: \"{sub_ctx}\" }}, name: {{ _eq: \"active\" }} }}) {{ nodeId }} }}"
-        ),
+        crate::graphql::relations_changed(crate::graphql::relation_named(&sub_ctx, "active")),
         refresh,
     );
     let rev = *refresh.read();

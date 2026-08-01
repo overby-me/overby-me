@@ -242,12 +242,7 @@ pub fn Layout() -> Element {
             .clone()
             .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".to_string());
         crate::subscription::use_live(
-            format!(
-                // See home_list: an accepted invitation is an update, invisible to a
-                // selection of ids alone.
-                "subscription {{ members(where: {{ nodeId: {{ _eq: \"{}\" }} }}) {{ id accepted active }} }}",
-                graphql::gql_escape(&sub_uid)
-            ),
+            crate::graphql::members_changed(crate::graphql::memberships_of(&sub_uid)),
             invite_refresh,
         );
         let rev = *invite_refresh.read();

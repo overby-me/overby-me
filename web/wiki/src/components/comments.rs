@@ -185,18 +185,8 @@ pub fn CommentSection(node_id: String, context_id: Option<String>) -> Element {
     // directly under this node) changes, so new comments and replies appear at
     // once — and drive the "someone replied to you" notification below.
     {
-        let filter = match &context_id {
-            Some(ctx) => format!(
-                "contextId: {{ _eq: \"{}\" }}",
-                crate::graphql::gql_escape(ctx)
-            ),
-            None => format!(
-                "parentId: {{ _eq: \"{}\" }}",
-                crate::graphql::gql_escape(&node_id)
-            ),
-        };
         crate::subscription::use_live_children(
-            format!("{filter}, mimeId: {{ _eq: \"vote/comment\" }}"),
+            crate::graphql::in_context_or_under(context_id.as_deref(), &node_id, "vote/comment"),
             node_id.clone(),
             refresh,
         );
@@ -408,18 +398,12 @@ fn CommentThread(
     // wakes only for its own children.
     let own = use_signal(|| 0u32);
     {
-        let filter = match &context_id {
-            Some(ctx) => format!(
-                "contextId: {{ _eq: \"{}\" }}",
-                crate::graphql::gql_escape(ctx)
-            ),
-            None => format!(
-                "parentId: {{ _eq: \"{}\" }}",
-                crate::graphql::gql_escape(&comment.id.0)
-            ),
-        };
         crate::subscription::use_live_children(
-            format!("{filter}, mimeId: {{ _eq: \"vote/comment\" }}"),
+            crate::graphql::in_context_or_under(
+                context_id.as_deref(),
+                &comment.id.0,
+                "vote/comment",
+            ),
             comment.id.0.clone(),
             own,
         );
@@ -790,20 +774,10 @@ fn ReactionBar(comment_id: String, context_id: Option<String>, can_react: bool) 
     // in the context refreshes the bars on screen, which is a handful of rows.
     //
     // Without a context there is nothing to share on, so it stays per-comment.
-    let scope = match &context_id {
-        Some(ctx) => format!(
-            "contextId: {{ _eq: \"{}\" }}",
-            crate::graphql::gql_escape(ctx)
-        ),
-        None => format!(
-            "parentId: {{ _eq: \"{}\" }}",
-            crate::graphql::gql_escape(&comment_id)
-        ),
-    };
     // Only this comment's reactions wake this bar. A context-wide token woke all
     // of them, so forty comments on a motion meant forty refetches for one tap.
     crate::subscription::use_live_children(
-        format!("{scope}, mimeId: {{ _eq: \"vote/reaction\" }}"),
+        crate::graphql::in_context_or_under(context_id.as_deref(), &comment_id, "vote/reaction"),
         comment_id.clone(),
         refresh,
     );

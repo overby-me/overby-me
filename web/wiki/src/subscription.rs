@@ -35,8 +35,8 @@ use crate::session::use_session;
 /// cover the rows whose change should trigger a refresh. Also refreshes when the
 /// window regains focus (#122), so a view recovers immediately if its socket was
 /// dropped while the tab was in the background.
-pub fn use_live(query: String, mut refresh: Signal<u32>) {
-    let sub = use_graphql_subscription(query);
+pub fn use_live(wire: crate::graphql::Wire, mut refresh: Signal<u32>) {
+    let sub = use_graphql_subscription(wire);
     let coalescer = use_hook(|| Rc::new(RefCell::new(Coalescer::default())));
     let timer: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
     let runtime = Runtime::current();
@@ -132,27 +132,6 @@ impl Coalescer {
     }
 }
 
-/// A node subscription that carries a CHANGE TOKEN instead of the rows.
-///
-/// `use_live` ignores the payload — it only needs to know that something under
-/// `where_clause` changed. Hasura, meanwhile, pushes the whole result to every
-/// subscriber whenever it differs, so selecting rows means a poll with 500 votes
-/// shipped 23 KB to every device on every vote cast. Measured against
-/// production: 23,011 bytes as rows, 101 bytes as `count` + `max(updatedAt)` —
-/// which moves on exactly the same events, since an insert changes the count, an
-/// edit changes the timestamp, and a delete in this wiki is an update that does
-/// both.
-///
-/// Only for `nodes`. `relations` and `members` expose no timestamp to aggregate,
-/// so a row EDITED in place (the chair moving the room's active node) would
-/// leave count and max(id) untouched and never reach the projector.
-pub fn nodes_changed(where_clause: &str) -> String {
-    format!(
-        "subscription {{ nodesAggregate(where: {{ {where_clause} }}) \
-         {{ aggregate {{ count max {{ updatedAt }} }} }} }}"
-    )
-}
-
 /// Refresh only when a streamed row belongs to YOU.
 ///
 /// A change token can only say "something under this filter changed", so every
@@ -167,15 +146,18 @@ pub fn nodes_changed(where_clause: &str) -> String {
 ///
 /// Every watcher of the same scope sends the SAME query, so the hub folds them
 /// into one server-side subscription however many are on screen.
-pub fn use_live_children(where_clause: String, mine: String, mut refresh: Signal<u32>) {
+pub fn use_live_children(
+    where_clause: crate::graphql::NodesBoolExp,
+    mine: String,
+    mut refresh: Signal<u32>,
+) {
     let since = use_hook(|| {
         js_sys::Date::new_0()
             .to_iso_string()
             .as_string()
             .unwrap_or_default()
     });
-    let stream =
-        use_graphql_subscription(crate::graphql::nodes_stream(&where_clause, &since, "parentId"));
+    let stream = use_graphql_subscription(crate::graphql::parent_stream(where_clause, &since, 100));
     use_effect(move || {
         let Some(payload) = stream.read().clone() else {
             return;
@@ -230,13 +212,20 @@ pub fn use_focus_refresh(mut refresh: Signal<u32>) {
 ///
 /// The hub connects on the first subscription and closes after the last one
 /// goes, so a signed-out reader with no live views holds no socket at all.
-pub fn use_graphql_subscription(query: String) -> Signal<Option<serde_json::Value>> {
+pub fn use_graphql_subscription(wire: crate::graphql::Wire) -> Signal<Option<serde_json::Value>> {
     // Subscribing to the session hook keeps this component in the reactive
     // graph; the fresh token itself is re-read at each (re)connect below.
     let _session = use_session();
     let data = use_signal(|| None::<serde_json::Value>);
 
-    let handle = use_hook(|| Hub::subscribe(query.clone(), data, Runtime::current()));
+    let handle = use_hook(|| {
+        Hub::subscribe(
+            wire.query.clone(),
+            wire.variables.clone(),
+            data,
+            Runtime::current(),
+        )
+    });
 
     use_drop(move || {
         // Deregister BEFORE anything else: a frame already in flight for this id
@@ -258,9 +247,13 @@ pub fn use_graphql_subscription(query: String) -> Signal<Option<serde_json::Valu
 ///
 /// Generic over the sink so the bookkeeping can be tested without a renderer.
 struct Registry<S> {
-    /// Server-side subscription id -> the query and everyone waiting on it.
-    subs: HashMap<String, (String, Vec<(u64, S)>)>,
-    /// Query text -> the id already carrying it.
+    /// Server-side subscription id -> the query, its variables, and everyone
+    /// waiting on it.
+    subs: HashMap<String, (String, serde_json::Value, Vec<(u64, S)>)>,
+    /// Query text AND variables -> the id already carrying it. Both, because two
+    /// components can now send the same query for different rows: one canvas and
+    /// another are the same operation with a different id in the variables, and
+    /// folding them together would cross their traffic.
     by_query: HashMap<String, String>,
     next_id: u64,
     next_sink: u64,
@@ -287,44 +280,52 @@ struct Handle {
 impl<S> Registry<S> {
     /// Add a listener. Returns its handle, and the query to SEND if this is the
     /// first listener for it — `None` means the socket already carries it.
-    fn register(&mut self, query: String, sink: S) -> (Handle, Option<String>) {
+    fn register(
+        &mut self,
+        query: String,
+        variables: serde_json::Value,
+        sink: S,
+    ) -> (Handle, Option<(String, serde_json::Value)>) {
         self.next_sink += 1;
         let sink_id = self.next_sink;
-        if let Some(id) = self.by_query.get(&query).cloned() {
-            if let Some((_, sinks)) = self.subs.get_mut(&id) {
+        let key = format!("{query}\u{1}{variables}");
+        if let Some(id) = self.by_query.get(&key).cloned() {
+            if let Some((_, _, sinks)) = self.subs.get_mut(&id) {
                 sinks.push((sink_id, sink));
                 return (Handle { id, sink: sink_id }, None);
             }
         }
         self.next_id += 1;
         let id = self.next_id.to_string();
-        self.subs
-            .insert(id.clone(), (query.clone(), vec![(sink_id, sink)]));
-        self.by_query.insert(query.clone(), id.clone());
-        (Handle { id, sink: sink_id }, Some(query))
+        self.subs.insert(
+            id.clone(),
+            (query.clone(), variables.clone(), vec![(sink_id, sink)]),
+        );
+        self.by_query.insert(key, id.clone());
+        (Handle { id, sink: sink_id }, Some((query, variables)))
     }
 
     /// Remove a listener. Returns the id to send `complete` for once the last
     /// listener for that query is gone.
     fn deregister(&mut self, handle: &Handle) -> Option<String> {
-        let (query, empty) = {
-            let (query, sinks) = self.subs.get_mut(&handle.id)?;
+        let (key, empty) = {
+            let (query, variables, sinks) = self.subs.get_mut(&handle.id)?;
             sinks.retain(|(s, _)| *s != handle.sink);
-            (query.clone(), sinks.is_empty())
+            (format!("{query}\u{1}{variables}"), sinks.is_empty())
         };
         if !empty {
             return None;
         }
         self.subs.remove(&handle.id);
-        self.by_query.remove(&query);
+        self.by_query.remove(&key);
         Some(handle.id.clone())
     }
 
     /// Every live (id, query), for re-sending after a reconnect.
-    fn live(&self) -> Vec<(String, String)> {
+    fn live(&self) -> Vec<(String, String, serde_json::Value)> {
         self.subs
             .iter()
-            .map(|(id, (q, _))| (id.clone(), q.clone()))
+            .map(|(id, (q, v, _))| (id.clone(), q.clone(), v.clone()))
             .collect()
     }
 
@@ -366,17 +367,20 @@ impl Hub {
     /// socket already carries costs nothing but a place in its listener list.
     fn subscribe(
         query: String,
+        variables: serde_json::Value,
         sink: Signal<Option<serde_json::Value>>,
         runtime: Rc<Runtime>,
     ) -> Handle {
         let (handle, to_send, acked) = Self::with(|st| {
             st.runtime.get_or_insert(runtime);
-            let (handle, to_send) = st.subs.register(query, sink);
+            let (handle, to_send) = st.subs.register(query, variables, sink);
             (handle, to_send, st.acked)
         });
         match (to_send, acked) {
             // New to the socket, and the socket is ready for it.
-            (Some(query), true) => Self::send_subscribe(&handle.id, &query),
+            (Some((query, variables)), true) => {
+                Self::send_subscribe(&handle.id, &query, &variables)
+            }
             // New, but the socket is not up yet: `connection_ack` sends it.
             (Some(_), false) => Self::ensure_connected(),
             // Already carried; the existing subscription feeds this sink too.
@@ -416,11 +420,11 @@ impl Hub {
         }
     }
 
-    fn send_subscribe(id: &str, query: &str) {
+    fn send_subscribe(id: &str, query: &str, variables: &serde_json::Value) {
         Self::send(&json!({
             "id": id,
             "type": "subscribe",
-            "payload": { "query": query },
+            "payload": { "query": query, "variables": variables },
         }));
     }
 
@@ -481,13 +485,13 @@ impl Hub {
                     // were registered while the socket was down. Hasura answers
                     // each with the current result, which is what makes a
                     // reconnect self-healing for the views.
-                    let pending: Vec<(String, String)> = Self::with(|st| {
+                    let pending: Vec<(String, String, serde_json::Value)> = Self::with(|st| {
                         st.acked = true;
                         st.attempts = 0;
                         st.subs.live()
                     });
-                    for (id, query) in pending {
-                        Self::send_subscribe(&id, &query);
+                    for (id, query, variables) in pending {
+                        Self::send_subscribe(&id, &query, &variables);
                     }
                 }
                 // Keepalive: the server pings, we pong (graphql-transport-ws).
@@ -501,7 +505,7 @@ impl Hub {
                             .subs
                             .subs
                             .get(id)
-                            .map(|(_, sinks)| sinks.iter().map(|(_, s)| *s).collect())
+                            .map(|(_, _, sinks)| sinks.iter().map(|(_, s)| *s).collect())
                             .unwrap_or_default();
                         st.runtime.clone().map(|rt| (sinks, rt))
                     });
@@ -656,24 +660,41 @@ mod tests {
     #[test]
     fn identical_queries_share_one_subscription() {
         let mut r: Registry<u32> = Registry::default();
-        let (h1, send1) = r.register("sub A".into(), 1);
-        let (h2, send2) = r.register("sub A".into(), 2);
-        assert_eq!(
-            send1.as_deref(),
-            Some("sub A"),
-            "the first must go to the server"
-        );
+        let v = serde_json::json!({"whereClause": {"parentId": {"_eq": "a"}}});
+        let (h1, send1) = r.register("sub A".into(), v.clone(), 1);
+        let (h2, send2) = r.register("sub A".into(), v.clone(), 2);
+        assert!(send1.is_some(), "the first must go to the server");
         assert_eq!(send2, None, "the second must ride along");
         assert_eq!(h1.id, h2.id, "both listen to the same subscription");
         assert_eq!(r.live().len(), 1);
-
-        // Both sinks are fed by the one subscription.
-        let sinks: Vec<u32> = r.subs[&h1.id].1.iter().map(|(_, s)| *s).collect();
+        let sinks: Vec<u32> = r.subs[&h1.id].2.iter().map(|(_, s)| *s).collect();
         assert_eq!(sinks, vec![1, 2]);
+    }
 
-        // A different question is its own subscription.
-        let (_, send3) = r.register("sub B".into(), 3);
-        assert_eq!(send3.as_deref(), Some("sub B"));
+    /// The same query with DIFFERENT variables is a different subscription.
+    ///
+    /// This is what typed operations changed: the filter used to be baked into
+    /// the query string, so two canvases were two strings. Now they are one
+    /// string and two variable sets, and folding them together would have crossed
+    /// their traffic — one canvas painting the other.
+    #[test]
+    fn the_same_query_with_other_variables_does_not_share() {
+        let mut r: Registry<u32> = Registry::default();
+        let (h1, send1) = r.register(
+            "sub A".into(),
+            serde_json::json!({"whereClause": {"parentId": {"_eq": "canvas-1"}}}),
+            1,
+        );
+        let (h2, send2) = r.register(
+            "sub A".into(),
+            serde_json::json!({"whereClause": {"parentId": {"_eq": "canvas-2"}}}),
+            2,
+        );
+        assert!(
+            send1.is_some() && send2.is_some(),
+            "both must reach the server"
+        );
+        assert_ne!(h1.id, h2.id, "two canvases are two subscriptions");
         assert_eq!(r.live().len(), 2);
     }
 
@@ -681,8 +702,9 @@ mod tests {
     #[test]
     fn a_shared_subscription_outlives_its_first_listener() {
         let mut r: Registry<u32> = Registry::default();
-        let (h1, _) = r.register("sub A".into(), 1);
-        let (h2, _) = r.register("sub A".into(), 2);
+        let v = serde_json::json!({"x": 1});
+        let (h1, _) = r.register("sub A".into(), v.clone(), 1);
+        let (h2, _) = r.register("sub A".into(), v.clone(), 2);
         assert_eq!(
             r.deregister(&h1),
             None,
@@ -695,15 +717,15 @@ mod tests {
             "the socket may close once nothing is listening"
         );
         // And the query is free to be registered afresh afterwards.
-        let (_, send) = r.register("sub A".into(), 3);
-        assert_eq!(send.as_deref(), Some("sub A"));
+        let (_, send) = r.register("sub A".into(), v, 3);
+        assert!(send.is_some());
     }
 
     /// Deregistering twice (or an unknown handle) is harmless.
     #[test]
     fn deregistering_an_unknown_listener_is_a_no_op() {
         let mut r: Registry<u32> = Registry::default();
-        let (h, _) = r.register("sub A".into(), 1);
+        let (h, _) = r.register("sub A".into(), serde_json::Value::Null, 1);
         assert!(r.deregister(&h).is_some());
         assert_eq!(r.deregister(&h), None);
     }

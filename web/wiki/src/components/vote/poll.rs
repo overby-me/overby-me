@@ -201,8 +201,9 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     // Live results: any vote cast on this poll re-runs the tally / voted checks.
     let sub_poll = crate::graphql::gql_escape(&poll_id);
     crate::subscription::use_live(
-        crate::subscription::nodes_changed(&format!(
-            "parentId: {{ _eq: \"{sub_poll}\" }}, mimeId: {{ _eq: \"vote/vote\" }}"
+        crate::graphql::nodes_changed_typed(crate::graphql::children_of_mime(
+            &sub_poll,
+            "vote/vote",
         )),
         refresh,
     );
@@ -217,10 +218,9 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
             .as_string()
             .unwrap_or_default()
     });
-    let poll_stream = crate::subscription::use_graphql_subscription(graphql::node_state_stream(
-        &sub_poll,
+    let poll_stream = crate::subscription::use_graphql_subscription(graphql::state_stream(
+        graphql::node_is(&sub_poll),
         &poll_since,
-        "id mutable",
     ));
     use_effect(move || {
         let Some(payload) = poll_stream.read().clone() else {
