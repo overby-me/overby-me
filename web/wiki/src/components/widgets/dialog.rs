@@ -16,6 +16,11 @@ pub fn Dialog(
     headline: String,
     actions: Element,
     icon: Option<String>,
+    /// A drawn glyph in place of a ligature name, for an icon the webfont does
+    /// not have (see `loader::feedback_glyph`). Takes precedence over `icon`,
+    /// and goes inside the same span, so it is sized and coloured identically.
+    #[props(default)]
+    icon_glyph: Option<Element>,
     /// This dialog is a FORM rather than a question. On a phone it then takes
     /// the whole screen, which is what M3 asks for and what the content wants:
     /// a card floating in a scrim, with a keyboard over its lower half and its
@@ -67,7 +72,9 @@ pub fn Dialog(
                         });
                     },
                 }
-                if let Some(icon) = icon {
+                if let Some(glyph) = icon_glyph {
+                    span { class: "m3-dialog-icon material-icons", {glyph} }
+                } else if let Some(icon) = icon {
                     span { class: "m3-dialog-icon material-icons", "{icon}" }
                 }
                 h2 { class: "m3-dialog-headline", "{headline}" }

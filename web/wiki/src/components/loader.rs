@@ -471,9 +471,48 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
 /// An icon element for a mime type: a `.material-icons` span holding the ligature
 /// so the Material Icons webfont renders it. Use in place of the old emoji text.
 pub fn icon_el(mime_id: &str) -> Element {
+    if matches!(mime_id, "wiki/feedback" | "app/feedback") {
+        return feedback_icon_el();
+    }
     let name = mime_icon(mime_id);
     rsx! {
         span { class: "material-icons", "{name}" }
+    }
+}
+
+/// A speech bubble with a five-pointed star, drawn rather than typed.
+///
+/// The font's own bubble-with-a-star (`reviews`) puts a FOUR-pointed sparkle in
+/// it, and at the 20-24px the rail and cards actually use, the sparkle's concave
+/// sides disappear and it reads as a plus — all but identical to `add_comment`.
+/// Nothing else in the font is a bubble with a star, so the shape is drawn here:
+/// one path, the star knocked out of the bubble by `evenodd`.
+///
+/// Wrapped in a `.material-icons` span so every rule that already sizes, colours
+/// and aligns an icon keeps applying, with the `1em` box in CSS following the
+/// font-size those rules set.
+pub fn feedback_icon_el() -> Element {
+    rsx! {
+        span { class: "material-icons", {feedback_glyph()} }
+    }
+}
+
+/// The bare drawn glyph, for a slot that supplies its own icon span (the dialog
+/// puts `.m3-dialog-icon` on it, which is what sizes it there).
+pub fn feedback_glyph() -> Element {
+    rsx! {
+        svg {
+            view_box: "0 0 24 24",
+            fill: "currentColor",
+            "aria-hidden": "true",
+            "focusable": "false",
+            path {
+                fill_rule: "evenodd",
+                d: "M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z \
+                    M12.00 3.40 L13.48 7.36 L17.71 7.55 L14.40 10.18 L15.53 14.25 \
+                    L12.00 11.92 L8.47 14.25 L9.60 10.18 L6.29 7.55 L10.52 7.36Z",
+            }
+        }
     }
 }
 

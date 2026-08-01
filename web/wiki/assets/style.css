@@ -1741,6 +1741,18 @@ html {
 	vertical-align: middle;
 }
 
+/* A drawn glyph standing in for a ligature (see loader::feedback_icon_el): the
+   span keeps every rule that sizes and colours an icon, and the svg takes its
+   box from the font-size those rules set, so it lines up with its neighbours
+   wherever it is used. `block` drops the inline baseline gap that would
+   otherwise make the span a pixel taller than a lettered icon. */
+.material-icons > svg {
+	width: 1em;
+	height: 1em;
+	display: block;
+	fill: currentColor;
+}
+
 /* Icons scale to their container (small avatars, the app rail). */
 .avatar.small .material-icons {
 	font-size: var(--md-sys-typescale-body-large-size);

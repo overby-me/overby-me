@@ -228,7 +228,7 @@ pub fn FeedbackApp() -> Element {
     rsx! {
         div { class: "card",
             div { class: "card-header",
-                div { class: "avatar small", span { class: "material-icons", "reviews" } }
+                div { class: "avatar small", {super::loader::feedback_icon_el()} }
                 h3 { class: "title-medium",
                     if is_owner { "{t(\"feedback.all\")}" } else { "{t(\"feedback.yours\")}" }
                 }
@@ -283,7 +283,7 @@ pub fn FeedbackApp() -> Element {
                 } else if items.is_empty() {
                     div { class: "empty-state empty-state-sm",
                         div { class: "empty-state-orb empty-state-orb-sm",
-                            span { class: "material-icons", "reviews" }
+                            {super::loader::feedback_icon_el()}
                         }
                         p { class: "empty-state-body",
                             // Nothing matching and nothing at all are different
