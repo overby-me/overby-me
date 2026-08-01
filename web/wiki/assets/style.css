@@ -1851,6 +1851,16 @@ html {
 	font-size: 0.5rem;
 }
 
+/* Bare (`.node-icon`, the drawer's node tree) the folder glyph is NOT drawn in
+   the avatar's on-primary white — the container paints it in
+   `--md-on-surface-variant`, a muted grey-green. The near-black letter above
+   then sat on it at a contrast ratio of 1.84 in light and 1.31 in dark, which
+   is to say invisible. Here the letter is the surface it is punched out to, the
+   natural counterpart of the glyph's own colour: measured 9.09 and 10.13. */
+.node-icon .folder-letter {
+	color: var(--md-surface);
+}
+
 /* Floating action button (Material pattern; dioxus-primitives has no FAB). */
 .fab {
 	position: fixed;
