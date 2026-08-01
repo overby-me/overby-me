@@ -78,6 +78,9 @@ pub struct Run {
     pub bold: bool,
     #[serde(default)]
     pub italic: bool,
+    /// Kept as a loose value because the shape varies: this parser emits a
+    /// bool, OOXML itself carries a style name (`single`, `dotted`, `none`), and
+    /// some producers write an object. [`is_underlined`] is what asks.
     #[serde(default)]
     pub underline: Option<serde_json::Value>,
     #[serde(default)]
@@ -153,6 +156,32 @@ pub fn heading_level(style_id: Option<&str>, outline_level: Option<i64>) -> Opti
     }
 }
 
+/// Whether a run is actually underlined.
+///
+/// The field was once tested with `.is_some()`, which underlined every run in
+/// every document: this parser writes `false` for a run WITHOUT an underline,
+/// and `Some(false)` is very much some. A loose type plus a truthiness check is
+/// a bug waiting to be reported, and it was.
+///
+/// Handles the shapes an underline is written in: a bool, a style name where
+/// `none` means none, or an object carrying that name under `val`.
+pub fn is_underlined(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::Bool(on)) => *on,
+        Some(serde_json::Value::String(style)) => !matches!(style.as_str(), "" | "none"),
+        Some(serde_json::Value::Object(map)) => match map.get("val") {
+            Some(serde_json::Value::String(style)) => !matches!(style.as_str(), "" | "none"),
+            Some(serde_json::Value::Bool(on)) => *on,
+            // An object with no `val` at all still says "there is an underline
+            // here" more than it says there is not.
+            None => !map.is_empty(),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 /// The inline CSS for a run, or an empty string when it needs none.
 ///
 /// Bold and italic are elements rather than styles (see `RunSpan`), so this
@@ -170,6 +199,15 @@ pub fn run_style(run: &Run) -> String {
         Some("superscript") => css.push_str("vertical-align:super;font-size:0.8em;"),
         Some("subscript") => css.push_str("vertical-align:sub;font-size:0.8em;"),
         _ => {}
+    }
+    // Decoration rather than elements, and both at once when both are set. The
+    // element chain this replaced could only pick one, so a bold underlined run
+    // silently lost its underline.
+    match (is_underlined(run.underline.as_ref()), run.strikethrough) {
+        (true, true) => css.push_str("text-decoration:underline line-through;"),
+        (true, false) => css.push_str("text-decoration:underline;"),
+        (false, true) => css.push_str("text-decoration:line-through;"),
+        (false, false) => {}
     }
     css
 }
@@ -347,16 +385,15 @@ fn RunSpan(run: Run) -> Element {
     // Word writes a hyperlink as an ordinary run carrying a target, so the
     // anchor is wrapped around whatever the run turns out to be.
     let inner = rsx! {
+        // Bold and italic are elements because they are MEANING and a screen
+        // reader announces them; underline and strikethrough are decoration and
+        // live in the style, so every combination survives.
         if run.bold && run.italic {
             strong { em { style: "{style}", "{text}" } }
         } else if run.bold {
             strong { style: "{style}", "{text}" }
         } else if run.italic {
             em { style: "{style}", "{text}" }
-        } else if run.underline.is_some() {
-            u { style: "{style}", "{text}" }
-        } else if run.strikethrough {
-            s { style: "{style}", "{text}" }
         } else {
             span { style: "{style}", "{text}" }
         }
@@ -427,6 +464,79 @@ mod tests {
             };
             assert_eq!(run_style(&r), "", "{junk:?}");
         }
+    }
+
+    /// The bug this exists to prevent: the parser writes `false` for a run with
+    /// NO underline, and the old check was `.is_some()`, so every run in every
+    /// document came out underlined. Reported from a real Word document that
+    /// contains no underline at all — 312 of its 315 runs carry `false`.
+    #[test]
+    fn a_run_that_is_not_underlined_is_not_underlined() {
+        use serde_json::json;
+        assert!(!is_underlined(Some(&json!(false))), "the reported case");
+        assert!(!is_underlined(None));
+        assert!(!is_underlined(Some(&json!(null))));
+        assert!(is_underlined(Some(&json!(true))));
+
+        // And through the styling, which is what actually reaches the page.
+        let plain = Run {
+            underline: Some(json!(false)),
+            ..Default::default()
+        };
+        assert!(
+            !run_style(&plain).contains("underline"),
+            "{}",
+            run_style(&plain)
+        );
+        let underlined = Run {
+            underline: Some(json!(true)),
+            ..Default::default()
+        };
+        assert!(run_style(&underlined).contains("text-decoration:underline;"));
+    }
+
+    /// OOXML itself writes an underline as a style NAME, and `none` is one of
+    /// them. A producer that writes the name rather than a bool must not turn
+    /// every run into an underlined one the same way.
+    #[test]
+    fn an_underline_style_of_none_is_not_an_underline() {
+        use serde_json::json;
+        for off in [
+            json!("none"),
+            json!(""),
+            json!({"val": "none"}),
+            json!({"val": false}),
+        ] {
+            assert!(!is_underlined(Some(&off)), "{off}");
+        }
+        for on in [
+            json!("single"),
+            json!("dotted"),
+            json!({"val": "wave"}),
+            json!({"val": true}),
+        ] {
+            assert!(is_underlined(Some(&on)), "{on}");
+        }
+    }
+
+    /// Underline and strikethrough are decoration and combine; the element
+    /// chain this replaced could only pick one, so a bold underlined run lost
+    /// its underline entirely.
+    #[test]
+    fn decoration_survives_bold_and_combines() {
+        use serde_json::json;
+        let both = Run {
+            underline: Some(json!(true)),
+            strikethrough: true,
+            bold: true,
+            ..Default::default()
+        };
+        assert_eq!(run_style(&both), "text-decoration:underline line-through;");
+        let struck = Run {
+            strikethrough: true,
+            ..Default::default()
+        };
+        assert_eq!(run_style(&struck), "text-decoration:line-through;");
     }
 
     #[test]
