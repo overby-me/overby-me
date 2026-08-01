@@ -43,6 +43,7 @@ and each row names the check that backs it.
 | `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
 | Builder API: types inferred, alignments filled in | done for the common instructions, unwinding, attributes and metadata | `llvm-builder-smoke` |
 | Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 369 intrinsics LangRef gives a signature for | `llvm-opt-differential`, `llvm-upstream-verifier` |
+| Positions of an intrinsic that share one overloaded type have to agree | done for the 161 LangRef documents more than once | `llvm-upstream-assembler`, `llvm-upstream-verifier` |
 
 ## The round trip
 
@@ -78,8 +79,8 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 464 | 483 | 5 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 314 | 328 | 0 | `llvm-upstream-verifier` |
+| `llvm/test/Assembler` | 465 | 483 | 5 | `llvm-upstream-assembler` |
+| `llvm/test/Verifier` | 316 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 
@@ -158,6 +159,10 @@ where its type is the same in every documented instantiation.
 `corpus/intrinsic-attributes.nu` asks the assembler rather than LangRef,
 writing each of those `declare` lines out and reading back the attributes
 upstream replaced them with, 369 intrinsics.
+`corpus/intrinsic-overloads.nu` reads the same lines a fourth way, comparing
+the positions to each other rather than to a fixed type: two whose types
+vary *together* across every documented instantiation are one overloaded
+type, so 161 intrinsics know which of their positions have to agree.
 
 That table moves neither ratchet and is in the tree anyway. What it
 catches is a module that declares an intrinsic *consistently* wrongly, so

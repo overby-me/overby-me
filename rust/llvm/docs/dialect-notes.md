@@ -152,6 +152,28 @@ suffix together, so `call void @llvm.made.up.name.i32(i32 1, i32 2)`
 against a one-argument declaration names something that does not exist,
 and upstream says so.
 
+## Tied rather than fixed
+
+**Positions of an intrinsic that share one overloaded type have to agree
+about what it is.** LangRef documents an overloaded intrinsic once per
+instantiation, so two positions whose types vary *together* across all of
+them are one type rather than two: `llvm.umax` is `i32, i32 -> i32` and
+`<4 x i32>, <4 x i32> -> <4 x i32>`, so `llvm.umax(i8 0, i16 1)` names no
+instantiation there is. `corpus/intrinsic-overloads.nu` measures which
+positions those are, counting the result as position nought.
+
+The conclusion is drawn narrowly. A position whose type never varies is
+fixed rather than tied, and `table::signature` is what states those, so
+`llvm.ctlz` returns what its first argument is and takes an `i1` second
+whatever the first is. An intrinsic LangRef documents once says nothing:
+two positions agreeing in the only instantiation written down is not
+evidence they are one type.
+
+Upstream reports the mismatch in two places and so does this. A call to an
+intrinsic nothing declares is a parse error, there being no declaration
+left to build from it; a declaration written out with the same mismatch
+parses and fails the verifier.
+
 ## Replaced rather than carried
 
 **An intrinsic's attributes are the intrinsic's, not the module's.**

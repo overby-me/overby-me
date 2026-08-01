@@ -60,6 +60,13 @@ fn the_corpus_verifies() {
 /// produce, so a rule that stops firing fails loudly rather than quietly
 /// widening what we accept.
 const BROKEN: &[(&str, &str)] = &[
+    // The declared half of the tied-position rule. A declaration nothing
+    // calls is never looked at, upstream included, so the mismatch is
+    // reported at the call.
+    (
+        "declare i8 @llvm.umax.i8(i8, i16)\n\ndefine void @t() {\nentry:\n  %r = call i8 @llvm.umax.i8(i8 0, i16 1)\n  ret void\n}\n",
+        "calls an intrinsic with two types where it takes one",
+    ),
     (
         "define i8 @f(ptr addrspace(42) %p) {\nentry:\n  %r = call i8 %p(i32 0)\n  ret i8 %r\n}\n",
         "calls through address space 42 rather than 0",
@@ -1011,6 +1018,21 @@ const BROKEN: &[(&str, &str)] = &[
 
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
+    // Positions that share one overloaded type have to agree about what it
+    // is, or there is no instantiation for the declaration to be built
+    // from. `llvm.umax` ties both arguments to the result.
+    (
+        "define void @t() {\nentry:\n  %r = call i8 @llvm.umax(i8 0, i16 1)\n  ret void\n}\n",
+        "invalid intrinsic signature",
+    ),
+    (
+        "define void @t() {\nentry:\n  %r = call i16 @llvm.umax(i8 0, i8 1)\n  ret void\n}\n",
+        "invalid intrinsic signature",
+    ),
+    (
+        "define void @t() {\nentry:\n  %r = call i8 @llvm.fshl(i8 0, i8 1, i16 2)\n  ret void\n}\n",
+        "invalid intrinsic signature",
+    ),
     // A `flags:` is a set of words and each of them has to be one. The mask
     // names LLVM groups them under are not words a module may write.
     (
@@ -1698,6 +1720,17 @@ const VERIFIES: &[&str] = &[
     // Two conventions we had never heard of.
     "define amdgpu_ps float @f(i32 %x) {\nentry:\n  ret float 0.000000e+00\n}\n",
     "define riscv_vls_cc(32) void @g() {\nentry:\n  ret void\n}\n",
+    // A declaration whose tied positions disagree and that nothing calls is
+    // a module upstream reads, the verifier never reaching a declaration
+    // nobody uses. Only the call is refused.
+    "declare i8 @llvm.umax.i8(i8, i16)\n",
+    // The other direction of the tied-position rule. Agreeing is fine at
+    // any type, including a vector, and a position that is fixed rather
+    // than tied is not asked to agree with anything: `llvm.ctlz` returns
+    // what its first argument is and takes an `i1` second whatever that is.
+    "define void @t() {\nentry:\n  %r = call i8 @llvm.umax(i8 0, i8 1)\n  ret void\n}\n",
+    "define void @t() {\nentry:\n  %r = call <4 x i32> @llvm.umax(<4 x i32> zeroinitializer, <4 x i32> zeroinitializer)\n  ret void\n}\n",
+    "define void @t() {\nentry:\n  %r = call i8 @llvm.ctlz(i8 0, i1 true)\n  ret void\n}\n",
 ];
 
 #[test]

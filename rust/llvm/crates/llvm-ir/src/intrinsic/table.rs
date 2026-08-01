@@ -41,7 +41,13 @@ pub fn base_name(name: &str) -> &str {
 
 /// Drops trailing components that look like the types a call mangles into
 /// an intrinsic's name.
-fn strip_mangling(name: &str) -> &str {
+///
+/// This is the strict reading, and the tables generated from LangRef are
+/// keyed on it. Dropping any trailing component instead walks past the name
+/// into a shorter one that happens to be a prefix of it:
+/// `llvm.vp.cttz.elts` would come out as `llvm.vp.cttz`, which is a
+/// different intrinsic with a different shape.
+pub fn strip_mangling(name: &str) -> &str {
     let mangled = |part: &str| {
         let rest = part
             .strip_prefix("nxv")

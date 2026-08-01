@@ -1563,6 +1563,43 @@ layout, and `target-types.ll` wants an alignment per target extension type:
 `spirv.Event`, `spirv.DeviceEvent` and `spirv.Image` are eight,
 `aarch64.svcount` is two and `x86.AMX` has no size at all, so there is no
 default to fall back on and it is the same table the type parameters want.
+The pass after it took the fourth reading of the same `declare` lines, and
+it needed no oracle at all. `corpus/intrinsic-signatures.nu` records a
+position whose type is the same in every documented instantiation and
+records nothing where it varies, and what that throws away is the other
+half: two positions whose types vary *together* are one overloaded type.
+`llvm.umax` is documented `i32, i32 -> i32` and
+`<4 x i32>, <4 x i32> -> <4 x i32>`, so both arguments and the result are
+one type and `llvm.umax(i8 0, i16 1)` names no instantiation there is,
+which is the "invalid intrinsic signature" upstream reports.
+`corpus/intrinsic-overloads.nu`, 161 intrinsics, counting the result as
+position nought because upstream ties a result to an argument as readily as
+two arguments to each other. The conclusion is only drawn where the type
+actually varies and only from an intrinsic documented more than once: two
+positions that are `i1` everywhere are equal by being fixed rather than by
+being tied, which the signature table already says, and concluding an
+overload from a single `declare` line would be inventing one.
+Both halves of the rule were probed first, and they land in different
+places. An undeclared call reports at parse time, there being no
+declaration left to build from it. A declaration written out with the same
+mismatch is read, and the verifier refuses the *call* rather than the
+declaration: `declare i8 @llvm.umax.i8(i8, i16)` on its own is a module
+upstream reads, an unused declaration never being looked at.
+The rule cost a CodeGen file before it was right, which is the tree ratchet
+catching something neither suite does for the second time. The bug was not
+the table but the lookup: it dropped trailing components until something
+matched, so `llvm.vp.cttz.elts.i32.nxv16i1` reduced to `llvm.vp.cttz`,
+which is a different intrinsic whose result is its operand's type where
+`vp.cttz.elts` counts into an `i32`. Both new tables key on
+`table::strip_mangling` now, which drops only components shaped like a
+mangled type and is what the derivations use, so a name can no longer walk
+into a shorter one that is a prefix of it.
+`table::signature` and `table::base_name` still use the loose reading. That
+is recorded rather than changed here: it is the same bug, and moving it
+moves numbers that want their own measurement.
+Assembler 464 to 465 and Verifier 314 to 316, with the modules we wrongly
+accept fourteen to thirteen and seventeen to twelve. The eleven trees are
+back where they were.
 Acceptance: both numbers up again, recorded in the same commit.
 
 **B2. [partial] Differential check against real `opt -S -passes=verify`.** *(2026-07-27)*

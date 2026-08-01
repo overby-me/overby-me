@@ -17,4 +17,5 @@
 
 pub mod attributes;
 pub mod names;
+pub mod overloads;
 pub mod table;

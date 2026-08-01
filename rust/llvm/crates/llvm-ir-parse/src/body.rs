@@ -1513,6 +1513,48 @@ impl Parser {
         self.implied_intrinsics.contains(&name).then_some(name)
     }
 
+    /// Whether a signature agrees with itself about the types an intrinsic
+    /// overloads on.
+    ///
+    /// LangRef documents an overloaded intrinsic once per instantiation, so
+    /// the positions whose types vary together across all of them are one
+    /// type. `corpus/intrinsic-overloads.nu` measures which, counting the
+    /// result as position nought, and a signature giving two of them
+    /// different types describes no instantiation there is.
+    fn check_tied_positions(
+        &mut self,
+        name: &Name,
+        result: TypeId,
+        params: &[TypeId],
+    ) -> Result<(), ParseError> {
+        let Name::Named(text) = name else {
+            return Ok(());
+        };
+        let Some((arity, classes)) = llvm_ir::intrinsic::overloads::tied(text) else {
+            return Ok(());
+        };
+        // Measured at one arity, and a call with another is one upstream
+        // upgrades from an older spelling rather than one to check here.
+        if arity != params.len() + 1 {
+            return Ok(());
+        }
+        let positions: Vec<TypeId> = std::iter::once(result)
+            .chain(params.iter().copied())
+            .collect();
+        for class in classes {
+            let mut wanted = None;
+            for position in *class {
+                let ty = positions[*position];
+                match wanted {
+                    None => wanted = Some(ty),
+                    Some(first) if first == ty => {}
+                    Some(_) => return self.error("invalid intrinsic signature"),
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Adds the declarations the calls implied, after everything the module
     /// writes, which is where upstream puts them. The attributes upstream
     /// gives an intrinsic go on afterwards, in `apply_intrinsic_attributes`,
@@ -1634,7 +1676,12 @@ impl Parser {
                 TypeKind::Function { result, .. } => *result,
                 _ => written_type,
             };
-            let params = args.iter().map(|arg| arg.ty).collect();
+            let params: Vec<TypeId> = args.iter().map(|arg| arg.ty).collect();
+            // There has to be a declaration to build, and positions that
+            // share one overloaded type disagreeing about what it is leaves
+            // none: `llvm.umax(i8, i16)` names no instantiation of
+            // `llvm.umax`, which upstream reports here rather than later.
+            self.check_tied_positions(&name, result, &params)?;
             self.implied_signatures.insert(name, (result, params));
         }
 

@@ -2906,6 +2906,38 @@ impl Verifier<'_> {
                         .iter()
                         .map(|param| param.attrs.has(EnumAttr::ImmArg))
                         .collect();
+                    // The other half of the same reading: positions whose
+                    // types vary together across LangRef's instantiations
+                    // are one overloaded type, so a call giving two of them
+                    // different types calls no instantiation there is.
+                    // Upstream verifies this at the call rather than at the
+                    // declaration, an unused declaration never being looked
+                    // at, which is why this sits here.
+                    if is_intrinsic
+                        && let Name::Named(intrinsic) = &callee.name
+                        && let Some((arity, classes)) = crate::intrinsic::overloads::tied(intrinsic)
+                        && arity == call.args.len() + 1
+                    {
+                        let positions: Vec<TypeId> = std::iter::once(ty)
+                            .chain(call.args.iter().map(|arg| arg.ty))
+                            .collect();
+                        for class in classes {
+                            let mut wanted = None;
+                            for position in *class {
+                                let ty = positions[*position];
+                                match wanted {
+                                    None => wanted = Some(ty),
+                                    Some(first) if first == ty => {}
+                                    Some(_) => {
+                                        self.report(format!(
+                                            "{where_} calls an intrinsic with two types where it takes one"
+                                        ));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     // LangRef documents what each intrinsic takes, and the
                     // positions whose type is the same in every documented
                     // instantiation are the ones a call has to get right.

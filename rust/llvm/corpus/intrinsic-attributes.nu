@@ -429,17 +429,15 @@ pub struct Attributes {
 
 /// What upstream gives the intrinsic this name instantiates, or `None` when
 /// it is not one whose attributes were measured.
+///
+/// The name is reduced by dropping mangling-shaped components only. Dropping
+/// trailing components until something matches walks past a name into a
+/// shorter one that is a prefix of it, and `llvm.vp.cttz.elts` is not
+/// `llvm.vp.cttz`.
 pub fn attributes(name: &str) -> Option<&'static Attributes> {
-    let mut candidate = name;
-    loop {
-        if let Ok(index) = ATTRIBUTES.binary_search_by_key(&candidate, |(name, _)| *name) {
-            return Some(&ATTRIBUTES[index].1);
-        }
-        match candidate.rsplit_once('.') {
-            Some((rest, _)) if rest.matches('.').count() >= 1 => candidate = rest,
-            _ => return None,
-        }
-    }
+    let base = crate::intrinsic::table::strip_mangling(name);
+    let index = ATTRIBUTES.binary_search_by_key(&base, |(name, _)| *name).ok()?;
+    Some(&ATTRIBUTES[index].1)
 }
 
 /// Sorted, so the lookup can be a binary search.
