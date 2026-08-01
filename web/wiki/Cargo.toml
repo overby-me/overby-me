@@ -19,6 +19,8 @@ dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "b
 # Pinned to a rev like dioxus-primitives above, so `cargo update` cannot float
 # it and stale the Nix outputHashes.
 docx-parser = { git = "https://github.com/yukiyokotani/office-open-xml-viewer", rev = "d8c4b961adce0b90e43cbe7723a39f3f123b9e74", default-features = false }
+xlsx-parser = { git = "https://github.com/yukiyokotani/office-open-xml-viewer", rev = "d8c4b961adce0b90e43cbe7723a39f3f123b9e74", default-features = false }
+pptx-parser = { git = "https://github.com/yukiyokotani/office-open-xml-viewer", rev = "d8c4b961adce0b90e43cbe7723a39f3f123b9e74", default-features = false }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"

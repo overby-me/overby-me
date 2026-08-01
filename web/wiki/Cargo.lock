@@ -2474,6 +2474,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
+name = "pptx-parser"
+version = "0.1.0"
+source = "git+https://github.com/yukiyokotani/office-open-xml-viewer?rev=d8c4b961adce0b90e43cbe7723a39f3f123b9e74#d8c4b961adce0b90e43cbe7723a39f3f123b9e74"
+dependencies = [
+ "console_error_panic_hook",
+ "ooxml-common",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "zip",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3799,6 +3813,7 @@ dependencies = [
  "js-sys",
  "log",
  "material-colors",
+ "pptx-parser",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3806,6 +3821,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-logger",
  "web-sys",
+ "xlsx-parser",
 ]
 
 [[package]]
@@ -4000,6 +4016,20 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "xlsx-parser"
+version = "0.1.0"
+source = "git+https://github.com/yukiyokotani/office-open-xml-viewer?rev=d8c4b961adce0b90e43cbe7723a39f3f123b9e74#d8c4b961adce0b90e43cbe7723a39f3f123b9e74"
+dependencies = [
+ "console_error_panic_hook",
+ "ooxml-common",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "zip",
+]
 
 [[package]]
 name = "xxhash-rust"

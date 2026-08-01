@@ -99,7 +99,17 @@ pub fn viewer_embed_url(viewer: OfficeViewer, encoded_src: &str) -> String {
 /// viewers, and the native option is not offered for it at all — an option that
 /// silently does nothing is worse than no option.
 pub fn renders_natively(mime: &str) -> bool {
-    mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    matches!(
+        mime,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+}
+
+/// Whether `mime` is the spreadsheet the native path renders as a grid rather
+/// than as a flowing document.
+fn is_spreadsheet(mime: &str) -> bool {
+    mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 }
 
 /// The chosen viewer, remembered per device.
@@ -248,6 +258,97 @@ fn NativeDocx(file_url: String, name: String) -> Element {
             log::info!("native docx render failed: {e}");
             rsx! {
                 p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
+            }
+        }
+    }
+}
+
+/// A spreadsheet rendered here.
+///
+/// Two parses, because the parser is built that way: the workbook once for the
+/// shared strings and number formats every sheet needs, then each sheet on its
+/// own. Only the first sheet is parsed up front — a workbook with twenty sheets
+/// should not cost twenty parses to show the one somebody opened.
+#[component]
+fn NativeXlsx(file_url: String, name: String) -> Element {
+    let mut sheet_no = use_signal(|| 0usize);
+    let url = file_url.clone();
+    let parsed = crate::use_data_resource!(|(url)| async move {
+        if url.is_empty() {
+            return Err(String::new());
+        }
+        let bytes = reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?;
+        let wb_json = xlsx_parser::parse_xlsx(&bytes, None).map_err(|e| format!("{e:?}"))?;
+        let wb_value: serde_json::Value =
+            serde_json::from_slice(&wb_json).map_err(|e| e.to_string())?;
+        let workbook: super::xlsx::Workbook =
+            serde_json::from_value(wb_value.clone()).map_err(|e| e.to_string())?;
+        // The sheet list lives under `workbook`; its names are what the tabs say
+        // and what `parse_sheet` needs alongside the index.
+        let names: Vec<String> = wb_value
+            .get("workbook")
+            .and_then(|w| w.get("sheets"))
+            .and_then(|s| s.as_array())
+            .map(|a| {
+                a.iter()
+                    .map(|s| {
+                        s.get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or_default()
+                            .to_string()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok::<_, String>((bytes, workbook, names))
+    });
+
+    let state = parsed.read().clone();
+    match state {
+        None => rsx! {
+            div { class: "empty-state empty-state-sm",
+                div { class: "spinner spinner-sm" }
+            }
+        },
+        Some(Err(e)) => {
+            log::info!("native xlsx render failed: {e}");
+            rsx! {
+                p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
+            }
+        }
+        Some(Ok((bytes, workbook, names))) => {
+            let idx = sheet_no().min(names.len().saturating_sub(1));
+            let sheet: super::xlsx::Sheet = names
+                .get(idx)
+                .and_then(|n| xlsx_parser::parse_sheet(&bytes, idx as u32, n, None).ok())
+                .and_then(|j| serde_json::from_slice(&j).ok())
+                .unwrap_or_default();
+            rsx! {
+                div { class: "xlsx-doc", aria_label: "{name}",
+                    // Tabs only when there is a choice to make.
+                    if names.len() > 1 {
+                        div { class: "xlsx-tabs", role: "tablist",
+                            for (i , sheet_name) in names.iter().enumerate() {
+                                button {
+                                    key: "s{i}",
+                                    class: if i == idx { "xlsx-tab is-active" } else { "xlsx-tab" },
+                                    role: "tab",
+                                    "aria-selected": if i == idx { "true" } else { "false" },
+                                    onclick: move |_| sheet_no.set(i),
+                                    "{sheet_name}"
+                                }
+                            }
+                        }
+                    }
+                    super::xlsx::SheetTable { sheet, workbook }
+                }
             }
         }
     }
@@ -539,6 +640,10 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                     div { class: "empty-state empty-state-sm",
                                         div { class: "spinner spinner-sm" }
                                     }
+                                },
+                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                                    && is_spreadsheet(file_mime) => rsx! {
+                                    NativeXlsx { file_url: file_url.clone(), name: name.to_string() }
                                 },
                                 OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && renders_natively(file_mime) => rsx! {

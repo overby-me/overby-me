@@ -8105,3 +8105,82 @@ a.list-item:hover {
 .docx-table th .docx-p:last-child {
 	margin-bottom: 0;
 }
+
+/* A spreadsheet rendered by this app (components::xlsx) ------------------- */
+
+.xlsx-doc {
+	/* A grid is wide by nature; it gets the whole width it can have. */
+	width: 100%;
+}
+
+/* Sheet tabs, shown only when a workbook has more than one. */
+.xlsx-tabs {
+	display: flex;
+	gap: var(--md-sys-spacing-1);
+	overflow-x: auto;
+	margin-bottom: var(--md-sys-spacing-2);
+}
+.xlsx-tab {
+	border: none;
+	background: none;
+	color: var(--md-on-surface-variant);
+	font: inherit;
+	font-size: var(--md-sys-typescale-label-large-size);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
+	border-radius: var(--md-sys-shape-corner-small);
+	cursor: pointer;
+	white-space: nowrap;
+}
+.xlsx-tab.is-active {
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+	font-weight: 600;
+}
+
+/* The grid scrolls inside itself: a sheet is wider than a phone by definition,
+   and it must not drag the rest of the page sideways with it. */
+.xlsx-wrap {
+	overflow: auto;
+	max-height: 70vh;
+	border: 1px solid var(--md-outline-variant);
+	border-radius: var(--md-sys-shape-corner-small);
+}
+.xlsx-table {
+	border-collapse: collapse;
+	font-size: var(--md-sys-typescale-body-small-size);
+	font-variant-numeric: tabular-nums;
+}
+.xlsx-table td,
+.xlsx-table th {
+	border: 1px solid var(--md-outline-variant);
+	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-2);
+	white-space: nowrap;
+	text-align: left;
+}
+
+/* The row numbers and column letters, so a reader can name a cell. They stay
+   put while the grid scrolls under them, which is the whole point of having
+   them: a value in the middle of a big sheet is meaningless without its
+   coordinates. */
+.xlsx-table thead th {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+}
+.xlsx-rowhead,
+.xlsx-corner {
+	position: sticky;
+	left: 0;
+	z-index: 1;
+}
+.xlsx-corner {
+	z-index: 3;
+}
+.xlsx-colhead,
+.xlsx-rowhead,
+.xlsx-corner {
+	background: var(--md-surface-container);
+	color: var(--md-on-surface-variant);
+	font-weight: 600;
+	text-align: center;
+}

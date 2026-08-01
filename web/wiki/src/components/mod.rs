@@ -34,6 +34,7 @@ pub mod social;
 pub mod sort;
 pub mod speak;
 pub mod widgets;
+pub mod xlsx;
 // Accessible form-control primitives (checkbox/radio/switch) wrapping
 // dioxus-primitives. Their generated code carries some unused API surface.
 #[allow(dead_code, unused_imports)]
