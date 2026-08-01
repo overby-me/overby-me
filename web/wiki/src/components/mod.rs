@@ -29,6 +29,7 @@ pub mod profile;
 pub mod program;
 pub mod pull_refresh;
 pub mod redirect;
+pub mod render_gaps;
 pub mod richtext;
 pub mod screen;
 pub mod social;

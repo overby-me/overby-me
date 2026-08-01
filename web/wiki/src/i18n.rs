@@ -650,7 +650,15 @@ const EN_JSON: &str = r#"{
         "viewerMicrosoft": "Microsoft",
         "viewerGoogle": "Google",
         "viewerNative": "This app",
-        "nativeFailed": "This app could not read that document. Try Microsoft or Google above."
+        "nativeFailed": "This app could not read that document. Try Microsoft or Google above.",
+        "gapPartial": "This viewer cannot show:",
+        "gapReplaced": "Shown with Microsoft, because this viewer cannot show:",
+        "gapImages": "images",
+        "gapCharts": "charts",
+        "gapGraphics": "graphics",
+        "gapFootnotes": "footnotes",
+        "gapHeaders": "headers and footers",
+        "gapMerges": "merged cells"
     },
     "mime": {
         "group": "Group",
@@ -1221,7 +1229,15 @@ const DA_JSON: &str = r#"{
         "viewerMicrosoft": "Microsoft",
         "viewerGoogle": "Google",
         "viewerNative": "Denne app",
-        "nativeFailed": "Denne app kunne ikke l\u00e6se dokumentet. Pr\u00f8v Microsoft eller Google ovenfor."
+        "nativeFailed": "Denne app kunne ikke l\u00e6se dokumentet. Pr\u00f8v Microsoft eller Google ovenfor.",
+        "gapPartial": "Denne fremviser kan ikke vise:",
+        "gapReplaced": "Vist med Microsoft, fordi denne fremviser ikke kan vise:",
+        "gapImages": "billeder",
+        "gapCharts": "diagrammer",
+        "gapGraphics": "grafik",
+        "gapFootnotes": "fodnoter",
+        "gapHeaders": "sidehoveder og sidefødder",
+        "gapMerges": "flettede celler"
     },
     "mime": {
         "group": "Gruppe",

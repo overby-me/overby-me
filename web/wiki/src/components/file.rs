@@ -216,6 +216,76 @@ mod tests {
     }
 }
 
+/// The viewer a native render falls back to when it cannot do the file justice.
+///
+/// Microsoft's: it is the one everybody had before this choice existed, and the
+/// one most likely to render an office file faithfully. The reader can still
+/// pick Google in the same sheet.
+const FALLBACK_VIEWER: OfficeViewer = OfficeViewer::Microsoft;
+
+/// What the native renderer will not draw, said plainly.
+///
+/// Shown above a document that renders anyway (a minor gap), and instead of one
+/// that does not (a major gap). Either way it names what is missing rather than
+/// leaving the reader to notice.
+#[component]
+fn GapNotice(report: super::render_gaps::GapReport, replaced: bool) -> Element {
+    let items: Vec<String> = report
+        .gaps
+        .iter()
+        .map(|gap| {
+            let label = t(gap.label_key());
+            match gap.count() {
+                0 => label,
+                n => format!("{n} {label}"),
+            }
+        })
+        .collect();
+    rsx! {
+        div { class: "file-gap-notice", role: "note",
+            span { class: "material-icons", "info" }
+            div {
+                p { class: "body-small",
+                    if replaced { "{t(\"file.gapReplaced\")}" } else { "{t(\"file.gapPartial\")}" }
+                    " "
+                    "{items.join(\", \")}"
+                }
+                // The way out, wherever the notice appears: the other viewers
+                // can show what this one cannot.
+                div { class: "file-gap-actions",
+                    button {
+                        class: "btn btn-text",
+                        onclick: move |_| set_office_viewer(OfficeViewer::Microsoft),
+                        "{t(\"file.viewerMicrosoft\")}"
+                    }
+                    button {
+                        class: "btn btn-text",
+                        onclick: move |_| set_office_viewer(OfficeViewer::Google),
+                        "{t(\"file.viewerGoogle\")}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// An embedded viewer standing in for a native render that would have misled.
+#[component]
+fn FallbackEmbed(
+    signed_url: String,
+    name: String,
+    report: super::render_gaps::GapReport,
+) -> Element {
+    let encoded = String::from(&js_sys::encode_uri_component(&signed_url));
+    let embed = viewer_embed_url(FALLBACK_VIEWER, &encoded);
+    rsx! {
+        GapNotice { report, replaced: true }
+        div { class: "viewport-frame",
+            iframe { src: "{embed}", title: "{name}" }
+        }
+    }
+}
+
 /// A Word file rendered here: fetch the bytes, parse them, show the document.
 ///
 /// The bytes come from the presigned STORAGE url, not the signed backend link
@@ -223,7 +293,7 @@ mod tests {
 /// the document; nothing third-party is involved here, and the presigned url is
 /// the one the browser can already read.
 #[component]
-fn NativeDocx(file_url: String, name: String) -> Element {
+fn NativeDocx(file_url: String, signed_url: String, name: String) -> Element {
     let url = file_url.clone();
     let parsed = crate::use_data_resource!(|(url)| async move {
         if url.is_empty() {
@@ -241,10 +311,13 @@ fn NativeDocx(file_url: String, name: String) -> Element {
         // renders are deserialised (see components::docx).
         let json = docx_parser::parse_docx_native(&bytes)?;
         let doc: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        // Counted from the RAW model: the render model drops what it cannot
+        // draw, so by the time this is a Vec<Block> the evidence is gone.
+        let gaps = super::render_gaps::docx_gaps(&doc);
         let blocks: Vec<super::docx::Block> =
             serde_json::from_value(doc.get("body").cloned().unwrap_or_default())
                 .map_err(|e| e.to_string())?;
-        Ok::<_, String>(blocks)
+        Ok::<_, String>((blocks, gaps))
     });
 
     let state = parsed.read().clone();
@@ -254,7 +327,13 @@ fn NativeDocx(file_url: String, name: String) -> Element {
                 div { class: "spinner spinner-sm" }
             }
         },
-        Some(Ok(blocks)) => rsx! {
+        Some(Ok((_blocks, gaps))) if gaps.is_major() => rsx! {
+            FallbackEmbed { signed_url, name, report: gaps }
+        },
+        Some(Ok((blocks, gaps))) => rsx! {
+            if !gaps.is_empty() {
+                GapNotice { report: gaps, replaced: false }
+            }
             article { class: "docx-doc", aria_label: "{name}",
                 super::docx::DocxBody { blocks }
             }
@@ -277,7 +356,7 @@ fn NativeDocx(file_url: String, name: String) -> Element {
 /// own. Only the first sheet is parsed up front — a workbook with twenty sheets
 /// should not cost twenty parses to show the one somebody opened.
 #[component]
-fn NativeXlsx(file_url: String, name: String) -> Element {
+fn NativeXlsx(file_url: String, signed_url: String, name: String) -> Element {
     let mut sheet_no = use_signal(|| 0usize);
     let url = file_url.clone();
     let parsed = crate::use_data_resource!(|(url)| async move {
@@ -332,13 +411,23 @@ fn NativeXlsx(file_url: String, name: String) -> Element {
         }
         Some(Ok((bytes, workbook, names))) => {
             let idx = sheet_no().min(names.len().saturating_sub(1));
-            let sheet: super::xlsx::Sheet = names
+            let sheet_json: serde_json::Value = names
                 .get(idx)
                 .and_then(|n| xlsx_parser::parse_sheet_native(&bytes, idx as u32, n).ok())
                 .and_then(|j| serde_json::from_str(&j).ok())
                 .unwrap_or_default();
+            let gaps = super::render_gaps::xlsx_gaps(&sheet_json);
+            let sheet: super::xlsx::Sheet = serde_json::from_value(sheet_json).unwrap_or_default();
+            if gaps.is_major() {
+                return rsx! {
+                    FallbackEmbed { signed_url, name, report: gaps }
+                };
+            }
             rsx! {
                 div { class: "xlsx-doc", aria_label: "{name}",
+                    if !gaps.is_empty() {
+                        GapNotice { report: gaps, replaced: false }
+                    }
                     // Tabs only when there is a choice to make.
                     if names.len() > 1 {
                         div { class: "xlsx-tabs", role: "tablist",
@@ -363,7 +452,7 @@ fn NativeXlsx(file_url: String, name: String) -> Element {
 
 /// A slide deck rendered here.
 #[component]
-fn NativePptx(file_url: String, name: String) -> Element {
+fn NativePptx(file_url: String, signed_url: String, name: String) -> Element {
     let url = file_url.clone();
     let parsed = crate::use_data_resource!(|(url)| async move {
         if url.is_empty() {
@@ -378,8 +467,10 @@ fn NativePptx(file_url: String, name: String) -> Element {
             .await
             .map_err(|e| e.to_string())?;
         let json = pptx_parser::parse_pptx_native(&bytes)?;
-        let deck: super::pptx::Deck = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-        Ok::<_, String>(deck)
+        let raw: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        let gaps = super::render_gaps::pptx_gaps(&raw);
+        let deck: super::pptx::Deck = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+        Ok::<_, String>((deck, gaps))
     });
     let state = parsed.read().clone();
     match state {
@@ -394,8 +485,14 @@ fn NativePptx(file_url: String, name: String) -> Element {
                 p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
             }
         }
-        Some(Ok(deck)) => rsx! {
+        Some(Ok((_deck, gaps))) if gaps.is_major() => rsx! {
+            FallbackEmbed { signed_url, name, report: gaps }
+        },
+        Some(Ok((deck, gaps))) => rsx! {
             div { class: "pptx-doc", aria_label: "{name}",
+                if !gaps.is_empty() {
+                    GapNotice { report: gaps, replaced: false }
+                }
                 super::pptx::DeckView { deck }
             }
         },
@@ -689,17 +786,17 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                         div { class: "spinner spinner-sm" }
                                     }
                                 },
-                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                                OfficeLink::Ready(url) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && is_presentation(file_mime) => rsx! {
-                                    NativePptx { file_url: file_url.clone(), name: name.to_string() }
+                                    NativePptx { file_url: file_url.clone(), signed_url: url.clone(), name: name.to_string() }
                                 },
-                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                                OfficeLink::Ready(url) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && is_spreadsheet(file_mime) => rsx! {
-                                    NativeXlsx { file_url: file_url.clone(), name: name.to_string() }
+                                    NativeXlsx { file_url: file_url.clone(), signed_url: url.clone(), name: name.to_string() }
                                 },
-                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                                OfficeLink::Ready(url) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && renders_natively(file_mime) => rsx! {
-                                    NativeDocx { file_url: file_url.clone(), name: name.to_string() }
+                                    NativeDocx { file_url: file_url.clone(), signed_url: url.clone(), name: name.to_string() }
                                 },
                                 OfficeLink::Ready(url) => {
                                     let encoded = String::from(&js_sys::encode_uri_component(&url));

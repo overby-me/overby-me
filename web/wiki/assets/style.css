@@ -8222,3 +8222,28 @@ a.list-item:hover {
 	   spilling out of its box. */
 	overflow-wrap: anywhere;
 }
+
+/* What a native render cannot show (components::render_gaps) -------------- */
+
+/* Deliberately quiet rather than alarming: nothing has gone wrong, the file
+   simply holds more than this viewer draws. It sits above the document so it is
+   read before the content is trusted, not after. */
+.file-gap-notice {
+	display: flex;
+	gap: var(--md-sys-spacing-3);
+	align-items: flex-start;
+	padding: var(--md-sys-spacing-3);
+	margin-bottom: var(--md-sys-spacing-3);
+	border-radius: var(--md-sys-shape-corner-medium);
+	background: var(--md-surface-container);
+	color: var(--md-on-surface-variant);
+}
+.file-gap-notice p {
+	margin: 0;
+}
+.file-gap-actions {
+	display: flex;
+	gap: var(--md-sys-spacing-2);
+	margin-top: var(--md-sys-spacing-1);
+	flex-wrap: wrap;
+}
