@@ -153,7 +153,11 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
                 Some("member") => rsx! { MemberApp { node } },
                 Some("editor") => rsx! { EditorApp { node } },
                 Some("sort") => rsx! { SortApp { node } },
-                Some("pixel") => rsx! { super::pixel::PixelCanvasesApp { node } },
+                // `pixel` as well as `canvas`: the app was called that until it
+                // was renamed, and links to it are already out there.
+                Some("canvas") | Some("pixel") => {
+                    rsx! { super::pixel::PixelCanvasesApp { node } }
+                }
                 Some("screen") => rsx! { super::screen::ScreenApp { node } },
                 Some("follow") => rsx! { super::screen::FollowApp { node } },
                 Some("admin") => rsx! { super::admin::AdminApp { node } },
@@ -423,7 +427,7 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "wiki/event" => "event",
         "wiki/folder" | "app/folder" => "folder",
         "wiki/document" => "article",
-        "pixel/canvas" | "app/pixel" => "grid_on",
+        "pixel/canvas" | "app/canvas" | "app/pixel" => "grid_on",
         "wiki/file" => "upload_file",
         "wiki/user" => "person",
         "text/plain" => "subject",

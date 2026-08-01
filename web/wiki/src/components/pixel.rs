@@ -432,7 +432,7 @@ mod tests {
     }
 }
 
-/// The canvases of a context, reached from the app rail (`?app=pixel`).
+/// The canvases of a context, reached from the app rail (`?app=canvas`).
 ///
 /// The context owner chooses which canvas the room is on, the way the chair
 /// chooses what the projector shows, and everyone else simply gets that one. A

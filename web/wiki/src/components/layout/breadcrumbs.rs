@@ -378,6 +378,8 @@ pub(super) fn app_crumb_label(app: &str) -> String {
         "editor" => t("mime.editor"),
         "sort" => t("mime.sort"),
         "screen" => t("mime.screen"),
+        // `pixel` too: the app was called that before it was renamed.
+        "canvas" | "pixel" => t("mime.canvas"),
         "follow" => t("mime.follow"),
         "admin" => t("console.title"),
         // The remaining URL-only apps: still labelled so a deep link shows a name
@@ -596,7 +598,7 @@ pub(super) fn context_apps(
             ("vote", "app/vote", t("mime.vote")),
             // A canvas is reached through its app, like a speaker list, rather
             // than sitting in the folder listing among the documents.
-            ("pixel", "app/pixel", t("mime.canvas")),
+            ("canvas", "app/canvas", t("mime.canvas")),
         ] {
             apps.push((
                 icon,
