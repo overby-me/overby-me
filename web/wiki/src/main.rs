@@ -143,6 +143,27 @@ fn App() -> Element {
     // "Must be called from inside a Dioxus runtime" — and did so non-obviously
     // only when localStorage already held a session (so `load_session` wrote),
     // which is exactly the flaky authenticated-load trap from PLAN.md issue 1.
+    // Take the boot screen down. It is in `index.html` so it can be drawn before
+    // the stylesheet or the wasm exist (see the comment there); this is the
+    // other half — the app is on screen now, so the placeholder goes. An effect
+    // rather than the hook below, because a hook runs BEFORE the first render
+    // and would clear the screen a frame early.
+    use_effect(|| {
+        let Some(boot) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id("boot"))
+        else {
+            return;
+        };
+        // Fade, then remove: the class starts the transition in `index.html`,
+        // and the node goes once it is over so it can never swallow a click.
+        let _ = boot.set_attribute("class", "is-done");
+        spawn(async move {
+            gloo_timers::future::TimeoutFuture::new(300).await;
+            boot.remove();
+        });
+    });
+
     use_hook(|| {
         // Load persisted session from localStorage.
         session::load_session();

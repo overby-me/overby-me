@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>RadikalWiki</title>
+        <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta charset="UTF-8">
+        <!--
+          The boot screen, inline on purpose.
+
+          Everything here has to work with NO stylesheet and NO wasm, because
+          that is the state it exists to cover: the seconds between the browser
+          having the document and the app being able to draw. Anything loaded
+          from a file would arrive too late to help, so the colours are literals
+          rather than tokens - they are the same two the generated theme uses
+          (assets/m3-theme.css), and if that theme is ever reseeded these want
+          changing with it.
+
+          The shape is the Material 3 Expressive loading indicator: a form that
+          morphs while it turns, rather than a spinner. Done with border-radius
+          keyframes, which is the closest CSS gets to shape morphing without
+          shipping a path interpolator to draw four frames of it.
+        -->
+        <style>
+            #boot {
+                position: fixed;
+                inset: 0;
+                display: grid;
+                place-items: center;
+                background: #fbfdf7;
+                z-index: 2147483000;
+                transition: opacity 240ms ease;
+            }
+            #boot.is-done { opacity: 0; pointer-events: none; }
+            #boot-shape {
+                width: 56px;
+                height: 56px;
+                background: #006d39;
+                animation: boot-morph 1.8s ease-in-out infinite,
+                           boot-turn 3.4s linear infinite;
+            }
+            @keyframes boot-morph {
+                0%, 100% { border-radius: 34% 66% 62% 38% / 42% 36% 64% 58%; }
+                25%      { border-radius: 64% 36% 34% 66% / 62% 58% 42% 38%; }
+                50%      { border-radius: 38% 62% 58% 42% / 66% 32% 68% 34%; }
+                75%      { border-radius: 58% 42% 36% 64% / 34% 62% 38% 66%; }
+            }
+            @keyframes boot-turn { to { transform: rotate(360deg); } }
+
+            /* The app sets data-theme once it is running; before that the only
+               thing to go on is what the device asks for. Both are honoured, so
+               a dark-mode reader is not flashed a white screen. */
+            @media (prefers-color-scheme: dark) {
+                #boot { background: #191c19; }
+                #boot-shape { background: #68dd8f; }
+            }
+            html[data-theme="dark"] #boot { background: #191c19; }
+            html[data-theme="dark"] #boot-shape { background: #68dd8f; }
+            html[data-theme="light"] #boot { background: #fbfdf7; }
+            html[data-theme="light"] #boot-shape { background: #006d39; }
+
+            /* Turning is the part that reads as motion; keep the morph, which is
+               slow and soft, and drop the spin. */
+            @media (prefers-reduced-motion: reduce) {
+                #boot-shape { animation: boot-morph 4s ease-in-out infinite; }
+            }
+        </style>
+    </head>
+    <body>
+        <div id="main"></div>
+        <div id="boot" role="status" aria-label="Loading">
+            <div id="boot-shape"></div>
+        </div>
+        <!--
+          The reader's own choice of theme, applied before anything is drawn.
+          `theme.rs` writes it to localStorage and sets the same attribute once
+          the app is running, but that is seconds away; without this a reader who
+          chose light on a dark device gets a dark boot screen and then a light
+          app, which is the flash this whole file exists to avoid. Wrapped
+          because storage can throw in a private window, and a boot screen is no
+          place to be fussy.
+        -->
+        <script>
+            try {
+                var t = localStorage.getItem("wiki_theme");
+                if (t === "light" || t === "dark") {
+                    document.documentElement.setAttribute("data-theme", t);
+                }
+            } catch (e) {}
+        </script>
+    </body>
+</html>
