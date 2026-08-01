@@ -131,6 +131,47 @@ fn len_of(value: &Value, key: &str) -> usize {
         .unwrap_or(0)
 }
 
+/// Whether one header or footer slot holds anything a reader would miss.
+///
+/// The presence of the slot says nothing. `headers` and `footers` are objects
+/// with a fixed three keys — `default`, `first`, `even` — and the parser writes
+/// `null` into the ones the document does not have, so the object is never
+/// empty even in a document with no header at all. Measured on 23 documents
+/// from the wiki: 14 had no header or footer part whatsoever, and every one of
+/// them would have been told its headers were missing.
+///
+/// Word also leaves behind slots holding a single empty paragraph. There is
+/// nothing to miss in those either, so the test is for content, not structure:
+///
+/// * any text that is not just whitespace, or
+/// * any run that is not text — a `field` is how a page number is written, and
+///   a footer that is only a page number is still a real footer, or
+/// * any block that is not a paragraph, such as a table.
+fn has_running_content(slot: &Value) -> bool {
+    let Some(body) = slot.get("body").and_then(|b| b.as_array()) else {
+        return false;
+    };
+    body.iter().any(|block| {
+        if block.get("type").and_then(|t| t.as_str()) != Some("paragraph") {
+            // A table or anything else structural is content by existing.
+            return !block.is_null();
+        }
+        block
+            .get("runs")
+            .and_then(|r| r.as_array())
+            .is_some_and(|runs| {
+                runs.iter().any(|run| {
+                    let kind = run.get("type").and_then(|t| t.as_str()).unwrap_or("text");
+                    let has_text = run
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .is_some_and(|t| !t.trim().is_empty());
+                    has_text || !matches!(kind, "text" | "break" | "tab")
+                })
+            })
+    })
+}
+
 /// What a Word document holds that this app will not draw.
 pub fn docx_gaps(model: &Value) -> GapReport {
     let body = model.get("body").cloned().unwrap_or(Value::Null);
@@ -150,12 +191,12 @@ pub fn docx_gaps(model: &Value) -> GapReport {
     if notes > 0 {
         gaps.push(Gap::Footnote(notes));
     }
-    // `headers`/`footers` are maps keyed by relationship id, not arrays.
     let heads = ["headers", "footers"]
         .iter()
         .filter_map(|k| model.get(*k))
         .filter_map(|v| v.as_object())
-        .any(|m| !m.is_empty());
+        .flat_map(|m| m.values())
+        .any(has_running_content);
     if heads {
         gaps.push(Gap::HeaderFooter);
     }
@@ -279,11 +320,58 @@ mod tests {
             "body": [{"type":"paragraph","runs":[]}],
             "footnotes": [{"id":"1"}, {"id":"2"}],
             "endnotes": [{"id":"3"}],
-            "headers": {"rId4": {}}
+            "headers": {"default": {"body": [
+                {"type":"paragraph","runs":[{"type":"text","text":"Radikal Ungdom"}]}
+            ]}, "first": null, "even": null}
         });
         let report = docx_gaps(&model);
         assert!(report.gaps.contains(&Gap::Footnote(3)), "{:?}", report.gaps);
         assert!(report.gaps.contains(&Gap::HeaderFooter));
+    }
+
+    /// Reported: a document with no header and no footer said its headers were
+    /// missing. The slots are always all three, holding `null` when absent, so
+    /// the object is never empty and its size means nothing. These are the exact
+    /// shapes the parser produced for real documents from the wiki.
+    #[test]
+    fn a_document_without_a_header_is_not_told_it_lost_one() {
+        let absent = json!({
+            "body": [{"type":"paragraph","runs":[{"type":"text","text":"Beretning"}]}],
+            "headers": {"default": null, "even": null, "first": null},
+            "footers": {"default": null, "even": null, "first": null}
+        });
+        assert!(
+            !docx_gaps(&absent).gaps.contains(&Gap::HeaderFooter),
+            "three null slots are three absent headers"
+        );
+
+        // Word leaves empty parts behind. An empty paragraph is nothing to miss.
+        let leftover = json!({
+            "body": [{"type":"paragraph","runs":[{"type":"text","text":"Beretning"}]}],
+            "headers": {"default": null, "even": null,
+                        "first": {"body": [{"type":"paragraph","runs":[]}]}},
+            "footers": {"default": {"body": [
+                {"type":"paragraph","runs":[{"type":"text","text":"   "}]}
+            ]}, "even": null, "first": null}
+        });
+        assert!(
+            !docx_gaps(&leftover).gaps.contains(&Gap::HeaderFooter),
+            "an empty paragraph and a paragraph of spaces are both empty"
+        );
+
+        // A page number is a `field` run carrying no text, and a footer that is
+        // only a page number is still a footer worth mentioning.
+        let page_number = json!({
+            "body": [{"type":"paragraph","runs":[{"type":"text","text":"Beretning"}]}],
+            "headers": {"default": null, "even": null, "first": null},
+            "footers": {"default": {"body": [
+                {"type":"paragraph","runs":[{"type":"field","text":null}]}
+            ]}, "even": null, "first": null}
+        });
+        assert!(
+            docx_gaps(&page_number).gaps.contains(&Gap::HeaderFooter),
+            "a page-number field is content"
+        );
     }
 
     /// The judgement call, from both sides. A long document with a few figures
