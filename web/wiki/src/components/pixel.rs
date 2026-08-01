@@ -455,9 +455,14 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             if evt.data().pointer_type() == "touch" {
                 return;
             }
-            let hit = cell_under(&evt);
-            if *asking.peek() != hit {
-                asking.set(hit);
+            // Only a real cell moves the answer. A move that maps to nothing —
+            // the rounding at the very edge of the element — must not take the
+            // tooltip away while the pointer is still on the board.
+            let Some(hit) = cell_under(&evt) else {
+                return;
+            };
+            if *asking.peek() != Some(hit) {
+                asking.set(Some(hit));
             }
         }
     };
@@ -631,7 +636,17 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
             // board, so it lands on the right cell at any width — a phone's
             // scaled-down board, a desktop's full one, or a pinch zoom — with
             // nothing measured in JavaScript.
-            div { class: "pixel-board-wrap", style: "max-width: {board_px(cols)}px;",
+            div {
+                class: "pixel-board-wrap",
+                style: "max-width: {board_px(cols)}px;",
+                // Leaving is the WRAPPER's business, not the canvas's. The tip
+                // hangs a small gap away from its cell, and that gap belongs to
+                // neither element: crossing it to reach the profile link fired
+                // the canvas's leave and took the tooltip away mid-reach. The
+                // gap is inside the wrapper, so travelling across it never
+                // leaves anything.
+                onpointerleave: on_leave,
+                onpointercancel: on_leave,
                 // Sized by CSS, not by a fixed pixel count: the canvas element's
                 // own width/height attributes are the CELL grid, so the browser
                 // keeps the aspect ratio and a phone gets the whole board scaled
@@ -644,9 +659,9 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                     onclick: on_click,
                     onpointermove: on_move,
                     onpointerdown: on_down,
+                    // A finger lifting ends the press wherever it happens; the
+                    // wrapper above handles leaving.
                     onpointerup: on_up,
-                    onpointerleave: on_leave,
-                    onpointercancel: on_leave,
                 }
                 if let Some(cell) = at {
                     div {
@@ -655,13 +670,12 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                         role: "tooltip",
                         aria_live: "polite",
                         // The pointer may travel INTO the tip to reach the
-                        // profile link, so the tip keeps itself open while it is
-                        // under the pointer and closes when it is left.
+                        // profile link. The tip only records that it is under
+                        // the pointer — closing stays the wrapper's decision, so
+                        // stepping off the tip back towards the board does not
+                        // shut the thing you are still using.
                         onpointerenter: move |_| over_tip.set(true),
-                        onpointerleave: move |_| {
-                            over_tip.set(false);
-                            asking.set(None);
-                        },
+                        onpointerleave: move |_| over_tip.set(false),
                         if let Some(author) = author.clone() {
                             // A person to go and look at, so the whole line is a
                             // link: avatar, name, and the cell it is about.

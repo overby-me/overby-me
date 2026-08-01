@@ -1,0 +1,46 @@
+-- 0013: only a context's owners may write its permission rules.
+--
+-- NOT SQL. This records a Hasura METADATA change, applied through the metadata
+-- API, because the rules live there rather than in the schema. It is written
+-- here so the change is in the repo's history with everything else.
+--
+-- Found while checking that only a context admin can add a canvas. A plain
+-- member could not insert a `canvas/canvas` node - that part was right - but
+-- they COULD insert a row into `permissions` granting themselves the right, and
+-- then add one. It was not canvas-specific: the same held for every mime, and
+-- for update and delete as well as insert, so any member of a context could
+-- rewrite that context's permission system.
+--
+-- The check on `permissions` for role `user` had three branches:
+--
+--   1. context.owner_id = the caller                      (correct)
+--   2. context.members: {owner: true, node_id: caller}    (correct)
+--   3. context.context: {_or: [{owner_id: {_ne: caller}},
+--                              {members: {node_id: caller}}]}
+--
+-- The third tests the context's OWN context and passes for almost anybody -
+-- `owner_id != caller` is true of every context somebody else made. It reads
+-- like a select rule pasted into a write rule. Branches 1 and 2 are the whole
+-- of the intent: you own the context, or you are an owner-member of it.
+--
+-- Branch 3 is dropped from the insert CHECK and from the update and delete
+-- FILTERS. Nothing legitimate used it: every permission-seeding path in the app
+-- (a new context, a speaker list, a canvas, the reaction seed) runs as the
+-- context's owner, and the reaction seed is already written to shrug off a
+-- refusal for a member.
+--
+-- Verified on production with a real non-owner member of a real event:
+--
+--                          | member        | owner
+--   insert a rule          | refused       | 1 row
+--   update a rule          | 0 rows        | 2 rows
+--   delete a rule          | 0 rows        | 1 row
+--   insert a canvas node   | refused       | (unchanged)
+--   paint a cell           | allowed       | allowed
+--
+-- (An update or delete that matches no rows does not raise - the row filter
+-- simply matches nothing - so "0 rows" is what a refusal looks like there.)
+--
+-- APPLIED to production on 2026-08-01.
+--
+-- To undo, re-add branch 3 to all three rules. There is no good reason to.
