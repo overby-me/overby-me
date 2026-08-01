@@ -1259,6 +1259,11 @@ mod tests {
                 "invite.nameOrEmail",
                 "member.author",
                 "mime.vote",
+                // The first rail item names the place you are in; these are the
+                // four names it can take (see `layout::breadcrumbs::place_name`).
+                "mime.group",
+                "mime.event",
+                "mime.folder",
             ] {
                 assert!(
                     lookup_key(map, key).is_some(),
