@@ -94,6 +94,9 @@ pub struct StreamedState {
 pub struct StreamedCell {
     pub key: String,
     pub data: Option<Jsonb>,
+    /// Who painted it, so a cell that arrives while you are looking can be
+    /// attributed without re-reading the board.
+    pub owner_id: Option<Uuid>,
 }
 
 // --- The subscriptions ---

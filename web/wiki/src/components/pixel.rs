@@ -129,6 +129,60 @@ pub fn cell_at(
     Some((x.min(cols - 1), y.min(rows - 1)))
 }
 
+/// How long a finger must rest on a cell before the board says who painted it.
+///
+/// There is no hover on a touch screen, and the tap is already spoken for: it
+/// paints, and painting costs a turn. So the question "who did this?" is asked
+/// by holding still, which is not something anyone does by accident and which
+/// cannot be confused with aiming. Long enough not to fire while a finger is
+/// settling, short enough to feel like an answer rather than a wait.
+const HOLD_TO_ASK_MS: u32 = 450;
+
+/// What the board should say about the cell under the pointer, as a translation
+/// key and the name to put in it.
+///
+/// Three states, and they read differently: nothing is pointed at, the cell is
+/// blank, or somebody painted it. An unattributed cell — painted by someone this
+/// reader may not see — is the last of these WITHOUT a name (`None`), rather
+/// than being reported as blank.
+///
+/// Pure, so the decision is testable: `t` reads a global signal and needs a
+/// running renderer, which a unit test has not got.
+pub fn painter_says(
+    cell: Option<(u32, u32)>,
+    owner: Option<&str>,
+    name: Option<&str>,
+    painted: bool,
+) -> Option<(&'static str, Option<String>)> {
+    cell?;
+    if !painted {
+        return Some(("pixel.cellEmpty", None));
+    }
+    let named = match (owner, name) {
+        (Some(_), Some(name)) if !name.trim().is_empty() => Some(name.to_string()),
+        _ => None,
+    };
+    Some(("pixel.painterIs", named))
+}
+
+/// [`painter_says`], worded.
+pub fn painter_label(
+    cell: Option<(u32, u32)>,
+    owner: Option<&str>,
+    name: Option<&str>,
+    painted: bool,
+) -> Option<String> {
+    let (x, y) = cell?;
+    let (key, named) = painter_says(cell, owner, name, painted)?;
+    let who = named.unwrap_or_else(|| t("pixel.painterUnknown"));
+    Some(
+        t(key)
+            .replace("{name}", &who)
+            .replace("{x}", &x.to_string())
+            .replace("{y}", &y.to_string()),
+    )
+}
+
 /// Seconds still to wait, from the `retry_after_ms=…` a rate-limited insert
 /// raises. `None` when the failure was something else.
 pub fn retry_after_seconds(error: &str) -> Option<u32> {
@@ -151,9 +205,19 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     let open = node.mutable;
 
     let mut cells = use_signal(HashMap::<(u32, u32), u8>::new);
+    // Who painted each cell, as user ids. Separate from `cells` so the drawing
+    // path stays a map of colours: the board is redrawn from it on every undo.
+    let mut owners = use_signal(HashMap::<(u32, u32), String>::new);
     let mut colour = use_signal(|| 3u8);
     let mut cooling = use_signal(|| 0u32);
     let mut busy = use_signal(|| false);
+    // The cell being asked about: hovered with a mouse, held under a finger.
+    let mut asking = use_signal(|| None::<(u32, u32)>);
+    // A hold that has already answered, so the tap that ends it does not also
+    // paint. Asking who painted a cell must never cost a turn.
+    let mut held = use_signal(|| false);
+    // Whether a finger is down right now, which is what the hold timer checks.
+    let mut pressing = use_signal(|| false);
 
     // The board as it stands, once. Everything after this arrives as a delta.
     let load_id = canvas_id.clone();
@@ -169,8 +233,12 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         if let Some(rows) = loaded.read().clone() {
             {
                 let mut map = cells.write();
-                for ((x, y), c) in rows {
-                    map.insert((x, y), c);
+                let mut who = owners.write();
+                for cell in rows {
+                    map.insert(cell.at, cell.colour);
+                    if let Some(owner) = cell.owner {
+                        who.insert(cell.at, owner);
+                    }
                 }
             }
             draw_all_of(&draw_id, cols, rows_n, &cells.read());
@@ -227,9 +295,22 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         }
         let ctx = board_context(&stream_id);
         let mut map = cells.write();
+        let mut who = owners.write();
         for row in rows.iter() {
-            if let Some(((x, y), c)) = graphql::parse_cell(row) {
+            if let Some(cell) = graphql::parse_cell_full(row) {
+                let ((x, y), c) = (cell.at, cell.colour);
                 map.insert((x, y), c);
+                match cell.owner {
+                    Some(owner) => {
+                        who.insert((x, y), owner);
+                    }
+                    // Repainted by someone this reader cannot see: drop the old
+                    // attribution rather than leaving the previous painter's
+                    // name on a cell that is no longer theirs.
+                    None => {
+                        who.remove(&(x, y));
+                    }
+                }
                 // One cell, not a re-render: this is what makes a busy canvas
                 // cost the same as a quiet one.
                 if let Some(ctx) = ctx.as_ref() {
@@ -251,13 +332,108 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
         }
     });
 
+    // Names for the people on the board, resolved ONCE for the whole canvas
+    // rather than per cell: a thousand cells are a handful of painters, and the
+    // rows carry ids. Re-runs only when a painter appears who was not there
+    // before, so a busy board does not re-ask on every placement.
+    let name_token = session.read().access_token.clone();
+    let painter_ids = {
+        let mut ids: Vec<String> = owners.read().values().cloned().collect();
+        ids.sort();
+        ids.dedup();
+        ids.join(",")
+    };
+    let names_res = crate::use_data_resource!(|(name_token, painter_ids)| async move {
+        let ids: Vec<String> = painter_ids
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        if ids.is_empty() {
+            return HashMap::<String, String>::new();
+        }
+        graphql::query_users_by_ids(name_token.as_deref(), &ids)
+            .await
+            .into_iter()
+            .filter_map(|a| Some((a.user_id?, a.name)))
+            .collect()
+    });
+
     let can_paint = session.read().is_authenticated() && open && !projector;
     let paint_canvas = canvas_id.clone();
     let click_id = dom_id.clone();
     let undo_id = dom_id.clone();
     let paint_ctx = context_id.clone();
 
+    // Which cell a pointer event is over, in board coordinates. The element's
+    // on-screen size is whatever CSS gave it, so ask the element (as the click
+    // path does) rather than assuming the drawn size.
+    let hit_id = dom_id.clone();
+    let cell_under = move |evt: &Event<PointerData>| -> Option<(u32, u32)> {
+        let coords = evt.data().element_coordinates();
+        let (box_w, box_h) = match board_size(&hit_id) {
+            Some(size) => size,
+            None => (board_px(cols) as f64, board_px(rows_n) as f64),
+        };
+        cell_at(coords.x, coords.y, box_w, box_h, cols, rows_n)
+    };
+
+    // A mouse answers by hovering. A touch pointer does not: its "move" events
+    // only happen while it is down, which is the drag of a hold, so following
+    // them would move the answer around under the finger.
+    let on_move = {
+        let cell_under = cell_under.clone();
+        move |evt: Event<PointerData>| {
+            if evt.data().pointer_type() == "touch" {
+                return;
+            }
+            let hit = cell_under(&evt);
+            if *asking.peek() != hit {
+                asking.set(hit);
+            }
+        }
+    };
+
+    let on_down = {
+        let cell_under = cell_under.clone();
+        move |evt: Event<PointerData>| {
+            if evt.data().pointer_type() != "touch" {
+                return;
+            }
+            let Some(hit) = cell_under(&evt) else {
+                return;
+            };
+            held.set(false);
+            pressing.set(true);
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(HOLD_TO_ASK_MS).await;
+                // Still down? A finger that lifted first cleared this, and its
+                // tap paints as usual — the answer is only for one that stayed.
+                if *pressing.peek() {
+                    held.set(true);
+                    asking.set(Some(hit));
+                }
+            });
+        }
+    };
+
+    // A lift ends the press. If the hold never fired, the tap that follows
+    // paints; if it did, `held` stays set for the click handler to consume, and
+    // the answer stays on screen until the next thing happens.
+    let on_up = move |_evt: Event<PointerData>| pressing.set(false);
+
+    let on_leave = move |_evt: Event<PointerData>| {
+        pressing.set(false);
+        held.set(false);
+        asking.set(None);
+    };
+
     let on_click = move |evt: Event<MouseData>| {
+        // The tap that ended a hold was a question, not a placement.
+        if *held.peek() {
+            held.set(false);
+            return;
+        }
         if !can_paint || cooling() > 0 || busy() {
             return;
         }
@@ -322,6 +498,19 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     let cells_now = cells.read().clone();
     let painted = cells_now.len();
 
+    // What the line under the board says right now.
+    let at = asking();
+    let owner_id = at.and_then(|c| owners.read().get(&c).cloned());
+    let painter = painter_label(
+        at,
+        owner_id.as_deref(),
+        owner_id
+            .as_deref()
+            .and_then(|id| names_res.read().as_ref()?.get(id).cloned())
+            .as_deref(),
+        at.map(|c| cells_now.contains_key(&c)).unwrap_or(false),
+    );
+
     rsx! {
         div { class: "pixel-app",
             div { class: "pixel-head",
@@ -344,6 +533,25 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
                 height: "{rows_n}",
                 style: "max-width: {board_px(cols)}px;",
                 onclick: on_click,
+                onpointermove: on_move,
+                onpointerdown: on_down,
+                onpointerup: on_up,
+                onpointerleave: on_leave,
+                onpointercancel: on_leave,
+            }
+
+            // Who painted the cell being pointed at. A fixed line under the
+            // board rather than a tooltip that follows the cursor: it reads the
+            // same on a phone, where there is no cursor to follow, and it never
+            // covers the cell it is describing.
+            div {
+                // Nothing pointed at yet says how to ask. Holding a cell is not
+                // a gesture anyone guesses, and the line is the only place with
+                // room to say so — it is replaced by the answer on the first
+                // hover or hold, so it costs nothing after the first time.
+                class: if painter.is_some() { "pixel-painter" } else { "pixel-painter is-hint" },
+                aria_live: "polite",
+                {painter.clone().unwrap_or_else(|| t("pixel.holdToSee"))}
             }
 
             if can_paint {
@@ -429,6 +637,55 @@ mod tests {
         assert_eq!(board_px(DEFAULT_SIDE), 512);
         assert_eq!(board_px(64), 1024);
         assert_eq!(board_px(1000), 1024, "and never wider than a screen");
+    }
+
+    /// Pointing at nothing says nothing: the line under the board is empty
+    /// until a cell is actually being asked about.
+    #[test]
+    fn nothing_pointed_at_says_nothing() {
+        assert_eq!(painter_says(None, None, None, false), None);
+        assert_eq!(painter_says(None, Some("u1"), Some("Anna"), true), None);
+    }
+
+    /// A cell nobody has painted says so, rather than naming nobody.
+    #[test]
+    fn an_unpainted_cell_says_it_is_empty() {
+        assert_eq!(
+            painter_says(Some((3, 4)), None, None, false),
+            Some(("pixel.cellEmpty", None))
+        );
+        // Even if an owner id somehow rides along, blank is blank.
+        assert_eq!(
+            painter_says(Some((3, 4)), Some("u1"), Some("Anna"), false),
+            Some(("pixel.cellEmpty", None))
+        );
+    }
+
+    /// The name, when it is known.
+    #[test]
+    fn a_painted_cell_names_its_painter() {
+        assert_eq!(
+            painter_says(Some((12, 7)), Some("u1"), Some("Anna Hansen"), true),
+            Some(("pixel.painterIs", Some("Anna Hansen".to_string())))
+        );
+    }
+
+    /// A cell painted by somebody this reader may not see is still painted: the
+    /// same sentence, with no name in it. It must not read as blank, and a name
+    /// that resolved to nothing must not be shown as a name.
+    #[test]
+    fn an_unattributed_cell_is_still_painted() {
+        assert_eq!(
+            painter_says(Some((1, 1)), None, None, true),
+            Some(("pixel.painterIs", None))
+        );
+        for empty in ["", "   "] {
+            assert_eq!(
+                painter_says(Some((1, 1)), Some("u1"), Some(empty), true),
+                Some(("pixel.painterIs", None)),
+                "{empty:?} is not a name"
+            );
+        }
     }
 }
 

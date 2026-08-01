@@ -7931,6 +7931,24 @@ a.list-item:hover {
 	font-weight: 600;
 }
 
+/* Who painted the cell under the pointer. Keeps its height whether or not it
+   says anything, so pointing at the board does not shunt the palette up and
+   down under the finger that is aiming at it. */
+.pixel-painter {
+	min-height: var(--md-sys-spacing-6);
+	margin-top: var(--md-sys-spacing-2);
+	color: var(--md-on-surface-variant);
+	font-size: var(--md-sys-typescale-body-small-size);
+	font-variant-numeric: tabular-nums;
+	transition: opacity var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard);
+}
+
+/* The resting state is an instruction, not an answer, so it sits back. */
+.pixel-painter.is-hint {
+	opacity: 0.7;
+	font-style: italic;
+}
+
 /* Search scope chip -------------------------------------------------------- */
 
 /* What the search is looking inside, as a chip in front of the field — the

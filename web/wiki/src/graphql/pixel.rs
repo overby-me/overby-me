@@ -24,14 +24,12 @@ pub const MAX_CANVAS_SIDE: u32 = 128;
 /// Only `key` and `data` are selected. The rest of a node row (name, path,
 /// ancestors, timestamps, the owner relation) is dead weight multiplied by the
 /// number of cells, which is the whole reason this is fast.
-pub async fn load_canvas(
-    access_token: Option<&str>,
-    canvas_id: &str,
-) -> Result<Vec<((u32, u32), u8)>, String> {
+pub async fn load_canvas(access_token: Option<&str>, canvas_id: &str) -> Result<Vec<Cell>, String> {
     let data = execute_raw_vars(
         access_token,
         "query($p: uuid!) { \
-           nodes(where: {parentId: {_eq: $p}, mimeId: {_eq: \"canvas/pixel\"}}) { key data } \
+           nodes(where: {parentId: {_eq: $p}, mimeId: {_eq: \"canvas/pixel\"}}) \
+             { key data ownerId } \
          }",
         serde_json::json!({ "p": canvas_id }),
     )
@@ -42,7 +40,38 @@ pub async fn load_canvas(
         .and_then(|n| n.as_array())
         .cloned()
         .unwrap_or_default();
-    Ok(rows.iter().filter_map(parse_cell).collect())
+    Ok(rows.iter().filter_map(parse_cell_full).collect())
+}
+
+/// One painted cell: where it is, what colour, and who put it there.
+///
+/// `owner` is the user id, not a name. Names are resolved once for the whole
+/// board rather than per cell — a thousand cells are usually a handful of
+/// people, and the id is what the row actually carries.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cell {
+    pub at: (u32, u32),
+    pub colour: u8,
+    pub owner: Option<String>,
+}
+
+/// One `{ key, data, ownerId }` row as a [`Cell`], or `None` if it is not one.
+///
+/// Pure, so the wire shape can be tested without a browser or a server.
+pub fn parse_cell_full(row: &serde_json::Value) -> Option<Cell> {
+    let ((x, y), colour) = parse_cell(row)?;
+    // Missing rather than empty: a row whose owner this reader may not see is
+    // unattributed, which is different from being painted by nobody.
+    let owner = row
+        .get("ownerId")
+        .and_then(|o| o.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    Some(Cell {
+        at: (x, y),
+        colour,
+        owner,
+    })
 }
 
 /// One `{ key, data }` row as `((x, y), colour)`, or `None` if it is not a cell.

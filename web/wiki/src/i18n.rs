@@ -372,7 +372,11 @@ const EN_JSON: &str = r#"{
         "canvasName": "Name",
         "colour": "Colour",
         "waitSeconds": "You can paint again in",
-        "yourTurn": "Pick a colour, then tap the board"
+        "yourTurn": "Pick a colour, then tap the board",
+        "painterIs": "{x}, {y} \u00b7 painted by {name}",
+        "painterUnknown": "someone",
+        "cellEmpty": "{x}, {y} \u00b7 not painted yet",
+        "holdToSee": "Hover or hold a cell to see who painted it"
     },
     "error": {
         "somethingWentWrong": "Something went wrong!",
@@ -932,7 +936,11 @@ const DA_JSON: &str = r#"{
         "canvasName": "Navn",
         "colour": "Farve",
         "waitSeconds": "Du kan male igen om",
-        "yourTurn": "V\u00e6lg en farve, og tryk p\u00e5 pladen"
+        "yourTurn": "V\u00e6lg en farve, og tryk p\u00e5 pladen",
+        "painterIs": "{x}, {y} \u00b7 malet af {name}",
+        "painterUnknown": "en anden",
+        "cellEmpty": "{x}, {y} \u00b7 ikke malet endnu",
+        "holdToSee": "Peg p\u00e5 eller hold et felt for at se, hvem der har malet det"
     },
     "error": {
         "somethingWentWrong": "Noget gik galt!",
