@@ -97,25 +97,26 @@ impl Numbering {
         Some((path, self.pic_bullet_mime_type.as_deref().unwrap_or("")))
     }
 
-    /// How to draw that bullet: the size Word recorded for it, which lives in
-    /// the numbering definition and is unrelated to the size of the file.
+    /// The SHAPE of that bullet. Not its size.
     ///
-    /// Driven from the HEIGHT rather than the width, with the width following
-    /// from the ratio, because the stylesheet caps a bullet to the line it
-    /// leads — Word will happily ask for an 18pt bullet beside 11pt text — and
-    /// a cap on the height must be free to take the width down with it.
+    /// The numbering definition carries a size, and it is a page-layout number
+    /// from whatever template the document came out of: the one in this wiki
+    /// asks for an 18pt bullet beside 11pt text, twice the size of the very
+    /// same image used as a bullet elsewhere in the same document. Drawing that
+    /// literally is what Word does and what a paginating renderer should do.
+    /// This renderer is not one, and says so: it favours a document that reads
+    /// over a document that is reproduced.
+    ///
+    /// So the stylesheet sets the height, in `em`, and a bullet tracks the text
+    /// it leads and the reader's own font size. All that is needed from the
+    /// document is the aspect ratio, so the picture is not squashed.
     pub fn bullet_style(&self) -> String {
-        let (w, h) = (
+        match (
             self.pic_bullet_width_pt.filter(|w| *w > 0.0),
             self.pic_bullet_height_pt.filter(|h| *h > 0.0),
-        );
-        match (w, h) {
-            (Some(w), Some(h)) => {
-                format!("height:{h:.2}pt;aspect-ratio:{w:.2}/{h:.2};width:auto;")
-            }
-            (None, Some(h)) => format!("height:{h:.2}pt;width:auto;"),
-            (Some(w), None) => format!("width:{w:.2}pt;"),
-            (None, None) => String::new(),
+        ) {
+            (Some(w), Some(h)) => format!("aspect-ratio:{w:.2}/{h:.2};"),
+            _ => String::new(),
         }
     }
 }
@@ -574,21 +575,35 @@ pub fn DocxBody(blocks: Vec<Block>) -> Element {
                     Group::Single(block) => rsx! {
                         DocxBlock { key: "b{i}", block }
                     },
-                    Group::List { ordered, items } => rsx! {
-                        if ordered {
-                            ol { key: "l{i}", class: "docx-list",
-                                for (j , item) in items.into_iter().enumerate() {
-                                    ListItem { key: "i{j}", item }
+                    Group::List { ordered, items } => {
+                        // A list drawn with picture bullets places itself from
+                        // the document's own indents, so the list must not add
+                        // its own padding on top and push it out of line with
+                        // the paragraphs around it.
+                        let class = match items.iter().any(|it| {
+                            it.numbering
+                                .as_ref()
+                                .is_some_and(|n| n.picture().is_some())
+                        }) {
+                            true => "docx-list docx-list-pic",
+                            false => "docx-list",
+                        };
+                        rsx! {
+                            if ordered {
+                                ol { key: "l{i}", class,
+                                    for (j , item) in items.into_iter().enumerate() {
+                                        ListItem { key: "i{j}", item }
+                                    }
                                 }
-                            }
-                        } else {
-                            ul { key: "l{i}", class: "docx-list",
-                                for (j , item) in items.into_iter().enumerate() {
-                                    ListItem { key: "i{j}", item }
+                            } else {
+                                ul { key: "l{i}", class,
+                                    for (j , item) in items.into_iter().enumerate() {
+                                        ListItem { key: "i{j}", item }
+                                    }
                                 }
                             }
                         }
-                    },
+                    }
                 }
             }
         }
@@ -619,12 +634,21 @@ fn ListItem(item: Paragraph) -> Element {
         .and_then(|n| n.src.clone().map(|src| (src, n.bullet_style())));
 
     match bullet {
-        Some((src, style)) => rsx! {
-            li { class: "docx-li-pic",
-                img { class: "docx-bullet", src: "{src}", style: "{style}", alt: "" }
-                span { class: "docx-li-body", {runs_of(&item)} }
+        Some((src, style)) => {
+            // Built exactly like the picture-bulleted PARAGRAPHS around it: the
+            // bullet inline at the head of the text, and the paragraph's own
+            // hanging indent placing it. That is what makes one level of
+            // bullets look like one level whether the document wrote them as a
+            // list or not — and the list's own padding is dropped, since the
+            // document has already said where this belongs.
+            let indent = paragraph_style(&item);
+            rsx! {
+                li { class: "docx-li-pic", style: "{indent}",
+                    img { class: "docx-bullet", src: "{src}", style: "{style}", alt: "" }
+                    {runs_of(&item)}
+                }
             }
-        },
+        }
         None => rsx! {
             li { {runs_of(&item)} }
         },
@@ -1030,12 +1054,10 @@ mod tests {
             src: None,
         };
         assert_eq!(n.picture(), Some(("word/media/image1.jpeg", "image/jpeg")));
-        // Driven from the height so the stylesheet's cap can take the width
-        // down with it: an 18pt bullet beside 11pt text is Word being Word.
-        let css = n.bullet_style();
-        assert!(css.contains("height:18.75pt;"), "{css}");
-        assert!(css.contains("aspect-ratio:18.00/18.75;"), "{css}");
-        assert!(css.contains("width:auto;"), "{css}");
+        // The SHAPE only. The size is the stylesheet's, in em, because an 18pt
+        // bullet beside 11pt text is a page-layout number and this renderer
+        // favours reading over reproduction.
+        assert_eq!(n.bullet_style(), "aspect-ratio:18.00/18.75;");
 
         // An ordinary character bullet has no picture and no style.
         let plain = Numbering {

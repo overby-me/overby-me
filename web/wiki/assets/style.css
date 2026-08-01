@@ -8105,28 +8105,28 @@ a.list-item:hover {
 }
 
 /* A list whose bullet is a picture (Word's numPicBullet). The browser's own
-   marker is turned off and the picture takes its place, laid out as a row so a
-   wrapping item stays indented under its text rather than under the bullet. */
+   marker is turned off and the picture takes its place, inline at the head of
+   the text — built exactly like the picture-bulleted PARAGRAPHS such documents
+   also contain, so one level of bullets looks like one level however the
+   document happened to write each item. The item carries its own margin and
+   hanging indent inline, from the document. */
 .docx-li-pic {
 	list-style: none;
-	display: flex;
-	align-items: baseline;
-	gap: var(--md-sys-spacing-2);
+}
+/* Which is also why the list adds no padding of its own here: doing so would
+   push these items right of the identical-looking paragraphs beside them. */
+.docx-list-pic {
+	padding-left: 0;
 }
 .docx-bullet {
-	flex: none;
-	/* Word sizes a picture bullet independently of the file, and can ask for one
-	   far larger than the text it leads. Cap it at the line so it stays a
-	   bullet. */
-	max-height: 1.1em;
+	/* Sized to the text it leads, NOT to the size in the numbering definition:
+	   that is a page-layout number, and the one in this wiki asks for 18pt
+	   beside 11pt text. 0.8em matches the 9pt images the same documents use as
+	   bullets inline, and follows the reader's font size. The aspect ratio comes
+	   from the document, so the picture is never squashed. */
+	height: 0.8em;
 	width: auto;
-	/* Baseline, NOT centred: an item that wraps to three lines is still one
-	   item, and its bullet belongs beside the FIRST line rather than halfway
-	   down the block. */
-	align-self: baseline;
-}
-.docx-li-body {
-	min-width: 0;
+	vertical-align: baseline;
 }
 
 /* A wide table scrolls inside itself rather than widening the document, which
