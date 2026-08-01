@@ -1566,9 +1566,14 @@ html {
 .content-hero.is-portrait .image-error {
 	object-fit: contain;
 	object-position: center;
-	/* Above the blurred backdrop, which is a ::before on the frame. */
+	/* Above the blurred backdrop, below the veil that carries the title. */
 	position: absolute;
 	z-index: 1;
+	/* No placeholder tone here. `.zoomable` paints one while an image loads, and
+	   with `contain` the element's BOX still fills the frame — so that grey
+	   covered the blurred backdrop completely, which is why the blur could not be
+	   seen at all. The backdrop is the placeholder now. */
+	background: transparent;
 }
 /* The hero image is a ZoomableImage; fill the hero as a cover crop (overriding the
    contained-thumbnail defaults of .zoomable) while keeping its click-to-expand. */
@@ -1587,6 +1592,9 @@ html {
 .content-hero-veil {
 	position: absolute;
 	inset: 0;
+	/* Above the photo, which is lifted above the blurred backdrop. Without this
+	   the title and date disappeared behind the image. */
+	z-index: 2;
 	display: flex;
 	align-items: flex-end;
 	gap: var(--md-sys-spacing-3-5);
