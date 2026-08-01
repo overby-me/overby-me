@@ -8043,3 +8043,65 @@ a.list-item:hover {
 .search-scope-clear .material-icons {
 	font-size: var(--md-sys-typescale-label-large-size);
 }
+
+/* A Word document rendered by this app (components::docx) ------------------ */
+
+/* Measured for READING, not for matching Word: a comfortable line length, the
+   app's own type, and spacing that survives on a phone. The document is not a
+   page here, so it takes the width it is given rather than a paper size. */
+.docx-doc {
+	max-width: 70ch;
+	margin: 0 auto;
+	color: var(--md-on-surface);
+}
+.docx-p {
+	margin: 0 0 var(--md-sys-spacing-3);
+	line-height: var(--md-sys-typescale-body-large-line);
+}
+/* An empty paragraph is a deliberate blank line in Word, and collapsing it to
+   nothing would run two blocks together. */
+.docx-p:empty {
+	min-height: var(--md-sys-spacing-4);
+}
+.docx-h {
+	margin: var(--md-sys-spacing-5) 0 var(--md-sys-spacing-2);
+	line-height: var(--md-sys-typescale-title-large-line);
+}
+.docx-doc .docx-h:first-child {
+	margin-top: 0;
+}
+.docx-list {
+	margin: 0 0 var(--md-sys-spacing-3);
+	padding-left: var(--md-sys-spacing-6);
+}
+.docx-list li {
+	margin-bottom: var(--md-sys-spacing-1);
+}
+
+/* A wide table scrolls inside itself rather than widening the document, which
+   on a phone would push every paragraph sideways too. */
+.docx-table-wrap {
+	overflow-x: auto;
+	margin: 0 0 var(--md-sys-spacing-4);
+}
+.docx-table {
+	border-collapse: collapse;
+	width: 100%;
+}
+.docx-table th,
+.docx-table td {
+	border: 1px solid var(--md-outline-variant);
+	padding: var(--md-sys-spacing-2) var(--md-sys-spacing-3);
+	vertical-align: top;
+	text-align: left;
+}
+.docx-table th {
+	background: var(--md-surface-container);
+	font-weight: 600;
+}
+/* Inside a cell the block spacing is noise: a cell is small and its last
+   paragraph must not push the row taller. */
+.docx-table td .docx-p:last-child,
+.docx-table th .docx-p:last-child {
+	margin-bottom: 0;
+}

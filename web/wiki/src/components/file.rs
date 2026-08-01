@@ -42,6 +42,9 @@ enum OfficeLink {
 pub enum OfficeViewer {
     Microsoft,
     Google,
+    /// Rendered here, by this app, from the file's own bytes. Offered only for
+    /// the formats it can actually read (see `renders_natively`).
+    Native,
 }
 
 impl OfficeViewer {
@@ -49,12 +52,14 @@ impl OfficeViewer {
         match self {
             OfficeViewer::Microsoft => "microsoft",
             OfficeViewer::Google => "google",
+            OfficeViewer::Native => "native",
         }
     }
 
     fn from_key(key: &str) -> Self {
         match key {
             "google" => OfficeViewer::Google,
+            "native" => OfficeViewer::Native,
             // Microsoft is what everybody had before the choice existed, so an
             // unset or unreadable preference keeps what they were used to.
             _ => OfficeViewer::Microsoft,
@@ -79,7 +84,22 @@ pub fn viewer_embed_url(viewer: OfficeViewer, encoded_src: &str) -> String {
         OfficeViewer::Google => {
             format!("https://docs.google.com/gview?embedded=true&url={encoded_src}")
         }
+        // Native has no embed URL: nothing is embedded. Falling back to
+        // Microsoft keeps this total rather than panicking, and it is only
+        // reachable for a format the native path declined.
+        OfficeViewer::Native => {
+            format!("https://view.officeapps.live.com/op/embed.aspx?src={encoded_src}")
+        }
     }
+}
+
+/// Whether this app can render `mime` itself.
+///
+/// Only Word so far. A format that is not on this list keeps the embedded
+/// viewers, and the native option is not offered for it at all — an option that
+/// silently does nothing is worse than no option.
+pub fn renders_natively(mime: &str) -> bool {
+    mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 }
 
 /// The chosen viewer, remembered per device.
@@ -175,6 +195,60 @@ mod tests {
                 OfficeViewer::Microsoft,
                 "{junk:?}"
             );
+        }
+    }
+}
+
+/// A Word file rendered here: fetch the bytes, parse them, show the document.
+///
+/// The bytes come from the presigned STORAGE url, not the signed backend link
+/// the embedded viewers use. The backend link exists so a third party can fetch
+/// the document; nothing third-party is involved here, and the presigned url is
+/// the one the browser can already read.
+#[component]
+fn NativeDocx(file_url: String, name: String) -> Element {
+    let url = file_url.clone();
+    let parsed = crate::use_data_resource!(|(url)| async move {
+        if url.is_empty() {
+            return Err(String::new());
+        }
+        let bytes = reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?;
+        // The parser hands back the document model as JSON; only the parts this
+        // renders are deserialised (see components::docx).
+        let json = docx_parser::parse_docx(&bytes, None).map_err(|e| format!("{e:?}"))?;
+        let doc: serde_json::Value = serde_json::from_slice(&json).map_err(|e| e.to_string())?;
+        let blocks: Vec<super::docx::Block> =
+            serde_json::from_value(doc.get("body").cloned().unwrap_or_default())
+                .map_err(|e| e.to_string())?;
+        Ok::<_, String>(blocks)
+    });
+
+    let state = parsed.read().clone();
+    match state {
+        None => rsx! {
+            div { class: "empty-state empty-state-sm",
+                div { class: "spinner spinner-sm" }
+            }
+        },
+        Some(Ok(blocks)) => rsx! {
+            article { class: "docx-doc", aria_label: "{name}",
+                super::docx::DocxBody { blocks }
+            }
+        },
+        // A document this cannot read is not a dead end: say so, and the other
+        // two viewers are one tap away in the same sheet.
+        Some(Err(e)) => {
+            log::info!("native docx render failed: {e}");
+            rsx! {
+                p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
+            }
         }
     }
 }
@@ -328,7 +402,13 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                         for (viewer , label) in [
                                             (OfficeViewer::Microsoft, t("file.viewerMicrosoft")),
                                             (OfficeViewer::Google, t("file.viewerGoogle")),
-                                        ] {
+                                        ]
+                                            .into_iter()
+                                            .chain(
+                                                renders_natively(file_mime)
+                                                    .then(|| (OfficeViewer::Native, t("file.viewerNative"))),
+                                            )
+                                        {
                                             button {
                                                 key: "{viewer.key()}",
                                                 class: if OFFICE_VIEWER() == viewer { "sheet-action selected" } else { "sheet-action" },
@@ -459,6 +539,10 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                     div { class: "empty-state empty-state-sm",
                                         div { class: "spinner spinner-sm" }
                                     }
+                                },
+                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                                    && renders_natively(file_mime) => rsx! {
+                                    NativeDocx { file_url: file_url.clone(), name: name.to_string() }
                                 },
                                 OfficeLink::Ready(url) => {
                                     let encoded = String::from(&js_sys::encode_uri_component(&url));

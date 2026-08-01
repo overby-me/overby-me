@@ -648,7 +648,9 @@ const EN_JSON: &str = r#"{
     "file": {
         "renderedBy": "Rendered by",
         "viewerMicrosoft": "Microsoft",
-        "viewerGoogle": "Google"
+        "viewerGoogle": "Google",
+        "viewerNative": "This app",
+        "nativeFailed": "This app could not read that document. Try Microsoft or Google above."
     },
     "mime": {
         "group": "Group",
@@ -1217,7 +1219,9 @@ const DA_JSON: &str = r#"{
     "file": {
         "renderedBy": "Vises af",
         "viewerMicrosoft": "Microsoft",
-        "viewerGoogle": "Google"
+        "viewerGoogle": "Google",
+        "viewerNative": "Denne app",
+        "nativeFailed": "Denne app kunne ikke l\u00e6se dokumentet. Pr\u00f8v Microsoft eller Google ovenfor."
     },
     "mime": {
         "group": "Gruppe",

@@ -5,6 +5,7 @@ pub mod bin;
 pub mod comments;
 pub mod content;
 pub mod cow;
+pub mod docx;
 pub mod editor;
 pub mod error;
 pub mod feed;

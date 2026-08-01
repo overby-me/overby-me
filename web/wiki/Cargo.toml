@@ -15,6 +15,10 @@ dioxus-icons = { version = "0.1.0", default-features = false }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
 # StreamExt for the use_coroutine bridge that feeds window-resize widths into the
 # adaptive WindowSizeClass signal from inside the Dioxus runtime.
+# Office Open XML parsers (MIT, Yuki Yokotani) — github.com/yukiyokotani/office-open-xml-viewer
+# Pinned to a rev like dioxus-primitives above, so `cargo update` cannot float
+# it and stale the Nix outputHashes.
+docx-parser = { git = "https://github.com/yukiyokotani/office-open-xml-viewer", rev = "d8c4b961adce0b90e43cbe7723a39f3f123b9e74", default-features = false }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
