@@ -8241,6 +8241,17 @@ a.list-item:hover {
 .file-gap-notice p {
 	margin: 0;
 }
+
+/* When most of the file is missing the note says so more firmly — but it is
+   still a note beside the document, not a replacement for it: the reader chose
+   this viewer and keeps it until they choose otherwise. */
+.file-gap-notice.is-urgent {
+	background: var(--md-error-container);
+	color: var(--md-on-error-container);
+}
+.file-gap-notice.is-urgent .material-icons {
+	color: var(--md-on-error-container);
+}
 .file-gap-actions {
 	display: flex;
 	gap: var(--md-sys-spacing-2);

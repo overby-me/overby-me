@@ -652,7 +652,7 @@ const EN_JSON: &str = r#"{
         "viewerNative": "This app",
         "nativeFailed": "This app could not read that document. Try Microsoft or Google above.",
         "gapPartial": "This viewer cannot show:",
-        "gapReplaced": "Shown with Microsoft, because this viewer cannot show:",
+        "gapMost": "Much of this file cannot be shown here. It is missing:",
         "gapImages": "images",
         "gapCharts": "charts",
         "gapGraphics": "graphics",
@@ -1231,7 +1231,7 @@ const DA_JSON: &str = r#"{
         "viewerNative": "Denne app",
         "nativeFailed": "Denne app kunne ikke l\u00e6se dokumentet. Pr\u00f8v Microsoft eller Google ovenfor.",
         "gapPartial": "Denne fremviser kan ikke vise:",
-        "gapReplaced": "Vist med Microsoft, fordi denne fremviser ikke kan vise:",
+        "gapMost": "Meget af denne fil kan ikke vises her. Den mangler:",
         "gapImages": "billeder",
         "gapCharts": "diagrammer",
         "gapGraphics": "grafik",
@@ -1302,6 +1302,10 @@ mod tests {
                 "mime.group",
                 "mime.event",
                 "mime.folder",
+                // Every viewer the file sheet can offer (file::viewers_for).
+                "file.viewerMicrosoft",
+                "file.viewerGoogle",
+                "file.viewerNative",
             ] {
                 assert!(
                     lookup_key(map, key).is_some(),

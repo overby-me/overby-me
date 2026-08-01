@@ -39,6 +39,11 @@ material-colors = { version = "0.4", default-features = false, features = [
 ] }
 # default-features disabled to drop native-tls/openssl-sys, which is unused on
 # wasm (reqwest uses the browser fetch) and breaks host-target clippy.
+# Already in the tree via vendor/ooxml; naming them here lets the OpenDocument
+# reader (components::odf) use them directly rather than through a parser crate
+# that does not handle ODF.
+roxmltree = "0.20"
+zip = { version = "2", default-features = false, features = ["deflate-miniz"] }
 reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "multipart"

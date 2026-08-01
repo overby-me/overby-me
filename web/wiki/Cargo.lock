@@ -3812,6 +3812,7 @@ dependencies = [
  "material-colors",
  "pptx-parser",
  "reqwest 0.12.28",
+ "roxmltree",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -3819,6 +3820,7 @@ dependencies = [
  "wasm-logger",
  "web-sys",
  "xlsx-parser",
+ "zip",
 ]
 
 [[package]]

@@ -19,7 +19,20 @@ fn is_office_mime(mime: &str) -> bool {
             | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             | "application/vnd.ms-powerpoint"
             | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            | ODT
+            | ODS
+            | ODP
     )
+}
+
+/// OpenDocument: what LibreOffice writes.
+pub const ODT: &str = "application/vnd.oasis.opendocument.text";
+pub const ODS: &str = "application/vnd.oasis.opendocument.spreadsheet";
+pub const ODP: &str = "application/vnd.oasis.opendocument.presentation";
+
+/// Whether `mime` is OpenDocument rather than OOXML.
+pub fn is_opendocument(mime: &str) -> bool {
+    matches!(mime, ODT | ODS | ODP)
 }
 
 /// The state of the backend-signed link the Office viewer fetches on. Kept
@@ -53,6 +66,15 @@ impl OfficeViewer {
             OfficeViewer::Microsoft => "microsoft",
             OfficeViewer::Google => "google",
             OfficeViewer::Native => "native",
+        }
+    }
+
+    /// What a reader is offered this viewer as.
+    pub fn label_key(self) -> &'static str {
+        match self {
+            OfficeViewer::Microsoft => "file.viewerMicrosoft",
+            OfficeViewer::Google => "file.viewerGoogle",
+            OfficeViewer::Native => "file.viewerNative",
         }
     }
 
@@ -104,7 +126,31 @@ pub fn renders_natively(mime: &str) -> bool {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            // OpenDocument text only, so far. An ODF spreadsheet or deck still
+            // goes to Google, which reads both families.
+            | ODT
     )
+}
+
+/// The viewers worth offering for `mime`, in the order they should appear.
+///
+/// Microsoft's viewer renders OOXML and the old binary formats; it does NOT
+/// render OpenDocument, and offering it for a `.odt` would be offering a button
+/// that produces an error page. Google's `gview` reads both families. The
+/// native renderer appears where it can do the job.
+///
+/// Pure, and tested, because an option that cannot work is worse than a missing
+/// one — that is the same rule `renders_natively` follows.
+pub fn viewers_for(mime: &str) -> Vec<OfficeViewer> {
+    let mut out = Vec::new();
+    if !is_opendocument(mime) {
+        out.push(OfficeViewer::Microsoft);
+    }
+    out.push(OfficeViewer::Google);
+    if renders_natively(mime) {
+        out.push(OfficeViewer::Native);
+    }
+    out
 }
 
 /// Whether `mime` is the spreadsheet the native path renders as a grid rather
@@ -192,6 +238,70 @@ mod tests {
         );
     }
 
+    /// Microsoft cannot render OpenDocument, so it is not offered for one.
+    /// Offering a button that produces an error page is the same mistake as
+    /// offering a native option that renders nothing.
+    #[test]
+    fn opendocument_is_never_offered_to_microsoft() {
+        use super::{viewers_for, OfficeViewer, ODP, ODS, ODT};
+        for mime in [ODT, ODS, ODP] {
+            let viewers = viewers_for(mime);
+            assert!(
+                !viewers.contains(&OfficeViewer::Microsoft),
+                "{mime} must not offer Microsoft: {viewers:?}"
+            );
+            assert!(viewers.contains(&OfficeViewer::Google), "gview reads ODF");
+        }
+        // ODT renders here; an ODF sheet or deck does not, yet.
+        assert!(viewers_for(ODT).contains(&OfficeViewer::Native));
+        assert!(!viewers_for(ODS).contains(&OfficeViewer::Native));
+        assert!(!viewers_for(ODP).contains(&OfficeViewer::Native));
+    }
+
+    #[test]
+    fn ooxml_is_offered_all_three() {
+        use super::{viewers_for, OfficeViewer};
+        let docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        assert_eq!(
+            viewers_for(docx),
+            vec![
+                OfficeViewer::Microsoft,
+                OfficeViewer::Google,
+                OfficeViewer::Native
+            ]
+        );
+        // A format nothing here reads keeps the two embedded viewers.
+        let legacy = "application/msword";
+        assert_eq!(
+            viewers_for(legacy),
+            vec![OfficeViewer::Microsoft, OfficeViewer::Google]
+        );
+    }
+
+    /// Every viewer a reader can be offered must name a label key. That the
+    /// key RESOLVES is checked in the i18n suite, which can read the tables
+    /// without a renderer; `t` needs one.
+    #[test]
+    fn every_offered_viewer_has_a_label_key() {
+        use super::{viewers_for, ODP, ODS, ODT};
+        let mimes = [
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/msword",
+            ODT,
+            ODS,
+            ODP,
+        ];
+        for mime in mimes {
+            let viewers = viewers_for(mime);
+            assert!(!viewers.is_empty(), "{mime} must offer something");
+            for viewer in viewers {
+                assert!(viewer.label_key().starts_with("file.viewer"));
+            }
+        }
+    }
+
     /// The stored preference round-trips, and anything else is Microsoft — which
     /// is what every reader had before this choice existed, so an unset or
     /// corrupt value must not change what they see.
@@ -216,20 +326,15 @@ mod tests {
     }
 }
 
-/// The viewer a native render falls back to when it cannot do the file justice.
-///
-/// Microsoft's: it is the one everybody had before this choice existed, and the
-/// one most likely to render an office file faithfully. The reader can still
-/// pick Google in the same sheet.
-const FALLBACK_VIEWER: OfficeViewer = OfficeViewer::Microsoft;
-
 /// What the native renderer will not draw, said plainly.
 ///
-/// Shown above a document that renders anyway (a minor gap), and instead of one
-/// that does not (a major gap). Either way it names what is missing rather than
-/// leaving the reader to notice.
+/// A SUGGESTION, never a substitution. The document always renders; this names
+/// what is missing from it and puts the viewers that can show it one tap away.
+/// When a lot is missing the note is louder, but the reader still decides —
+/// quietly swapping somebody's chosen viewer for another is the very thing this
+/// is meant to prevent.
 #[component]
-fn GapNotice(report: super::render_gaps::GapReport, replaced: bool) -> Element {
+fn GapNotice(report: super::render_gaps::GapReport, urgent: bool) -> Element {
     let items: Vec<String> = report
         .gaps
         .iter()
@@ -242,11 +347,13 @@ fn GapNotice(report: super::render_gaps::GapReport, replaced: bool) -> Element {
         })
         .collect();
     rsx! {
-        div { class: "file-gap-notice", role: "note",
-            span { class: "material-icons", "info" }
+        div {
+            class: if urgent { "file-gap-notice is-urgent" } else { "file-gap-notice" },
+            role: "note",
+            span { class: "material-icons", if urgent { "report" } else { "info" } }
             div {
                 p { class: "body-small",
-                    if replaced { "{t(\"file.gapReplaced\")}" } else { "{t(\"file.gapPartial\")}" }
+                    if urgent { "{t(\"file.gapMost\")}" } else { "{t(\"file.gapPartial\")}" }
                     " "
                     "{items.join(\", \")}"
                 }
@@ -269,20 +376,46 @@ fn GapNotice(report: super::render_gaps::GapReport, replaced: bool) -> Element {
     }
 }
 
-/// An embedded viewer standing in for a native render that would have misled.
+/// An OpenDocument text file rendered here.
+///
+/// No renderer of its own: ODF is converted to the same block model the Word
+/// renderer draws (see `components::odf`), so headings, lists, tables and styled
+/// runs all work exactly as they do for a `.docx`.
 #[component]
-fn FallbackEmbed(
-    signed_url: String,
-    name: String,
-    report: super::render_gaps::GapReport,
-) -> Element {
-    let encoded = String::from(&js_sys::encode_uri_component(&signed_url));
-    let embed = viewer_embed_url(FALLBACK_VIEWER, &encoded);
-    rsx! {
-        GapNotice { report, replaced: true }
-        div { class: "viewport-frame",
-            iframe { src: "{embed}", title: "{name}" }
+fn NativeOdt(file_url: String, name: String) -> Element {
+    let url = file_url.clone();
+    let parsed = crate::use_data_resource!(|(url)| async move {
+        if url.is_empty() {
+            return Err(String::new());
         }
+        let bytes = reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?;
+        super::odf::parse_odt(&bytes)
+    });
+    let state = parsed.read().clone();
+    match state {
+        None => rsx! {
+            div { class: "empty-state empty-state-sm",
+                div { class: "spinner spinner-sm" }
+            }
+        },
+        Some(Err(e)) => {
+            log::info!("native odt render failed: {e}");
+            rsx! {
+                p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
+            }
+        }
+        Some(Ok(blocks)) => rsx! {
+            article { class: "docx-doc", aria_label: "{name}",
+                super::docx::DocxBody { blocks }
+            }
+        },
     }
 }
 
@@ -293,7 +426,7 @@ fn FallbackEmbed(
 /// the document; nothing third-party is involved here, and the presigned url is
 /// the one the browser can already read.
 #[component]
-fn NativeDocx(file_url: String, signed_url: String, name: String) -> Element {
+fn NativeDocx(file_url: String, name: String) -> Element {
     let url = file_url.clone();
     let parsed = crate::use_data_resource!(|(url)| async move {
         if url.is_empty() {
@@ -327,12 +460,9 @@ fn NativeDocx(file_url: String, signed_url: String, name: String) -> Element {
                 div { class: "spinner spinner-sm" }
             }
         },
-        Some(Ok((_blocks, gaps))) if gaps.is_major() => rsx! {
-            FallbackEmbed { signed_url, name, report: gaps }
-        },
         Some(Ok((blocks, gaps))) => rsx! {
             if !gaps.is_empty() {
-                GapNotice { report: gaps, replaced: false }
+                GapNotice { urgent: gaps.is_major(), report: gaps }
             }
             article { class: "docx-doc", aria_label: "{name}",
                 super::docx::DocxBody { blocks }
@@ -356,7 +486,7 @@ fn NativeDocx(file_url: String, signed_url: String, name: String) -> Element {
 /// own. Only the first sheet is parsed up front — a workbook with twenty sheets
 /// should not cost twenty parses to show the one somebody opened.
 #[component]
-fn NativeXlsx(file_url: String, signed_url: String, name: String) -> Element {
+fn NativeXlsx(file_url: String, name: String) -> Element {
     let mut sheet_no = use_signal(|| 0usize);
     let url = file_url.clone();
     let parsed = crate::use_data_resource!(|(url)| async move {
@@ -418,15 +548,11 @@ fn NativeXlsx(file_url: String, signed_url: String, name: String) -> Element {
                 .unwrap_or_default();
             let gaps = super::render_gaps::xlsx_gaps(&sheet_json);
             let sheet: super::xlsx::Sheet = serde_json::from_value(sheet_json).unwrap_or_default();
-            if gaps.is_major() {
-                return rsx! {
-                    FallbackEmbed { signed_url, name, report: gaps }
-                };
-            }
+
             rsx! {
                 div { class: "xlsx-doc", aria_label: "{name}",
                     if !gaps.is_empty() {
-                        GapNotice { report: gaps, replaced: false }
+                        GapNotice { urgent: gaps.is_major(), report: gaps }
                     }
                     // Tabs only when there is a choice to make.
                     if names.len() > 1 {
@@ -452,7 +578,7 @@ fn NativeXlsx(file_url: String, signed_url: String, name: String) -> Element {
 
 /// A slide deck rendered here.
 #[component]
-fn NativePptx(file_url: String, signed_url: String, name: String) -> Element {
+fn NativePptx(file_url: String, name: String) -> Element {
     let url = file_url.clone();
     let parsed = crate::use_data_resource!(|(url)| async move {
         if url.is_empty() {
@@ -485,13 +611,10 @@ fn NativePptx(file_url: String, signed_url: String, name: String) -> Element {
                 p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
             }
         }
-        Some(Ok((_deck, gaps))) if gaps.is_major() => rsx! {
-            FallbackEmbed { signed_url, name, report: gaps }
-        },
         Some(Ok((deck, gaps))) => rsx! {
             div { class: "pptx-doc", aria_label: "{name}",
                 if !gaps.is_empty() {
-                    GapNotice { report: gaps, replaced: false }
+                    GapNotice { urgent: gaps.is_major(), report: gaps }
                 }
                 super::pptx::DeckView { deck }
             }
@@ -645,16 +768,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                 if is_office_mime(file_mime) {
                                     super::widgets::SheetGroup {
                                         div { class: "sheet-label", "{t(\"file.renderedBy\")}" }
-                                        for (viewer , label) in [
-                                            (OfficeViewer::Microsoft, t("file.viewerMicrosoft")),
-                                            (OfficeViewer::Google, t("file.viewerGoogle")),
-                                        ]
-                                            .into_iter()
-                                            .chain(
-                                                renders_natively(file_mime)
-                                                    .then(|| (OfficeViewer::Native, t("file.viewerNative"))),
-                                            )
-                                        {
+                                        for viewer in viewers_for(file_mime) {
                                             button {
                                                 key: "{viewer.key()}",
                                                 class: if OFFICE_VIEWER() == viewer { "sheet-action selected" } else { "sheet-action" },
@@ -663,7 +777,7 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                                 span { class: "material-icons",
                                                     if OFFICE_VIEWER() == viewer { "radio_button_checked" } else { "radio_button_unchecked" }
                                                 }
-                                                "{label}"
+                                                "{t(viewer.label_key())}"
                                             }
                                         }
                                     }
@@ -786,17 +900,21 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                         div { class: "spinner spinner-sm" }
                                     }
                                 },
-                                OfficeLink::Ready(url) if OFFICE_VIEWER() == OfficeViewer::Native
+                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                                    && file_mime == ODT => rsx! {
+                                    NativeOdt { file_url: file_url.clone(), name: name.to_string() }
+                                },
+                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && is_presentation(file_mime) => rsx! {
-                                    NativePptx { file_url: file_url.clone(), signed_url: url.clone(), name: name.to_string() }
+                                    NativePptx { file_url: file_url.clone(), name: name.to_string() }
                                 },
-                                OfficeLink::Ready(url) if OFFICE_VIEWER() == OfficeViewer::Native
+                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && is_spreadsheet(file_mime) => rsx! {
-                                    NativeXlsx { file_url: file_url.clone(), signed_url: url.clone(), name: name.to_string() }
+                                    NativeXlsx { file_url: file_url.clone(), name: name.to_string() }
                                 },
-                                OfficeLink::Ready(url) if OFFICE_VIEWER() == OfficeViewer::Native
+                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && renders_natively(file_mime) => rsx! {
-                                    NativeDocx { file_url: file_url.clone(), signed_url: url.clone(), name: name.to_string() }
+                                    NativeDocx { file_url: file_url.clone(), name: name.to_string() }
                                 },
                                 OfficeLink::Ready(url) => {
                                     let encoded = String::from(&js_sys::encode_uri_component(&url));
