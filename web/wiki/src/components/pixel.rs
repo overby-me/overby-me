@@ -210,7 +210,7 @@ pub fn PixelApp(node: NodeWithChildren, #[props(default)] projector: bool) -> El
     });
     let stream_id = dom_id.clone();
     let stream = crate::subscription::use_graphql_subscription(graphql::cell_stream(
-        graphql::children_of_mime(&canvas_id, "pixel/pixel"),
+        graphql::children_of_mime(&canvas_id, "canvas/pixel"),
         &since,
     ));
     use_effect(move || {
@@ -451,7 +451,7 @@ pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
     let canvases: Vec<_> = node
         .children
         .iter()
-        .filter(|c| c.mime_id.as_deref() == Some("pixel/canvas"))
+        .filter(|c| c.mime_id.as_deref() == Some("canvas/canvas"))
         .cloned()
         .collect();
 

@@ -286,7 +286,7 @@ pub fn MimeLoader(
         "vote/poll" => rsx! { PollApp { node: node.clone(), projector } },
         // A canvas is a node type, like a poll or a speaker list, so a context
         // can hold as many as it likes and each lives wherever it was made.
-        "pixel/canvas" => rsx! { super::pixel::PixelApp { node: node.clone(), projector } },
+        "canvas/canvas" => rsx! { super::pixel::PixelApp { node: node.clone(), projector } },
         "map/map" => rsx! { super::map::MapApp { node: node.clone() } },
         // Leaf text nodes (a plain note, a Q&A question, a single comment) carry
         // their body in `data.text` / `data.content`; without an arm they fell to
@@ -427,7 +427,7 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "wiki/event" => "event",
         "wiki/folder" | "app/folder" => "folder",
         "wiki/document" => "article",
-        "pixel/canvas" | "app/canvas" | "app/pixel" => "grid_on",
+        "canvas/canvas" | "app/canvas" | "app/pixel" => "grid_on",
         "wiki/file" => "upload_file",
         "wiki/user" => "person",
         "text/plain" => "subject",

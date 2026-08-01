@@ -1,4 +1,4 @@
-//! The pixel canvas (`pixel/canvas` + `pixel/pixel`).
+//! The canvas app (`canvas/canvas` + `canvas/pixel`).
 //!
 //! A canvas is an ordinary node; each painted cell is a hidden child keyed
 //! `p_<x>_<y>`, so the unique index on `(parent_id, key)` makes a cell's identity
@@ -31,7 +31,7 @@ pub async fn load_canvas(
     let data = execute_raw_vars(
         access_token,
         "query($p: uuid!) { \
-           nodes(where: {parentId: {_eq: $p}, mimeId: {_eq: \"pixel/pixel\"}}) { key data } \
+           nodes(where: {parentId: {_eq: $p}, mimeId: {_eq: \"canvas/pixel\"}}) { key data } \
          }",
         serde_json::json!({ "p": canvas_id }),
     )
@@ -106,7 +106,7 @@ pub async fn paint_cell(
             "contextId": context_id,
             "key": key,
             "name": "px",
-            "mimeId": "pixel/pixel",
+            "mimeId": "canvas/pixel",
             "mutable": false,
             "data": { "c": colour },
         }}),
@@ -138,7 +138,7 @@ pub async fn my_last_paint(
     let data = execute_raw_vars(
         access_token,
         "query($p: uuid!, $u: uuid!) { \
-           nodesAggregate(where: {parentId: {_eq: $p}, mimeId: {_eq: \"pixel/pixel\"}, \
+           nodesAggregate(where: {parentId: {_eq: $p}, mimeId: {_eq: \"canvas/pixel\"}, \
                                   ownerId: {_eq: $u}}) \
            { aggregate { max { updatedAt } } } }",
         serde_json::json!({ "p": canvas_id, "u": user_id }),
@@ -176,7 +176,7 @@ pub async fn create_canvas(
     let height = height.clamp(1, MAX_CANVAS_SIDE);
 
     let existing = node_insert_mimes(access_token, context_id).await;
-    if !existing.iter().any(|m| m == "pixel/canvas") {
+    if !existing.iter().any(|m| m == "canvas/canvas") {
         execute_raw_vars(
             access_token,
             "mutation($objs: [permissions_insert_input!]!) { \
@@ -185,7 +185,7 @@ pub async fn create_canvas(
                 {
                     "contextId": context_id,
                     "nodeId": context_id,
-                    "mimeId": "pixel/canvas",
+                    "mimeId": "canvas/canvas",
                     "role": "owner",
                     "parents": ["wiki/event", "wiki/group", "wiki/folder"],
                     "active": true,
@@ -194,9 +194,9 @@ pub async fn create_canvas(
                 {
                     "contextId": context_id,
                     "nodeId": context_id,
-                    "mimeId": "pixel/pixel",
+                    "mimeId": "canvas/pixel",
                     "role": "member",
-                    "parents": ["pixel/canvas"],
+                    "parents": ["canvas/canvas"],
                     "active": true,
                     // No delete: a cell is repainted, never removed, so the
                     // canvas cannot be quietly erased one cell at a time.
@@ -213,7 +213,7 @@ pub async fn create_canvas(
         model::NodesInsertInput {
             name: Some(name.to_string()),
             key: None,
-            mime_id: Some("pixel/canvas".to_string()),
+            mime_id: Some("canvas/canvas".to_string()),
             parent_id: Some(model::Uuid(context_id.to_string())),
             context_id: Some(model::Uuid(context_id.to_string())),
             data: Some(model::Jsonb(serde_json::json!({
@@ -236,7 +236,7 @@ pub async fn focused_canvas(access_token: Option<&str>, context_id: &str) -> Opt
     let data = execute_raw_vars(
         access_token,
         "query($p: uuid!) { \
-           relations(where: {parentId: {_eq: $p}, name: {_eq: \"pixel\"}}) { nodeId } }",
+           relations(where: {parentId: {_eq: $p}, name: {_eq: \"canvas\"}}) { nodeId } }",
         serde_json::json!({ "p": context_id }),
     )
     .await
@@ -264,7 +264,7 @@ pub async fn set_focused_canvas(
            }) { id } }",
         serde_json::json!({ "o": {
             "parentId": context_id,
-            "name": "pixel",
+            "name": "canvas",
             "nodeId": canvas_id,
         }}),
     )
