@@ -461,7 +461,9 @@ pub fn mime_icon(mime_id: &str) -> &'static str {
         "app/redirect" => "open_in_new",
         "app/cow" => "pets",
         "app/parent" => "link_off",
-        "wiki/feedback" | "app/feedback" => "feedback",
+        // A speech bubble with a star, not the one with an exclamation mark:
+        // asking what people think should not look like a warning.
+        "wiki/feedback" | "app/feedback" => "reviews",
         _ => mime_icon_by_prefix(mime_id),
     }
 }

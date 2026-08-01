@@ -147,7 +147,7 @@ pub fn FeedbackDialog() -> Element {
             headline: t("feedback.title"),
             // A form, so it takes the screen on a phone (see widgets::Dialog).
             form: true,
-            icon: "feedback".to_string(),
+            icon: "reviews".to_string(),
             actions: rsx! {
                 button {
                     class: "btn btn-outlined",
