@@ -239,8 +239,8 @@ fn NativeDocx(file_url: String, name: String) -> Element {
             .map_err(|e| e.to_string())?;
         // The parser hands back the document model as JSON; only the parts this
         // renders are deserialised (see components::docx).
-        let json = docx_parser::parse_docx(&bytes, None).map_err(|e| format!("{e:?}"))?;
-        let doc: serde_json::Value = serde_json::from_slice(&json).map_err(|e| e.to_string())?;
+        let json = docx_parser::parse_docx_native(&bytes)?;
+        let doc: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         let blocks: Vec<super::docx::Block> =
             serde_json::from_value(doc.get("body").cloned().unwrap_or_default())
                 .map_err(|e| e.to_string())?;
@@ -292,9 +292,9 @@ fn NativeXlsx(file_url: String, name: String) -> Element {
             .bytes()
             .await
             .map_err(|e| e.to_string())?;
-        let wb_json = xlsx_parser::parse_xlsx(&bytes, None).map_err(|e| format!("{e:?}"))?;
+        let wb_json = xlsx_parser::parse_workbook_native(&bytes)?;
         let wb_value: serde_json::Value =
-            serde_json::from_slice(&wb_json).map_err(|e| e.to_string())?;
+            serde_json::from_str(&wb_json).map_err(|e| e.to_string())?;
         let workbook: super::xlsx::Workbook =
             serde_json::from_value(wb_value.clone()).map_err(|e| e.to_string())?;
         // The sheet list lives under `workbook`; its names are what the tabs say
@@ -334,8 +334,8 @@ fn NativeXlsx(file_url: String, name: String) -> Element {
             let idx = sheet_no().min(names.len().saturating_sub(1));
             let sheet: super::xlsx::Sheet = names
                 .get(idx)
-                .and_then(|n| xlsx_parser::parse_sheet(&bytes, idx as u32, n, None).ok())
-                .and_then(|j| serde_json::from_slice(&j).ok())
+                .and_then(|n| xlsx_parser::parse_sheet_native(&bytes, idx as u32, n).ok())
+                .and_then(|j| serde_json::from_str(&j).ok())
                 .unwrap_or_default();
             rsx! {
                 div { class: "xlsx-doc", aria_label: "{name}",
@@ -377,8 +377,8 @@ fn NativePptx(file_url: String, name: String) -> Element {
             .bytes()
             .await
             .map_err(|e| e.to_string())?;
-        let json = pptx_parser::parse_pptx(&bytes, None).map_err(|e| format!("{e:?}"))?;
-        let deck: super::pptx::Deck = serde_json::from_slice(&json).map_err(|e| e.to_string())?;
+        let json = pptx_parser::parse_pptx_native(&bytes)?;
+        let deck: super::pptx::Deck = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         Ok::<_, String>(deck)
     });
     let state = parsed.read().clone();

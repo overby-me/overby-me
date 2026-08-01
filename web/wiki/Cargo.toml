@@ -15,12 +15,17 @@ dioxus-icons = { version = "0.1.0", default-features = false }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
 # StreamExt for the use_coroutine bridge that feeds window-resize widths into the
 # adaptive WindowSizeClass signal from inside the Dioxus runtime.
-# Office Open XML parsers (MIT, Yuki Yokotani) — github.com/yukiyokotani/office-open-xml-viewer
-# Pinned to a rev like dioxus-primitives above, so `cargo update` cannot float
-# it and stale the Nix outputHashes.
-docx-parser = { git = "https://github.com/yukiyokotani/office-open-xml-viewer", rev = "d8c4b961adce0b90e43cbe7723a39f3f123b9e74", default-features = false }
-xlsx-parser = { git = "https://github.com/yukiyokotani/office-open-xml-viewer", rev = "d8c4b961adce0b90e43cbe7723a39f3f123b9e74", default-features = false }
-pptx-parser = { git = "https://github.com/yukiyokotani/office-open-xml-viewer", rev = "d8c4b961adce0b90e43cbe7723a39f3f123b9e74", default-features = false }
+# Office Open XML parsers, VENDORED from github.com/yukiyokotani/office-open-xml-viewer
+# (MIT, Yuki Yokotani; see vendor/ooxml/LICENSE and vendor/ooxml/README.md).
+#
+# Vendored rather than depended on as a git rev because all three crates export
+# a `#[wasm_bindgen] extract_image`, and linking any two into one wasm binary
+# fails with "__wbindgen_describe_extract_image: symbol multiply defined". The
+# vendored copies have the JS layer stripped: this app calls them as plain Rust
+# and never needed a JS binding.
+docx-parser = { path = "vendor/ooxml/docx-parser" }
+xlsx-parser = { path = "vendor/ooxml/xlsx-parser" }
+pptx-parser = { path = "vendor/ooxml/pptx-parser" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"

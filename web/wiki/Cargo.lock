@@ -1235,7 +1235,6 @@ dependencies = [
 [[package]]
 name = "docx-parser"
 version = "0.1.0"
-source = "git+https://github.com/yukiyokotani/office-open-xml-viewer?rev=d8c4b961adce0b90e43cbe7723a39f3f123b9e74#d8c4b961adce0b90e43cbe7723a39f3f123b9e74"
 dependencies = [
  "console_error_panic_hook",
  "ooxml-common",
@@ -2306,7 +2305,6 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "ooxml-common"
 version = "0.1.0"
-source = "git+https://github.com/yukiyokotani/office-open-xml-viewer?rev=d8c4b961adce0b90e43cbe7723a39f3f123b9e74#d8c4b961adce0b90e43cbe7723a39f3f123b9e74"
 dependencies = [
  "roxmltree",
  "serde",
@@ -2476,7 +2474,6 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pptx-parser"
 version = "0.1.0"
-source = "git+https://github.com/yukiyokotani/office-open-xml-viewer?rev=d8c4b961adce0b90e43cbe7723a39f3f123b9e74#d8c4b961adce0b90e43cbe7723a39f3f123b9e74"
 dependencies = [
  "console_error_panic_hook",
  "ooxml-common",
@@ -4020,7 +4017,6 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 [[package]]
 name = "xlsx-parser"
 version = "0.1.0"
-source = "git+https://github.com/yukiyokotani/office-open-xml-viewer?rev=d8c4b961adce0b90e43cbe7723a39f3f123b9e74#d8c4b961adce0b90e43cbe7723a39f3f123b9e74"
 dependencies = [
  "console_error_panic_hook",
  "ooxml-common",

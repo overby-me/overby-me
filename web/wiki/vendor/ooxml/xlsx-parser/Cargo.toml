@@ -1,0 +1,24 @@
+[package]
+name = "xlsx-parser"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = { version = "2", default-features = false, features = ["deflate-miniz"] }
+roxmltree = "0.20"
+console_error_panic_hook = "0.1"
+ooxml-common = { path = "../ooxml-common" }
+
+# `-Oz` optimizes the wasm binary for size (over the default `-O`), shrinking
+# the artifact browsers download. wasm-pack runs this pass after wasm-bindgen.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz"]
+
+[package.metadata.wasm-pack.profile.release.wasm-bindgen]
+omit-default-module-path = true
