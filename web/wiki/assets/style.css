@@ -7891,3 +7891,63 @@ a.list-item:hover {
 	color: var(--md-primary);
 	font-weight: 600;
 }
+
+/* Search scope chip -------------------------------------------------------- */
+
+/* What the search is looking inside, as a chip in front of the field — the
+   pattern Reddit uses. It replaced an icon button that toggled the same state:
+   the button knew where you were searching and would not say, and a chip both
+   names the section and makes removing it the obvious way to widen the search.
+   Sized to sit inside the pill without pushing the field around, and allowed to
+   shrink before the input does, because the name is context and the query is the
+   task. */
+.search-scope {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--md-sys-spacing-1);
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 45%;
+	padding: var(--md-sys-spacing-0-5) var(--md-sys-spacing-0-5)
+		var(--md-sys-spacing-0-5) var(--md-sys-spacing-2);
+	border-radius: var(--md-sys-shape-corner-full);
+	background: var(--md-secondary-container);
+	color: var(--md-on-secondary-container);
+	font-size: var(--md-sys-typescale-label-medium-size);
+	line-height: 1;
+}
+
+.search-scope-icon {
+	font-size: var(--md-sys-typescale-label-large-size);
+	flex: 0 0 auto;
+}
+
+/* A long group name gives way rather than squeezing the field it labels. */
+.search-scope-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.search-scope-clear {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: var(--md-sys-spacing-5);
+	height: var(--md-sys-spacing-5);
+	padding: 0;
+	border: 0;
+	border-radius: var(--md-sys-shape-corner-full);
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+}
+
+.search-scope-clear:hover {
+	background: color-mix(in srgb, var(--md-on-secondary-container) 12%, transparent);
+}
+
+.search-scope-clear .material-icons {
+	font-size: var(--md-sys-typescale-label-large-size);
+}

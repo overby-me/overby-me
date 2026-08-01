@@ -67,9 +67,17 @@ pub(super) fn SearchBar(
             .await
             .ok()
             .flatten()
-            .map(|n| n.id.0)
+            // The NAME as well as the id: the chip has to say what it is scoping
+            // to, or it is just a box the search happens to be in.
+            .map(|n| (n.id.0, n.name))
     }));
-    let has_context = context.read().clone().flatten().is_some();
+    let scope_name = context
+        .read()
+        .clone()
+        .flatten()
+        .map(|(_, name)| name)
+        .unwrap_or_default();
+    let has_context = !scope_name.is_empty();
     // Start scoped to the section you are standing in: that is nearly always
     // what you meant, and the button widens to the whole site in one click.
     // Outside any group or event there is nothing to scope to, so this reads as
@@ -81,7 +89,7 @@ pub(super) fn SearchBar(
     // the button says "in section". Re-issue the query once the id arrives.
     // Peeked, not read: this must react to the id resolving, not to the toggle
     // (whose own handler already re-runs the search).
-    let resolved = context.read().clone().flatten();
+    let resolved = context.read().clone().flatten().map(|(id, _)| id);
     use_effect(use_reactive!(|(resolved)| {
         let Some(id) = resolved.clone() else { return };
         if !*in_context.peek() {
@@ -97,18 +105,27 @@ pub(super) fn SearchBar(
 
     rsx! {
         div { class: "search-box",
-            if has_context {
-                button {
-                    class: "btn-icon",
-                    title: if in_context() { t("common.searchEverywhere") } else { t("common.searchInSection") },
-                    onclick: move |_| {
-                        let now = in_context();
-                        in_context.set(!now);
-                        let scoped = if !now { context.read().clone().flatten() } else { None };
-                        let token = session.read().access_token.clone();
-                        search_run(input.read().clone(), results, seq, token, scoped);
-                    },
-                    span { class: "material-icons", {if in_context() { "folder" } else { "public" }} }
+            // Where the search is looking, as a chip you can take off. A toggle
+            // button said the same thing in an icon nobody had to read; a chip
+            // NAMES the section, and removing it is the obvious way to widen the
+            // search rather than something to discover. Gone means everywhere,
+            // and it comes back when search is opened from that section again.
+            if has_context && in_context() {
+                span { class: "search-scope",
+                    span { class: "material-icons search-scope-icon", "folder" }
+                    span { class: "search-scope-name", "{scope_name}" }
+                    button {
+                        class: "search-scope-clear",
+                        r#type: "button",
+                        aria_label: "{t(\"common.searchEverywhere\")}",
+                        title: "{t(\"common.searchEverywhere\")}",
+                        onclick: move |_| {
+                            in_context.set(false);
+                            let token = session.read().access_token.clone();
+                            search_run(input.read().clone(), results, seq, token, None);
+                        },
+                        span { class: "material-icons", "close" }
+                    }
                 }
             }
             input {
@@ -127,7 +144,7 @@ pub(super) fn SearchBar(
                     let value = evt.value();
                     input.set(value.clone());
                     selected.set(0);
-                    let scoped = if in_context() { context.read().clone().flatten() } else { None };
+                    let scoped = if in_context() { context.read().clone().flatten().map(|(id, _)| id) } else { None };
                     let token = session.read().access_token.clone();
                     search_run(value, results, seq, token, scoped);
                 },
