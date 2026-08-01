@@ -4029,6 +4029,28 @@ select:focus {
 	line-height: var(--md-sys-typescale-body-small-line);
 }
 
+/* The payload of an auto-filed failure (feedback_app::ErrorDetail): the same
+   block a crash gets, because it is read the same way — scanned for the one
+   line that says what the server refused to do. Indentation is the structure
+   here, so unlike a stack this keeps its own line breaks and scrolls sideways
+   rather than wrapping: a re-wrapped JSON tree loses the nesting that makes it
+   readable at all. Capped so one enormous report cannot own the whole list. */
+.feedback-payload {
+	margin-top: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-3);
+	border-radius: var(--md-sys-shape-corner-medium);
+	border: 1px solid var(--md-outline-variant);
+	background: var(--md-surface-container-low);
+	color: var(--md-on-surface-variant);
+	font-family: ui-monospace, monospace;
+	font-size: var(--md-sys-typescale-body-small-size);
+	line-height: var(--md-sys-typescale-body-small-line);
+	white-space: pre;
+	overflow-x: auto;
+	max-height: 24rem;
+	overflow-y: auto;
+}
+
 /* Wrapping rather than scrolling: this is read on a phone as often as not, and a
    stack full of long generic names would otherwise be a sideways drag per line.
    The hanging indent keeps a wrapped frame visually attached to its own line. */

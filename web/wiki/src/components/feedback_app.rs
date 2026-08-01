@@ -65,7 +65,10 @@ fn cutoff_ms(since: &str) -> Option<f64> {
 }
 
 fn matches_kind(item: &FeedbackItem, kind: &str) -> bool {
-    kind == "all" || item.kind == kind
+    // An auto-filed failure answers the "Bug" chip, matching how it is labelled.
+    // Filtering to bugs and not being shown the ones the app reported itself is
+    // the opposite of what that chip is for.
+    kind == "all" || item.kind == kind || (kind == "bug" && item.kind == "error")
 }
 
 /// Free text against everything a person might search by: what was reported,
@@ -109,7 +112,12 @@ fn matches_since(item: &FeedbackItem, cutoff: Option<f64>) -> bool {
 /// The material icon + label key for a feedback kind.
 fn kind_glyph(kind: &str) -> (&'static str, &'static str) {
     match kind {
-        "bug" => ("bug_report", "feedback.bug"),
+        // `error` is a failure the app noticed and could only describe to the
+        // person as "something went wrong". It is filed automatically, and it is
+        // stored under its own kind so repeats fold by digest — but it IS a bug,
+        // and reading as "Other" put the app's own failures in the drawer for
+        // things that fit nowhere.
+        "bug" | "error" => ("bug_report", "feedback.bug"),
         "feature" => ("lightbulb", "feedback.feature"),
         // Not offered in the dialog: a crash files itself (src/crash.rs), and
         // telling it apart from a bug someone sat down and wrote matters, since
@@ -448,6 +456,44 @@ fn parse_stack(message: &str) -> Vec<StackLine> {
         .collect()
 }
 
+/// Split an auto-filed failure into the sentence a person can read and the
+/// payload a developer needs, pretty-printed.
+///
+/// These arrive as a line of prose followed by whatever the server said, which
+/// for a GraphQL error is a single line of deeply nested JSON carrying the whole
+/// generated SQL statement. Unreadable as a paragraph: no wrapping a browser
+/// does to one 4 KB line makes the `message` field findable.
+///
+/// The payload is returned even when it does not parse — a report is clamped at
+/// a maximum length, so a big one arrives with its JSON cut mid-string, and that
+/// truncated tail is still worth reading in a monospace block rather than being
+/// dropped or run together with the prose.
+fn split_payload(message: &str) -> (String, Option<String>) {
+    let Some(at) = message.find(['{', '[']) else {
+        return (message.to_string(), None);
+    };
+    let (head, tail) = message.split_at(at);
+    let pretty = serde_json::from_str::<serde_json::Value>(tail.trim())
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+        .unwrap_or_else(|| tail.trim().to_string());
+    (head.trim_end().to_string(), Some(pretty))
+}
+
+/// An auto-filed failure: the sentence, then its payload as a code block.
+#[component]
+fn ErrorDetail(message: String) -> Element {
+    let (head, payload) = split_payload(&message);
+    rsx! {
+        if !head.is_empty() {
+            p { class: "body-medium text-preserve-breaks feedback-message", "{head}" }
+        }
+        if let Some(payload) = payload {
+            pre { class: "feedback-payload", "{payload}" }
+        }
+    }
+}
+
 /// A crash report, rendered as the stack it is.
 #[component]
 fn CrashStack(message: String) -> Element {
@@ -609,10 +655,13 @@ fn FeedbackRow(
                     }
                 }
             }
-            // A crash is a stack, not prose, and reads as one. Everything a
-            // person typed stays prose.
+            // A crash is a stack and an auto-filed failure is a payload; neither
+            // is prose, and neither reads as prose. Everything a person typed
+            // stays prose.
             if item.kind == "crash" {
                 CrashStack { message: item.message.clone() }
+            } else if item.kind == "error" {
+                ErrorDetail { message: item.message.clone() }
             } else {
                 p { class: "body-medium text-preserve-breaks feedback-message", "{item.message}" }
             }
@@ -781,5 +830,65 @@ mod tests {
         );
         assert!(matches!(parsed[0], StackLine::Panic(_)));
         assert!(matches!(parsed[1], StackLine::Raw(_)));
+    }
+
+    /// The reported shape: a sentence, then one line of nested JSON. The JSON
+    /// becomes a tree, and the prose stays prose.
+    #[test]
+    fn a_graphql_failure_splits_into_prose_and_a_tree() {
+        let msg = r#"graphql error (raw vars): [{"extensions":{"code":"unexpected","internal":{"error":{"message":"rate limited: retry_after_ms=54977","status_code":"P0001"}}},"message":"database query error"}]"#;
+        let (head, payload) = split_payload(msg);
+        assert_eq!(head, "graphql error (raw vars):");
+        let payload = payload.expect("the JSON is the point of the report");
+        assert!(payload.contains('\n'), "pretty-printed, not one line");
+        // The two lines someone is actually looking for each end up on a line of
+        // their own, indented to their depth rather than buried mid-string.
+        assert!(payload
+            .lines()
+            .any(|l| l.trim() == "\"message\": \"rate limited: retry_after_ms=54977\","));
+        assert!(payload
+            .lines()
+            .any(|l| l.trim() == "\"message\": \"database query error\""));
+        assert!(
+            payload.lines().count() > 10,
+            "one line per field, not one line total"
+        );
+    }
+
+    /// A report clamped at the storage limit arrives with its JSON cut in half.
+    /// The tail is still what someone needs to read, so it is kept as-is rather
+    /// than dropped or run together with the sentence.
+    #[test]
+    fn a_truncated_payload_is_kept_verbatim() {
+        let (head, payload) = split_payload(r#"graphql error: [{"extensions":{"code":"unexp"#);
+        assert_eq!(head, "graphql error:");
+        assert_eq!(payload.as_deref(), Some(r#"[{"extensions":{"code":"unexp"#));
+    }
+
+    /// Something a person typed has no payload and must not grow a code block,
+    /// even if they used a brace.
+    #[test]
+    fn prose_is_left_alone() {
+        assert_eq!(
+            split_payload("the vote button did nothing"),
+            ("the vote button did nothing".to_string(), None)
+        );
+        let (head, payload) = split_payload("it printed {weird} at me");
+        assert_eq!(head, "it printed");
+        assert_eq!(payload.as_deref(), Some("{weird} at me"));
+    }
+
+    /// An auto-filed failure is a bug, and answers the Bug chip.
+    #[test]
+    fn an_auto_filed_failure_reads_as_a_bug() {
+        assert_eq!(kind_glyph("error"), ("bug_report", "feedback.bug"));
+        assert_eq!(kind_glyph("error"), kind_glyph("bug"));
+        let item = FeedbackItem {
+            kind: "error".into(),
+            ..Default::default()
+        };
+        assert!(matches_kind(&item, "bug"), "the Bug filter must show it");
+        assert!(matches_kind(&item, "all"));
+        assert!(!matches_kind(&item, "feature"));
     }
 }

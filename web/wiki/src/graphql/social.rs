@@ -190,7 +190,7 @@ pub async fn insert_reaction(
 /// A feedback submission — a `wiki/feedback` node under the root. Which of these
 /// a caller receives is gated SERVER-SIDE (the `nodes` select rule): a home-
 /// context owner sees all; a plain member sees only their own.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct FeedbackItem {
     pub id: String,
     pub kind: String,
