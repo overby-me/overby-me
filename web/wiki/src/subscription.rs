@@ -519,7 +519,13 @@ impl Hub {
                         .get("payload")
                         .map(|p| p.to_string())
                         .unwrap_or_default();
-                    log::warn!("subscription {id} failed: {detail}");
+                    // `error`, not `warn`. A refused subscription is a view that
+                    // has silently stopped updating, and these queries are built
+                    // as strings with nothing to check them before the server
+                    // does. One shipped double-wrapped and every reader of the
+                    // feed lost live updates; it surfaced only because somebody
+                    // pasted a warning nobody was filtering for.
+                    log::error!("subscription {id} refused: {detail}");
                 }
                 _ => {}
             }

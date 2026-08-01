@@ -86,21 +86,10 @@ pub fn FeedList(
     // Ids the stream has named, waiting to be fetched in the feed's row shape.
     let arrivals = use_signal(Vec::<String>::new);
     {
-        let scope = match &context_id {
-            // Everything under this context, which is what the feed itself now
-            // asks for (see graphql::recent_where_clause).
-            Some(id) => {
-                let id = crate::graphql::gql_escape(id);
-                format!(
-                    r#"{{_or: [{{contextId: {{_eq: "{id}"}}}}, {{ancestors: {{_contains: ["{id}"]}}}}]}}"#
-                )
-            }
-            // Unscoped: the contexts this reader belongs to.
-            None => {
-                let uid = crate::graphql::gql_escape(user_id.as_deref().unwrap_or_default());
-                format!(r#"{{context: {{members: {{nodeId: {{_eq: "{uid}"}}}}}}}}"#)
-            }
-        };
+        let scope = crate::graphql::feed_scope(
+            context_id.as_deref(),
+            user_id.as_deref().unwrap_or_default(),
+        );
         if user_id.is_some() {
             // STREAMED ids. A change token could only say "something appeared
             // somewhere in scope", which cost a page fetch to find out what; the

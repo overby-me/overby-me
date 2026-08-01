@@ -438,3 +438,71 @@ pub async fn query_nodes_by_ids(
         Err(_) => Vec::new(),
     }
 }
+
+/// The feed's live scope as a `nodes_bool_exp` BODY, without the enclosing
+/// braces.
+///
+/// Without braces on purpose: the callers that compose it add their own, and a
+/// string that carried its own produced `where: { {_or: …} }` — which the server
+/// rejects as "not a valid graphql query", live, on every reader who opened the
+/// feed. Hand-built GraphQL has no compiler; the shape has to be pinned by a
+/// test instead.
+pub fn feed_scope(context_id: Option<&str>, user_id: &str) -> String {
+    match context_id {
+        // Everything under this context, matching what the feed itself asks for
+        // (see `recent_where_clause`).
+        Some(id) => {
+            let id = gql_escape(id);
+            format!(
+                r#"_or: [{{contextId: {{_eq: "{id}"}}}}, {{ancestors: {{_contains: ["{id}"]}}}}]"#
+            )
+        }
+        // Unscoped: the contexts this reader belongs to.
+        None => {
+            let uid = gql_escape(user_id);
+            format!(r#"context: {{members: {{nodeId: {{_eq: "{uid}"}}}}}}"#)
+        }
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    /// The composed subscription must be a single well-formed filter.
+    ///
+    /// This is the test that was missing: the scope carried its own braces and
+    /// the composer added another pair, so every feed reader's subscription was
+    /// rejected. Nothing in Rust checks a GraphQL string, so check it here.
+    #[test]
+    fn the_feed_scope_composes_into_one_filter() {
+        for scope in [feed_scope(Some("ctx-1"), "u-1"), feed_scope(None, "u-1")] {
+            let q = crate::graphql::nodes_stream(&scope, "2026-01-01T00:00:00Z", "id");
+            assert!(
+                !q.contains("{ {") && !q.contains("{{"),
+                "double-wrapped filter: {q}"
+            );
+            assert_eq!(
+                q.matches('{').count(),
+                q.matches('}').count(),
+                "unbalanced braces: {q}"
+            );
+            assert!(q.contains("nodes_stream"), "{q}");
+        }
+        // And the shape that actually shipped is caught: a scope carrying its own
+        // braces double-wraps, which is what the server called "not a valid
+        // graphql query".
+        let bad = crate::graphql::nodes_stream(r#"{_or: [{contextId: {_eq: "x"}}]}"#, "t", "id");
+        assert!(bad.contains("{ {"), "the guard must catch the double wrap: {bad}");
+    }
+
+    /// A context scope covers the context AND everything beneath it, which is
+    /// what makes a group's feed show what happened in its events.
+    #[test]
+    fn a_context_scope_rolls_up_the_subtree() {
+        let s = feed_scope(Some("ctx-1"), "u-1");
+        assert!(s.contains(r#"contextId: {_eq: "ctx-1"}"#), "{s}");
+        assert!(s.contains(r#"ancestors: {_contains: ["ctx-1"]}"#), "{s}");
+        assert!(!s.starts_with('{'), "the caller adds the braces: {s}");
+    }
+}
