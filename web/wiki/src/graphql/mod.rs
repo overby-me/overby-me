@@ -102,6 +102,42 @@ where
     Q: serde::de::DeserializeOwned + 'static,
     V: serde::Serialize,
 {
+    execute_reporting(access_token, operation, true).await
+}
+
+/// [`execute`] for a failure the CALLER expects and handles, so it is neither
+/// shown to the person nor filed as a fault.
+///
+/// For a request whose failure is part of how it works. Naming a new node is the
+/// case this exists for: the key is found by ATTEMPTING the insert and stepping
+/// to the next name when it is taken (see `insert_node_named`), so a collision
+/// is the mechanism, not a fault — and reporting it told somebody adding a
+/// second canvas called "test" that a database constraint had been violated,
+/// filed it in the feedback app as a bug, and then created their canvas anyway.
+///
+/// The error still comes back to the caller, and still reaches the console. Only
+/// the toast and the auto-filed report are suppressed. Use it where the caller
+/// genuinely handles the failure — everything else should stay loud.
+pub async fn execute_quiet<Q, V>(
+    access_token: Option<&str>,
+    operation: cynic::Operation<Q, V>,
+) -> Result<Q, String>
+where
+    Q: serde::de::DeserializeOwned + 'static,
+    V: serde::Serialize,
+{
+    execute_reporting(access_token, operation, false).await
+}
+
+async fn execute_reporting<Q, V>(
+    access_token: Option<&str>,
+    operation: cynic::Operation<Q, V>,
+    report: bool,
+) -> Result<Q, String>
+where
+    Q: serde::de::DeserializeOwned + 'static,
+    V: serde::Serialize,
+{
     let result = match execute_once(access_token, &operation).await {
         Err(msg) if is_jwt_error(&msg) => {
             // The token likely lapsed (e.g. the tab was backgrounded past expiry).
@@ -123,6 +159,16 @@ where
         // Every caller of this swallows the error into an empty list, so this is
         // the last place that knows anything went wrong.
         let failure = crate::errors::classify(e);
+        // A failure the caller expects and handles stays on the console: no
+        // toast, no auto-filed report, nothing shipped. See `execute_quiet`.
+        if !report {
+            log::info!(
+                "graphql {} [{}] (expected): {e}",
+                failure.label(),
+                short_type_name::<Q>()
+            );
+            return result;
+        }
         // The level decides what leaves the device: logging.rs ships warn and
         // error to Better Stack. Only a genuine fault is worth paying to store.
         //

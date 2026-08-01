@@ -925,6 +925,12 @@ pub(crate) const KEY_ATTEMPTS: u32 = 20;
 /// After [`KEY_ATTEMPTS`] the timestamped key from
 /// [`crate::components::loader::slugify`] ends it, so a pathological name can
 /// never loop or fail outright.
+///
+/// The attempts run QUIET. A collision here is the mechanism working, not a
+/// fault: reported normally, adding a second canvas called "test" showed the
+/// person a database-constraint error, filed it in the feedback app as a bug,
+/// and then created their canvas as `test-3` anyway. Only the final attempt —
+/// the one whose failure is real — reports.
 pub async fn insert_node_named(
     access_token: Option<&str>,
     mut input: model::NodesInsertInput,
@@ -943,7 +949,7 @@ pub async fn insert_node_named(
             format!("{base}-{attempt}")
         };
         input.key = Some(key);
-        match insert_node(access_token, input.clone()).await {
+        match insert_node_quiet(access_token, input.clone()).await {
             Err(e) if is_key_taken(&e) => continue,
             other => return other,
         }
@@ -955,8 +961,17 @@ pub async fn insert_node_named(
 /// Whether an insert failed because the key was already used under that parent,
 /// as opposed to anything else that can go wrong.
 pub(crate) fn is_key_taken(error: &str) -> bool {
-    error.contains("nodes_parent_id_namespace_key")
-        || (error.contains("Uniqueness violation") && error.contains("key"))
+    // Both indexes that a taken name trips, BY NAME. A key is unique per parent
+    // (`nodes_parent_id_namespace_key`) and the path it produces is unique among
+    // live nodes (`nodes_path_live_idx`); it is the PATH one that fires in
+    // practice, since it covers every live node while the key index is partial.
+    //
+    // This used to fall back to "a uniqueness violation mentioning `key`", which
+    // matched the path index only through Postgres happening to say "duplicate
+    // key value" — and matched every `*_pkey` in the schema as well. A primary
+    // key violation is not a taken name: retrying it twenty times with new keys
+    // cannot fix it, and the twentieth failure is what would be reported.
+    error.contains("nodes_parent_id_namespace_key") || error.contains("nodes_path_live_idx")
 }
 
 pub async fn insert_node(
@@ -968,6 +983,21 @@ pub async fn insert_node(
         object: input.into(),
     });
     let result = execute(access_token, operation).await?;
+    Ok(result.insert_node.map(Into::into))
+}
+
+/// [`insert_node`] for an attempt whose failure the caller handles — the key
+/// search in [`insert_node_named`]. Same insert; the error comes back, but a
+/// taken key is not announced to the person or filed as a bug.
+async fn insert_node_quiet(
+    access_token: Option<&str>,
+    input: model::NodesInsertInput,
+) -> Result<Option<model::InsertedNode>, String> {
+    use cynic::MutationBuilder;
+    let operation = InsertNodeMutation::build(InsertNodeVariables {
+        object: input.into(),
+    });
+    let result = execute_quiet(access_token, operation).await?;
     Ok(result.insert_node.map(Into::into))
 }
 
@@ -1743,5 +1773,32 @@ mod tests {
             crate::components::loader::node_icon_mime_id("wiki/file", None),
             "wiki/file"
         );
+    }
+
+    /// The real message a taken name produces, captured from production on
+    /// 2026-08-01. It is the PATH index that fires, not the key index, and the
+    /// retry that finds a free name depends on recognising it.
+    #[test]
+    fn a_taken_name_is_recognised_by_the_index_that_actually_fires() {
+        let path_idx = "graphql error [InsertNodeMutation]: Uniqueness violation. \
+             duplicate key value violates unique constraint \"nodes_path_live_idx\"";
+        assert!(super::is_key_taken(path_idx));
+        let key_idx = "Uniqueness violation. duplicate key value violates unique \
+             constraint \"nodes_parent_id_namespace_key\"";
+        assert!(super::is_key_taken(key_idx));
+    }
+
+    /// Anything else must NOT be swallowed as a name collision: the retry would
+    /// burn twenty inserts on an error no new key can fix, and then report the
+    /// twentieth instead of the first.
+    #[test]
+    fn another_failure_is_not_a_taken_name() {
+        assert!(!super::is_key_taken(
+            "permission has failed: insert on nodes"
+        ));
+        assert!(!super::is_key_taken(
+            "Uniqueness violation. duplicate value violates unique constraint \"members_pkey\""
+        ));
+        assert!(!super::is_key_taken("rate limited: retry_after_ms=54977"));
     }
 }
