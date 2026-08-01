@@ -95,14 +95,15 @@ pub fn viewer_embed_url(viewer: OfficeViewer, encoded_src: &str) -> String {
 
 /// Whether this app can render `mime` itself.
 ///
-/// Only Word so far. A format that is not on this list keeps the embedded
-/// viewers, and the native option is not offered for it at all — an option that
-/// silently does nothing is worse than no option.
+/// All three OOXML formats now. A format that is not on this list keeps the
+/// embedded viewers, and the native option is not offered for it at all — an
+/// option that silently does nothing is worse than no option.
 pub fn renders_natively(mime: &str) -> bool {
     matches!(
         mime,
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     )
 }
 
@@ -110,6 +111,12 @@ pub fn renders_natively(mime: &str) -> bool {
 /// than as a flowing document.
 fn is_spreadsheet(mime: &str) -> bool {
     mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+}
+
+/// Whether `mime` is the slide deck the native path lays out as fixed-aspect
+/// boxes rather than as flowing content.
+fn is_presentation(mime: &str) -> bool {
+    mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 }
 
 /// The chosen viewer, remembered per device.
@@ -351,6 +358,47 @@ fn NativeXlsx(file_url: String, name: String) -> Element {
                 }
             }
         }
+    }
+}
+
+/// A slide deck rendered here.
+#[component]
+fn NativePptx(file_url: String, name: String) -> Element {
+    let url = file_url.clone();
+    let parsed = crate::use_data_resource!(|(url)| async move {
+        if url.is_empty() {
+            return Err(String::new());
+        }
+        let bytes = reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?;
+        let json = pptx_parser::parse_pptx(&bytes, None).map_err(|e| format!("{e:?}"))?;
+        let deck: super::pptx::Deck = serde_json::from_slice(&json).map_err(|e| e.to_string())?;
+        Ok::<_, String>(deck)
+    });
+    let state = parsed.read().clone();
+    match state {
+        None => rsx! {
+            div { class: "empty-state empty-state-sm",
+                div { class: "spinner spinner-sm" }
+            }
+        },
+        Some(Err(e)) => {
+            log::info!("native pptx render failed: {e}");
+            rsx! {
+                p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
+            }
+        }
+        Some(Ok(deck)) => rsx! {
+            div { class: "pptx-doc", aria_label: "{name}",
+                super::pptx::DeckView { deck }
+            }
+        },
     }
 }
 
@@ -640,6 +688,10 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                                     div { class: "empty-state empty-state-sm",
                                         div { class: "spinner spinner-sm" }
                                     }
+                                },
+                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                                    && is_presentation(file_mime) => rsx! {
+                                    NativePptx { file_url: file_url.clone(), name: name.to_string() }
                                 },
                                 OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
                                     && is_spreadsheet(file_mime) => rsx! {

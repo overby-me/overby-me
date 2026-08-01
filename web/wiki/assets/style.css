@@ -8184,3 +8184,41 @@ a.list-item:hover {
 	font-weight: 600;
 	text-align: center;
 }
+
+/* A slide deck rendered by this app (components::pptx) -------------------- */
+
+.pptx-deck {
+	display: flex;
+	flex-direction: column;
+	gap: var(--md-sys-spacing-4);
+}
+
+/* Each slide keeps the deck's aspect ratio and takes the width it is given.
+   `container-type: size` is what makes the type scale: the shapes inside are
+   sized in cqw, hundredths of THIS box, so a deck reads the same on a phone and
+   on a projector. */
+.pptx-slide {
+	position: relative;
+	container-type: size;
+	width: 100%;
+	overflow: hidden;
+	background: var(--md-surface-container-lowest);
+	border: 1px solid var(--md-outline-variant);
+	border-radius: var(--md-sys-shape-corner-small);
+}
+
+/* A shape sits where the author put it. Flex so the text can sit at the top,
+   middle or bottom of a box taller than itself, which is what the deck says. */
+.pptx-shape {
+	position: absolute;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+.pptx-para {
+	margin: 0;
+	line-height: 1.25;
+	/* A slide's own line breaks are meaningful; a long line wraps rather than
+	   spilling out of its box. */
+	overflow-wrap: anywhere;
+}

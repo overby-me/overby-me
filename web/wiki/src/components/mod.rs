@@ -24,6 +24,7 @@ pub mod optimistic;
 pub mod parent;
 pub mod perm;
 pub mod pixel;
+pub mod pptx;
 pub mod profile;
 pub mod program;
 pub mod pull_refresh;
