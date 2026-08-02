@@ -79,7 +79,9 @@ Two consequences worth knowing:
 
 ## Remaining structural work
 
-Ordered by how much it retires.
+Ordered by how much it retires. The convergence design that implements this list
+as one deliberate series (jobs plus a single dispatcher) is
+[EVENT-LOOP.md](EVENT-LOOP.md); prefer it over item-by-item fixes here.
 
 1. **Universal deferred start completion.** Extend the deferred handler to every service
    type and activation source, so nothing waits for a child while holding a lock. Closes

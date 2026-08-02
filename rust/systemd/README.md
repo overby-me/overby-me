@@ -80,6 +80,7 @@ crates/
 | [docs/TESTING.md](docs/TESTING.md) | How to run every test layer; harness mechanics; boot debugging |
 | [docs/TEST-OVERRIDES.md](docs/TEST-OVERRIDES.md) | Every place a test is weakened or skipped, and what it needs |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | The PID 1 concurrency model, its divergence from upstream, and the open invariants |
+| [docs/EVENT-LOOP.md](docs/EVENT-LOOP.md) | The jobs-plus-dispatcher convergence design and its seven migration increments |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Component inventory, directive coverage, differential-testing plan |
 | [CHANGELOG.md](CHANGELOG.md) | Change history |
 

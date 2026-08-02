@@ -51,10 +51,10 @@ follow from where it strains.
    under C PID 1 on one real, low-stakes NixOS machine, as a module override with
    generation rollback. This exercises design principle 5 for the first time and
    opens a production feedback channel that VM tests cannot provide.
-2. **Event-loop convergence**, as a named project with a design doc: minimal job
-   objects plus a single state-changed dispatcher queue. Retires invariants I1-I6
-   wholesale and unblocks TEST-63-PATH, TEST-60-MOUNT-RATELIMIT and the
-   ExecStopPost deadlock as side effects.
+2. **Event-loop convergence**, designed in [EVENT-LOOP.md](EVENT-LOOP.md): minimal
+   job objects plus a single state-changed dispatcher queue, in seven gated
+   increments. Retires invariants I1-I6 wholesale and unblocks TEST-63-PATH,
+   TEST-60-MOUNT-RATELIMIT and the ExecStopPost deadlock as side effects.
 3. **The user manager** (config-driven `systemd --user`), the largest single unlock
    for both tests and real usability.
 4. **Version-matrix CI** (see Differential testing below): run the suite against new
