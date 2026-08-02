@@ -215,6 +215,13 @@ fn now_ms() -> f64 {
     js_sys::Date::now()
 }
 
+/// Whether the page is backgrounded.
+fn page_hidden() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .is_some_and(|d| d.hidden())
+}
+
 /// Absolute expiry (ms epoch) for a token that lasts `expires_in` seconds.
 pub fn expires_at_from(expires_in: Option<i64>) -> Option<f64> {
     expires_in.map(|secs| now_ms() + secs as f64 * 1000.0)
@@ -442,6 +449,14 @@ pub async fn run_token_refresh() {
         let nudged = take_visibility_nudge();
         if SESSION.peek().refresh_token.is_none() {
             continue; // Signed out; idle until a session appears again.
+        }
+        // Never start one on the way into the background. NHost rotates the
+        // token server-side before it answers, so a request iOS kills in flight
+        // leaves this tab holding a dead one — and the next attempt signs a
+        // perfectly good session out. The nudge covers coming back, and
+        // `ensure_fresh_token` covers anything that needs a token before then.
+        if !nudged && page_hidden() {
+            continue;
         }
         if nudged || due_to_refresh() {
             refresh_access_token().await;
