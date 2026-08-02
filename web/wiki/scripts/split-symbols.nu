@@ -8,10 +8,19 @@
 #   public/assets/wiki-dioxus_bg-<hash>.wasm   stripped — the one that ships
 #   public/symbols/<hash>.debug.wasm           the same module, DWARF intact
 #
-# Stripping only removes trailing custom sections, so the code section keeps its
-# offset (verified: identical before and after). That is what makes the split
-# safe — a stack frame's byte offset means the same thing in both files, so the
-# symbols resolve against exactly the binary the reader was running.
+# Stripping only removes custom sections, so the code section keeps its offset
+# and its function indices. That is what makes the split safe — a stack frame
+# means the same thing in both files, so the symbols resolve against exactly the
+# binary the reader was running.
+#
+# NOTHING MAY REWRITE THE MODULE AFTER THIS POINT. A `wasm-opt -Oz` pass used to
+# run here, on the shipped copy only. It inlines, merges and drops functions and
+# prunes unused imports, so the pair silently stopped corresponding (12148 vs
+# 10707 functions, 425 vs 416 imports) and every report came back resolved to a
+# real source line in an unrelated crate. It was removed rather than reordered:
+# binaryen aborts on a module that still holds DWARF, even with `-g`. It cost
+# 9 KB gzipped — 0.5% of what a reader downloads — which is not worth a crash
+# report that lies. `assert_pair` below fails the build if it happens again.
 #
 # The pair is keyed by dx's own content hash, already in the filename and already
 # in the wasm URL the browser reports, so no build-id section is needed. The
@@ -76,6 +85,33 @@ def current_wasm [] {
     { hash: $name, path: $"($PUBLIC)/assets/wiki-dioxus_bg-($name).wasm" }
 }
 
+# The imports and code sections as objdump reports them: offsets, sizes, counts.
+def section_shape [path: string] {
+    ^wasm-tools objdump $path
+    | lines
+    | each {|l| $l | str replace --all --regex '\s+' ' ' | str trim }
+    | where {|l| ($l | str starts-with "code ") or ($l | str starts-with "imports ") }
+    | sort
+    | str join "  //  "
+}
+
+# A frame carries a byte offset (Chrome, Firefox) or a function index (Safari).
+# Both are positions in the code section, and both are meaningless against a
+# module whose code section moved. Refuse to publish a pair that cannot resolve.
+def assert_pair [shipped: string, sidecar: string] {
+    let a = (section_shape $shipped)
+    let b = (section_shape $sidecar)
+    if $a == $b {
+        return
+    }
+    print "ABORT: the shipped wasm and its sidecar are different modules."
+    print $"  shipped  ($a)"
+    print $"  sidecar  ($b)"
+    print "A reported frame would resolve to whatever function now sits at that"
+    print "address. Something rewrote the module after the split — move it before."
+    exit 1
+}
+
 def main [] {
     let target = (current_wasm)
     if not ($target.path | path exists) {
@@ -96,6 +132,9 @@ def main [] {
     let has_debug = (^wasm-tools objdump $target.path | str contains ".debug_")
     if not $has_debug {
         if ($sidecar | path exists) {
+            # Check the pair we are keeping, not just the one we just made: a
+            # rebuilt-but-unchanged wasm takes this path every time.
+            assert_pair $target.path $sidecar
             print $"already split  ($sidecar)"
             prune_symbols $symbols_dir $sidecar
             return
@@ -112,15 +151,7 @@ def main [] {
     # changes.
     ^wasm-tools strip -d '^\.debug_' $sidecar -o $target.path
 
-    # Optimise here, not in dx. dx runs wasm-opt BEFORE this script, while the
-    # DWARF is still in the module, and binaryen aborts on it (SIGABRT), so the
-    # optimisation was silently skipped and the unoptimised binary shipped. On
-    # the stripped module it takes about two seconds and gives back a good tenth
-    # of the payload. Rewriting the bytes under dx's content-hashed filename is
-    # what the strip above already does; nothing revalidates the hash.
-    let optimised = $"($target.path).opt"
-    ^wasm-opt -Oz $target.path -o $optimised
-    mv --force $optimised $target.path
+    assert_pair $target.path $sidecar
 
     let symbols_size = (ls $sidecar | get size.0)
     let shipped_size = (ls $target.path | get size.0)

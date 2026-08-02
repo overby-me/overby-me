@@ -26,11 +26,11 @@ dev:
     {{dx}} serve
 
 build:
-    # --debug-symbols keeps the DWARF line tables through wasm-bindgen and
-    # wasm-opt; split-symbols.nu then moves them out of the shipped binary into a
-    # sidecar, so a crash can be traced to a source line without every visitor
-    # downloading 20 MB of debug info. Costs ~2% on the bundle, because wasm-opt
-    # optimises less aggressively when it has to keep the mapping valid.
+    # --debug-symbols keeps the DWARF line tables through wasm-bindgen;
+    # split-symbols.nu then moves them out of the shipped binary into a sidecar,
+    # so a crash can be traced to a source line without every visitor
+    # downloading 20 MB of debug info. Nothing may rewrite the wasm after that
+    # split — see the header of split-symbols.nu for what that cost us.
     {{dx}} build --release --debug-symbols true {{remote_logging}}
     nu scripts/split-symbols.nu
     # The boot screen's download progress needs a denominator, and the network
