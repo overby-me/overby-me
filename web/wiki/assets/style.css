@@ -8292,6 +8292,13 @@ a.list-item:hover {
 	flex-direction: column;
 	overflow: hidden;
 }
+/* A picture on a slide is placed exactly like any other shape: absolutely, at
+   its own fraction of the slide box. The element IS the box, so its size comes
+   from the inline percentages and never from a rule here. */
+.pptx-img {
+	position: absolute;
+	transform-origin: center;
+}
 .pptx-para {
 	margin: 0;
 	line-height: 1.25;

@@ -622,6 +622,36 @@ fn GapNotice(report: super::render_gaps::GapReport, urgent: bool) -> Element {
     }
 }
 
+/// The message shown when this app cannot read a file at all.
+///
+/// The same shape as [`GapNotice`], because it is the same kind of thing said
+/// more firmly: something is wrong with what you are looking at, and here are
+/// the two viewers that can show it. It used to be a bare line of body text,
+/// which looked like part of the document rather than a note about it.
+#[component]
+fn FailureNotice() -> Element {
+    rsx! {
+        div { class: "file-gap-notice is-urgent", role: "note",
+            span { class: "material-icons", "report" }
+            div {
+                p { class: "body-small", "{t(\"file.nativeFailed\")}" }
+                div { class: "file-gap-actions",
+                    button {
+                        class: "btn btn-text",
+                        onclick: move |_| set_office_viewer(OfficeViewer::Microsoft),
+                        "{t(\"file.viewerMicrosoft\")}"
+                    }
+                    button {
+                        class: "btn btn-text",
+                        onclick: move |_| set_office_viewer(OfficeViewer::Google),
+                        "{t(\"file.viewerGoogle\")}"
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// An OpenDocument text file rendered here.
 ///
 /// No renderer of its own: ODF is converted to the same block model the Word
@@ -644,7 +674,7 @@ fn NativeOdt(file_id: String, name: String) -> Element {
         Some(Err(e)) => {
             log::info!("native odt render failed: {e}");
             rsx! {
-                p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
+                FailureNotice {}
             }
         }
         Some(Ok(blocks)) => rsx! {
@@ -708,7 +738,7 @@ fn NativeDocx(file_id: String, name: String) -> Element {
         Some(Err(e)) => {
             log::info!("native docx render failed: {e}");
             rsx! {
-                p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
+                FailureNotice {}
             }
         }
     }
@@ -768,7 +798,7 @@ fn NativeXlsx(file_id: String, name: String) -> Element {
         Some(Err(e)) => {
             log::info!("native xlsx render failed: {e}");
             rsx! {
-                p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
+                FailureNotice {}
             }
         }
         Some(Ok((bytes, workbook, names))) => {
@@ -817,7 +847,11 @@ fn NativePptx(file_id: String, name: String) -> Element {
         let json = pptx_parser::parse_pptx_native(&bytes)?;
         let raw: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         let gaps = super::render_gaps::pptx_gaps(&raw);
-        let deck: super::pptx::Deck = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+        let mut deck: super::pptx::Deck = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+        // Same as the Word path: the model names its pictures by their path
+        // inside the package, and the bytes are still in the package.
+        let images = super::pptx::collect_images(&deck, &bytes);
+        super::pptx::attach_images(&mut deck, &images);
         Ok::<_, String>((deck, gaps))
     });
     let state = parsed.read().clone();
@@ -830,7 +864,7 @@ fn NativePptx(file_id: String, name: String) -> Element {
         Some(Err(e)) => {
             log::info!("native pptx render failed: {e}");
             rsx! {
-                p { class: "body-medium", "{t(\"file.nativeFailed\")}" }
+                FailureNotice {}
             }
         }
         Some(Ok((deck, gaps))) => rsx! {

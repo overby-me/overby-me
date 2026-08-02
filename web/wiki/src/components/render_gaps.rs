@@ -272,7 +272,26 @@ pub fn pptx_gaps(model: &Value) -> GapReport {
     let slides = model.get("slides").cloned().unwrap_or(Value::Null);
     let mut gaps = Vec::new();
 
-    let pictures = count_typed(&slides, &["picture", "image", "media", "video"]);
+    // Pictures ARE drawn now. What is still counted is a picture the browser
+    // cannot decode, on the same rule the Word renderer uses; video is never
+    // drawn, so it stays counted whatever its format.
+    let pictures = count_where(
+        &slides,
+        &|node| match node.get("type").and_then(|t| t.as_str()) {
+            Some("media") | Some("video") => true,
+            Some("picture") | Some("image") => {
+                let vector = node
+                    .get("svgImagePath")
+                    .and_then(|p| p.as_str())
+                    .is_some_and(|p| !p.is_empty());
+                !vector
+                    && !super::docx::is_drawable(
+                        node.get("mimeType").and_then(|m| m.as_str()).unwrap_or(""),
+                    )
+            }
+            _ => false,
+        },
+    );
     if pictures > 0 {
         gaps.push(Gap::Image(pictures));
     }

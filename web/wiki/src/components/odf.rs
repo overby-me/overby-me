@@ -159,6 +159,9 @@ fn table_of(node: roxmltree::Node, styles: &HashMap<String, (bool, bool)>) -> Ta
                 .collect();
             cells.push(Cell {
                 content,
+                // ODF cell shading lives in its automatic style, which this
+                // reader does not resolve yet.
+                background: None,
                 // ODF spells a horizontal span `number-columns-spanned`.
                 col_span: cell
                     .attribute((NS_TABLE, "number-columns-spanned"))

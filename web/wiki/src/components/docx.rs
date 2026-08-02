@@ -243,6 +243,61 @@ pub struct Cell {
     /// a cell is not drawn at all, or the row grows an extra column.
     #[serde(default)]
     pub v_merge: Option<String>,
+    /// The cell's shading, as `RRGGBB`. A table's header row is usually the only
+    /// thing telling a reader it is a header, so this is not decoration.
+    #[serde(default)]
+    pub background: Option<String>,
+}
+
+/// A cell's shading, as CSS.
+///
+/// `auto` means "whatever the reader's theme says", exactly as it does on a
+/// run's colour, so it must NOT become a colour — a document that says `auto`
+/// on a dark theme wants the dark background, not a white one painted over it.
+pub fn cell_style(cell: &Cell) -> String {
+    match cell.background.as_deref() {
+        Some(hex) if is_real_colour(hex) => {
+            let hex = hex.trim().trim_start_matches('#');
+            // Ink to match. A document that paints a header dark navy expects
+            // light text on it, and the theme's own on-surface colour is not
+            // that: the background is the DOCUMENT'S, not the theme's, so what
+            // reads against it has to be worked out from it. A run carrying its
+            // own colour still wins — this only sets what the cell inherits.
+            format!("background:#{hex};color:{};", readable_ink(hex))
+        }
+        _ => String::new(),
+    }
+}
+
+/// Black or white, whichever can be read on `hex`.
+///
+/// Relative luminance, as WCAG defines it: the eye is far more sensitive to
+/// green than to blue, so a flat average of the channels calls a saturated blue
+/// light when it is not.
+fn readable_ink(hex: &str) -> &'static str {
+    let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0) as f64 / 255.0;
+    let linear = |c: f64| match c <= 0.03928 {
+        true => c / 12.92,
+        false => ((c + 0.055) / 1.055).powf(2.4),
+    };
+    if hex.len() < 6 {
+        return "#000";
+    }
+    let l = 0.2126 * linear(channel(0)) + 0.7152 * linear(channel(2)) + 0.0722 * linear(channel(4));
+    // 0.179 is where white and black give the same contrast ratio against a
+    // background, so it is the crossover.
+    match l > 0.179 {
+        true => "#000",
+        false => "#fff",
+    }
+}
+
+/// Whether a colour from the document is an actual colour.
+fn is_real_colour(hex: &str) -> bool {
+    let hex = hex.trim().trim_start_matches('#');
+    !hex.eq_ignore_ascii_case("auto")
+        && matches!(hex.len(), 6 | 8)
+        && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 fn one() -> u32 {
@@ -307,10 +362,17 @@ pub fn collect_images(blocks: &[Block], package: &[u8]) -> Images {
         want(p.numbering.as_ref().and_then(|n| n.picture()));
         p.runs.iter().for_each(|run| want(picture_of(run)));
     });
+    read_images(wanted, package)
+}
+
+/// Read a list of already-deduplicated pictures out of a package.
+///
+/// Shared with the slide renderer, which finds its pictures differently but
+/// stores them the same way — a zip path and a mime, out of an OOXML package.
+pub fn read_images(wanted: Vec<(String, String)>, package: &[u8]) -> Images {
     if wanted.is_empty() {
         return Images::new();
     }
-
     // One archive for all of them: opening the zip per picture would re-scan the
     // central directory each time.
     let Ok(mut zip) = zip::ZipArchive::new(std::io::Cursor::new(package)) else {
@@ -798,6 +860,24 @@ enum Group {
     },
 }
 
+/// One cell of a table.
+///
+/// Its own component so the shading can be read off the cell before its content
+/// moves into the body, which rsx has no room to do inline.
+#[component]
+fn TableCell(cell: Cell, header: bool) -> Element {
+    let shade = cell_style(&cell);
+    let span = cell.col_span;
+    match header {
+        true => rsx! {
+            th { colspan: "{span}", style: "{shade}", DocxBody { blocks: cell.content } }
+        },
+        false => rsx! {
+            td { colspan: "{span}", style: "{shade}", DocxBody { blocks: cell.content } }
+        },
+    }
+}
+
 /// One item in a list.
 ///
 /// Word lists can use a picture as their bullet — `numPicBullet` — and a
@@ -867,15 +947,7 @@ fn DocxBlock(block: Block) -> Element {
                                 // A cell covered by a merge from above is not
                                 // drawn; drawing it would push the row wider.
                                 if !is_merged_away(&cell) {
-                                    if row.is_header {
-                                        th { key: "c{c}", colspan: "{cell.col_span}",
-                                            DocxBody { blocks: cell.content }
-                                        }
-                                    } else {
-                                        td { key: "c{c}", colspan: "{cell.col_span}",
-                                            DocxBody { blocks: cell.content }
-                                        }
-                                    }
+                                    TableCell { key: "c{c}", cell, header: row.is_header }
                                 }
                             }
                         }
@@ -1356,6 +1428,57 @@ mod tests {
         assert_eq!(paragraph_style(p), "text-align:left;");
     }
 
+    /// Reported: table cells lost their colour. The parser gives it as a hex on
+    /// the cell; `auto` means the theme's, exactly as it does on a run.
+    #[test]
+    fn a_table_cell_keeps_the_colour_the_document_gave_it() {
+        let shaded = Cell {
+            background: Some("D9E2F3".into()),
+            ..Default::default()
+        };
+        let css = cell_style(&shaded);
+        assert!(css.contains("background:#D9E2F3;"), "{css}");
+        // Pale blue: black reads on it.
+        assert!(css.contains("color:#000;"), "{css}");
+
+        // A dark header wants light text, and the theme's ink is not it.
+        let dark = Cell {
+            background: Some("1F3864".into()),
+            ..Default::default()
+        };
+        assert!(
+            cell_style(&dark).contains("color:#fff;"),
+            "{}",
+            cell_style(&dark)
+        );
+
+        // `auto` is "whatever the reader's theme says" and must not be painted.
+        for skip in [Some("auto".to_string()), Some("".to_string()), None] {
+            let cell = Cell {
+                background: skip.clone(),
+                ..Default::default()
+            };
+            assert_eq!(cell_style(&cell), "", "{skip:?}");
+        }
+    }
+
+    /// Green is most of what the eye sees, so a flat average calls a saturated
+    /// blue light when it is not. These are the colours Word's own table styles
+    /// use.
+    #[test]
+    fn ink_is_chosen_by_luminance_not_by_average() {
+        assert_eq!(readable_ink("FFFFFF"), "#000");
+        assert_eq!(readable_ink("000000"), "#fff");
+        assert_eq!(readable_ink("1F3864"), "#fff", "dark navy");
+        assert_eq!(readable_ink("D9E2F3"), "#000", "pale blue");
+        assert_eq!(
+            readable_ink("0000FF"),
+            "#fff",
+            "pure blue is DARK to the eye"
+        );
+        assert_eq!(readable_ink("FFFF00"), "#000", "pure yellow is light");
+    }
+
     #[test]
     fn a_picture_is_sized_as_the_document_says() {
         let css = image_style(&bullet_run("word/media/image2.jpeg"));
@@ -1427,6 +1550,7 @@ mod tests {
                         })],
                         col_span: 1,
                         v_merge: None,
+                        background: None,
                     }],
                     is_header: false,
                 }],

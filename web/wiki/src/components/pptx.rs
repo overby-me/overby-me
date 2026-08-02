@@ -63,6 +63,87 @@ pub struct Shape {
     pub text_body: Option<TextBody>,
     #[serde(default)]
     pub name: Option<String>,
+
+    // --- pictures ---
+    /// Zip path of the picture this shape draws, `ppt/media/image1.png`.
+    #[serde(default)]
+    pub image_path: Option<String>,
+    /// The vector original, when PowerPoint kept one beside the raster it
+    /// rasterised for compatibility. Preferred: it scales to the projector.
+    #[serde(default)]
+    pub svg_image_path: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub rotation: Option<f64>,
+    #[serde(default)]
+    pub flip_h: bool,
+    #[serde(default)]
+    pub flip_v: bool,
+    /// The picture itself, filled in by [`attach_images`] after parsing, exactly
+    /// as the Word renderer does it.
+    #[serde(skip)]
+    pub src: Option<std::rc::Rc<str>>,
+}
+
+/// Which picture a shape draws, and in what format.
+pub fn picture_of(shape: &Shape) -> Option<(&str, &str)> {
+    if let Some(svg) = shape.svg_image_path.as_deref().filter(|p| !p.is_empty()) {
+        return Some((svg, "image/svg+xml"));
+    }
+    let path = shape.image_path.as_deref().filter(|p| !p.is_empty())?;
+    Some((path, shape.mime_type.as_deref().unwrap_or("")))
+}
+
+/// Read every picture the deck draws out of the package, once each.
+pub fn collect_images(deck: &Deck, package: &[u8]) -> super::docx::Images {
+    let mut wanted: Vec<(String, String)> = Vec::new();
+    for slide in &deck.slides {
+        for shape in &slide.elements {
+            if let Some((path, mime)) = picture_of(shape) {
+                if super::docx::is_drawable(mime) && !wanted.iter().any(|(p, _)| p == path) {
+                    wanted.push((path.to_string(), mime.to_string()));
+                }
+            }
+        }
+    }
+    super::docx::read_images(wanted, package)
+}
+
+/// Give every picture shape the bytes it draws.
+pub fn attach_images(deck: &mut Deck, images: &super::docx::Images) {
+    for slide in &mut deck.slides {
+        for shape in &mut slide.elements {
+            if let Some((path, _)) = picture_of(shape) {
+                shape.src = images.get(path).cloned();
+            }
+        }
+    }
+}
+
+/// How a picture sits in its shape box.
+///
+/// NOT its width and height: the `<img>` IS the box, placed by [`shape_box`] as
+/// a fraction of the slide, and setting a size here would override that and
+/// blow the picture up to the whole slide.
+///
+/// `contain` rather than `cover` because the box is the size the author drew,
+/// and cropping to fill it would hide part of what they placed.
+pub fn image_style(shape: &Shape) -> String {
+    let mut css = String::from("object-fit:contain;");
+    let mut transform = String::new();
+    if let Some(deg) = shape.rotation.filter(|d| d.abs() > 0.01) {
+        transform.push_str(&format!("rotate({deg:.2}deg) "));
+    }
+    if shape.flip_h || shape.flip_v {
+        let x = if shape.flip_h { -1 } else { 1 };
+        let y = if shape.flip_v { -1 } else { 1 };
+        transform.push_str(&format!("scale({x},{y})"));
+    }
+    if !transform.trim().is_empty() {
+        css.push_str(&format!("transform:{};", transform.trim()));
+    }
+    css
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -233,7 +314,19 @@ pub fn DeckView(deck: Deck) -> Element {
                     style: "aspect-ratio:{w} / {h};",
                     aria_label: "{i + 1}",
                     for (j , shape) in slide.elements.into_iter().enumerate() {
-                        if shape.text_body.is_some() {
+                        if let Some(src) = shape.src.clone() {
+                            // A picture sits in its own box, at the place and
+                            // size the author put it, like every other shape.
+                            img {
+                                key: "e{j}",
+                                class: "pptx-img",
+                                src: "{src}",
+                                style: "{shape_box(&shape, &deck)}{image_style(&shape)}",
+                                alt: "",
+                                loading: "lazy",
+                                decoding: "async",
+                            }
+                        } else if shape.text_body.is_some() {
                             div {
                                 key: "e{j}",
                                 class: "pptx-shape",
@@ -289,6 +382,95 @@ fn shape_text(shape: &Shape, deck: &Deck) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The numbers are from a real deck in the wiki: a full-bleed background
+    /// picture and a small logo, on a 9144000 x 6858000 EMU slide.
+    #[test]
+    fn a_picture_is_placed_like_any_other_shape() {
+        let deck = Deck {
+            slide_width: 9_144_000.0,
+            slide_height: 6_858_000.0,
+            ..Default::default()
+        };
+        let full_bleed = Shape {
+            x: 0.0,
+            y: 0.0,
+            width: 9_144_000.0,
+            height: 5_143_500.0,
+            image_path: Some("ppt/media/image1.png".into()),
+            mime_type: Some("image/png".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            shape_box(&full_bleed, &deck),
+            "left:0.000%;top:0.000%;width:100.000%;height:75.000%;"
+        );
+        // The box carries the size. The picture style must NOT, or it would
+        // override those percentages and blow the picture up to the slide.
+        let css = image_style(&full_bleed);
+        assert!(!css.contains("width"), "{css}");
+        assert!(!css.contains("height"), "{css}");
+        assert!(css.contains("object-fit:contain;"), "{css}");
+
+        let logo = Shape {
+            x: 540_000.0,
+            y: 530_467.0,
+            width: 1_235_676.0,
+            height: 190_500.0,
+            image_path: Some("ppt/media/image2.png".into()),
+            mime_type: Some("image/png".into()),
+            ..Default::default()
+        };
+        let box_css = shape_box(&logo, &deck);
+        assert!(box_css.contains("left:5.906%"), "{box_css}");
+        assert!(box_css.contains("width:13.514%"), "{box_css}");
+    }
+
+    #[test]
+    fn a_slide_picture_prefers_its_vector_original_and_carries_its_turn() {
+        let mut shape = Shape {
+            image_path: Some("ppt/media/image1.png".into()),
+            mime_type: Some("image/png".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            picture_of(&shape),
+            Some(("ppt/media/image1.png", "image/png"))
+        );
+        shape.svg_image_path = Some("ppt/media/image1.svg".into());
+        assert_eq!(
+            picture_of(&shape),
+            Some(("ppt/media/image1.svg", "image/svg+xml"))
+        );
+
+        shape.rotation = Some(90.0);
+        shape.flip_v = true;
+        let css = image_style(&shape);
+        assert!(
+            css.contains("transform:rotate(90.00deg) scale(1,-1);"),
+            "{css}"
+        );
+
+        // A shape that draws no picture is not one.
+        assert_eq!(picture_of(&Shape::default()), None);
+    }
+
+    /// The shape as the parser writes it for a picture, pasted from a real deck.
+    #[test]
+    fn a_real_picture_shape_deserialises() {
+        let json = r#"{
+            "x": 540000, "y": 530467, "width": 1235676, "height": 190500,
+            "rotation": 0.0, "flipH": false, "flipV": false,
+            "imagePath": "ppt/media/image2.png", "mimeType": "image/png",
+            "type": "picture"
+        }"#;
+        let shape: Shape = serde_json::from_str(json).expect("the parser's own output");
+        assert_eq!(shape.image_path.as_deref(), Some("ppt/media/image2.png"));
+        assert_eq!(shape.mime_type.as_deref(), Some("image/png"));
+        assert_eq!(shape.width, 1_235_676.0);
+        assert!(shape.src.is_none(), "the bytes are attached separately");
+        assert!(shape.text_body.is_none());
+    }
 
     /// A 10 x 7.5 inch slide, which is what PowerPoint calls 4:3.
     fn deck() -> Deck {

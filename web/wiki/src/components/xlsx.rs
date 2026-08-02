@@ -99,8 +99,21 @@ pub struct Merge {
 pub struct Workbook {
     #[serde(default)]
     pub shared_strings: Vec<SharedString>,
-    #[serde(default)]
+    /// Lenient on purpose. Styles decide whether a number is a date, and
+    /// nothing else; a shape this does not recognise should cost the dates, not
+    /// the whole spreadsheet. That is exactly what went wrong once already —
+    /// `numFmts` turned out to be a list where this expected a map, and the
+    /// error took every word of the document with it.
+    #[serde(default, deserialize_with = "lenient_styles")]
     pub styles: Styles,
+}
+
+fn lenient_styles<'de, D>(d: D) -> Result<Styles, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(raw).unwrap_or_default())
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -114,10 +127,31 @@ pub struct SharedString {
 pub struct Styles {
     #[serde(default)]
     pub cell_xfs: Vec<Xf>,
-    /// Custom formats, by id. The built-in ids are not listed here — they are
-    /// defined by the spec, which is why [`is_date_format`] knows them.
+    /// Custom formats. A LIST, carrying its own ids — not a map keyed by them,
+    /// which is what this was and what silently failed the whole workbook. The
+    /// built-in ids are not listed here at all; they are defined by the spec,
+    /// which is why [`is_date_format`] knows them.
     #[serde(default)]
-    pub num_fmts: std::collections::HashMap<String, String>,
+    pub num_fmts: Vec<NumFmt>,
+}
+
+impl Styles {
+    /// The pattern for a format id, if the workbook defines one.
+    pub fn format_code(&self, id: u32) -> Option<&str> {
+        self.num_fmts
+            .iter()
+            .find(|f| f.num_fmt_id == id)
+            .map(|f| f.format_code.as_str())
+    }
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NumFmt {
+    #[serde(default)]
+    pub num_fmt_id: u32,
+    #[serde(default)]
+    pub format_code: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -217,7 +251,7 @@ pub fn cell_text(cell: &SheetCell, wb: &Workbook) -> String {
                 .and_then(|i| wb.styles.cell_xfs.get(i))
                 .and_then(|xf| xf.num_fmt_id);
             if let Some(id) = fmt {
-                let custom = wb.styles.num_fmts.get(&id.to_string()).map(String::as_str);
+                let custom = wb.styles.format_code(id);
                 if is_date_format(id, custom) {
                     if let Some(date) = excel_serial_to_date(*number) {
                         return date;
@@ -301,6 +335,45 @@ pub fn SheetTable(sheet: Sheet, workbook: Workbook) -> Element {
 mod tests {
     use super::*;
 
+    /// The custom number formats are a LIST carrying their own ids, not a map
+    /// keyed by them. Guessing that wrong failed the whole workbook and blanked
+    /// a document — so this is the shape the parser actually emits, pasted.
+    #[test]
+    fn custom_number_formats_are_a_list() {
+        let json = serde_json::json!({
+            "cellXfs": [
+                {"alignH": null, "alignV": null, "borderId": 0, "fillId": 0,
+                 "fontId": 0, "numFmtId": 0, "wrapText": false},
+                {"alignH": null, "alignV": null, "borderId": 1, "fillId": 0,
+                 "fontId": 3, "numFmtId": 164, "wrapText": false}
+            ],
+            "numFmts": [
+                {"formatCode": "_-* #,##0.00\\ \"kr.\"_-", "numFmtId": 44},
+                {"formatCode": "dd/mm/yyyy", "numFmtId": 164}
+            ]
+        });
+        let styles: Styles = serde_json::from_value(json).expect("the parser's own shape");
+        assert_eq!(styles.cell_xfs.len(), 2);
+        assert_eq!(styles.cell_xfs[1].num_fmt_id, Some(164));
+        assert_eq!(styles.format_code(164), Some("dd/mm/yyyy"));
+        assert_eq!(styles.format_code(9999), None, "an id nobody defined");
+        assert!(is_date_format(164, styles.format_code(164)));
+    }
+
+    /// A styles block this cannot read must cost the DATES, not the document.
+    /// The workbook is what carries every string in the file.
+    #[test]
+    fn unreadable_styles_do_not_take_the_words_with_them() {
+        let json = serde_json::json!({
+            "sharedStrings": [{"text": "Kontonr."}, {"text": "Kontonavn"}],
+            // Whatever this is, it is not the shape above.
+            "styles": {"numFmts": {"164": "dd/mm/yyyy"}, "cellXfs": "surprise"}
+        });
+        let wb: Workbook = serde_json::from_value(json).expect("must not fail");
+        assert_eq!(wb.shared_strings.len(), 2, "the words survive");
+        assert!(wb.styles.num_fmts.is_empty(), "the styles are given up on");
+    }
+
     /// Reported: a 351-row spreadsheet rendered as one empty row.
     ///
     /// The workbook was being read with `parse_workbook_native`, which
@@ -375,9 +448,10 @@ mod tests {
                         num_fmt_id: Some(44),
                     },
                 ],
-                num_fmts: [("165".to_string(), "dd/mm/yyyy".to_string())]
-                    .into_iter()
-                    .collect(),
+                num_fmts: vec![NumFmt {
+                    num_fmt_id: 165,
+                    format_code: "dd/mm/yyyy".to_string(),
+                }],
             },
         }
     }
