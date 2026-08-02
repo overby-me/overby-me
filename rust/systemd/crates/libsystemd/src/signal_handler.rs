@@ -96,15 +96,19 @@ pub fn handle_signals(
                                     // This lets `wait_for_service` (which polls the
                                     // PID table under a RuntimeInfo read lock) see
                                     // the `ServiceExited` entry and proceed.
-                                    let unit_id = {
+                                    let resolved = {
                                         let mut pt = pid_table.lock_poisoned();
                                         match pt.get(&pid) {
-                                            Some(PidEntry::Helper(_id, srvc_name)) => {
+                                            Some(PidEntry::Helper(id, srvc_name)) => {
                                                 trace!(
                                                     "Helper process for service: {srvc_name} exited with: {code:?}"
                                                 );
+                                                let id = id.clone();
                                                 pt.insert(pid, PidEntry::HelperExited(code));
-                                                None // no further handling needed
+                                                // Inline waiters poll the table;
+                                                // dispatcher continuations get the
+                                                // event.
+                                                Some(crate::entrypoints::dispatcher::ChildKind::Helper(id))
                                             }
                                             Some(PidEntry::Service(_id, _srvctype)) => {
                                                 // Remove the Service entry and replace
@@ -123,7 +127,7 @@ pub fn handle_signals(
                                                     ));
                                                 }
                                                 pt.insert(pid, PidEntry::ServiceExited(code));
-                                                Some(id)
+                                                Some(crate::entrypoints::dispatcher::ChildKind::Service(id))
                                             }
                                             Some(
                                                 PidEntry::HelperExited(_)
@@ -139,20 +143,26 @@ pub fn handle_signals(
                                                     "All processes spawned by rust-systemd have a pid entry. \
                                                      This did not: {pid}. Probably a rerooted orphan."
                                                 );
-                                                None
+                                                // Usually an orphan, but possibly a
+                                                // dispatcher chain child whose exit
+                                                // raced the registering insert; the
+                                                // dispatcher matches by pid.
+                                                Some(crate::entrypoints::dispatcher::ChildKind::Unknown)
                                             }
                                         }
                                     };
 
-                                    // Phase 2: If the exited process was a service,
-                                    // hand the exit to the dispatcher, which runs
-                                    // the non-blocking head and spawns the blocking
-                                    // tail (docs/EVENT-LOOP.md inc 1). The critical
-                                    // PID-table update above is already visible.
-                                    if let Some(id) = unit_id {
+                                    // Phase 2: hand the exit to the dispatcher,
+                                    // which runs the non-blocking service head,
+                                    // advances parked oneshot chains, and spawns
+                                    // the blocking tail when needed
+                                    // (docs/EVENT-LOOP.md inc 1 and 2). The
+                                    // critical PID-table update is already
+                                    // visible.
+                                    if let Some(kind) = resolved {
                                         dispatcher.send_normal(
                                             crate::entrypoints::dispatcher::Event::ChildExit(
-                                                pid, id, code,
+                                                pid, kind, code,
                                             ),
                                         );
                                     }

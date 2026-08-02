@@ -9,12 +9,28 @@
 //! into initiate-plus-event and retires that thread. Later increments move
 //! starts, dependency waiting, mounts and reload onto the dispatcher.
 
-use crate::lock_ext::RwLockExt;
+use crate::lock_ext::{MutexExt, RwLockExt};
 use crate::runtime_info::{ArcMutRuntimeInfo, RuntimeInfo};
 use crate::signal_handler::ChildTermination;
 use crate::units::UnitId;
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
+
+/// What the signal thread's PID-table phase resolved a reaped child to.
+pub enum ChildKind {
+    /// A service's main process (ServiceExited recorded).
+    Service(UnitId),
+    /// A helper process (HelperExited recorded); inline waiters may be
+    /// polling the PID table for it, so only continuations the dispatcher
+    /// itself registered may claim it.
+    Helper(UnitId),
+    /// No PID-table entry at reap time. Usually a rerooted orphan, but also
+    /// a chain child whose exit raced the registering insert; the chain
+    /// table match by pid covers that case (the registration always lands
+    /// before the dispatcher pops this event, because both happen on the
+    /// dispatcher).
+    Unknown,
+}
 
 /// Events consumed by the dispatcher. The set grows per increment of
 /// docs/EVENT-LOOP.md; only variants with a live producer are defined.
@@ -30,12 +46,23 @@ pub enum Event {
         datagram: String,
         received_fds: Vec<std::os::fd::RawFd>,
     },
-    /// A reaped child of PID 1, already resolved to its service unit with
-    /// the PID table updated (invariant I4). NORMAL priority, so that a
-    /// doomed process's final READY=/MAINPID= datagram is always applied
-    /// before its exit is processed (upstream: notify at event priority -5,
-    /// SIGCHLD at -4).
-    ChildExit(nix::unistd::Pid, UnitId, ChildTermination),
+    /// A reaped child of PID 1 with the PID table already updated
+    /// (invariant I4). NORMAL priority, so that a doomed process's final
+    /// READY=/MAINPID= datagram is always applied before its exit is
+    /// processed (upstream: notify at event priority -5, SIGCHLD at -4).
+    ChildExit(nix::unistd::Pid, ChildKind, ChildTermination),
+    /// Begin a deferred multi-command oneshot start: the dispatcher forks
+    /// the first preliminary command and advances the chain on ChildExit
+    /// events (docs/EVENT-LOOP.md inc 2).
+    StartOneshotChain(crate::units::OneshotChainStart),
+}
+
+/// A oneshot exec chain parked between steps, keyed by the awaited pid.
+struct PendingChain {
+    chain: crate::units::OneshotChainStart,
+    cmd: crate::units::Commandline,
+    timeout: Option<std::time::Duration>,
+    deadline: Option<std::time::Instant>,
 }
 
 struct Queues {
@@ -90,17 +117,29 @@ impl DispatcherHandle {
         cv.notify_one();
     }
 
-    fn pop_blocking(&self) -> Event {
+    /// Pop the next event, draining HIGH before NORMAL, or return None once
+    /// `deadline` passes with no event: the dispatcher's timer wheel.
+    fn pop_blocking_until(&self, deadline: Option<std::time::Instant>) -> Option<Event> {
         let (lock, cv) = &*self.queue;
         let mut queues = lock.lock().unwrap();
         loop {
             if let Some(event) = queues.high.pop_front() {
-                return event;
+                return Some(event);
             }
             if let Some(event) = queues.normal.pop_front() {
-                return event;
+                return Some(event);
             }
-            queues = cv.wait(queues).unwrap();
+            match deadline {
+                None => queues = cv.wait(queues).unwrap(),
+                Some(deadline) => {
+                    let now = std::time::Instant::now();
+                    if now >= deadline {
+                        return None;
+                    }
+                    let (guard, _timeout) = cv.wait_timeout(queues, deadline - now).unwrap();
+                    queues = guard;
+                }
+            }
         }
     }
 }
@@ -113,10 +152,19 @@ impl DispatcherHandle {
 pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
     let handle = run_info.read_poisoned().dispatcher.clone();
     super::service_manager::spawn_critical_thread("dispatcher", move || {
+        // Oneshot exec chains parked between steps, keyed by awaited pid.
+        // Dispatcher-private: nothing else may mutate a parked chain.
+        let mut chains: std::collections::HashMap<i32, PendingChain> =
+            std::collections::HashMap::new();
         loop {
-            let event = handle.pop_blocking();
+            let next_deadline = chains.values().filter_map(|chain| chain.deadline).min();
+            let event = handle.pop_blocking_until(next_deadline);
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                dispatch_one(event, &run_info);
+                match event {
+                    Some(event) => dispatch_one(event, &run_info, &mut chains),
+                    // The deadline wheel fired with no event.
+                    None => expire_due_chains(&run_info, &mut chains),
+                }
             }));
             if let Err(panic) = result {
                 let msg = panic_message(&panic);
@@ -139,7 +187,11 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-fn dispatch_one(event: Event, run_info: &ArcMutRuntimeInfo) {
+fn dispatch_one(
+    event: Event,
+    run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingChain>,
+) {
     match event {
         Event::Notify {
             unit,
@@ -148,14 +200,92 @@ fn dispatch_one(event: Event, run_info: &ArcMutRuntimeInfo) {
         } => {
             crate::notification_handler::apply_notify(&unit, &datagram, received_fds, run_info);
         }
-        Event::ChildExit(pid, id, code) => {
-            let proceed = {
-                let guard = acquire_read(run_info, &id, pid);
-                crate::services::service_exit_head(pid, &id, &code, &guard, run_info)
-            };
-            if proceed {
-                crate::services::service_exit_handler_new_thread(pid, id, code, run_info.clone());
+        Event::ChildExit(pid, kind, code) => {
+            if let Some(pending) = chains.remove(&pid.as_raw()) {
+                // A parked chain owns this pid. Drop its PID-table record
+                // the way wait_for_helper_child does for inline waits; the
+                // registration is guaranteed to have landed because both it
+                // and this pop happen on the dispatcher.
+                {
+                    let ri = run_info.read_poisoned();
+                    ri.pid_table.lock_poisoned().remove(&pid);
+                }
+                let outcome = crate::units::oneshot_chain_child_exited(
+                    &pending.chain,
+                    &pending.cmd,
+                    code,
+                    run_info,
+                );
+                park_chain(outcome, pending.chain, chains);
+                return;
             }
+            match kind {
+                ChildKind::Service(id) => {
+                    let proceed = {
+                        let guard = acquire_read(run_info, &id, pid);
+                        crate::services::service_exit_head(pid, &id, &code, &guard, run_info)
+                    };
+                    if proceed {
+                        crate::services::service_exit_handler_new_thread(
+                            pid,
+                            id,
+                            code,
+                            run_info.clone(),
+                        );
+                    }
+                }
+                ChildKind::Helper(_) | ChildKind::Unknown => {
+                    // Inline waiters poll the PID table for helper exits;
+                    // orphan reaps have nothing to do here.
+                }
+            }
+        }
+        Event::StartOneshotChain(chain) => {
+            let outcome = crate::units::oneshot_chain_step(&chain, run_info);
+            park_chain(outcome, chain, chains);
+        }
+    }
+}
+
+/// Park a chain that advanced to a new preliminary command, arming its
+/// per-command deadline on the wheel. Finished chains need nothing.
+fn park_chain(
+    outcome: crate::units::OneshotStepOutcome,
+    chain: crate::units::OneshotChainStart,
+    chains: &mut std::collections::HashMap<i32, PendingChain>,
+) {
+    if let crate::units::OneshotStepOutcome::Advanced { pid, cmd, timeout } = outcome {
+        chains.insert(
+            pid.as_raw(),
+            PendingChain {
+                chain,
+                cmd,
+                timeout,
+                deadline: timeout.map(|t| std::time::Instant::now() + t),
+            },
+        );
+    }
+}
+
+fn expire_due_chains(
+    run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingChain>,
+) {
+    let now = std::time::Instant::now();
+    let due: Vec<i32> = chains
+        .iter()
+        .filter(|(_, pending)| pending.deadline.is_some_and(|deadline| deadline <= now))
+        .map(|(raw_pid, _)| *raw_pid)
+        .collect();
+    for raw_pid in due {
+        if let Some(pending) = chains.remove(&raw_pid) {
+            crate::units::oneshot_chain_timed_out(
+                &pending.chain,
+                &pending.cmd,
+                nix::unistd::Pid::from_raw(raw_pid),
+                pending.timeout,
+                run_info,
+            );
         }
     }
 }
@@ -216,7 +346,7 @@ mod tests {
         let handle = DispatcherHandle::new();
         handle.send_normal(Event::ChildExit(
             nix::unistd::Pid::from_raw(1),
-            uid("a.service"),
+            super::ChildKind::Service(uid("a.service")),
             crate::signal_handler::ChildTermination::Exit(0),
         ));
         handle.send_high(Event::Notify {
@@ -225,13 +355,24 @@ mod tests {
             received_fds: Vec::new(),
         });
         // The notify was queued second but must come out first.
-        match handle.pop_blocking() {
+        match handle.pop_blocking_until(None).unwrap() {
             Event::Notify { unit, .. } => assert_eq!(unit.name, "b.service"),
-            Event::ChildExit(..) => panic!("normal event dispatched before the high queue drained"),
+            _ => panic!("normal event dispatched before the high queue drained"),
         }
-        match handle.pop_blocking() {
-            Event::ChildExit(_, unit, _) => assert_eq!(unit.name, "a.service"),
-            Event::Notify { .. } => panic!("expected the child exit second"),
+        match handle.pop_blocking_until(None).unwrap() {
+            Event::ChildExit(_, super::ChildKind::Service(unit), _) => {
+                assert_eq!(unit.name, "a.service");
+            }
+            _ => panic!("expected the child exit second"),
         }
+    }
+
+    #[test]
+    fn deadline_pop_returns_none_when_idle() {
+        let handle = DispatcherHandle::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(20);
+        let popped = handle.pop_blocking_until(Some(deadline));
+        assert!(popped.is_none());
+        assert!(std::time::Instant::now() >= deadline);
     }
 }

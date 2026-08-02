@@ -1282,19 +1282,26 @@ fn activate_units_recursive(
                         let filter_ids_bg = filter_ids_copy;
                         let errors_bg = errors_copy;
                         if is_oneshot_prelim {
-                            std::thread::Builder::new()
-                                .name(format!("oneshot-exec-{}", unit_name))
-                                .spawn(move || {
-                                    deferred_oneshot_exec_drive(
-                                        id_bg,
+                            // Hand the exec chain to the dispatcher: each
+                            // preliminary command is forked initiate-only and
+                            // advanced by its ChildExit event, with the
+                            // per-command timeout on the dispatcher's deadline
+                            // wheel (docs/EVENT-LOOP.md inc 2).
+                            let dispatcher = {
+                                let ri = run_info_bg.read_poisoned();
+                                ri.dispatcher.clone()
+                            };
+                            dispatcher.send_normal(
+                                crate::entrypoints::dispatcher::Event::StartOneshotChain(
+                                    OneshotChainStart {
+                                        id: id_bg,
                                         next_services_ids,
-                                        filter_ids_bg,
-                                        run_info_bg,
-                                        errors_bg,
+                                        filter_ids: filter_ids_bg,
+                                        errors: errors_bg,
                                         source,
-                                    );
-                                })
-                                .expect("Failed to spawn deferred oneshot exec thread");
+                                    },
+                                ),
+                            );
                         } else {
                             std::thread::Builder::new()
                                 .name(format!("notify-wait-{}", unit_name))
@@ -1418,33 +1425,51 @@ fn deferred_start_fail_cleanup(
     }
 }
 
-/// Background driver for a multi-command Type=oneshot service whose preliminary
-/// (non-last) `ExecStart=` commands were deferred by `Service::start` (returning
-/// `StartResult::DeferredOneshotExec`). It runs each non-last command to
-/// completion WITHOUT holding the RuntimeInfo table read lock across the wait —
-/// the child is spawned under a short read guard, then waited on via the
-/// pid_table Arc with no table lock held — so a concurrent `systemctl
-/// daemon-reload` can commit between commands and the final command reflects the
-/// reloaded config (07-pid1-exec-deserialization). Each iteration re-reads the
-/// exec list and relocates via `current_exec_argv`, mirroring the inline loop in
-/// `Service::start`. Once only the last command remains it forks it as the main
-/// process via `fork_main_and_maybe_defer` and hands completion + before-chain
-/// dispatch to `deferred_notify_wait_and_dispatch`.
-fn deferred_oneshot_exec_drive(
-    id: UnitId,
-    next_services_ids: Vec<UnitId>,
-    filter_ids: Arc<Vec<UnitId>>,
-    run_info: ArcMutRuntimeInfo,
-    errors: Arc<Mutex<Vec<UnitOperationError>>>,
-    source: ActivationSource,
-) {
+/// Everything a deferred multi-command Type=oneshot start needs to advance:
+/// carried by the dispatcher between steps (docs/EVENT-LOOP.md inc 2).
+pub struct OneshotChainStart {
+    pub id: UnitId,
+    pub next_services_ids: Vec<UnitId>,
+    pub filter_ids: Arc<Vec<UnitId>>,
+    pub errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    pub source: ActivationSource,
+}
+
+pub enum OneshotStepOutcome {
+    /// A preliminary command was forked; the chain now waits for this pid's
+    /// ChildExit event, bounded by the per-command start timeout.
+    Advanced {
+        pid: nix::unistd::Pid,
+        cmd: crate::units::Commandline,
+        timeout: Option<std::time::Duration>,
+    },
+    /// The chain is done with: the main process forked (its completion wait
+    /// is the notify-wait thread's job), the oneshot completed with no
+    /// command left, or a failure was recorded.
+    Finished,
+}
+
+/// One decide-and-fork step of a multi-command Type=oneshot start whose
+/// preliminary (non-last) `ExecStart=` commands were deferred by
+/// `Service::start` (returning `StartResult::DeferredOneshotExec`). Runs on
+/// the dispatcher: each call takes one brief read guard, relocates in the
+/// (possibly reloaded) exec list via `current_exec_argv` exactly like
+/// Service::start's inline loop, and either forks the next preliminary
+/// command, forks the last command as the main process, or completes the
+/// oneshot. It never waits: the fork's exit comes back as a ChildExit event
+/// that [`oneshot_chain_child_exited`] consumes, so a concurrent
+/// `systemctl daemon-reload` can commit between commands and the final
+/// command reflects the reloaded config (07-pid1-exec-deserialization).
+pub(crate) fn oneshot_chain_step(
+    chain: &OneshotChainStart,
+    run_info: &ArcMutRuntimeInfo,
+) -> OneshotStepOutcome {
+    let id = chain.id.clone();
     let name = id.name.clone();
-    // Clone the pid_table Arc once so helper waits need no table guard.
-    let pid_table = run_info.read_poisoned().pid_table.clone();
 
     enum Step {
-        // Carries the command so the wait can apply the same exit-status rules
-        // as Service::run_cmd, including the `-` ignore-failure prefix.
+        // Carries the command so the exit handler can apply the same
+        // exit-status rules as Service::run_cmd, including the `-` prefix.
         Wait(
             std::process::Child,
             Option<std::time::Duration>,
@@ -1453,162 +1478,201 @@ fn deferred_oneshot_exec_drive(
         Forked(Result<Option<crate::services::StartResult>, ServiceErrorReason>),
         Completed,
         SpawnErr(String),
+        Gone,
     }
 
-    loop {
-        let step = {
-            let ri = run_info.read_poisoned();
-            let Some(unit) = ri.unit_table.get(&id) else {
-                break;
-            };
-            let Specific::Service(svc) = &unit.specific else {
-                break;
-            };
-            let conf = &svc.conf;
-            let exec_list = conf.exec.clone();
-            let working_dir = conf.exec_config.working_directory.clone();
-            let mut st = svc.state.write_poisoned();
-            let timeout = st.srvc.get_start_timeout(conf);
+    let step = {
+        let ri = run_info.read_poisoned();
+        match ri.unit_table.get(&id) {
+            None => Step::Gone,
+            Some(unit) => match &unit.specific {
+                Specific::Service(svc) => {
+                    let conf = &svc.conf;
+                    let exec_list = conf.exec.clone();
+                    let working_dir = conf.exec_config.working_directory.clone();
+                    let mut st = svc.state.write_poisoned();
+                    let timeout = st.srvc.get_start_timeout(conf);
 
-            // Relocate in the (possibly reloaded) exec list via the argv of the
-            // command we just ran, exactly like Service::start's inline loop.
-            let mut idx = 0usize;
-            let mut removed = false;
-            if let Some(last_argv) = st.srvc.current_exec_argv.take() {
-                match exec_list.iter().position(|c| c.to_string() == last_argv) {
-                    Some(pos) => idx = pos + 1,
-                    None => removed = true,
-                }
-            }
-
-            if removed {
-                // The currently-running command vanished from the reloaded
-                // config: finish the oneshot without running any further command
-                // (empty log), matching upstream ("the currently executed
-                // command vanished ... simply finish executing the unit"). Signal
-                // completion via main_exit_status=0; deferred_notify_wait_and_dispatch
-                // performs the Started transition + before-chain dispatch.
-                st.srvc.current_exec_argv = None;
-                st.srvc.main_exit_status = Some(0);
-                Step::Completed
-            } else if idx + 1 >= exec_list.len() {
-                // Only the last command remains: fork it as the main process.
-                Step::Forked(st.srvc.fork_main_and_maybe_defer(
-                    conf,
-                    id.clone(),
-                    &name,
-                    &ri,
-                    source,
-                    &unit.common,
-                ))
-            } else {
-                let cmd = exec_list[idx].clone();
-                st.srvc.current_exec_argv = Some(cmd.to_string());
-                match st
-                    .srvc
-                    .spawn_helper_child(&cmd, id.clone(), &name, &ri, working_dir.as_ref())
-                {
-                    Ok(child) => Step::Wait(child, timeout, cmd),
-                    Err(e) => Step::SpawnErr(format!("{e}")),
-                }
-            }
-        };
-
-        match step {
-            Step::Wait(mut child, timeout, cmd) => {
-                // A preliminary ExecStart= that fails must abort the rest of the
-                // oneshot, exactly as Service::run_cmd does for the inline path.
-                // Without this the remaining commands ran anyway.
-                let failure: Option<crate::services::RunCmdError> =
-                    match crate::services::wait_for_helper_child(&child, &pid_table, timeout) {
-                        crate::services::WaitResult::InTime(Ok(exitstatus)) => {
-                            if exitstatus.success()
-                                || cmd
-                                    .prefixes
-                                    .contains(&crate::units::CommandlinePrefix::Minus)
-                            {
-                                None
-                            } else {
-                                Some(crate::services::RunCmdError::BadExitCode(
-                                    cmd.to_string(),
-                                    exitstatus,
-                                ))
-                            }
-                        }
-                        crate::services::WaitResult::InTime(Err(e)) => Some(
-                            crate::services::RunCmdError::WaitError(cmd.to_string(), format!("{e}")),
-                        ),
-                        crate::services::WaitResult::TimedOut => {
-                            let _ = child.kill();
-                            Some(crate::services::RunCmdError::Timeout(
-                                cmd.to_string(),
-                                format!("Timeout ({timeout:?}) reached"),
-                            ))
-                        }
-                    };
-                if let Some(e) = failure {
-                    // Clear the relocation breadcrumb so nothing can resume the
-                    // sequence from the failed command.
-                    {
-                        let ri = run_info.read_poisoned();
-                        if let Some(unit) = ri.unit_table.get(&id)
-                            && let Specific::Service(svc) = &unit.specific
-                        {
-                            svc.state.write_poisoned().srvc.current_exec_argv = None;
+                    // Relocate in the (possibly reloaded) exec list via the
+                    // argv of the command we just ran, exactly like
+                    // Service::start's inline loop.
+                    let mut idx = 0usize;
+                    let mut removed = false;
+                    if let Some(last_argv) = st.srvc.current_exec_argv.take() {
+                        match exec_list.iter().position(|c| c.to_string() == last_argv) {
+                            Some(pos) => idx = pos + 1,
+                            None => removed = true,
                         }
                     }
-                    let reason = format!("{e}");
-                    errors.lock_poisoned().push(UnitOperationError {
-                        unit_name: name.clone(),
-                        unit_id: id.clone(),
-                        reason: UnitOperationErrorReason::ServiceStartError(
-                            ServiceErrorReason::StartFailed(e),
-                        ),
-                    });
-                    // Reporting the error is not enough: the unit would stay in
-                    // UnitStatus::Starting and be started again from the top,
-                    // re-running the preliminary commands forever. Mark it
-                    // StoppedUnexpected via the same helper the other deferred
-                    // start-failure paths use. Takes &ArcMutRuntimeInfo and does
-                    // its own try_read, so no guard may be held here.
-                    deferred_start_fail_cleanup(&run_info, &id, &name, reason);
-                    return;
+
+                    if removed {
+                        // The currently-running command vanished from the
+                        // reloaded config: finish the oneshot without running
+                        // any further command (empty log), matching upstream
+                        // ("the currently executed command vanished ... simply
+                        // finish executing the unit"). Signal completion via
+                        // main_exit_status=0; deferred_notify_wait_and_dispatch
+                        // performs the Started transition + dispatch.
+                        st.srvc.current_exec_argv = None;
+                        st.srvc.main_exit_status = Some(0);
+                        Step::Completed
+                    } else if idx + 1 >= exec_list.len() {
+                        // Only the last command remains: fork it as the main
+                        // process.
+                        Step::Forked(st.srvc.fork_main_and_maybe_defer(
+                            conf,
+                            id.clone(),
+                            &name,
+                            &ri,
+                            chain.source,
+                            &unit.common,
+                        ))
+                    } else {
+                        let cmd = exec_list[idx].clone();
+                        st.srvc.current_exec_argv = Some(cmd.to_string());
+                        match st.srvc.spawn_helper_child(
+                            &cmd,
+                            id.clone(),
+                            &name,
+                            &ri,
+                            working_dir.as_ref(),
+                        ) {
+                            Ok(child) => Step::Wait(child, timeout, cmd),
+                            Err(e) => Step::SpawnErr(format!("{e}")),
+                        }
+                    }
                 }
-            }
-            Step::Forked(Ok(_)) | Step::Completed => {
-                // Main process forked (its completion wait is itself deferred),
-                // or the oneshot finished with no further command (Completed, via
-                // main_exit_status=0). Reuse the notify-wait poller to perform the
-                // Started transition + before-chain dispatch, like the inline path.
-                deferred_notify_wait_and_dispatch(
-                    id,
-                    next_services_ids,
-                    filter_ids,
-                    run_info,
-                    errors,
-                    source,
-                );
-                return;
-            }
-            Step::Forked(Err(e)) => {
-                errors.lock_poisoned().push(UnitOperationError {
-                    unit_name: name.clone(),
-                    unit_id: id.clone(),
-                    reason: UnitOperationErrorReason::ServiceStartError(e),
+                _ => Step::Gone,
+            },
+        }
+    };
+
+    match step {
+        Step::Wait(child, timeout, cmd) => OneshotStepOutcome::Advanced {
+            pid: nix::unistd::Pid::from_raw(child.id() as i32),
+            cmd,
+            timeout,
+        },
+        Step::Forked(Ok(_)) | Step::Completed => {
+            // Main process forked (its completion wait is itself deferred),
+            // or the oneshot finished with no further command. The notify-wait
+            // thread performs the Started transition + before-chain dispatch;
+            // converting that wait into events is a later inc 2 slice.
+            let chain_id = id;
+            let next = chain.next_services_ids.clone();
+            let filter = chain.filter_ids.clone();
+            let ri = run_info.clone();
+            let errs = chain.errors.clone();
+            let source = chain.source;
+            let spawned = std::thread::Builder::new()
+                .name(format!("notify-wait-{name}"))
+                .spawn(move || {
+                    deferred_notify_wait_and_dispatch(chain_id, next, filter, ri, errs, source);
                 });
-                return;
+            if let Err(e) = spawned {
+                error!("oneshot chain {name}: failed to spawn completion thread: {e}");
             }
-            Step::SpawnErr(e) => {
-                error!("deferred oneshot {name}: failed to spawn preliminary command: {e}");
-                errors.lock_poisoned().push(UnitOperationError {
-                    unit_name: name.clone(),
-                    unit_id: id.clone(),
-                    reason: UnitOperationErrorReason::GenericStartError(e),
-                });
-                return;
-            }
+            OneshotStepOutcome::Finished
+        }
+        Step::Forked(Err(e)) => {
+            chain.errors.lock_poisoned().push(UnitOperationError {
+                unit_name: name.clone(),
+                unit_id: id.clone(),
+                reason: UnitOperationErrorReason::ServiceStartError(e),
+            });
+            OneshotStepOutcome::Finished
+        }
+        Step::SpawnErr(e) => {
+            // Preserved shape from the thread-based driver: the error is
+            // recorded but the unit stays in Starting (the deferred fail
+            // cleanup is only wired to the wait path).
+            error!("deferred oneshot {name}: failed to spawn preliminary command: {e}");
+            chain.errors.lock_poisoned().push(UnitOperationError {
+                unit_name: name.clone(),
+                unit_id: id.clone(),
+                reason: UnitOperationErrorReason::GenericStartError(e),
+            });
+            OneshotStepOutcome::Finished
+        }
+        Step::Gone => OneshotStepOutcome::Finished,
+    }
+}
+
+/// Consume a chain child's exit on the dispatcher: apply the same
+/// exit-status rules as Service::run_cmd (success or a leading `-` prefix
+/// continues; anything else aborts the start), then run the next step.
+pub(crate) fn oneshot_chain_child_exited(
+    chain: &OneshotChainStart,
+    cmd: &crate::units::Commandline,
+    termination: crate::signal_handler::ChildTermination,
+    run_info: &ArcMutRuntimeInfo,
+) -> OneshotStepOutcome {
+    // A preliminary ExecStart= that fails must abort the rest of the
+    // oneshot, exactly as Service::run_cmd does for the inline path.
+    if termination.success() || cmd.prefixes.contains(&crate::units::CommandlinePrefix::Minus) {
+        return oneshot_chain_step(chain, run_info);
+    }
+    oneshot_chain_fail(
+        chain,
+        crate::services::RunCmdError::BadExitCode(cmd.to_string(), termination),
+        run_info,
+    );
+    OneshotStepOutcome::Finished
+}
+
+/// The chain's per-command start timeout fired: SIGKILL the preliminary
+/// command (mirroring the thread driver's child.kill()) and fail the start.
+/// The kill's reap arrives later as an unmatched ChildExit and is dropped.
+pub(crate) fn oneshot_chain_timed_out(
+    chain: &OneshotChainStart,
+    cmd: &crate::units::Commandline,
+    pid: nix::unistd::Pid,
+    timeout: Option<std::time::Duration>,
+    run_info: &ArcMutRuntimeInfo,
+) {
+    unsafe {
+        libc::kill(pid.as_raw(), libc::SIGKILL);
+    }
+    oneshot_chain_fail(
+        chain,
+        crate::services::RunCmdError::Timeout(
+            cmd.to_string(),
+            format!("Timeout ({timeout:?}) reached"),
+        ),
+        run_info,
+    );
+}
+
+fn oneshot_chain_fail(
+    chain: &OneshotChainStart,
+    e: crate::services::RunCmdError,
+    run_info: &ArcMutRuntimeInfo,
+) {
+    let id = &chain.id;
+    let name = &id.name;
+    // Clear the relocation breadcrumb so nothing can resume the sequence
+    // from the failed command.
+    {
+        let ri = run_info.read_poisoned();
+        if let Some(unit) = ri.unit_table.get(id)
+            && let Specific::Service(svc) = &unit.specific
+        {
+            svc.state.write_poisoned().srvc.current_exec_argv = None;
         }
     }
+    let reason = format!("{e}");
+    chain.errors.lock_poisoned().push(UnitOperationError {
+        unit_name: name.clone(),
+        unit_id: id.clone(),
+        reason: UnitOperationErrorReason::ServiceStartError(ServiceErrorReason::StartFailed(e)),
+    });
+    // Reporting the error is not enough: the unit would stay in
+    // UnitStatus::Starting and be started again from the top, re-running
+    // the preliminary commands forever. Mark it StoppedUnexpected via the
+    // same helper the other deferred start-failure paths use. Takes
+    // &ArcMutRuntimeInfo and does its own try_read, so no guard may be
+    // held here.
+    deferred_start_fail_cleanup(run_info, id, name, reason);
 }
 
 fn deferred_notify_wait_and_dispatch(
