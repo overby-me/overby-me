@@ -59,6 +59,9 @@
           ./src
           ./assets
           ./graphql
+          # Path dependencies: the OOXML parsers and the patched dioxus-core.
+          # Cargo cannot resolve the manifest without them.
+          ./vendor
           # `just build` ends in this script. Named on its own rather than the
           # whole scripts/ directory, so editing an unrelated script does not
           # rebuild the frontend.
