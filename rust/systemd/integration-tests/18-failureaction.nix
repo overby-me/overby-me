@@ -19,15 +19,26 @@
   # fires. They pass whether or not the actions work at all, so the real
   # coverage is entirely in the two phases.
   #
-  # PHASE 1 IS RESTORED as of 2026-07-30. The previous note claimed "the NixOS
-  # test VM cannot survive SuccessAction=reboot (QEMU hard reset)", which was
-  # stale: the harness grew reboot-resume machinery (testsuite.nix:848-872,
-  # whose comment names this very test) that reconnects and re-runs the script,
-  # and `allowReboot` below starts QEMU with allow_reboot=True. The script
-  # tracks its own progress across boots via /firstphase, which is exactly the
-  # shape that machinery expects. `sleep infinity` moves into the then-branch to
-  # park the script until the reboot lands: without it the script would exit 0
-  # before the machine goes down and the harness would check /testok too early.
+  # PHASE 1 IS RESTORED as of 2026-07-30, and MEASURED RED 2026-08-02: a full
+  # unpiped run showed SuccessAction=reboot fires, the VM reboots, and the
+  # second boot comes up healthy (kmsg flows past guest clock 2000s, zero
+  # panics), but the test driver's root shell never reconnects; the run sat in
+  # "Guest root shell did not produce any data yet" for over ten guest-clock
+  # minutes before being stopped. The reboot-resume harness cycle is what
+  # fails, the same class as 09-REBOOT, so phase 2's /testok is never checked
+  # and THIS TEST DOES NOT PASS. The SuccessAction/FailureAction feature
+  # behavior is verified up to and including the reboot firing and a healthy
+  # second boot; the post-reboot in-test assertions remain unverifiable under
+  # this harness until the reboot-resume cycle works (see 09-REBOOT).
+  #
+  # The original restoration rationale, kept for context: the harness grew
+  # reboot-resume machinery (testsuite.nix:848-872, whose comment names this
+  # very test) that reconnects and re-runs the script, and `allowReboot` below
+  # starts QEMU with allow_reboot=True. The script tracks its own progress
+  # across boots via /firstphase, which is exactly the shape that machinery
+  # expects. `sleep infinity` moves into the then-branch to park the script
+  # until the reboot lands: without it the script would exit 0 before the
+  # machine goes down and the harness would check /testok too early.
   #
   # PHASE 2 STAYS MASKED, and the reason is the harness, not rust. Upstream does
   # NOT exit PID 1 here: emergency-action.c:153-170 degrades "exit" to
