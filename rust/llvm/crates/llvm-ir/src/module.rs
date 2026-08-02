@@ -262,6 +262,40 @@ impl Module {
         }
         count
     }
+
+    /// Whether a `blockaddress` naming this block is read anywhere.
+    ///
+    /// This is the half of a block's use list that its own function cannot
+    /// answer. Upstream uniques the constant per block, so however many
+    /// times its text appears it is one entry in the list, and a constant
+    /// nothing reads is not an entry at all: a `uselistorder` directive can
+    /// name a blockaddress without using it.
+    ///
+    /// `pending` is a function that is being read and has not joined the
+    /// module yet, whose own operands count too: a block can take its own
+    /// address, as an `indirectbr` written against a label in the same
+    /// function does.
+    pub fn block_address_used(
+        &self,
+        function: GlobalRef,
+        block: &Name,
+        pending: Option<&Function>,
+    ) -> bool {
+        let address = (0..self.ctx.constant_count())
+            .map(|index| ConstId(index as u32))
+            .find(|id| {
+                matches!(
+                    self.ctx.constant(*id),
+                    Constant::BlockAddress { function: named, block: label, .. }
+                        if *named == function && label == block
+                )
+            });
+        let Some(address) = address else {
+            return false;
+        };
+        self.use_count(address) > 0
+            || pending.is_some_and(|function| function.value_uses(Value::Constant(address)) > 0)
+    }
 }
 
 #[cfg(test)]

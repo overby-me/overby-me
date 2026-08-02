@@ -1149,6 +1149,60 @@ const REJECTED: &[(&str, &str)] = &[
         "define void @f() {\nentry:\n  ret void\n}\n\nuselistorder_bb @missing, %entry, { 1, 0 }\n",
         "uselistorder_bb names a function this module does not have",
     ),
+    // A block's use list holds the terminator slots that reach it. One
+    // branch is one use, and a list of one cannot be permuted.
+    (
+        "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %target, label %other\ntarget:\n  ret void\nother:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+        "value only has one use",
+    ),
+    // The entry block is reached by entering the function rather than by a
+    // branch, so nothing uses it.
+    (
+        "define void @f(i1 %c) {\ntarget:\n  br i1 %c, label %a, label %b\na:\n  ret void\nb:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+        "value has no uses",
+    ),
+    // A phi names the blocks its values arrive from, and upstream holds
+    // those beside the operand list rather than in it: an incoming edge is
+    // not a use. Here `%target` is reached by one branch and named by one
+    // phi, and the count upstream takes is one.
+    (
+        "define i32 @f(i1 %c) {\nentry:\n  br i1 %c, label %target, label %join\ntarget:\n  br label %join\njoin:\n  %p = phi i32 [ 0, %entry ], [ 1, %target ]\n  ret i32 %p\n  uselistorder label %target, { 1, 0 }\n}\n",
+        "value only has one use",
+    ),
+    // Two edges are two uses, so three indexes are one too many.
+    (
+        "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %target, label %target\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0, 2 }\n}\n",
+        "wrong number of indexes, expected 2",
+    ),
+    // A directive in a body is checked where it is written, so an address
+    // taken below the function is not yet a use of the block.
+    (
+        "define void @f() {\nentry:\n  br label %target\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n\n@a = global ptr blockaddress(@f, %target)\n",
+        "value only has one use",
+    ),
+    // `uselistorder_bb` is a top-level directive. Written among the
+    // instructions it is an opcode upstream does not know.
+    (
+        "define void @f() {\nentry:\n  br label %target\ntarget:\n  ret void\n  uselistorder_bb @f, %target, { 1, 0 }\n}\n\n@a = global ptr blockaddress(@f, %target)\n",
+        "unknown instruction",
+    ),
+    // The same block through the other directive, which is counted against
+    // the whole module: one branch and no address taken is one use.
+    (
+        "define void @f() {\nentry:\n  br label %target\ntarget:\n  ret void\n}\n\nuselistorder_bb @f, %target, { 1, 0 }\n",
+        "value only has one use",
+    ),
+    // A numbered block is counted the same way, and one edge is still one.
+    (
+        "define void @f(i1 %c) {\n  br i1 %c, label %1, label %2\n1:\n  ret void\n2:\n  ret void\n  uselistorder label %1, { 1, 0 }\n}\n",
+        "value only has one use",
+    ),
+    // The indexes are positions in the list, so one past its end is out of
+    // range even when the count is right.
+    (
+        "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %target, label %target\ntarget:\n  ret void\n  uselistorder label %target, { 2, 0 }\n}\n",
+        "expected distinct uselistorder indexes in range [0, size)",
+    ),
     (
         "!named = !{!{i32 1}}\n",
         "a named metadata list holds references, not nodes",
@@ -1551,6 +1605,32 @@ const VERIFIES: &[&str] = &[
     "define void @f(i8 %a) mustprogress {\nentry:\n  ret void\n}\n",
     // `noext` says not to widen, which anything can be told.
     "declare void @f(ptr noext)\n",
+    // A block's use list, which is the terminator slots that reach it. Both
+    // arms of one branch count, so this is two.
+    "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %target, label %target\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+    // Two branches from two blocks, likewise two.
+    "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %a, label %b\na:\n  br label %target\nb:\n  br label %target\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+    // A switch counts once per case, not once per switch.
+    "define void @f(i32 %x) {\nentry:\n  switch i32 %x, label %other [\n    i32 0, label %target\n    i32 1, label %target\n  ]\ntarget:\n  ret void\nother:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+    // Taking a block's address is the other half of its use list. The
+    // constant is uniqued, so two globals holding it are one use, and one
+    // branch makes two.
+    "@a = global ptr blockaddress(@f, %target)\n@b = global ptr blockaddress(@f, %target)\n\ndefine void @f() {\nentry:\n  br label %target\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+    // The address a function takes of its own block, read by the
+    // `indirectbr` that also lists the block as a destination.
+    "define void @f() {\nentry:\n  indirectbr ptr blockaddress(@f, %target), [ label %target ]\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+    // A block labelled `1:` keeps no name and answers to its slot number,
+    // which is the name a `blockaddress` writes for it too. One branch and
+    // one address make two.
+    "@a = global ptr blockaddress(@f, %1)\n\ndefine void @f() {\n  br label %1\n1:\n  ret void\n  uselistorder label %1, { 1, 0 }\n}\n",
+    "define void @f(i1 %c) {\n  br i1 %c, label %1, label %1\n1:\n  ret void\n  uselistorder label %1, { 1, 0 }\n}\n",
+    // `uselistorder_bb` is counted against the whole module, so an address
+    // taken below it reaches it where a body directive's would not.
+    "define void @f() {\nentry:\n  br label %target\ntarget:\n  ret void\n}\n\n@a = global ptr blockaddress(@f, %target)\n\nuselistorder_bb @f, %target, { 1, 0 }\n",
+    // Naming a blockaddress in a directive is not using it: the constant is
+    // read by the two globals that hold it, and the block by the one branch
+    // and the one address, so both lists are two long.
+    "@a = global ptr blockaddress(@f, %target)\n@b = global ptr blockaddress(@f, %target)\n\ndefine void @f() {\nentry:\n  br label %target\ntarget:\n  ret void\n}\n\nuselistorder ptr blockaddress(@f, %target), { 1, 0 }\nuselistorder_bb @f, %target, { 1, 0 }\n",
     // The fields that do take a metadata string, which is a list rather than
     // a rule: corpus/md-string-fields.nu measured which.
     "!t = !{!1}\n!1 = !DIDerivedType(tag: DW_TAG_member, baseType: !9, extraData: !\"ok\")\n!llvm.module.flags = !{!0}\n\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n!9 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",

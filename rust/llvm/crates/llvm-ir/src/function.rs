@@ -13,7 +13,7 @@ use crate::global::{ComdatRef, GlobalQualifiers};
 use crate::instruction::{CallingConv, Instruction};
 use crate::metadata::MdAttachment;
 use crate::types::TypeId;
-use crate::value::{BlockId, InstId, Name};
+use crate::value::{BlockId, InstId, Name, Value};
 use llvm_support::Align;
 
 /// One formal parameter.
@@ -198,6 +198,39 @@ impl Function {
             .iter()
             .filter_map(move |inst| Some((*inst, self.try_instruction(*inst)?)))
     }
+
+    /// Every live instruction of the function, in printing order.
+    pub fn instructions(&self) -> impl Iterator<Item = (InstId, &Instruction)> {
+        self.blocks()
+            .flat_map(move |(id, _)| self.block_instructions(id))
+    }
+
+    /// How many operand slots in this function read a value.
+    ///
+    /// One per slot rather than one per instruction, which is what upstream
+    /// counts.
+    pub fn value_uses(&self, target: Value) -> usize {
+        self.instructions()
+            .flat_map(|(_, instruction)| instruction.kind.use_count_values())
+            .filter(|value| *value == target)
+            .count()
+    }
+
+    /// How many terminator slots in this function name a block.
+    ///
+    /// A block's use list is not a value's. It holds the terminator operands
+    /// that can transfer control to the block, one per slot, so
+    /// `br i1 %c, label %b, label %b` uses `%b` twice. A phi's incoming
+    /// blocks are not in it: upstream stores those beside the operand list
+    /// rather than in it, so naming a block as an incoming edge is not a use
+    /// of it. The other half of the list, the `blockaddress` constant that
+    /// names the block, is a module-wide question and is counted there.
+    pub fn block_uses(&self, block: BlockId) -> usize {
+        self.instructions()
+            .flat_map(|(_, instruction)| instruction.kind.successors())
+            .filter(|successor| *successor == block)
+            .count()
+    }
 }
 
 #[cfg(test)]
@@ -240,5 +273,42 @@ mod tests {
         // A later instruction gets a fresh id rather than the freed one.
         let third = f.add_instruction(Instruction::new(TypeId(0), InstKind::Unreachable));
         assert_ne!(third, first);
+    }
+
+    /// Both arms of one branch are two entries, not one, and a phi naming
+    /// the block as an incoming edge is not an entry at all. Measured
+    /// against `llvm-as`, which takes a directive only when its index count
+    /// matches the list.
+    #[test]
+    fn a_block_is_used_once_per_terminator_slot_that_names_it() {
+        let mut f = function();
+        let entry = f.add_block(BasicBlock::default());
+        let target = f.add_block(BasicBlock::default());
+
+        let branch = f.add_instruction(Instruction::new(
+            TypeId(0),
+            InstKind::CondBr {
+                condition: Value::Argument(0),
+                if_true: target,
+                if_false: target,
+            },
+        ));
+        f.block_mut(entry).instructions = vec![branch];
+
+        let phi = f.add_instruction(Instruction::new(
+            TypeId(0),
+            InstKind::Phi {
+                fast_math: Default::default(),
+                incoming: vec![(Value::Argument(0), entry), (Value::Argument(1), target)],
+            },
+        ));
+        f.block_mut(target).instructions = vec![phi];
+
+        assert_eq!(f.block_uses(target), 2);
+        // Nothing branches to the entry block; being entered is not a use.
+        assert_eq!(f.block_uses(entry), 0);
+        // The phi's own operands are values, and they are counted as such.
+        assert_eq!(f.value_uses(Value::Argument(0)), 2);
+        assert_eq!(f.value_uses(Value::Argument(1)), 1);
     }
 }

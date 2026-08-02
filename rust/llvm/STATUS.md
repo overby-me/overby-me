@@ -135,15 +135,20 @@ Assembler agreement fell from 454 to 447 when the use-list order directives
 started parsing: eighteen of that suite's files are negative tests for them,
 seven of which check the indexes against a use list this does not build.
 Refusing every such module had scored as agreement for a reason that had
-nothing to do with what those files test.
+nothing to do with what those files test. Ten of them are closed now, and
+none of it needed the def-use chains the note above assumed: a use *count*
+answers a directive, and both a value's and a block's can be read straight
+off the assembler, which takes a directive only when its index count
+matches the list.
 
 The two halves of the gap are not equally bad, so each suite has two
-bounds. We **refuse 18 modules llvm-as reads**, which is the failure that
-matters: parse gaps, led now by intrinsics used without a declaration
-(five files), which needs more than a table of intrinsic names. That count is
-a ceiling that may only fall. We
-**read 57 modules llvm-as refuses**, which is a missing verifier rule
-each, and agreement is a floor that may only rise.
+bounds. We **refuse 5 modules llvm-as reads**, all of them in Assembler,
+which is the failure that matters: a target intrinsic no LangRef line names,
+two calls upstream upgrades to a signature we check against the documented
+one, a label written as a bare `-`, and a redefinition of `@`. That count is
+a ceiling that may only fall. We **read 15 modules llvm-as refuses**, three
+in Assembler and twelve in Verifier, which is a missing verifier rule each,
+and agreement is a floor that may only rise.
 
 Most of what is left on the second count is one thing: upstream knows what
 each intrinsic means and we know only what LangRef's `declare` lines say
@@ -301,5 +306,5 @@ Recorded so that the plan stays the plan and the deltas stay visible.
 | Plan says | Reality | Why |
 | --- | --- | --- |
 | `rust-toolchain.toml` in the tree from the start (§4.1) | not present | Nothing in T0.1 needs nightly, and an unused pin is a maintenance cost plus a slower nix build. It lands with task B5, which is the first thing that needs `rustc_private`. |
-| Use-lists as intrusive lists over indices (§4.2) | instruction storage is an arena, blocks hold `Vec<InstId>`, no use-lists yet | Def-use chains have no consumer before the first analysis pass. Instruction ids are stable regardless, which is the property that matters for retrofitting. |
+| Use-lists as intrusive lists over indices (§4.2) | instruction storage is an arena, blocks hold `Vec<InstId>`, no use-lists yet; a use *count* is walked on demand for `uselistorder` | Def-use chains have no consumer before the first analysis pass. The one thing that did want them turned out to want only a count, for a value or for a block, and a walk answers that. Instruction ids are stable regardless, which is the property that matters for retrofitting. |
 | Vendor upstream tests under `corpus/upstream/` (§7.1) | upstream tests are read from `pkgs.llvm.src` in check derivations | Same coverage, no third-party import into the tree, and the oracle version is pinned by the flake lock rather than by a copy that silently ages. |

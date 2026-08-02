@@ -1737,10 +1737,30 @@ array of, so `DW_TAG_array_type` without a `baseType:` is refused. And an
 is "invalid cast opcode" at parse time.
 The fixtures are rebuilt from shapes the assembler was asked about first,
 so each still tests what it meant to. The three rules are recorded and not
-written: each wants its own measurement. What is not counted is a block's use list,
-which is its predecessors and derivable from the terminators' successors;
-`uselistorder label` and `uselistorder_bb` are read and not checked, which
-is what they were before.
+written: each wants its own measurement.
+Then the block use list, left read and unchecked by the pass before and
+recorded there as "its predecessors, derivable from the terminators'
+successors". That was half of it, and the wrong half to have guessed at.
+The count comes off the assembler directly: a directive assembles only when
+its index count matches the list, so scanning `k` over
+`uselistorder label %b, { k indexes }` reads the number out of the exit
+code, and twenty shapes answered in a few seconds.
+A block is used once per terminator *slot* that names it, so
+`br i1 %c, label %b, label %b` is two and a switch with two cases to one
+block is two. A phi's incoming blocks are not uses at all: upstream keeps
+those beside the operand list rather than in it. The other half is not
+predecessors but `blockaddress`, and that constant is uniqued per block, so
+ten globals holding one block's address are one entry in its list, while a
+directive that only *names* the constant does not use it.
+The two directives are checked at different times, and it is the same
+distinction the constant rule already draws. `uselistorder label` in a body
+is checked at the end of its function, so a `blockaddress` written below
+the function is not a use yet; `uselistorder_bb` is checked at the end of
+the module and sees every one. Both placements were measured against both,
+and the matrix agrees on all six rows.
+The probe found a rule on the way. `uselistorder_bb` is a top-level
+directive: written among the instructions, upstream calls it an unknown
+opcode, where ours took it in either place.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`

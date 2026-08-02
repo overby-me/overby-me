@@ -274,7 +274,7 @@ impl Parser {
             let next = self.peek().clone();
             if in_directives
                 && !matches!(next, Token::RightBrace | Token::Eof)
-                && !matches!(&next, Token::Word(word) if word == "uselistorder" || word == "uselistorder_bb")
+                && !matches!(&next, Token::Word(word) if word == "uselistorder")
             {
                 return self.error("expected uselistorder directive");
             }
@@ -326,8 +326,10 @@ impl Parser {
                 }
                 // A use-list order directive sits among the instructions and
                 // is not one: it says what order a value's uses were in, and
-                // upstream drops it on the way out.
-                Token::Word(word) if word == "uselistorder" || word == "uselistorder_bb" => {
+                // upstream drops it on the way out. Only `uselistorder`:
+                // `uselistorder_bb` is a top-level directive, and written
+                // here it is an opcode upstream does not know.
+                Token::Word(word) if word == "uselistorder" => {
                     self.parse_use_list_order(Some((function, state)))?;
                     in_directives = true;
                 }

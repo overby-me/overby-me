@@ -73,6 +73,7 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         wrote_debug_record: false,
         wrote_debug_intrinsic: false,
         use_list_orders: Vec::new(),
+        block_use_list_orders: Vec::new(),
     };
     parser.next_inline_metadata = parser
         .tokens
@@ -131,6 +132,11 @@ pub(crate) struct Parser {
     /// and the indexes it gave. Checked once the module is whole, a global
     /// used by a later function not yet being used while the text is read.
     pub(crate) use_list_orders: Vec<(Position, llvm_ir::constant::ConstId, Vec<u64>)>,
+    /// Every `uselistorder_bb`, likewise. A block's list holds the
+    /// terminator slots that reach it, plus the `blockaddress` that names
+    /// it, and that address can be written below the directive.
+    pub(crate) block_use_list_orders:
+        Vec<(Position, llvm_ir::value::FunctionId, BlockId, Vec<u64>)>,
 }
 
 /// Everything the parser has to remember while inside one function body.

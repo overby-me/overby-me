@@ -14,6 +14,29 @@ use llvm_ir::types::TypeKind;
 use llvm_ir::value::{GlobalRef, MdId, Name, Value};
 use llvm_support::{ApInt, DataLayout, Triple};
 
+/// What upstream says about a use list and the indexes written for it, or
+/// `None` when it says nothing.
+///
+/// The indexes are a permutation of the list, so there is one per use and
+/// each is a position in it. Upstream has a message of its own for the two
+/// counts that cannot be permuted at all. Both a value's use list and a
+/// block's are read this way; only the counting differs.
+fn use_list_verdict(uses: usize, indexes: &[u64]) -> Option<String> {
+    if uses == 0 {
+        return Some("value has no uses".to_string());
+    }
+    if uses == 1 {
+        return Some("value only has one use".to_string());
+    }
+    if indexes.len() != uses {
+        return Some(format!("wrong number of indexes, expected {uses}"));
+    }
+    if indexes.iter().any(|index| *index as usize >= uses) {
+        return Some("expected distinct uselistorder indexes in range [0, size)".to_string());
+    }
+    None
+}
+
 impl Parser {
     // ------------------------------------------------------------- top level
 
@@ -284,14 +307,18 @@ impl Parser {
             let defined = target
                 .block_order
                 .iter()
-                .any(|id| target.block(*id).name.as_ref() == Some(&Name::Named(block.clone())));
-            if !defined {
+                .find(|id| target.block(**id).name.as_ref() == Some(&Name::Named(block.clone())))
+                .copied();
+            let Some(defined) = defined else {
                 return self.error("uselistorder_bb names a block its function does not define");
-            }
+            };
             self.require(Token::Comma)?;
-            // A block's use list is not a value's, so the count says nothing
-            // about it and the indexes stand on their own.
-            self.parse_use_list_indexes()?;
+            let at = self.position();
+            let indexes = self.parse_use_list_indexes()?;
+            // Checked after the module rather than here: a block whose
+            // address is taken below this directive is not used yet.
+            self.block_use_list_orders
+                .push((at, function, defined, indexes));
             return Ok(());
         }
         // The type is read, because it has to be the type the value was
@@ -367,12 +394,46 @@ impl Parser {
         name: &Token,
         indexes: &[u64],
     ) -> Result<(), ParseError> {
-        // `uselistorder label %block` names a block, whose uses are the
-        // branches that reach it rather than the operand slots that read a
-        // value. That is a different count and is not taken here, so the
-        // directive is read and left alone as it was before.
+        // `uselistorder label %block` names a block, whose use list holds
+        // the terminator slots that reach it rather than the operand slots
+        // that read a value.
+        //
+        // A body's directive is checked where it is written, so it counts
+        // what the module has read so far: a `blockaddress` below the
+        // function is not a use yet, and upstream answers the same file the
+        // same way.
         if matches!(self.module.ctx.type_kind(written), TypeKind::Label) {
-            return Ok(());
+            // The name to look a `blockaddress` up by is the one the
+            // directive wrote, not the one the block stored: a block
+            // labelled `1:` keeps no name and answers to its slot number,
+            // which is what an address naming it writes too.
+            let (block, label) = match name {
+                Token::LocalName(text) => (
+                    state.named_blocks.get(text).copied(),
+                    Some(Name::Named(text.clone())),
+                ),
+                Token::LocalNumber(number) => (
+                    state.numbered_blocks.get(number).copied(),
+                    Some(Name::Number(*number)),
+                ),
+                _ => (None, None),
+            };
+            let Some(block) = block else {
+                return self.error("value has no uses");
+            };
+            let mut uses = function.block_uses(block);
+            let symbol = self.symbols.get(&function.name).copied();
+            if let (Some(symbol), Some(label)) = (symbol, label)
+                && self
+                    .module
+                    .block_address_used(symbol, &label, Some(function))
+            {
+                uses += 1;
+            }
+            return match use_list_verdict(uses, indexes) {
+                Some(message) => self.error(message),
+                None => Ok(()),
+            };
         }
         let target = match name {
             Token::LocalName(text) => state
@@ -406,27 +467,10 @@ impl Parser {
             }
             return Ok(());
         };
-        let mut uses = 0;
-        for (id, _) in function.blocks() {
-            for (_, instruction) in function.block_instructions(id) {
-                for value in instruction.kind.use_count_values() {
-                    uses += usize::from(value == target);
-                }
-            }
+        match use_list_verdict(function.value_uses(target), indexes) {
+            Some(message) => self.error(message),
+            None => Ok(()),
         }
-        if uses == 0 {
-            return self.error("value has no uses");
-        }
-        if uses == 1 {
-            return self.error("value only has one use");
-        }
-        if indexes.len() != uses {
-            return self.error(format!("wrong number of indexes, expected {uses}"));
-        }
-        if indexes.iter().any(|index| *index as usize >= uses) {
-            return self.error("expected distinct uselistorder indexes in range [0, size)");
-        }
-        Ok(())
     }
 
     /// Every directive that named a constant, against the use count the
@@ -443,26 +487,31 @@ impl Parser {
             if !self.module.ctx.constant(target).has_use_list() {
                 continue;
             }
-            let uses = self.module.use_count(target);
-            let fail = |message: String| {
-                Err(ParseError {
+            if let Some(message) = use_list_verdict(self.module.use_count(target), &indexes) {
+                return Err(ParseError {
                     position: at,
                     message,
-                })
-            };
-            if uses == 0 {
-                return fail("value has no uses".to_string());
+                });
             }
-            if uses == 1 {
-                return fail("value only has one use".to_string());
+        }
+        // `uselistorder_bb` is written at the top level, after every
+        // function, so its block is counted against the whole module: a
+        // `blockaddress` anywhere reaches it, wherever it was written.
+        for (at, function, block, indexes) in std::mem::take(&mut self.block_use_list_orders) {
+            let target = self.module.function(function);
+            let mut uses = target.block_uses(block);
+            if let Some(label) = target.block(block).name.clone()
+                && self
+                    .module
+                    .block_address_used(GlobalRef::Function(function), &label, None)
+            {
+                uses += 1;
             }
-            if indexes.len() != uses {
-                return fail(format!("wrong number of indexes, expected {uses}"));
-            }
-            if indexes.iter().any(|index| *index as usize >= uses) {
-                return fail(
-                    "expected distinct uselistorder indexes in range [0, size)".to_string(),
-                );
+            if let Some(message) = use_list_verdict(uses, &indexes) {
+                return Err(ParseError {
+                    position: at,
+                    message,
+                });
             }
         }
         Ok(())
