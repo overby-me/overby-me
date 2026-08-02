@@ -33,6 +33,10 @@ build:
     # optimises less aggressively when it has to keep the mapping valid.
     {{dx}} build --release --debug-symbols true {{remote_logging}}
     nu scripts/split-symbols.nu
+    # The boot screen's download progress needs a denominator, and the network
+    # cannot supply one (gzipped + chunked = no Content-Length). Written in here,
+    # after split-symbols, so it is the size a reader actually downloads.
+    nu scripts/inject-wasm-size.nu
     # dx drops files from assets/ it doesn't recognize, so copy them into the
     # served root ourselves. This is the single source of truth for the deploy
     # bundle — the Nix package (default.nix) runs `just build`, so both match.

@@ -59,17 +59,63 @@
             html[data-theme="light"] #boot { background: #fbfdf7; }
             html[data-theme="light"] #boot-shape { background: #006d39; }
 
+            /* Download progress, when there is a download worth reporting.
+
+               Determinate, because the size IS known: the build writes the
+               wasm's byte count into this page, and the loader counts what
+               arrives. Hidden until it has something true to say - a cached
+               load finishes in a frame, and a bar that flashes 100% and
+               vanishes is noise. */
+            #boot-stack {
+                display: grid;
+                justify-items: center;
+                gap: 20px;
+            }
+            #boot-progress {
+                width: 148px;
+                height: 4px;
+                border-radius: 2px;
+                background: rgba(0, 109, 57, 0.18);
+                overflow: hidden;
+                opacity: 0;
+                transition: opacity 200ms ease;
+            }
+            #boot-progress.is-shown { opacity: 1; }
+            #boot-bar {
+                width: 100%;
+                height: 100%;
+                border-radius: 2px;
+                background: #006d39;
+                transform: scaleX(0);
+                transform-origin: left center;
+                transition: transform 140ms linear;
+            }
+            @media (prefers-color-scheme: dark) {
+                #boot-progress { background: rgba(104, 221, 143, 0.22); }
+                #boot-bar { background: #68dd8f; }
+            }
+            html[data-theme="dark"] #boot-progress { background: rgba(104, 221, 143, 0.22); }
+            html[data-theme="dark"] #boot-bar { background: #68dd8f; }
+            html[data-theme="light"] #boot-progress { background: rgba(0, 109, 57, 0.18); }
+            html[data-theme="light"] #boot-bar { background: #006d39; }
+
             /* Turning is the part that reads as motion; keep the morph, which is
-               slow and soft, and drop the spin. */
+               slow and soft, and drop the spin. The BAR keeps moving: it is
+               information, not decoration, and it only moves when bytes do. */
             @media (prefers-reduced-motion: reduce) {
                 #boot-shape { animation: boot-morph 4s ease-in-out infinite; }
+                #boot-bar { transition: none; }
             }
         </style>
     </head>
     <body>
         <div id="main"></div>
         <div id="boot" role="status" aria-label="Loading">
-            <div id="boot-shape"></div>
+            <div id="boot-stack">
+                <div id="boot-shape"></div>
+                <div id="boot-progress" role="progressbar" aria-label="Downloading"
+                     aria-valuemin="0" aria-valuemax="100"><div id="boot-bar"></div></div>
+            </div>
         </div>
         <!--
           The reader's own choice of theme, applied before anything is drawn.
@@ -87,6 +133,85 @@
                     document.documentElement.setAttribute("data-theme", t);
                 }
             } catch (e) {}
+        </script>
+        <!--
+          Download progress for the wasm bundle, which is the wait this screen
+          covers: a couple of megabytes over whatever connection the reader has.
+
+          The size cannot be read off the response. The server sends the bundle
+          gzipped and CHUNKED, so there is no `Content-Length` to divide by --
+          and a stream reader counts DECOMPRESSED bytes anyway, which that header
+          would not describe even when present. So the build writes the wasm's
+          uncompressed byte count into the line below (scripts/inject-wasm-size.nu),
+          and that is the denominator. Left at 0 the bar simply never appears,
+          which is what a dev build gets and what an unpatched deploy would get.
+
+          The response handed on to the loader is the ORIGINAL, untouched: only a
+          `clone()` is read here. The generated glue calls
+          `WebAssembly.instantiateStreaming` and RETHROWS if it fails on a
+          correctly-typed response, so there is no fallback to be had -- handing
+          it a reconstructed Response would be betting the whole app on an engine
+          detail. A clone cannot cost anything but memory.
+        -->
+        <script>
+            window.__WASM_BYTES__ = 0;
+            (function () {
+                var total = window.__WASM_BYTES__ | 0;
+                if (!total || typeof window.fetch !== "function") return;
+
+                var seen = 0;
+                var started = Date.now();
+                var track = null;
+                var bar = null;
+
+                function paint() {
+                    if (track === null) {
+                        track = document.getElementById("boot-progress");
+                        bar = document.getElementById("boot-bar");
+                        if (!track) return;
+                    }
+                    var p = Math.min(seen / total, 1);
+                    // Not before a quarter of a second: a cached bundle arrives
+                    // in one chunk, and a bar that flashes full and disappears
+                    // says nothing except that something flickered.
+                    if (Date.now() - started > 250) track.className = "is-shown";
+                    bar.style.transform = "scaleX(" + p.toFixed(4) + ")";
+                    track.setAttribute("aria-valuenow", Math.round(p * 100));
+                }
+
+                function count(body) {
+                    var reader = body.getReader();
+                    (function pump() {
+                        reader.read().then(function (r) {
+                            if (r.done) return;
+                            seen += r.value.length;
+                            paint();
+                            pump();
+                        }, function () {});
+                    })();
+                }
+
+                var original = window.fetch;
+                window.fetch = function (input) {
+                    // The loader passes whichever of the three the bundler felt
+                    // like emitting -- a string, a `Request`, or a `URL`. A URL
+                    // has no `.url`, and stringifies to its href.
+                    var url = typeof input === "string"
+                        ? input
+                        : (input && input.url) || String(input || "");
+                    var result = original.apply(this, arguments);
+                    if (!/\.wasm($|\?)/.test(url)) return result;
+                    // One bundle, one measurement; everything the app fetches
+                    // afterwards goes straight through.
+                    window.fetch = original;
+                    return result.then(function (response) {
+                        try {
+                            if (response.ok && response.body) count(response.clone().body);
+                        } catch (e) {}
+                        return response;
+                    });
+                };
+            })();
         </script>
     </body>
 </html>
