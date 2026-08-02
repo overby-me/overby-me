@@ -64,47 +64,63 @@
                Determinate, because the size IS known: the build writes the
                wasm's byte count into this page, and the loader counts what
                arrives. Hidden until it has something true to say - a cached
-               load finishes in a frame, and a bar that flashes 100% and
-               vanishes is noise. */
+               load finishes in a frame, and a ring that flashes full and
+               vanishes is noise.
+
+               Drawn as a ring AROUND the morphing shape rather than as a bar
+               beneath it, so the progress and the thing being waited on are one
+               object instead of two. SVG rather than a conic-gradient because a
+               stroked arc is exact at any size and needs no mask to punch its
+               centre out. */
             #boot-stack {
+                position: relative;
                 display: grid;
-                justify-items: center;
-                gap: 20px;
+                place-items: center;
+                width: 88px;
+                height: 88px;
             }
             #boot-progress {
-                width: 148px;
-                height: 4px;
-                border-radius: 2px;
-                background: rgba(0, 109, 57, 0.18);
-                overflow: hidden;
+                position: absolute;
+                inset: 0;
+                width: 88px;
+                height: 88px;
                 opacity: 0;
                 transition: opacity 200ms ease;
+                /* Start the arc at twelve o'clock; SVG angles begin at three. */
+                transform: rotate(-90deg);
             }
             #boot-progress.is-shown { opacity: 1; }
-            #boot-bar {
-                width: 100%;
-                height: 100%;
-                border-radius: 2px;
-                background: #006d39;
-                transform: scaleX(0);
-                transform-origin: left center;
-                transition: transform 140ms linear;
+            #boot-track,
+            #boot-arc {
+                fill: none;
+                stroke-width: 4;
+                stroke-linecap: round;
+            }
+            #boot-track { stroke: rgba(0, 109, 57, 0.18); }
+            #boot-arc {
+                stroke: #006d39;
+                /* The dash pattern is measured in circumference: 2 pi r, r = 42.
+                   A full dash with a full offset draws nothing; the loader walks
+                   the offset down to zero. Keep in step with BOOT_ARC below. */
+                stroke-dasharray: 263.89;
+                stroke-dashoffset: 263.89;
+                transition: stroke-dashoffset 140ms linear;
             }
             @media (prefers-color-scheme: dark) {
-                #boot-progress { background: rgba(104, 221, 143, 0.22); }
-                #boot-bar { background: #68dd8f; }
+                #boot-track { stroke: rgba(104, 221, 143, 0.22); }
+                #boot-arc { stroke: #68dd8f; }
             }
-            html[data-theme="dark"] #boot-progress { background: rgba(104, 221, 143, 0.22); }
-            html[data-theme="dark"] #boot-bar { background: #68dd8f; }
-            html[data-theme="light"] #boot-progress { background: rgba(0, 109, 57, 0.18); }
-            html[data-theme="light"] #boot-bar { background: #006d39; }
+            html[data-theme="dark"] #boot-track { stroke: rgba(104, 221, 143, 0.22); }
+            html[data-theme="dark"] #boot-arc { stroke: #68dd8f; }
+            html[data-theme="light"] #boot-track { stroke: rgba(0, 109, 57, 0.18); }
+            html[data-theme="light"] #boot-arc { stroke: #006d39; }
 
             /* Turning is the part that reads as motion; keep the morph, which is
-               slow and soft, and drop the spin. The BAR keeps moving: it is
+               slow and soft, and drop the spin. The ARC keeps moving: it is
                information, not decoration, and it only moves when bytes do. */
             @media (prefers-reduced-motion: reduce) {
                 #boot-shape { animation: boot-morph 4s ease-in-out infinite; }
-                #boot-bar { transition: none; }
+                #boot-arc { transition: none; }
             }
         </style>
     </head>
@@ -113,8 +129,11 @@
         <div id="boot" role="status" aria-label="Loading">
             <div id="boot-stack">
                 <div id="boot-shape"></div>
-                <div id="boot-progress" role="progressbar" aria-label="Downloading"
-                     aria-valuemin="0" aria-valuemax="100"><div id="boot-bar"></div></div>
+                <svg id="boot-progress" viewBox="0 0 88 88" role="progressbar"
+                     aria-label="Downloading" aria-valuemin="0" aria-valuemax="100">
+                    <circle id="boot-track" cx="44" cy="44" r="42"></circle>
+                    <circle id="boot-arc" cx="44" cy="44" r="42"></circle>
+                </svg>
             </div>
         </div>
         <!--
@@ -159,24 +178,30 @@
                 var total = window.__WASM_BYTES__ | 0;
                 if (!total || typeof window.fetch !== "function") return;
 
+                // 2 pi r with r = 42, the circumference #boot-arc's dash pattern
+                // is measured in. Keep in step with the stylesheet above.
+                var BOOT_ARC = 263.89;
                 var seen = 0;
                 var started = Date.now();
-                var track = null;
-                var bar = null;
+                var ring = null;
+                var arc = null;
 
                 function paint() {
-                    if (track === null) {
-                        track = document.getElementById("boot-progress");
-                        bar = document.getElementById("boot-bar");
-                        if (!track) return;
+                    if (ring === null) {
+                        ring = document.getElementById("boot-progress");
+                        arc = document.getElementById("boot-arc");
+                        if (!ring || !arc) { ring = null; return; }
                     }
                     var p = Math.min(seen / total, 1);
                     // Not before a quarter of a second: a cached bundle arrives
-                    // in one chunk, and a bar that flashes full and disappears
+                    // in one chunk, and a ring that flashes full and disappears
                     // says nothing except that something flickered.
-                    if (Date.now() - started > 250) track.className = "is-shown";
-                    bar.style.transform = "scaleX(" + p.toFixed(4) + ")";
-                    track.setAttribute("aria-valuenow", Math.round(p * 100));
+                    // `setAttribute` rather than `.className`: on an SVG element
+                    // that property is a read-only SVGAnimatedString, and
+                    // assigning a string to it silently does nothing.
+                    if (Date.now() - started > 250) ring.setAttribute("class", "is-shown");
+                    arc.style.strokeDashoffset = (BOOT_ARC * (1 - p)).toFixed(2);
+                    ring.setAttribute("aria-valuenow", Math.round(p * 100));
                 }
 
                 function count(body) {
