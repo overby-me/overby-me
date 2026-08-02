@@ -7348,7 +7348,12 @@ a.list-item:hover {
 	color: var(--md-on-surface-variant);
 }
 
-/* Pull-to-refresh indicator */
+/* Pull-to-refresh indicator.
+
+   A POSITIONER, and nothing else: the surface, the elevation and the shape all
+   belong to the loading indicator inside it (.spinner-contained). This used to
+   draw its own 40px circle with its own shadow, so while refreshing there were
+   two nested surfaces — a contained indicator inside another container. */
 .ptr-indicator {
 	position: fixed;
 	top: 0;
@@ -7356,16 +7361,27 @@ a.list-item:hover {
 	z-index: 1200;
 	display: grid;
 	place-items: center;
-	width: 40px;
-	height: 40px;
 	margin-top: var(--md-sys-spacing-1-5);
-	border-radius: 50%;
-	background: var(--md-surface-container-high);
-	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-	color: var(--md-primary);
 	/* Default transform is set inline (follows the finger); opacity always eases. */
 	transition: opacity 0.15s ease;
 	pointer-events: none;
+}
+/* The indicator grows into place with the pull; its scale is set inline.
+
+   `--spinner-size` is set HERE, on the container, not only on the shape inside:
+   `.spinner-contained` sizes itself from that variable, and `.spinner-sm` sets
+   it on the child, where the parent cannot see it. Without this the container
+   fell back to its 44px default and came out 81px across — twice the footprint
+   of the 40px circle this replaces, and bigger than the old circle it used to
+   sit inside. */
+.ptr-spinner {
+	--spinner-size: var(--md-sys-typescale-title-large-size);
+	transition: transform 0.12s ease;
+}
+/* Still a shape while the finger is down — it is a gesture, not a wait. The
+   morph starts when the refresh does, which is what says the pull was taken. */
+.ptr-indicator:not(.refreshing) .spinner {
+	animation-play-state: paused;
 }
 
 /* When settling / parking (not actively dragging) also ease the transform so the
@@ -7380,23 +7396,9 @@ a.list-item:hover {
 	opacity: 0 !important;
 }
 
-.ptr-indicator .material-icons {
-	font-size: var(--md-sys-typescale-title-large-size);
-	transition: transform 0.15s ease;
-}
-
-/* Armed (pulled past the threshold): flip the arrow to say "release to refresh". */
-.ptr-indicator.armed .material-icons {
-	transform: rotate(180deg);
-}
-
-/* While refreshing, the indicator carries the loading component and does NOT
-   spin the container: the shape sequence inside is the motion. Spinning both
-   made a rotating icon inside a rotating box. */
-.ptr-indicator.refreshing .ptr-spinner {
-	display: grid;
-	place-items: center;
-}
+/* While refreshing, the indicator does NOT spin the container: the shape
+   sequence inside is the motion. Spinning both made a rotating shape inside a
+   rotating box. */
 
 @keyframes ptr-spin {
 	to {

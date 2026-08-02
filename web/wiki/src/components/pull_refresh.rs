@@ -204,23 +204,31 @@ pub fn PullToRefresh() -> Element {
         cls.push_str(" hidden");
     }
 
+    // The indicator grows with the pull and is at full size exactly at the
+    // threshold, which is what says "let go now" — the job the flipped arrow
+    // used to do, done by the component itself.
+    let scale = match refreshing {
+        true => 1.0,
+        false => 0.55 + 0.45 * (pull / THRESHOLD).min(1.0),
+    };
+
     rsx! {
         div {
             class: "{cls}",
             style: "transform: translateX(-50%) translateY({offset}px); opacity: {opacity};",
-            div { class: "ptr-spinner",
-                if refreshing {
-                    // The M3 Expressive loading indicator, which the spec names
-                    // for exactly this: "loading indicators are used in the
-                    // pull-to-refresh behavior". Contained, because it sits over
-                    // the content it is refreshing rather than in a cleared space.
-                    div { class: "spinner-contained",
-                        div { class: "spinner spinner-sm" }
-                    }
-                } else {
-                    // Still a gesture, not a wait: the arrow says which way.
-                    span { class: "material-icons", "arrow_downward" }
-                }
+            // The M3 Expressive loading indicator, which the spec names for
+            // exactly this: "loading indicators are used in the pull-to-refresh
+            // behavior". Contained, because it sits over the content it is
+            // refreshing rather than in a cleared space.
+            //
+            // The SAME component for the whole gesture. It used to be an arrow
+            // in a circle while dragging and this while refreshing, which is two
+            // different components for one gesture — and the arrow was the older
+            // pattern the loading indicator replaces.
+            div {
+                class: "spinner-contained ptr-spinner",
+                style: "transform: scale({scale:.3});",
+                div { class: "spinner spinner-sm" }
             }
         }
     }
