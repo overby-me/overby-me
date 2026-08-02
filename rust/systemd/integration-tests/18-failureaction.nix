@@ -44,8 +44,11 @@
   patchScript = ''
     # Ends the machine, and the /testok check runs on the host afterwards.
     sed -i '/FailureAction=exit/d' TEST-18-FAILUREACTION.sh
-    # Park inside phase 1 instead, so the script stays alive until the reboot.
+    # Park inside phase 1 instead, so the script stays alive until the reboot
+    # lands. Bounded rather than upstream's `sleep infinity`: if the reboot does
+    # NOT happen, the script falls out of the branch, writes no /testok and
+    # fails in five minutes instead of sitting out the 1800s testTimeout.
     sed -i '/^sleep infinity$/d' TEST-18-FAILUREACTION.sh
-    sed -i '/SuccessAction=reboot/a\    sleep infinity' TEST-18-FAILUREACTION.sh
+    sed -i '/SuccessAction=reboot/a\    sleep 300' TEST-18-FAILUREACTION.sh
   '';
 }
