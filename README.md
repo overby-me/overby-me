@@ -75,14 +75,7 @@
 
 #### Rust
 
-Two kinds of work, kept apart because they answer different questions. A
-rewrite has an upstream to be measured against — it either passes that
-program's tests and accepts its flags, or it does not. Something new has no
-such yardstick, and is judged on whether it does the job at all.
-
 ##### Rewrites
-
-Replacing an existing program in Rust, compatible with what it replaced.
 
 | Project | Description |
 |-|-|
@@ -115,9 +108,6 @@ Replacing an existing program in Rust, compatible with what it replaced.
 | [Xz-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/xz) | xz-compatible compression tool |
 
 ##### New
-
-No upstream being reimplemented: a standard implemented directly, a tool that
-did not exist, or a substrate assembled from parts.
 
 | Project | Description |
 |-|-|
@@ -528,7 +518,7 @@ did not exist, or a substrate assembled from parts.
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Build Script | [Just 🦀](https://github.com/casey/just) | | [Make-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/make) ([Bash-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bash)) | [GNU Make 💣](https://en.wikipedia.org/wiki/Make_(software)) |
-| 🚫 | Build System | | [Buck2 🦀](https://github.com/facebook/buck2), [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/meson) | 🆗 | [Bazel ☕](https://github.com/bazelbuild/bazel), [Pants 🐍](https://github.com/pantsbuild/pants) |
+| 🚫 | Build System | [Buck2 🦀](https://github.com/facebook/buck2) | | [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/meson) | [Bazel ☕](https://github.com/bazelbuild/bazel), [Pants 🐍](https://github.com/pantsbuild/pants), [Meson 🐍](https://github.com/mesonbuild/meson), [CMake 💣](https://github.com/Kitware/CMake) |
 | ✅ | Editor | [Helix 🦀](https://github.com/helix-editor/helix) | | 🆗 | [Neovim 💣](https://github.com/neovim/neovim) |
 | ✅ | IDE | [Zed 🦀](https://github.com/zed-industries/zed) | | [LSP 📖](https://github.com/microsoft/language-server-protocol), [DAP 📖](https://github.com/Microsoft/debug-adapter-protocol), [BSP 📖](https://github.com/build-server-protocol/build-server-protocol) | [VS Codium 🐒💣](https://github.com/VSCodium/vscodium) |
 | ✅ | System Call Tracing | [Lurk 🦀](https://github.com/JakWai01/lurk) | | 🆗 | [Tracexec 🦀🇨🇳](https://github.com/kxxt/tracexec), [Strace 💣](https://github.com/strace/strace) |
