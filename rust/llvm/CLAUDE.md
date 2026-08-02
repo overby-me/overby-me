@@ -1649,14 +1649,37 @@ The value had been skipped rather than read, on the grounds that nothing
 needed to know which value it was, so the type is read now and the rest of
 the reference is still skipped, it being a constant expression with commas
 of its own in the general case. Assembler 465 to 466.
-What the count needs is recorded rather than started, because it cannot be
-taken while the module is still being read: a global used by a later
-function is not yet used when the directive is parsed, so upstream collects
-the directives and applies them at the end. The count itself was derived
+What the count needs is recorded rather than started, and the blocker is
+not the one that was recorded before. It is not def-use chains and it is
+not the concept; it is that nothing here enumerates the operands of a
+constant or the constant operands of an instruction. `verify.rs` has an
+`operands(kind)` that yields the `InstId`s an instruction reads, which is
+the instruction-to-instruction half only, so counting the uses of a global
+has nowhere to start.
+The rest is settled. The count cannot be taken while the module is still
+being read, a global used by a later function not yet being used when the
+directive is parsed, so the directives are collected and checked after the
+parse, next to the other post-parse passes. The count itself was derived
 from upstream's own message, which names the number it expected: each
 operand slot is one use, a constant expression is uniqued so the same one
-written twice is one use, and the same value twice in one instruction is
-two.
+written into two globals is one use, and the same value twice in one
+instruction is two. Three aliases are three, one initializer is one.
+The order to do it in, and what each step is worth. Enumerating a
+constant's operands and an instruction's constant operands is the whole
+prerequisite. With it, six files come from globals alone
+(`indexes-empty`, `indexes-one`, `indexes-toofew`, `indexes-toomany`,
+`indexes-range`, `global-missing`), which is the simpler walk: global
+initializers, aliasees and resolvers, every interned constant's operands,
+every instruction's operands, and a function's personality, prefix and
+prologue. Two more want a local counted inside its own function
+(`function-missing-named`, `function-missing-numbered`), and one wants a
+placement rule rather than a count (`function-between-blocks`).
+The count should be validated before any rule leans on it, and there is an
+oracle for that: upstream's "wrong number of indexes, expected N" names the
+number. A script that writes modules of varying shape and compares our
+count against the N upstream reports would settle it the way the other
+tables were settled. Refusing on a count that is short by one refuses a
+module upstream reads, which is the direction that costs.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`
