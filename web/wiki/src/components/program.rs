@@ -4,7 +4,7 @@ use crate::i18n::t;
 use crate::model::NodeWithChildren;
 use crate::route::Route;
 
-use super::loader::{icon_el, mime_icon, visible_sorted};
+use super::loader::{icon_el, visible_sorted};
 
 /// ProgramApp — an agenda / programme view of a context (#60). Renders the
 /// context's ordered children as a numbered vertical timeline, each item linking
@@ -33,10 +33,10 @@ pub fn ProgramApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                         {
                             let mut full = path.clone();
                             full.push(item.key.clone());
-                            let icon = mime_icon(&super::loader::node_icon_mime_id(
+                            let icon = super::loader::node_icon_el(
                                 item.mime_id.as_deref().unwrap_or(""),
                                 item.data.as_ref().map(|d| &d.0),
-                            ));
+                            );
                             let time = program_time(item.data.as_ref().map(|d| &d.0));
                             rsx! {
                                 Link {
@@ -55,7 +55,7 @@ pub fn ProgramApp(node: NodeWithChildren, path: Vec<String>) -> Element {
                                     }
                                     div { class: "program-body",
                                         div { class: "list-item-primary",
-                                            span { class: "material-icons program-item-icon", "{icon}" }
+                                            span { class: "program-item-icon", {icon} }
                                             "{item.name}"
                                         }
                                     }

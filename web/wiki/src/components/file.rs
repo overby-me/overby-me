@@ -868,7 +868,10 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
                             div { class: "file-meta-chips",
                                 if !type_label.is_empty() {
                                     span { class: "file-chip",
-                                        span { class: "material-icons", "description" }
+                                        // The chip's own format, not a document
+                                        // icon beside every label: it read
+                                        // "[document] Excel".
+                                        {super::loader::icon_el(file_mime)}
                                         "{type_label}"
                                     }
                                 }

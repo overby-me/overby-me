@@ -474,9 +474,91 @@ pub fn icon_el(mime_id: &str) -> Element {
     if matches!(mime_id, "wiki/feedback" | "app/feedback") {
         return feedback_icon_el();
     }
+    // Word, Excel and PowerPoint are drawn: the font has no mark for any of
+    // them. Checked before the font lookup so every caller gets it.
+    if let Some(path) = office_glyph(mime_id) {
+        return office_icon_el(path);
+    }
     let name = mime_icon(mime_id);
     rsx! {
         span { class: "material-icons", "{name}" }
+    }
+}
+
+/// The Word, Excel and PowerPoint marks, for the file formats that have one.
+///
+/// The icon font has no glyph for any of these — the closest it offers are
+/// `description`, `table_chart` and `slideshow`, which are a page of lines, a
+/// grid and a projector screen. They are three different icons, but none of
+/// them says which program wrote the file, and a wiki whose folders are mostly
+/// Word documents wants that at a glance. The old wiki drew them, and this is
+/// the same three shapes it used, from Material Design Icons (Pictogrammers,
+/// Apache-2.0): `microsoft-word`, `microsoft-excel`, `microsoft-powerpoint`.
+///
+/// `currentColor`, as they were there: these sit inside tonal avatars whose
+/// colour is the theme's, and a brand colour dropped into one would fight it.
+///
+/// Returns `None` for everything else, which keeps the font glyph.
+fn office_glyph(mime_id: &str) -> Option<&'static str> {
+    // Matched by substring in the same order as the font fallback, because the
+    // OOXML content types contain more than one of these words:
+    // `…officedocument.spreadsheetml.sheet` is a spreadsheet AND a document.
+    if mime_id.contains("spreadsheet") {
+        Some(MDI_EXCEL)
+    } else if mime_id.contains("presentation") {
+        Some(MDI_POWERPOINT)
+    } else if mime_id.contains("wordprocessing") || mime_id == "application/msword" {
+        Some(MDI_WORD)
+    } else {
+        None
+    }
+}
+
+const MDI_WORD: &str = "M21.17 3.25Q21.5 3.25 21.76 3.5 22 3.74 22 4.08V19.92Q22 20.26 21.76 20.5 \
+     21.5 20.75 21.17 20.75H7.83Q7.5 20.75 7.24 20.5 7 20.26 7 19.92V17H2.83Q2.5 17 2.24 16.76 2 \
+     16.5 2 16.17V7.83Q2 7.5 2.24 7.24 2.5 7 2.83 7H7V4.08Q7 3.74 7.24 3.5 7.5 3.25 7.83 \
+     3.25M7.03 11.34L8.23 15.28H9.6L10.91 8.72H9.53L8.75 12.6L7.64 8.85H6.5L5.31 12.62L4.53 \
+     8.72H3.09L4.4 15.28H5.77M20.75 19.5V17H8.25V19.5M20.75 15.75V12.63H12V15.75M20.75 \
+     11.38V8.25H12V11.38M20.75 7V4.5H8.25V7Z";
+
+const MDI_EXCEL: &str = "M21.17 3.25Q21.5 3.25 21.76 3.5 22 3.74 22 4.08V19.92Q22 20.26 21.76 \
+     20.5 21.5 20.75 21.17 20.75H7.83Q7.5 20.75 7.24 20.5 7 20.26 7 19.92V17H2.83Q2.5 17 2.24 \
+     16.76 2 16.5 2 16.17V7.83Q2 7.5 2.24 7.24 2.5 7 2.83 7H7V4.08Q7 3.74 7.24 3.5 7.5 3.25 7.83 \
+     3.25M7 13.06L8.18 15.28H9.97L8 12.06L9.93 8.89H8.22L7.13 10.9L7.09 10.96L7.06 11.03Q6.8 10.5 \
+     6.5 9.96 6.25 9.43 5.97 8.89H4.16L6.05 12.08L4 15.28H5.78M13.88 19.5V17H8.25V19.5M13.88 \
+     15.75V12.63H12V15.75M13.88 11.38V8.25H12V11.38M13.88 7V4.5H8.25V7M20.75 \
+     19.5V17H15.13V19.5M20.75 15.75V12.63H15.13V15.75M20.75 11.38V8.25H15.13V11.38M20.75 \
+     7V4.5H15.13V7Z";
+
+const MDI_POWERPOINT: &str = "M13.25 3.25q1.21 0 2.33.31q1.12.32 2.09.89q.97.55 1.77 1.36q.79.8 \
+     1.36 1.77q.58.97.89 2.09Q22 10.79 22 12t-.31 2.33q-.31 1.12-.89 2.09q-.57.97-1.36 1.77q-.8.81 \
+     -1.77 1.36q-.97.58-2.09.89q-1.12.31-2.33.31q-1.07 0-2.1-.25q-1.03-.26-1.95-.74q-.92-.49-1.7 \
+     -1.18q-.81-.7-1.43-1.58H2.83q-.33 0-.59-.24Q2 16.5 2 16.17V7.83q0-.33.24-.58Q2.5 7 2.83 \
+     7h3.24q.62-.88 1.43-1.58q.78-.7 1.7-1.18q.93-.48 1.95-.74q1.03-.25 2.1-.25m.63 1.28v6.84h6.84q \
+     -.12-1.37-.69-2.56T18.55 6.7q-.91-.91-2.12-1.48q-1.2-.57-2.55-.69M9.5 10.84q0-.57-.2-.97q-.19 \
+     -.41-.52-.66q-.33-.26-.78-.37q-.45-.12-1-.12H4.37v6.55h1.54V13h1.03q.48 0 .93-.16q.46-.14.82 \
+     -.41q.36-.26.58-.67q.23-.4.23-.92m3.75 8.66q.98 0 1.89-.24q.9-.26 1.71-.68q.81-.45 1.48-1.08q \
+     .67-.61 1.17-1.37q.5-.77.83-1.66q.31-.89.39-1.85h-8.08V4.53q-1.45.12-2.73.76T7.67 7h3.5q.33 0 \
+     .59.25q.24.25.24.58v8.34q0 .33-.24.59q-.26.24-.59.24h-3.5q.53.6 1.17 1.06q.66.44 1.35.78q.72 \
+     .33 1.49.49q.77.17 1.57.17M6.85 10q.47 0 .76.19q.28.19.28.7q0 .22-.1.36q-.1.14-.26.25q-.16.07 \
+     -.35.1q-.18.04-.38.04h-.89V10h.94Z";
+
+/// One of those marks, drawn. Sized on the element for the same reason the
+/// feedback glyph is: an inline svg has no intrinsic size, and before the
+/// stylesheet arrives a bare one is 300x150.
+fn office_icon_el(path: &'static str) -> Element {
+    rsx! {
+        span { class: "material-icons",
+            svg {
+                view_box: "0 0 24 24",
+                width: "1em",
+                height: "1em",
+                fill: "currentColor",
+                "aria-hidden": "true",
+                "focusable": "false",
+                path { d: "{path}" }
+            }
+        }
     }
 }
 
@@ -1314,6 +1396,62 @@ mod tests {
             let eff = node_icon_mime_id("wiki/file", Some(&data));
             assert_eq!(eff, ty);
             assert_eq!(mime_icon(&eff), icon, "wrong icon for {ty}");
+        }
+    }
+
+    /// The three formats the icon font has no mark for. Drawn instead, as the
+    /// old wiki drew them, so a folder of Word documents is readable at a
+    /// glance. These are the content types production actually stores.
+    #[test]
+    fn office_formats_get_their_own_mark() {
+        let word = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        let excel = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        let deck = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+        assert_eq!(office_glyph(word), Some(MDI_WORD));
+        assert_eq!(office_glyph(excel), Some(MDI_EXCEL));
+        assert_eq!(office_glyph(deck), Some(MDI_POWERPOINT));
+        assert_eq!(office_glyph("application/msword"), Some(MDI_WORD));
+
+        // All three marks are different, which is the whole point.
+        assert_ne!(MDI_WORD, MDI_EXCEL);
+        assert_ne!(MDI_EXCEL, MDI_POWERPOINT);
+        assert_ne!(MDI_WORD, MDI_POWERPOINT);
+
+        // Every OOXML type contains "document" (…officeDOCUMENT…), so order
+        // decides: a spreadsheet must not come out as Word.
+        assert!(excel.contains("document") && excel.contains("spreadsheet"));
+        assert!(deck.contains("document") && deck.contains("presentation"));
+
+        // Everything else keeps the font, including the formats that HAVE a
+        // good glyph and the OpenDocument ones, which are not Microsoft's.
+        for other in [
+            "application/pdf",
+            "image/png",
+            "video/mp4",
+            "text/plain",
+            "wiki/folder",
+            "application/zip",
+        ] {
+            assert_eq!(office_glyph(other), None, "{other} should keep the font");
+        }
+    }
+
+    /// A drawn mark is a path, and a path that does not start with a move
+    /// command draws nothing at all.
+    #[test]
+    fn the_drawn_marks_are_well_formed() {
+        for (name, d) in [
+            ("word", MDI_WORD),
+            ("excel", MDI_EXCEL),
+            ("powerpoint", MDI_POWERPOINT),
+        ] {
+            assert!(d.starts_with('M'), "{name} does not start with a moveto");
+            assert!(d.ends_with('Z'), "{name} is not a closed path");
+            assert!(d.len() > 100, "{name} is suspiciously short");
+            // Line continuations in the source must not leave gaps that would
+            // split a coordinate pair into two.
+            assert!(!d.contains("  "), "{name} has a doubled space");
         }
     }
 

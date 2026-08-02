@@ -5601,6 +5601,12 @@ h6,
 	font-size: 1.125rem;
 	margin-right: var(--md-sys-spacing-1-5);
 }
+/* The icon element brings its own `.material-icons` span, which carries the
+   default icon size; the size set here has to reach through it. */
+.program-item-icon .material-icons {
+	font-size: inherit;
+	vertical-align: middle;
+}
 
 /* Click-to-zoom images (#114). */
 .zoomable {
