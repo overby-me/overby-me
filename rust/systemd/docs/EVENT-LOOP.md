@@ -211,6 +211,27 @@ scenario today's drivers were built for). Risk: highest code-motion volume;
 land per service type (oneshot, notify, simple/exec, forking, dbus) in separate
 commits, each VM-gated.
 
+Progress note, 2026-08-02: increments 0 and 1 are landed, and inc 2 has
+landed its deferred half in two slices. The oneshot exec chain runs as
+dispatcher continuations advanced by ChildExit events with per-command
+deadlines on the dispatcher's wheel; every deferred start wait (notify,
+oneshot and forking completion, the exec confirmation window, dbus names
+via a per-start watcher thread reporting back as an event) is parked as a
+StartWait continuation with EXTEND_TIMEOUT_USEC-aware monotonic deadlines
+and SIGTERM-then-SIGKILL escalation, and the per-start polling threads
+are deleted. Completion (ExecStartPost plus the Started bookkeeping) runs
+on a finisher thread, one per completing start. Two rules proved
+load-bearing: deadline refreshes must be monotone, and every dispatcher
+acquisition of the RuntimeInfo lock must yield to writers (dispatcher_read),
+or a queued writer starves the dispatcher into the old wedge shape.
+Still open in inc 2: ExecCondition= and ExecStartPre= helper waits (and
+the poststop error path behind them) still run inline in Service::start
+under the caller's guard, which also means starts from non-deferred
+sources still wait inline; converting them means slicing Service::start
+into initiate steps, the natural next slice. 20-mainpidgames exists here
+as 07-pid1-main-PID-change, which is red for harness reasons on the C
+oracle too (see its wrapper).
+
 ### Inc 3: stops and restarts under jobs
 
 ExecStop/ExecStopPost/restart waits become events; deactivation initiates and
