@@ -8249,7 +8249,22 @@ a.list-item:hover {
 }
 .xlsx-table td,
 .xlsx-table th {
-	border: 1px solid var(--md-outline-variant);
+	/* The gridline is a SHADOW, not a border, and that is load-bearing.
+
+	   A cell carries the rules the workbook draws on it (components::xlsx) as
+	   real borders, and in a collapsing table two borders meeting at one edge
+	   are resolved against each other: widest wins, then style, then position.
+	   A thin rule from the document is 1px solid — exactly the gridline — so it
+	   TIED, and the tie-break goes to the cell above, which meant the app's own
+	   decoration silently beat the document. The single rule over a RESULTAT row
+	   was simply not drawn, while the double rule under it (3px) came through.
+	   Making the gridline thinner or wider only moves which rules lose.
+
+	   A shadow does not take part in that resolution at all: it is decoration,
+	   it paints under the borders, and every rule the document asks for is
+	   drawn. Right and bottom only, so neighbours do not double up; the outer
+	   edges come from `.xlsx-wrap`. */
+	box-shadow: inset -1px -1px 0 0 var(--md-outline-variant);
 	padding: var(--md-sys-spacing-1) var(--md-sys-spacing-2);
 	white-space: nowrap;
 	text-align: left;
