@@ -341,6 +341,13 @@ a:hover {
    The reduced-motion rule above forces this back to `auto`. */
 html {
 	scroll-behavior: smooth;
+	/* Take over the top over-scroll, so the app's own pull-to-refresh runs and
+	   the BROWSER'S does not. This has to be on the ROOT element: the viewport
+	   takes its overscroll-behavior from `html`, and — unlike `overflow` — a
+	   value on `body` is not propagated to it. With it only on `body` the app
+	   drew its indicator and the browser drew its own on top, which is two
+	   spinners for one gesture, one of them nothing to do with this app. */
+	overscroll-behavior-y: contain;
 }
 
 /* DESIGN (functional a11y: focus baseline): a consistent keyboard-focus ring
