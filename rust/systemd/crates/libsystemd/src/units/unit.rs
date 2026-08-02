@@ -339,7 +339,7 @@ impl SocketState {
 /// Flush pending connections/data on all fds belonging to a socket unit.
 /// Called when `FlushPending=yes` is configured, before re-arming a socket
 /// for activation, so that stale traffic doesn't immediately re-trigger.
-fn flush_socket_fds(socket_id: &UnitId, run_info: &RuntimeInfo) {
+pub(crate) fn flush_socket_fds(socket_id: &UnitId, run_info: &RuntimeInfo) {
     let fd_store = run_info.fd_store.read_poisoned();
     if let Some(fds) = fd_store.get_global(&socket_id.name) {
         for (_, _, fd_box) in fds {
@@ -466,6 +466,12 @@ impl ServiceState {
                 // Multi-command oneshot whose preliminary ExecStart= commands
                 // are deferred to deferred_oneshot_exec_drive.  Status stays
                 // Starting (no main PID yet); the pool closure spawns the driver.
+                Ok(UnitStatus::Starting)
+            }
+            Ok(crate::services::StartResult::DeferredPrestart) => {
+                // ExecCondition=/ExecStartPre= deferred to the dispatcher's
+                // start chain.  Status stays Starting; the pool worker sends
+                // the chain event (docs/EVENT-LOOP.md inc 2).
                 Ok(UnitStatus::Starting)
             }
             Err(e) => {
@@ -747,6 +753,12 @@ impl ServiceState {
                     let mut status = status.write_poisoned();
                     *status = UnitStatus::Stopped(StatusStopped::ConditionSkipped, vec![]);
                 }
+                Ok(())
+            }
+            Ok(crate::services::StartResult::DeferredPrestart) => {
+                // Unreachable from this path (the deferral is gated on the
+                // pool's DeferNotifyWait source), but keep the unit alive in
+                // Starting rather than mislabeling it if that ever changes.
                 Ok(())
             }
             Ok(crate::services::StartResult::WaitingForSocket) => {

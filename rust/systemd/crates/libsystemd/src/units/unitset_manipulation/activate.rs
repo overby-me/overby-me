@@ -1253,6 +1253,21 @@ fn activate_units_recursive(
                         false
                     };
 
+                    // A service with ExecCondition=/ExecStartPre= whose start
+                    // deferred at the helper phase (StartResult::DeferredPrestart):
+                    // config plus no-main-pid is unambiguous for the pool path,
+                    // because Service::start always defers before running the
+                    // helpers with this source. Same lock-free main_pid read as
+                    // above.
+                    let is_prestart_chain = if let Some(unit) = ri_guard.unit_table.get(&id_saved)
+                        && let Specific::Service(svc) = &unit.specific
+                    {
+                        (!svc.conf.exec_condition.is_empty() || !svc.conf.startpre.is_empty())
+                            && unit.common.main_pid.load(std::sync::atomic::Ordering::Acquire) == 0
+                    } else {
+                        false
+                    };
+
                     // Drop the read lock before triggering OnFailure= (which
                     // may need a write lock via find_or_load_unit).
                     drop(ri_guard);
@@ -1281,7 +1296,28 @@ fn activate_units_recursive(
                         let id_bg = id_saved;
                         let filter_ids_bg = filter_ids_copy;
                         let errors_bg = errors_copy;
-                        if is_oneshot_prelim {
+                        if is_prestart_chain {
+                            // The ExecCondition=/ExecStartPre= phase runs as a
+                            // dispatcher chain; its main phase then routes to
+                            // the oneshot chain or a start wait
+                            // (docs/EVENT-LOOP.md inc 2).
+                            let dispatcher = {
+                                let ri = run_info_bg.read_poisoned();
+                                ri.dispatcher.clone()
+                            };
+                            dispatcher.send_normal(
+                                crate::entrypoints::dispatcher::Event::StartServiceChain(
+                                    ServiceStartChain {
+                                        id: id_bg,
+                                        next_services_ids,
+                                        filter_ids: filter_ids_bg,
+                                        errors: errors_bg,
+                                        source,
+                                        phase: StartChainPhase::Condition(0),
+                                    },
+                                ),
+                            );
+                        } else if is_oneshot_prelim {
                             // Hand the exec chain to the dispatcher: each
                             // preliminary command is forked initiate-only and
                             // advanced by its ChildExit event, with the
@@ -1656,6 +1692,394 @@ pub(crate) fn oneshot_chain_timed_out(
         ),
         run_info,
     );
+}
+
+/// A deferred ExecCondition=/ExecStartPre= helper phase advanced on the
+/// dispatcher (docs/EVENT-LOOP.md inc 2), carrying the same dispatch
+/// context as the oneshot chain. Created when `Service::start` returns
+/// `StartResult::DeferredPrestart` for a pool-path activation.
+pub struct ServiceStartChain {
+    pub id: UnitId,
+    pub next_services_ids: Vec<UnitId>,
+    pub filter_ids: Arc<Vec<UnitId>>,
+    pub errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    pub source: ActivationSource,
+    pub phase: StartChainPhase,
+}
+
+pub enum StartChainPhase {
+    /// Running ExecCondition= command `idx`.
+    Condition(usize),
+    /// Running ExecStartPre= command `idx`.
+    Prestart(usize),
+    /// A condition or prestart command errored; ExecStopPost= runs before
+    /// the start is failed with `error` (mirrors the inline path's
+    /// PrestartFailed-plus-poststop handling).
+    PoststopAfterError { idx: usize, error: String },
+}
+
+pub enum StartChainOutcome {
+    /// A helper was forked; the chain waits for this pid's exit, holding
+    /// the Child so its piped output can be drained then.
+    Advanced {
+        pid: nix::unistd::Pid,
+        child: std::process::Child,
+        cmd: crate::units::Commandline,
+        timeout: Option<std::time::Duration>,
+    },
+    /// The helper phase completed and the main phase produced this start
+    /// result for the dispatcher to route.
+    MainDispatched(crate::services::StartResult),
+    /// The chain ended without a main fork (skip, failure, or the unit
+    /// vanished or left Starting).
+    Finished,
+}
+
+/// Advance the chain: run through empty or exhausted phases, fork the next
+/// helper command, or run the main phase. Never waits.
+pub(crate) fn service_start_chain_step(
+    chain: &mut ServiceStartChain,
+    run_info: &ArcMutRuntimeInfo,
+) -> StartChainOutcome {
+    enum Action {
+        Fork(crate::units::Commandline),
+        NextPhase(StartChainPhase),
+        RunMain,
+        FinalizeError(String),
+    }
+    loop {
+        let action = {
+            let ri = dispatcher_read(run_info);
+            let Some(unit) = ri.unit_table.get(&chain.id) else {
+                return StartChainOutcome::Finished;
+            };
+            if !matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting) {
+                return StartChainOutcome::Finished;
+            }
+            let Specific::Service(svc) = &unit.specific else {
+                return StartChainOutcome::Finished;
+            };
+            match &chain.phase {
+                StartChainPhase::Condition(idx) => {
+                    if *idx >= svc.conf.exec_condition.len() {
+                        Action::NextPhase(StartChainPhase::Prestart(0))
+                    } else {
+                        Action::Fork(svc.conf.exec_condition[*idx].clone())
+                    }
+                }
+                StartChainPhase::Prestart(idx) => {
+                    if *idx >= svc.conf.startpre.len() {
+                        Action::RunMain
+                    } else {
+                        Action::Fork(svc.conf.startpre[*idx].clone())
+                    }
+                }
+                StartChainPhase::PoststopAfterError { idx, error } => {
+                    if *idx >= svc.conf.stoppost.len() {
+                        Action::FinalizeError(error.clone())
+                    } else {
+                        Action::Fork(svc.conf.stoppost[*idx].clone())
+                    }
+                }
+            }
+        };
+        match action {
+            Action::NextPhase(phase) => {
+                chain.phase = phase;
+            }
+            Action::FinalizeError(error) => {
+                start_chain_finalize_error(chain, error, run_info);
+                return StartChainOutcome::Finished;
+            }
+            Action::Fork(cmd) => {
+                let name = chain.id.name.clone();
+                let forked = {
+                    let ri = dispatcher_read(run_info);
+                    let Some(unit) = ri.unit_table.get(&chain.id) else {
+                        return StartChainOutcome::Finished;
+                    };
+                    let Specific::Service(svc) = &unit.specific else {
+                        return StartChainOutcome::Finished;
+                    };
+                    let working_dir = svc.conf.exec_config.working_directory.clone();
+                    let mut st = svc.state.write_poisoned();
+                    let timeout = st.srvc.get_start_timeout(&svc.conf);
+                    // The helper must see the service's filesystem view
+                    // (BindPaths=, PrivateTmp=), like the inline phases.
+                    st.srvc.helper_mount_ns =
+                        crate::services::helper_mount_ns_from_conf(&svc.conf);
+                    let res = st.srvc.spawn_helper_child(
+                        &cmd,
+                        chain.id.clone(),
+                        &name,
+                        &ri,
+                        working_dir.as_ref(),
+                    );
+                    st.srvc.helper_mount_ns = None;
+                    res.map(|child| (child, timeout))
+                };
+                match forked {
+                    Ok((child, timeout)) => {
+                        return StartChainOutcome::Advanced {
+                            pid: nix::unistd::Pid::from_raw(child.id() as i32),
+                            child,
+                            cmd,
+                            timeout,
+                        };
+                    }
+                    Err(e) => {
+                        // Mirror run_cmd's spawn-error handling: a leading
+                        // '-' swallows the failure and the chain continues;
+                        // anything else is a start error.
+                        if cmd
+                            .prefixes
+                            .contains(&crate::units::CommandlinePrefix::Minus)
+                        {
+                            advance_chain_index(chain);
+                        } else {
+                            chain_error_to_poststop(chain, format!("Failed to spawn {cmd}: {e}"));
+                        }
+                    }
+                }
+            }
+            Action::RunMain => {
+                let name = chain.id.name.clone();
+                let main_result = {
+                    let ri = dispatcher_read(run_info);
+                    let Some(unit) = ri.unit_table.get(&chain.id) else {
+                        return StartChainOutcome::Finished;
+                    };
+                    let Specific::Service(svc) = &unit.specific else {
+                        return StartChainOutcome::Finished;
+                    };
+                    let conf = svc.conf.clone();
+                    let mut st = svc.state.write_poisoned();
+                    st.srvc.start_main_phase(
+                        &conf,
+                        chain.id.clone(),
+                        &name,
+                        &ri,
+                        ActivationSource::DeferNotifyWait,
+                        &unit.common,
+                    )
+                };
+                match main_result {
+                    Ok(result) => return StartChainOutcome::MainDispatched(result),
+                    Err(e) => {
+                        chain.errors.lock_poisoned().push(UnitOperationError {
+                            unit_name: name,
+                            unit_id: chain.id.clone(),
+                            reason: UnitOperationErrorReason::ServiceStartError(e),
+                        });
+                        fail_deferred_start(
+                            run_info,
+                            &chain.id,
+                            "main ExecStart dispatch failed".to_owned(),
+                        );
+                        trigger_on_failure_units(&chain.id, run_info);
+                        return StartChainOutcome::Finished;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Consume a chain helper's exit on the dispatcher, mirroring run_cmd's
+/// wait semantics per phase, then advance.
+pub(crate) fn service_start_chain_child_exited(
+    chain: &mut ServiceStartChain,
+    cmd: &crate::units::Commandline,
+    mut child: std::process::Child,
+    termination: crate::signal_handler::ChildTermination,
+    run_info: &ArcMutRuntimeInfo,
+) -> StartChainOutcome {
+    // Drain the helper's piped output into the service buffers, as the
+    // inline run_cmd does after its wait.
+    {
+        let ri = dispatcher_read(run_info);
+        if let Some(unit) = ri.unit_table.get(&chain.id)
+            && let Specific::Service(svc) = &unit.specific
+        {
+            let status = unit.common.status.read_poisoned().clone();
+            svc.state.write_poisoned().srvc.drain_helper_output_nonblocking(
+                &mut child,
+                &chain.id.name,
+                &status,
+            );
+        }
+    }
+    drop(child);
+
+    let ok = termination.success()
+        || cmd.prefixes.contains(&crate::units::CommandlinePrefix::Minus);
+    match &chain.phase {
+        StartChainPhase::Condition(_) => {
+            if ok {
+                advance_chain_index(chain);
+            } else if let crate::signal_handler::ChildTermination::Exit(code) = termination
+                && (1..=254).contains(&code)
+            {
+                // ExecCondition= exit 1-254: skip the service, not a failure.
+                apply_condition_skip(&chain.id, run_info);
+                return StartChainOutcome::Finished;
+            } else {
+                chain_error_to_poststop(
+                    chain,
+                    format!("ExecCondition {cmd} failed: {termination:?}"),
+                );
+            }
+        }
+        StartChainPhase::Prestart(_) => {
+            if ok {
+                advance_chain_index(chain);
+            } else {
+                chain_error_to_poststop(
+                    chain,
+                    format!("ExecStartPre {cmd} failed: {termination:?}"),
+                );
+            }
+        }
+        StartChainPhase::PoststopAfterError { error, .. } => {
+            if ok {
+                advance_chain_index(chain);
+            } else {
+                // Mirror run_all_cmds: the first poststop failure aborts the
+                // rest; both errors are reported.
+                let combined = format!("{error}; ExecStopPost {cmd} failed: {termination:?}");
+                start_chain_finalize_error(chain, combined, run_info);
+                return StartChainOutcome::Finished;
+            }
+        }
+    }
+    service_start_chain_step(chain, run_info)
+}
+
+/// The chain helper's per-command timeout fired: SIGKILL it and route the
+/// timeout through the same per-phase error handling as a bad exit.
+pub(crate) fn service_start_chain_timed_out(
+    chain: &mut ServiceStartChain,
+    cmd: &crate::units::Commandline,
+    pid: nix::unistd::Pid,
+    timeout: Option<std::time::Duration>,
+    run_info: &ArcMutRuntimeInfo,
+) -> StartChainOutcome {
+    unsafe {
+        libc::kill(pid.as_raw(), libc::SIGKILL);
+    }
+    let error = format!("{cmd} timed out ({timeout:?})");
+    match &chain.phase {
+        StartChainPhase::Condition(_) | StartChainPhase::Prestart(_) => {
+            chain_error_to_poststop(chain, error);
+            service_start_chain_step(chain, run_info)
+        }
+        StartChainPhase::PoststopAfterError {
+            error: original, ..
+        } => {
+            let combined = format!("{original}; {error}");
+            start_chain_finalize_error(chain, combined, run_info);
+            StartChainOutcome::Finished
+        }
+    }
+}
+
+fn advance_chain_index(chain: &mut ServiceStartChain) {
+    chain.phase = match &chain.phase {
+        StartChainPhase::Condition(idx) => StartChainPhase::Condition(idx + 1),
+        StartChainPhase::Prestart(idx) => StartChainPhase::Prestart(idx + 1),
+        StartChainPhase::PoststopAfterError { idx, error } => StartChainPhase::PoststopAfterError {
+            idx: idx + 1,
+            error: error.clone(),
+        },
+    };
+}
+
+fn chain_error_to_poststop(chain: &mut ServiceStartChain, error: String) {
+    chain.phase = StartChainPhase::PoststopAfterError { idx: 0, error };
+}
+
+fn start_chain_finalize_error(
+    chain: &ServiceStartChain,
+    error: String,
+    run_info: &ArcMutRuntimeInfo,
+) {
+    chain.errors.lock_poisoned().push(UnitOperationError {
+        unit_name: chain.id.name.clone(),
+        unit_id: chain.id.clone(),
+        reason: UnitOperationErrorReason::GenericStartError(error.clone()),
+    });
+    fail_deferred_start(run_info, &chain.id, error);
+    trigger_on_failure_units(&chain.id, run_info);
+}
+
+/// ExecCondition= said no: mark the unit skipped and re-arm its sockets.
+/// Mirrors Unit::activate's ConditionSkipped arm (units/unit.rs), which
+/// stays inline for the non-chain sources.
+fn apply_condition_skip(id: &UnitId, run_info: &ArcMutRuntimeInfo) {
+    let ri = dispatcher_read(run_info);
+    let Some(unit) = ri.unit_table.get(id) else {
+        return;
+    };
+    {
+        let mut status = unit.common.status.write_poisoned();
+        if matches!(&*status, UnitStatus::Starting) {
+            *status = UnitStatus::Stopped(crate::units::StatusStopped::ConditionSkipped, vec![]);
+        }
+    }
+    if let Specific::Service(svc) = &unit.specific {
+        for socket_id in &svc.conf.sockets {
+            if let Some(sock_unit) = ri.unit_table.get(socket_id)
+                && let Specific::Socket(sock) = &sock_unit.specific
+            {
+                if sock.state.read_poisoned().result
+                    == crate::units::SocketResult::TriggerLimitHit
+                {
+                    continue;
+                }
+                if sock.conf.flush_pending {
+                    crate::units::flush_socket_fds(socket_id, &ri);
+                }
+                sock.state.write_poisoned().sock.activated = false;
+            }
+        }
+        if !svc.conf.sockets.is_empty() {
+            ri.notify_eventfds();
+        }
+    }
+}
+
+/// The chain's main phase reported WaitingForSocket: apply the status and
+/// socket re-arm that Unit::activate's arm applies for inline starts.
+pub(crate) fn apply_waiting_for_socket(id: &UnitId, run_info: &ArcMutRuntimeInfo) {
+    let ri = dispatcher_read(run_info);
+    let Some(unit) = ri.unit_table.get(id) else {
+        return;
+    };
+    {
+        let mut status = unit.common.status.write_poisoned();
+        if matches!(&*status, UnitStatus::Starting) {
+            *status =
+                UnitStatus::Started(crate::units::StatusStarted::WaitingForSocket);
+        }
+    }
+    if let Specific::Service(svc) = &unit.specific {
+        for socket_id in &svc.conf.sockets {
+            if let Some(sock_unit) = ri.unit_table.get(socket_id)
+                && let Specific::Socket(sock) = &sock_unit.specific
+            {
+                if sock.state.read_poisoned().result
+                    == crate::units::SocketResult::TriggerLimitHit
+                {
+                    continue;
+                }
+                if sock.conf.flush_pending {
+                    crate::units::flush_socket_fds(socket_id, &ri);
+                }
+                sock.state.write_poisoned().sock.activated = false;
+            }
+        }
+        ri.notify_eventfds();
+    }
 }
 
 /// Dispatcher-callable wrapper for the shared deferred start-failure

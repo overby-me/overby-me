@@ -105,7 +105,7 @@ pub fn open_journal_stream(
 /// the service has no directives that change the filesystem view.  This is
 /// the input that helper commands (ExecStartPre=/Post=/StopPost=) use to
 /// match the eventual ExecStart= namespace.
-fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
+pub(crate) fn helper_mount_ns_from_conf(conf: &ServiceConfig) -> Option<HelperMountNs> {
     let exec = &conf.exec_config;
     if exec.bind_paths.is_empty()
         && exec.bind_read_only_paths.is_empty()
@@ -687,6 +687,13 @@ pub enum StartResult {
     /// concurrent `daemon-reload` can commit between commands. The service is
     /// left in the Starting state with no main PID yet (07-pid1-exec-deserialization).
     DeferredOneshotExec,
+    /// The service has ExecCondition= or ExecStartPre= commands and the
+    /// activation came from the pool (DeferNotifyWait): the helper phase is
+    /// deferred to the dispatcher's start chain instead of waiting inline
+    /// under the caller's table read guard (docs/EVENT-LOOP.md inc 2). The
+    /// service is left in Starting with no main PID yet; the chain runs the
+    /// helpers and then the main phase.
+    DeferredPrestart,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -815,6 +822,17 @@ impl Service {
         )
         .map_err(ServiceErrorReason::PreparingFailed)?;
 
+        // Pool-path activations defer the ExecCondition=/ExecStartPre=
+        // helper phase to the dispatcher's start chain so nothing waits for
+        // a helper while holding the table read guard (docs/EVENT-LOOP.md
+        // inc 2). Other sources still run the helpers inline below.
+        if (!conf.exec_condition.is_empty() || !conf.startpre.is_empty())
+            && matches!(source, ActivationSource::DeferNotifyWait)
+            && crate::entrypoints::dispatcher::global().is_some()
+        {
+            return Ok(StartResult::DeferredPrestart);
+        }
+
         // ExecCondition= — if any command exits 1-254, skip the service.
         match self.run_exec_condition(conf, id.clone(), name, run_info) {
             Ok(true) => {} // conditions met, proceed
@@ -839,6 +857,22 @@ impl Service {
                 },
             )?;
 
+        self.start_main_phase(conf, id, name, run_info, source, common)
+    }
+
+    /// The main-fork half of [`Self::start`]: stdio reopen, slice cgroup
+    /// setup and the ExecStart dispatch. Runs after the helper phase
+    /// (ExecCondition=/ExecStartPre=), whether that ran inline in `start`
+    /// or on the dispatcher's start chain (docs/EVENT-LOOP.md inc 2).
+    pub(crate) fn start_main_phase(
+        &mut self,
+        conf: &ServiceConfig,
+        id: UnitId,
+        name: &str,
+        run_info: &RuntimeInfo,
+        source: ActivationSource,
+        common: &crate::units::Common,
+    ) -> Result<StartResult, ServiceErrorReason> {
         // Re-open stdout/stderr after ExecStartPre, which may have deleted
         // the output file (e.g. ExecStartPre=rm -f ...). In real systemd,
         // each process invocation gets fresh file descriptors.
@@ -1776,6 +1810,49 @@ impl Service {
                     Err(RunCmdError::SpawnError(cmdline.to_string(), format!("{e}")))
                 }
             }
+        }
+    }
+
+    /// Drain a helper child's piped stdout/stderr into the service's
+    /// buffers and forward complete lines to the journal, without blocking:
+    /// the pipes are switched to O_NONBLOCK and read until empty or EOF.
+    /// Used by the dispatcher's start chain after the helper's exit event;
+    /// data buffered by the exited helper is read, while output pipes still
+    /// held open by a grandchild are not waited for (the inline run_cmd
+    /// path blocks on EOF there, which the dispatcher must never do).
+    pub(crate) fn drain_helper_output_nonblocking(
+        &mut self,
+        child: &mut std::process::Child,
+        name: &str,
+        status: &crate::units::UnitStatus,
+    ) {
+        use std::os::fd::AsRawFd;
+        let drain = |raw_fd: i32, out: &mut Vec<u8>| {
+            let flags = unsafe { libc::fcntl(raw_fd, libc::F_GETFL) };
+            if flags >= 0 {
+                unsafe { libc::fcntl(raw_fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+            }
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = unsafe { libc::read(raw_fd, buf.as_mut_ptr().cast(), buf.len()) };
+                if n > 0 {
+                    out.extend_from_slice(&buf[..n as usize]);
+                } else {
+                    break;
+                }
+            }
+        };
+        if let Some(stream) = &mut child.stderr {
+            let mut collected = Vec::new();
+            drain(stream.as_raw_fd(), &mut collected);
+            self.stderr_buffer.extend(collected);
+            let _ = self.log_stderr_lines(name, status, None);
+        }
+        if let Some(stream) = &mut child.stdout {
+            let mut collected = Vec::new();
+            drain(stream.as_raw_fd(), &mut collected);
+            self.stdout_buffer.extend(collected);
+            let _ = self.log_stdout_lines(name, status, None);
         }
     }
 

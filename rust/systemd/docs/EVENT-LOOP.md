@@ -224,13 +224,17 @@ on a finisher thread, one per completing start. Two rules proved
 load-bearing: deadline refreshes must be monotone, and every dispatcher
 acquisition of the RuntimeInfo lock must yield to writers (dispatcher_read),
 or a queued writer starves the dispatcher into the old wedge shape.
-Still open in inc 2: ExecCondition= and ExecStartPre= helper waits (and
-the poststop error path behind them) still run inline in Service::start
-under the caller's guard, which also means starts from non-deferred
-sources still wait inline; converting them means slicing Service::start
-into initiate steps, the natural next slice. 20-mainpidgames exists here
-as 07-pid1-main-PID-change, which is red for harness reasons on the C
-oracle too (see its wrapper).
+The inline helper half followed as a third slice: for pool-path
+activations, ExecCondition= and ExecStartPre= run as a phased dispatcher
+chain (condition, prestart, then the extracted main phase, with
+ExecStopPost= as the error phase and the run_cmd exit rules per phase),
+so Service::start defers before its first helper fork and the main-phase
+result routes to the oneshot chain, a start wait, a finisher, or the
+WaitingForSocket transition. Still open in inc 2: starts from non-pool
+sources (socket activation, triggers, restarts) run cond/prestart and
+the per-type fork_parent waits inline, and stop-side helpers are inc 3's
+business. 20-mainpidgames exists here as 07-pid1-main-PID-change, which
+is red for harness reasons on the C oracle too (see its wrapper).
 
 ### Inc 3: stops and restarts under jobs
 

@@ -59,6 +59,11 @@ pub enum Event {
     /// Notify and ChildExit events and enforces its timeouts, replacing the
     /// per-start polling thread (docs/EVENT-LOOP.md inc 2).
     StartServiceWait(crate::units::StartWaitParams),
+    /// Begin a deferred ExecCondition=/ExecStartPre= helper phase: the
+    /// dispatcher runs each helper initiate-only and, when the phase
+    /// completes, runs the main ExecStart dispatch and routes its result
+    /// (docs/EVENT-LOOP.md inc 2).
+    StartServiceChain(crate::units::ServiceStartChain),
     /// A Type=dbus bus-name watcher thread finished its blocking wait.
     DbusNameResult {
         unit: UnitId,
@@ -67,11 +72,26 @@ pub enum Event {
     },
 }
 
-/// A oneshot exec chain parked between steps, keyed by the awaited pid.
-struct PendingChain {
-    chain: crate::units::OneshotChainStart,
-    cmd: crate::units::Commandline,
-    timeout: Option<std::time::Duration>,
+/// A helper-command continuation parked between steps, keyed by the
+/// awaited pid: either a preliminary oneshot ExecStart= chain or an
+/// ExecCondition=/ExecStartPre= start chain (which keeps the Child handle
+/// so its piped output can be drained on exit).
+enum PendingHelper {
+    Oneshot {
+        chain: crate::units::OneshotChainStart,
+        cmd: crate::units::Commandline,
+        timeout: Option<std::time::Duration>,
+    },
+    StartPhase {
+        chain: crate::units::ServiceStartChain,
+        cmd: crate::units::Commandline,
+        child: std::process::Child,
+        timeout: Option<std::time::Duration>,
+    },
+}
+
+struct PendingEntry {
+    kind: PendingHelper,
     deadline: Option<std::time::Instant>,
 }
 
@@ -199,13 +219,13 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
         // Dispatcher-private continuation state: oneshot exec chains keyed
         // by awaited pid, and deferred start waits keyed by unit. Nothing
         // else may mutate them.
-        let mut chains: std::collections::HashMap<i32, PendingChain> =
+        let mut chains: std::collections::HashMap<i32, PendingEntry> =
             std::collections::HashMap::new();
         let mut start_waits: StartWaits = StartWaits::new();
         loop {
             let next_deadline = chains
                 .values()
-                .filter_map(|chain| chain.deadline)
+                .filter_map(|entry| entry.deadline)
                 .chain(start_waits.values().filter_map(|wait| wait.armed_deadline))
                 .chain(start_waits.values().filter_map(|wait| wait.exec_confirm_at))
                 .min();
@@ -215,7 +235,7 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
                     Some(event) => dispatch_one(event, &run_info, &mut chains, &mut start_waits),
                     // The deadline wheel fired with no event.
                     None => {
-                        expire_due_chains(&run_info, &mut chains);
+                        expire_due_chains(&run_info, &mut chains, &mut start_waits);
                         expire_due_start_waits(&run_info, &mut start_waits);
                     }
                 }
@@ -244,7 +264,7 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 fn dispatch_one(
     event: Event,
     run_info: &ArcMutRuntimeInfo,
-    chains: &mut std::collections::HashMap<i32, PendingChain>,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
     start_waits: &mut StartWaits,
 ) {
     match event {
@@ -285,13 +305,24 @@ fn dispatch_one(
                     let ri = crate::units::dispatcher_read(run_info);
                     ri.pid_table.lock_poisoned().remove(&pid);
                 }
-                let outcome = crate::units::oneshot_chain_child_exited(
-                    &pending.chain,
-                    &pending.cmd,
-                    code,
-                    run_info,
-                );
-                park_chain(outcome, pending.chain, chains, start_waits, run_info);
+                match pending.kind {
+                    PendingHelper::Oneshot { chain, cmd, .. } => {
+                        let outcome =
+                            crate::units::oneshot_chain_child_exited(&chain, &cmd, code, run_info);
+                        park_chain(outcome, chain, chains, start_waits, run_info);
+                    }
+                    PendingHelper::StartPhase {
+                        mut chain,
+                        cmd,
+                        child,
+                        ..
+                    } => {
+                        let outcome = crate::units::service_start_chain_child_exited(
+                            &mut chain, &cmd, child, code, run_info,
+                        );
+                        route_start_chain_outcome(outcome, chain, chains, start_waits, run_info);
+                    }
+                }
                 return;
             }
             match kind {
@@ -323,6 +354,10 @@ fn dispatch_one(
         Event::StartOneshotChain(chain) => {
             let outcome = crate::units::oneshot_chain_step(&chain, run_info);
             park_chain(outcome, chain, chains, start_waits, run_info);
+        }
+        Event::StartServiceChain(mut chain) => {
+            let outcome = crate::units::service_start_chain_step(&mut chain, run_info);
+            route_start_chain_outcome(outcome, chain, chains, start_waits, run_info);
         }
         Event::StartServiceWait(params) => {
             register_start_wait(params, run_info, start_waits);
@@ -419,14 +454,27 @@ fn progress_start_wait(
 }
 
 fn spawn_start_finisher(wait: StartWait, run_info: ArcMutRuntimeInfo) {
-    let id = wait.id;
+    spawn_start_finisher_parts(
+        wait.id,
+        wait.next_services_ids,
+        wait.filter_ids,
+        wait.errors,
+        wait.source,
+        run_info,
+    );
+}
+
+fn spawn_start_finisher_parts(
+    id: UnitId,
+    next: Vec<UnitId>,
+    filter: Arc<Vec<UnitId>>,
+    errors: Arc<Mutex<Vec<crate::units::UnitOperationError>>>,
+    source: crate::units::ActivationSource,
+    run_info: ArcMutRuntimeInfo,
+) {
     let name = id.name.clone();
     let log_name = name.clone();
     let thread_name = format!("start-finish-{name}");
-    let next = wait.next_services_ids;
-    let filter = wait.filter_ids;
-    let errors = wait.errors;
-    let source = wait.source;
     let spawned = std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
@@ -540,7 +588,7 @@ fn expire_due_start_waits(run_info: &ArcMutRuntimeInfo, start_waits: &mut StartW
 fn park_chain(
     outcome: crate::units::OneshotStepOutcome,
     chain: crate::units::OneshotChainStart,
-    chains: &mut std::collections::HashMap<i32, PendingChain>,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
     start_waits: &mut StartWaits,
     run_info: &ArcMutRuntimeInfo,
 ) {
@@ -548,11 +596,13 @@ fn park_chain(
         crate::units::OneshotStepOutcome::Advanced { pid, cmd, timeout } => {
             chains.insert(
                 pid.as_raw(),
-                PendingChain {
-                    chain,
-                    cmd,
-                    timeout,
+                PendingEntry {
                     deadline: timeout.map(|t| std::time::Instant::now() + t),
+                    kind: PendingHelper::Oneshot {
+                        chain,
+                        cmd,
+                        timeout,
+                    },
                 },
             );
         }
@@ -576,7 +626,8 @@ fn park_chain(
 
 fn expire_due_chains(
     run_info: &ArcMutRuntimeInfo,
-    chains: &mut std::collections::HashMap<i32, PendingChain>,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
+    start_waits: &mut StartWaits,
 ) {
     let now = std::time::Instant::now();
     let due: Vec<i32> = chains
@@ -585,15 +636,118 @@ fn expire_due_chains(
         .map(|(raw_pid, _)| *raw_pid)
         .collect();
     for raw_pid in due {
-        if let Some(pending) = chains.remove(&raw_pid) {
-            crate::units::oneshot_chain_timed_out(
-                &pending.chain,
-                &pending.cmd,
-                nix::unistd::Pid::from_raw(raw_pid),
-                pending.timeout,
-                run_info,
+        let Some(pending) = chains.remove(&raw_pid) else {
+            continue;
+        };
+        match pending.kind {
+            PendingHelper::Oneshot { chain, cmd, timeout } => {
+                crate::units::oneshot_chain_timed_out(
+                    &chain,
+                    &cmd,
+                    nix::unistd::Pid::from_raw(raw_pid),
+                    timeout,
+                    run_info,
+                );
+            }
+            PendingHelper::StartPhase {
+                mut chain,
+                cmd,
+                timeout,
+                ..
+            } => {
+                let outcome = crate::units::service_start_chain_timed_out(
+                    &mut chain,
+                    &cmd,
+                    nix::unistd::Pid::from_raw(raw_pid),
+                    timeout,
+                    run_info,
+                );
+                route_start_chain_outcome(outcome, chain, chains, start_waits, run_info);
+            }
+        }
+    }
+}
+
+/// Route a start chain's step outcome: park it against the next helper pid,
+/// hand the completed main phase to the right completion owner, or nothing.
+fn route_start_chain_outcome(
+    outcome: crate::units::StartChainOutcome,
+    chain: crate::units::ServiceStartChain,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
+    start_waits: &mut StartWaits,
+    run_info: &ArcMutRuntimeInfo,
+) {
+    match outcome {
+        crate::units::StartChainOutcome::Advanced {
+            pid,
+            child,
+            cmd,
+            timeout,
+        } => {
+            chains.insert(
+                pid.as_raw(),
+                PendingEntry {
+                    deadline: timeout.map(|t| std::time::Instant::now() + t),
+                    kind: PendingHelper::StartPhase {
+                        chain,
+                        cmd,
+                        child,
+                        timeout,
+                    },
+                },
             );
         }
+        crate::units::StartChainOutcome::MainDispatched(result) => match result {
+            crate::services::StartResult::DeferredOneshotExec => {
+                let oneshot = crate::units::OneshotChainStart {
+                    id: chain.id,
+                    next_services_ids: chain.next_services_ids,
+                    filter_ids: chain.filter_ids,
+                    errors: chain.errors,
+                    source: chain.source,
+                };
+                let outcome = crate::units::oneshot_chain_step(&oneshot, run_info);
+                park_chain(outcome, oneshot, chains, start_waits, run_info);
+            }
+            crate::services::StartResult::DeferredNotifyWait => {
+                register_start_wait(
+                    crate::units::StartWaitParams {
+                        id: chain.id,
+                        next_services_ids: Some(chain.next_services_ids),
+                        filter_ids: chain.filter_ids,
+                        errors: chain.errors,
+                        source: chain.source,
+                        check_starting: false,
+                    },
+                    run_info,
+                    start_waits,
+                );
+            }
+            crate::services::StartResult::Started => {
+                // The main phase completed synchronously (e.g. Type=simple):
+                // the finisher runs ExecStartPost, flips Started and
+                // dispatches dependents, exactly like a ready start wait.
+                spawn_start_finisher_parts(
+                    chain.id,
+                    chain.next_services_ids,
+                    chain.filter_ids,
+                    chain.errors,
+                    chain.source,
+                    run_info.clone(),
+                );
+            }
+            crate::services::StartResult::WaitingForSocket => {
+                crate::units::apply_waiting_for_socket(&chain.id, run_info);
+            }
+            crate::services::StartResult::ConditionSkipped
+            | crate::services::StartResult::DeferredPrestart => {
+                crate::entrypoints::kmsg(&format!(
+                    "START-CHAIN {}: unexpected main-phase result",
+                    chain.id.name
+                ));
+            }
+        },
+        crate::units::StartChainOutcome::Finished => {}
     }
 }
 
