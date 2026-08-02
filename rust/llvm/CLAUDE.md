@@ -1803,8 +1803,27 @@ at all: an empty quoted name is unnamed, and the value takes the next slot
 number. Measuring it turned up the rest of the rule, which is that upstream
 renumbers every unnamed global densely from zero, so `@5` and `@7` print as
 `@0` and `@1` where we print what was written. That is a printing change as
-well as a parsing one, so it wants its own pass rather than a corner of
-this one.
+well as a parsing one, and it took a pass of its own.
+The model that fits every shape measured is two numberings rather than one.
+Reading has a single counter over every kind in source order, and a
+definition takes from it: `@N =` says which slot to start at and may only
+skip ahead, `@"" =` takes the next. That is what makes the test's `@""`
+after `@5` reachable as `@6`, and it is why `@7` then `@5` is refused where
+`@0` then `@5` is not. Printing has a second, per-kind numbering: every
+unnamed global, then the aliases, the ifuncs and the functions, each in
+module order, renumbered from zero. A function written above the globals
+still numbers after them, which is measured and not what definition order
+would give.
+The parse side is one rewrite rather than a rule threaded through: the
+pre-scan turns an unnamed definition's token into the slot it took, so
+everything after it sees one spelling and a reference by number finds it.
+The print side is `ModuleSlots` beside the `FunctionSlots` that already
+existed, and the slots module's own comment had said module-scope symbols
+needed none of this.
+Assembler 476 to 477 with the ceiling 4 to 3, its differential 190 to 191,
+and CodeGen 22,384 to 22,385. The corpus is untouched, being `llvm-dis`
+output already numbered from zero, which is the reassuring part: the change
+only moves files that were written by hand.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`

@@ -1222,6 +1222,16 @@ const REJECTED: &[(&str, &str)] = &[
         "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %target, label %target\ntarget:\n  ret void\n  uselistorder label %target, { 2, 0 }\n}\n",
         "expected distinct uselistorder indexes in range [0, size)",
     ),
+    // A written number only skips ahead: one that goes back names a slot
+    // already taken.
+    (
+        "@7 = global i8 0\n@5 = global i8 1\n",
+        "global number @5 is out of order",
+    ),
+    (
+        "@5 = global i8 0\n@5 = global i8 1\n",
+        "global number @5 is out of order",
+    ),
     // Crossing address spaces is the whole of what an addrspacecast does, so
     // one that stays in its own space is not that cast. An expression folds
     // as it is read and says so there; an instruction says so on verifying.
@@ -1649,6 +1659,14 @@ const VERIFIES: &[&str] = &[
     // The address a function takes of its own block, read by the
     // `indirectbr` that also lists the block as a destination.
     "define void @f() {\nentry:\n  indirectbr ptr blockaddress(@f, %target), [ label %target ]\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+    // An empty quoted name is no name at all: the symbol is unnamed and
+    // takes the next slot, so a second one is not a redefinition of a first.
+    "@\"\" = global i8 0\n@\"\" = global i8 1\n",
+    "@\"\" = global i8 0\n\ndeclare ptr @\"\"(ptr)\n",
+    // A written number says which slot to start from, so it may skip ahead,
+    // and a reference finds the slot rather than what was written.
+    "@5 = global i8 0\n@r = global ptr @5\n",
+    "@5 = global i8 0\n@\"\" = global i8 1\n@r = global ptr @6\n",
     // A label's characters are a wider set than a word's, and the colon is
     // what says which set was meant: `-N-` and `$N` name blocks where they
     // would otherwise be a negative number and a comdat.

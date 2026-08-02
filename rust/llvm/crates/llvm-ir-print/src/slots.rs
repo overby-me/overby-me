@@ -7,13 +7,74 @@
 //! walk exactly is what makes `%13` in our output mean the same thing as
 //! `%13` in upstream's.
 //!
-//! Module-scope symbols need none of this: a global written `@0` parses to a
-//! numbered name and prints back as the number it came with.
+//! Module-scope symbols need the same treatment for a different reason. The
+//! number a global is written with is an identity for the references to it
+//! and not what it prints as: upstream renumbers every unnamed module symbol
+//! from zero, so `@5` and `@7` come back as `@0` and `@1`. The order is by
+//! kind rather than by definition, which was measured rather than assumed.
 
 use std::collections::HashMap;
 
 use llvm_ir::function::Function;
+use llvm_ir::value::{AliasId, FunctionId, GlobalRef, GlobalVarId, IFuncId, Name};
 use llvm_ir::{BlockId, InstId, Module, TypeKind};
+
+/// Numbers for everything unnamed at module scope.
+#[derive(Debug, Default)]
+pub struct ModuleSlots {
+    numbers: HashMap<GlobalRef, u32>,
+}
+
+impl ModuleSlots {
+    pub fn compute(module: &Module) -> ModuleSlots {
+        let mut slots = ModuleSlots::default();
+        let mut next = 0u32;
+        // Every unnamed global first, then the aliases, the ifuncs and the
+        // functions, each in module order. A function written before the
+        // globals still numbers after them.
+        let kinds: [Box<dyn Iterator<Item = (GlobalRef, &Name)>>; 4] =
+            [
+                Box::new(module.globals.iter().enumerate().map(|(index, global)| {
+                    (GlobalRef::Variable(GlobalVarId(index as u32)), &global.name)
+                })),
+                Box::new(
+                    module.aliases.iter().enumerate().map(|(index, alias)| {
+                        (GlobalRef::Alias(AliasId(index as u32)), &alias.name)
+                    }),
+                ),
+                Box::new(
+                    module.ifuncs.iter().enumerate().map(|(index, ifunc)| {
+                        (GlobalRef::IFunc(IFuncId(index as u32)), &ifunc.name)
+                    }),
+                ),
+                Box::new(
+                    module
+                        .functions
+                        .iter()
+                        .enumerate()
+                        .map(|(index, function)| {
+                            (
+                                GlobalRef::Function(FunctionId(index as u32)),
+                                &function.name,
+                            )
+                        }),
+                ),
+            ];
+        for kind in kinds {
+            for (id, name) in kind {
+                if matches!(name, Name::Number(_)) {
+                    slots.numbers.insert(id, next);
+                    next += 1;
+                }
+            }
+        }
+        slots
+    }
+
+    pub fn get(&self, id: GlobalRef) -> Option<u32> {
+        self.numbers.get(&id).copied()
+    }
+}
 
 /// Numbers for everything unnamed in one function.
 #[derive(Debug, Default)]

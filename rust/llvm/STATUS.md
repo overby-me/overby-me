@@ -79,7 +79,7 @@ skipped, so the denominator is the whole suite.
 
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
-| `llvm/test/Assembler` | 476 | 483 | 4 | `llvm-upstream-assembler` |
+| `llvm/test/Assembler` | 477 | 483 | 3 | `llvm-upstream-assembler` |
 | `llvm/test/Verifier` | 316 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
@@ -93,7 +93,7 @@ right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/CodeGen` | 22,384 | 22,785 | `llvm-tree-codegen` |
+| `llvm/test/CodeGen` | 22,385 | 22,785 | `llvm-tree-codegen` |
 | `llvm/test/Transforms` | 10,232 | 10,305 | `llvm-tree-transforms` |
 | `llvm/test/Analysis` | 1,396 | 1,403 | `llvm-tree-analysis` |
 | `llvm/test/DebugInfo` | 1,101 | 1,101 | `llvm-tree-debuginfo` |
@@ -105,7 +105,7 @@ right in every case.
 | `llvm/test/Bitcode` | 232 | 232 | `llvm-tree-bitcode` |
 | `llvm/test/Feature` | 82 | 82 | `llvm-tree-feature` |
 
-That is 36,850 of the 37,334 modules llvm-as reads across eleven trees.
+That is 36,851 of the 37,334 modules llvm-as reads across eleven trees.
 What is left is dominated by one thing: a target intrinsic no LangRef line
 names cannot be auto-declared, which is most of what CodeGen still refuses.
 The intrinsic name table is honest about why, and the number moves only if
@@ -142,11 +142,10 @@ off the assembler, which takes a directive only when its index count
 matches the list.
 
 The two halves of the gap are not equally bad, so each suite has two
-bounds. We **refuse 4 modules llvm-as reads**, all of them in Assembler,
+bounds. We **refuse 3 modules llvm-as reads**, all of them in Assembler,
 which is the failure that matters: a target intrinsic no LangRef line names,
-two calls upstream upgrades to a signature we check against the documented
-one, and `@""`, which upstream reads as no name at all rather than as a
-name that can be redefined. That count is a ceiling that may only fall. We
+and two calls upstream upgrades to a signature we check against the
+documented one. That count is a ceiling that may only fall. We
 **read 15 modules llvm-as refuses**, three in Assembler and twelve in
 Verifier, which is a missing verifier rule each, and agreement is a floor
 that may only rise.
@@ -235,7 +234,7 @@ comparable to these.
 A third check asks a different question: not whether we accept the same
 files, but whether we print the same text. For every Assembler file both we
 and upstream accept, `llvm-opt-differential` compares our `opt -S` output
-against upstream's own `opt -S`, and **190 of 222** are identical, with
+against upstream's own `opt -S`, and **191 of 223** are identical, with
 three more suites measured the same way: **67 of 71** in `Feature`, **207 of
 220** in `Linker` and **140 of 144** in `Other`. Fourteen of the
 remaining differences are ones where we already match

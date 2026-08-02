@@ -20,6 +20,33 @@ use llvm_ir::value::{AliasId, FunctionId, GlobalRef, GlobalVarId, IFuncId, Name}
 use llvm_support::{ApFloat, FloatSemantics};
 
 impl Parser {
+    /// The name a definition takes, with the slot it consumes.
+    ///
+    /// An unnamed symbol is rewritten to the slot it took, so that the parse
+    /// after this sees one spelling for it and a reference by number finds
+    /// it. A named one takes no slot and is left alone.
+    fn take_slot(&mut self, index: usize, slot: &mut u32) -> Result<Option<Name>, ParseError> {
+        let number = match &self.tokens[index].token {
+            Token::GlobalName(text) if text.is_empty() => *slot,
+            Token::GlobalName(text) => return Ok(Some(Name::Named(text.clone()))),
+            Token::GlobalNumber(number) => {
+                // A written number says which slot to start from, so it may
+                // skip ahead and may not go back over one already taken.
+                if *number < *slot {
+                    return Err(ParseError {
+                        position: self.tokens[index].position,
+                        message: format!("global number @{number} is out of order"),
+                    });
+                }
+                *number
+            }
+            _ => return Ok(None),
+        };
+        *slot = number + 1;
+        self.tokens[index].token = Token::GlobalNumber(number);
+        Ok(Some(Name::Number(number)))
+    }
+
     /// Works out the id of every global-scope symbol before parsing anything.
     pub(crate) fn prescan_symbols(&mut self) -> Result<(), ParseError> {
         let mut symbols: HashMap<Name, GlobalRef> = HashMap::new();
@@ -28,15 +55,23 @@ impl Parser {
         let mut ifuncs = 0u32;
         let mut functions = 0u32;
 
+        // The slot an unnamed module symbol takes. A written number is a
+        // slot rather than a name, and so is an empty quoted name: upstream
+        // reads `@""` as unnamed and gives it the next one, which is how
+        // `skip-value-numbers-globals.ll` refers to the `@""` after `@5` as
+        // `@6`. One counter serves every kind, in the order they are
+        // written, and a number only ever skips ahead.
+        let mut slot = 0u32;
+
         for index in 0..self.tokens.len() {
             match &self.tokens[index].token {
-                token @ (Token::GlobalName(_) | Token::GlobalNumber(_))
+                Token::GlobalName(_) | Token::GlobalNumber(_)
                     if matches!(
                         self.tokens.get(index + 1).map(|t| &t.token),
                         Some(Token::Equals)
                     ) =>
                 {
-                    let Some(name) = global_name(token) else {
+                    let Some(name) = self.take_slot(index, &mut slot)? else {
                         continue;
                     };
                     let mut kind = "global";
@@ -78,7 +113,10 @@ impl Parser {
                 }
                 Token::Word(word) if word == "define" || word == "declare" => {
                     for ahead in index + 1..self.tokens.len() {
-                        let Some(name) = global_name(&self.tokens[ahead].token) else {
+                        if global_name(&self.tokens[ahead].token).is_none() {
+                            continue;
+                        }
+                        let Some(name) = self.take_slot(ahead, &mut slot)? else {
                             continue;
                         };
                         if symbols.contains_key(&name) {

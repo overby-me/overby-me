@@ -150,7 +150,7 @@ impl Printer<'_> {
     }
 
     pub(crate) fn global_ref_text(&self, target: GlobalRef) -> String {
-        format!("@{}", name_text(self.module.global_name(target)))
+        format!("@{}", self.global_text(target))
     }
 
     pub(crate) fn inline_asm(&mut self, asm: &InlineAsm) {

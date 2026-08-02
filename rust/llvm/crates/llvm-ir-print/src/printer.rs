@@ -13,7 +13,8 @@ use llvm_support::Align;
 
 use crate::md_slots::MetadataSlots;
 use crate::print_type;
-use crate::slots::FunctionSlots;
+use crate::slots::{FunctionSlots, ModuleSlots};
+use llvm_ir::value::GlobalRef;
 
 /// The column upstream pads a block label to before its predecessor comment.
 pub(crate) const LABEL_COMMENT_COLUMN: usize = 50;
@@ -33,6 +34,7 @@ pub(crate) struct Printer<'m> {
     groups: Vec<Vec<Attribute>>,
     group_numbers: HashMap<Vec<Attribute>, u32>,
     pub(crate) metadata: MetadataSlots,
+    pub(crate) module_slots: ModuleSlots,
 }
 
 impl<'m> Printer<'m> {
@@ -44,6 +46,16 @@ impl<'m> Printer<'m> {
             groups: Vec::new(),
             group_numbers: HashMap::new(),
             metadata: MetadataSlots::default(),
+            module_slots: ModuleSlots::compute(module),
+        }
+    }
+
+    /// What a module-scope symbol prints as, which for an unnamed one is its
+    /// slot rather than the number it was written with.
+    pub(crate) fn global_text(&self, id: GlobalRef) -> String {
+        match self.module_slots.get(id) {
+            Some(number) => number.to_string(),
+            None => name_text(self.module.global_name(id)),
         }
     }
 
@@ -153,7 +165,7 @@ impl<'m> Printer<'m> {
         if !self.module.globals.is_empty() {
             self.push("\n");
             for index in 0..self.module.globals.len() {
-                self.global(&self.module.globals[index]);
+                self.global(index, &self.module.globals[index]);
                 self.push("\n");
             }
         }
@@ -161,14 +173,14 @@ impl<'m> Printer<'m> {
         if !self.module.aliases.is_empty() {
             self.push("\n");
             for index in 0..self.module.aliases.len() {
-                self.alias(&self.module.aliases[index]);
+                self.alias(index, &self.module.aliases[index]);
             }
         }
 
         if !self.module.ifuncs.is_empty() {
             self.push("\n");
             for index in 0..self.module.ifuncs.len() {
-                self.ifunc(&self.module.ifuncs[index]);
+                self.ifunc(index, &self.module.ifuncs[index]);
             }
         }
 
@@ -182,7 +194,7 @@ impl<'m> Printer<'m> {
                 continue;
             }
             self.push("\n");
-            self.function(&self.module.functions[index]);
+            self.function(index, &self.module.functions[index]);
         }
 
         if !self.groups.is_empty() {

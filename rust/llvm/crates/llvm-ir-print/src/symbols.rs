@@ -14,12 +14,14 @@ use crate::{
     LABEL_COMMENT_COLUMN, Printer, attribute_list, attribute_text, escape_string, identifier,
     name_text, predecessors,
 };
+use llvm_ir::value::{AliasId, FunctionId, GlobalRef, GlobalVarId, IFuncId};
 
 impl Printer<'_> {
     // --------------------------------------------------------------- globals
 
-    pub(crate) fn global(&mut self, global: &GlobalVariable) {
-        let _ = write!(self.out, "@{} = ", name_text(&global.name));
+    pub(crate) fn global(&mut self, index: usize, global: &GlobalVariable) {
+        let name = self.global_text(GlobalRef::Variable(GlobalVarId(index as u32)));
+        let _ = write!(self.out, "@{name} = ");
         if global.initializer.is_none()
             && matches!(global.qualifiers.linkage, None | Some(Linkage::External))
         {
@@ -70,8 +72,9 @@ impl Printer<'_> {
         }
     }
 
-    pub(crate) fn alias(&mut self, alias: &Alias) {
-        let _ = write!(self.out, "@{} = ", name_text(&alias.name));
+    pub(crate) fn alias(&mut self, index: usize, alias: &Alias) {
+        let name = self.global_text(GlobalRef::Alias(AliasId(index as u32)));
+        let _ = write!(self.out, "@{name} = ");
         self.qualifiers(&alias.qualifiers, true, true);
         self.push("alias ");
         self.ty(alias.value_type);
@@ -93,8 +96,9 @@ impl Printer<'_> {
         self.push("\n");
     }
 
-    pub(crate) fn ifunc(&mut self, ifunc: &IFunc) {
-        let _ = write!(self.out, "@{} = ", name_text(&ifunc.name));
+    pub(crate) fn ifunc(&mut self, index: usize, ifunc: &IFunc) {
+        let name = self.global_text(GlobalRef::IFunc(IFuncId(index as u32)));
+        let _ = write!(self.out, "@{name} = ");
         self.qualifiers(&ifunc.qualifiers, true, true);
         self.push("ifunc ");
         self.ty(ifunc.value_type);
@@ -182,7 +186,7 @@ impl Printer<'_> {
 
     // ------------------------------------------------------------- functions
 
-    pub(crate) fn function(&mut self, function: &Function) {
+    pub(crate) fn function(&mut self, index: usize, function: &Function) {
         let resolved = self.resolved_attributes(&function.attrs);
         let comment: Vec<String> = resolved
             .iter()
@@ -220,7 +224,11 @@ impl Printer<'_> {
             );
         }
         self.ty(function.return_type);
-        let _ = write!(self.out, " @{}(", name_text(&function.name));
+        let _ = write!(
+            self.out,
+            " @{}(",
+            self.global_text(GlobalRef::Function(FunctionId(index as u32)))
+        );
 
         self.slots = FunctionSlots::compute(self.module, function);
         for (index, param) in function.params.iter().enumerate() {
