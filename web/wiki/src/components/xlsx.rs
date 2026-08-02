@@ -133,6 +133,13 @@ pub struct Styles {
     /// which is why [`is_date_format`] knows them.
     #[serde(default)]
     pub num_fmts: Vec<NumFmt>,
+    /// The line styles cells draw their edges with, indexed by `border_id`.
+    ///
+    /// In a set of accounts these ARE the structure: a medium rule under a
+    /// subtotal, a double rule under the result. Without them the numbers run
+    /// together as one undivided block.
+    #[serde(default)]
+    pub borders: Vec<Border>,
 }
 
 impl Styles {
@@ -143,6 +150,90 @@ impl Styles {
             .find(|f| f.num_fmt_id == id)
             .map(|f| f.format_code.as_str())
     }
+
+    /// The border a cell of this style draws, if it draws one at all.
+    ///
+    /// Index 0 is the workbook's "no border" entry and every unstyled cell
+    /// points at it, so an edgeless border is treated as none rather than as a
+    /// rule to draw.
+    pub fn border_of(&self, style_index: Option<usize>) -> Option<&Border> {
+        let xf = self.cell_xfs.get(style_index?)?;
+        let border = self.borders.get(xf.border_id? as usize)?;
+        border.draws().then_some(border)
+    }
+}
+
+/// One cell's four edges. Diagonals and the table-style inner rules are parsed
+/// by the vendored crate but not read here: neither appears on a cell border.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Border {
+    #[serde(default)]
+    pub left: Option<BorderEdge>,
+    #[serde(default)]
+    pub right: Option<BorderEdge>,
+    #[serde(default)]
+    pub top: Option<BorderEdge>,
+    #[serde(default)]
+    pub bottom: Option<BorderEdge>,
+}
+
+impl Border {
+    /// Whether any edge actually draws. Excel writes a full `<border>` with four
+    /// empty edges for "no border", and every plain cell refers to it.
+    pub fn draws(&self) -> bool {
+        [&self.left, &self.right, &self.top, &self.bottom]
+            .into_iter()
+            .flatten()
+            .any(|e| edge_css(e).is_some())
+    }
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BorderEdge {
+    #[serde(default)]
+    pub style: String,
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+/// One edge as a CSS `border-*` value, or `None` when it draws nothing.
+///
+/// The colour is deliberately dropped for `currentColor`. Excel writes these as
+/// `auto` or `indexed="64"` — "whatever the text colour is" — which is exactly
+/// what `currentColor` means, and it keeps the rules legible in dark mode where
+/// a literal black would vanish.
+pub fn edge_css(edge: &BorderEdge) -> Option<&'static str> {
+    match edge.style.trim() {
+        "thin" | "hair" => Some("1px solid currentColor"),
+        "medium" => Some("2px solid currentColor"),
+        "thick" => Some("3px solid currentColor"),
+        // The accountant's grand-total rule, and the one CSS spells the same.
+        "double" => Some("3px double currentColor"),
+        "dotted" => Some("1px dotted currentColor"),
+        "dashed" | "dashDot" | "dashDotDot" | "slantDashDot" => Some("1px dashed currentColor"),
+        "mediumDashed" | "mediumDashDot" | "mediumDashDotDot" => Some("2px dashed currentColor"),
+        // "none", "", and anything a future Excel invents.
+        _ => None,
+    }
+}
+
+/// A cell's borders as inline CSS. Empty when it draws none, so the common cell
+/// carries no style attribute at all.
+pub fn border_css(border: &Border) -> String {
+    let mut css = String::new();
+    for (side, edge) in [
+        ("top", &border.top),
+        ("right", &border.right),
+        ("bottom", &border.bottom),
+        ("left", &border.left),
+    ] {
+        if let Some(value) = edge.as_ref().and_then(edge_css) {
+            css.push_str(&format!("border-{side}:{value};"));
+        }
+    }
+    css
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -159,6 +250,9 @@ pub struct NumFmt {
 pub struct Xf {
     #[serde(default)]
     pub num_fmt_id: Option<u32>,
+    /// Which entry of [`Styles::borders`] this style draws its edges with.
+    #[serde(default)]
+    pub border_id: Option<u32>,
 }
 
 /// A spreadsheet column's letter: 1 → A, 26 → Z, 27 → AA.
@@ -270,7 +364,7 @@ pub fn cell_text(cell: &SheetCell, wb: &Workbook) -> String {
 ///
 /// Rendering straight from the sparse model puts every value hard against the
 /// left edge and loses the columns entirely; this is what puts them back.
-pub fn to_grid(sheet: &Sheet, wb: &Workbook) -> (Vec<Vec<String>>, usize) {
+pub fn to_grid(sheet: &Sheet, wb: &Workbook) -> (Vec<Vec<GridCell>>, usize) {
     let width = sheet
         .rows
         .iter()
@@ -283,7 +377,7 @@ pub fn to_grid(sheet: &Sheet, wb: &Workbook) -> (Vec<Vec<String>>, usize) {
         .map(|r| r.index as usize)
         .max()
         .unwrap_or(0);
-    let mut grid = vec![vec![String::new(); width]; last_row];
+    let mut grid = vec![vec![GridCell::default(); width]; last_row];
     for row in &sheet.rows {
         let Some(r) = (row.index as usize).checked_sub(1) else {
             continue;
@@ -293,11 +387,24 @@ pub fn to_grid(sheet: &Sheet, wb: &Workbook) -> (Vec<Vec<String>>, usize) {
                 continue;
             };
             if r < grid.len() && c < width {
-                grid[r][c] = cell_text(cell, wb);
+                grid[r][c] = GridCell {
+                    text: cell_text(cell, wb),
+                    // A cell with no text can still carry a rule: the underline
+                    // beneath a total is usually on the empty cells beside it.
+                    border: wb.styles.border_of(cell.style_index).map(border_css),
+                };
             }
         }
     }
     (grid, width)
+}
+
+/// One cell of the dense grid: what it says, and the rules it draws.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GridCell {
+    pub text: String,
+    /// Inline CSS for its edges, when it has any.
+    pub border: Option<String>,
 }
 
 /// A sheet as a table, with the spreadsheet's own row numbers and column
@@ -320,8 +427,14 @@ pub fn SheetTable(sheet: Sheet, workbook: Workbook) -> Element {
                     for (r , row) in grid.into_iter().enumerate() {
                         tr { key: "r{r}",
                             th { class: "xlsx-rowhead", "{r + 1}" }
-                            for (c , text) in row.into_iter().enumerate() {
-                                td { key: "c{c}", "{text}" }
+                            for (c , cell) in row.into_iter().enumerate() {
+                                td {
+                                    key: "c{c}",
+                                    // Only the cells that draw one carry a style
+                                    // attribute; a sheet is mostly plain cells.
+                                    style: cell.border.unwrap_or_default(),
+                                    "{cell.text}"
+                                }
                             }
                         }
                     }
@@ -437,21 +550,26 @@ mod tests {
                 cell_xfs: vec![
                     Xf {
                         num_fmt_id: Some(0),
+                        ..Default::default()
                     },
                     Xf {
                         num_fmt_id: Some(14),
+                        ..Default::default()
                     },
                     Xf {
                         num_fmt_id: Some(165),
+                        ..Default::default()
                     },
                     Xf {
                         num_fmt_id: Some(44),
+                        ..Default::default()
                     },
                 ],
                 num_fmts: vec![NumFmt {
                     num_fmt_id: 165,
                     format_code: "dd/mm/yyyy".to_string(),
                 }],
+                borders: Vec::new(),
             },
         }
     }
@@ -562,11 +680,102 @@ mod tests {
             ..Default::default()
         };
         let (grid, width) = to_grid(&sheet, &w);
+        let text = |r: usize| -> Vec<String> { grid[r].iter().map(|c| c.text.clone()).collect() };
         assert_eq!(width, 4, "widest row decides the column count");
         assert_eq!(grid.len(), 3, "the absent row 2 is still a row");
-        assert_eq!(grid[0], vec!["Year", "", "7", ""], "B1 stays a hole");
-        assert_eq!(grid[1], vec!["", "", "", ""], "the empty row is empty");
-        assert_eq!(grid[2], vec!["", "", "", "x"], "D3 stays in column D");
+        assert_eq!(text(0), vec!["Year", "", "7", ""], "B1 stays a hole");
+        assert_eq!(text(1), vec!["", "", "", ""], "the empty row is empty");
+        assert_eq!(text(2), vec!["", "", "", "x"], "D3 stays in column D");
+    }
+
+    /// The rules a set of accounts is read by, in the shape the parser emits
+    /// them: pasted from the styles of a real `regnskabsark`. Every edge is
+    /// present as a key and `null` when it draws nothing, and index 0 is the
+    /// all-empty border that every plain cell in the workbook points at.
+    #[test]
+    fn a_workbooks_rules_become_css_edges() {
+        let wb: Workbook = serde_json::from_value(serde_json::json!({
+            "sharedStrings": [],
+            "styles": {
+                "cellXfs": [
+                    {"numFmtId": 0, "borderId": 0},
+                    {"numFmtId": 0, "borderId": 1},
+                    {"numFmtId": 0, "borderId": 2},
+                    {"numFmtId": 0, "borderId": 3}
+                ],
+                "numFmts": [],
+                "borders": [
+                    {"left": null, "right": null, "top": null, "bottom": null},
+                    {"left": null, "right": null,
+                     "top": {"style": "thin", "color": "#000000"},
+                     "bottom": {"style": "double", "color": "#000000"}},
+                    {"left": null, "right": null, "top": null,
+                     "bottom": {"style": "thick", "color": null}},
+                    {"left": null, "right": null, "top": null,
+                     "bottom": {"style": "medium", "color": "#000000"}}
+                ]
+            }
+        }))
+        .expect("the parser's own shape");
+
+        // The plain cell draws nothing, which is most of the sheet.
+        assert!(wb.styles.border_of(Some(0)).is_none());
+        // ...and so does a cell with no style at all, or one off the end.
+        assert!(wb.styles.border_of(None).is_none());
+        assert!(wb.styles.border_of(Some(99)).is_none());
+
+        // The grand total: a thin rule above, a double rule below.
+        let total = wb.styles.border_of(Some(1)).expect("border 1 draws");
+        assert_eq!(
+            border_css(total),
+            "border-top:1px solid currentColor;border-bottom:3px double currentColor;"
+        );
+        // The heavy rule, and the subtotal's.
+        assert_eq!(
+            border_css(wb.styles.border_of(Some(2)).expect("border 2 draws")),
+            "border-bottom:3px solid currentColor;"
+        );
+        assert_eq!(
+            border_css(wb.styles.border_of(Some(3)).expect("border 3 draws")),
+            "border-bottom:2px solid currentColor;"
+        );
+    }
+
+    /// A rule can sit on a cell with nothing in it — the underline beside a
+    /// total usually does — so the grid has to carry style, not just text.
+    #[test]
+    fn an_empty_cell_still_carries_its_rule() {
+        let wb: Workbook = serde_json::from_value(serde_json::json!({
+            "sharedStrings": [],
+            "styles": {
+                "cellXfs": [{"numFmtId": 0, "borderId": 0}, {"numFmtId": 0, "borderId": 1}],
+                "numFmts": [],
+                "borders": [
+                    {"left": null, "right": null, "top": null, "bottom": null},
+                    {"left": null, "right": null, "top": null,
+                     "bottom": {"style": "medium", "color": null}}
+                ]
+            }
+        }))
+        .expect("the parser's own shape");
+        let sheet = Sheet {
+            rows: vec![SheetRow {
+                index: 1,
+                cells: vec![SheetCell {
+                    col: 2,
+                    value: None,
+                    style_index: Some(1),
+                }],
+            }],
+            ..Default::default()
+        };
+        let (grid, _) = to_grid(&sheet, &wb);
+        assert_eq!(grid[0][1].text, "", "nothing written in it");
+        assert_eq!(
+            grid[0][1].border.as_deref(),
+            Some("border-bottom:2px solid currentColor;"),
+            "but the rule under it is the point"
+        );
     }
 
     /// The parser's real wire shape, keys and all.
