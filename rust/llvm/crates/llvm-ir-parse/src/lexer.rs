@@ -307,12 +307,17 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 self.prefixed_name(position, Token::GlobalName, Token::GlobalNumber)?
             }
-            b'$' => {
-                self.bump();
-                self.prefixed_name(position, Token::ComdatName, |_| {
-                    Token::ComdatName(String::new())
-                })?
-            }
+            // `$x:` is a label and `$x = comdat any` names a comdat, and
+            // the colon is again what tells them apart.
+            b'$' => match self.label_ahead() {
+                Some(label) => Token::Label(label),
+                None => {
+                    self.bump();
+                    self.prefixed_name(position, Token::ComdatName, |_| {
+                        Token::ComdatName(String::new())
+                    })?
+                }
+            },
             b'!' => {
                 self.bump();
                 match self.peek() {
@@ -417,7 +422,14 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 Token::Ellipsis
             }
-            b'-' | b'0'..=b'9' | b'+' => self.numeric()?,
+            // A label may start with a hyphen, where a number's sign may
+            // only be followed by digits: `-N-:` is a label and `-3` a
+            // negative number, and the colon is what tells them apart.
+            b'-' => match self.label_ahead() {
+                Some(label) => Token::Label(label),
+                None => self.numeric()?,
+            },
+            b'0'..=b'9' | b'+' => self.numeric()?,
             b if is_name_start(b) => self.word_or_label()?,
             other => {
                 return Err(self.error(format!("unexpected character '{}'", other as char)));
@@ -458,6 +470,33 @@ impl<'a> Lexer<'a> {
                 message: "expected a name after the sigil".to_string(),
             }),
         }
+    }
+
+    /// The label a run of label characters spells, when a `:` closes it.
+    ///
+    /// Upstream scans this set first and only then decides what it read: a
+    /// run ending at a colon is a label, and one that does not is whatever
+    /// the shorter grammars make of it. That is what lets `-N-:` be a label
+    /// while `i16-1` stays a type and a negative number, and `$x:` a label
+    /// while `$x` is a comdat. The set was measured one character at a
+    /// time: a label starts with a letter, `$`, `.`, `_` or `-`, and
+    /// continues with those and digits.
+    fn label_ahead(&mut self) -> Option<String> {
+        let start = self.offset;
+        while let Some(byte) = self.peek() {
+            if is_name_byte(byte) || byte == b'-' {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        if self.offset > start && self.peek() == Some(b':') {
+            let text = self.text[start..self.offset].to_string();
+            self.bump();
+            return Some(text);
+        }
+        self.rewind_to(start);
+        None
     }
 
     /// A name after a sigil, which may hold a hyphen where a bare word may
@@ -794,6 +833,47 @@ mod tests {
         );
         assert_eq!(tokens("3:"), vec![Token::LabelNumber(3), Token::Eof]);
         assert_eq!(tokens("%3:"), vec![Token::LabelNumber(3), Token::Eof]);
+    }
+
+    /// A label's characters are a wider set than a word's, and the colon is
+    /// what says which set was meant. Measured against `llvm-as` one
+    /// character at a time.
+    #[test]
+    fn a_label_may_start_where_a_word_may_not() {
+        assert_eq!(
+            tokens("-N-:"),
+            vec![Token::Label("-N-".to_string()), Token::Eof]
+        );
+        assert_eq!(
+            tokens("$N:"),
+            vec![Token::Label("$N".to_string()), Token::Eof]
+        );
+        assert_eq!(
+            tokens("-3:"),
+            vec![Token::Label("-3".to_string()), Token::Eof]
+        );
+        // Without the colon each is what it was before: a comdat name, and
+        // a type followed by a negative number rather than one word.
+        assert_eq!(
+            tokens("$N = comdat"),
+            vec![
+                Token::ComdatName("N".to_string()),
+                Token::Equals,
+                Token::Word("comdat".to_string()),
+                Token::Eof,
+            ]
+        );
+        assert_eq!(
+            tokens("i16-1"),
+            vec![
+                Token::IntType(16),
+                Token::Integer {
+                    negative: true,
+                    digits: "1".to_string(),
+                },
+                Token::Eof,
+            ]
+        );
     }
 
     #[test]

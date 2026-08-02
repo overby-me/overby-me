@@ -1781,6 +1781,30 @@ is measured rather than assumed.
 No bound moves for any of it. The suites do not test these shapes, which is
 what the fixture audit exists to catch and why the rules were found by
 asking upstream about our own tests rather than by running its.
+Next the ceiling, the count of modules we refuse that `llvm-as` reads,
+which STATUS calls the failure that matters. Two of the five looked like
+parse gaps rather than blocked work, and one of them was.
+`Assembler/block-labels.ll` writes `-N-:` and `$N:`, and neither reached
+the label path: a leading `-` went to the number lexer and a leading `$` to
+the comdat sigil. The character set was measured one character at a time,
+leading and continuing separately, and it is
+`[-a-zA-Z$._][-a-zA-Z$._0-9]*`. Upstream resolves the ambiguity by scanning
+that set first and deciding afterwards, the colon being what says which
+grammar was meant, and `word_or_label` already did exactly that for a
+hyphen in the middle. Lifting it into `label_ahead` and calling it from the
+two other starts is the whole fix, and `i16-1` stays a type and a negative
+number because no colon follows it.
+Assembler 475 to 476 with the ceiling 5 to 4, and its differential 189 to
+190: the file is not only read now but printed the way upstream prints it.
+The other of the two is a bigger rule than it looks.
+`skip-value-numbers-globals.ll` fails on `@""`, which we call a
+redefinition the second time it appears, and upstream does not call a name
+at all: an empty quoted name is unnamed, and the value takes the next slot
+number. Measuring it turned up the rest of the rule, which is that upstream
+renumbers every unnamed global densely from zero, so `@5` and `@7` print as
+`@0` and `@1` where we print what was written. That is a printing change as
+well as a parsing one, so it wants its own pass rather than a corner of
+this one.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`

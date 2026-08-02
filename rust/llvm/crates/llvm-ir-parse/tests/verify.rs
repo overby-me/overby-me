@@ -1649,6 +1649,13 @@ const VERIFIES: &[&str] = &[
     // The address a function takes of its own block, read by the
     // `indirectbr` that also lists the block as a destination.
     "define void @f() {\nentry:\n  indirectbr ptr blockaddress(@f, %target), [ label %target ]\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+    // A label's characters are a wider set than a word's, and the colon is
+    // what says which set was meant: `-N-` and `$N` name blocks where they
+    // would otherwise be a negative number and a comdat.
+    "define void @f() {\n  br label %-N-\n-N-:\n  ret void\n}\n",
+    "define void @f() {\n  br label %$N\n$N:\n  ret void\n}\n",
+    "define void @f() {\n  br label %-3\n-3:\n  ret void\n}\n",
+    "define void @f() {\n  br label %a.$b\na.$b:\n  ret void\n}\n",
     // An addrspacecast that does cross, in both directions and through a
     // vector of pointers.
     "@r = addrspace(3) global i32 0\n@a = global ptr addrspacecast (ptr addrspace(3) @r to ptr)\n",
