@@ -202,6 +202,7 @@ const EN_JSON: &str = r#"{
     "common": {
         "add": "Add",
         "cancel": "Cancel",
+        "create": "Create",
         "delete": "Delete",
         "deletePermanent": "This one cannot be undone.",
         "edit": "Edit",
@@ -781,6 +782,7 @@ const DA_JSON: &str = r#"{
     "common": {
         "add": "Tilf\u00f8j",
         "cancel": "Annuller",
+        "create": "Opret",
         "delete": "Slet",
         "deletePermanent": "Denne kan ikke fortrydes.",
         "edit": "Rediger",
@@ -1277,6 +1279,102 @@ const DA_JSON: &str = r#"{
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every key the app asks for must exist, in both languages.
+    ///
+    /// `t()` falls back to returning the KEY when it cannot find one, which on a
+    /// button with no other content renders as nothing at all — a blank button
+    /// shipped to production that way, and no test noticed. This walks the
+    /// source for every `t("…")` literal and looks each one up, so the next
+    /// missing label fails here instead of on somebody's screen.
+    ///
+    /// Only literals are checked. A key built at runtime (`gap.label_key()`,
+    /// `viewer.label_key()`) returns a `&'static str` from a match, and those
+    /// are covered by their own tests.
+    #[test]
+    fn every_key_the_source_asks_for_exists_in_both_languages() {
+        fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    rust_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let mut files = Vec::new();
+        rust_files(std::path::Path::new("src"), &mut files);
+        assert!(files.len() > 20, "found only {} source files", files.len());
+
+        let (en, da) = (en_translations(), da_translations());
+        let mut missing: Vec<String> = Vec::new();
+        let mut checked = 0usize;
+        for file in &files {
+            let Ok(text) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            // `t("a.b")` and `t(\"a.b\")`, the two ways it is written inside and
+            // outside an rsx string.
+            for (i, _) in text.match_indices("t(").chain(text.match_indices("t(\\\"")) {
+                // Doc comments explain the shape of a `t()` call and are not
+                // calls; the line they sit on begins with `//`.
+                let line_start = text[..i].rfind('\n').map(|n| n + 1).unwrap_or(0);
+                if text[line_start..i].trim_start().starts_with("//") {
+                    continue;
+                }
+                let rest = &text[i..];
+                let Some(open) = rest.find(['"']) else {
+                    continue;
+                };
+                if open > 5 {
+                    continue;
+                }
+                let after = &rest[open + 1..];
+                let Some(close) = after.find(['"', '\\']) else {
+                    continue;
+                };
+                let key = &after[..close];
+                if key.len() < 3 || !key.contains('.') || key.contains(' ') || key.contains('{') {
+                    continue;
+                }
+                let mut parts = key.split('.');
+                let (Some(section), Some(name), None) = (parts.next(), parts.next(), parts.next())
+                else {
+                    continue;
+                };
+                let named = |s: &str| {
+                    s.starts_with(|c: char| c.is_ascii_alphabetic())
+                        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                };
+                if !named(section) || !named(name) {
+                    continue;
+                }
+                checked += 1;
+                for (lang, map) in [("en", &en), ("da", &da)] {
+                    if lookup_key(map, key).is_none() {
+                        missing.push(format!("{lang}: {key}  ({})", file.display()));
+                    }
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            checked > 100,
+            "only {checked} keys found; the scan is broken"
+        );
+        assert!(
+            missing.is_empty(),
+            "{} translation key(s) the app asks for do not exist:\n  {}",
+            missing.len(),
+            missing.join("\n  ")
+        );
+    }
 
     /// The embedded JSON must parse and contain the sections the components use.
     /// A malformed blob would parse to an empty map and every key would silently

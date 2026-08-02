@@ -906,7 +906,11 @@ mod tests {
 #[component]
 pub fn PixelCanvasesApp(node: NodeWithChildren) -> Element {
     let session = use_session();
-    let is_owner = node.is_context_owner.unwrap_or(false) || node.is_owner.unwrap_or(false);
+    // Context owners ONLY. `is_owner` is a different question — it means "you
+    // created THIS node" — and it was being accepted here as though it meant
+    // "you administer this place", so whoever happened to own the node the app
+    // hangs off could add a canvas to somebody else's group.
+    let is_owner = node.is_context_owner.unwrap_or(false);
     let context_id = node
         .context_id
         .clone()
