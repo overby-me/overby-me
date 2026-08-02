@@ -301,6 +301,54 @@ pub fn SheetTable(sheet: Sheet, workbook: Workbook) -> Element {
 mod tests {
     use super::*;
 
+    /// Reported: a 351-row spreadsheet rendered as one empty row.
+    ///
+    /// The workbook was being read with `parse_workbook_native`, which
+    /// serialises only the sheet LIST. It is named after the workbook and it
+    /// deserialises into [`Workbook`] without complaint — every field simply
+    /// takes its default — so the shared-string table was always empty. A cell
+    /// holding text holds an INDEX into that table, so every string in every
+    /// real spreadsheet resolved to nothing.
+    ///
+    /// Both shapes are pinned here: the one that silently says nothing, and the
+    /// one that carries the strings.
+    #[test]
+    fn the_workbook_must_be_the_whole_workbook() {
+        // What `parse_workbook_native` returns. Deserialises fine; says nothing.
+        let list_only = serde_json::json!({
+            "sheets": [{"name": "Ark1", "sheetId": 1, "rId": "rId1"}]
+        });
+        let wb: Workbook = serde_json::from_value(list_only).unwrap();
+        assert!(
+            wb.shared_strings.is_empty(),
+            "this is the trap: it parses, and it is empty"
+        );
+
+        // What `parse_xlsx` returns, which is what the renderer needs.
+        let whole = serde_json::json!({
+            "workbook": {"sheets": [{"name": "Ark1", "sheetId": 1, "rId": "rId1"}]},
+            "sharedStrings": [{"text": "Kontonr."}, {"text": "Kontonavn"}],
+            "styles": {"cellXfs": [{"numFmtId": 0}], "numFmts": {}}
+        });
+        let wb: Workbook = serde_json::from_value(whole).unwrap();
+        assert_eq!(wb.shared_strings.len(), 2);
+
+        // And a cell pointing into it reads back as its text.
+        let cell = SheetCell {
+            value: Some(CellValue::Shared { si: 1 }),
+            ..Default::default()
+        };
+        assert_eq!(cell_text(&cell, &wb), "Kontonavn");
+
+        // An index past the end is blank, not a panic: a corrupt table must not
+        // take the page down.
+        let past_end = SheetCell {
+            value: Some(CellValue::Shared { si: 99 }),
+            ..Default::default()
+        };
+        assert_eq!(cell_text(&past_end, &wb), "");
+    }
+
     fn wb() -> Workbook {
         Workbook {
             shared_strings: vec![

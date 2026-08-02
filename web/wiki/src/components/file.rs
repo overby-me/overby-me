@@ -726,9 +726,16 @@ fn NativeXlsx(file_id: String, name: String) -> Element {
     let token = crate::session::use_session().read().access_token.clone();
     let parsed = crate::use_data_resource!(|(file_id, token)| async move {
         let bytes = crate::backend_api::file_bytes(&file_id, &token.unwrap_or_default()).await?;
-        let wb_json = xlsx_parser::parse_workbook_native(&bytes)?;
+        // `parse_xlsx`, NOT `parse_workbook_native`: the latter serialises only
+        // the sheet LIST. It looks like the workbook because it is named after
+        // it, and it deserialises into `Workbook` without complaint — every
+        // field simply defaults. So the shared-string table was always empty,
+        // and a cell holding text holds an INDEX into that table, which is how
+        // every real spreadsheet came out blank. Reported from a 351-row
+        // spreadsheet whose 182 strings all vanished.
+        let wb_bytes = xlsx_parser::parse_xlsx(&bytes, None).map_err(|e| format!("{e:?}"))?;
         let wb_value: serde_json::Value =
-            serde_json::from_str(&wb_json).map_err(|e| e.to_string())?;
+            serde_json::from_slice(&wb_bytes).map_err(|e| e.to_string())?;
         let workbook: super::xlsx::Workbook =
             serde_json::from_value(wb_value.clone()).map_err(|e| e.to_string())?;
         // The sheet list lives under `workbook`; its names are what the tabs say
