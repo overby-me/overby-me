@@ -576,6 +576,42 @@ fn expire_due_start_waits(
                 start_waits.insert(id, wait);
             }
             Some(_) => {
+                // Verify the process actually survived the SIGTERM before
+                // declaring the start dead: under load the exit event may
+                // still be queued, and failing blind here SIGKILLs a healthy
+                // shutdown mid-trap (the 16/59 margin flake class). The
+                // main_pid atomic is maintained lock-free: set at fork,
+                // cleared by the exit head.
+                let (still_starting, live_pid) = {
+                    let ri = crate::units::dispatcher_read(run_info);
+                    match ri.unit_table.get(&id) {
+                        Some(unit) => (
+                            matches!(
+                                &*unit.common.status.read_poisoned(),
+                                crate::units::UnitStatus::Starting
+                            ),
+                            unit.common
+                                .main_pid
+                                .load(std::sync::atomic::Ordering::Acquire)
+                                != 0,
+                        ),
+                        None => (false, false),
+                    }
+                };
+                if !still_starting {
+                    // Someone else owned the outcome during the grace period.
+                    continue;
+                }
+                if !live_pid {
+                    // The process is gone; its exit or final datagram is in
+                    // flight. Re-evaluate now (a notify main-exit resolves to
+                    // the protocol failure immediately) and otherwise give the
+                    // events a short window instead of failing blind.
+                    wait.armed_deadline =
+                        Some(now + std::time::Duration::from_millis(500));
+                    progress_start_wait(wait, false, run_info, chains, start_waits);
+                    continue;
+                }
                 crate::entrypoints::kmsg(&format!(
                     "START-TIMEOUT {} did not exit after SIGTERM; failing the start",
                     id.name
