@@ -1856,6 +1856,27 @@ refusing in the probe that first suggested otherwise.
 Verifier 316 to 320, its wrongly-read count 12 to 8. Nothing else moves, and
 the generated table is byte-identical on regeneration, the generator running
 `rustfmt` itself because a row is wider than the line limit.
+The next cluster was `DIExpression`, four files across the two suites all
+failing with "invalid expression", and it is recorded here as measured and
+not written, which is a different thing from the blockers that were only
+arguments.
+The obvious shape is a per-opcode table: which numbers are opcodes and how
+many operands each takes. Three probes were built for it and all three
+measure something else. Writing `DIExpression(N, 0, 0)` and taking the
+arities that verify says 80 through 143 accept every arity, because the
+trailing zeros are themselves elements and a register op swallows what
+follows. Anchoring with `DW_OP_deref` and asking again says everything takes
+no operands, because the anchor is the number 6 and `DW_OP_plus_uconst` is
+glad to take 6 as its operand. Spelling the anchor by name changes nothing:
+a name is a number to the parser, so `DIExpression(DW_OP_plus_uconst,
+DW_OP_deref)` is `plus_uconst 6` and verifies.
+What settles it is a pair: `DIExpression(DW_OP_swap)` is refused and
+`DIExpression(DW_OP_swap, DW_OP_deref)` is not. No arity explains that.
+Validity is a property of the whole sequence, a stack the operations leave
+in a shape the verifier will accept, so the rule is a small interpreter
+rather than a table and it wants a pass of its own. What is measured and
+worth keeping is that a standalone `!DIExpression` reached from a named list
+is verified, which makes the oracle cheap for whoever writes it.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`
