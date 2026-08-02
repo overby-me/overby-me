@@ -16,9 +16,8 @@ dioxus-icons = { version = "0.1.0", default-features = false }
 # Pinned to an explicit rev so `cargo update` can't float it to HEAD (which would
 # stale the Nix `outputHashes` FOD hash in default.nix and break the build).
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
-# StreamExt for the use_coroutine bridge that feeds window-resize widths into the
-# adaptive WindowSizeClass signal from inside the Dioxus runtime.
-# Office Open XML parsers, VENDORED from github.com/yukiyokotani/office-open-xml-viewer
+# Office Open XML parsers (docx-, pptx- and xlsx-parser, sorted apart below),
+# VENDORED from github.com/yukiyokotani/office-open-xml-viewer
 # (MIT, Yuki Yokotani; see vendor/ooxml/LICENSE and vendor/ooxml/README.md).
 #
 # Vendored rather than depended on as a git rev because all three crates export
@@ -27,8 +26,8 @@ dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "b
 # vendored copies have the JS layer stripped: this app calls them as plain Rust
 # and never needed a JS binding.
 docx-parser = { path = "vendor/ooxml/docx-parser" }
-xlsx-parser = { path = "vendor/ooxml/xlsx-parser" }
-pptx-parser = { path = "vendor/ooxml/pptx-parser" }
+# StreamExt for the use_coroutine bridge that feeds window-resize widths into the
+# adaptive WindowSizeClass signal from inside the Dioxus runtime.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
@@ -40,17 +39,17 @@ log = "0.4"
 material-colors = { version = "0.4", default-features = false, features = [
   "libm"
 ] }
+pptx-parser = { path = "vendor/ooxml/pptx-parser" }
 # default-features disabled to drop native-tls/openssl-sys, which is unused on
 # wasm (reqwest uses the browser fetch) and breaks host-target clippy.
-# Already in the tree via vendor/ooxml; naming them here lets the OpenDocument
-# reader (components::odf) use them directly rather than through a parser crate
-# that does not handle ODF.
-roxmltree = "0.20"
-zip = { version = "2", default-features = false, features = ["deflate-miniz"] }
 reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "multipart"
 ] }
+# roxmltree and zip (bottom) are already in the tree via vendor/ooxml; naming
+# them here lets the OpenDocument reader (components::odf) use them directly
+# rather than through a parser crate that does not handle ODF.
+roxmltree = "0.20"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Pinned to the wasm-bindgen 0.2.121 family so the crate versions match the
@@ -65,13 +64,13 @@ web-sys = { version = "=0.3.98", features = [
   # service worker cannot answer it with the build being replaced.
   "Cache",
   "CacheStorage",
+  "CanvasRenderingContext2d",
   "Clipboard",
   "ClipboardEvent",
   "CloseEvent",
   "CssStyleDeclaration",
   "DataTransfer",
   "Document",
-  "CanvasRenderingContext2d",
   "Element",
   "ErrorEvent",
   "Event",
@@ -79,8 +78,8 @@ web-sys = { version = "=0.3.98", features = [
   "History",
   "HtmlAnchorElement",
   "HtmlBrElement",
-  "HtmlDocument",
   "HtmlCanvasElement",
+  "HtmlDocument",
   "HtmlElement",
   "HtmlHeadElement",
   "HtmlImageElement",
@@ -114,6 +113,8 @@ web-sys = { version = "=0.3.98", features = [
   "XmlHttpRequest",
   "console",
 ] }
+xlsx-parser = { path = "vendor/ooxml/xlsx-parser" }
+zip = { version = "2", default-features = false, features = ["deflate-miniz"] }
 
 [features]
 default = ["web"]
@@ -121,6 +122,15 @@ default = ["web"]
 # panics) to Better Stack / Logtail. Reads BETTERSTACK_SOURCE_TOKEN at build time.
 remote-logging = []
 web = ["dioxus/router", "dioxus/web"]
+
+# dioxus-core 0.7.9 VENDORED for a one-line fix (vendor/dioxus-core, see its
+# README). `Runtime::handle_event` held its `elements` borrow across listener
+# code, so any render a listener triggered aborted the app with "RefCell
+# already borrowed". Patched here rather than pinned to a fork so Nix and local
+# builds resolve identically. Sent upstream as DioxusLabs/dioxus#5729; drop
+# this section once it ships.
+[patch.crates-io]
+dioxus-core = { path = "vendor/dioxus-core" }
 
 # dx builds the web bundle with the `wasm-release` profile. Size matters (phones
 # on venue wifi): fat LTO + a single codegen unit + abort-on-panic trim the wasm
