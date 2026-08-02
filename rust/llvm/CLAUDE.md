@@ -1649,37 +1649,42 @@ The value had been skipped rather than read, on the grounds that nothing
 needed to know which value it was, so the type is read now and the rest of
 the reference is still skipped, it being a constant expression with commas
 of its own in the general case. Assembler 465 to 466.
-What the count needs is recorded rather than started, and the blocker is
-not the one that was recorded before. It is not def-use chains and it is
-not the concept; it is that nothing here enumerates the operands of a
-constant or the constant operands of an instruction. `verify.rs` has an
-`operands(kind)` that yields the `InstId`s an instruction reads, which is
-the instruction-to-instruction half only, so counting the uses of a global
-has nowhere to start.
-The rest is settled. The count cannot be taken while the module is still
-being read, a global used by a later function not yet being used when the
-directive is parsed, so the directives are collected and checked after the
-parse, next to the other post-parse passes. The count itself was derived
-from upstream's own message, which names the number it expected: each
-operand slot is one use, a constant expression is uniqued so the same one
-written into two globals is one use, and the same value twice in one
-instruction is two. Three aliases are three, one initializer is one.
-The order to do it in, and what each step is worth. Enumerating a
-constant's operands and an instruction's constant operands is the whole
-prerequisite. With it, six files come from globals alone
-(`indexes-empty`, `indexes-one`, `indexes-toofew`, `indexes-toomany`,
-`indexes-range`, `global-missing`), which is the simpler walk: global
-initializers, aliasees and resolvers, every interned constant's operands,
-every instruction's operands, and a function's personality, prefix and
-prologue. Two more want a local counted inside its own function
-(`function-missing-named`, `function-missing-numbered`), and one wants a
-placement rule rather than a count (`function-between-blocks`).
-The count should be validated before any rule leans on it, and there is an
-oracle for that: upstream's "wrong number of indexes, expected N" names the
-number. A script that writes modules of varying shape and compares our
-count against the N upstream reports would settle it the way the other
-tables were settled. Refusing on a count that is short by one refuses a
-module upstream reads, which is the direction that costs.
+The pass after it built that count, and the blocker recorded for it was
+half wrong. `InstKind::operand_values` already walks every value an
+instruction reads and `ConstExpr::parts` already walks an expression's, so
+only `Constant::operand_constants` was missing, which is one match.
+`Module::use_count` is the walk: every interned constant's operands, every
+instruction's, global initializers, aliasees and resolvers, and a
+function's personality, prefix and prologue. It cannot be taken while the
+module is being read, a global used by a later function not yet being used
+when the directive is parsed, so the directives are collected and checked
+after the parse.
+The count was validated before any rule leaned on it, against upstream's
+own message: "wrong number of indexes, expected N" names the number, so the
+test holds six shapes with N read off `llvm-as`. Two of them are the ones
+worth having: `icmp eq ptr @g, @g` is two uses, and one `getelementptr`
+written into two globals is one, constants being uniqued.
+Turning it on cost four tree modules anyway, and neither cause was one that
+reasoning would have found. A `ptr null` has no use list at all: upstream
+takes any number of indexes for it, and sweeping the kinds gives a clean
+boundary, `null`, a literal, `undef`, `zeroinitializer` and a splat are
+never checked where a symbol, an expression and an aggregate holding
+either are. That is constant *data*, shared across the context rather than
+owned by the module, and `Constant::has_use_list` says so. The other three
+permute `@llvm.dbg.declare`'s use list, and its calls are read into debug
+records the way upstream reads them, so the uses are gone from the model
+before the count is taken; a record is the call, so the count adds one per
+record whose name matches.
+Two fixtures of ours turned out to be modules upstream refuses, which is
+worse than a missing rule because they were asserting the opposite. One
+said `uselistorder ptr @a` parses where nothing uses `@a`. The other sat in
+the table of modules upstream *accepts* and had three faults at once: a
+directive among the instructions rather than after the terminator, a value
+with no uses, and `uselistorder_bb` on the entry block, which nothing
+branches to. Nothing had ever asked `llvm-as` about it.
+Assembler 466 to 472, with the modules we wrongly accept twelve to six.
+What is left of the ten is the local count, which wants the same walk
+inside one function, and the placement rule that fixture just taught.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`

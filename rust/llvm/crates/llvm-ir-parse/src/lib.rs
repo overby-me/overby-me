@@ -72,6 +72,7 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
         next_inline_metadata: 0,
         wrote_debug_record: false,
         wrote_debug_intrinsic: false,
+        use_list_orders: Vec::new(),
     };
     parser.next_inline_metadata = parser
         .tokens
@@ -98,6 +99,7 @@ pub fn parse_module(text: &str) -> Result<Module, ParseError> {
     parser.upgrade_objc_module_flags();
     parser.drop_invalid_debug_info();
     parser.mark_self_referencing_distinct();
+    parser.check_use_list_orders()?;
     Ok(parser.module)
 }
 
@@ -125,6 +127,10 @@ pub(crate) struct Parser {
     /// noticed as they are read.
     pub(crate) wrote_debug_record: bool,
     pub(crate) wrote_debug_intrinsic: bool,
+    /// Every `uselistorder` that named a constant, with where it was written
+    /// and the indexes it gave. Checked once the module is whole, a global
+    /// used by a later function not yet being used while the text is read.
+    pub(crate) use_list_orders: Vec<(Position, llvm_ir::constant::ConstId, Vec<u64>)>,
 }
 
 /// Everything the parser has to remember while inside one function body.

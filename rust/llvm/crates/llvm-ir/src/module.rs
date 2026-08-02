@@ -3,12 +3,13 @@
 use std::collections::HashMap;
 
 use crate::attribute::Attribute;
+use crate::constant::{ConstId, Constant};
 use crate::context::Context;
 use crate::function::Function;
 use crate::global::{Alias, Comdat, GlobalVariable, IFunc};
 use crate::metadata::{Metadata, NamedMetadata};
 use crate::types::TypeId;
-use crate::value::{AliasId, FunctionId, GlobalRef, GlobalVarId, IFuncId, MdId, Name};
+use crate::value::{AliasId, FunctionId, GlobalRef, GlobalVarId, IFuncId, MdId, Name, Value};
 use llvm_support::{Align, DataLayout, Triple};
 
 /// A translation unit: everything one `.ll` file holds, plus the context its
@@ -201,6 +202,65 @@ impl Module {
             .iter()
             .enumerate()
             .filter_map(|(index, node)| Some((MdId(index as u32), node.as_ref()?)))
+    }
+
+    /// How many operand slots in the module read this constant.
+    ///
+    /// One per slot rather than one per reader, which is what upstream
+    /// counts: `icmp eq ptr @g, @g` uses `@g` twice. Constants are interned,
+    /// so an expression written into two globals is one constant and reads
+    /// what it reads once; the two globals then read the expression rather
+    /// than what it names.
+    ///
+    /// This is what a `uselistorder` directive is checked against, and it
+    /// can only be taken once the whole module is read: a global used by a
+    /// later function is not yet used while the text is still being parsed.
+    pub fn use_count(&self, target: ConstId) -> usize {
+        let mut count = 0;
+        for index in 0..self.ctx.constant_count() {
+            for operand in self.ctx.constant(ConstId(index as u32)).operand_constants() {
+                count += usize::from(operand == target);
+            }
+        }
+        for global in &self.globals {
+            count += usize::from(global.initializer == Some(target));
+        }
+        for alias in &self.aliases {
+            count += usize::from(alias.aliasee == target);
+        }
+        for ifunc in &self.ifuncs {
+            count += usize::from(ifunc.resolver == target);
+        }
+        for function in &self.functions {
+            for slot in [function.personality, function.prefix, function.prologue] {
+                count += usize::from(slot.map(|(_, id)| id) == Some(target));
+            }
+            for (id, _) in function.blocks() {
+                for (_, instruction) in function.block_instructions(id) {
+                    for value in instruction.kind.operand_values() {
+                        count += usize::from(value == Value::Constant(target));
+                    }
+                    // A debug record is a call to one of the four
+                    // `llvm.dbg.*` intrinsics in its older spelling, read
+                    // into a record as upstream reads it. The call is gone
+                    // from the model and the use it made is not: upstream
+                    // still counts it, so a module permuting that
+                    // declaration's use list is counting these.
+                    if let crate::instruction::InstKind::DebugRecord { name, .. } =
+                        &instruction.kind
+                        && let Constant::Global {
+                            target: GlobalRef::Function(callee),
+                            ..
+                        } = self.ctx.constant(target)
+                        && let Name::Named(intrinsic) = &self.function(*callee).name
+                    {
+                        count +=
+                            usize::from(intrinsic == &format!("llvm.{}", name.replace('_', ".")));
+                    }
+                }
+            }
+        }
+        count
     }
 }
 

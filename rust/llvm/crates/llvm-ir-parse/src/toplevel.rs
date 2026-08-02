@@ -199,6 +199,12 @@ impl Parser {
             {
                 return self.error("global variable reference must have pointer type");
             }
+            // A name nothing defines has no uses by construction, which is
+            // what upstream says about it rather than reporting the symbol
+            // as undefined.
+            Token::GlobalName(name) if !self.symbols.contains_key(&Name::Named(name.clone())) => {
+                return self.error("value has no uses");
+            }
             Token::LocalName(name) => {
                 let Some((function, state)) = context else {
                     return Ok(());
@@ -283,15 +289,34 @@ impl Parser {
                 return self.error("uselistorder_bb names a block its function does not define");
             }
             self.require(Token::Comma)?;
-            return self.parse_use_list_indexes();
+            // A block's use list is not a value's, so the count says nothing
+            // about it and the indexes stand on their own.
+            self.parse_use_list_indexes()?;
+            return Ok(());
         }
         // The type is read, because it has to be the type the value was
-        // defined with, and the rest of what names the value is skipped: it
-        // may be a constant expression with commas and parentheses of its
-        // own, and nothing else here needs to know which value it was.
+        // defined with.
         let written = self.parse_type()?;
         self.check_use_list_type(written, context)?;
-        let items = 1;
+        let at = self.position();
+        // At the top level the value is a constant, and reading it is what
+        // lets the indexes be checked against its use count afterwards. A
+        // form the constant parser does not take is skipped the way the
+        // whole reference used to be, so a shape this does not model costs
+        // the check rather than the module.
+        let target = if context.is_none() {
+            let saved = self.index;
+            match self.parse_constant(written) {
+                Ok(id) => Some(id),
+                Err(_) => {
+                    self.index = saved;
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let items = usize::from(target.is_none());
         // The scan stops at the comma before the index list, which is the
         // first one outside any bracket.
         for item in 0..items {
@@ -316,16 +341,61 @@ impl Parser {
             }
         }
         self.require(Token::Comma)?;
-        self.parse_use_list_indexes()
+        let indexes = self.parse_use_list_indexes()?;
+        // Checked after the module rather than here: a global used by a
+        // later function is not yet used while the text is being read.
+        if let Some(target) = target {
+            self.use_list_orders.push((at, target, indexes));
+        }
+        Ok(())
+    }
+
+    /// Every directive that named a constant, against the use count the
+    /// whole module gives it.
+    ///
+    /// The indexes are a permutation of the use list, so there is one per
+    /// use and each is a position in it. Upstream has a message of its own
+    /// for the two counts that cannot be permuted at all.
+    pub(crate) fn check_use_list_orders(&mut self) -> Result<(), ParseError> {
+        for (at, target, indexes) in std::mem::take(&mut self.use_list_orders) {
+            // Constant data is shared across the context rather than owned
+            // by the module, so it has no use list to permute and upstream
+            // takes any indexes at all for one.
+            if !self.module.ctx.constant(target).has_use_list() {
+                continue;
+            }
+            let uses = self.module.use_count(target);
+            let fail = |message: String| {
+                Err(ParseError {
+                    position: at,
+                    message,
+                })
+            };
+            if uses == 0 {
+                return fail("value has no uses".to_string());
+            }
+            if uses == 1 {
+                return fail("value only has one use".to_string());
+            }
+            if indexes.len() != uses {
+                return fail(format!("wrong number of indexes, expected {uses}"));
+            }
+            if indexes.iter().any(|index| *index as usize >= uses) {
+                return fail(
+                    "expected distinct uselistorder indexes in range [0, size)".to_string(),
+                );
+            }
+        }
+        Ok(())
     }
 
     /// The `{ 1, 0 }` half of a directive.
     ///
     /// The indexes are a permutation of a use list, so they are distinct and
     /// they change the order: upstream refuses `{ 0, 1 }` for saying nothing.
-    /// Whether they cover the list is not checked, that needing the use lists
-    /// this does not build.
-    fn parse_use_list_indexes(&mut self) -> Result<(), ParseError> {
+    /// Whether they cover the list is checked afterwards, the count not being
+    /// available until the whole module is read.
+    fn parse_use_list_indexes(&mut self) -> Result<Vec<u64>, ParseError> {
         self.require(Token::LeftBrace)?;
         let mut indexes = Vec::new();
         while !self.eat(&Token::RightBrace) {
@@ -343,7 +413,7 @@ impl Parser {
         if indexes.windows(2).all(|pair| pair[0] < pair[1]) {
             return self.error("uselistorder indexes that are already in order say nothing");
         }
-        Ok(())
+        Ok(indexes)
     }
 
     fn parse_type_definition(&mut self, name: &str) -> Result<(), ParseError> {

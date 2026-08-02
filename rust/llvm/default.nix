@@ -136,7 +136,7 @@ in {
     # not build. Refusing every such module scored as agreement for a reason
     # that had nothing to do with what those files test, which is what the
     # second bound is for. Folding typed pointers took it back to 449.
-    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 466 5;
+    llvm-upstream-assembler = pkgs: upstreamCheck pkgs "Assembler" 472 5;
     llvm-upstream-verifier = pkgs: upstreamCheck pkgs "Verifier" 316 0;
 
     # Not whether we accept the same files, but whether we print the same

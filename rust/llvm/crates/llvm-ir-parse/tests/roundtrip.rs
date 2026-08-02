@@ -157,9 +157,13 @@ fn debug_intrinsic_calls_become_records() {
 /// them, and an alias whose aliasee is an expression writes no type in front
 /// of it.
 const DROPPED: &[(&str, &str)] = &[
+    // The value needs as many uses as the directive gives indexes, or
+    // upstream refuses the module rather than dropping the directive. This
+    // case was written with a value nothing used, which `llvm-as` reports
+    // as "value has no uses"; two aliases make it the module it meant to be.
     (
-        "@a = global i32 0\n\nuselistorder ptr @a, { 1, 0 }\n",
-        "@a = global i32 0\n",
+        "@a = global i32 0\n@b = alias i32, ptr @a\n@c = alias i32, ptr @a\n\nuselistorder ptr @a, { 1, 0 }\n",
+        "@a = global i32 0\n\n@b = alias i32, ptr @a\n@c = alias i32, ptr @a\n",
     ),
     (
         "@a = global [4 x i1] zeroinitializer\n@b = alias i1, getelementptr ([4 x i1], ptr @a, i64 0, i64 2)\n",

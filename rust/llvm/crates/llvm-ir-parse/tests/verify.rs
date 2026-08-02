@@ -1426,7 +1426,12 @@ const ACCEPTED: &[&str] = &[
     // globals, and says what order a value's uses were in. `llvm-dis` prints
     // none of them unless asked to, so reading one and keeping nothing is
     // what reproduces upstream's output.
-    "@a = global i32 0\n@b = global i32 0\n\ndefine i32 @f(i32 %x) {\nentry:\n  %p = add i32 %x, 1\n  %q = add i32 %x, 2\n  %r = add i32 %p, %q\n  uselistorder i32 %x, { 1, 0 }\n  ret i32 %r\n}\n\nuselistorder ptr @a, { 1, 0 }\nuselistorder_bb @f, %entry, { 1, 0 }\n",
+    // This was three directives upstream refuses, in an "upstream accepts
+    // this" table, and nothing had asked it: `uselistorder` may not sit
+    // among the instructions, a value with no uses cannot be permuted, and
+    // the entry block has no uses because nothing branches to it. What is
+    // left is the two `llvm-as` really takes.
+    "@a = global i32 0\n@b = alias i32, ptr @a\n@c = alias i32, ptr @a\n\ndefine i32 @f(i32 %x) {\nentry:\n  %p = add i32 %x, 1\n  %q = add i32 %x, 2\n  %r = add i32 %p, %q\n  ret i32 %r\n  uselistorder i32 %x, { 1, 0 }\n}\n\nuselistorder ptr @a, { 1, 0 }\n",
     // `extern_weak` is a linkage rather than the `external` keyword, and it
     // declares just as `external` does, so the next global is the next
     // global rather than this one's initializer.
@@ -1849,4 +1854,59 @@ fn text_outside_utf8_round_trips() {
     );
     let again = llvm_ir_parse::parse_module(&printed).expect("our own output parses");
     assert_eq!(llvm_ir_print::print_module(&again), printed);
+}
+
+/// The use count agrees with the number upstream reports.
+///
+/// A `uselistorder` directive whose index list is the wrong length makes
+/// `llvm-as` say "wrong number of indexes, expected N", which names the
+/// count it took. Every expectation below is that N, read off the oracle
+/// rather than reasoned about, and the two that have no N are the messages
+/// upstream uses for nought and one.
+#[test]
+fn a_constants_use_count_is_the_number_upstream_expects() {
+    // (module, name of the global, uses upstream counted)
+    let cases: &[(&str, usize)] = &[
+        // Three aliases, one aliasee slot each.
+        (
+            "@g = global i32 0\n@a1 = alias i32, ptr @g\n@a2 = alias i32, ptr @g\n@a3 = alias i32, ptr @g\n",
+            3,
+        ),
+        // One instruction reading it twice is two uses, not one.
+        (
+            "@g = global i32 0\ndefine void @f() {\nentry:\n  %r = icmp eq ptr @g, @g\n  ret void\n}\n",
+            2,
+        ),
+        // Two distinct expressions name it, and a third global names it
+        // directly.
+        (
+            "@g = global i32 0\n@p = global ptr getelementptr (i32, ptr @g, i64 1)\n@q = global ptr getelementptr (i32, ptr @g, i64 2)\n@r = global ptr @g\n",
+            3,
+        ),
+        // Constants are interned, so the same expression written into two
+        // globals is one constant naming it once.
+        (
+            "@g = global i32 0\n@p = global ptr getelementptr (i32, ptr @g, i64 1)\n@q = global ptr getelementptr (i32, ptr @g, i64 1)\n",
+            1,
+        ),
+        ("@g = global i32 0\n@p = global ptr @g\n", 1),
+        ("@g = global i32 0\n", 0),
+    ];
+    for (text, expected) in cases {
+        let module = llvm_ir_parse::parse_module(text).expect("upstream accepts this");
+        let target = (0..module.ctx.constant_count())
+            .map(|index| llvm_ir::constant::ConstId(index as u32))
+            .find(|id| match module.ctx.constant(*id) {
+                llvm_ir::constant::Constant::Global { target, .. } => {
+                    module.global_name(*target) == &llvm_ir::value::Name::Named("g".to_string())
+                }
+                _ => false,
+            });
+        let counted = match target {
+            Some(id) => module.use_count(id),
+            // Nothing names it, so there is no reference constant to count.
+            None => 0,
+        };
+        assert_eq!(counted, *expected, "for:\n{text}");
+    }
 }

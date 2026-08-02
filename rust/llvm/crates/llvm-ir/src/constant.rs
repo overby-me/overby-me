@@ -230,6 +230,79 @@ impl Constant {
         }
     }
 
+    /// Whether uses of this constant are tracked at all.
+    ///
+    /// The ones that are not are what upstream calls constant *data*: a
+    /// literal, a null, an undef or poison, a zeroinitializer, a string, a
+    /// splat of any of those. They are shared across the whole context
+    /// rather than owned by a module, so there is no per-module use list to
+    /// permute and a `uselistorder` naming one is not checked against a
+    /// count. Everything that names something else is: a symbol, an
+    /// expression, an aggregate holding either.
+    ///
+    /// Measured rather than reasoned about: `uselistorder ptr null` takes
+    /// any number of indexes and `uselistorder ptr @g` does not.
+    pub fn has_use_list(&self) -> bool {
+        !matches!(
+            self,
+            Constant::Integer { .. }
+                | Constant::Float { .. }
+                | Constant::Null(_)
+                | Constant::NoneToken(_)
+                | Constant::Undef(_)
+                | Constant::Poison(_)
+                | Constant::ZeroInitializer(_)
+                | Constant::String { .. }
+                | Constant::Splat { .. }
+        )
+    }
+
+    /// The constants this one names, in the order it holds them.
+    ///
+    /// One slot per occurrence rather than one per distinct constant, so a
+    /// struct holding the same field twice names it twice. That is what a
+    /// use count wants: upstream counts the edges into a value, and two
+    /// operands reading one constant are two uses of it.
+    pub fn operand_constants(&self) -> Vec<ConstId> {
+        match self {
+            Constant::Struct { fields, .. } => fields.clone(),
+            Constant::Array { elements, .. } | Constant::Vector { elements, .. } => {
+                elements.clone()
+            }
+            Constant::Splat { element, .. } => vec![*element],
+            Constant::PtrAuth {
+                pointer,
+                key,
+                discriminator,
+                address_discriminator,
+                ..
+            } => [
+                Some(*pointer),
+                Some(*key),
+                *discriminator,
+                *address_discriminator,
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+            Constant::Expression(expr) => expr.parts().0,
+            Constant::Integer { .. }
+            | Constant::Float { .. }
+            | Constant::Null(_)
+            | Constant::NoneToken(_)
+            | Constant::Undef(_)
+            | Constant::Poison(_)
+            | Constant::ZeroInitializer(_)
+            | Constant::String { .. }
+            | Constant::Global { .. }
+            | Constant::BlockAddress { .. }
+            | Constant::DsoLocalEquivalent { .. }
+            | Constant::NoCfiValue { .. }
+            | Constant::Metadata { .. }
+            | Constant::InlineAsm(_) => Vec::new(),
+        }
+    }
+
     pub fn as_global(&self) -> Option<GlobalRef> {
         match self {
             Constant::Global { target, .. } => Some(*target),
