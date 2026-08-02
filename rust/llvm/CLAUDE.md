@@ -1824,6 +1824,38 @@ Assembler 476 to 477 with the ceiling 4 to 3, its differential 190 to 191,
 and CodeGen 22,384 to 22,385. The corpus is untouched, being `llvm-dis`
 output already numbered from zero, which is the reassuring part: the change
 only moves files that were written by hand.
+Then the target extension types, which four Verifier files and one Assembler
+file were waiting on and which the tree had recorded as a blocker twice, once
+in `fits_in_a_global_step` saying whether one can be a global "is a property
+of the target rather than of the IR". It is, and the assembler will say which
+property, one question at a time. `corpus/target-extension-types.nu` asks
+five: has a size, may be a global, may be an `alloca`, takes a
+`zeroinitializer`, may be a vector element. Each is a module that assembles
+only when the type has that property.
+The shape of the answer is two levels. A namespace carries defaults, so
+`target("spirv.anything")` is sized and global for any name at all and
+`target("dx.anything")` is sized and global and takes no zero; a registered
+name may then override them, which is why `spirv.Image` differs from its own
+namespace. Probing an invented name is what separates the two, no override
+being able to apply to a name nobody registered. Everything else has no
+properties, which is what makes `target("foo")` unsized.
+Two probes were wrong first, and the tree caught both. Asking about
+`zeroinitializer` by writing `@g = global T zeroinitializer` also asks
+whether `T` may be a global, so `aarch64.svcount` answered no to a question
+about zero; passing the constant to a call instead isolates it. And a name
+carrying required parameters is not a type without them, so
+`target("riscv.vector.tuple")` read false for every property when the
+parameterised spelling reads true for four. Both errors have the same shape
+as the alias-scope one: a probe that fails for a reason other than the one
+being asked about. The spellings are harvested whole from upstream's tests
+now, and each name is probed through one the assembler accepts.
+`x86_amx` came out of the same sweep. It was listed with `void` and `label`
+as having no size, and it has one: upstream loads and stores it. What it may
+not be is a function parameter, which is a different rule and was doing the
+refusing in the probe that first suggested otherwise.
+Verifier 316 to 320, its wrongly-read count 12 to 8. Nothing else moves, and
+the generated table is byte-identical on regeneration, the generator running
+`rustfmt` itself because a row is wider than the line limit.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`

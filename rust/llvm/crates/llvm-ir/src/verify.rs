@@ -3606,8 +3606,17 @@ impl Verifier<'_> {
             | TypeKind::Label
             | TypeKind::Metadata
             | TypeKind::Token
-            | TypeKind::X86Amx
             | TypeKind::Function { .. } => false,
+            // A target extension type has whatever properties the target
+            // registered it with, and one upstream does not know has none:
+            // `target("spirv.Image")` is loaded and stored where
+            // `target("foo")` is refused. The table is measured against the
+            // assembler by `corpus/target-extension-types.nu`, LangRef
+            // saying the properties exist and pointing at a header for the
+            // list.
+            TypeKind::Target { name, .. } => {
+                crate::target_extension::properties(name.as_str()).sized
+            }
             // A struct is as sized as its fields, and a body it has not been
             // given yet has no layout at all.
             TypeKind::Struct { fields, .. } => self.struct_is_sized(&fields.clone(), trail),
@@ -3699,11 +3708,14 @@ impl Verifier<'_> {
             | TypeKind::X86Amx
             | TypeKind::Function { .. } => false,
             TypeKind::Vector { scalable, .. } => !scalable,
-            // Not target extension types: whether one can be a global is a
-            // property of the target rather than of the IR, and upstream
-            // reads `target("spirv.DeviceEvent")` while refusing
-            // `target("opaque")`. Without that property we would refuse
-            // both.
+            // Whether a target extension type can be a global is a property
+            // of the target rather than of the IR: upstream reads
+            // `target("spirv.DeviceEvent")` while refusing `target("opaque")`
+            // and `target("aarch64.svcount")`, the last of which is sized and
+            // still not allowed here.
+            TypeKind::Target { name, .. } => {
+                crate::target_extension::properties(name.as_str()).global
+            }
             TypeKind::Struct { fields, .. } => fields
                 .clone()
                 .iter()

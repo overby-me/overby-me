@@ -614,6 +614,17 @@ impl Parser {
                 address_discriminator,
             })));
         }
+        // `zeroinitializer` is a value of a target extension type only where
+        // the target registered it as one, and `undef` and `poison` are
+        // values of every one of them. Upstream says so while reading rather
+        // than when verifying, so the rule sits here and covers a global's
+        // initializer and an instruction's operand alike.
+        if word == "zeroinitializer"
+            && let TypeKind::Target { name, .. } = self.module.ctx.type_kind(ty)
+            && !llvm_ir::target_extension::properties(name.as_str()).zeroinit
+        {
+            return self.error("invalid type for null constant");
+        }
         let constant = match word {
             "zeroinitializer" => Constant::ZeroInitializer(ty),
             "undef" => Constant::Undef(ty),

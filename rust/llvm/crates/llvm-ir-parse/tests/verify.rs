@@ -73,6 +73,21 @@ const BROKEN: &[(&str, &str)] = &[
         "define void @f(<2 x ptr> %p) {\nentry:\n  %q = addrspacecast <2 x ptr> %p to <2 x ptr>\n  ret void\n}\n",
         "casts between the wrong kinds of type",
     ),
+    // An unregistered target extension type has no size, so it cannot be
+    // loaded, stored or held in a global.
+    (
+        "define void @f(ptr %p) {\nentry:\n  %v = load target(\"foo\"), ptr %p\n  ret void\n}\n",
+        "loads a type with no size",
+    ),
+    (
+        "@g = global target(\"foo\") undef\n",
+        "has an invalid type for a global variable",
+    ),
+    // Sized and still not allowed to be a global, which are two properties.
+    (
+        "@g = global target(\"aarch64.svcount\") undef\n",
+        "has an invalid type for a global variable",
+    ),
     // An array says what it is an array of, and it is the only composite
     // tag that has to.
     (
@@ -1222,6 +1237,17 @@ const REJECTED: &[(&str, &str)] = &[
         "define void @f(i1 %c) {\nentry:\n  br i1 %c, label %target, label %target\ntarget:\n  ret void\n  uselistorder label %target, { 2, 0 }\n}\n",
         "expected distinct uselistorder indexes in range [0, size)",
     ),
+    // A target extension type upstream does not know has no properties at
+    // all, so it has no size and cannot be a vector element. A registered
+    // one may still lack a property its namespace has.
+    (
+        "define void @f() {\nentry:\n  %a = alloca <2 x target(\"spirv.Image\")>\n  ret void\n}\n",
+        "invalid vector element type",
+    ),
+    (
+        "declare void @g(target(\"spirv.Image\"))\n\ndefine void @f() {\nentry:\n  call void @g(target(\"spirv.Image\") zeroinitializer)\n  ret void\n}\n",
+        "invalid type for null constant",
+    ),
     // A written number only skips ahead: one that goes back names a slot
     // already taken.
     (
@@ -1659,6 +1685,21 @@ const VERIFIES: &[&str] = &[
     // The address a function takes of its own block, read by the
     // `indirectbr` that also lists the block as a destination.
     "define void @f() {\nentry:\n  indirectbr ptr blockaddress(@f, %target), [ label %target ]\ntarget:\n  ret void\n  uselistorder label %target, { 1, 0 }\n}\n",
+    // A target extension type has whatever properties the target registered
+    // it with, measured by corpus/target-extension-types.nu. A registered
+    // one is loaded and stored and may be a global.
+    "define void @f(ptr %p) {\nentry:\n  %v = load target(\"spirv.Image\"), ptr %p\n  store target(\"spirv.Image\") %v, ptr %p\n  ret void\n}\n",
+    "@g = global target(\"spirv.Event\") zeroinitializer\n",
+    // One that may not be a global may still be an alloca and still take a
+    // zeroinitializer, which are three properties and not one.
+    "define void @f() {\nentry:\n  %a = alloca target(\"aarch64.svcount\")\n  ret void\n}\n",
+    "declare void @g(target(\"aarch64.svcount\"))\n\ndefine void @f() {\nentry:\n  call void @g(target(\"aarch64.svcount\") zeroinitializer)\n  ret void\n}\n",
+    // `undef` is a value of every target extension type, registered or not.
+    "@g = global target(\"spirv.Image\") undef\n",
+    // Only a type registered as a vector element may be one.
+    "define void @f() {\nentry:\n  %a = alloca <2 x target(\"llvm.test.vectorelement\")>\n  ret void\n}\n",
+    // x86_amx has a size, so it is loaded and stored like anything else.
+    "define void @f(ptr %p) {\nentry:\n  %v = load x86_amx, ptr %p\n  store x86_amx %v, ptr %p\n  ret void\n}\n",
     // An empty quoted name is no name at all: the symbol is unnamed and
     // takes the next slot, so a second one is not a redefinition of a first.
     "@\"\" = global i8 0\n@\"\" = global i8 1\n",

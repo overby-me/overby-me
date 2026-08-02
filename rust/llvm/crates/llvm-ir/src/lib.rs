@@ -42,6 +42,7 @@ pub mod layout;
 pub mod metadata;
 pub mod module;
 pub mod summary;
+pub mod target_extension;
 pub mod text;
 pub mod types;
 

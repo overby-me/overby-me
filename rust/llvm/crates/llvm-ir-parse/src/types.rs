@@ -289,15 +289,19 @@ impl Parser {
     /// What a vector may hold, which is narrower still: only the types a
     /// lane can be.
     pub(crate) fn is_valid_vector_element(&self, ty: TypeId) -> bool {
+        // A target extension type may be a vector element only where the
+        // target registered it as one, which is a property of its own rather
+        // than something the other four imply: `spirv.Image` is sized and
+        // allocatable and still not a vector element, while
+        // `llvm.test.vectorelement` is. Both spellings appear in upstream's
+        // own tests, one in `target-ext-vector.ll` and one in
+        // `target-ext-vector-invalid.ll`.
+        if let TypeKind::Target { name, .. } = self.module.ctx.type_kind(ty) {
+            return llvm_ir::target_extension::properties(name.as_str()).vector;
+        }
         matches!(
             self.module.ctx.type_kind(ty),
-            // A target extension type is opaque to us and may still be a
-            // vector element: upstream's own target-ext-vector.ll builds
-            // `<2 x target(...)>` and llvm-as reads it.
-            TypeKind::Integer(_)
-                | TypeKind::Float(_)
-                | TypeKind::Pointer { .. }
-                | TypeKind::Target { .. }
+            TypeKind::Integer(_) | TypeKind::Float(_) | TypeKind::Pointer { .. }
         )
     }
 }

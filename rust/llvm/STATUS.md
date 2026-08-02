@@ -44,6 +44,7 @@ and each row names the check that backs it.
 | Builder API: types inferred, alignments filled in | done for the common instructions, unwinding, attributes and metadata | `llvm-builder-smoke` |
 | Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 370 intrinsics LangRef gives a signature for | `llvm-opt-differential`, `llvm-upstream-verifier` |
 | Positions of an intrinsic that share one overloaded type have to agree | done for the 161 LangRef documents more than once | `llvm-upstream-assembler`, `llvm-upstream-verifier` |
+| Target extension types: size, global, alloca, zeroinitializer, vector element | done for the names upstream's tests mention | `llvm-upstream-verifier` |
 
 ## The round trip
 
@@ -80,7 +81,7 @@ skipped, so the denominator is the whole suite.
 | Suite | Agreed | Files | Refused but valid | Check |
 | --- | --- | --- | --- | --- |
 | `llvm/test/Assembler` | 477 | 483 | 3 | `llvm-upstream-assembler` |
-| `llvm/test/Verifier` | 316 | 328 | 0 | `llvm-upstream-verifier` |
+| `llvm/test/Verifier` | 320 | 328 | 0 | `llvm-upstream-verifier` |
 
 ## Conformance against real IR
 
@@ -146,7 +147,7 @@ bounds. We **refuse 3 modules llvm-as reads**, all of them in Assembler,
 which is the failure that matters: a target intrinsic no LangRef line names,
 and two calls upstream upgrades to a signature we check against the
 documented one. That count is a ceiling that may only fall. We
-**read 15 modules llvm-as refuses**, three in Assembler and twelve in
+**read 11 modules llvm-as refuses**, three in Assembler and eight in
 Verifier, which is a missing verifier rule each, and agreement is a floor
 that may only rise.
 
