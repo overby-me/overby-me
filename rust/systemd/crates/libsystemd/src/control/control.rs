@@ -3819,6 +3819,12 @@ fn create_transient_unit(
                             ));
                     }
                 }
+                "BusName" => {
+                    // Without this arm a transient Type=dbus service has no
+                    // name to wait for and its start fails as unconfigured
+                    // (TEST-23-UNIT-FILE.ExecStopPost dbus1/dbus2).
+                    service_conf.dbus_name = Some(value.to_string());
+                }
                 "RemainAfterExit" => {
                     service_conf.remain_after_exit = matches!(value, "yes" | "true" | "1");
                 }

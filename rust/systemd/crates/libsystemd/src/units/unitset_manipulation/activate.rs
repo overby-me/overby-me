@@ -1511,6 +1511,10 @@ pub enum OneshotStepOutcome {
     /// command left): the dispatcher should park a start wait for the
     /// unit's completion, carrying the chain's dispatch context.
     AwaitCompletion,
+    /// A preliminary command failed on a unit with ExecStopPost=: the
+    /// dispatcher should drive this poststop chain before the failure is
+    /// finalized.
+    PoststopChain(ServiceStartChain),
     /// The chain is done: a failure was recorded, or the unit vanished.
     Finished,
 }
@@ -1663,12 +1667,14 @@ pub(crate) fn oneshot_chain_child_exited(
     if termination.success() || cmd.prefixes.contains(&crate::units::CommandlinePrefix::Minus) {
         return oneshot_chain_step(chain, run_info);
     }
-    oneshot_chain_fail(
+    match oneshot_chain_fail(
         chain,
         crate::services::RunCmdError::BadExitCode(cmd.to_string(), termination),
         run_info,
-    );
-    OneshotStepOutcome::Finished
+    ) {
+        Some(post) => OneshotStepOutcome::PoststopChain(post),
+        None => OneshotStepOutcome::Finished,
+    }
 }
 
 /// The chain's per-command start timeout fired: SIGKILL the preliminary
@@ -1680,18 +1686,21 @@ pub(crate) fn oneshot_chain_timed_out(
     pid: nix::unistd::Pid,
     timeout: Option<std::time::Duration>,
     run_info: &ArcMutRuntimeInfo,
-) {
+) -> OneshotStepOutcome {
     unsafe {
         libc::kill(pid.as_raw(), libc::SIGKILL);
     }
-    oneshot_chain_fail(
+    match oneshot_chain_fail(
         chain,
         crate::services::RunCmdError::Timeout(
             cmd.to_string(),
             format!("Timeout ({timeout:?}) reached"),
         ),
         run_info,
-    );
+    ) {
+        Some(post) => OneshotStepOutcome::PoststopChain(post),
+        None => OneshotStepOutcome::Finished,
+    }
 }
 
 /// A deferred ExecCondition=/ExecStartPre= helper phase advanced on the
@@ -1871,13 +1880,12 @@ pub(crate) fn service_start_chain_step(
                             unit_id: chain.id.clone(),
                             reason: UnitOperationErrorReason::ServiceStartError(e),
                         });
-                        fail_deferred_start(
-                            run_info,
-                            &chain.id,
+                        // Route through the chain's own poststop phase so
+                        // ExecStopPost= runs before the failure finalizes.
+                        chain_error_to_poststop(
+                            chain,
                             "main ExecStart dispatch failed".to_owned(),
                         );
-                        trigger_on_failure_units(&chain.id, run_info);
-                        return StartChainOutcome::Finished;
                     }
                 }
             }
@@ -2008,7 +2016,7 @@ fn start_chain_finalize_error(
         unit_id: chain.id.clone(),
         reason: UnitOperationErrorReason::GenericStartError(error.clone()),
     });
-    fail_deferred_start(run_info, &chain.id, error);
+    finalize_deferred_start_failure(run_info, &chain.id, error);
     trigger_on_failure_units(&chain.id, run_info);
 }
 
@@ -2082,18 +2090,84 @@ pub(crate) fn apply_waiting_for_socket(id: &UnitId, run_info: &ArcMutRuntimeInfo
     }
 }
 
-/// Dispatcher-callable wrapper for the shared deferred start-failure
-/// cleanup (kill remaining processes, clear runtime fds, StoppedUnexpected).
-pub(crate) fn fail_deferred_start(run_info: &ArcMutRuntimeInfo, id: &UnitId, reason: String) {
+/// Finalize a deferred start failure without running ExecStopPost=: kill
+/// remaining processes, clear runtime fds, StoppedUnexpected. The poststop
+/// chain's own finalizer, and the fallback when no ExecStopPost= exists.
+pub(crate) fn finalize_deferred_start_failure(
+    run_info: &ArcMutRuntimeInfo,
+    id: &UnitId,
+    reason: String,
+) {
     warn!("deferred start of {} failed: {reason}", id.name);
     deferred_start_fail_cleanup(run_info, id, &id.name.clone(), reason);
 }
 
+/// Fail a deferred start the way upstream does: the service's processes are
+/// killed, then ExecStopPost= runs, then the unit is marked failed. The
+/// poststop commands must not be waited for here (the historical inline
+/// attempt deadlocked PID 1, see the 23-unit-file-execstoppost wrapper), so
+/// when the unit has ExecStopPost= this returns a chain parked in its
+/// poststop phase for the dispatcher to drive; the chain's finalizer sets
+/// the failed status afterwards. With no ExecStopPost= the failure is
+/// finalized immediately and None is returned.
+#[must_use]
+pub(crate) fn fail_deferred_start(
+    run_info: &ArcMutRuntimeInfo,
+    id: &UnitId,
+    reason: String,
+) -> Option<ServiceStartChain> {
+    // Without a live dispatcher (unit tests, very early boot) nothing can
+    // drive the chain, so the failure must finalize directly or the unit
+    // leaks in Starting.
+    let has_stoppost = crate::entrypoints::dispatcher::global().is_some() && {
+        let ri = dispatcher_read(run_info);
+        match ri.unit_table.get(id) {
+            Some(unit) => match &unit.specific {
+                // Kill the started processes first, like the plain cleanup,
+                // but leave the status in Starting so the poststop chain's
+                // steps still own the unit.
+                Specific::Service(svc) if !svc.conf.stoppost.is_empty() => {
+                    let mut state = svc.state.write_poisoned();
+                    state
+                        .srvc
+                        .kill_all_remaining_processes(&svc.conf, &id.name);
+                    state.srvc.pid = None;
+                    state.srvc.process_group = None;
+                    true
+                }
+                _ => false,
+            },
+            None => false,
+        }
+    };
+    if has_stoppost {
+        warn!(
+            "deferred start of {} failed: {reason}; running ExecStopPost before failing",
+            id.name
+        );
+        Some(ServiceStartChain {
+            id: id.clone(),
+            next_services_ids: Vec::new(),
+            filter_ids: Arc::new(Vec::new()),
+            errors: Arc::new(Mutex::new(Vec::new())),
+            source: ActivationSource::Regular,
+            phase: StartChainPhase::PoststopAfterError {
+                idx: 0,
+                error: reason,
+            },
+        })
+    } else {
+        finalize_deferred_start_failure(run_info, id, reason);
+        None
+    }
+}
+
+#[must_use]
 fn oneshot_chain_fail(
     chain: &OneshotChainStart,
     e: crate::services::RunCmdError,
     run_info: &ArcMutRuntimeInfo,
-) {
+) -> Option<ServiceStartChain> {
     let id = &chain.id;
     let name = &id.name;
     // Clear the relocation breadcrumb so nothing can resume the sequence
@@ -2114,11 +2188,9 @@ fn oneshot_chain_fail(
     });
     // Reporting the error is not enough: the unit would stay in
     // UnitStatus::Starting and be started again from the top, re-running
-    // the preliminary commands forever. Mark it StoppedUnexpected via the
-    // same helper the other deferred start-failure paths use. Takes
-    // &ArcMutRuntimeInfo and does its own try_read, so no guard may be
-    // held here.
-    deferred_start_fail_cleanup(run_info, id, name, reason);
+    // the preliminary commands forever. Fail the start; with ExecStopPost=
+    // configured that hands back a poststop chain to drive first.
+    fail_deferred_start(run_info, id, reason)
 }
 
 /// What a parked deferred start needs the dispatcher to know at
@@ -2292,13 +2364,33 @@ pub(crate) fn evaluate_start_wait(
         ServiceType::Dbus => {
             if dbus_done {
                 StartWaitVerdict::Ready
+            } else if svc.state.read_poisoned().srvc.main_exit_status.is_some() {
+                // The main process exited before the bus name appeared: the
+                // exit handler owns the outcome (clean exit deactivates,
+                // failure fails), so the wait must not keep the deadline
+                // armed for a unit that is about to leave Starting.
+                StartWaitVerdict::Abandoned
             } else {
                 StartWaitVerdict::Pending
             }
         }
-        // notify, notify-reload and everything else that lands here waits
-        // for READY=1. RELOADING=1 implies a previous READY=1, so a service
-        // reloading counts as started.
+        // RELOADING=1 implies a previous READY=1, so a reloading service
+        // counts as started. A notify main exiting before READY=1 is
+        // upstream's 'protocol' failure; the exit head suppressed death
+        // processing so this wait owns it, ExecStopPost= included.
+        ServiceType::Notify | ServiceType::NotifyReload => {
+            let state = svc.state.read_poisoned();
+            if state.srvc.signaled_ready || state.srvc.reloading {
+                StartWaitVerdict::Ready
+            } else if state.srvc.main_exit_status.is_some() {
+                StartWaitVerdict::Fail(
+                    "Service exited before sending READY=1".to_owned(),
+                )
+            } else {
+                StartWaitVerdict::Pending
+            }
+        }
+        // Everything else that lands here waits for READY=1.
         _ => {
             let state = svc.state.read_poisoned();
             if state.srvc.signaled_ready || state.srvc.reloading {

@@ -10,29 +10,18 @@
   # now, so deleting the assertions only hid whatever they would find. They run
   # again here.
   #
-  # RESTORING THEM IMMEDIATELY FOUND A REAL BUG, which is what a deleted
-  # assertion costs you. The Type=dbus case fails at `test -f /run/dbus1`.
-  # Upstream starts a Type=dbus service whose command is a busctl RequestName
-  # that exits straight away, wraps it in `|| :` so the exit status cannot
-  # matter, and asserts only that ExecStopPost= ran. rust never runs it.
-  #
-  # ROOT CAUSE, located: the bus-name wait resolves on the DEFERRED start path,
-  # and activate.rs deferred_start_fail_cleanup() — the shared cleanup for start
-  # timeout, dbus-name timeout, exec confirmation failure and a failing forking
-  # parent — kills the processes and marks the unit failed without ever running
-  # ExecStopPost=. It is not dbus-specific: ANY service whose start fails on a
-  # deferred path skips its ExecStopPost=.
-  #
-  # THE OBVIOUS FIX DEADLOCKS PID 1, so it is NOT applied. Calling run_poststop
-  # from inside that function wedged the VM at forking1.service with the clock
-  # frozen: deferred_start_fail_cleanup holds BOTH the RuntimeInfo read guard
-  # and the service state write guard, and run_poststop waits on a helper
-  # underneath them. That is exactly the hazard activate.rs already flags at the
-  # ExecStartPost failure path ("this holds the RuntimeInfo read guard + state
-  # write lock across the bounded poststart helper wait; taking helper waits
-  # fully off the locks is docs/ARCHITECTURE.md invariant I1"). A real fix has to
-  # run the ExecStopPost commands AFTER dropping both guards, which is the same
-  # lock-decoupling work tracked for activate.rs generally — not a local edit.
+  # GREEN as of 2026-08-03, the EVENT-LOOP.md inc 3 expected flip. The long
+  # arc, kept short: restoring the deleted sections found that ANY deferred
+  # start failure skipped ExecStopPost=, and the in-place fix deadlocked
+  # PID 1 (deferred_start_fail_cleanup held the table read guard plus the
+  # state write guard while run_poststop waited on a helper underneath).
+  # The dispatcher's poststop chains resolve exactly that: failures now run
+  # ExecStopPost= initiate-only between brief guards and finalize after.
+  # Getting every section green also fixed three real bugs: the transient
+  # property loop dropped BusName= (Type=dbus transients started
+  # unconfigured), a Type=dbus main exiting before its name appeared left a
+  # stale parked wait armed, and a Type=notify main exiting before READY=1
+  # deactivated cleanly instead of failing with upstream's protocol result.
   #
   # What remains is environment-only and does NOT reduce coverage: upstream
   # writes ExecStopPost='touch ...' with a bare command name, and NixOS has no

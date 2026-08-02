@@ -387,7 +387,7 @@ find what the hand-written one does not cover.
 | 26-SYSTEMCTL | Interactive `systemctl edit` (the `EDITOR=... script -ec` lines) is blocked by a separate live bug: util-linux `script(1)` hangs under rust-systemd as PID 1 (parent-side termios/poll setup). The `override.conf` `cmp` assertions go with it |
 | 07-PID1 protect-control-groups | `testcase_delegate_subgroup_pam` needs unprivileged PAM session management |
 | 18-FAILUREACTION | Phase 1 (`SuccessAction=reboot`) restored 2026-07-30 and MEASURED RED 2026-08-02: the reboot fires and the second boot is healthy, but the test driver's root shell never reconnects (09-REBOOT harness class), so the test does not reach its post-reboot assertions and DOES NOT PASS. Only the `FailureAction=exit` line is still deleted, and not because it "kills PID 1": upstream degrades `exit` to `poweroff` for a system manager (emergency-action.c:153-170), so the machine ends cleanly either way, and our harness checks `/testok` from the host once the script returns. Its `FailureActionExitStatus=123` assertion is covered by unit tests, the setting having been silently ignored until that assertion was read closely |
-| 23-UNIT-FILE ExecStopPost | Deletions REMOVED; now honestly red. `ExecStopPost=` is never run when a start fails on a deferred path (start timeout, dbus-name timeout, exec confirmation failure, failing forking parent) — `activate.rs deferred_start_fail_cleanup()` skips it. Fixing it in place DEADLOCKS PID 1 (that function holds the RuntimeInfo read guard + the state write guard, and `run_poststop` waits on a helper underneath both), so it needs the invariant-I1 lock decoupling |
+| 23-UNIT-FILE ExecStopPost | PASSES as of 2026-08-03, the EVENT-LOOP inc 3 expected flip. Deferred-start failures now run `ExecStopPost=` as a dispatcher poststop chain before finalizing, which is exactly the lock decoupling this row said the in-place fix needed (the historical in-place attempt deadlocked PID 1 under the read+write guards). Getting every section green also required three real fixes: the transient-property loop dropped `BusName=` so Type=dbus transients started unconfigured, a Type=dbus main exiting before its name appeared left a stale parked wait, and a Type=notify main exiting before READY=1 was treated as a clean deactivation instead of upstream's protocol failure |
 | 07-PID1 issue-30412 | `socat` is backgrounded and killed after 2s instead of running in the foreground, so the test no longer proves the socket fd is dropped when `ExecStart` fails with 203. That is exactly what issue #30412 is about |
 | 34-DYNAMICUSERMIGRATE | All four `test_directory` phases (State/Runtime/Cache/Logs) now pass in full, including both `DynamicUser=` directions. Remaining: `test_check_writable`, which needs nested exec directories (`quux/pief`, `aaa/bbb`, `xxx/yyy:aaa/111`), and then idmapped mounts on kernels >= 5.12. The wedge that blocked this was NOT a race or lock starvation: `systemctl start --wait` polled for `Stopped`, while a completed `Type=oneshot` deliberately stays `Started` to avoid boot activation-graph races, so `--wait` on any oneshot could never return |
 
@@ -478,6 +478,16 @@ after re-running the *same* configuration, never on the strength of the name alo
   refuses to stop.
 - **07-PID1** `testcase_delegate_subgroup_control`.
 - **26-SYSTEMCTL** `assert_rc 3 systemctl --quiet is-active`.
+- **16-EXTEND-TIMEOUT** and **59-RELOADING-RESTART**, since the inc 2 slice-3
+  tree (60471c75): roughly every other run, with a shared signature of
+  dispatcher event application stalling for seconds under simultaneous-start
+  load (START-TIMEOUT kmsg at exactly the base deadline for notify units
+  whose READY/extends were already sent, and 59's notify-reload script
+  SIGKILLed mid-trap reading ExecMainStatus 9). This is NOT dismissed as
+  environment: it is a timing margin the slice narrowed, tracked as a real
+  regression with the analysis and fix options in the task ledger
+  (dispatcher throughput vs activation writers; the blind second escalation
+  stage should also verify the process survived SIGTERM before failing).
 
 Beware a trap when baselining one of these. Reverting the change and rebuilding often
 resolves to a **cached** derivation, so nix returns `exit=0` in a handful of lines

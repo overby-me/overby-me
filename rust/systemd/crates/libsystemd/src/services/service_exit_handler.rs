@@ -686,6 +686,28 @@ pub(crate) fn service_exit_head(
         return false;
     }
 
+    // Type=notify/notify-reload: the main process exiting while the unit is
+    // still Starting without ever sending READY=1 is a failed start
+    // (upstream's 'protocol' result), owned by the parked start wait for
+    // deferred starts and by the inline waiter's error path otherwise.
+    // Suppress death processing so the failure owner is deterministic and
+    // ExecStopPost= runs on the failure path instead of a clean
+    // deactivation racing it.
+    if let Specific::Service(srvc) = &unit.specific
+        && matches!(
+            srvc.conf.srcv_type,
+            ServiceType::Notify | ServiceType::NotifyReload
+        )
+        && matches!(&*unit.common.status.read_poisoned(), UnitStatus::Starting)
+        && !srvc.state.read_poisoned().srvc.signaled_ready
+    {
+        trace!(
+            "Service {}: notify main exited while Starting before READY=1, leaving the failure to the start owner",
+            srvc_id.name
+        );
+        return false;
+    }
+
     let success_exit_status = get_success_exit_status(unit);
 
     // ExitType=cgroup: if the service is configured to only be considered dead

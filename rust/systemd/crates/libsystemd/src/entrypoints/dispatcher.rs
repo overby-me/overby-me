@@ -236,7 +236,7 @@ pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
                     // The deadline wheel fired with no event.
                     None => {
                         expire_due_chains(&run_info, &mut chains, &mut start_waits);
-                        expire_due_start_waits(&run_info, &mut start_waits);
+                        expire_due_start_waits(&run_info, &mut chains, &mut start_waits);
                     }
                 }
             }));
@@ -292,7 +292,7 @@ fn dispatch_one(
                         (current, new) => new.or(current),
                     };
                 }
-                progress_start_wait(wait, false, run_info, start_waits);
+                progress_start_wait(wait, false, run_info, chains, start_waits);
             }
         }
         Event::ChildExit(pid, kind, code) => {
@@ -342,7 +342,7 @@ fn dispatch_one(
                     // The head recorded main_exit_status: a parked oneshot,
                     // forking or exec start may now have its verdict.
                     if let Some(wait) = start_waits.remove(&id) {
-                        progress_start_wait(wait, false, run_info, start_waits);
+                        progress_start_wait(wait, false, run_info, chains, start_waits);
                     }
                 }
                 ChildKind::Helper(_) | ChildKind::Unknown => {
@@ -360,15 +360,15 @@ fn dispatch_one(
             route_start_chain_outcome(outcome, chain, chains, start_waits, run_info);
         }
         Event::StartServiceWait(params) => {
-            register_start_wait(params, run_info, start_waits);
+            register_start_wait(params, run_info, chains, start_waits);
         }
         Event::DbusNameResult { unit, ok, message } => {
             if let Some(mut wait) = start_waits.remove(&unit) {
                 if ok {
                     wait.dbus_done = true;
-                    progress_start_wait(wait, false, run_info, start_waits);
+                    progress_start_wait(wait, false, run_info, chains, start_waits);
                 } else {
-                    crate::units::fail_deferred_start(run_info, &unit, message);
+                    fail_start_with_poststop(&unit, message, run_info, chains, start_waits);
                 }
             }
         }
@@ -381,6 +381,7 @@ fn dispatch_one(
 fn register_start_wait(
     params: crate::units::StartWaitParams,
     run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
     start_waits: &mut StartWaits,
 ) {
     let Some(setup) = crate::units::start_wait_setup(&params, run_info) else {
@@ -394,10 +395,12 @@ fn register_start_wait(
                 spawn_dbus_name_watcher(params.id.clone(), bus_name, setup.timeout);
             }
             None => {
-                crate::units::fail_deferred_start(
-                    run_info,
+                fail_start_with_poststop(
                     &params.id,
                     "No BusName= configured for Type=dbus service".to_owned(),
+                    run_info,
+                    chains,
+                    start_waits,
                 );
                 return;
             }
@@ -421,7 +424,7 @@ fn register_start_wait(
             .then(|| now + std::time::Duration::from_millis(500)),
         dbus_done: false,
     };
-    progress_start_wait(wait, false, run_info, start_waits);
+    progress_start_wait(wait, false, run_info, chains, start_waits);
 }
 
 /// Evaluate a start wait and act on the verdict: park it again, complete it
@@ -431,6 +434,7 @@ fn progress_start_wait(
     wait: StartWait,
     exec_confirm_elapsed: bool,
     run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
     start_waits: &mut StartWaits,
 ) {
     match crate::units::evaluate_start_wait(
@@ -445,7 +449,7 @@ fn progress_start_wait(
         }
         crate::units::StartWaitVerdict::Abandoned => {}
         crate::units::StartWaitVerdict::Fail(reason) => {
-            crate::units::fail_deferred_start(run_info, &wait.id, reason);
+            fail_start_with_poststop(&wait.id, reason, run_info, chains, start_waits);
         }
         crate::units::StartWaitVerdict::Ready => {
             spawn_start_finisher(wait, run_info.clone());
@@ -523,7 +527,11 @@ fn spawn_dbus_name_watcher(
     }
 }
 
-fn expire_due_start_waits(run_info: &ArcMutRuntimeInfo, start_waits: &mut StartWaits) {
+fn expire_due_start_waits(
+    run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
+    start_waits: &mut StartWaits,
+) {
     let now = std::time::Instant::now();
     let due: Vec<UnitId> = start_waits
         .iter()
@@ -540,7 +548,7 @@ fn expire_due_start_waits(run_info: &ArcMutRuntimeInfo, start_waits: &mut StartW
         // Type=exec: the confirmation window elapsing COMPLETES the start.
         if wait.exec_confirm_at.is_some_and(|deadline| deadline <= now) {
             wait.exec_confirm_at = None;
-            progress_start_wait(wait, true, run_info, start_waits);
+            progress_start_wait(wait, true, run_info, chains, start_waits);
             continue;
         }
         // Start timeout: re-check the effective deadline first, since an
@@ -572,10 +580,12 @@ fn expire_due_start_waits(run_info: &ArcMutRuntimeInfo, start_waits: &mut StartW
                     "START-TIMEOUT {} did not exit after SIGTERM; failing the start",
                     id.name
                 ));
-                crate::units::fail_deferred_start(
-                    run_info,
+                fail_start_with_poststop(
                     &id,
                     format!("Timed out starting ({:?})", wait.timeout),
+                    run_info,
+                    chains,
+                    start_waits,
                 );
             }
         }
@@ -606,6 +616,10 @@ fn park_chain(
                 },
             );
         }
+        crate::units::OneshotStepOutcome::PoststopChain(mut post) => {
+            let outcome = crate::units::service_start_chain_step(&mut post, run_info);
+            route_start_chain_outcome(outcome, post, chains, start_waits, run_info);
+        }
         crate::units::OneshotStepOutcome::AwaitCompletion => {
             register_start_wait(
                 crate::units::StartWaitParams {
@@ -617,6 +631,7 @@ fn park_chain(
                     check_starting: false,
                 },
                 run_info,
+                chains,
                 start_waits,
             );
         }
@@ -641,13 +656,14 @@ fn expire_due_chains(
         };
         match pending.kind {
             PendingHelper::Oneshot { chain, cmd, timeout } => {
-                crate::units::oneshot_chain_timed_out(
+                let outcome = crate::units::oneshot_chain_timed_out(
                     &chain,
                     &cmd,
                     nix::unistd::Pid::from_raw(raw_pid),
                     timeout,
                     run_info,
                 );
+                park_chain(outcome, chain, chains, start_waits, run_info);
             }
             PendingHelper::StartPhase {
                 mut chain,
@@ -665,6 +681,25 @@ fn expire_due_chains(
                 route_start_chain_outcome(outcome, chain, chains, start_waits, run_info);
             }
         }
+    }
+}
+
+/// Fail a deferred start upstream-style: kill, then ExecStopPost= via a
+/// poststop chain when configured, then the failed status (the chain's
+/// finalizer). Without ExecStopPost= the failure finalizes immediately.
+fn fail_start_with_poststop(
+    id: &UnitId,
+    reason: String,
+    run_info: &ArcMutRuntimeInfo,
+    chains: &mut std::collections::HashMap<i32, PendingEntry>,
+    start_waits: &mut StartWaits,
+) {
+    // kmsg deliberately: PID 1's log macros never reach the console, and a
+    // failing start's reason is the first thing an investigation needs.
+    crate::entrypoints::kmsg(&format!("START-FAIL {}: {reason}", id.name));
+    if let Some(mut chain) = crate::units::fail_deferred_start(run_info, id, reason) {
+        let outcome = crate::units::service_start_chain_step(&mut chain, run_info);
+        route_start_chain_outcome(outcome, chain, chains, start_waits, run_info);
     }
 }
 
@@ -720,6 +755,7 @@ fn route_start_chain_outcome(
                         check_starting: false,
                     },
                     run_info,
+                    chains,
                     start_waits,
                 );
             }
