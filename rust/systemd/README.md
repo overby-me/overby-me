@@ -15,7 +15,7 @@ resolved.
 
 - 93 crates, roughly 370,000 lines of Rust
 - About 9,700 unit test functions
-- 440 upstream systemd integration tests registered; 40 still carry an override
+- 440 upstream systemd integration tests registered; 37 still carry a real override
 
 The gap lists are [docs/TEST-OVERRIDES.md](docs/TEST-OVERRIDES.md) (functional) and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (structural). Neither is optimistic; read

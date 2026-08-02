@@ -9,15 +9,82 @@ resolved.
 93 crates, about 370,000 lines of Rust, about 9,700 unit test functions.
 
 The original six-phase port plan is finished as a structuring device: every phase has
-shipped its components. What is left is not "phase 6", it is three concrete lists:
+shipped its components. The gap lists remain authoritative for *what* is missing:
 
-1. **[TEST-OVERRIDES.md](TEST-OVERRIDES.md)** is the functional gap list. 40 of the 440
-   registered integration tests still carry an override. That file says what each one
-   needs.
+1. **[TEST-OVERRIDES.md](TEST-OVERRIDES.md)** is the functional gap list. 37 of the 440
+   registered integration tests still carry a real override. That file says what each
+   one needs.
 2. **[ARCHITECTURE.md](ARCHITECTURE.md)** is the structural gap list: the PID 1
    concurrency model and the invariants it has not yet adopted.
 3. **Differential testing** below, which is the only part of the old plan with
    infrastructure still unbuilt.
+
+What to work on next, however, is no longer "remove the next override". That stopped
+measuring progress once the cheap seam was exhausted. The strategy below is the plan.
+
+## Strategy, 2026-08-02
+
+A full review of the approach, measured against the tree (375k lines of Rust against
+1.02M lines of C in the pinned v260.2 `src/`), reached this verdict: the premise is
+sound and the parity-plus-ledger method is the right one, but three course corrections
+follow from where it strains.
+
+### Why the priorities changed
+
+1. **The concurrency model is the largest liability.** Upstream PID 1 is one thread,
+   one event loop, a job engine: nothing can starve. The thread pool plus global
+   RwLock is the one place this port reimagined instead of followed, and it is the
+   source of the wedge class (the open invariants in ARCHITECTURE.md). Its
+   structural-work list is, read honestly, a plan to become upstream's event loop.
+   Do that deliberately, not invariant by invariant.
+2. **Suite-green is not the finish line.** The remaining overrides encode missing
+   subsystems (job objects, the user manager, autofs, importd/storagetm/sysupdate,
+   mkosi-class fixtures), so the marginal green test no longer tracks user value.
+   Shippable increments do.
+3. **The memory-safety payoff is in the parsers.** PID 1's inputs are root-trusted;
+   systemd's worst CVEs lived in resolved, networkd's DHCP and journald's wire
+   protocols. Those crates have had the least test pressure here.
+
+### The plan, in order
+
+1. **Ship one increment.** One rust daemon (journald, udevd, or tmpfiles/sysusers)
+   under C PID 1 on one real, low-stakes NixOS machine, as a module override with
+   generation rollback. This exercises design principle 5 for the first time and
+   opens a production feedback channel that VM tests cannot provide.
+2. **Event-loop convergence**, as a named project with a design doc: minimal job
+   objects plus a single state-changed dispatcher queue. Retires invariants I1-I6
+   wholesale and unblocks TEST-63-PATH, TEST-60-MOUNT-RATELIMIT and the
+   ExecStopPost deadlock as side effects.
+3. **The user manager** (config-driven `systemd --user`), the largest single unlock
+   for both tests and real usability.
+4. **Version-matrix CI** (see Differential testing below): run the suite against new
+   upstream pins on a schedule, so upstream drift arrives as failing tests instead
+   of silent parity decay.
+5. **Differential fuzzing of the remote-facing parsers** (resolved, networkd DHCP,
+   journald stream and remote protocols) against the C implementations, reusing
+   upstream's fuzz corpora and the `difftest` harness.
+6. **Publish.** Extract or mirror the tree, with a license and attribution review;
+   the harness and the ledger method are independently valuable.
+
+### Falsification checkpoint
+
+If, after item 2 lands and a real machine has run rust components for a month, PID 1
+wedge-class bugs still surface at a steady rate, freeze the PID 1 ambition and ship
+daemons under C PID 1. Decide then, not never.
+
+### Method rules
+
+The discipline that kept the port honest, kept explicit:
+
+1. Every weakening of a test lives as an entry in TEST-OVERRIDES.md. There are no
+   silent skips (`expectedSkip` enforces this) and no fake passes.
+2. Before debugging any failure, run the `c-systemd-test-<name>` oracle to classify
+   it as environmental or real.
+3. Follow upstream's architecture. Every deviation is documented debt in
+   ARCHITECTURE.md, carrying its consequences.
+4. Schedule outside-in audits (random sampling sweeps of wrappers, as on
+   2026-07-28); assume the green metric gets gamed.
+5. "Done" means a shippable increment someone runs, not a green count.
 
 ## Component inventory
 
