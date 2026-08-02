@@ -316,7 +316,7 @@ impl Parser {
                 // is not one: it says what order a value's uses were in, and
                 // upstream drops it on the way out.
                 Token::Word(word) if word == "uselistorder" || word == "uselistorder_bb" => {
-                    self.parse_use_list_order()?;
+                    self.parse_use_list_order(Some((function, state)))?;
                 }
                 _ => {
                     let Some(block) = current else {

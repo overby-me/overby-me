@@ -1018,6 +1018,23 @@ const BROKEN: &[(&str, &str)] = &[
 
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
+    // A use-list order directive names its value with the type that value
+    // was defined with. A local is reported against its own definition,
+    // whether it is a parameter or an instruction result.
+    (
+        "define void @f(i32 %x, i32 %y) {\nentry:\n  %a = add i32 %x, %y\n  %b = add i32 %x, %a\n  ret void\n  uselistorder float %x, { 1, 0 }\n}\n",
+        "is defined with a type a uselistorder directive does not name",
+    ),
+    (
+        "define void @f(i32 %y) {\nentry:\n  %a = add i32 %y, %y\n  %b = add i32 %a, %a\n  ret void\n  uselistorder float %a, { 1, 0 }\n}\n",
+        "is defined with a type a uselistorder directive does not name",
+    ),
+    // A symbol reference has the symbol's own pointer type, so naming one
+    // with anything else is not a reference to it.
+    (
+        "@g = global i32 0\n@a1 = alias i32, ptr @g\n@a2 = alias i32, ptr @g\nuselistorder i32 @g, { 1, 0 }\n",
+        "global variable reference must have pointer type",
+    ),
     // Positions that share one overloaded type have to agree about what it
     // is, or there is no instantiation for the declaration to be built
     // from. `llvm.umax` ties both arguments to the result.
@@ -1724,6 +1741,10 @@ const VERIFIES: &[&str] = &[
     // a module upstream reads, the verifier never reaching a declaration
     // nobody uses. Only the call is refused.
     "declare i8 @llvm.umax.i8(i8, i16)\n",
+    // The other direction of the use-list type rule: naming the type the
+    // value really has is fine, for a parameter and for a symbol.
+    "define void @f(i32 %x, i32 %y) {\nentry:\n  %a = add i32 %x, %y\n  %b = add i32 %x, %a\n  ret void\n  uselistorder i32 %x, { 1, 0 }\n}\n",
+    "@g = global i32 0\n@a1 = alias i32, ptr @g\n@a2 = alias i32, ptr @g\nuselistorder ptr @g, { 1, 0 }\n",
     // A name is reduced by dropping mangling-shaped components only.
     // `llvm.vp.cttz.elts` counts into an `i32` where `llvm.vp.cttz` returns
     // its operand's type, and reading the first as the second refused this,

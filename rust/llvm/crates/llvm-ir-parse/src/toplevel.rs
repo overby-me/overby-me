@@ -2,9 +2,10 @@
 
 use crate::attributes::LegacyMemory;
 use crate::lexer::Token;
-use crate::{ParseError, Parser};
+use crate::{FunctionState, ParseError, Parser};
 use llvm_ir::TypeId;
 use llvm_ir::constant::Constant;
+use llvm_ir::function::Function;
 use llvm_ir::global::{Comdat, ComdatKind};
 use llvm_ir::intrinsic::table::Parameter;
 use llvm_ir::metadata::{MdField, MdOperand, Metadata, NamedMetadata, SpecializedArgs};
@@ -68,7 +69,7 @@ impl Parser {
                         self.parse_attribute_group()?;
                     }
                     "uselistorder" | "uselistorder_bb" => {
-                        self.parse_use_list_order()?;
+                        self.parse_use_list_order(None)?;
                     }
                     other => {
                         return self.error(format!("unexpected top-level keyword '{other}'"));
@@ -179,7 +180,58 @@ impl Parser {
     /// use list, which upstream does check. That needs the def-use chains
     /// this does not build, so a module with nonsense indexes is read where
     /// upstream refuses it.
-    pub(crate) fn parse_use_list_order(&mut self) -> Result<(), ParseError> {
+    /// A directive names its value with the type that value was defined
+    /// with, and upstream says so in two different ways: a local is reported
+    /// against its own definition, and a global is reported for not being a
+    /// pointer, a symbol reference having the symbol's own pointer type.
+    ///
+    /// Only the type is checked here. Whether the indexes match the use list
+    /// needs the count, which cannot be taken while the module is still
+    /// being read.
+    fn check_use_list_type(
+        &mut self,
+        written: TypeId,
+        context: Option<(&Function, &FunctionState)>,
+    ) -> Result<(), ParseError> {
+        match self.peek().clone() {
+            Token::GlobalName(_) | Token::GlobalNumber(_)
+                if !matches!(self.module.ctx.type_kind(written), TypeKind::Pointer { .. }) =>
+            {
+                return self.error("global variable reference must have pointer type");
+            }
+            Token::LocalName(name) => {
+                let Some((function, state)) = context else {
+                    return Ok(());
+                };
+                // A name the body has only referred to has a slot reserved
+                // and nothing in it yet, so there is no type to compare and
+                // nothing to say.
+                let defined = state
+                    .named_params
+                    .get(&name)
+                    .and_then(|index| function.params.get(*index as usize))
+                    .map(|param| param.ty)
+                    .or_else(|| {
+                        let id = state.named_values.get(&name)?;
+                        Some(function.try_instruction(*id)?.ty)
+                    });
+                if let Some(defined) = defined
+                    && defined != written
+                {
+                    return self.error(format!(
+                        "'%{name}' is defined with a type a uselistorder directive does not name"
+                    ));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub(crate) fn parse_use_list_order(
+        &mut self,
+        context: Option<(&Function, &FunctionState)>,
+    ) -> Result<(), ParseError> {
         // `uselistorder_bb` names a function and a block, so it has one more
         // comma-separated item before the index list than `uselistorder`.
         let by_block = self.require_word()? == "uselistorder_bb";
@@ -233,12 +285,15 @@ impl Parser {
             self.require(Token::Comma)?;
             return self.parse_use_list_indexes();
         }
+        // The type is read, because it has to be the type the value was
+        // defined with, and the rest of what names the value is skipped: it
+        // may be a constant expression with commas and parentheses of its
+        // own, and nothing else here needs to know which value it was.
+        let written = self.parse_type()?;
+        self.check_use_list_type(written, context)?;
         let items = 1;
-        // What names the value is skipped rather than read: it may be a
-        // constant expression with commas and parentheses of its own, and
-        // nothing here needs to know which value it was. The scan stops at
-        // the comma before the index list, which is the first one outside
-        // any bracket.
+        // The scan stops at the comma before the index list, which is the
+        // first one outside any bracket.
         for item in 0..items {
             if item > 0 {
                 self.require(Token::Comma)?;

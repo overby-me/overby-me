@@ -1633,6 +1633,30 @@ hand-written into `table.rs`, which `corpus/intrinsic-signatures.nu`
 generates and does not emit them, so regenerating that table would have
 deleted them without a word. Nothing had regenerated it since they were
 added.
+The pass after that went back to the use-list order directives, which the
+fifty-second pass left as ten files wanting "the def-use chains PLAN 4.2 is
+still waiting on". Reading what the ten actually check says otherwise.
+Eight want the *number* of uses rather than their order: "value has no
+uses", "value only has one use", "wrong number of indexes, expected 3" and
+"expected distinct uselistorder indexes in range [0, size)" all need a
+count, which is a walk forwards over the operand slots rather than a use
+list. One wants a placement rule and one wants no count at all.
+That last one is this pass. A directive names its value with the type the
+value was defined with, and upstream reports it two ways: a local against
+its own definition, a global for not being a pointer, a symbol reference
+having the symbol's own pointer type. Both were probed, both directions.
+The value had been skipped rather than read, on the grounds that nothing
+needed to know which value it was, so the type is read now and the rest of
+the reference is still skipped, it being a constant expression with commas
+of its own in the general case. Assembler 465 to 466.
+What the count needs is recorded rather than started, because it cannot be
+taken while the module is still being read: a global used by a later
+function is not yet used when the directive is parsed, so upstream collects
+the directives and applies them at the end. The count itself was derived
+from upstream's own message, which names the number it expected: each
+operand slot is one use, a constant expression is uniqued so the same one
+written twice is one use, and the same value twice in one instruction is
+two.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`
