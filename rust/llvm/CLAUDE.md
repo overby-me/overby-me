@@ -1714,7 +1714,30 @@ reports is the token after the one it is about: `self.error` fires once the
 index list is consumed, which is the next line. Three files were diagnosed
 against the wrong directive before that was noticed.
 Assembler 473 to 475, with the modules we wrongly accept six to three. All
-ten use-list files are closed. What is not counted is a block's use list,
+ten use-list files are closed.
+Two of the fixtures those rules tripped over turned out to be modules
+upstream refuses, sitting in tables that claim the opposite, so the next
+pass asked upstream about every one of them.
+`every_fixture_agrees_with_llvm_as` runs each of the four tables past the
+assembler when `LLVM_AS` names one, off by default because the unit checks
+carry no LLVM. Each table is a different claim and needs a different
+question: `ACCEPTED` says the text parses, so the assembler is asked with
+its verifier off; `VERIFIES` says a whole module is well formed, so it is
+asked with the verifier on; `REJECTED` and `BROKEN` say upstream refuses,
+and the exit code is the whole of that, the stage it refuses at being
+nobody's business here. The first shape of the audit asked all four the
+same way and reported seventy-seven disagreements, nearly all of them
+`BROKEN` entries upstream refuses at parse time where we refuse at verify,
+which is agreement rather than a fault.
+Asked properly it found three, all in `VERIFIES`, and each is a rule this
+does not have rather than only a bad fixture. An alias scope has two
+operands or three, itself and its domain. An array says what it is an
+array of, so `DW_TAG_array_type` without a `baseType:` is refused. And an
+`addrspacecast` has to cross address spaces: `addrspacecast (ptr @r to ptr)`
+is "invalid cast opcode" at parse time.
+The fixtures are rebuilt from shapes the assembler was asked about first,
+so each still tests what it meant to. The three rules are recorded and not
+written: each wants its own measurement. What is not counted is a block's use list,
 which is its predecessors and derivable from the terminators' successors;
 `uselistorder label` and `uselistorder_bb` are read and not checked, which
 is what they were before.

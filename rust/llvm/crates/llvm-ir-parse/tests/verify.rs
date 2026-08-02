@@ -1657,7 +1657,9 @@ const VERIFIES: &[&str] = &[
     "@v = thread_local global i32 0\n@a = thread_local alias i32, ptr @v\n\ndefine void @f(<4 x i32> %x, <4 x i32> %y, <8 x float> %s, <8 x i1> %m, i32 %n) {\nentry:\n  %p = call ptr @llvm.threadlocal.address(ptr @a)\n  %c = call <4 x i32> @llvm.scmp.v4i32.v4i32(<4 x i32> %x, <4 x i32> %y)\n  %v = call <8 x i32> @llvm.vp.fptosi.v8i32.v8f32(<8 x float> %s, <8 x i1> %m, i32 %n)\n  ret void\n}\n",
     // One scope is what the declaration of a scope declares, and a tail
     // convention hands the frame over without anything in a register.
-    "declare void @llvm.experimental.noalias.scope.decl(metadata)\n\ndeclare tailcc void @g(i32)\n\ndefine tailcc void @f(i32 %x) {\nentry:\n  call void @llvm.experimental.noalias.scope.decl(metadata !0)\n  musttail call tailcc void @g(i32 %x)\n  ret void\n}\n\n!0 = !{!1}\n!1 = !{!1}\n",
+    // The scope needs two operands, itself and its domain. Written with one
+    // it is a module upstream refuses, which is not what this is about.
+    "declare void @llvm.experimental.noalias.scope.decl(metadata)\n\ndeclare tailcc void @g(i32)\n\ndefine tailcc void @f(i32 %x) {\nentry:\n  call void @llvm.experimental.noalias.scope.decl(metadata !0)\n  musttail call tailcc void @g(i32 %x)\n  ret void\n}\n\n!0 = !{!1}\n!1 = !{!1, !2}\n!2 = !{!2}\n",
     // 128 bits is a size an atomic comes in, and so is a vector of floats
     // whose lanes multiply out to one.
     "define void @f(ptr %p) {\nentry:\n  %v = load atomic i128, ptr %p monotonic, align 16\n  %r = atomicrmw fadd ptr %p, <2 x half> undef seq_cst, align 4\n  ret void\n}\n",
@@ -1677,7 +1679,10 @@ const VERIFIES: &[&str] = &[
     // destination, a landingpad in it, and a personality to read the result.
     "declare void @g()\n\ndefine void @f() personality ptr null {\nentry:\n  invoke void @g() to label %n unwind label %u\n\nn:\n  ret void\n\nu:\n  %p = landingpad { ptr, i32 } cleanup\n  resume { ptr, i32 } %p\n}\n",
     // A resolver reached through a cast is still a function.
-    "define ptr @resolver() {\nentry:\n  ret ptr null\n}\n\n@f = ifunc void (), ptr addrspacecast (ptr @resolver to ptr)\n",
+    // The cast has to cross address spaces, which means the resolver has to
+    // be in one: `addrspacecast (ptr @r to ptr)` is "invalid cast opcode"
+    // upstream rather than the reach-through-a-cast this is about.
+    "define ptr @resolver() addrspace(1) {\nentry:\n  ret ptr null\n}\n\n@f = ifunc void (), ptr addrspacecast (ptr addrspace(1) @resolver to ptr)\n",
     // `!absolute_symbol` may carry more than one range.
     "@g = external global i32, !absolute_symbol !0\n!0 = !{i64 1, i64 2, i64 4, i64 8}\n",
     // Opaque pointers put the signature at the call site, so a call that does
@@ -1701,7 +1706,10 @@ const VERIFIES: &[&str] = &[
     // is reached and not where it is not, which is what set1.ll leans on.
     "!named = !{!2}\n!0 = !{null}\n!1 = !DICompositeType(tag: DW_TAG_class_type, name: \"C\", size: 64, elements: !0)\n!2 = !{}\n",
     // An array's shape fields belong on an array.
-    "!named = !{!0}\n!0 = !DICompositeType(tag: DW_TAG_array_type, name: \"A\", size: 64, rank: !DIExpression(DW_OP_deref))\n",
+    // An array says what it is an array of, so leaving the base type out
+    // makes this a module upstream refuses for a reason that is not the
+    // `rank:` being tested.
+    "!named = !{!0}\n!0 = !DICompositeType(tag: DW_TAG_array_type, name: \"A\", size: 64, baseType: !1, rank: !DIExpression(DW_OP_deref))\n!1 = !DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)\n",
     // An alias writes an expression aliasee with no type in front, because
     // the expression says what it produces.
     "@a = global i32 0\n@b = alias i32, getelementptr inbounds (i32, ptr @a, i64 1)\n",
@@ -1937,4 +1945,67 @@ fn a_constants_use_count_is_the_number_upstream_expects() {
         };
         assert_eq!(counted, *expected, "for:\n{text}");
     }
+}
+
+/// Every fixture says what upstream does with it, so upstream is asked.
+///
+/// The four tables are claims about `llvm-as`: `ACCEPTED` and `VERIFIES`
+/// say it reads a module, `REJECTED` and `BROKEN` say it does not. Nothing
+/// checked them, and two were wrong: one asserted `uselistorder ptr @a`
+/// parses where nothing uses `@a`, and one sat in `ACCEPTED` with three
+/// faults at once. Both were found by accident, when a new rule tripped
+/// over them.
+///
+/// Set `LLVM_AS` to the assembler to run this. It is off by default
+/// because the unit checks are hermetic and carry no LLVM.
+#[test]
+fn every_fixture_agrees_with_llvm_as() {
+    let Ok(llvm_as) = std::env::var("LLVM_AS") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join("llvm-rs-fixture-audit");
+    std::fs::create_dir_all(&dir).expect("a directory to write probes in");
+    let verdict = |text: &str, index: usize, verify: bool| -> bool {
+        let path = dir.join(format!("probe{index}.ll"));
+        std::fs::write(&path, text).expect("the probe is writable");
+        let mut command = std::process::Command::new(&llvm_as);
+        if !verify {
+            command.arg("--disable-verify");
+        }
+        command
+            .arg(&path)
+            .arg("-o")
+            .arg(dir.join("out.bc"))
+            .output()
+            .expect("the assembler runs")
+            .status
+            .success()
+    };
+    let mut wrong = Vec::new();
+    for (index, text) in ACCEPTED.iter().enumerate() {
+        if !verdict(text, index, false) {
+            wrong.push(format!("ACCEPTED but llvm-as does not parse:\n{text}"));
+        }
+    }
+    for (index, text) in VERIFIES.iter().enumerate() {
+        if !verdict(text, 1000 + index, true) {
+            wrong.push(format!("VERIFIES but llvm-as does not verify:\n{text}"));
+        }
+    }
+    for (index, (text, _)) in REJECTED.iter().enumerate() {
+        if verdict(text, 2000 + index, true) {
+            wrong.push(format!("REJECTED but llvm-as reads it:\n{text}"));
+        }
+    }
+    for (index, (text, _)) in BROKEN.iter().enumerate() {
+        if verdict(text, 3000 + index, true) {
+            wrong.push(format!("BROKEN but llvm-as reads it:\n{text}"));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} fixtures claim something llvm-as does not do:\n\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }
