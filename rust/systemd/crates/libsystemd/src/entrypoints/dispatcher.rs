@@ -55,6 +55,16 @@ pub enum Event {
     /// the first preliminary command and advances the chain on ChildExit
     /// events (docs/EVENT-LOOP.md inc 2).
     StartOneshotChain(crate::units::OneshotChainStart),
+    /// Park a deferred service start: the dispatcher re-evaluates it on
+    /// Notify and ChildExit events and enforces its timeouts, replacing the
+    /// per-start polling thread (docs/EVENT-LOOP.md inc 2).
+    StartServiceWait(crate::units::StartWaitParams),
+    /// A Type=dbus bus-name watcher thread finished its blocking wait.
+    DbusNameResult {
+        unit: UnitId,
+        ok: bool,
+        message: String,
+    },
 }
 
 /// A oneshot exec chain parked between steps, keyed by the awaited pid.
@@ -63,6 +73,39 @@ struct PendingChain {
     cmd: crate::units::Commandline,
     timeout: Option<std::time::Duration>,
     deadline: Option<std::time::Instant>,
+}
+
+/// A deferred service start parked on the dispatcher, keyed by unit.
+struct StartWait {
+    id: UnitId,
+    svc_type: crate::units::ServiceType,
+    next_services_ids: Vec<UnitId>,
+    filter_ids: Arc<Vec<crate::units::UnitId>>,
+    errors: Arc<Mutex<Vec<crate::units::UnitOperationError>>>,
+    source: crate::units::ActivationSource,
+    timeout: Option<std::time::Duration>,
+    /// Static base start deadline; the armed deadline is the effective one
+    /// (base pushed by EXTEND_TIMEOUT_USEC), refreshed on notify events and
+    /// re-checked when the wheel fires.
+    base_deadline: Option<std::time::Instant>,
+    armed_deadline: Option<std::time::Instant>,
+    stop_grace: std::time::Duration,
+    term_sent_at: Option<std::time::Instant>,
+    /// Type=exec confirmation window; expiring COMPLETES the start.
+    exec_confirm_at: Option<std::time::Instant>,
+    dbus_done: bool,
+}
+
+type StartWaits = std::collections::HashMap<UnitId, StartWait>;
+
+/// Global producer handle, for senders that may hold a RuntimeInfo read
+/// guard (a second same-thread read acquisition deadlocks against a queued
+/// writer, so they must not read the handle out of RuntimeInfo).
+static GLOBAL_DISPATCHER: std::sync::OnceLock<DispatcherHandle> = std::sync::OnceLock::new();
+
+#[must_use]
+pub fn global() -> Option<&'static DispatcherHandle> {
+    GLOBAL_DISPATCHER.get()
 }
 
 struct Queues {
@@ -151,19 +194,30 @@ impl DispatcherHandle {
 /// routed to the emergency shell.
 pub fn spawn_dispatcher(run_info: ArcMutRuntimeInfo) {
     let handle = run_info.read_poisoned().dispatcher.clone();
+    let _ = GLOBAL_DISPATCHER.set(handle.clone());
     super::service_manager::spawn_critical_thread("dispatcher", move || {
-        // Oneshot exec chains parked between steps, keyed by awaited pid.
-        // Dispatcher-private: nothing else may mutate a parked chain.
+        // Dispatcher-private continuation state: oneshot exec chains keyed
+        // by awaited pid, and deferred start waits keyed by unit. Nothing
+        // else may mutate them.
         let mut chains: std::collections::HashMap<i32, PendingChain> =
             std::collections::HashMap::new();
+        let mut start_waits: StartWaits = StartWaits::new();
         loop {
-            let next_deadline = chains.values().filter_map(|chain| chain.deadline).min();
+            let next_deadline = chains
+                .values()
+                .filter_map(|chain| chain.deadline)
+                .chain(start_waits.values().filter_map(|wait| wait.armed_deadline))
+                .chain(start_waits.values().filter_map(|wait| wait.exec_confirm_at))
+                .min();
             let event = handle.pop_blocking_until(next_deadline);
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match event {
-                    Some(event) => dispatch_one(event, &run_info, &mut chains),
+                    Some(event) => dispatch_one(event, &run_info, &mut chains, &mut start_waits),
                     // The deadline wheel fired with no event.
-                    None => expire_due_chains(&run_info, &mut chains),
+                    None => {
+                        expire_due_chains(&run_info, &mut chains);
+                        expire_due_start_waits(&run_info, &mut start_waits);
+                    }
                 }
             }));
             if let Err(panic) = result {
@@ -191,6 +245,7 @@ fn dispatch_one(
     event: Event,
     run_info: &ArcMutRuntimeInfo,
     chains: &mut std::collections::HashMap<i32, PendingChain>,
+    start_waits: &mut StartWaits,
 ) {
     match event {
         Event::Notify {
@@ -199,6 +254,26 @@ fn dispatch_one(
             received_fds,
         } => {
             crate::notification_handler::apply_notify(&unit, &datagram, received_fds, run_info);
+            // A parked start for this unit may just have become ready, and
+            // an EXTEND_TIMEOUT_USEC in the datagram moves its deadline.
+            // Once SIGTERM escalation has begun, the armed deadline is the
+            // stop grace period and must not be clobbered with the (already
+            // elapsed) start deadline.
+            if let Some(mut wait) = start_waits.remove(&unit) {
+                if wait.term_sent_at.is_none() {
+                    let refreshed = crate::units::effective_start_deadline(
+                        &unit,
+                        wait.base_deadline,
+                        run_info,
+                    );
+                    // An extension only ever pushes the deadline out.
+                    wait.armed_deadline = match (wait.armed_deadline, refreshed) {
+                        (Some(current), Some(new)) => Some(current.max(new)),
+                        (current, new) => new.or(current),
+                    };
+                }
+                progress_start_wait(wait, false, run_info, start_waits);
+            }
         }
         Event::ChildExit(pid, kind, code) => {
             if let Some(pending) = chains.remove(&pid.as_raw()) {
@@ -207,7 +282,7 @@ fn dispatch_one(
                 // registration is guaranteed to have landed because both it
                 // and this pop happen on the dispatcher.
                 {
-                    let ri = run_info.read_poisoned();
+                    let ri = crate::units::dispatcher_read(run_info);
                     ri.pid_table.lock_poisoned().remove(&pid);
                 }
                 let outcome = crate::units::oneshot_chain_child_exited(
@@ -216,7 +291,7 @@ fn dispatch_one(
                     code,
                     run_info,
                 );
-                park_chain(outcome, pending.chain, chains);
+                park_chain(outcome, pending.chain, chains, start_waits, run_info);
                 return;
             }
             match kind {
@@ -228,10 +303,15 @@ fn dispatch_one(
                     if proceed {
                         crate::services::service_exit_handler_new_thread(
                             pid,
-                            id,
+                            id.clone(),
                             code,
                             run_info.clone(),
                         );
+                    }
+                    // The head recorded main_exit_status: a parked oneshot,
+                    // forking or exec start may now have its verdict.
+                    if let Some(wait) = start_waits.remove(&id) {
+                        progress_start_wait(wait, false, run_info, start_waits);
                     }
                 }
                 ChildKind::Helper(_) | ChildKind::Unknown => {
@@ -242,28 +322,255 @@ fn dispatch_one(
         }
         Event::StartOneshotChain(chain) => {
             let outcome = crate::units::oneshot_chain_step(&chain, run_info);
-            park_chain(outcome, chain, chains);
+            park_chain(outcome, chain, chains, start_waits, run_info);
+        }
+        Event::StartServiceWait(params) => {
+            register_start_wait(params, run_info, start_waits);
+        }
+        Event::DbusNameResult { unit, ok, message } => {
+            if let Some(mut wait) = start_waits.remove(&unit) {
+                if ok {
+                    wait.dbus_done = true;
+                    progress_start_wait(wait, false, run_info, start_waits);
+                } else {
+                    crate::units::fail_deferred_start(run_info, &unit, message);
+                }
+            }
         }
     }
 }
 
-/// Park a chain that advanced to a new preliminary command, arming its
-/// per-command deadline on the wheel. Finished chains need nothing.
+/// Handle Event::StartServiceWait: read the type-relevant setup under one
+/// brief guard, spawn the Type=dbus name watcher when needed, then evaluate
+/// once immediately (the readiness signal may already be there) and park.
+fn register_start_wait(
+    params: crate::units::StartWaitParams,
+    run_info: &ArcMutRuntimeInfo,
+    start_waits: &mut StartWaits,
+) {
+    let Some(setup) = crate::units::start_wait_setup(&params, run_info) else {
+        return;
+    };
+    let now = std::time::Instant::now();
+    let base_deadline = setup.timeout.map(|t| now + t);
+    if setup.svc_type == crate::units::ServiceType::Dbus {
+        match setup.dbus_name.clone() {
+            Some(bus_name) => {
+                spawn_dbus_name_watcher(params.id.clone(), bus_name, setup.timeout);
+            }
+            None => {
+                crate::units::fail_deferred_start(
+                    run_info,
+                    &params.id,
+                    "No BusName= configured for Type=dbus service".to_owned(),
+                );
+                return;
+            }
+        }
+    }
+    let wait = StartWait {
+        id: params.id,
+        svc_type: setup.svc_type,
+        next_services_ids: setup.next_services_ids,
+        filter_ids: params.filter_ids,
+        errors: params.errors,
+        source: params.source,
+        timeout: setup.timeout,
+        base_deadline,
+        armed_deadline: base_deadline,
+        stop_grace: setup
+            .stop_timeout
+            .unwrap_or(std::time::Duration::from_secs(90)),
+        term_sent_at: None,
+        exec_confirm_at: (setup.svc_type == crate::units::ServiceType::Exec)
+            .then(|| now + std::time::Duration::from_millis(500)),
+        dbus_done: false,
+    };
+    progress_start_wait(wait, false, run_info, start_waits);
+}
+
+/// Evaluate a start wait and act on the verdict: park it again, complete it
+/// on a finisher thread, or fail it. The finisher thread is where the
+/// blocking ExecStartPost= runs, never the dispatcher.
+fn progress_start_wait(
+    wait: StartWait,
+    exec_confirm_elapsed: bool,
+    run_info: &ArcMutRuntimeInfo,
+    start_waits: &mut StartWaits,
+) {
+    match crate::units::evaluate_start_wait(
+        &wait.id,
+        wait.svc_type,
+        exec_confirm_elapsed,
+        wait.dbus_done,
+        run_info,
+    ) {
+        crate::units::StartWaitVerdict::Pending => {
+            start_waits.insert(wait.id.clone(), wait);
+        }
+        crate::units::StartWaitVerdict::Abandoned => {}
+        crate::units::StartWaitVerdict::Fail(reason) => {
+            crate::units::fail_deferred_start(run_info, &wait.id, reason);
+        }
+        crate::units::StartWaitVerdict::Ready => {
+            spawn_start_finisher(wait, run_info.clone());
+        }
+    }
+}
+
+fn spawn_start_finisher(wait: StartWait, run_info: ArcMutRuntimeInfo) {
+    let id = wait.id;
+    let name = id.name.clone();
+    let log_name = name.clone();
+    let thread_name = format!("start-finish-{name}");
+    let next = wait.next_services_ids;
+    let filter = wait.filter_ids;
+    let errors = wait.errors;
+    let source = wait.source;
+    let spawned = std::thread::Builder::new()
+        .name(thread_name)
+        .spawn(move || {
+            crate::units::finish_deferred_start(
+                &id, &name, next, filter, run_info, errors, source,
+            );
+        });
+    if let Err(e) = spawned {
+        log::error!("failed to spawn start finisher for {log_name}: {e}");
+    }
+}
+
+/// One watcher thread per Type=dbus start: runs the existing blocking bus
+/// name wait and reports the outcome as an event. A NameOwnerChanged
+/// subscription can replace this without changing the event contract.
+fn spawn_dbus_name_watcher(
+    unit: UnitId,
+    bus_name: String,
+    timeout: Option<std::time::Duration>,
+) {
+    let thread_name = format!("dbus-wait-{}", unit.name);
+    let spawned = std::thread::Builder::new().name(thread_name).spawn(move || {
+        let event = match crate::dbus_wait::wait_for_name_system_bus(&bus_name, timeout) {
+            Ok(crate::dbus_wait::WaitResult::Ok) => Event::DbusNameResult {
+                unit,
+                ok: true,
+                message: String::new(),
+            },
+            Ok(crate::dbus_wait::WaitResult::Timedout) => Event::DbusNameResult {
+                unit,
+                ok: false,
+                message: format!("Timed out waiting for bus name {bus_name} ({timeout:?})"),
+            },
+            Err(e) => Event::DbusNameResult {
+                unit,
+                ok: false,
+                message: format!("Error waiting for bus name {bus_name}: {e}"),
+            },
+        };
+        if let Some(handle) = global() {
+            handle.send_normal(event);
+        }
+    });
+    if let Err(e) = spawned {
+        log::error!("failed to spawn dbus name watcher: {e}");
+    }
+}
+
+fn expire_due_start_waits(run_info: &ArcMutRuntimeInfo, start_waits: &mut StartWaits) {
+    let now = std::time::Instant::now();
+    let due: Vec<UnitId> = start_waits
+        .iter()
+        .filter(|(_, wait)| {
+            wait.exec_confirm_at.is_some_and(|deadline| deadline <= now)
+                || wait.armed_deadline.is_some_and(|deadline| deadline <= now)
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in due {
+        let Some(mut wait) = start_waits.remove(&id) else {
+            continue;
+        };
+        // Type=exec: the confirmation window elapsing COMPLETES the start.
+        if wait.exec_confirm_at.is_some_and(|deadline| deadline <= now) {
+            wait.exec_confirm_at = None;
+            progress_start_wait(wait, true, run_info, start_waits);
+            continue;
+        }
+        // Start timeout: re-check the effective deadline first, since an
+        // EXTEND_TIMEOUT_USEC may have pushed it while armed.
+        if let Some(effective) =
+            crate::units::effective_start_deadline(&id, wait.base_deadline, run_info)
+            && effective > now
+        {
+            wait.armed_deadline = Some(effective);
+            start_waits.insert(id, wait);
+            continue;
+        }
+        match wait.term_sent_at {
+            None => {
+                // kmsg deliberately: PID 1's log macros do not reach the
+                // console, and a start timeout firing is exactly what a
+                // wedge investigation needs to see.
+                crate::entrypoints::kmsg(&format!(
+                    "START-TIMEOUT {} after {:?}; sending SIGTERM",
+                    id.name, wait.timeout
+                ));
+                crate::units::start_wait_send_sigterm(&id, run_info);
+                wait.term_sent_at = Some(now);
+                wait.armed_deadline = Some(now + wait.stop_grace);
+                start_waits.insert(id, wait);
+            }
+            Some(_) => {
+                crate::entrypoints::kmsg(&format!(
+                    "START-TIMEOUT {} did not exit after SIGTERM; failing the start",
+                    id.name
+                ));
+                crate::units::fail_deferred_start(
+                    run_info,
+                    &id,
+                    format!("Timed out starting ({:?})", wait.timeout),
+                );
+            }
+        }
+    }
+}
+
+/// Act on a chain step's outcome: park it against the next pid with its
+/// per-command deadline, hand a finished fork off to a start wait for
+/// completion tracking, or nothing.
 fn park_chain(
     outcome: crate::units::OneshotStepOutcome,
     chain: crate::units::OneshotChainStart,
     chains: &mut std::collections::HashMap<i32, PendingChain>,
+    start_waits: &mut StartWaits,
+    run_info: &ArcMutRuntimeInfo,
 ) {
-    if let crate::units::OneshotStepOutcome::Advanced { pid, cmd, timeout } = outcome {
-        chains.insert(
-            pid.as_raw(),
-            PendingChain {
-                chain,
-                cmd,
-                timeout,
-                deadline: timeout.map(|t| std::time::Instant::now() + t),
-            },
-        );
+    match outcome {
+        crate::units::OneshotStepOutcome::Advanced { pid, cmd, timeout } => {
+            chains.insert(
+                pid.as_raw(),
+                PendingChain {
+                    chain,
+                    cmd,
+                    timeout,
+                    deadline: timeout.map(|t| std::time::Instant::now() + t),
+                },
+            );
+        }
+        crate::units::OneshotStepOutcome::AwaitCompletion => {
+            register_start_wait(
+                crate::units::StartWaitParams {
+                    id: chain.id,
+                    next_services_ids: Some(chain.next_services_ids),
+                    filter_ids: chain.filter_ids,
+                    errors: chain.errors,
+                    source: chain.source,
+                    check_starting: false,
+                },
+                run_info,
+                start_waits,
+            );
+        }
+        crate::units::OneshotStepOutcome::Finished => {}
     }
 }
 
