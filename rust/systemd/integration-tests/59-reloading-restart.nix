@@ -16,34 +16,14 @@
   # process immediately, so the `trap leave SIGTERM` handler never ran and the
   # unit exited by signal (ExecMainStatus=9) instead of 109.
   #
-  # THIS TEST CURRENTLY FAILS, measured 2026-07-28. Everything up to the
-  # notify-reload subtest passes; it dies on the last assertion,
-  #
-  #     test "$(systemctl show -p ExecMainStatus --value notify-reload-test)" = 109
-  #
-  # with ExecMainStatus reading back EMPTY -- not 109, and not the 9 that the
-  # old SIGKILL behaviour produced.
-  #
-  # THE STOP PATH IS NOT THE PROBLEM. A kmsg probe inside terminate_gracefully
-  # settled this: for this unit it reports
-  #
-  #     kill_mode=Process main_pid=None pid=Some(5626) resolved=Some(5626)
-  #     SENDING target=5626
-  #
-  # so the SIGTERM really is delivered, and PID 1 reaps the process about
-  # 0.9s later (REAP pid=5626 -> ServiceExited). The journal shows the script's
-  # own trace running its handlers, e.g. the reload path reaching
-  # EXIT_STATUS=99. None of the terminate_gracefully early returns fire: not
-  # the KillMode::None guard, not the no-live-PID return, not the
-  # already-exited check.
-  #
-  # So the remaining question is why ExecMainStatus is EMPTY for a stopped
-  # TRANSIENT unit whose main process exited normally, rather than carrying its
-  # exit code. Look at how the exit status is recorded and reported for
-  # transient units around stop -- unit property reporting and transient unit
-  # lifetime -- NOT at the kill path. Two earlier rounds of work on this bug,
-  # including a note in this file, blamed the graceful-SIGTERM machinery; the
-  # probe shows that theory is wrong.
+  # GREEN as of 2026-08-02. The long-open ExecMainStatus-reads-empty failure
+  # on the final assertion was the transient unit's LIFETIME, exactly where
+  # the 2026-07-28 kmsg probe pointed after clearing the kill path: the Stop
+  # handler unloaded stopped transient units from the unit table immediately,
+  # so `systemctl show` right after `systemctl stop` queried a unit that no
+  # longer existed and printed an empty property. Stopped transient units now
+  # linger loaded (fragment still deleted) until reset-failed unloads them or
+  # daemon-reload prunes them, matching upstream, and the assertion reads 109.
   patchScript = ''
         cat > TEST-59-RELOADING-RESTART.sh << 'TESTEOF'
     #!/usr/bin/env bash

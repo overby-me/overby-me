@@ -7896,19 +7896,50 @@ pub fn execute_command(
             return Ok(Value::Array(rows));
         }
         Command::ResetFailed(unit_name) => {
-            let ri = run_info.read_poisoned();
-            if let Some(name) = unit_name {
-                let units = find_units_with_name(&name, &ri.unit_table);
-                if units.is_empty() {
-                    return Err(format!("Unit {name} not found."));
+            // Reset statuses under the read guard, and collect inactive
+            // transient units on the way: upstream's reset-failed triggers a
+            // GC sweep that unloads them (their fragments are already gone),
+            // which is what bounds how long a stopped transient lingers for
+            // `systemctl show` after the Stop handler stopped unloading them.
+            let transient_leftovers: Vec<crate::units::UnitId> = {
+                let ri = run_info.read_poisoned();
+                let mut targets: Vec<&Unit> = Vec::new();
+                if let Some(name) = unit_name {
+                    let units = find_units_with_name(&name, &ri.unit_table);
+                    if units.is_empty() {
+                        return Err(format!("Unit {name} not found."));
+                    }
+                    targets.extend(units);
+                } else {
+                    // Reset all failed units
+                    targets.extend(ri.unit_table.values());
                 }
-                for unit in &units {
+                let mut leftovers = Vec::new();
+                for unit in targets {
                     reset_failed_unit(unit);
+                    let is_transient = unit
+                        .common
+                        .unit
+                        .fragment_path
+                        .as_ref()
+                        .is_some_and(|p| p.starts_with("/run/systemd/transient"));
+                    if is_transient
+                        && matches!(
+                            &*unit.common.status.read_poisoned(),
+                            UnitStatus::NeverStarted | UnitStatus::Stopped(..)
+                        )
+                    {
+                        leftovers.push(unit.id.clone());
+                    }
                 }
-            } else {
-                // Reset all failed units
-                for unit in ri.unit_table.values() {
-                    reset_failed_unit(unit);
+                leftovers
+            };
+            if !transient_leftovers.is_empty() {
+                let mut ri = run_info.write_poisoned();
+                for id in transient_leftovers {
+                    if crate::units::remove_unit_with_dependencies(id.clone(), &mut ri).is_err() {
+                        ri.unit_table.remove(&id);
+                    }
                 }
             }
             return Ok(serde_json::json!(null));
@@ -10435,10 +10466,6 @@ pub fn execute_command(
                 a_is_socket.cmp(&b_is_socket)
             });
 
-            // Transient units unloaded after the read guard is released: taking a
-            // write lock while it is held is the shape that deadlocked PID 1
-            // (docs/ARCHITECTURE.md invariant I1).
-            let mut transient_stopped: Vec<crate::units::UnitId> = Vec::new();
             {
             let run_info = &*run_info.read_poisoned();
             for unit_name in &actual_names {
@@ -10532,40 +10559,25 @@ pub fn execute_command(
                         return Err(format!("Job for {} canceled.", id.name,));
                     }
 
-                    // A transient unit does not outlive its stop: upstream
-                    // removes the runtime fragment so `systemctl cat` fails
-                    // afterwards, which TEST-74-AUX-UTILS.run asserts with
-                    // `(! systemctl cat "$UNIT")`. Only the fragment is removed
-                    // here; the unit is left in the table, so a full GC that
-                    // also unloads it is still missing. Doing that from here
-                    // would mean taking a write lock while this arm holds the
-                    // RuntimeInfo read guard, which is the shape that deadlocked
-                    // PID 1 once already (docs/ARCHITECTURE.md invariant I1).
+                    // A stopped transient unit loses its runtime fragment so
+                    // `systemctl cat` fails afterwards (TEST-74-AUX-UTILS.run
+                    // asserts this), but the unit itself stays loaded, like
+                    // upstream, until reset-failed unloads it or daemon-reload
+                    // prunes it: TEST-59 reads ExecMainStatus off the stopped
+                    // unit right after `systemctl stop`, which the previous
+                    // eager unload returned as empty. A later systemd-run with
+                    // the same name replaces the leftover
+                    // (create_transient_unit's stopped/failed replacement).
                     if let Some(unit) = run_info.unit_table.get(id)
                         && let Some(path) = unit.common.unit.fragment_path.as_ref()
                         && path.starts_with("/run/systemd/transient")
                     {
                         let _ = std::fs::remove_file(path);
-                        transient_stopped.push(id.clone());
                     }
                     stop_job.finish(crate::units::jobs::JobResult::Done);
                 } // end for id in &ids_to_stop
             }
             } // read guard released here
-
-            // Now that no read guard is held, drop the stopped transient units
-            // from the table so they stop showing up in list-units and are not
-            // re-resolved by later dependency walks. Dependency-aware removal
-            // scrubs them from other units' dep lists; the raw remove is the
-            // same fallback mount_monitor uses.
-            if !transient_stopped.is_empty() {
-                let mut ri = run_info.write_poisoned();
-                for id in transient_stopped {
-                    if crate::units::remove_unit_with_dependencies(id.clone(), &mut ri).is_err() {
-                        ri.unit_table.remove(&id);
-                    }
-                }
-            }
         }
         Command::StopNoBlock(unit_names) => {
             // Like Stop but returns immediately — deactivation runs in background.

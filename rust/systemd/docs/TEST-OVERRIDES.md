@@ -83,7 +83,7 @@ Two real failures surfaced.
 | Test | Result |
 |------|--------|
 | 07-PID1 multi-exec-start | FAILED, now FIXED. A `Type=oneshot` with several `ExecStart=` ignored a failing preliminary command, because the deferred driver discarded `wait_for_helper_child`'s result while `Service::run_cmd` checks it. Fixing that exposed a second defect: reporting the failure without moving the unit out of `Starting` re-ran the whole sequence about every 61s forever. |
-| 59-RELOADING-RESTART | FAILS. Its wrapper described the graceful-SIGTERM fix as though the subtest passed; the note now records the real stop point. |
+| 59-RELOADING-RESTART | PASSES as of 2026-08-02. The wrapper once described the graceful-SIGTERM fix as though the subtest passed while ExecMainStatus read back empty; the real cause was the Stop handler unloading stopped transient units before `systemctl show` could read them, fixed by letting them linger until reset-failed or daemon-reload. |
 
 Everything else was either a genuine pass or an honest declared skip. Short
 logs are common and are usually fine: `31-DEVICE-ENUMERATION` traces three
