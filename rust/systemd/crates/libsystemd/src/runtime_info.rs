@@ -42,6 +42,12 @@ pub type ArcMutPidTable = Arc<Mutex<PidTable>>;
 /// holding the `RuntimeInfo` RwLock in write mode.
 pub type Jobs = Arc<Mutex<crate::units::jobs::JobRegistry>>;
 
+/// Producer handle to the dispatcher's event queue (docs/EVENT-LOOP.md
+/// increment 1). Cloneable and lock-free with respect to the `RuntimeInfo`
+/// RwLock, so the signal thread and the notification reader can enqueue
+/// events without touching it.
+pub type Dispatcher = crate::entrypoints::dispatcher::DispatcherHandle;
+
 /// Manager environment variables, accessible via show-environment/set-environment.
 pub type ManagerEnvironment = Arc<Mutex<HashMap<String, String>>>;
 
@@ -70,6 +76,7 @@ pub struct RuntimeInfo {
     pub notification_eventfd: EventFd,
     pub socket_activation_eventfd: EventFd,
     pub jobs: Jobs,
+    pub dispatcher: Dispatcher,
     pub manager_environment: ManagerEnvironment,
     pub unit_markers: UnitMarkers,
     pub transactions_with_cycle: TransactionsWithCycle,

@@ -112,6 +112,7 @@ fn check_notify_access(
 
 pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
     let eventfd = { run_info.read_poisoned().notification_eventfd };
+    let dispatcher = run_info.read_poisoned().dispatcher.clone();
     loop {
         if crate::shutdown::is_shutting_down() {
             trace!("Notification handler exiting: shutdown in progress");
@@ -281,51 +282,20 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                                 mut_state.srvc.notifications_buffer.push('\n');
                             }
 
-                            // Process text notifications first so FDNAME= is parsed
-                            // before we handle the received FDs.
-                            crate::notification_handler::handle_notifications_from_buffer(
-                                &mut mut_state.srvc,
-                                &srvc_unit.id.name,
-                            );
-
-                            // A Type=notify service that signals READY=1 and then
-                            // exits almost immediately (e.g. `systemd-notify --ready;
-                            // exit 1`) can have its deferred activation bail out when
-                            // the SIGCHLD exit handler moves the unit out of Starting
-                            // before the activation path records ActiveEnterTimestamp,
-                            // leaving it unset (0). Record it here — the point where
-                            // READY=1 is definitively processed — so the exec
-                            // timestamps stay consistent (start <= handoff <= active
-                            // <= exit). Clamp to the recorded main exit time when the
-                            // service has already exited so active-enter never exceeds
-                            // exit regardless of the interleaving between this thread
-                            // and the exit handler.
-                            if mut_state.srvc.signaled_ready {
-                                // Check-and-set under a single timestamps write guard
-                                // so we don't race the deferred activation thread
-                                // (which also records active_enter via record_active_enter)
-                                // between a separate read and write.
-                                let mut ts = srvc_unit.common.timestamps.write_poisoned();
-                                if ts.active_enter.is_none() {
-                                    let now = crate::units::UnitTimestamps::now_usec();
-                                    let active_ts = match mut_state.srvc.exec_main_exit_timestamp {
-                                        Some(e) if e < now => e,
-                                        _ => now,
-                                    };
-                                    ts.record_active_enter_at(active_ts);
-                                }
-                            }
-
-                            // Now handle FDSTORE with any received file descriptors.
-                            if !received_fds.is_empty() {
-                                handle_received_fds(
-                                    &note_str,
+                            // Application (buffer drain, READY=/MAINPID=
+                            // transitions, timestamps, FDSTORE) happens on the
+                            // dispatcher (docs/EVENT-LOOP.md inc 1): the HIGH
+                            // queue guarantees a doomed process's final
+                            // datagram is applied before its ChildExit is
+                            // processed. Ownership of the received fds
+                            // transfers with the event.
+                            dispatcher.send_high(
+                                crate::entrypoints::dispatcher::Event::Notify {
+                                    unit: srvc_unit.id.clone(),
+                                    datagram: note_str.clone(),
                                     received_fds,
-                                    &mut mut_state.srvc,
-                                    &srvc_unit.id.name,
-                                    &srvc_unit.specific,
-                                );
-                            }
+                                },
+                            );
                         }
                         Err(nix::errno::Errno::EAGAIN) => {
                             // No data available — normal for non-blocking.
@@ -351,6 +321,87 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                 warn!("Error while selecting: {e}");
             }
         }
+    }
+}
+
+/// Apply one forwarded notification event on the dispatcher: drain the
+/// service's notifications_buffer (state transitions such as READY=1,
+/// MAINPID= and RELOADING=), keep the active-enter timestamp consistent,
+/// then apply FDSTORE/FDSTOREREMOVE from the raw datagram. The reader has
+/// already enforced NotifyAccess= and appended the datagram to the buffer;
+/// draining may consume datagrams from later events of the same service,
+/// which preserves per-service ordering (their own events find an empty
+/// buffer and only apply their fds).
+pub fn apply_notify(
+    unit_id: &UnitId,
+    datagram: &str,
+    received_fds: Vec<RawFd>,
+    run_info: &ArcMutRuntimeInfo,
+) {
+    // Yield-to-writers acquisition, mirroring the reader's.
+    let run_info_locked = loop {
+        match run_info.try_read() {
+            Ok(guard) => break guard,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    };
+    let close_all = |fds: Vec<RawFd>| {
+        for fd in fds {
+            let _ = nix::unistd::close(fd);
+        }
+    };
+    let Some(srvc_unit) = run_info_locked.unit_table.get(unit_id) else {
+        close_all(received_fds);
+        return;
+    };
+    let Specific::Service(srvc) = &srvc_unit.specific else {
+        close_all(received_fds);
+        return;
+    };
+    let mut_state = &mut *srvc.state.write_poisoned();
+
+    // Process text notifications first so FDNAME= is parsed before the
+    // received FDs are handled.
+    handle_notifications_from_buffer(&mut mut_state.srvc, &srvc_unit.id.name);
+
+    // A Type=notify service that signals READY=1 and then exits almost
+    // immediately (e.g. `systemd-notify --ready; exit 1`) can have its
+    // deferred activation bail out when the SIGCHLD exit handler moves the
+    // unit out of Starting before the activation path records
+    // ActiveEnterTimestamp, leaving it unset (0). Record it here, the point
+    // where READY=1 is definitively processed, so the exec timestamps stay
+    // consistent (start <= handoff <= active <= exit). Clamp to the
+    // recorded main exit time when the service has already exited so
+    // active-enter never exceeds exit regardless of the interleaving with
+    // exit processing.
+    if mut_state.srvc.signaled_ready {
+        // Check-and-set under a single timestamps write guard so we don't
+        // race the deferred activation thread (which also records
+        // active_enter via record_active_enter) between a separate read
+        // and write.
+        let mut ts = srvc_unit.common.timestamps.write_poisoned();
+        if ts.active_enter.is_none() {
+            let now = crate::units::UnitTimestamps::now_usec();
+            let active_ts = match mut_state.srvc.exec_main_exit_timestamp {
+                Some(exit_ts) if exit_ts < now => exit_ts,
+                _ => now,
+            };
+            ts.record_active_enter_at(active_ts);
+        }
+    }
+
+    // Now handle FDSTORE with any received file descriptors.
+    if !received_fds.is_empty() {
+        handle_received_fds(
+            datagram,
+            received_fds,
+            &mut mut_state.srvc,
+            &srvc_unit.id.name,
+            &srvc_unit.specific,
+        );
     }
 }
 

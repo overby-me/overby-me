@@ -1684,6 +1684,7 @@ mod tests {
             notification_eventfd: crate::platform::make_event_fd().unwrap(),
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
             jobs: Arc::new(Mutex::new(crate::units::jobs::JobRegistry::new())),
+            dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: Arc::new(Mutex::new(std::collections::HashMap::new())),
             unit_markers: Arc::new(Mutex::new(std::collections::HashMap::new())),
             transactions_with_cycle: Arc::new(Mutex::new(Vec::new())),

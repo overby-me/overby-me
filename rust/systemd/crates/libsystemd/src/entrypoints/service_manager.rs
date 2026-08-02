@@ -195,6 +195,9 @@ pub fn run_service_manager() {
             unreachable!("");
         }
     };
+    // The dispatcher must be consuming before the signal thread and the
+    // notification reader start producing events for it.
+    super::dispatcher::spawn_dispatcher(run_info.clone());
     // listen to signals
     let _signal_handle = start_signal_handler_thread(signals, run_info.clone());
 
@@ -394,6 +397,7 @@ pub fn run_user_manager() {
             return;
         }
     };
+    super::dispatcher::spawn_dispatcher(run_info.clone());
     let handle = start_signal_handler_thread(signals, run_info.clone());
 
     // Bind the user control socket ($XDG_RUNTIME_DIR/systemd/control.socket)
@@ -611,7 +615,7 @@ fn find_shell_path() -> Option<std::path::PathBuf> {
     possible_paths.into_iter().find(|p| p.exists())
 }
 
-fn unrecoverable_error(error: String) {
+pub(crate) fn unrecoverable_error(error: String) {
     if nix::unistd::getpid().as_raw() == 1 {
         eprintln!("Unrecoverable error: {error}");
         if let Some(shell_path) = find_shell_path() {
@@ -1243,6 +1247,7 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
         jobs: std::sync::Arc::new(std::sync::Mutex::new(
             crate::units::jobs::JobRegistry::new(),
         )),
+        dispatcher: super::dispatcher::DispatcherHandle::new(),
         manager_environment: {
             let mut env = std::collections::HashMap::new();
             for (k, v) in std::env::vars() {
@@ -1294,7 +1299,7 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
 /// spawn failure surfaced as a panic at `library/std` that did not say which
 /// thread failed. Naming the threads also makes them identifiable in
 /// `/proc/<pid>/task/*/comm` and in a debugger.
-fn spawn_critical_thread<F>(name: &str, f: F) -> std::thread::JoinHandle<()>
+pub(crate) fn spawn_critical_thread<F>(name: &str, f: F) -> std::thread::JoinHandle<()>
 where
     F: FnOnce() + Send + 'static,
 {

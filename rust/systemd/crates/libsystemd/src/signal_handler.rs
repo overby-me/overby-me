@@ -44,9 +44,8 @@
 //! | +23    | Set log level to info (alt)                   |
 //! | +24    | Immediate exit (container mode)               |
 
-use crate::lock_ext::MutexExt;
+use crate::lock_ext::{MutexExt, RwLockExt};
 use crate::runtime_info::{ArcMutPidTable, ArcMutRuntimeInfo, PidEntry};
-use crate::services;
 use log::error;
 use log::info;
 use log::trace;
@@ -77,6 +76,10 @@ pub fn handle_signals(
     pid_table: ArcMutPidTable,
 ) {
     let sigrtmin_base = unsafe { libc::__libc_current_sigrtmin() };
+    // Cloned once up front: the reap path below must never touch the
+    // RuntimeInfo RwLock (see the phase 1 comment), and the handle is
+    // lock-free to use.
+    let dispatcher = run_info.read_poisoned().dispatcher.clone();
 
     loop {
         // Pick up new signals
@@ -142,14 +145,15 @@ pub fn handle_signals(
                                     };
 
                                     // Phase 2: If the exited process was a service,
-                                    // spawn a thread to handle restart/cleanup logic.
-                                    // That thread *will* need the RuntimeInfo read
-                                    // lock, but by now the critical PID-table update
-                                    // is already visible.
+                                    // hand the exit to the dispatcher, which runs
+                                    // the non-blocking head and spawns the blocking
+                                    // tail (docs/EVENT-LOOP.md inc 1). The critical
+                                    // PID-table update above is already visible.
                                     if let Some(id) = unit_id {
-                                        let run_info_clone = run_info.clone();
-                                        services::service_exit_handler_new_thread(
-                                            pid, id, code, run_info_clone,
+                                        dispatcher.send_normal(
+                                            crate::entrypoints::dispatcher::Event::ChildExit(
+                                                pid, id, code,
+                                            ),
                                         );
                                     }
                                 }
@@ -1092,6 +1096,7 @@ mod tests {
             jobs: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::units::jobs::JobRegistry::new(),
             )),
+            dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1159,6 +1164,7 @@ mod tests {
             jobs: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::units::jobs::JobRegistry::new(),
             )),
+            dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1233,6 +1239,7 @@ mod tests {
             jobs: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::units::jobs::JobRegistry::new(),
             )),
+            dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),

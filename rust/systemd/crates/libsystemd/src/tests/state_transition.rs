@@ -74,6 +74,7 @@ fn test_service_state_transitions_inner() {
         jobs: std::sync::Arc::new(std::sync::Mutex::new(
             crate::units::jobs::JobRegistry::new(),
         )),
+        dispatcher: crate::entrypoints::dispatcher::DispatcherHandle::detached(),
         manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashMap::new(),
         )),

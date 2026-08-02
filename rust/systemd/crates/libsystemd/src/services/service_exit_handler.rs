@@ -604,24 +604,32 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
     }
 }
 
-/// Handle the aftermath of a service process exiting.
+/// The non-blocking head of service exit processing, run on the dispatcher
+/// (docs/EVENT-LOOP.md inc 1): utmp bookkeeping, recording the main
+/// process's exit status, and the two decisions that suppress death
+/// processing entirely (Type=forking readiness, ExitType=cgroup draining).
 ///
-/// The PID table has already been updated by the signal handler; this function
-/// deals with utmp records, oneshot process cleanup, restart decisions, and
-/// SuccessAction/FailureAction triggers.
-pub(crate) fn service_exit_handler(
+/// Returns true when the blocking tail ([`service_exit_handler`] on its
+/// continuation thread) still has work to do.
+pub(crate) fn service_exit_head(
     pid: nix::unistd::Pid,
-    srvc_id: UnitId,
-    code: ChildTermination,
+    srvc_id: &UnitId,
+    code: &ChildTermination,
     run_info: &RuntimeInfo,
     arc_run_info: &ArcMutRuntimeInfo,
-) -> Result<(Option<PendingTrigger>, Option<PendingRestart>), String> {
+) -> bool {
     trace!(
-        "Exit handler for service {:?} with pid: {pid} code: {code:?}",
+        "Exit head for service {:?} with pid: {pid} code: {code:?}",
         srvc_id.name
     );
-    let Some(unit) = run_info.unit_table.get(&srvc_id) else {
-        panic!("Tried to run a unit that has been removed from the map");
+    let Some(unit) = run_info.unit_table.get(srvc_id) else {
+        // Racing a daemon-reload that removed the unit. Nothing to finish,
+        // and the dispatcher must not panic over it.
+        error!(
+            "Exit of pid {pid} resolved to unit {} which is no longer loaded",
+            srvc_id.name
+        );
+        return false;
     };
 
     // Write DEAD_PROCESS utmp/wtmp record if the service had UtmpIdentifier= set.
@@ -638,7 +646,7 @@ pub(crate) fn service_exit_handler(
     // Record the main process exit status and PID for ExecMainStatus/ExecMainPID properties.
     if let Specific::Service(srvc) = &unit.specific {
         let mut state = srvc.state.write_poisoned();
-        let exit_code = match &code {
+        let exit_code = match code {
             ChildTermination::Exit(c) => *c,
             ChildTermination::Signal(s) => *s as i32,
         };
@@ -662,10 +670,10 @@ pub(crate) fn service_exit_handler(
     // Starting is the type's readiness signal, not a service death.  The
     // deferred start completion handler consumes the main_exit_status
     // recorded above, picks up the daemon PID from PIDFile/MAINPID and
-    // transitions the unit to Started (or failed) — suppress death
-    // processing here.  With the inline (non-deferred) wait this branch is
+    // transitions the unit to Started (or failed), so death processing is
+    // suppressed here.  With the inline (non-deferred) wait this branch is
     // unreachable: the activating thread holds the service state write lock
-    // across the wait, so this handler blocks above until activation has
+    // across the wait, so the recording above blocks until activation has
     // already moved the unit out of Starting.
     if let Specific::Service(srvc) = &unit.specific
         && srvc.conf.srcv_type == ServiceType::Forking
@@ -675,7 +683,7 @@ pub(crate) fn service_exit_handler(
             "Service {}: forking parent exited while Starting, leaving completion to the deferred start handler",
             srvc_id.name
         );
-        return Ok((None, None));
+        return false;
     }
 
     let success_exit_status = get_success_exit_status(unit);
@@ -708,8 +716,8 @@ pub(crate) fn service_exit_handler(
             }
 
             // Record the exit code from the main process for later use.
-            let main_code = code;
-            let main_success = success_exit_status.is_success(&code);
+            let main_code = *code;
+            let main_success = success_exit_status.is_success(code);
 
             // Poll the cgroup until it's empty, then deactivate the service.
             let cg = cgroup_path.clone();
@@ -778,9 +786,37 @@ pub(crate) fn service_exit_handler(
                     let _ = std::fs::remove_dir(&cg);
                 }
             });
-            return Ok((None, None));
+            return false;
         }
     }
+
+    true
+}
+
+/// Handle the aftermath of a service process exiting.
+///
+/// The PID table has already been updated by the signal handler and the
+/// non-blocking head ([`service_exit_head`]) has run on the dispatcher;
+/// this tail deals with oneshot process cleanup, restart decisions, and
+/// SuccessAction/FailureAction triggers, and may block on stop followups.
+pub(crate) fn service_exit_handler(
+    pid: nix::unistd::Pid,
+    srvc_id: UnitId,
+    code: ChildTermination,
+    run_info: &RuntimeInfo,
+    arc_run_info: &ArcMutRuntimeInfo,
+) -> Result<(Option<PendingTrigger>, Option<PendingRestart>), String> {
+    trace!(
+        "Exit handler for service {:?} with pid: {pid} code: {code:?}",
+        srvc_id.name
+    );
+    let Some(unit) = run_info.unit_table.get(&srvc_id) else {
+        // The unit can vanish on a daemon-reload between the dispatcher's
+        // head and this continuation thread; there is nothing left to do.
+        return Ok((None, None));
+    };
+
+    let success_exit_status = get_success_exit_status(unit);
 
     // Handle oneshot service exit: clean up remaining processes and decide
     // whether to keep the service active (RemainAfterExit=yes) or deactivate it.

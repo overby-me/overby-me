@@ -1,3 +1,4 @@
+pub mod dispatcher;
 pub(crate) mod exec_helper;
 mod service_manager;
 
