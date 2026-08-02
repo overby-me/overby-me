@@ -42,6 +42,9 @@ pub struct SheetRow {
     pub index: u32,
     #[serde(default)]
     pub cells: Vec<SheetCell>,
+    /// The style the row states, which its cells inherit unless they state one.
+    #[serde(default)]
+    pub style_index: Option<usize>,
     /// The height the author set, in POINTS, when they set one. Absent means
     /// the sheet's default, which most rows are. Worth honouring because it is
     /// used to give a section its heading: a banner row set to 34pt against a
@@ -346,6 +349,33 @@ pub fn border_css(border: &Border) -> String {
     css
 }
 
+/// Everything one style says about how a cell looks, as inline CSS.
+///
+/// Shared by cells and by ROWS: a row states a style its cells inherit, and
+/// Excel then omits the cells that hold nothing but that style — so for those
+/// positions the row is the only record that they are styled at all.
+pub fn style_css(styles: &Styles, style_index: Option<usize>, base: f64) -> String {
+    let mut css = styles
+        .border_of(style_index)
+        .map(border_css)
+        .unwrap_or_default();
+    if let Some(font) = styles.font_of(style_index) {
+        css.push_str(&font_css(font, base));
+    }
+    if let Some(fill) = styles.fill_of(style_index) {
+        // Ink to match, worked out from the fill: the background is the
+        // WORKBOOK'S and the theme's on-surface colour knows nothing about it,
+        // so a pale fill in dark mode would otherwise carry near-white text.
+        // Same reasoning, and the same helper, as a Word table's shaded cell.
+        let hex = fill.trim().trim_start_matches('#');
+        css.push_str(&format!(
+            "background:#{hex};color:{};",
+            super::docx::readable_ink(hex)
+        ));
+    }
+    css
+}
+
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NumFmt {
@@ -499,36 +529,33 @@ pub fn to_grid(sheet: &Sheet, wb: &Workbook) -> (Vec<Vec<GridCell>>, usize) {
         let Some(r) = (row.index as usize).checked_sub(1) else {
             continue;
         };
+        if r >= grid.len() {
+            continue;
+        }
+        // The ROW's own style across the whole width first. Excel omits the
+        // cells that hold nothing but the row's format, so a rule under a
+        // heading is recorded here and nowhere else for those columns — it was
+        // simply missing from every column with no cell of its own.
+        let from_row = row
+            .style_index
+            .map(|s| style_css(&wb.styles, Some(s), base))
+            .unwrap_or_default();
+        if !from_row.is_empty() {
+            for cell in grid[r].iter_mut() {
+                cell.style = from_row.clone();
+            }
+        }
+        // Then the cells, which override it: a cell that states a style wins
+        // over the row's, and a cell with no text can still carry a rule (the
+        // underline beneath a total sits on the empty cells beside it).
         for cell in &row.cells {
             let Some(c) = (cell.col as usize).checked_sub(1) else {
                 continue;
             };
-            if r < grid.len() && c < width {
-                // A cell with no text can still be styled: the rule beneath a
-                // total is usually on the empty cells beside it.
-                let mut style = wb
-                    .styles
-                    .border_of(cell.style_index)
-                    .map(border_css)
-                    .unwrap_or_default();
-                if let Some(font) = wb.styles.font_of(cell.style_index) {
-                    style.push_str(&font_css(font, base));
-                }
-                if let Some(fill) = wb.styles.fill_of(cell.style_index) {
-                    // Ink to match, worked out from the fill: the background is
-                    // the WORKBOOK'S and the theme's on-surface colour knows
-                    // nothing about it, so a pale fill in dark mode would
-                    // otherwise carry near-white text. Same reasoning, and the
-                    // same helper, as a Word table's shaded cell.
-                    let hex = fill.trim().trim_start_matches('#');
-                    style.push_str(&format!(
-                        "background:#{hex};color:{};",
-                        super::docx::readable_ink(hex)
-                    ));
-                }
+            if c < width {
                 grid[r][c] = GridCell {
                     text: cell_text(cell, wb),
-                    style,
+                    style: style_css(&wb.styles, cell.style_index, base),
                 };
             }
         }
@@ -1027,6 +1054,68 @@ mod tests {
         // A row that states nothing keeps the sheet's default.
         assert_eq!(row_style(None), "");
         assert_eq!(row_style(Some(0.0)), "");
+    }
+
+    /// Row 1 of the reported sheet: the row states the rule, and Excel then
+    /// writes no cell at all for column A. The rule has to come from the row or
+    /// it is lost exactly where there is nothing else to draw.
+    #[test]
+    fn a_rule_stated_by_the_row_reaches_the_columns_with_no_cell() {
+        let wb: Workbook = serde_json::from_value(serde_json::json!({
+            "sharedStrings": [],
+            "styles": {
+                "cellXfs": [
+                    {"numFmtId": 0, "borderId": 0, "fontId": 0, "fillId": 0},
+                    {"numFmtId": 0, "borderId": 1, "fontId": 0, "fillId": 0},
+                    {"numFmtId": 0, "borderId": 2, "fontId": 0, "fillId": 0}
+                ],
+                "numFmts": [],
+                "fonts": [{"bold": false, "italic": false, "underline": false, "size": 11.0}],
+                "fills": [],
+                "borders": [
+                    {"left": null, "right": null, "top": null, "bottom": null},
+                    {"left": null, "right": null, "top": null,
+                     "bottom": {"style": "medium", "color": null}},
+                    {"left": null, "right": null, "top": null,
+                     "bottom": {"style": "thick", "color": null}}
+                ]
+            }
+        }))
+        .expect("the parser's own shape");
+
+        let sheet = Sheet {
+            rows: vec![SheetRow {
+                index: 1,
+                // The row says medium; column A has no cell of its own.
+                style_index: Some(1),
+                cells: vec![
+                    SheetCell {
+                        col: 2,
+                        value: None,
+                        style_index: Some(1),
+                    },
+                    // ...and one cell overrides the row with its own.
+                    SheetCell {
+                        col: 3,
+                        value: None,
+                        style_index: Some(2),
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let (grid, width) = to_grid(&sheet, &wb);
+        assert_eq!(width, 3);
+        assert_eq!(
+            grid[0][0].style, "border-bottom:2px solid currentColor;",
+            "column A has no cell, so the ROW is the only record of its rule"
+        );
+        assert_eq!(grid[0][1].style, "border-bottom:2px solid currentColor;");
+        assert_eq!(
+            grid[0][2].style, "border-bottom:3px solid currentColor;",
+            "a cell that states a style wins over its row's"
+        );
     }
 
     /// The parser's real wire shape, keys and all.

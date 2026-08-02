@@ -1,3 +1,11 @@
+// Vendored third-party code (see ../../README.md). Clippy wants the length
+// checks inside the `a:path` command arms of `drawing.rs` folded into match
+// GUARDS, which is not the same program: a guard that fails falls through to
+// the next arm, where the `if` simply does nothing and the arm still matches.
+// Restyling a parser we did not write, in a file nothing here has reason to
+// touch, to satisfy a lint is a worse trade than saying so once.
+#![allow(clippy::collapsible_match)]
+
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, Read};
 use wasm_bindgen::prelude::*;
@@ -1307,6 +1315,13 @@ fn parse_worksheet(
                 // unless the cell overrides with its own `@ph`. Threaded into
                 // `parse_row_cells` so each cell resolves the effective value.
                 let row_ph = attr_bool(&node, "ph").unwrap_or(false);
+                // §18.3.1.73 `<row s>` — the row's own style, which its cells
+                // inherit unless they state one. Read for the same reason `ht`
+                // is: `customFormat` is metadata about HOW the format was set,
+                // not whether it applies. A row that carries a border here has
+                // no cell elements at the positions that hold only that border,
+                // so without this they are the one place the rule is lost.
+                let style_index = node.attribute("s").and_then(|s| s.parse::<u32>().ok());
                 let cells = parse_row_cells(&node, row_idx, row_ph, shared_strings, theme_colors);
                 rows.push(Row {
                     index: row_idx,
@@ -1315,6 +1330,7 @@ fn parse_worksheet(
                     outline_level,
                     collapsed,
                     hidden,
+                    style_index,
                 });
             }
             "conditionalFormatting" if is_x_ns(node.tag_name().namespace()) => {

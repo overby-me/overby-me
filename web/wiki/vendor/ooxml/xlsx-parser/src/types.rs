@@ -1206,6 +1206,17 @@ pub struct Row {
     pub index: u32,
     pub height: Option<f64>,
     pub cells: Vec<Cell>,
+    /// `<row s>` (§18.3.1.73): the style every cell of the row takes unless it
+    /// carries one of its own.
+    ///
+    /// Load-bearing, not decoration. Excel writes a row's format here and then
+    /// omits the cells that hold nothing but that format, so for those
+    /// positions this is the ONLY record that they are styled at all — a rule
+    /// under a heading row simply vanishes from the leading columns without it.
+    /// Omitted from JSON when absent, so a sheet without row styles serializes
+    /// exactly as before.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub style_index: Option<u32>,
     /// Outline (grouping) depth of this row, 0-7 (ECMA-376 §18.3.1.73
     /// `<row outlineLevel>`). `0` (the ungrouped default) is omitted from JSON
     /// so a sheet without outlining serializes byte-for-byte as before.
