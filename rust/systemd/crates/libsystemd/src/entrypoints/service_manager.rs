@@ -1240,8 +1240,8 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
         stderr_eventfd: platform::make_event_fd().unwrap(),
         notification_eventfd: platform::make_event_fd().unwrap(),
         socket_activation_eventfd: platform::make_event_fd().unwrap(),
-        pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashSet::new(),
+        jobs: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::units::jobs::JobRegistry::new(),
         )),
         manager_environment: {
             let mut env = std::collections::HashMap::new();

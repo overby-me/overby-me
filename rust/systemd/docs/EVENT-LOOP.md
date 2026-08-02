@@ -166,6 +166,10 @@ gates green, and a commit. The standing gate set for every increment is
 01-basic boot time is measured before the series and after each increment and
 must stay within 10% of the baseline.
 
+Baseline, measured 2026-08-02 on tree 5e28b2a4 before increment 0:
+`multi-user.target` activation at 10.09 s on the guest kernel clock
+(01-basic VM log), 15.05 s test-driver boot wait.
+
 ### Inc 0: job bookkeeping and a real D-Bus job surface
 
 JobRegistry lands in RuntimeInfo. Every control/D-Bus start, stop, restart and

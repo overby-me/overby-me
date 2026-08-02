@@ -2,6 +2,7 @@
 
 pub(crate) mod from_parsed_config;
 mod id;
+pub mod jobs;
 pub(crate) mod loading;
 mod mount_monitor;
 mod status;
@@ -11,6 +12,7 @@ pub(crate) mod unit_parsing;
 mod unitset_manipulation;
 
 pub use id::*;
+pub use jobs::*;
 pub use loading::*;
 pub use mount_monitor::*;
 pub use status::*;

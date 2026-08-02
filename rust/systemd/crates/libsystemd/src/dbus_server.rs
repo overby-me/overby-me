@@ -11,8 +11,22 @@ pub fn start_dbus_server_thread(_run_info: crate::runtime_info::ArcMutRuntimeInf
     // no-op
 }
 
+/// Job lifecycle hooks called by the `JobRegistry` (units/jobs.rs). With
+/// D-Bus support compiled in and the system bus connected they emit
+/// JobNew/JobRemoved and register/unregister the per-job object; otherwise
+/// they are no-ops.
+#[cfg(not(feature = "dbus_support"))]
+pub fn notify_job_created(_job: &crate::units::jobs::Job) {
+    // no-op
+}
+
+#[cfg(not(feature = "dbus_support"))]
+pub fn notify_job_removed(_job: &crate::units::jobs::Job) {
+    // no-op
+}
+
 #[cfg(feature = "dbus_support")]
-pub use inner::start_dbus_server_thread;
+pub use inner::{notify_job_created, notify_job_removed, start_dbus_server_thread};
 
 #[cfg(feature = "dbus_support")]
 mod inner {
@@ -105,6 +119,21 @@ mod inner {
             } else {
                 "not-found".to_string()
             }
+        }
+
+        /// The job installed for this unit as (id, path), or (0, "/") when
+        /// none is.
+        #[zbus(property)]
+        fn job(&self) -> (u32, zbus::zvariant::OwnedObjectPath) {
+            let ri = self.run_info.read_poisoned();
+            let registry = ri.jobs.lock().unwrap();
+            registry
+                .iter()
+                .find(|job| job.unit.name == self.unit_name)
+                .map_or_else(
+                    || (0, zbus::zvariant::OwnedObjectPath::try_from("/").unwrap()),
+                    |job| (job.id, job_object_path(job.id)),
+                )
         }
 
         #[zbus(property)]
@@ -861,6 +890,59 @@ mod inner {
         zbus::zvariant::OwnedObjectPath,
     );
 
+    /// Per-job tuple returned by `ListJobs`: (id, unit, type, state,
+    /// job_obj_path, unit_obj_path).
+    type ListJobsEntry = (
+        u32,
+        String,
+        String,
+        String,
+        zbus::zvariant::OwnedObjectPath,
+        zbus::zvariant::OwnedObjectPath,
+    );
+
+    /// Per-job object exported at `/org/freedesktop/systemd1/job/<id>` while
+    /// the job is installed. Properties read the live registry and fall back
+    /// to the values captured at registration once the job is gone (a client
+    /// may still hold the path briefly after JobRemoved).
+    struct JobObj {
+        run_info: ArcMutRuntimeInfo,
+        id: u32,
+        unit_name: String,
+        kind: &'static str,
+    }
+
+    #[interface(name = "org.freedesktop.systemd1.Job")]
+    impl JobObj {
+        #[zbus(property)]
+        fn id(&self) -> u32 {
+            self.id
+        }
+
+        #[zbus(property)]
+        fn unit(&self) -> (String, zbus::zvariant::OwnedObjectPath) {
+            (self.unit_name.clone(), unit_object_path(&self.unit_name))
+        }
+
+        #[zbus(property)]
+        fn job_type(&self) -> String {
+            let ri = self.run_info.read_poisoned();
+            let registry = ri.jobs.lock().unwrap();
+            registry
+                .get(self.id)
+                .map_or_else(|| self.kind.to_string(), |job| job.kind.as_str().to_string())
+        }
+
+        #[zbus(property)]
+        fn state(&self) -> String {
+            let ri = self.run_info.read_poisoned();
+            let registry = ri.jobs.lock().unwrap();
+            registry
+                .get(self.id)
+                .map_or_else(|| "running".to_string(), |job| job.state.as_str().to_string())
+        }
+    }
+
     /// Resolve the real UID of a D-Bus method's caller via the bus daemon's
     /// `GetConnectionUnixUser`.  A message with no sender comes from a direct
     /// peer connection (no bus) and is treated as trusted (uid 0).  A message
@@ -907,10 +989,64 @@ mod inner {
             ri.unit_table.len() as u32
         }
 
-        /// Number of running jobs.  We don't track a job queue, so report 0.
+        /// Number of installed jobs.
         #[zbus(property)]
         fn n_jobs(&self) -> u32 {
-            0
+            let ri = self.run_info.read_poisoned();
+            let registry = ri.jobs.lock().unwrap();
+            registry.len() as u32
+        }
+
+        /// Emitted when a job is installed.
+        #[zbus(signal)]
+        async fn job_new(
+            emitter: &zbus::object_server::SignalEmitter<'_>,
+            id: u32,
+            job: zbus::zvariant::OwnedObjectPath,
+            unit: String,
+        ) -> zbus::Result<()>;
+
+        /// Emitted when a job completes, with its result string
+        /// (done/failed/canceled/timeout/dependency/skipped).
+        #[zbus(signal)]
+        async fn job_removed(
+            emitter: &zbus::object_server::SignalEmitter<'_>,
+            id: u32,
+            job: zbus::zvariant::OwnedObjectPath,
+            unit: String,
+            result: String,
+        ) -> zbus::Result<()>;
+
+        /// Returns the installed jobs as (id, unit, type, state, job_path,
+        /// unit_path) tuples, ordered by job ID.
+        fn list_jobs(&self) -> Vec<ListJobsEntry> {
+            let ri = self.run_info.read_poisoned();
+            let registry = ri.jobs.lock().unwrap();
+            let mut jobs: Vec<_> = registry.iter().collect();
+            jobs.sort_by_key(|job| job.id);
+            jobs.into_iter()
+                .map(|job| {
+                    (
+                        job.id,
+                        job.unit.name.clone(),
+                        job.kind.as_str().to_string(),
+                        job.state.as_str().to_string(),
+                        job_object_path(job.id),
+                        unit_object_path(&job.unit.name),
+                    )
+                })
+                .collect()
+        }
+
+        /// Returns the object path of the job with the given ID.
+        fn get_job(&self, id: u32) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
+            let ri = self.run_info.read_poisoned();
+            let registry = ri.jobs.lock().unwrap();
+            if registry.get(id).is_some() {
+                Ok(job_object_path(id))
+            } else {
+                Err(zbus::fdo::Error::Failed(format!("Job {id} does not exist.")))
+            }
         }
 
         /// Number of failed units.
@@ -961,6 +1097,7 @@ mod inner {
         ///  follower, object_path, job_id, job_type, job_object_path).
         fn list_units(&self) -> Vec<ListUnitsEntry> {
             let ri = self.run_info.read_poisoned();
+            let registry = ri.jobs.lock().unwrap();
             let mut out = Vec::new();
             let root = zbus::zvariant::OwnedObjectPath::try_from("/").unwrap();
             for unit in ri.unit_table.values() {
@@ -968,6 +1105,16 @@ mod inner {
                 let (active, sub) = map_active_sub(&status);
                 let desc = unit.common.unit.description.clone();
                 let obj = unit_object_path(&unit.id.name);
+                let (job_id, job_type, job_path) = registry.job_for_unit(&unit.id).map_or_else(
+                    || (0, String::new(), root.clone()),
+                    |job| {
+                        (
+                            job.id,
+                            job.kind.as_str().to_string(),
+                            job_object_path(job.id),
+                        )
+                    },
+                );
                 out.push((
                     unit.id.name.clone(),
                     desc,
@@ -976,9 +1123,9 @@ mod inner {
                     sub.to_string(),
                     String::new(),
                     obj,
-                    0,
-                    String::new(),
-                    root.clone(),
+                    job_id,
+                    job_type,
+                    job_path,
                 ));
             }
             out
@@ -1009,39 +1156,76 @@ mod inner {
             }
         }
 
-        /// Start the given unit.  The `mode` argument is accepted but ignored
-        /// (C systemd uses it for job scheduling modes like "replace" /
-        /// "isolate").  Returns the object path of a fictional job entry.
+        /// Start the given unit.  Installs a real job (the synchronous
+        /// control handler merges into and completes it) and returns its
+        /// object path, like upstream StartUnit.
         fn start_unit(
             &self,
             name: String,
-            _mode: String,
+            mode: String,
         ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
-            invoke_command(&self.run_info, crate::control::Command::Start(vec![name]))
-                .map_err(zbus::fdo::Error::Failed)?;
-            Ok(zbus::zvariant::OwnedObjectPath::try_from("/").unwrap())
+            let mut args = Vec::new();
+            if !mode.is_empty() && mode != "replace" {
+                args.push(format!("--job-mode={mode}"));
+            }
+            args.push(name.clone());
+            run_job_command(
+                &self.run_info,
+                &name,
+                &mode,
+                crate::units::jobs::JobKind::Start,
+                crate::control::Command::Start(args),
+            )
         }
 
         /// Stop the given unit.
         fn stop_unit(
             &self,
             name: String,
-            _mode: String,
+            mode: String,
         ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
-            invoke_command(&self.run_info, crate::control::Command::Stop(vec![name]))
-                .map_err(zbus::fdo::Error::Failed)?;
-            Ok(zbus::zvariant::OwnedObjectPath::try_from("/").unwrap())
+            let mut args = Vec::new();
+            if !mode.is_empty() && mode != "replace" {
+                args.push(format!("--job-mode={mode}"));
+            }
+            args.push(name.clone());
+            run_job_command(
+                &self.run_info,
+                &name,
+                &mode,
+                crate::units::jobs::JobKind::Stop,
+                crate::control::Command::Stop(args),
+            )
         }
 
         /// Restart the given unit.
         fn restart_unit(
             &self,
             name: String,
-            _mode: String,
+            mode: String,
         ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
-            invoke_command(&self.run_info, crate::control::Command::Restart(name))
-                .map_err(zbus::fdo::Error::Failed)?;
-            Ok(zbus::zvariant::OwnedObjectPath::try_from("/").unwrap())
+            run_job_command(
+                &self.run_info,
+                &name,
+                &mode,
+                crate::units::jobs::JobKind::Restart,
+                crate::control::Command::Restart(name.clone()),
+            )
+        }
+
+        /// Reload the given unit (ExecReload= or Type=notify-reload SIGHUP).
+        fn reload_unit(
+            &self,
+            name: String,
+            mode: String,
+        ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
+            run_job_command(
+                &self.run_info,
+                &name,
+                &mode,
+                crate::units::jobs::JobKind::Reload,
+                crate::control::Command::Reload(name.clone()),
+            )
         }
 
         /// Restart the unit only if it is currently running.  No-op when
@@ -1049,38 +1233,33 @@ mod inner {
         fn try_restart_unit(
             &self,
             name: String,
-            _mode: String,
+            mode: String,
         ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
-            let active = {
-                let ri = self.run_info.read_poisoned();
-                ri.unit_table
-                    .values()
-                    .find(|u| u.id.name == name)
-                    .map(|u| u.common.status.read_poisoned().is_started())
-                    .unwrap_or(false)
-            };
-            if active {
-                invoke_command(
-                    &self.run_info,
-                    crate::control::Command::Restart(name.clone()),
-                )
-                .map_err(zbus::fdo::Error::Failed)?;
-            }
-            Ok(zbus::zvariant::OwnedObjectPath::try_from("/").unwrap())
+            run_job_command(
+                &self.run_info,
+                &name,
+                &mode,
+                crate::units::jobs::JobKind::TryRestart,
+                crate::control::Command::TryRestart(name.clone()),
+            )
         }
 
         /// Reload the unit if it supports reloading (Type=notify-reload or
-        /// has ExecReload=), otherwise restart it.  Returns a fake job path.
+        /// has ExecReload=), otherwise restart it.
         fn reload_or_restart_unit(
             &self,
             name: String,
-            _mode: String,
+            mode: String,
         ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
-            // For simplicity, just restart — Reload is not distinct enough
-            // in our impl to warrant a separate dispatch.
-            invoke_command(&self.run_info, crate::control::Command::Restart(name))
-                .map_err(zbus::fdo::Error::Failed)?;
-            Ok(zbus::zvariant::OwnedObjectPath::try_from("/").unwrap())
+            // Restart covers both halves in our implementation; the job is a
+            // restart job, matching what the reduced merge table can express.
+            run_job_command(
+                &self.run_info,
+                &name,
+                &mode,
+                crate::units::jobs::JobKind::Restart,
+                crate::control::Command::Restart(name.clone()),
+            )
         }
 
         /// Reload unit files from disk (equivalent to `systemctl daemon-reload`).
@@ -1388,6 +1567,36 @@ mod inner {
                 crate::control::Command::StartTransient(params),
             )
             .map_err(zbus::fdo::Error::Failed)?;
+            // Upstream returns the start job's path, not the unit path. The
+            // transient start completed synchronously above, so install and
+            // finish the job inline now that the unit exists in the table,
+            // unless another producer already has one installed for it.
+            let (unit_id, jobs) = {
+                let ri = self.run_info.read_poisoned();
+                (
+                    ri.unit_table
+                        .values()
+                        .find(|u| u.id.name == name)
+                        .map(|u| u.id.clone()),
+                    ri.jobs.clone(),
+                )
+            };
+            if let Some(unit_id) = unit_id {
+                let mut registry = jobs.lock().unwrap();
+                if let Some(existing) = registry.job_for_unit(&unit_id) {
+                    return Ok(job_object_path(existing.id));
+                }
+                if let Ok(job_id) = registry.create(
+                    unit_id,
+                    crate::units::jobs::JobKind::Start,
+                    crate::units::ActivationSource::Regular,
+                    crate::units::jobs::JobMode::Replace,
+                ) {
+                    registry.set_running(job_id);
+                    registry.finish(job_id, crate::units::jobs::JobResult::Done);
+                    return Ok(job_object_path(job_id));
+                }
+            }
             Ok(unit_object_path(&name))
         }
     }
@@ -1531,6 +1740,49 @@ mod inner {
         crate::control::execute_command(cmd, run_info.clone()).map(|_| ())
     }
 
+    /// Install a job for a D-Bus verb, run the corresponding synchronous
+    /// control command (whose handler merges into and completes the job by
+    /// ID), and return the job's object path like upstream does. The
+    /// defensive finish afterwards is an idempotent no-op unless an early
+    /// error left the job installed.
+    fn run_job_command(
+        run_info: &ArcMutRuntimeInfo,
+        name: &str,
+        mode: &str,
+        kind: crate::units::jobs::JobKind,
+        cmd: crate::control::Command,
+    ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
+        let id = crate::control::find_or_load_unit(name, run_info)
+            .map_err(zbus::fdo::Error::Failed)?;
+        let jmode = if mode == "fail" {
+            crate::units::jobs::JobMode::Fail
+        } else {
+            crate::units::jobs::JobMode::Replace
+        };
+        let jobs = run_info.read_poisoned().jobs.clone();
+        let job_id = jobs
+            .lock()
+            .unwrap()
+            .create(
+                id,
+                kind,
+                crate::units::ActivationSource::Regular,
+                jmode,
+            )
+            .map_err(zbus::fdo::Error::Failed)?;
+        let result = invoke_command(run_info, cmd);
+        jobs.lock().unwrap().finish(
+            job_id,
+            if result.is_ok() {
+                crate::units::jobs::JobResult::Done
+            } else {
+                crate::units::jobs::JobResult::Failed
+            },
+        );
+        result.map_err(zbus::fdo::Error::Failed)?;
+        Ok(job_object_path(job_id))
+    }
+
     /// Map a `UnitStatus` to the D-Bus `ActiveState` and `SubState` strings
     /// that C systemd exports.
     fn map_active_sub(status: &UnitStatus) -> (&'static str, &'static str) {
@@ -1561,6 +1813,107 @@ mod inner {
         let path = format!("/org/freedesktop/systemd1/unit/{encoded}");
         zbus::zvariant::OwnedObjectPath::try_from(path.as_str())
             .unwrap_or_else(|_| zbus::zvariant::OwnedObjectPath::try_from("/").unwrap())
+    }
+
+    /// Job object path: `/org/freedesktop/systemd1/job/<id>`.
+    fn job_object_path(id: u32) -> zbus::zvariant::OwnedObjectPath {
+        zbus::zvariant::OwnedObjectPath::try_from(format!("/org/freedesktop/systemd1/job/{id}"))
+            .unwrap_or_else(|_| zbus::zvariant::OwnedObjectPath::try_from("/").unwrap())
+    }
+
+    /// Queue to the job-signal thread. Set once the system bus is up; events
+    /// sent before then are dropped, matching upstream where boot-time jobs
+    /// predate the bus.
+    static JOB_DBUS_TX: std::sync::OnceLock<std::sync::mpsc::Sender<JobDbusEvent>> =
+        std::sync::OnceLock::new();
+
+    enum JobDbusEvent {
+        Created {
+            id: u32,
+            unit: String,
+            kind: &'static str,
+        },
+        Removed {
+            id: u32,
+            unit: String,
+            result: &'static str,
+        },
+    }
+
+    pub fn notify_job_created(job: &crate::units::jobs::Job) {
+        if let Some(tx) = JOB_DBUS_TX.get() {
+            let _ = tx.send(JobDbusEvent::Created {
+                id: job.id,
+                unit: job.unit.name.clone(),
+                kind: job.kind.as_str(),
+            });
+        }
+    }
+
+    pub fn notify_job_removed(job: &crate::units::jobs::Job) {
+        if let Some(tx) = JOB_DBUS_TX.get() {
+            let _ = tx.send(JobDbusEvent::Removed {
+                id: job.id,
+                unit: job.unit.name.clone(),
+                result: job.result.map_or("done", |r| r.as_str()),
+            });
+        }
+    }
+
+    /// Consume job lifecycle events on a dedicated thread: register and
+    /// unregister the per-job objects and emit JobNew/JobRemoved. Runs off
+    /// the zbus executor so the blocking emission cannot deadlock a method
+    /// handler, at the cost of the signal trailing the method reply, which
+    /// is the ordering sd-bus clients expect anyway.
+    fn spawn_job_signal_thread(conn: Connection, run_info: ArcMutRuntimeInfo) {
+        let (tx, rx) = std::sync::mpsc::channel::<JobDbusEvent>();
+        if JOB_DBUS_TX.set(tx).is_err() {
+            // A previous bus connection already owns the channel.
+            return;
+        }
+        let spawned = std::thread::Builder::new()
+            .name("dbus-job-signals".into())
+            .spawn(move || {
+                let emitter = match zbus::object_server::SignalEmitter::new(
+                    conn.inner(),
+                    "/org/freedesktop/systemd1",
+                ) {
+                    Ok(emitter) => emitter,
+                    Err(e) => {
+                        warn!("dbus-server: no signal emitter for jobs: {e}");
+                        return;
+                    }
+                };
+                for event in rx {
+                    match event {
+                        JobDbusEvent::Created { id, unit, kind } => {
+                            let path = job_object_path(id);
+                            let obj = JobObj {
+                                run_info: run_info.clone(),
+                                id,
+                                unit_name: unit.clone(),
+                                kind,
+                            };
+                            let _ = conn.object_server().at(&path, obj);
+                            let _ = zbus::block_on(Manager::job_new(&emitter, id, path, unit));
+                        }
+                        JobDbusEvent::Removed { id, unit, result } => {
+                            let path = job_object_path(id);
+                            let _ = conn.object_server().remove::<JobObj, _>(&path);
+                            let _ = zbus::block_on(Manager::job_removed(
+                                &emitter,
+                                id,
+                                path,
+                                unit,
+                                result.to_string(),
+                            ));
+                        }
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            warn!("dbus-server: failed to spawn job signal thread: {e}");
+        }
     }
 
     /// Spawn a background thread that (eventually) connects to the system
@@ -1602,6 +1955,8 @@ mod inner {
                 return;
             }
         }
+
+        spawn_job_signal_thread(conn.clone(), run_info.clone());
 
         // Register per-unit objects for all currently-loaded units.  New
         // units added later (e.g. transient units from StartTransientUnit)

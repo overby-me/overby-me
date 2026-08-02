@@ -1683,7 +1683,7 @@ mod tests {
             stderr_eventfd: crate::platform::make_event_fd().unwrap(),
             notification_eventfd: crate::platform::make_event_fd().unwrap(),
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
-            pending_activations: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            jobs: Arc::new(Mutex::new(crate::units::jobs::JobRegistry::new())),
             manager_environment: Arc::new(Mutex::new(std::collections::HashMap::new())),
             unit_markers: Arc::new(Mutex::new(std::collections::HashMap::new())),
             transactions_with_cycle: Arc::new(Mutex::new(Vec::new())),

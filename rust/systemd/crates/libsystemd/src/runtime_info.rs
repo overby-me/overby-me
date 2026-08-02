@@ -36,9 +36,11 @@ pub type MutFDStore = RwLock<FDStore>;
 /// handler.
 pub type ArcMutPidTable = Arc<Mutex<PidTable>>;
 
-/// Set of unit IDs that are part of a pending activation (started via --no-block).
-/// Used by `list-jobs` to determine which units are "waiting" vs "running".
-pub type PendingActivations = Arc<Mutex<std::collections::HashSet<UnitId>>>;
+/// The installed jobs (docs/EVENT-LOOP.md increment 0). Wrapped in
+/// `Arc<Mutex<…>>` like the PID table so producers (control handlers, the
+/// D-Bus server, activation monitors) can install and finish jobs without
+/// holding the `RuntimeInfo` RwLock in write mode.
+pub type Jobs = Arc<Mutex<crate::units::jobs::JobRegistry>>;
 
 /// Manager environment variables, accessible via show-environment/set-environment.
 pub type ManagerEnvironment = Arc<Mutex<HashMap<String, String>>>;
@@ -67,7 +69,7 @@ pub struct RuntimeInfo {
     pub stderr_eventfd: EventFd,
     pub notification_eventfd: EventFd,
     pub socket_activation_eventfd: EventFd,
-    pub pending_activations: PendingActivations,
+    pub jobs: Jobs,
     pub manager_environment: ManagerEnvironment,
     pub unit_markers: UnitMarkers,
     pub transactions_with_cycle: TransactionsWithCycle,

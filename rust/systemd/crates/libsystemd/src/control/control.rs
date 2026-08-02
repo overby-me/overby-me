@@ -7875,29 +7875,25 @@ pub fn execute_command(
             return Ok(Value::Array(Vec::new()));
         }
         Command::ListJobs => {
-            // Return units currently being activated as jobs. Units in the
-            // pending_activations set that are NeverStarted are "waiting";
-            // units in Starting state are "running".
+            // Real job objects (docs/EVENT-LOOP.md inc 0): report the
+            // installed jobs with their stable IDs, ordered by ID the way
+            // upstream lists them.
             let ri = run_info.read_poisoned();
-            let pending = ri.pending_activations.lock().unwrap().clone();
-            let mut job_id: u64 = 1;
-            let mut jobs: Vec<Value> = Vec::new();
-            for unit in ri.unit_table.values() {
-                let status = unit.common.status.read_poisoned().clone();
-                let (job_type, state) = match &status {
-                    UnitStatus::Starting => ("start", "running"),
-                    UnitStatus::NeverStarted if pending.contains(&unit.id) => ("start", "waiting"),
-                    _ => continue,
-                };
-                jobs.push(serde_json::json!({
-                    "JOB": job_id,
-                    "UNIT": unit.id.name,
-                    "TYPE": job_type,
-                    "STATE": state,
-                }));
-                job_id += 1;
-            }
-            return Ok(Value::Array(jobs));
+            let registry = ri.jobs.lock().unwrap();
+            let mut jobs: Vec<&crate::units::jobs::Job> = registry.iter().collect();
+            jobs.sort_by_key(|job| job.id);
+            let rows: Vec<Value> = jobs
+                .into_iter()
+                .map(|job| {
+                    serde_json::json!({
+                        "JOB": job.id,
+                        "UNIT": job.unit.name,
+                        "TYPE": job.kind.as_str(),
+                        "STATE": job.state.as_str(),
+                    })
+                })
+                .collect();
+            return Ok(Value::Array(rows));
         }
         Command::ResetFailed(unit_name) => {
             let ri = run_info.read_poisoned();
@@ -8870,6 +8866,13 @@ pub fn execute_command(
         }
         Command::Reload(unit_name) => {
             let id = find_or_load_unit(&unit_name, &run_info)?;
+            let jobs_registry = run_info.read_poisoned().jobs.clone();
+            let reload_job = crate::units::jobs::JobHandle::create(
+                &jobs_registry,
+                id.clone(),
+                crate::units::jobs::JobKind::Reload,
+                crate::units::jobs::JobMode::Replace,
+            )?;
             let ri = run_info.read_poisoned();
             let unit = ri
                 .unit_table
@@ -8989,9 +8992,17 @@ pub fn execute_command(
             if let Some(err) = last_error {
                 return Err(err);
             }
+            reload_job.finish(crate::units::jobs::JobResult::Done);
         }
         Command::Restart(unit_name) => {
             let id = find_or_load_unit(&unit_name, &run_info)?;
+            let jobs_registry = run_info.read_poisoned().jobs.clone();
+            let restart_job = crate::units::jobs::JobHandle::create(
+                &jobs_registry,
+                id.clone(),
+                crate::units::jobs::JobKind::Restart,
+                crate::units::jobs::JobMode::Replace,
+            )?;
             // Load dependency units from disk (e.g. Wants= targets that were
             // created since the unit was first loaded) and refresh on-disk
             // .wants/.requires directories, matching Start behaviour.
@@ -9136,6 +9147,7 @@ pub fn execute_command(
                     });
                 }
             }
+            restart_job.finish(crate::units::jobs::JobResult::Done);
         }
         Command::TryRestart(unit_name) => {
             // try-restart: restart the unit only if it is currently active.
@@ -9167,6 +9179,14 @@ pub fn execute_command(
                     .unwrap_or(false);
                 (id, active)
             };
+
+            let jobs_registry = run_info.read_poisoned().jobs.clone();
+            let try_restart_job = crate::units::jobs::JobHandle::create(
+                &jobs_registry,
+                id.clone(),
+                crate::units::jobs::JobKind::TryRestart,
+                crate::units::jobs::JobMode::Replace,
+            )?;
 
             if is_active {
                 // PropagatesStopTo= stop propagation during restart
@@ -9238,6 +9258,13 @@ pub fn execute_command(
                     crate::units::reactivate_unit(id.clone(), &ri).map_err(|e| format!("{e}"))?;
                 }
             }
+            // An inactive unit makes try-restart a no-op, which upstream
+            // records as a skipped job rather than a completed one.
+            try_restart_job.finish(if is_active {
+                crate::units::jobs::JobResult::Done
+            } else {
+                crate::units::jobs::JobResult::Skipped
+            });
         }
         Command::ReloadOrRestart(unit_name) => {
             // reload-or-restart: try to reload, fall back to restart.
@@ -9441,9 +9468,24 @@ pub fn execute_command(
             }
             let ignore_deps = job_mode.as_deref() == Some("ignore-dependencies")
                 || job_mode.as_deref() == Some("ignore-requirements");
+            let jmode = if job_mode.as_deref() == Some("fail") {
+                crate::units::jobs::JobMode::Fail
+            } else {
+                crate::units::jobs::JobMode::Replace
+            };
+            let jobs_registry = run_info.read_poisoned().jobs.clone();
 
             for unit_name in &actual_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
+                // Installed for the whole inline start of this unit; the
+                // failure paths below return early, which drops the handle
+                // and finishes the job as failed.
+                let start_job = crate::units::jobs::JobHandle::create(
+                    &jobs_registry,
+                    id.clone(),
+                    crate::units::jobs::JobKind::Start,
+                    jmode,
+                )?;
 
                 // Capture restart counter BEFORE activation begins.
                 // The exit handler can increment n_restarts as soon as the
@@ -10008,13 +10050,26 @@ pub fn execute_command(
                         }
                     }
                 }
+                start_job.finish(crate::units::jobs::JobResult::Done);
             }
         }
         Command::StartWait(unit_names) => {
             // Start units, then block until they all reach a terminal state.
+            let jobs_registry = run_info.read_poisoned().jobs.clone();
+            let mut start_jobs: Vec<(crate::units::UnitId, crate::units::jobs::JobHandle)> =
+                Vec::new();
             let mut unit_ids = Vec::new();
             for unit_name in &unit_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
+                start_jobs.push((
+                    id.clone(),
+                    crate::units::jobs::JobHandle::create(
+                        &jobs_registry,
+                        id.clone(),
+                        crate::units::jobs::JobKind::Start,
+                        crate::units::jobs::JobMode::Replace,
+                    )?,
+                ));
                 load_dependency_units(&id, &run_info);
                 refresh_directory_deps(&id.name, &run_info);
                 {
@@ -10060,6 +10115,8 @@ pub fn execute_command(
             // NeverStarted) and then stopped. This avoids racing with the
             // activation path where a unit might still be NeverStarted.
             let mut any_failed = false;
+            let mut failed_units: std::collections::HashSet<crate::units::UnitId> =
+                std::collections::HashSet::new();
             let mut seen_started: std::collections::HashSet<crate::units::UnitId> =
                 std::collections::HashSet::new();
             loop {
@@ -10102,6 +10159,7 @@ pub fn execute_command(
                                 seen_started.insert(id.clone());
                                 if !errors.is_empty() {
                                     any_failed = true;
+                                    failed_units.insert(id.clone());
                                 }
                             }
                             _ => {
@@ -10119,6 +10177,13 @@ pub fn execute_command(
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            for (unit_id, job) in start_jobs {
+                job.finish(if failed_units.contains(&unit_id) {
+                    crate::units::jobs::JobResult::Failed
+                } else {
+                    crate::units::jobs::JobResult::Done
+                });
             }
             if any_failed {
                 return Err("One or more units failed.".to_string());
@@ -10187,23 +10252,33 @@ pub fn execute_command(
                         }
                     }
                 }
-                // Record the full activation subgraph so list-jobs can find
-                // "waiting" units.
-                let pending = {
+                // Install a start job for the whole activation subgraph
+                // (docs/EVENT-LOOP.md inc 0): the root and every dependency
+                // pulled in get a real job with a stable ID, so `list-jobs`
+                // reports them as waiting/running until each unit reaches a
+                // terminal state. The monitor thread below owns completion.
+                let (jobs_registry, subgraph) = {
                     let ri = run_info.read_poisoned();
                     let mut ids = vec![id.clone()];
                     crate::units::collect_unit_start_subgraph(&mut ids, &ri.unit_table);
-                    ri.pending_activations.clone()
+                    (ri.jobs.clone(), ids)
                 };
-                {
-                    let mut pa = pending.lock().unwrap();
-                    let ri = run_info.read_poisoned();
-                    let mut ids = vec![id.clone()];
-                    crate::units::collect_unit_start_subgraph(&mut ids, &ri.unit_table);
-                    for pending_id in &ids {
-                        pa.insert(pending_id.clone());
-                    }
-                }
+                let job_ids: Vec<crate::units::jobs::JobId> = {
+                    let mut registry = jobs_registry.lock().unwrap();
+                    subgraph
+                        .iter()
+                        .filter_map(|sid| {
+                            registry
+                                .create(
+                                    sid.clone(),
+                                    crate::units::jobs::JobKind::Start,
+                                    crate::units::ActivationSource::NonBlocking,
+                                    crate::units::jobs::JobMode::Replace,
+                                )
+                                .ok()
+                        })
+                        .collect()
+                };
                 let run_info_clone = run_info.clone();
                 std::thread::spawn(move || {
                     let errs =
@@ -10216,51 +10291,69 @@ pub fn execute_command(
                     // starts are deferred to background completion handlers,
                     // that happens long before the graph is actually active
                     // (e.g. a `sleep 60` oneshot returns instantly and finishes
-                    // 60s later).  Clearing the whole pending_activations set
-                    // here would drop the "waiting" jobs `list-jobs` reports for
-                    // units still parked on an ordering dependency.  Instead,
-                    // drop each subgraph unit from the set only once it reaches a
-                    // terminal state, and stop monitoring when none remain (or
-                    // after a bounded grace period so a dependency that never
-                    // becomes ready cannot leak the entries forever).
-                    let subgraph = {
-                        let ri = run_info_clone.read_poisoned();
-                        let mut ids = vec![id.clone()];
-                        crate::units::collect_unit_start_subgraph(&mut ids, &ri.unit_table);
-                        ids
-                    };
+                    // 60s later).  Finish each job only once its unit reaches a
+                    // terminal state, flipping waiting jobs to running while
+                    // their unit is activating, and stop when none remain. The
+                    // deadline is a leak guard: a dependency that never becomes
+                    // ready must not keep a job installed forever.
                     let deadline =
                         std::time::Instant::now() + std::time::Duration::from_secs(15 * 60);
                     loop {
                         std::thread::sleep(std::time::Duration::from_millis(200));
-                        let remaining = {
+                        let mut remaining = 0usize;
+                        {
                             let ri = run_info_clone.read_poisoned();
-                            let mut pa = ri.pending_activations.lock().unwrap();
-                            let mut remaining = 0usize;
-                            for sid in &subgraph {
-                                let terminal = ri
+                            let mut registry = ri.jobs.lock().unwrap();
+                            for jid in &job_ids {
+                                let unit_id = match registry.get(*jid) {
+                                    // Finished, replaced or canceled elsewhere.
+                                    None => continue,
+                                    Some(job) => job.unit.clone(),
+                                };
+                                let status = ri
                                     .unit_table
-                                    .get(sid)
-                                    .map(|u| {
-                                        matches!(
-                                            &*u.common.status.read_poisoned(),
-                                            UnitStatus::Started(_) | UnitStatus::Stopped(_, _)
-                                        )
-                                    })
-                                    .unwrap_or(true);
-                                if terminal {
-                                    pa.remove(sid);
-                                } else {
-                                    remaining += 1;
+                                    .get(&unit_id)
+                                    .map(|u| u.common.status.read_poisoned().clone());
+                                match status {
+                                    // Unit vanished (e.g. daemon-reload removed
+                                    // it): the job can never complete.
+                                    None => {
+                                        registry
+                                            .finish(*jid, crate::units::jobs::JobResult::Canceled);
+                                    }
+                                    Some(UnitStatus::Started(_)) => {
+                                        registry.finish(*jid, crate::units::jobs::JobResult::Done);
+                                    }
+                                    Some(UnitStatus::Stopped(_, errs)) => {
+                                        let result = if errs.is_empty() {
+                                            crate::units::jobs::JobResult::Done
+                                        } else {
+                                            crate::units::jobs::JobResult::Failed
+                                        };
+                                        registry.finish(*jid, result);
+                                    }
+                                    Some(
+                                        UnitStatus::Starting
+                                        | UnitStatus::Restarting
+                                        | UnitStatus::Stopping,
+                                    ) => {
+                                        registry.set_running(*jid);
+                                        remaining += 1;
+                                    }
+                                    Some(UnitStatus::NeverStarted) => {
+                                        remaining += 1;
+                                    }
                                 }
                             }
-                            remaining
-                        };
-                        if remaining == 0 || std::time::Instant::now() > deadline {
+                        }
+                        if remaining == 0 {
+                            break;
+                        }
+                        if std::time::Instant::now() > deadline {
                             let ri = run_info_clone.read_poisoned();
-                            let mut pa = ri.pending_activations.lock().unwrap();
-                            for sid in &subgraph {
-                                pa.remove(sid);
+                            let mut registry = ri.jobs.lock().unwrap();
+                            for jid in &job_ids {
+                                registry.finish(*jid, crate::units::jobs::JobResult::Timeout);
                             }
                             break;
                         }
@@ -10326,6 +10419,11 @@ pub fn execute_command(
                 }
             }
             let irreversible = job_mode.as_deref() == Some("replace-irreversibly");
+            let stop_jmode = if job_mode.as_deref() == Some("fail") {
+                crate::units::jobs::JobMode::Fail
+            } else {
+                crate::units::jobs::JobMode::Replace
+            };
 
             // Sort units so services are stopped before their sockets.
             // This ensures the service process releases the listening fd
@@ -10374,6 +10472,12 @@ pub fn execute_command(
                 };
 
                 for id in &ids_to_stop {
+                    let stop_job = crate::units::jobs::JobHandle::create(
+                        &run_info.jobs,
+                        id.clone(),
+                        crate::units::jobs::JobKind::Stop,
+                        stop_jmode,
+                    )?;
                     // Set deactivation flags so concurrent StartNoBlock can detect
                     // the conflict (simulates real systemd's job queue behavior).
                     if let Some(unit) = run_info.unit_table.get(id) {
@@ -10424,6 +10528,7 @@ pub fn execute_command(
                                 crate::units::StatusStarted::Running,
                             );
                         }
+                        stop_job.finish(crate::units::jobs::JobResult::Canceled);
                         return Err(format!("Job for {} canceled.", id.name,));
                     }
 
@@ -10443,6 +10548,7 @@ pub fn execute_command(
                         let _ = std::fs::remove_file(path);
                         transient_stopped.push(id.clone());
                     }
+                    stop_job.finish(crate::units::jobs::JobResult::Done);
                 } // end for id in &ids_to_stop
             }
             } // read guard released here
@@ -10479,10 +10585,37 @@ pub fn execute_command(
             drop(ri);
             for id in ids {
                 let run_info_clone = run_info.clone();
-                std::thread::spawn(move || {
+                let stop_job_id = {
                     let ri = run_info_clone.read_poisoned();
-                    if let Err(e) = crate::units::deactivate_unit_recursive(&id, &ri) {
+                    let mut registry = ri.jobs.lock().unwrap();
+                    registry
+                        .create(
+                            id.clone(),
+                            crate::units::jobs::JobKind::Stop,
+                            crate::units::ActivationSource::Regular,
+                            crate::units::jobs::JobMode::Replace,
+                        )
+                        .ok()
+                        .inspect(|jid| registry.set_running(*jid))
+                };
+                std::thread::spawn(move || {
+                    let result = {
+                        let ri = run_info_clone.read_poisoned();
+                        crate::units::deactivate_unit_recursive(&id, &ri)
+                    };
+                    if let Err(e) = &result {
                         log::error!("Background stop error for {}: {e}", id.name);
+                    }
+                    if let Some(jid) = stop_job_id {
+                        let ri = run_info_clone.read_poisoned();
+                        ri.jobs.lock().unwrap().finish(
+                            jid,
+                            if result.is_ok() {
+                                crate::units::jobs::JobResult::Done
+                            } else {
+                                crate::units::jobs::JobResult::Failed
+                            },
+                        );
                     }
                 });
             }
@@ -10490,6 +10623,19 @@ pub fn execute_command(
         Command::RestartNoBlock(unit_name) => {
             // Like Restart but returns immediately — restart runs in background.
             let id = find_or_load_unit(&unit_name, &run_info)?;
+            let restart_job_id = {
+                let ri = run_info.read_poisoned();
+                let mut registry = ri.jobs.lock().unwrap();
+                registry
+                    .create(
+                        id.clone(),
+                        crate::units::jobs::JobKind::Restart,
+                        crate::units::ActivationSource::NonBlocking,
+                        crate::units::jobs::JobMode::Replace,
+                    )
+                    .ok()
+                    .inspect(|jid| registry.set_running(*jid))
+            };
             let run_info_clone = run_info.clone();
             std::thread::spawn(move || {
                 // PropagatesStopTo= stop propagation during restart
@@ -10556,11 +10702,23 @@ pub fn execute_command(
                     }
                 }
                 // Dependencies are up; now restart the unit itself.
-                {
+                let restart_result = {
                     let ri = run_info_clone.read_poisoned();
-                    if let Err(e) = crate::units::reactivate_unit(id.clone(), &ri) {
-                        log::error!("Background restart error for {unit_name}: {e}");
-                    }
+                    crate::units::reactivate_unit(id.clone(), &ri)
+                };
+                if let Err(e) = &restart_result {
+                    log::error!("Background restart error for {unit_name}: {e}");
+                }
+                if let Some(jid) = restart_job_id {
+                    let ri = run_info_clone.read_poisoned();
+                    ri.jobs.lock().unwrap().finish(
+                        jid,
+                        if restart_result.is_ok() {
+                            crate::units::jobs::JobResult::Done
+                        } else {
+                            crate::units::jobs::JobResult::Failed
+                        },
+                    );
                 }
             });
         }
