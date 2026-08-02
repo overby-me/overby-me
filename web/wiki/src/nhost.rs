@@ -115,6 +115,28 @@ fn error_from_body(body: &serde_json::Value) -> Option<NhostError> {
     }
 }
 
+/// Read a failed refresh, WITHOUT deciding on the service's behalf that the
+/// refresh token is dead.
+///
+/// A rejected refresh signs the reader out, so this classification is the only
+/// thing standing between a bad minute of network and losing the session mid-
+/// edit. It used to name every non-2xx `invalid-refresh-token`, which
+/// [`is_auth_error`] matches on: a 502 from a gateway, a 429, or any error page
+/// a captive portal answered with meant an immediate sign-out. That is precisely
+/// the failure a venue's wifi produces.
+///
+/// So: the service's own error when it sent one (in either shape, via
+/// [`error_from_body`]), otherwise the bare HTTP status and NO invented code.
+/// A real dead token still answers 401 with a body saying so, and is still
+/// treated as one; everything else is left to be retried.
+fn refresh_error(status: u16, body: &serde_json::Value) -> NhostError {
+    error_from_body(body).unwrap_or(NhostError {
+        status: Some(status),
+        error: None,
+        message: Some(format!("refresh failed with HTTP {status}")),
+    })
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct NhostError {
     pub status: Option<u16>,
@@ -313,18 +335,11 @@ pub async fn refresh_session(refresh_token: &str) -> Result<AuthSession, NhostEr
             message: Some(e.to_string()),
         })?;
 
-    // A non-2xx response means the refresh token is invalid/expired; surface it
-    // as an auth error (not a parse error) so callers can sign the user out.
+    // A non-2xx is NOT proof the refresh token is dead: see `refresh_error`.
     let status = resp.status();
     if !status.is_success() {
         let body: serde_json::Value = resp.json().await.unwrap_or_default();
-        return Err(
-            serde_json::from_value::<NhostError>(body).unwrap_or(NhostError {
-                status: Some(status.as_u16()),
-                error: Some("invalid-refresh-token".to_string()),
-                message: Some("Session expired".to_string()),
-            }),
-        );
+        return Err(refresh_error(status.as_u16(), &body));
     }
 
     resp.json().await.map_err(|e| NhostError {
@@ -466,6 +481,51 @@ mod tests {
         let err = error_from_body(&body).expect("nested error should be read");
         assert_eq!(err.error.as_deref(), Some("invalid-email-password"));
         assert_eq!(err.status, Some(401));
+    }
+
+    /// The one that signed people out for free. A gateway, a proxy or a captive
+    /// portal answers a non-2xx with something that is not an NHost error at
+    /// all, and none of those say anything about the refresh token. Treating
+    /// them as auth failures ended the session; they must read as retryable.
+    #[test]
+    fn a_refresh_failure_with_no_nhost_error_is_not_a_dead_token() {
+        for (status, body) in [
+            (502u16, serde_json::Value::Null),
+            (503, serde_json::json!("<html>upstream unavailable</html>")),
+            (429, serde_json::json!({ "detail": "slow down" })),
+            (504, serde_json::json!({})),
+        ] {
+            let err = refresh_error(status, &body);
+            assert!(
+                !is_auth_error(&err),
+                "HTTP {status} must not end the session: {err:?}"
+            );
+            assert_eq!(err.status, Some(status));
+        }
+    }
+
+    /// ...while a refresh token that really is dead still ends the session, in
+    /// either shape NHost sends it. Getting this wrong the other way would loop
+    /// a signed-out reader on a token that can never work.
+    #[test]
+    fn a_genuinely_rejected_refresh_token_still_signs_out() {
+        let nested = serde_json::json!({
+            "error": { "status": 401, "error": "invalid-refresh-token",
+                       "message": "Invalid or expired refresh token" },
+        });
+        let err = refresh_error(401, &nested);
+        assert!(is_auth_error(&err));
+        assert_eq!(err.error.as_deref(), Some("invalid-refresh-token"));
+
+        let flat = serde_json::json!({
+            "status": 401, "error": "invalid-refresh-token",
+            "message": "Invalid or expired refresh token",
+        });
+        assert!(is_auth_error(&refresh_error(401, &flat)));
+
+        // No body to read, but the status alone is enough to be sure.
+        assert!(is_auth_error(&refresh_error(401, &serde_json::Value::Null)));
+        assert!(is_auth_error(&refresh_error(403, &serde_json::Value::Null)));
     }
 
     /// A successful sign-in carries a session and no error: it must not be

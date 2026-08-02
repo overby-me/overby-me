@@ -151,4 +151,19 @@ disabled_rules = [
   # items — the idiomatic Rust module-index shape (e.g. components/layout/mod.rs),
   # not an accidental catch-all.
   "rust_mod_rs_catchall",
+
+  # ── Maps in a browser, not a server ───────────────────────────────────
+  # The flagged sites are `HashMap::new()` in a `Default` impl (subscription.rs's
+  # Registry, built once for the app's lifetime) and a style lookup assembled
+  # while parsing one OpenDocument (odf.rs). Neither is a hot path. The rule
+  # exists so a server does not hash attacker-chosen keys with SipHash in a
+  # request loop; in a single-user WASM tab there is no such loop and no such
+  # attacker, and the default hasher is the safer default to keep.
+  "rust_hashmap_default_hasher",
+
+  # The one flagged split is `split_payload` (feedback_app.rs), and its offset is
+  # not external: it comes from `message.find(['{', '['])` on the very string
+  # being split, so it is in bounds and on a character boundary by construction.
+  # A guard there could not fail.
+  "rust_split_at_unchecked_external_input",
 ]
