@@ -242,6 +242,7 @@ static NAMES: &[&str] = &[
     "llvm.ptr.annotation",
     "llvm.ptrauth.blend",
     "llvm.ptrauth.sign",
+    "llvm.ptrmask",
     "llvm.read_register",
     "llvm.read_volatile_register",
     "llvm.readcyclecounter",
@@ -436,5 +437,6 @@ static NAMES: &[&str] = &[
     "llvm.vp.usub.sat",
     "llvm.vp.xor",
     "llvm.vp.zext",
+    "llvm.vscale",
     "llvm.write_register",
 ];

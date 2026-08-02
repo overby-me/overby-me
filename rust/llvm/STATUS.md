@@ -42,7 +42,7 @@ and each row names the check that backs it.
 | Verifier: placement rules for `!range`, `!align`, `!nonnull`, `!prof`, scope lists | done | `llvm-upstream-verifier` |
 | `opt`, for the flags it accepts | done | `llvm-roundtrip`, which drives the built binary |
 | Builder API: types inferred, alignments filled in | done for the common instructions, unwinding, attributes and metadata | `llvm-builder-smoke` |
-| Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 369 intrinsics LangRef gives a signature for | `llvm-opt-differential`, `llvm-upstream-verifier` |
+| Per-intrinsic attributes, replacing whatever a declaration wrote | done for the 370 intrinsics LangRef gives a signature for | `llvm-opt-differential`, `llvm-upstream-verifier` |
 | Positions of an intrinsic that share one overloaded type have to agree | done for the 161 LangRef documents more than once | `llvm-upstream-assembler`, `llvm-upstream-verifier` |
 
 ## The round trip
@@ -93,9 +93,9 @@ right in every case.
 
 | Tree | Read | llvm-as reads | Check |
 | --- | --- | --- | --- |
-| `llvm/test/CodeGen` | 22,371 | 22,785 | `llvm-tree-codegen` |
-| `llvm/test/Transforms` | 10,223 | 10,305 | `llvm-tree-transforms` |
-| `llvm/test/Analysis` | 1,395 | 1,403 | `llvm-tree-analysis` |
+| `llvm/test/CodeGen` | 22,384 | 22,785 | `llvm-tree-codegen` |
+| `llvm/test/Transforms` | 10,232 | 10,305 | `llvm-tree-transforms` |
+| `llvm/test/Analysis` | 1,396 | 1,403 | `llvm-tree-analysis` |
 | `llvm/test/DebugInfo` | 1,101 | 1,101 | `llvm-tree-debuginfo` |
 | `llvm/test/Instrumentation` | 505 | 508 | `llvm-tree-instrumentation` |
 | `llvm/test/Linker` | 338 | 338 | `llvm-tree-linker` |
@@ -105,7 +105,7 @@ right in every case.
 | `llvm/test/Bitcode` | 232 | 232 | `llvm-tree-bitcode` |
 | `llvm/test/Feature` | 82 | 82 | `llvm-tree-feature` |
 
-That is 36,827 of the 37,334 modules llvm-as reads across eleven trees.
+That is 36,850 of the 37,334 modules llvm-as reads across eleven trees.
 What is left is dominated by one thing: a target intrinsic no LangRef line
 names cannot be auto-declared, which is most of what CodeGen still refuses.
 The intrinsic name table is honest about why, and the number moves only if
@@ -126,7 +126,7 @@ documents, and appending it after everything the module writes. The
 attributes upstream gives an intrinsic go on it too, from a table LangRef
 does not document and the assembler does: `corpus/intrinsic-attributes.nu`
 writes out each `declare` line and reads back the set upstream replaced it
-with, 369 intrinsics of them.
+with, 370 intrinsics of them.
 Doing it exposed four verifier rules that had been unreachable, and all four
 are real, which is why both suite ratchets ended up better than they started
 rather than worse.
@@ -149,7 +149,7 @@ Most of what is left on the second count is one thing: upstream knows what
 each intrinsic means and we know only what LangRef's `declare` lines say
 it takes, plus what the assembler will say when asked. All three halves of
 that were built and measured.
-`corpus/intrinsic-names.nu` harvests the 419 base names LangRef documents;
+`corpus/intrinsic-names.nu` harvests the 421 base names LangRef documents;
 auto-declaring an undeclared intrinsic on that basis fixes three of the
 modules we refuse and costs eight new wrong acceptances, because the parse
 error it removes was standing in for the signature check, so it is a
@@ -158,7 +158,7 @@ signatures from the same lines, 314 intrinsics, recording a position only
 where its type is the same in every documented instantiation.
 `corpus/intrinsic-attributes.nu` asks the assembler rather than LangRef,
 writing each of those `declare` lines out and reading back the attributes
-upstream replaced them with, 369 intrinsics.
+upstream replaced them with, 370 intrinsics.
 `corpus/intrinsic-overloads.nu` reads the same lines a fourth way, comparing
 the positions to each other rather than to a fixed type: two whose types
 vary *together* across every documented instantiation are one overloaded
@@ -203,7 +203,7 @@ which are dropped when written at their default.
 A third asks the assembler about the intrinsics rather than the metadata.
 `corpus/intrinsic-attributes.nu` writes out every `declare` line LangRef
 documents and reads back what upstream replaced it with, which is the whole
-per-intrinsic attribute set: 369 intrinsics, 22 distinct function attribute
+per-intrinsic attribute set: 370 intrinsics, 27 distinct function attribute
 sets, and the `immarg` positions that had been a separate blocker. The
 derivation had been recorded as impossible four times, on the grounds that
 LangRef writes an attribute on only fourteen of its eight hundred `declare`

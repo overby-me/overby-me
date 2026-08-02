@@ -3018,4 +3018,12 @@ static ATTRIBUTES: &[(&str, Attributes)] = &[
             params: &["", "", ""],
         },
     ),
+    (
+        "llvm.vscale",
+        Attributes {
+            function: "nocallback nofree nosync nounwind willreturn memory(none)",
+            ret: "",
+            params: &[],
+        },
+    ),
 ];

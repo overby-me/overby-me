@@ -30,10 +30,25 @@ def main [tree: path, out: path = "intrinsic/names.rs"] {
   # or a float width, or an array.
   let mangled = '^(v[0-9].*|nxv[0-9].*|p[0-9]+|i[0-9]+|f[0-9]+|bf[0-9]+|f80|f128|ppcf128|isVoid|a[0-9].*)$'
 
+  let text = (open --raw $langref)
+
+  # Almost every mention writes the `@`. Two do not: LangRef declares
+  # `llvm.vscale.i64` and `llvm.ptrmask` without it, and an `@`-anchored
+  # match therefore leaves two real intrinsics out of the set and refuses
+  # every module that calls one without declaring it. A `declare` line names
+  # an intrinsic whether or not the sigil was remembered.
+  #
+  # Only `declare` lines, because the looser readings are wrong: LangRef
+  # gives `llvm.loop` and `llvm.access.group` headings of their own and they
+  # are metadata rather than intrinsics, so harvesting headings would have us
+  # build a function declaration for a node kind.
   let names = (
-    open --raw $langref
-    | parse --regex '@(?P<name>llvm\.[A-Za-z0-9_.]*[A-Za-z0-9_])'
-    | get name
+    [
+      ($text | parse --regex '@(?P<name>llvm\.[A-Za-z0-9_.]*[A-Za-z0-9_])' | get name)
+      ($text | lines | where ($it | str trim | str starts-with "declare ")
+        | parse --regex '^\s*declare\s+[^@]*?\b(?P<name>llvm\.[A-Za-z0-9_.]*[A-Za-z0-9_])\s*\(' | get name)
+    ]
+    | flatten
     | uniq
   )
 

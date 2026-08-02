@@ -215,6 +215,7 @@ def harvest [all: list<string>]: nothing -> list<string> {
       continue
     }
     if ($line | str starts-with "declare ") {
+      let line = (restore-sigil $line)
       if (complete-declare $line) {
         $out = ($out | append $line)
       } else {
@@ -224,6 +225,17 @@ def harvest [all: list<string>]: nothing -> list<string> {
     }
   }
   $out | where ($it =~ '@llvm\.')
+}
+
+# LangRef declares `llvm.vscale.i64` and `llvm.ptrmask` without the `@` that
+# every other mention writes, so a `declare` line naming one is put back into
+# the shape the rest are in rather than being missed for a missing sigil.
+def restore-sigil [line: string]: nothing -> string {
+  if ($line =~ '@') {
+    $line
+  } else {
+    $line | str replace --regex '(\s)(llvm\.[A-Za-z0-9_.]*[A-Za-z0-9_])(\s*\()' '${1}@${2}${3}'
+  }
 }
 
 # A declaration is whole when it names something and closes every bracket it

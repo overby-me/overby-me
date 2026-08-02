@@ -1633,6 +1633,25 @@ hand-written into `table.rs`, which `corpus/intrinsic-signatures.nu`
 generates and does not emit them, so regenerating that table would have
 deleted them without a word. Nothing had regenerated it since they were
 added.
+Chasing that lookup turned up two intrinsics missing from the name set
+altogether, which is what decides whether an undeclared call is built into
+a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`
+matches `@llvm.*`, and LangRef writes `declare i64 llvm.vscale.i64()` and
+`declare ptrty llvm.ptrmask(...)` without the sigil every other mention
+has. Two real intrinsics were therefore refused wherever a module called
+one without declaring it.
+The harvest reads a `declare` line's name with or without the `@` now, and
+only a `declare` line: LangRef gives `llvm.loop` and `llvm.access.group`
+headings of their own and they are metadata rather than intrinsics, so
+harvesting headings would have us build a function declaration for a node
+kind. 419 base names to 421.
+`llvm.vscale` picked up its attributes from the same fix, the attribute
+sweep having missed it for the same reason. `llvm.ptrmask` did not:
+LangRef writes its declaration with `ptrty` and `intty` where a type goes,
+which is a placeholder spelling the sweep does not instantiate, so it is
+auto-declared without attributes. No file in the four print suites shows
+that, the differentials being unmoved, so it is recorded rather than
+worked around.
 The earlier regression's recorded reason was corrected too.
 `llvm.vp.cttz.elts` has entries of its own in the signature and attribute
 tables, so the loose reading gave a wrong answer only where a name is
