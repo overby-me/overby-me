@@ -963,266 +963,264 @@ pub fn FileApp(node: NodeWithChildren) -> Element {
     }
 
     rsx! {
-        super::widgets::SupportingPaneLayout {
-            // Primary pane: the file's identity header above the file itself, so the
-            // title / date / tools sit atop the content rather than below it.
-            primary: rsx! {
-                div { class: "card file-card {accent}",
-                    div { class: "card-header",
-                        div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
-                        div {
-                            h3 { class: "title-medium", "{name}" }
-                            div { class: "file-meta-chips",
-                                if !type_label.is_empty() {
-                                    span { class: "file-chip",
-                                        // The chip's own format, not a document
-                                        // icon beside every label: it read
-                                        // "[document] Excel".
-                                        {super::loader::icon_el(file_mime)}
-                                        "{type_label}"
-                                    }
-                                }
-                                if let Some(iso) = created.as_ref() {
-                                    span {
-                                        class: "file-chip",
-                                        title: "{super::loader::full_datetime(iso)}",
-                                        span { class: "material-icons", "schedule" }
-                                        "{super::loader::relative_time(iso)}"
-                                    }
-                                }
+        // ONE column: the file, then the discussion beneath it.
+        //
+        // This was a supporting-pane split, which stands a comment thread beside
+        // the primary content once there is room for both. That is right for a
+        // console or a profile, and wrong here: the primary content is a document
+        // viewer, and a spreadsheet or a slide wants every pixel of width it can
+        // get far more than a comment thread does.
+        div { class: "card file-card {accent}",
+            div { class: "card-header",
+                div { class: "avatar", {node_icon_el("wiki/file", data.as_ref())} }
+                div {
+                    h3 { class: "title-medium", "{name}" }
+                    div { class: "file-meta-chips",
+                        if !type_label.is_empty() {
+                            span { class: "file-chip",
+                                // The chip's own format, not a document
+                                // icon beside every label: it read
+                                // "[document] Excel".
+                                {super::loader::icon_el(file_mime)}
+                                "{type_label}"
                             }
                         }
-                        div { class: "flex-grow" }
-                        // File actions in the M3 tools sheet.
-                        if !file_url.is_empty() || (can_manage && !segments.is_empty()) {
-                            super::widgets::ToolSheet {
-                                title: t("common.tools"),
-                                // Pinned quick group: copy link (the sheet's own
-                                // first segment) and downloading the file itself.
-                                quick: rsx! {
-                                    if !file_url.is_empty() {
-                                        a {
-                                            href: "{file_url}",
-                                            target: "_blank",
-                                            download: "{name}",
-                                            "referrerpolicy": "no-referrer",
-                                            class: "sheet-quick-action",
-                                            title: "{t(\"common.download\")}",
-                                            aria_label: "{t(\"common.download\")}",
-                                            span { class: "material-icons", "download" }
-                                        }
-                                    }
-                                },
-                                // Who renders it. Only for the mimes that go
-                                // through a third party at all — offering it on
-                                // a PDF or an image would be offering a choice
-                                // that changes nothing.
-                                if is_office_mime(file_mime) {
-                                    super::widgets::SheetGroup {
-                                        div { class: "sheet-label", "{t(\"file.renderedBy\")}" }
-                                        for viewer in viewers_for(file_mime) {
-                                            button {
-                                                key: "{viewer.key()}",
-                                                class: if OFFICE_VIEWER() == viewer { "sheet-action selected" } else { "sheet-action" },
-                                                "aria-pressed": if OFFICE_VIEWER() == viewer { "true" } else { "false" },
-                                                onclick: move |_| set_office_viewer(viewer),
-                                                span { class: "material-icons",
-                                                    if OFFICE_VIEWER() == viewer { "radio_button_checked" } else { "radio_button_unchecked" }
-                                                }
-                                                "{t(viewer.label_key())}"
-                                            }
-                                        }
-                                    }
-                                }
-                                if can_manage && !segments.is_empty() {
-                                    super::widgets::SheetGroup { danger: true,
-                                        button {
-                                            class: "sheet-action danger",
-                                            onclick: move |_| confirm_open.set(true),
-                                            span { class: "material-icons", "delete" }
-                                            "{t(\"common.delete\")}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // Delete confirm dialog (owner-only).
-                        if can_manage && !segments.is_empty() {
-                            super::widgets::Dialog {
-                                open: confirm_open(),
-                                on_dismiss: move |_| confirm_open.set(false),
-                                headline: t("content.confirmDeleteBin"),
-                                icon: "delete".to_string(),
-                                actions: rsx! {
-                                    button {
-                                        class: "btn btn-outlined",
-                                        onclick: move |_| confirm_open.set(false),
-                                        "{t(\"common.cancel\")}"
-                                    }
-                                    button {
-                                        class: "btn btn-primary",
-                                        disabled: deleting(),
-                                        onclick: {
-                                            let node_id = node_id.clone();
-                                            let parent = segments[..segments.len() - 1].to_vec();
-                                            let node_path = node_path.clone();
-                                            let actor = actor.clone();
-                                            move |_| {
-                                                if deleting() {
-                                                    return;
-                                                }
-                                                let token = session.read().access_token.clone();
-                                                let node_id = node_id.clone();
-                                                let parent = parent.clone();
-                                                let node_path = node_path.clone();
-                                                let actor = actor.clone();
-                                                // Dialog stays open so the spinner has somewhere
-                                                // to be while the statement runs.
-                                                deleting.set(true);
-                                                spawn(async move {
-                                                    // To the bin, like a document or a folder:
-                                                    // deleting a file from its own page used to be
-                                                    // final while deleting the folder around it was
-                                                    // recoverable, which made the promise depend on
-                                                    // which page you happened to be looking at.
-                                                    // The stored object is untouched either way, so
-                                                    // a restored file is a working file.
-                                                    match graphql::bin_node(
-                                                        token.as_deref(),
-                                                        &node_id,
-                                                        node_path.as_deref(),
-                                                        actor.as_deref(),
-                                                    )
-                                                    .await
-                                                    {
-                                                        Ok(_) => {
-                                                            crate::session::bump_data_version();
-                                                            deleting.set(false);
-                                                            confirm_open.set(false);
-                                                            nav.push(Route::PathPage { segments: parent, app: None });
-                                                        }
-                                                        other => {
-                                                            log::error!("delete_node failed: {other:?}");
-                                                            deleting.set(false);
-                                                            crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
-                                                        }
-                                                    }
-                                                });
-                                            }
-                                        },
-                                        if deleting() {
-                                            div { class: "spinner spinner-xs" }
-                                        }
-                                        "{t(\"common.delete\")}"
-                                    }
-                                },
-                                p { class: "body-medium", "{name}" }
-                                p { class: "body-medium text-muted", "{t(\"content.deleteRecoverable\")}" }
+                        if let Some(iso) = created.as_ref() {
+                            span {
+                                class: "file-chip",
+                                title: "{super::loader::full_datetime(iso)}",
+                                span { class: "material-icons", "schedule" }
+                                "{super::loader::relative_time(iso)}"
                             }
                         }
                     }
-                    div { class: "file-viewer",
-                        if file_url.is_empty() {
-                            p { class: "body-medium", "{t(\"common.noContent\")}" }
-                        } else if file_mime.starts_with("image/") {
-                            super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
-                        } else if file_mime.starts_with("video/") {
-                            video {
-                                controls: true,
-                                "referrerpolicy": "no-referrer",
-                                src: "{file_url}",
-                            }
-                        } else if file_mime.starts_with("audio/") {
-                            audio { controls: true, "referrerpolicy": "no-referrer", src: "{file_url}" }
-                        } else if file_mime == "application/pdf" {
-                            // DESIGN: frame document previews like the map/graph.
-                            div { class: "viewport-frame",
-                                iframe { src: "{file_url}", title: "{name}", "referrerpolicy": "no-referrer" }
-                            }
-                        } else if is_office_mime(file_mime) {
-                            // Word/Excel/PowerPoint through Microsoft's hosted
-                            // viewer, which fetches the document from ITS servers.
-                            // So it gets a backend link, not a storage URL: the
-                            // backend checked the caller may read the file and
-                            // serves the bytes for a couple of hours. A presigned
-                            // storage URL would be dead 30 seconds later.
-                            match office_embed() {
-                                OfficeLink::Pending => rsx! {
-                                    div { class: "empty-state empty-state-sm",
-                                        div { class: "spinner spinner-sm" }
-                                    }
-                                },
-                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
-                                    && file_mime == ODT => rsx! {
-                                    NativeOdt { file_id: file_id.to_string(), name: name.to_string() }
-                                },
-                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
-                                    && is_presentation(file_mime) => rsx! {
-                                    NativePptx { file_id: file_id.to_string(), name: name.to_string() }
-                                },
-                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
-                                    && is_spreadsheet(file_mime) => rsx! {
-                                    NativeXlsx { file_id: file_id.to_string(), name: name.to_string() }
-                                },
-                                OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
-                                    && renders_natively(file_mime) => rsx! {
-                                    NativeDocx { file_id: file_id.to_string(), name: name.to_string() }
-                                },
-                                OfficeLink::Ready(url) => {
-                                    let encoded = String::from(&js_sys::encode_uri_component(&url));
-                                    // Not the raw preference: reaching here means
-                                    // the native path declined this format, and
-                                    // Microsoft cannot read OpenDocument either.
-                                    let embed = viewer_embed_url(
-                                        effective_viewer(OFFICE_VIEWER(), file_mime),
-                                        &encoded,
-                                    );
-                                    rsx! {
-                                        div { class: "viewport-frame",
-                                            iframe {
-                                                // Keyed on the viewer: swapping
-                                                // service must reload the frame,
-                                                // and a changed `src` alone does
-                                                // not reliably do that.
-                                                key: "{OFFICE_VIEWER().key()}",
-                                                src: "{embed}",
-                                                title: "{name}",
-                                            }
-                                        }
-                                    }
-                                }
-                                OfficeLink::Refused => rsx! {
-                                    p { class: "body-medium", "{t(\"common.noPreview\")}" }
-                                },
-                            }
-                        } else {
-                            // DESIGN: a rich "no preview" state (format orb +
-                            // prominent download) instead of a bare button.
-                            div { class: "empty-state empty-state-sm",
-                                div { class: "empty-state-orb empty-state-orb-sm",
-                                    {node_icon_el("wiki/file", data.as_ref())}
-                                }
-                                p { class: "empty-state-body", "{t(\"common.noPreview\")}" }
+                }
+                div { class: "flex-grow" }
+                // File actions in the M3 tools sheet.
+                if !file_url.is_empty() || (can_manage && !segments.is_empty()) {
+                    super::widgets::ToolSheet {
+                        title: t("common.tools"),
+                        // Pinned quick group: copy link (the sheet's own
+                        // first segment) and downloading the file itself.
+                        quick: rsx! {
+                            if !file_url.is_empty() {
                                 a {
                                     href: "{file_url}",
                                     target: "_blank",
+                                    download: "{name}",
                                     "referrerpolicy": "no-referrer",
-                                    class: "btn btn-primary",
+                                    class: "sheet-quick-action",
+                                    title: "{t(\"common.download\")}",
+                                    aria_label: "{t(\"common.download\")}",
                                     span { class: "material-icons", "download" }
-                                    " {t(\"common.download\")}"
+                                }
+                            }
+                        },
+                        // Who renders it. Only for the mimes that go
+                        // through a third party at all — offering it on
+                        // a PDF or an image would be offering a choice
+                        // that changes nothing.
+                        if is_office_mime(file_mime) {
+                            super::widgets::SheetGroup {
+                                div { class: "sheet-label", "{t(\"file.renderedBy\")}" }
+                                for viewer in viewers_for(file_mime) {
+                                    button {
+                                        key: "{viewer.key()}",
+                                        class: if OFFICE_VIEWER() == viewer { "sheet-action selected" } else { "sheet-action" },
+                                        "aria-pressed": if OFFICE_VIEWER() == viewer { "true" } else { "false" },
+                                        onclick: move |_| set_office_viewer(viewer),
+                                        span { class: "material-icons",
+                                            if OFFICE_VIEWER() == viewer { "radio_button_checked" } else { "radio_button_unchecked" }
+                                        }
+                                        "{t(viewer.label_key())}"
+                                    }
+                                }
+                            }
+                        }
+                        if can_manage && !segments.is_empty() {
+                            super::widgets::SheetGroup { danger: true,
+                                button {
+                                    class: "sheet-action danger",
+                                    onclick: move |_| confirm_open.set(true),
+                                    span { class: "material-icons", "delete" }
+                                    "{t(\"common.delete\")}"
                                 }
                             }
                         }
                     }
                 }
-            },
-            // Supporting pane: the discussion.
-            supporting: rsx! {
-                super::comments::CommentSection {
-                    node_id: node_id.clone(),
-                    context_id: context_id.clone(),
+                // Delete confirm dialog (owner-only).
+                if can_manage && !segments.is_empty() {
+                    super::widgets::Dialog {
+                        open: confirm_open(),
+                        on_dismiss: move |_| confirm_open.set(false),
+                        headline: t("content.confirmDeleteBin"),
+                        icon: "delete".to_string(),
+                        actions: rsx! {
+                            button {
+                                class: "btn btn-outlined",
+                                onclick: move |_| confirm_open.set(false),
+                                "{t(\"common.cancel\")}"
+                            }
+                            button {
+                                class: "btn btn-primary",
+                                disabled: deleting(),
+                                onclick: {
+                                    let node_id = node_id.clone();
+                                    let parent = segments[..segments.len() - 1].to_vec();
+                                    let node_path = node_path.clone();
+                                    let actor = actor.clone();
+                                    move |_| {
+                                        if deleting() {
+                                            return;
+                                        }
+                                        let token = session.read().access_token.clone();
+                                        let node_id = node_id.clone();
+                                        let parent = parent.clone();
+                                        let node_path = node_path.clone();
+                                        let actor = actor.clone();
+                                        // Dialog stays open so the spinner has somewhere
+                                        // to be while the statement runs.
+                                        deleting.set(true);
+                                        spawn(async move {
+                                            // To the bin, like a document or a folder:
+                                            // deleting a file from its own page used to be
+                                            // final while deleting the folder around it was
+                                            // recoverable, which made the promise depend on
+                                            // which page you happened to be looking at.
+                                            // The stored object is untouched either way, so
+                                            // a restored file is a working file.
+                                            match graphql::bin_node(
+                                                token.as_deref(),
+                                                &node_id,
+                                                node_path.as_deref(),
+                                                actor.as_deref(),
+                                            )
+                                            .await
+                                            {
+                                                Ok(_) => {
+                                                    crate::session::bump_data_version();
+                                                    deleting.set(false);
+                                                    confirm_open.set(false);
+                                                    nav.push(Route::PathPage { segments: parent, app: None });
+                                                }
+                                                other => {
+                                                    log::error!("delete_node failed: {other:?}");
+                                                    deleting.set(false);
+                                                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                                                }
+                                            }
+                                        });
+                                    }
+                                },
+                                if deleting() {
+                                    div { class: "spinner spinner-xs" }
+                                }
+                                "{t(\"common.delete\")}"
+                            }
+                        },
+                        p { class: "body-medium", "{name}" }
+                        p { class: "body-medium text-muted", "{t(\"content.deleteRecoverable\")}" }
+                    }
                 }
-            },
+            }
+            div { class: "file-viewer",
+                if file_url.is_empty() {
+                    p { class: "body-medium", "{t(\"common.noContent\")}" }
+                } else if file_mime.starts_with("image/") {
+                    super::widgets::ZoomableImage { src: file_url.clone(), alt: name.to_string() }
+                } else if file_mime.starts_with("video/") {
+                    video {
+                        controls: true,
+                        "referrerpolicy": "no-referrer",
+                        src: "{file_url}",
+                    }
+                } else if file_mime.starts_with("audio/") {
+                    audio { controls: true, "referrerpolicy": "no-referrer", src: "{file_url}" }
+                } else if file_mime == "application/pdf" {
+                    // DESIGN: frame document previews like the map/graph.
+                    div { class: "viewport-frame",
+                        iframe { src: "{file_url}", title: "{name}", "referrerpolicy": "no-referrer" }
+                    }
+                } else if is_office_mime(file_mime) {
+                    // Word/Excel/PowerPoint through Microsoft's hosted
+                    // viewer, which fetches the document from ITS servers.
+                    // So it gets a backend link, not a storage URL: the
+                    // backend checked the caller may read the file and
+                    // serves the bytes for a couple of hours. A presigned
+                    // storage URL would be dead 30 seconds later.
+                    match office_embed() {
+                        OfficeLink::Pending => rsx! {
+                            div { class: "empty-state empty-state-sm",
+                                div { class: "spinner spinner-sm" }
+                            }
+                        },
+                        OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                            && file_mime == ODT => rsx! {
+                            NativeOdt { file_id: file_id.to_string(), name: name.to_string() }
+                        },
+                        OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                            && is_presentation(file_mime) => rsx! {
+                            NativePptx { file_id: file_id.to_string(), name: name.to_string() }
+                        },
+                        OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                            && is_spreadsheet(file_mime) => rsx! {
+                            NativeXlsx { file_id: file_id.to_string(), name: name.to_string() }
+                        },
+                        OfficeLink::Ready(_) if OFFICE_VIEWER() == OfficeViewer::Native
+                            && renders_natively(file_mime) => rsx! {
+                            NativeDocx { file_id: file_id.to_string(), name: name.to_string() }
+                        },
+                        OfficeLink::Ready(url) => {
+                            let encoded = String::from(&js_sys::encode_uri_component(&url));
+                            // Not the raw preference: reaching here means
+                            // the native path declined this format, and
+                            // Microsoft cannot read OpenDocument either.
+                            let embed = viewer_embed_url(
+                                effective_viewer(OFFICE_VIEWER(), file_mime),
+                                &encoded,
+                            );
+                            rsx! {
+                                div { class: "viewport-frame",
+                                    iframe {
+                                        // Keyed on the viewer: swapping
+                                        // service must reload the frame,
+                                        // and a changed `src` alone does
+                                        // not reliably do that.
+                                        key: "{OFFICE_VIEWER().key()}",
+                                        src: "{embed}",
+                                        title: "{name}",
+                                    }
+                                }
+                            }
+                        }
+                        OfficeLink::Refused => rsx! {
+                            p { class: "body-medium", "{t(\"common.noPreview\")}" }
+                        },
+                    }
+                } else {
+                    // DESIGN: a rich "no preview" state (format orb +
+                    // prominent download) instead of a bare button.
+                    div { class: "empty-state empty-state-sm",
+                        div { class: "empty-state-orb empty-state-orb-sm",
+                            {node_icon_el("wiki/file", data.as_ref())}
+                        }
+                        p { class: "empty-state-body", "{t(\"common.noPreview\")}" }
+                        a {
+                            href: "{file_url}",
+                            target: "_blank",
+                            "referrerpolicy": "no-referrer",
+                            class: "btn btn-primary",
+                            span { class: "material-icons", "download" }
+                            " {t(\"common.download\")}"
+                        }
+                    }
+                }
+            }
+        }
+        super::comments::CommentSection {
+            node_id: node_id.clone(),
+            context_id: context_id.clone(),
         }
     }
 }
