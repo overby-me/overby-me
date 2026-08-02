@@ -1683,8 +1683,41 @@ directive among the instructions rather than after the terminator, a value
 with no uses, and `uselistorder_bb` on the entry block, which nothing
 branches to. Nothing had ever asked `llvm-as` about it.
 Assembler 466 to 472, with the modules we wrongly accept twelve to six.
-What is left of the ten is the local count, which wants the same walk
-inside one function, and the placement rule that fixture just taught.
+The pass after it took the rule that broken fixture had been hiding, which
+is the one thing it was right about by accident. A body's directives come
+last, in a run: once one is written, an instruction after it is "expected
+uselistorder directive" and so is a label, while a second directive is
+fine. Written before the terminator it is not a directive at all but an
+instruction upstream cannot name. All three were probed, and the first
+attempt at probing them measured nothing, the count error firing before
+the placement one because the probe gave the wrong number of indexes.
+Assembler 472 to 473, and nine of the ten are closed.
+The tenth came with the same pass: a local is counted inside its own
+function, nothing outside one being able to use it, and it needs no waiting
+the way a constant does because a body's directives come after every
+instruction in it. A name the body never defines has no uses, which is what
+upstream says of it.
+Two things went wrong first and both were caught by a bound rather than by
+reading. The ceiling rose, 5 to 6, on `uselistorder label %preexit`: a
+label names a block, whose uses are the branches that reach it rather than
+the operand slots that read a value, so it is a different count and is left
+alone. Excluding labels fixed the ceiling and gained a file, `uselistorder.ll`
+being one of the suite's own.
+Then Transforms fell three, and the cause is a distinction worth keeping.
+`operand_values` leaves out a phi's incoming values on purpose: it answers
+the dominance check, which wants a phi's value to dominate the
+predecessor's terminator rather than the phi. That is right there and wrong
+for a count, so `use_count_values` puts them back, and a debug record's
+values with them, without touching the walk dominance uses.
+Finding it took longer than it should have because the position an error
+reports is the token after the one it is about: `self.error` fires once the
+index list is consumed, which is the next line. Three files were diagnosed
+against the wrong directive before that was noticed.
+Assembler 473 to 475, with the modules we wrongly accept six to three. All
+ten use-list files are closed. What is not counted is a block's use list,
+which is its predecessors and derivable from the terminators' successors;
+`uselistorder label` and `uselistorder_bb` are read and not checked, which
+is what they were before.
 Chasing that lookup turned up two intrinsics missing from the name set
 altogether, which is what decides whether an undeclared call is built into
 a declaration or is "use of undefined value". `corpus/intrinsic-names.nu`

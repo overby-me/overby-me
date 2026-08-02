@@ -265,8 +265,20 @@ impl Parser {
             }
         };
 
+        // A body's use-list order directives come last, in a run: once one
+        // has been written, an instruction or a label after it is
+        // "expected uselistorder directive" upstream. Measured both ways,
+        // including that a second directive is fine.
+        let mut in_directives = false;
         loop {
-            match self.peek().clone() {
+            let next = self.peek().clone();
+            if in_directives
+                && !matches!(next, Token::RightBrace | Token::Eof)
+                && !matches!(&next, Token::Word(word) if word == "uselistorder" || word == "uselistorder_bb")
+            {
+                return self.error("expected uselistorder directive");
+            }
+            match next {
                 Token::RightBrace | Token::Eof => break,
                 Token::Label(name) => {
                     self.advance();
@@ -317,6 +329,7 @@ impl Parser {
                 // upstream drops it on the way out.
                 Token::Word(word) if word == "uselistorder" || word == "uselistorder_bb" => {
                     self.parse_use_list_order(Some((function, state)))?;
+                    in_directives = true;
                 }
                 _ => {
                     let Some(block) = current else {

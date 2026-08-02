@@ -846,6 +846,31 @@ impl InstKind {
         out
     }
 
+    /// Every value an instruction reads, for counting uses of one.
+    ///
+    /// [`Self::operand_values`] leaves out a phi's incoming values and a
+    /// debug record's, and is right to: it answers the dominance check,
+    /// which wants a phi's value to dominate the predecessor's terminator
+    /// rather than the phi. A use count wants them, upstream counting an
+    /// edge into a value wherever it is read, so this puts them back.
+    pub fn use_count_values(&self) -> Vec<Value> {
+        let mut out = self.operand_values();
+        match self {
+            InstKind::Phi { incoming, .. } => {
+                out.extend(incoming.iter().map(|(value, _)| *value));
+            }
+            InstKind::DebugRecord { operands, .. } => {
+                for operand in operands {
+                    if let crate::metadata::MdOperand::Value { value, .. } = operand {
+                        out.push(*value);
+                    }
+                }
+            }
+            _ => {}
+        }
+        out
+    }
+
     /// The blocks this instruction can transfer control to.
     pub fn successors(&self) -> Vec<BlockId> {
         match self {

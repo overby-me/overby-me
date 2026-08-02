@@ -298,6 +298,7 @@ impl Parser {
         // defined with.
         let written = self.parse_type()?;
         self.check_use_list_type(written, context)?;
+        let named = self.peek().clone();
         let at = self.position();
         // At the top level the value is a constant, and reading it is what
         // lets the indexes be checked against its use count afterwards. A
@@ -346,6 +347,84 @@ impl Parser {
         // later function is not yet used while the text is being read.
         if let Some(target) = target {
             self.use_list_orders.push((at, target, indexes));
+        } else if let Some((function, state)) = context {
+            self.check_local_use_list(function, state, written, &named, &indexes)?;
+        }
+        Ok(())
+    }
+
+    /// A local named by a directive, against the uses its own function
+    /// makes of it.
+    ///
+    /// This needs no waiting the way a constant does: a body's directives
+    /// come after every instruction in it, so the function is whole by the
+    /// time one is read, and nothing outside the function can use a local.
+    fn check_local_use_list(
+        &mut self,
+        function: &Function,
+        state: &FunctionState,
+        written: TypeId,
+        name: &Token,
+        indexes: &[u64],
+    ) -> Result<(), ParseError> {
+        // `uselistorder label %block` names a block, whose uses are the
+        // branches that reach it rather than the operand slots that read a
+        // value. That is a different count and is not taken here, so the
+        // directive is read and left alone as it was before.
+        if matches!(self.module.ctx.type_kind(written), TypeKind::Label) {
+            return Ok(());
+        }
+        let target = match name {
+            Token::LocalName(text) => state
+                .named_params
+                .get(text)
+                .map(|index| Value::Argument(*index))
+                .or_else(|| {
+                    state
+                        .named_values
+                        .get(text)
+                        .map(|id| Value::Instruction(*id))
+                }),
+            Token::LocalNumber(number) => state
+                .numbered_params
+                .get(number)
+                .map(|index| Value::Argument(*index))
+                .or_else(|| {
+                    state
+                        .numbered_values
+                        .get(number)
+                        .map(|id| Value::Instruction(*id))
+                }),
+            _ => None,
+        };
+        let Some(target) = target else {
+            // A local nothing defines has no uses, which is what upstream
+            // says about it. Only a local: anything else here is a constant
+            // and the module-wide count answers for it.
+            if matches!(name, Token::LocalName(_) | Token::LocalNumber(_)) {
+                return self.error("value has no uses");
+            }
+            return Ok(());
+        };
+        let mut uses = 0;
+        for (id, _) in function.blocks() {
+            for (_, instruction) in function.block_instructions(id) {
+                for value in instruction.kind.use_count_values() {
+                    uses += usize::from(value == target);
+                }
+            }
+        }
+        if uses == 0 {
+            return self.error("value has no uses");
+        }
+        if uses == 1 {
+            return self.error("value only has one use");
+        }
+        if indexes.len() != uses {
+            return self.error(format!("wrong number of indexes, expected {uses}"));
+        }
+        if indexes.iter().any(|index| *index as usize >= uses) {
+            return self.error("expected distinct uselistorder indexes in range [0, size)");
         }
         Ok(())
     }

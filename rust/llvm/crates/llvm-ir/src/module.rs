@@ -237,7 +237,7 @@ impl Module {
             }
             for (id, _) in function.blocks() {
                 for (_, instruction) in function.block_instructions(id) {
-                    for value in instruction.kind.operand_values() {
+                    for value in instruction.kind.use_count_values() {
                         count += usize::from(value == Value::Constant(target));
                     }
                     // A debug record is a call to one of the four

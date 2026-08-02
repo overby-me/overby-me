@@ -1018,6 +1018,26 @@ const BROKEN: &[(&str, &str)] = &[
 
 /// Input the parser itself has to refuse, with the message it owes.
 const REJECTED: &[(&str, &str)] = &[
+    // A local is counted inside its own function, nothing outside one being
+    // able to use it. A name the body never defines has no uses at all.
+    (
+        "define void @f(i32 %x) {\nentry:\n  %a = add i32 %x, %x\n  %b = add i32 %x, %a\n  ret void\n  uselistorder i32 %x, { 1, 0 }\n}\n",
+        "wrong number of indexes, expected 3",
+    ),
+    (
+        "define void @f(i32 %x) {\nentry:\n  ret void\n  uselistorder i32 %missing, { 1, 0 }\n}\n",
+        "value has no uses",
+    ),
+    // A body's use-list order directives come last, in a run. An
+    // instruction after one is not one, and neither is a label.
+    (
+        "define void @f(i32 %x) {\nentry:\n  %a = add i32 %x, %x\n  %b = add i32 %x, %a\n  ret void\n  uselistorder i32 %x, { 2, 1, 0 }\n  %c = add i32 1, 1\n}\n",
+        "expected uselistorder directive",
+    ),
+    (
+        "define void @f(i32 %x) {\nentry:\n  %a = add i32 %x, %x\n  %b = add i32 %x, %a\n  ret void\n  uselistorder i32 %x, { 2, 1, 0 }\nnext:\n  ret void\n}\n",
+        "expected uselistorder directive",
+    ),
     // A use-list order directive names its value with the type that value
     // was defined with. A local is reported against its own definition,
     // whether it is a parameter or an instruction result.
@@ -1746,6 +1766,14 @@ const VERIFIES: &[&str] = &[
     // a module upstream reads, the verifier never reaching a declaration
     // nobody uses. Only the call is refused.
     "declare i8 @llvm.umax.i8(i8, i16)\n",
+    // The other direction of the local count, at each way a local can be
+    // named: a parameter, a numbered parameter, an unnamed instruction.
+    "define void @f(i32 %x) {\nentry:\n  %a = add i32 %x, %x\n  %b = add i32 %x, %a\n  ret void\n  uselistorder i32 %x, { 2, 1, 0 }\n}\n",
+    "define void @f(i32) {\nentry:\n  %a = add i32 %0, %0\n  %b = add i32 %0, %a\n  ret void\n  uselistorder i32 %0, { 2, 1, 0 }\n}\n",
+    "define void @f(i32 %x) {\nentry:\n  %1 = add i32 %x, %x\n  %2 = add i32 %1, %1\n  ret void\n  uselistorder i32 %1, { 1, 0 }\n}\n",
+    // The other direction of the placement rule: a second directive after
+    // the first is one, so the run may be any length.
+    "define void @f(i32 %x) {\nentry:\n  %a = add i32 %x, %x\n  %b = add i32 %x, %a\n  ret void\n  uselistorder i32 %x, { 2, 1, 0 }\n  uselistorder i32 %x, { 1, 2, 0 }\n}\n",
     // The other direction of the use-list type rule: naming the type the
     // value really has is fine, for a parameter and for a symbol.
     "define void @f(i32 %x, i32 %y) {\nentry:\n  %a = add i32 %x, %y\n  %b = add i32 %x, %a\n  ret void\n  uselistorder i32 %x, { 1, 0 }\n}\n",
