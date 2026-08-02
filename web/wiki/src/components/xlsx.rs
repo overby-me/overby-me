@@ -42,6 +42,12 @@ pub struct SheetRow {
     pub index: u32,
     #[serde(default)]
     pub cells: Vec<SheetCell>,
+    /// The height the author set, in POINTS, when they set one. Absent means
+    /// the sheet's default, which most rows are. Worth honouring because it is
+    /// used to give a section its heading: a banner row set to 34pt against a
+    /// 14pt default is doing the work a heading style would in a document.
+    #[serde(default)]
+    pub height: Option<f64>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -140,6 +146,60 @@ pub struct Styles {
     /// together as one undivided block.
     #[serde(default)]
     pub borders: Vec<Border>,
+    /// The typefaces cells are set in, indexed by `font_id`.
+    #[serde(default)]
+    pub fonts: Vec<Font>,
+    /// The backgrounds cells are painted with, indexed by `fill_id`.
+    #[serde(default)]
+    pub fills: Vec<Fill>,
+}
+
+/// A cell's background.
+///
+/// Note which colour that is: for a solid pattern it is the FOREGROUND. In
+/// OOXML a pattern paints `fgColor` over `bgColor`, and "solid" is the pattern
+/// that covers everything — so `fgColor` is the flat colour a reader sees, and
+/// `bgColor` is what would show between the dots of a hatch. Reading the
+/// obvious-looking field would paint nearly every filled cell the wrong colour.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Fill {
+    #[serde(default)]
+    pub pattern_type: String,
+    #[serde(default)]
+    pub fg_color: Option<String>,
+}
+
+impl Fill {
+    /// The flat colour this paints, if it paints one. Only `solid` is taken:
+    /// a hatch drawn as its foreground colour would be far heavier than the
+    /// sparse pattern the author chose, and `none` is the unfilled default that
+    /// most cells point at.
+    pub fn colour(&self) -> Option<&str> {
+        if self.pattern_type.trim() != "solid" {
+            return None;
+        }
+        self.fg_color
+            .as_deref()
+            .filter(|c| super::docx::is_real_colour(c))
+    }
+}
+
+/// A cell's typeface. Colour and family are parsed by the vendored crate but not
+/// read here: the app sets both, and a workbook's own black on the app's own
+/// surface is a contrast decision this is not the place to make.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Font {
+    #[serde(default)]
+    pub bold: bool,
+    #[serde(default)]
+    pub italic: bool,
+    #[serde(default)]
+    pub underline: bool,
+    /// In points, as the workbook states it.
+    #[serde(default)]
+    pub size: f64,
 }
 
 impl Styles {
@@ -161,6 +221,56 @@ impl Styles {
         let border = self.borders.get(xf.border_id? as usize)?;
         border.draws().then_some(border)
     }
+
+    /// The font a cell of this style is set in.
+    pub fn font_of(&self, style_index: Option<usize>) -> Option<&Font> {
+        let xf = self.cell_xfs.get(style_index?)?;
+        self.fonts.get(xf.font_id? as usize)
+    }
+
+    /// The background a cell of this style is painted, if any.
+    pub fn fill_of(&self, style_index: Option<usize>) -> Option<&str> {
+        let xf = self.cell_xfs.get(style_index?)?;
+        self.fills.get(xf.fill_id? as usize)?.colour()
+    }
+
+    /// The size the sheet is mostly set in, which every other size is read
+    /// against. Font 0 is the workbook's default by definition (ECMA-376), and
+    /// 11pt is Excel's out-of-the-box default when a workbook states nothing.
+    pub fn base_font_size(&self) -> f64 {
+        self.fonts
+            .first()
+            .map(|f| f.size)
+            .filter(|s| *s > 0.0)
+            .unwrap_or(11.0)
+    }
+}
+
+/// A cell's typeface as inline CSS, relative to what the sheet is mostly set in.
+///
+/// The size is a RATIO, not the workbook's points. A sheet is rendered at this
+/// app's own density, and 11pt Arial would be half again the size of everything
+/// around it; what carries meaning is that a heading is bigger than its rows,
+/// not that it is 14 points. Anything within a whisker of the base size says
+/// nothing and is left off.
+pub fn font_css(font: &Font, base: f64) -> String {
+    let mut css = String::new();
+    if font.bold {
+        css.push_str("font-weight:700;");
+    }
+    if font.italic {
+        css.push_str("font-style:italic;");
+    }
+    if font.underline {
+        css.push_str("text-decoration:underline;");
+    }
+    if base > 0.0 && font.size > 0.0 {
+        let ratio = font.size / base;
+        if !(0.96..=1.04).contains(&ratio) {
+            css.push_str(&format!("font-size:{ratio:.3}em;"));
+        }
+    }
+    css
 }
 
 /// One cell's four edges. Diagonals and the table-style inner rules are parsed
@@ -253,6 +363,12 @@ pub struct Xf {
     /// Which entry of [`Styles::borders`] this style draws its edges with.
     #[serde(default)]
     pub border_id: Option<u32>,
+    /// Which entry of [`Styles::fonts`] this style is set in.
+    #[serde(default)]
+    pub font_id: Option<u32>,
+    /// Which entry of [`Styles::fills`] this style is painted with.
+    #[serde(default)]
+    pub fill_id: Option<u32>,
 }
 
 /// A spreadsheet column's letter: 1 → A, 26 → Z, 27 → AA.
@@ -377,6 +493,7 @@ pub fn to_grid(sheet: &Sheet, wb: &Workbook) -> (Vec<Vec<GridCell>>, usize) {
         .map(|r| r.index as usize)
         .max()
         .unwrap_or(0);
+    let base = wb.styles.base_font_size();
     let mut grid = vec![vec![GridCell::default(); width]; last_row];
     for row in &sheet.rows {
         let Some(r) = (row.index as usize).checked_sub(1) else {
@@ -387,11 +504,31 @@ pub fn to_grid(sheet: &Sheet, wb: &Workbook) -> (Vec<Vec<GridCell>>, usize) {
                 continue;
             };
             if r < grid.len() && c < width {
+                // A cell with no text can still be styled: the rule beneath a
+                // total is usually on the empty cells beside it.
+                let mut style = wb
+                    .styles
+                    .border_of(cell.style_index)
+                    .map(border_css)
+                    .unwrap_or_default();
+                if let Some(font) = wb.styles.font_of(cell.style_index) {
+                    style.push_str(&font_css(font, base));
+                }
+                if let Some(fill) = wb.styles.fill_of(cell.style_index) {
+                    // Ink to match, worked out from the fill: the background is
+                    // the WORKBOOK'S and the theme's on-surface colour knows
+                    // nothing about it, so a pale fill in dark mode would
+                    // otherwise carry near-white text. Same reasoning, and the
+                    // same helper, as a Word table's shaded cell.
+                    let hex = fill.trim().trim_start_matches('#');
+                    style.push_str(&format!(
+                        "background:#{hex};color:{};",
+                        super::docx::readable_ink(hex)
+                    ));
+                }
                 grid[r][c] = GridCell {
                     text: cell_text(cell, wb),
-                    // A cell with no text can still carry a rule: the underline
-                    // beneath a total is usually on the empty cells beside it.
-                    border: wb.styles.border_of(cell.style_index).map(border_css),
+                    style,
                 };
             }
         }
@@ -399,12 +536,30 @@ pub fn to_grid(sheet: &Sheet, wb: &Workbook) -> (Vec<Vec<GridCell>>, usize) {
     (grid, width)
 }
 
-/// One cell of the dense grid: what it says, and the rules it draws.
+/// One cell of the dense grid: what it says, and how it is set.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GridCell {
     pub text: String,
-    /// Inline CSS for its edges, when it has any.
-    pub border: Option<String>,
+    /// Inline CSS: its rules and its typeface. Empty for a plain cell, which is
+    /// most of them, so the common cell carries no style attribute at all.
+    pub style: String,
+}
+
+/// A row's height as inline CSS, when the author set one — points, as the
+/// workbook states them.
+///
+/// This raises a row and cannot lower one: `height` is a minimum for a table
+/// row, and a padded cell here is ~16.5pt against Excel's 14pt default. So a
+/// row stated at 15pt still renders at ~16.5, and that is deliberate. Rows
+/// around Excel's default are not shrunk rows, they ARE the default; trimming
+/// the padding to reach them would make most of a sheet cramped to honour a
+/// number the author never chose. What is worth honouring is the row the author
+/// made deliberately TALL — a 34pt banner heading — and that works.
+pub fn row_style(height: Option<f64>) -> String {
+    match height {
+        Some(h) if h > 0.0 => format!("height:{h}pt;"),
+        _ => String::new(),
+    }
 }
 
 /// A sheet as a table, with the spreadsheet's own row numbers and column
@@ -412,6 +567,16 @@ pub struct GridCell {
 #[component]
 pub fn SheetTable(sheet: Sheet, workbook: Workbook) -> Element {
     let (grid, width) = to_grid(&sheet, &workbook);
+    // Heights by the same dense 0-based position the grid uses, so a row that
+    // states one can be found while rendering. Absent rows keep the default.
+    let mut heights: Vec<Option<f64>> = vec![None; grid.len()];
+    for row in &sheet.rows {
+        if let Some(r) = (row.index as usize).checked_sub(1) {
+            if r < heights.len() {
+                heights[r] = row.height;
+            }
+        }
+    }
     rsx! {
         div { class: "xlsx-wrap",
             table { class: "xlsx-table",
@@ -425,14 +590,16 @@ pub fn SheetTable(sheet: Sheet, workbook: Workbook) -> Element {
                 }
                 tbody {
                     for (r , row) in grid.into_iter().enumerate() {
-                        tr { key: "r{r}",
+                        tr {
+                            key: "r{r}",
+                            style: row_style(heights.get(r).copied().flatten()),
                             th { class: "xlsx-rowhead", "{r + 1}" }
                             for (c , cell) in row.into_iter().enumerate() {
                                 td {
                                     key: "c{c}",
-                                    // Only the cells that draw one carry a style
-                                    // attribute; a sheet is mostly plain cells.
-                                    style: cell.border.unwrap_or_default(),
+                                    // Only styled cells carry the attribute at
+                                    // all; a sheet is mostly plain cells.
+                                    style: cell.style,
                                     "{cell.text}"
                                 }
                             }
@@ -569,7 +736,7 @@ mod tests {
                     num_fmt_id: 165,
                     format_code: "dd/mm/yyyy".to_string(),
                 }],
-                borders: Vec::new(),
+                ..Default::default()
             },
         }
     }
@@ -670,11 +837,13 @@ mod tests {
                         // C1, with nothing in B1.
                         cell(3, CellValue::Number { number: 7.0 }, None),
                     ],
+                    ..Default::default()
                 },
                 // Row 2 is empty and absent; row 3 has one cell far right.
                 SheetRow {
                     index: 3,
                     cells: vec![cell(4, CellValue::Inline { text: "x".into() }, None)],
+                    ..Default::default()
                 },
             ],
             ..Default::default()
@@ -766,16 +935,98 @@ mod tests {
                     value: None,
                     style_index: Some(1),
                 }],
+                ..Default::default()
             }],
             ..Default::default()
         };
         let (grid, _) = to_grid(&sheet, &wb);
         assert_eq!(grid[0][1].text, "", "nothing written in it");
         assert_eq!(
-            grid[0][1].border.as_deref(),
-            Some("border-bottom:2px solid currentColor;"),
+            grid[0][1].style, "border-bottom:2px solid currentColor;",
             "but the rule under it is the point"
         );
+    }
+
+    /// Sizes are read against what the sheet is mostly set in, not in points:
+    /// the sheet is drawn at this app's density, and what carries meaning is
+    /// that a heading is bigger than its rows.
+    #[test]
+    fn a_cells_typeface_is_relative_to_the_sheets_own() {
+        let plain = Font {
+            size: 11.0,
+            ..Default::default()
+        };
+        assert_eq!(font_css(&plain, 11.0), "", "the body size says nothing");
+
+        let heading = Font {
+            bold: true,
+            size: 14.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            font_css(&heading, 11.0),
+            "font-weight:700;font-size:1.273em;",
+            "14 over 11, not 14 points"
+        );
+
+        let emphasis = Font {
+            bold: true,
+            italic: true,
+            size: 11.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            font_css(&emphasis, 11.0),
+            "font-weight:700;font-style:italic;"
+        );
+
+        // A workbook that states nothing is Excel's own 11pt.
+        assert_eq!(Styles::default().base_font_size(), 11.0);
+    }
+
+    /// For a solid pattern the colour a reader sees is the FOREGROUND: OOXML
+    /// paints fg over bg, and solid covers everything. Reading `bgColor` would
+    /// paint nearly every filled cell the wrong colour.
+    #[test]
+    fn a_solid_fill_is_its_foreground_and_a_pattern_is_not_taken() {
+        let solid = Fill {
+            pattern_type: "solid".into(),
+            fg_color: Some("#C9C9C9".into()),
+        };
+        assert_eq!(solid.colour(), Some("#C9C9C9"));
+
+        // The two every unfilled cell points at.
+        assert_eq!(
+            Fill {
+                pattern_type: "none".into(),
+                fg_color: None
+            }
+            .colour(),
+            None
+        );
+        assert_eq!(
+            Fill {
+                pattern_type: "gray125".into(),
+                fg_color: Some("#000000".into())
+            }
+            .colour(),
+            None,
+            "a hatch drawn solid would be far heavier than the author chose"
+        );
+    }
+
+    /// The heights this workbook actually states: a 34pt banner row, and a
+    /// handful around Excel's 14pt default. Only the tall ones change anything,
+    /// which is the point — `height` on a table row is a minimum.
+    #[test]
+    fn a_row_states_the_height_its_author_set() {
+        assert_eq!(row_style(Some(34.0)), "height:34pt;", "the banner heading");
+        assert_eq!(row_style(Some(18.0)), "height:18pt;");
+        assert_eq!(row_style(Some(15.0)), "height:15pt;");
+
+        // A row that states nothing keeps the sheet's default.
+        assert_eq!(row_style(None), "");
+        assert_eq!(row_style(Some(0.0)), "");
     }
 
     /// The parser's real wire shape, keys and all.

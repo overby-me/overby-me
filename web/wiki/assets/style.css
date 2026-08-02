@@ -8270,6 +8270,7 @@ a.list-item:hover {
 	text-align: left;
 }
 
+
 /* The row numbers and column letters, so a reader can name a cell. They stay
    put while the grid scrolls under them, which is the whole point of having
    them: a value in the middle of a big sheet is meaningless without its

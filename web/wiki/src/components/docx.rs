@@ -274,7 +274,7 @@ pub fn cell_style(cell: &Cell) -> String {
 /// Relative luminance, as WCAG defines it: the eye is far more sensitive to
 /// green than to blue, so a flat average of the channels calls a saturated blue
 /// light when it is not.
-fn readable_ink(hex: &str) -> &'static str {
+pub fn readable_ink(hex: &str) -> &'static str {
     let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0) as f64 / 255.0;
     let linear = |c: f64| match c <= 0.03928 {
         true => c / 12.92,
@@ -293,7 +293,7 @@ fn readable_ink(hex: &str) -> &'static str {
 }
 
 /// Whether a colour from the document is an actual colour.
-fn is_real_colour(hex: &str) -> bool {
+pub fn is_real_colour(hex: &str) -> bool {
     let hex = hex.trim().trim_start_matches('#');
     !hex.eq_ignore_ascii_case("auto")
         && matches!(hex.len(), 6 | 8)
