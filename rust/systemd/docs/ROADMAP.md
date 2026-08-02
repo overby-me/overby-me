@@ -86,6 +86,9 @@ The discipline that kept the port honest, kept explicit:
    2026-07-28); assume the green metric gets gamed.
 5. "Done" means a shippable increment someone runs, not a green count.
 
+These rules are generalized for every port in the portfolio in
+[../../PORTING.md](../../PORTING.md); this port is the exemplar its rules point at.
+
 ## Component inventory
 
 | Area | Crates |
