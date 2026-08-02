@@ -172,7 +172,39 @@ fn stored_session() -> Option<Session> {
 
 /// Guards against two overlapping refreshes racing on the same (rotating)
 /// refresh token, which NHost would reject.
+///
+/// This is per-TAB: it is a static in one wasm instance, and every tab has its
+/// own. Tabs share the token through localStorage but not this flag, so two of
+/// them can still present the same token at once — see [`ROTATION_GRACE_MS`].
 static REFRESHING: AtomicBool = AtomicBool::new(false);
+
+/// How long a rejected refresh waits for another tab to publish the token it
+/// rotated, before accepting the session is really over.
+///
+/// NHost rotates on use: of two tabs presenting the same token, the first is
+/// renewed and the second is REJECTED. The loser recovers by adopting whatever
+/// the winner stored — but only if the winner has stored it yet. Both requests
+/// went out together, so both responses land together, and which handler runs
+/// first is a coin toss. Losing it signed the reader out of a session that was
+/// perfectly alive, and cleared the storage the winner was about to write to.
+///
+/// Generous next to the gap it covers (two responses and a synchronous write),
+/// and it costs nothing except delaying a sign-out that is genuinely due.
+const ROTATION_GRACE_MS: u32 = 1200;
+const ROTATION_POLL_MS: u32 = 50;
+/// Looking more than ONCE is the whole fix — a single check is what signed
+/// people out, because it could run before the winner had written anything.
+const ROTATION_ATTEMPTS: u32 = ROTATION_GRACE_MS / ROTATION_POLL_MS;
+
+/// Whether storage now holds a DIFFERENT refresh token than the one just
+/// rejected — i.e. another tab rotated it and this one should adopt rather than
+/// sign out.
+///
+/// No stored token is not a rotation: another tab signing out leaves nothing to
+/// adopt, and this one should follow it out rather than resurrect the session.
+fn is_rotation(tried: &str, stored: Option<&str>) -> bool {
+    stored.is_some_and(|t| t != tried)
+}
 
 /// Set by the `visibilitychange` listener when the tab becomes visible again,
 /// consumed by the refresh loop to force an immediate renewal.
@@ -317,19 +349,30 @@ async fn refresh_access_token() -> RefreshOutcome {
             // (NHost invalidates the old token on refresh, and localStorage is
             // shared). If the stored token now differs from the one we tried,
             // adopt it and retry rather than logging the user out everywhere.
-            if let Some(stored) = stored_session() {
-                if stored
-                    .refresh_token
-                    .as_deref()
-                    .is_some_and(|t| t != refresh_token)
-                {
+            //
+            // Checked NOW and then again for a moment: the winning tab may not
+            // have written its new token yet, and a rejection that merely
+            // arrived first is not evidence of anything. Storage is re-read each
+            // pass, so the winner's write is seen as soon as it lands. The
+            // single-flight flag stays held throughout, which is what we want —
+            // this tab must not start another refresh with the dead token.
+            for _ in 0..ROTATION_ATTEMPTS {
+                let stored = stored_session();
+                if is_rotation(
+                    &refresh_token,
+                    stored.as_ref().and_then(|s| s.refresh_token.as_deref()),
+                ) {
                     log::info!("adopting refresh token rotated by another tab");
-                    *SESSION.write() = stored;
+                    if let Some(stored) = stored {
+                        *SESSION.write() = stored;
+                    }
                     return RefreshOutcome::Transient;
                 }
+                gloo_timers::future::TimeoutFuture::new(ROTATION_POLL_MS).await;
             }
-            // The refresh token itself is dead, so clear the session and let the
-            // UI fall back to the login screen instead of looping on a bad token.
+            // Nobody rotated it in all that time, so the refresh token itself is
+            // dead: clear the session and let the UI fall back to the login
+            // screen instead of looping on a bad token.
             log::warn!("session refresh rejected, signing out: {err}");
             *SESSION.write() = Session::default();
             save_session(&Session::default());
@@ -408,7 +451,7 @@ pub async fn run_token_refresh() {
 
 #[cfg(test)]
 mod tests {
-    use super::{b64url_decode, jwt_exp_ms};
+    use super::{b64url_decode, is_rotation, jwt_exp_ms, ROTATION_ATTEMPTS, ROTATION_GRACE_MS};
 
     #[test]
     fn b64url_decodes_without_padding() {
@@ -434,5 +477,35 @@ mod tests {
     fn jwt_exp_is_none_for_garbage() {
         assert_eq!(jwt_exp_ms("not-a-jwt"), None);
         assert_eq!(jwt_exp_ms("a.b.c"), None);
+    }
+
+    /// The three ways a refresh can be rejected, and what each means.
+    #[test]
+    fn a_rejection_is_only_a_rotation_when_storage_moved_on() {
+        // Another tab refreshed first and published the token it got back. The
+        // session is alive; adopt it instead of signing the reader out.
+        assert!(is_rotation("old-token", Some("new-token")));
+
+        // Storage still holds the very token that was just refused, so nobody
+        // rotated anything and it really is dead.
+        assert!(!is_rotation("dead-token", Some("dead-token")));
+
+        // Another tab signed out and cleared storage. There is nothing to adopt,
+        // and resurrecting a session it just ended would be wrong.
+        assert!(!is_rotation("dead-token", None));
+    }
+
+    /// The predicate above was always right; what signed people out was asking
+    /// it once, before the winning tab had written anything. The waiting itself
+    /// needs a browser to exercise, so this pins the part that can be checked
+    /// here: that there IS a retry, over a window wide enough to cover two
+    /// responses landing together.
+    #[test]
+    fn a_rejected_refresh_looks_more_than_once() {
+        assert!(
+            ROTATION_ATTEMPTS > 1,
+            "a single look is the bug, not the fix"
+        );
+        assert!(ROTATION_GRACE_MS >= 1000, "too tight to cover the race");
     }
 }
