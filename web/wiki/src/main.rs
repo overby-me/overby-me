@@ -136,6 +136,38 @@ fn claim_token_from_search(search: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// How long the boot screen will wait for the stylesheets before giving up on
+/// them, and how often it checks. A ceiling is required: a stylesheet that 404s
+/// or is blocked never applies, and unstyled content is bad where a loading
+/// screen that never leaves is worse.
+const CSS_WAIT_MS: u32 = 3000;
+const POLL_MS: u32 = 16;
+
+/// True once every stylesheet on the page has actually applied.
+///
+/// A `<link>` that has been fetched and parsed exposes a `sheet`; one still in
+/// flight — or one that failed — has null there. Read through `Reflect` because
+/// `HtmlLinkElement` is not among this crate's web-sys features, the same way
+/// `back_to_top` reaches VisualViewport.
+///
+/// No links yet means not ready rather than ready: at the moment this starts
+/// running, Dioxus may not have injected them.
+fn stylesheets_applied(doc: &web_sys::Document) -> bool {
+    let Ok(links) = doc.query_selector_all("link[rel=stylesheet]") else {
+        // Nothing can be checked, so nothing can be waited for.
+        return true;
+    };
+    if links.length() == 0 {
+        return false;
+    }
+    (0..links.length()).all(|i| {
+        links.item(i).is_some_and(|node| {
+            js_sys::Reflect::get(&node, &wasm_bindgen::JsValue::from_str("sheet"))
+                .is_ok_and(|sheet| !sheet.is_null() && !sheet.is_undefined())
+        })
+    })
+}
+
 #[component]
 fn App() -> Element {
     // Initialize global state once, *inside* the Dioxus runtime. Writing to a
@@ -149,16 +181,38 @@ fn App() -> Element {
     // rather than the hook below, because a hook runs BEFORE the first render
     // and would clear the screen a frame early.
     use_effect(|| {
-        let Some(boot) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id("boot"))
-        else {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
-        // Fade, then remove: the class starts the transition in `index.html`,
-        // and the node goes once it is over so it can never swallow a click.
-        let _ = boot.set_attribute("class", "is-done");
+        let Some(boot) = doc.get_element_by_id("boot") else {
+            return;
+        };
         spawn(async move {
+            // Mounted is not the same as ready. Dioxus adds its `asset!`
+            // stylesheets as <link> elements at RUNTIME, so the first render can
+            // land before any of them have applied — for those frames the page
+            // is real content with no CSS, which reads as an avatar at its full
+            // natural size and unstyled text. Hold the screen until the CSS is
+            // actually on.
+            //
+            // Twice in a row, because the links are injected around the same
+            // render this effect follows: a single pass can fall in the gap
+            // before the last one exists and call an empty set ready.
+            let mut settled = 0;
+            for _ in 0..(CSS_WAIT_MS / POLL_MS) {
+                if stylesheets_applied(&doc) {
+                    settled += 1;
+                    if settled == 2 {
+                        break;
+                    }
+                } else {
+                    settled = 0;
+                }
+                gloo_timers::future::TimeoutFuture::new(POLL_MS).await;
+            }
+            // Fade, then remove: the class starts the transition in `index.html`,
+            // and the node goes once it is over so it can never swallow a click.
+            let _ = boot.set_attribute("class", "is-done");
             gloo_timers::future::TimeoutFuture::new(300).await;
             boot.remove();
         });
