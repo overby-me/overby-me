@@ -8077,7 +8077,15 @@ a.list-item:hover {
 }
 .docx-h {
 	margin: var(--md-sys-spacing-5) 0 var(--md-sys-spacing-2);
-	line-height: var(--md-sys-typescale-title-large-line);
+	/* Unitless, so it follows the heading's own size. A heading is sized from
+	   the document (see docx::scale_headings), and a line-height fixed in rem
+	   would leave a small heading swimming and a large one cramped. */
+	line-height: 1.25;
+	/* Word's heading styles carry their weight on the runs, which arrive as
+	   <strong>; the app's own h1-h6 are weight 400 and that is right for the
+	   app's chrome. A document heading that is NOT bold in Word should not be
+	   bold here either, so nothing is forced. */
+	font-weight: inherit;
 }
 .docx-doc .docx-h:first-child {
 	margin-top: 0;

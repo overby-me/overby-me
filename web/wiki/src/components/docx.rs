@@ -73,6 +73,12 @@ pub struct Paragraph {
     pub space_after: Option<f64>,
     #[serde(default)]
     pub line_spacing: Option<LineSpacing>,
+    /// How big this heading is against the document's own body text, as a
+    /// multiplier. Not from the document: computed by [`scale_headings`] after
+    /// parsing, because it takes the whole document to know what "body text"
+    /// means here.
+    #[serde(skip)]
+    pub heading_scale: Option<f64>,
 }
 
 /// A paragraph's line spacing.
@@ -169,6 +175,9 @@ pub struct Run {
     pub vert_align: Option<String>,
     #[serde(default)]
     pub hyperlink: Option<String>,
+    /// Points, as the document resolved them through its styles.
+    #[serde(default)]
+    pub font_size: Option<f64>,
 
     // --- pictures ---
     /// Zip path of the raster the run draws, `word/media/image1.png`. A run
@@ -331,6 +340,79 @@ fn data_url(mime: &str, bytes: &[u8]) -> String {
     )
 }
 
+/// The size of a paragraph's text: whichever size most of its characters are
+/// set in. A paragraph is usually all one size, and where it is not, the run
+/// carrying the words is the one that matters, not a stray space.
+fn dominant_size(p: &Paragraph) -> Option<f64> {
+    let mut weights: Vec<(f64, usize)> = Vec::new();
+    for run in &p.runs {
+        let Some(pt) = run.font_size.filter(|s| *s > 0.0) else {
+            continue;
+        };
+        let chars = run.text.trim().chars().count();
+        if chars == 0 {
+            continue;
+        }
+        match weights.iter_mut().find(|(s, _)| (*s - pt).abs() < 0.01) {
+            Some((_, n)) => *n += chars,
+            None => weights.push((pt, chars)),
+        }
+    }
+    weights.into_iter().max_by_key(|(_, n)| *n).map(|(s, _)| s)
+}
+
+/// Work out how prominent each heading is, against the document's own body text.
+///
+/// A Word heading keeps its level and its size separately, and the two do not
+/// track each other. The document this was written for has a 20pt `Titel` and
+/// an 11pt `Overskrift1` — both of which are outline level 0, so both become an
+/// `<h1>`, and rendering them at the `<h1>` size of the app's type scale makes
+/// them identical and loses the hierarchy the author wrote. The 11pt one also
+/// arrives three times the size it has in the document.
+///
+/// So a heading is sized RELATIVE to the document's body text rather than
+/// absolutely: `20/11` is a big heading and `11/11` is a heading that is bold
+/// and no larger, which is exactly what each of those is in Word. Relative
+/// rather than absolute so the reader's own font size still sets the scale — an
+/// 8pt document should not arrive at 8pt on a phone.
+///
+/// Body text is the size most of the document's characters are set in, which is
+/// what "body text" means. Headings are excluded from that count, or a document
+/// of mostly headings would measure itself against its own headings.
+///
+/// Clamped below at 1: a heading is never SMALLER than the text it introduces,
+/// whatever the document says, because the tag has already promised a reader
+/// that it is a heading.
+pub fn scale_headings(blocks: &mut [Block]) {
+    let mut sizes: Vec<(f64, usize)> = Vec::new();
+    for_each_paragraph(blocks, &mut |p| {
+        if heading_level(p.style_id.as_deref(), p.outline_level).is_some() {
+            return;
+        }
+        let Some(pt) = dominant_size(p) else { return };
+        let chars = p.runs.iter().map(|r| r.text.trim().chars().count()).sum();
+        match sizes.iter_mut().find(|(s, _)| (*s - pt).abs() < 0.01) {
+            Some((_, n)) => *n += chars,
+            None => sizes.push((pt, chars)),
+        }
+    });
+    let Some(body) = sizes
+        .into_iter()
+        .max_by_key(|(_, n)| *n)
+        .map(|(s, _)| s)
+        .filter(|s| *s > 0.0)
+    else {
+        return;
+    };
+
+    for_each_paragraph_mut(blocks, &mut |p| {
+        if heading_level(p.style_id.as_deref(), p.outline_level).is_none() {
+            return;
+        }
+        p.heading_scale = dominant_size(p).map(|pt| (pt / body).clamp(1.0, 2.5));
+    });
+}
+
 /// Give every picture run the bytes it draws.
 ///
 /// Separate from parsing because the two come from different places: the model
@@ -434,16 +516,28 @@ pub fn image_style(run: &Run) -> String {
 /// names its styles means them; outline level is the fallback.
 ///
 /// 9 is OOXML's "body text" outline level, and is deliberately not a heading.
+///
+/// Style names are LOCALISED. Word writes them in the language of the copy that
+/// made the document, so a Danish document has `Titel` and `Overskrift1` where
+/// an English one has `Title` and `Heading1` — and this wiki is Danish. Matching
+/// only the English names left the title of a document rendering as an ordinary
+/// paragraph, which is how this was found. Outline level catches the numbered
+/// ones in any language; the plain title has no outline level and needs its
+/// name read.
 pub fn heading_level(style_id: Option<&str>, outline_level: Option<i64>) -> Option<u8> {
     if let Some(style) = style_id {
         let s = style.to_ascii_lowercase().replace([' ', '-', '_'], "");
-        if s == "title" {
-            return Some(1);
-        }
-        if let Some(n) = s.strip_prefix("heading").and_then(|n| n.parse::<u8>().ok()) {
-            if (1..=9).contains(&n) {
-                return Some(n.min(6));
-            }
+        // Trailing digits are the level; what is left is the name.
+        let digits = s.len() - s.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+        let (name, level) = s.split_at(s.len() - digits);
+        let level = level.parse::<u8>().ok();
+
+        match (KNOWN_HEADING_NAMES.contains(&name), level) {
+            // `Heading2`, `Overskrift2`, `Titre 2` …
+            (true, Some(n)) if (1..=9).contains(&n) => return Some(n.min(6)),
+            // `Title`, `Titel`, `Titre` — a document's one top heading.
+            (true, None) => return Some(1),
+            _ => {}
         }
     }
     match outline_level {
@@ -451,6 +545,28 @@ pub fn heading_level(style_id: Option<&str>, outline_level: Option<i64>) -> Opti
         _ => None,
     }
 }
+
+/// What Word calls a heading, in the languages a document in this wiki plausibly
+/// came from. Lowercased with spaces and dashes removed, and with any trailing
+/// level number already stripped.
+///
+/// Not exhaustive and not meant to be: a heading with a level also carries an
+/// outline level, which needs no translating and is the fallback. This list is
+/// what rescues the LEVELLESS title, and Danish is the one that matters here.
+const KNOWN_HEADING_NAMES: &[&str] = &[
+    "heading",
+    "title", // English
+    "overskrift",
+    "titel",      // Danish, Norwegian, German, Dutch, Swedish
+    "rubrik",     // Swedish
+    "berschrift", // German, once the umlaut is not an ascii letter
+    "titre",      // French, which uses one word for both
+    "titulo",
+    "encabezado", // Spanish, Portuguese
+    "titolo",     // Italian
+    "otsikko",    // Finnish
+    "naglowek",   // Polish
+];
 
 /// Whether a run is actually underlined.
 ///
@@ -560,6 +676,14 @@ pub fn paragraph_style(p: &Paragraph) -> String {
     // which in Word sits under a blank paragraph and here would sit flush
     // against the text above it.
     let is_heading = heading_level(p.style_id.as_deref(), p.outline_level).is_some();
+    // A heading takes its prominence from the document, not from the tag: see
+    // [`scale_headings`]. `em`, so it is measured against the reader's own text
+    // size rather than against Word's page.
+    if is_heading {
+        if let Some(scale) = p.heading_scale.filter(|s| *s > 0.0) {
+            css.push_str(&format!("font-size:{scale:.3}em;"));
+        }
+    }
     if !is_heading {
         if let Some(pt) = p.space_before.filter(|v| *v >= 0.0) {
             css.push_str(&format!("margin-top:{:.2}rem;", pt / 16.0));
@@ -1408,6 +1532,187 @@ mod tests {
     /// `spaceAfter` to zero on all 44 of its paragraphs and separates them with
     /// blank ones instead, so the stylesheet's own margin was a second gap on
     /// top of every blank line. These are its real values.
+    /// Word localises its style names, and this wiki is Danish. The title of
+    /// the document this was found in is styled `Titel`, which matched nothing
+    /// and rendered as an ordinary paragraph.
+    #[test]
+    fn a_heading_is_recognised_in_the_language_it_was_written_in() {
+        assert_eq!(heading_level(Some("Titel"), None), Some(1), "Danish title");
+        assert_eq!(heading_level(Some("Overskrift1"), None), Some(1));
+        assert_eq!(heading_level(Some("Overskrift3"), None), Some(3));
+        assert_eq!(
+            heading_level(Some("Titre"), None),
+            Some(1),
+            "French, no level"
+        );
+        assert_eq!(
+            heading_level(Some("Titre 2"), None),
+            Some(2),
+            "French, level"
+        );
+        assert_eq!(heading_level(Some("Rubrik 1"), None), Some(1), "Swedish");
+
+        // Body text is not a heading in any language, and falls through to the
+        // outline level, which is where a document without named styles says so.
+        assert_eq!(heading_level(Some("Brdtekst"), None), None);
+        assert_eq!(heading_level(Some("Normal"), None), None);
+        assert_eq!(heading_level(Some("Brdtekst"), Some(1)), Some(2));
+    }
+
+    /// Reported: headings did not look like the document's headings. Both
+    /// `Titel` (20pt) and `Overskrift1` (11pt) are outline level 0, so both
+    /// become an `<h1>`, and rendering both at the app's `<h1>` size made them
+    /// identical — losing the hierarchy — and made the 11pt one three times the
+    /// size it has in the document. The numbers here are that document's.
+    #[test]
+    fn a_heading_is_sized_against_the_documents_own_body_text() {
+        let text = |pt: f64, bold: bool, words: &str| Run {
+            text: words.into(),
+            bold,
+            font_size: Some(pt),
+            ..Default::default()
+        };
+        let mut blocks = vec![
+            Block::Paragraph(Paragraph {
+                style_id: Some("Titel".into()),
+                runs: vec![text(20.0, true, "Strategi 2030")],
+                ..Default::default()
+            }),
+            Block::Paragraph(Paragraph {
+                style_id: Some("Overskrift1".into()),
+                outline_level: Some(0),
+                runs: vec![text(11.0, true, "Radikal Ungdom skal være nytænkende.")],
+                ..Default::default()
+            }),
+            Block::Paragraph(Paragraph {
+                style_id: Some("Brdtekst".into()),
+                runs: vec![text(
+                    11.0,
+                    false,
+                    "Radikal Ungdom skal fortsætte med at udvikle sig.",
+                )],
+                ..Default::default()
+            }),
+        ];
+        scale_headings(&mut blocks);
+
+        let scale = |b: &Block| match b {
+            Block::Paragraph(p) => p.heading_scale,
+            _ => None,
+        };
+        assert_eq!(
+            scale(&blocks[0]),
+            Some(20.0 / 11.0),
+            "the title, 20pt on 11pt"
+        );
+        assert_eq!(
+            scale(&blocks[1]),
+            Some(1.0),
+            "bold, and no bigger, as in Word"
+        );
+        assert_eq!(scale(&blocks[2]), None, "body text is not a heading");
+
+        // And it reaches the style, in em, so the reader's own size still rules.
+        let Block::Paragraph(title) = &blocks[0] else {
+            panic!()
+        };
+        assert!(paragraph_style(title).contains("font-size:1.818em;"));
+        let Block::Paragraph(body) = &blocks[2] else {
+            panic!()
+        };
+        assert!(!paragraph_style(body).contains("font-size"));
+    }
+
+    #[test]
+    fn a_heading_is_never_smaller_than_its_body_and_never_absurd() {
+        let text = |pt: f64, words: &str| Run {
+            text: words.into(),
+            font_size: Some(pt),
+            ..Default::default()
+        };
+        let mut blocks = vec![
+            Block::Paragraph(Paragraph {
+                style_id: Some("Heading1".into()),
+                runs: vec![text(8.0, "A small heading")],
+                ..Default::default()
+            }),
+            Block::Paragraph(Paragraph {
+                style_id: Some("Heading2".into()),
+                runs: vec![text(96.0, "A poster")],
+                ..Default::default()
+            }),
+            Block::Paragraph(Paragraph {
+                runs: vec![text(
+                    12.0,
+                    "Body text, which is most of the characters here.",
+                )],
+                ..Default::default()
+            }),
+        ];
+        scale_headings(&mut blocks);
+        let scale = |b: &Block| match b {
+            Block::Paragraph(p) => p.heading_scale,
+            _ => None,
+        };
+        // The tag has promised a reader this is a heading.
+        assert_eq!(
+            scale(&blocks[0]),
+            Some(1.0),
+            "smaller than body, clamped up"
+        );
+        assert_eq!(
+            scale(&blocks[1]),
+            Some(2.5),
+            "eight times body, clamped down"
+        );
+    }
+
+    /// A document that never states a size gets the app's own type scale, which
+    /// is the sensible thing to fall back to and what OpenDocument gets.
+    #[test]
+    fn a_document_without_sizes_keeps_the_apps_scale() {
+        let mut blocks = vec![
+            Block::Paragraph(Paragraph {
+                style_id: Some("Heading1".into()),
+                runs: vec![Run {
+                    text: "Dagsorden".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    text: "Velkomst".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+        ];
+        scale_headings(&mut blocks);
+        let Block::Paragraph(h) = &blocks[0] else {
+            panic!()
+        };
+        assert_eq!(h.heading_scale, None);
+        assert!(!paragraph_style(h).contains("font-size"));
+    }
+
+    /// The run shape carrying a size, as the parser writes it.
+    #[test]
+    fn a_real_sized_run_deserialises() {
+        let json = r#"{
+            "type": "text",
+            "bold": true,
+            "color": "0e4660",
+            "fontFamily": "Gill Sans MT",
+            "fontSize": 20.0,
+            "text": "Strategi 2030"
+        }"#;
+        let run: Run = serde_json::from_str(json).expect("the parser's own output");
+        assert_eq!(run.font_size, Some(20.0));
+        assert!(run.bold);
+        assert!(run_style(&run).contains("color:#0e4660;"));
+    }
+
     #[test]
     fn the_document_decides_the_space_between_its_paragraphs() {
         let tight = Paragraph {

@@ -616,6 +616,9 @@ fn NativeDocx(file_id: String, name: String) -> Element {
         // bytes are still in the package that was just parsed.
         let images = super::docx::collect_images(&blocks, &bytes);
         super::docx::attach_images(&mut blocks, &images);
+        // Needs the whole document: a heading's size means something only
+        // against the size of the body text around it.
+        super::docx::scale_headings(&mut blocks);
         Ok::<_, String>((blocks, gaps))
     });
 
